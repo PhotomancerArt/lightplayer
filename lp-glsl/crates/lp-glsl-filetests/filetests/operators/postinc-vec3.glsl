@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 int test_postinc_vec3() {
     ivec3 v = ivec3(5, 10, 15);

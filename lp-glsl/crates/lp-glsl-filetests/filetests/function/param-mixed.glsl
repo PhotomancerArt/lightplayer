@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Mixed Parameter Qualifiers: in, out, inout combinations
@@ -71,7 +71,7 @@ vec2 test_param_mixed_vector() {
     return out_vec + inout_vec;
 }
 
-// run: test_param_mixed_vector() ~= vec2(5.0, 8.0)
+// run: test_param_mixed_vector() ~= vec2(6.0, 9.0)
 
 void int_ops(in int base, out int doubled, inout int incremented) {
     doubled = base * 2;
@@ -85,7 +85,7 @@ int test_param_mixed_int() {
     return out_val + inout_val;
 }
 
-// run: test_param_mixed_int() == 35
+// run: test_param_mixed_int() == 25
 
 void ordered_ops(in float a, in float b, out float sum, out float product) {
     sum = a + b;

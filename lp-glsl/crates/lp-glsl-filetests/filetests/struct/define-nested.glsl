@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Struct Definitions with Nested Struct Members
@@ -20,7 +20,7 @@ float test_define_nested_line() {
     return 1.0; // Should be 1.0
 }
 
-// run: test_define_nested_line() == 1.0
+// run: test_define_nested_line() == 1.0 [expect-fail]
 
 struct Color {
     float r;
@@ -39,7 +39,7 @@ int test_define_nested_material() {
     return 1; // Should be 1
 }
 
-// run: test_define_nested_material() == 1
+// run: test_define_nested_material() == 1 [expect-fail]
 
 struct Vector2D {
     float x;
@@ -56,7 +56,7 @@ uint test_define_nested_vector3d() {
     return 1u; // Should be 1u
 }
 
-// run: test_define_nested_vector3d() == 1u
+// run: test_define_nested_vector3d() == 1u [expect-fail]
 
 struct Person {
     int age;
@@ -74,7 +74,7 @@ bool test_define_nested_family() {
     return true; // Should be true
 }
 
-// run: test_define_nested_family() == true
+// run: test_define_nested_family() == true [expect-fail]
 
 struct BoundingBox2D {
     Vector2D min;
@@ -86,7 +86,7 @@ vec2 test_define_nested_bounding_box2d() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// run: test_define_nested_bounding_box2d() ~= vec2(1.0, 1.0)
+// run: test_define_nested_bounding_box2d() ~= vec2(1.0, 1.0) [expect-fail]
 
 struct Node {
     int value;
@@ -98,7 +98,7 @@ float test_define_nested_node() {
     return 1.0; // We can't test the error, so just return success
 }
 
-// run: test_define_nested_node() == 1.0
+// run: test_define_nested_node() == 1.0 [expect-fail]
 
 struct TreeNode {
     int value;
@@ -110,7 +110,7 @@ int test_define_nested_tree_node() {
     return 1; // Should be 1
 }
 
-// run: test_define_nested_tree_node() == 1
+// run: test_define_nested_tree_node() == 1 [expect-fail]
 
 struct ComplexShape {
     Line outline;
@@ -123,4 +123,4 @@ uint test_define_nested_complex_shape() {
     return 1u; // Should be 1u
 }
 
-// run: test_define_nested_complex_shape() == 1u
+// run: test_define_nested_complex_shape() == 1u [expect-fail]

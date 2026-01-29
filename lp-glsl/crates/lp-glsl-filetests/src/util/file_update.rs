@@ -119,7 +119,133 @@ impl FileUpdate {
         Ok(())
     }
 
-    /// Update CLIF expectations for a test type (compile or transform.fixed32).
+    /// Add `[expect-fail]` marker to a `// run:` line.
+    pub fn add_expect_fail_marker(&self, line_number: usize) -> Result<()> {
+        // This is required for correctness of this update.
+        assert!(line_number > self.last_update.get());
+        self.last_update.set(line_number);
+
+        // Read the old test file
+        let old_test = fs::read_to_string(&self.path)?;
+        let mut new_test = String::new();
+        let mut lines = old_test.lines();
+        let lines_to_preserve = (((line_number - 1) as isize) + self.line_diff.get()) as usize;
+
+        // Push everything leading up to the run directive
+        for _ in 0..lines_to_preserve {
+            if let Some(line) = lines.next() {
+                new_test.push_str(line);
+                new_test.push('\n');
+            }
+        }
+
+        // Find and add the marker to the run directive line
+        if let Some(line) = lines.next() {
+            if line.trim().starts_with("// run:") {
+                // Add [expect-fail] marker if not already present
+                let trimmed = line.trim();
+                let updated_line = if trimmed.ends_with("[expect-fail]") {
+                    // Already has marker, keep original
+                    line.to_string()
+                } else {
+                    // Add marker at the end
+                    let indent = line
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+                    format!("{indent}{trimmed} [expect-fail]")
+                };
+                new_test.push_str(&updated_line);
+                new_test.push('\n');
+            } else {
+                // Not a run directive at expected line, keep original line
+                new_test.push_str(line);
+                new_test.push('\n');
+            }
+        }
+
+        // Push the rest of the file
+        for line in lines {
+            new_test.push_str(line);
+            new_test.push('\n');
+        }
+
+        // Record the difference in line count so future updates can be adjusted
+        // accordingly, and then write the file back out to the filesystem.
+        let old_line_count = old_test.lines().count();
+        let new_line_count = new_test.lines().count();
+        self.line_diff
+            .set(self.line_diff.get() + (new_line_count as isize - old_line_count as isize));
+
+        fs::write(&self.path, new_test)?;
+        Ok(())
+    }
+
+    /// Remove `[expect-fail]` marker from a `// run:` line.
+    pub fn remove_expect_fail_marker(&self, line_number: usize) -> Result<()> {
+        // This is required for correctness of this update.
+        assert!(line_number > self.last_update.get());
+        self.last_update.set(line_number);
+
+        // Read the old test file
+        let old_test = fs::read_to_string(&self.path)?;
+        let mut new_test = String::new();
+        let mut lines = old_test.lines();
+        let lines_to_preserve = (((line_number - 1) as isize) + self.line_diff.get()) as usize;
+
+        // Push everything leading up to the run directive
+        for _ in 0..lines_to_preserve {
+            if let Some(line) = lines.next() {
+                new_test.push_str(line);
+                new_test.push('\n');
+            }
+        }
+
+        // Find and remove the marker from the run directive line
+        if let Some(line) = lines.next() {
+            if line.trim().starts_with("// run:") {
+                // Remove [expect-fail] marker if present
+                let trimmed = line.trim();
+                let updated_line = if trimmed.ends_with("[expect-fail]") {
+                    // Strip the marker and any trailing whitespace
+                    let without_marker = trimmed.strip_suffix("[expect-fail]").unwrap().trim_end();
+                    // Preserve indentation
+                    let indent = line
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .collect::<String>();
+                    format!("{indent}{without_marker}")
+                } else {
+                    // No marker, keep original
+                    line.to_string()
+                };
+                new_test.push_str(&updated_line);
+                new_test.push('\n');
+            } else {
+                // Not a run directive at expected line, keep original line
+                new_test.push_str(line);
+                new_test.push('\n');
+            }
+        }
+
+        // Push the rest of the file
+        for line in lines {
+            new_test.push_str(line);
+            new_test.push('\n');
+        }
+
+        // Record the difference in line count so future updates can be adjusted
+        // accordingly, and then write the file back out to the filesystem.
+        let old_line_count = old_test.lines().count();
+        let new_line_count = new_test.lines().count();
+        self.line_diff
+            .set(self.line_diff.get() + (new_line_count as isize - old_line_count as isize));
+
+        fs::write(&self.path, new_test)?;
+        Ok(())
+    }
+
+    /// Update CLIF expectations for a test type (compile or transform.q32).
     /// TODO: Implement when CLIF tests are implemented.
     pub fn update_clif_expectations(&self, _test_type: &str, _new_clif: &str) -> Result<()> {
         // TODO: Implement CLIF expectation updates when CLIF tests are implemented

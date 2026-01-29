@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Equal: equal(uvec2, uvec2) -> bvec2 (component-wise)

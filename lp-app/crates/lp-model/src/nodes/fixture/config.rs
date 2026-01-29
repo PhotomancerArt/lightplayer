@@ -1,6 +1,31 @@
+use crate::nodes::fixture::mapping::MappingConfig;
 use crate::nodes::{NodeConfig, NodeKind, NodeSpecifier};
-use alloc::string::String;
 use serde::{Deserialize, Serialize};
+
+/// Fixture node configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FixtureConfig {
+    /// Output node specifier
+    pub output_spec: NodeSpecifier,
+    /// Texture node specifier
+    pub texture_spec: NodeSpecifier,
+    /// Mapping configuration (simplified for now)
+    pub mapping: MappingConfig,
+    /// Color order for RGB channels
+    pub color_order: ColorOrder,
+    /// Transform matrix (4x4)
+    pub transform: [[f32; 4]; 4], // todo!() - will be proper matrix type later
+}
+
+impl NodeConfig for FixtureConfig {
+    fn kind(&self) -> NodeKind {
+        NodeKind::Fixture
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+}
 
 /// Color order for RGB channels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,45 +102,29 @@ impl ColorOrder {
     }
 }
 
-/// Fixture node configuration
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FixtureConfig {
-    /// Output node specifier
-    pub output_spec: NodeSpecifier,
-    /// Texture node specifier
-    pub texture_spec: NodeSpecifier,
-    /// Mapping configuration (simplified for now)
-    pub mapping: String, // todo!() - will be structured type later
-    /// Lamp type (color order, etc.)
-    pub lamp_type: String, // todo!() - will be enum later
-    /// Color order for RGB channels
-    pub color_order: ColorOrder,
-    /// Transform matrix (4x4)
-    pub transform: [[f32; 4]; 4], // todo!() - will be proper matrix type later
-}
-
-impl NodeConfig for FixtureConfig {
-    fn kind(&self) -> NodeKind {
-        NodeKind::Fixture
-    }
-
-    fn as_any(&self) -> &dyn core::any::Any {
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::ToString;
+    use alloc::vec;
 
     #[test]
     fn test_fixture_config_kind() {
+        use crate::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
         let config = FixtureConfig {
             output_spec: NodeSpecifier::from("/src/out.output"),
             texture_spec: NodeSpecifier::from("/src/tex.texture"),
-            mapping: "linear".to_string(),
-            lamp_type: "rgb".to_string(),
+            mapping: MappingConfig::PathPoints {
+                paths: vec![PathSpec::RingArray {
+                    center: (0.5, 0.5),
+                    diameter: 1.0,
+                    start_ring_inclusive: 0,
+                    end_ring_exclusive: 1,
+                    ring_lamp_counts: vec![1],
+                    offset_angle: 0.0,
+                    order: RingOrder::InnerFirst,
+                }],
+                sample_diameter: 2.0,
+            },
             color_order: ColorOrder::Rgb,
             transform: [[1.0; 4]; 4],
         };

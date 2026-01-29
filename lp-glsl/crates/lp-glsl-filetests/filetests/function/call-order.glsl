@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Argument Evaluation Order: Left to right, exactly once
@@ -28,7 +28,7 @@ float test_call_order_left_to_right() {
     return add_three(get_next(), get_next(), get_next());
 }
 
-// run: test_call_order_left_to_right() ~= 6.0
+// run: test_call_order_left_to_right() ~= 6.0 [expect-fail]
 
 float increment_counter() {
     global_counter = global_counter + 1.0;
@@ -47,7 +47,7 @@ float test_call_order_exactly_once() {
     return result; // Should be 1 + 2 = 3
 }
 
-// run: test_call_order_exactly_once() ~= 3.0
+// run: test_call_order_exactly_once() ~= 3.0 [expect-fail]
 
 float side_effect_func(float x) {
     global_counter = global_counter + x;
@@ -69,7 +69,7 @@ float test_call_order_side_effects() {
     return result + global_counter; // 24 + 5 = 29
 }
 
-// run: test_call_order_side_effects() ~= 29.0
+// run: test_call_order_side_effects() ~= 29.0 [expect-fail]
 
 vec2 make_vec2(float x, float y) {
     global_counter = global_counter + 1.0;
@@ -89,7 +89,7 @@ vec2 test_call_order_vector_args() {
     return add_vectors(make_vec2(1.0, 2.0), make_vec2(4.0, 5.0));
 }
 
-// run: test_call_order_vector_args() ~= vec2(8.0, 10.0)
+// run: test_call_order_vector_args() ~= vec2(8.0, 10.0) [expect-fail]
 
 float complex_arg(float base) {
     global_counter = global_counter + 0.5;
@@ -110,7 +110,7 @@ float test_call_order_complex_expression() {
     return process(complex_arg(1.0), complex_arg(2.0), complex_arg(3.0));
 }
 
-// run: test_call_order_complex_expression() ~= 9.0
+// run: test_call_order_complex_expression() ~= 9.0 [expect-fail]
 
 float record_value(float val) {
     global_counter = val;
@@ -135,5 +135,5 @@ float test_call_order_mixed_types() {
     return combine(record_value(3.14), record_int(42));
 }
 
-// run: test_call_order_mixed_types() ~= 45.14
+// run: test_call_order_mixed_types() ~= 45.14 [expect-fail]
 

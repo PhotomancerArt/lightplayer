@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Modulo: ivec2 % ivec2 -> ivec2 (component-wise, sign follows dividend)

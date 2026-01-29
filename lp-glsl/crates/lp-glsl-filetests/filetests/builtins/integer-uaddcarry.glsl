@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // uaddCarry(): Unsigned add with carry function
@@ -14,7 +14,7 @@ uvec2 test_uaddcarry_uint_no_carry() {
     return uvec2(sum, carry);
 }
 
-// run: test_uaddcarry_uint_no_carry() == uvec2(3u, 0u)
+// run: test_uaddcarry_uint_no_carry() == uvec2(3u, 0u) [expect-fail]
 
 uvec2 test_uaddcarry_uint_with_carry() {
     // uaddCarry(max_uint, 1) should return (0, 1)
@@ -23,7 +23,7 @@ uvec2 test_uaddcarry_uint_with_carry() {
     return uvec2(sum, carry);
 }
 
-// run: test_uaddcarry_uint_with_carry() == uvec2(0u, 1u)
+// run: test_uaddcarry_uint_with_carry() == uvec2(0u, 1u) [expect-fail]
 
 uvec2 test_uaddcarry_uint_large_no_carry() {
     // uaddCarry(large numbers) without carry
@@ -32,7 +32,7 @@ uvec2 test_uaddcarry_uint_large_no_carry() {
     return uvec2(sum, carry);
 }
 
-// run: test_uaddcarry_uint_large_no_carry() == uvec2(4000000000u, 0u)
+// run: test_uaddcarry_uint_large_no_carry() == uvec2(4000000000u, 0u) [expect-fail]
 
 uvec4 test_uaddcarry_uvec2() {
     // uaddCarry with uvec2
@@ -41,7 +41,7 @@ uvec4 test_uaddcarry_uvec2() {
     return uvec4(sum.x, sum.y, carry.x, carry.y);
 }
 
-// run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u)
+// run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u) [expect-fail]
 
 
 

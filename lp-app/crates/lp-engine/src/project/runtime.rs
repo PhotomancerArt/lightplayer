@@ -7,7 +7,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use lp_model::{
     AsLpPath, FrameId, LpPath, LpPathBuf, NodeConfig, NodeHandle, NodeKind,
@@ -48,6 +48,8 @@ pub struct NodeEntry {
     pub config_ver: FrameId,
     /// Node status
     pub status: NodeStatus,
+    /// Frame when status was last changed
+    pub status_ver: FrameId,
     /// Node runtime (None until initialized)
     pub runtime: Option<Box<dyn NodeRuntime>>,
     /// Last frame state updates occurred
@@ -125,6 +127,7 @@ impl ProjectRuntime {
                         config,
                         config_ver: self.frame_id,
                         status: NodeStatus::Created,
+                        status_ver: self.frame_id,
                         runtime: None,
                         state_ver: FrameId::default(),
                     };
@@ -158,8 +161,10 @@ impl ProjectRuntime {
                         NodeKind::Fixture => Box::new(lp_model::nodes::fixture::FixtureConfig {
                             output_spec: lp_model::NodeSpecifier::from(""),
                             texture_spec: lp_model::NodeSpecifier::from(""),
-                            mapping: String::new(),
-                            lamp_type: String::new(),
+                            mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                paths: vec![],
+                                sample_diameter: 2.0,
+                            },
                             color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                             transform: [[0.0; 4]; 4],
                         }),
@@ -171,6 +176,7 @@ impl ProjectRuntime {
                         config,
                         config_ver: self.frame_id,
                         status: NodeStatus::InitError(format!("Failed to load: {e}")),
+                        status_ver: self.frame_id,
                         runtime: None,
                         state_ver: FrameId::default(),
                     };
@@ -350,15 +356,36 @@ impl ProjectRuntime {
                     runtime.init(&ctx)
                 };
 
+                // Check if this is a shader runtime with compilation error before storing
+                // GLSL compilation errors are runtime state errors, not initialization errors
+                let shader_compilation_error = if node_kind == NodeKind::Shader {
+                    // Try to downcast to ShaderRuntime to check compilation error
+                    runtime
+                        .as_any()
+                        .downcast_ref::<ShaderRuntime>()
+                        .and_then(|sr| sr.compilation_error().map(|s| s.to_string()))
+                } else {
+                    None
+                };
+
                 // Now do mutable operations (context is dropped)
                 if let Some(entry) = self.nodes.get_mut(&handle) {
                     match init_result {
                         Ok(()) => {
-                            entry.status = NodeStatus::Ok;
+                            if let Some(error_msg) = shader_compilation_error {
+                                // Shader initialized but has compilation error - set status to Error
+                                entry.status = NodeStatus::Error(error_msg);
+                                entry.status_ver = self.frame_id;
+                            } else {
+                                // Node initialized successfully
+                                entry.status = NodeStatus::Ok;
+                                entry.status_ver = self.frame_id;
+                            }
                             entry.runtime = Some(runtime);
                         }
                         Err(e) => {
                             entry.status = NodeStatus::InitError(format!("{e}"));
+                            entry.status_ver = self.frame_id;
                             entry.runtime = None;
                         }
                     }
@@ -372,15 +399,17 @@ impl ProjectRuntime {
     /// Ensure all nodes initialized successfully
     ///
     /// Returns an error if any nodes failed to initialize, with details about
-    /// which nodes failed and why. Warnings are ignored (nodes with warnings
-    /// are considered successfully initialized).
+    /// which nodes failed and why. Warnings and runtime errors are ignored
+    /// (nodes with warnings or runtime errors are considered successfully initialized).
     pub fn ensure_all_nodes_initialized(&self) -> Result<(), Error> {
         let mut failed_nodes = Vec::new();
 
         for (_, entry) in &self.nodes {
             match &entry.status {
-                NodeStatus::Ok | NodeStatus::Warn(_) => {
-                    // Node initialized successfully (warnings are acceptable)
+                NodeStatus::Ok | NodeStatus::Warn(_) | NodeStatus::Error(_) => {
+                    // Node initialized successfully
+                    // Warnings and runtime errors (e.g., GLSL compilation errors) are acceptable
+                    // The node is initialized, just in an error state
                 }
                 NodeStatus::Created => {
                     failed_nodes.push(format!(
@@ -392,14 +421,6 @@ impl ProjectRuntime {
                 NodeStatus::InitError(msg) => {
                     failed_nodes.push(format!(
                         "{} ({:?}): initialization error: {}",
-                        entry.path.as_str(),
-                        entry.kind,
-                        msg
-                    ));
-                }
-                NodeStatus::Error(msg) => {
-                    failed_nodes.push(format!(
-                        "{} ({:?}): error: {}",
                         entry.path.as_str(),
                         entry.kind,
                         msg
@@ -487,6 +508,7 @@ impl ProjectRuntime {
             if let Some(entry) = self.nodes.get_mut(&handle) {
                 if let Err(e) = render_result {
                     entry.status = NodeStatus::Error(format!("{e}"));
+                    entry.status_ver = self.frame_id;
                 }
             }
         }
@@ -528,6 +550,7 @@ impl ProjectRuntime {
             if let Err(e) = render_result {
                 if let Some(entry) = self.nodes.get_mut(&handle) {
                     entry.status = NodeStatus::Error(format!("{e}"));
+                    entry.status_ver = self.frame_id;
                 }
             }
         }
@@ -706,13 +729,33 @@ impl ProjectRuntime {
 
                 if let Some(mut runtime) = runtime_opt {
                     let ctx = InitContext::new(self, &path)?;
+                    // handle_fs_change now returns Ok() even on compilation errors
                     runtime.handle_fs_change(&relative_change, &ctx)?;
                     // Drop context before mutating nodes
                     drop(ctx);
 
-                    // Put runtime back
+                    // Check if this is a shader runtime with compilation error
+                    let shader_compilation_error = runtime
+                        .as_any()
+                        .downcast_ref::<ShaderRuntime>()
+                        .and_then(|sr| sr.compilation_error().map(|s| s.to_string()));
+
+                    // Put runtime back and update status
                     if let Some(node_entry) = self.nodes.get_mut(&handle) {
+                        let old_status = node_entry.status.clone();
                         node_entry.runtime = Some(runtime);
+
+                        // Update status based on compilation error state
+                        if let Some(error_msg) = shader_compilation_error {
+                            // Shader has compilation error - update status to Error
+                            node_entry.status = NodeStatus::Error(error_msg);
+                            node_entry.status_ver = self.frame_id;
+                        } else if matches!(old_status, NodeStatus::Error(_)) {
+                            // No compilation error and status was Error - update to Ok
+                            node_entry.status = NodeStatus::Ok;
+                            node_entry.status_ver = self.frame_id;
+                        }
+                        // Status change will be picked up in get_changes() if status changed
                     }
                 }
             }
@@ -756,6 +799,7 @@ impl ProjectRuntime {
                     config,
                     config_ver: self.frame_id,
                     status: NodeStatus::Created,
+                    status_ver: self.frame_id,
                     runtime: None,
                     state_ver: FrameId::default(),
                 };
@@ -790,6 +834,7 @@ impl ProjectRuntime {
         &self,
         since_frame: FrameId,
         detail_specifier: &ApiNodeSpecifier,
+        theoretical_fps: Option<f32>,
     ) -> Result<ProjectResponse, Error> {
         let mut node_handles = Vec::new();
         let mut node_changes = Vec::new();
@@ -821,6 +866,28 @@ impl ProjectRuntime {
                 node_changes.push(NodeChange::StateUpdated {
                     handle: *handle,
                     state_ver: entry.state_ver,
+                });
+            }
+
+            // Always send current status for all nodes (requirement: always send status even for unwatched nodes)
+            // If status changed since since_frame, send StatusChanged
+            // Otherwise, still send current status so client has it
+            let api_status = match &entry.status {
+                NodeStatus::Created => ApiNodeStatus::Created,
+                NodeStatus::InitError(msg) => ApiNodeStatus::InitError(msg.clone()),
+                NodeStatus::Ok => ApiNodeStatus::Ok,
+                NodeStatus::Warn(msg) => ApiNodeStatus::Warn(msg.clone()),
+                NodeStatus::Error(msg) => ApiNodeStatus::Error(msg.clone()),
+            };
+
+            // Always include status - if it changed since since_frame, or if this is the first sync (since_frame is default)
+            // For first sync (since_frame == 0), we want to send status for all nodes
+            // For subsequent syncs, we only send if status changed
+            if entry.status_ver.as_i64() > since_frame.as_i64() || since_frame == FrameId::default()
+            {
+                node_changes.push(NodeChange::StatusChanged {
+                    handle: *handle,
+                    status: api_status,
                 });
             }
 
@@ -921,8 +988,8 @@ impl ProjectRuntime {
                                     mapping_points
                                         .iter()
                                         .map(|mp| {
-                                            // Apply transform to convert from fixture space to texture space
-                                            // Fixture space is [-1, 1], texture space is [0, 1]
+                                            // Apply transform to convert from texture space to texture space
+                                            // Both input and output are in texture space [0, 1]
                                             let transformed =
                                                 apply_transform_2d(mp.center, transform);
                                             // Ensure coordinates are in [0, 1] range (clamp if needed)
@@ -947,8 +1014,11 @@ impl ProjectRuntime {
                                     .get_output_handle()
                                     .map(|h| h.as_node_handle());
 
+                                // Extract lamp colors from runtime
+                                let lamp_colors = fixture_runtime.get_lamp_colors().to_vec();
+
                                 NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                    lamp_colors: Vec::new(), // TODO: Extract from runtime if needed
+                                    lamp_colors,
                                     mapping_cells,
                                     texture_handle,
                                     output_handle,
@@ -971,14 +1041,6 @@ impl ProjectRuntime {
                             })
                         }
                     }
-                };
-
-                let api_status = match &entry.status {
-                    NodeStatus::Created => ApiNodeStatus::Created,
-                    NodeStatus::InitError(msg) => ApiNodeStatus::InitError(msg.clone()),
-                    NodeStatus::Ok => ApiNodeStatus::Ok,
-                    NodeStatus::Warn(msg) => ApiNodeStatus::Warn(msg.clone()),
-                    NodeStatus::Error(msg) => ApiNodeStatus::Error(msg.clone()),
                 };
 
                 // Clone config based on kind - extract from runtime if available
@@ -1058,8 +1120,11 @@ impl ProjectRuntime {
                                     Box::new(lp_model::nodes::fixture::FixtureConfig {
                                         output_spec: lp_model::NodeSpecifier::from(""),
                                         texture_spec: lp_model::NodeSpecifier::from(""),
-                                        mapping: String::new(),
-                                        lamp_type: String::new(),
+                                        mapping:
+                                            lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                                paths: vec![],
+                                                sample_diameter: 2.0,
+                                            },
                                         color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
                                     })
@@ -1068,8 +1133,10 @@ impl ProjectRuntime {
                                 Box::new(lp_model::nodes::fixture::FixtureConfig {
                                     output_spec: lp_model::NodeSpecifier::from(""),
                                     texture_spec: lp_model::NodeSpecifier::from(""),
-                                    mapping: String::new(),
-                                    lamp_type: String::new(),
+                                    mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                        paths: vec![],
+                                        sample_diameter: 2.0,
+                                    },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                 })
@@ -1078,8 +1145,10 @@ impl ProjectRuntime {
                             Box::new(lp_model::nodes::fixture::FixtureConfig {
                                 output_spec: lp_model::NodeSpecifier::from(""),
                                 texture_spec: lp_model::NodeSpecifier::from(""),
-                                mapping: String::new(),
-                                lamp_type: String::new(),
+                                mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                    paths: vec![],
+                                    sample_diameter: 2.0,
+                                },
                                 color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                 transform: [[0.0; 4]; 4],
                             })
@@ -1093,7 +1162,6 @@ impl ProjectRuntime {
                         path: entry.path.clone(),
                         config,
                         state,
-                        status: api_status,
                     },
                 );
             }
@@ -1104,6 +1172,7 @@ impl ProjectRuntime {
             node_handles,
             node_changes,
             node_details,
+            theoretical_fps,
         })
     }
 }
@@ -1477,11 +1546,30 @@ impl<'a> RenderContextImpl<'a> {
                 }
             };
 
-            render_result?;
-
-            // Update shader state_ver after render
-            if let Some(entry) = ctx.nodes.get_mut(&shader_handle) {
-                entry.state_ver = frame_id;
+            // Handle render errors - if shader execution fails, update shader status
+            match render_result {
+                Ok(()) => {
+                    // Update shader state_ver after successful render
+                    if let Some(entry) = nodes.get_mut(&shader_handle) {
+                        entry.state_ver = frame_id;
+                    }
+                }
+                Err(e) => {
+                    // Check if this is a shader execution error
+                    let error_msg = format!("{e}");
+                    if error_msg.contains("Shader execution failed") {
+                        // Update shader status to Error
+                        if let Some(entry) = nodes.get_mut(&shader_handle) {
+                            entry.status = NodeStatus::Error(error_msg.clone());
+                            entry.status_ver = frame_id;
+                        }
+                        // Don't propagate error - shader already has error status
+                        // This prevents fixture/texture from getting the error
+                    } else {
+                        // Other errors (e.g., texture not found) should propagate
+                        return Err(e);
+                    }
+                }
             }
         }
 

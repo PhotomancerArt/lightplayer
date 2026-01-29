@@ -65,6 +65,7 @@ fn test_sync_with_changes() {
             kind: lp_model::NodeKind::Texture,
         }],
         node_details: BTreeMap::new(),
+        theoretical_fps: None,
     };
 
     // Sync

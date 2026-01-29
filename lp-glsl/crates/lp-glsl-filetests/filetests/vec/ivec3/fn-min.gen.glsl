@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/ivec3/fn-min --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Min: min(ivec3, ivec3) -> ivec3 (component-wise minimum)

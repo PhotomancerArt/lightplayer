@@ -1,16 +1,14 @@
-#[cfg(not(feature = "std"))]
-extern crate alloc;
 use crate::call::call_structreturn;
 use crate::error::JitCallError;
-use core::marker::PhantomData;
+use core::clone::Clone;
+use core::default::Default;
+use core::marker::{Copy, PhantomData};
+use core::ops::Fn;
+use core::result::Result;
 use cranelift_codegen::ir::Type;
 use cranelift_codegen::isa::CallConv;
 
-#[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
-
-#[cfg(feature = "std")]
-use std::{boxed::Box, vec::Vec};
 
 /// A wrapper for a StructReturn function that provides a Rust-friendly interface.
 ///

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Assign Element: bvec2.x = bool, bvec2[0] = bool - single component assignment

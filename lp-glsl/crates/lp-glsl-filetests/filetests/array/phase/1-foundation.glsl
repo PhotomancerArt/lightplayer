@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // Phase 1: Foundation - Basic 1D scalar arrays with literal int sizes
 // Stack allocation, pointer-based storage, basic read/write access

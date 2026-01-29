@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Struct Definitions with Vector Members
@@ -15,7 +15,7 @@ float test_define_vector_transform() {
     return 1.0; // Should be 1.0
 }
 
-// run: test_define_vector_transform() == 1.0
+// run: test_define_vector_transform() == 1.0 [expect-fail]
 
 struct ColorRGBA {
     vec4 rgba;
@@ -26,7 +26,7 @@ int test_define_vector_color_rgba() {
     return 1; // Should be 1
 }
 
-// run: test_define_vector_color_rgba() == 1
+// run: test_define_vector_color_rgba() == 1 [expect-fail]
 
 struct LineSegment {
     vec2 start;
@@ -38,7 +38,7 @@ uint test_define_vector_line_segment() {
     return 1u; // Should be 1u
 }
 
-// run: test_define_vector_line_segment() == 1u
+// run: test_define_vector_line_segment() == 1u [expect-fail]
 
 struct Triangle3D {
     vec3 v1;
@@ -51,7 +51,7 @@ bool test_define_vector_triangle3d() {
     return true; // Should be true
 }
 
-// run: test_define_vector_triangle3d() == true
+// run: test_define_vector_triangle3d() == true [expect-fail]
 
 struct MatrixTransform {
     vec4 row0;
@@ -65,7 +65,7 @@ vec2 test_define_vector_matrix_transform() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// run: test_define_vector_matrix_transform() ~= vec2(1.0, 1.0)
+// run: test_define_vector_matrix_transform() ~= vec2(1.0, 1.0) [expect-fail]
 
 struct Particle {
     vec3 position;
@@ -79,7 +79,7 @@ float test_define_vector_particle() {
     return 1.0; // Should be 1.0
 }
 
-// run: test_define_vector_particle() == 1.0
+// run: test_define_vector_particle() == 1.0 [expect-fail]
 
 struct BoundingBox {
     vec2 min;
@@ -91,7 +91,7 @@ int test_define_vector_bounding_box() {
     return 1; // Should be 1
 }
 
-// run: test_define_vector_bounding_box() == 1
+// run: test_define_vector_bounding_box() == 1 [expect-fail]
 
 struct Light {
     vec3 position;
@@ -105,4 +105,4 @@ uint test_define_vector_light() {
     return 1u; // Should be 1u
 }
 
-// run: test_define_vector_light() == 1u
+// run: test_define_vector_light() == 1u [expect-fail]

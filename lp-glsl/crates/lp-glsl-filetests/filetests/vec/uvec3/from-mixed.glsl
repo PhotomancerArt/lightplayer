@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Mixed: uvec3(int, float, bool, ivec3, bvec3, vec3) - type conversions
@@ -43,7 +43,7 @@ uvec3 test_uvec3_from_mixed_vec3() {
     return uvec3(source);
 }
 
-// run: test_uvec3_from_mixed_vec3() == uvec3(1u, 0u, 3u)
+// run: test_uvec3_from_mixed_vec3() == uvec3(1u, 4294967294u, 3u)
 
 uvec3 test_uvec3_from_mixed_zero_values() {
     return uvec3(0, 0.0, false);
@@ -55,7 +55,7 @@ uvec3 test_uvec3_from_mixed_negative_values() {
     return uvec3(-1, -2.5, -3);
 }
 
-// run: test_uvec3_from_mixed_negative_values() == uvec3(4294967295u, 0u, 4294967293u)
+// run: test_uvec3_from_mixed_negative_values() == uvec3(4294967295u, 4294967294u, 4294967293u)
 
 uvec3 test_uvec3_from_mixed_large_values() {
     return uvec3(100000, 999.9, true);

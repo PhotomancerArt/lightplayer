@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Conversion: float(bool) - converts bool to float (false -> 0.0, true -> 1.0)

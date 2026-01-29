@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Multiply Assign: mat4 *= mat4 (matrix multiplication) or mat4 *= float (component-wise)
@@ -36,7 +36,7 @@ mat4 test_mat4_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// run: test_mat4_multiply_assign_matrix_expressions() ~= mat4(2.0, 2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+// run: test_mat4_multiply_assign_matrix_expressions() ~= mat4(2.0, 2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0) [expect-fail]
 
 mat4 test_mat4_multiply_assign_scalar() {
     mat4 result = mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0);

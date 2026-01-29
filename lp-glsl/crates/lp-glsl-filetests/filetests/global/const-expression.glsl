@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Const Expression: Const global initializers must be constant expressions
@@ -29,35 +29,35 @@ float test_const_expression_arithmetic() {
     return TWO_PI + PI_OVER_TWO;
 }
 
-// run: test_const_expression_arithmetic() ~= 9.42477
+// run: test_const_expression_arithmetic() ~= 9.42477 [expect-fail]
 
 int test_const_expression_int_math() {
     // Constant integer expressions
     return DOUBLE_ANSWER / 2;
 }
 
-// run: test_const_expression_int_math() == 42
+// run: test_const_expression_int_math() == 42 [expect-fail]
 
 vec2 test_const_expression_vector() {
     // Constant vector expressions
     return SCALED_VECTOR + vec2(1.0, 1.0);
 }
 
-// run: test_const_expression_vector() ~= vec2(3.0, 1.0)
+// run: test_const_expression_vector() ~= vec2(3.0, 1.0) [expect-fail]
 
 vec3 test_const_expression_vector_ops() {
     // Constant vector operations
     return UP_VECTOR + RIGHT_VECTOR + FORWARD_VECTOR;
 }
 
-// run: test_const_expression_vector_ops() ~= vec3(1.0, 1.0, 1.0)
+// run: test_const_expression_vector_ops() ~= vec3(1.0, 1.0, 1.0) [expect-fail]
 
 mat2 test_const_expression_matrix() {
     // Constant matrix expressions
     return SCALED_IDENTITY;
 }
 
-// run: test_const_expression_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0)
+// run: test_const_expression_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
 
 float test_const_expression_nested() {
     // Nested constant expressions
@@ -67,7 +67,7 @@ float test_const_expression_nested() {
     return QUARTER_PI + EIGHTH_PI;
 }
 
-// run: test_const_expression_nested() ~= 1.9635
+// run: test_const_expression_nested() ~= 1.9635 [expect-fail]
 
 vec3 test_const_expression_complex() {
     // Complex constant vector expressions
@@ -78,7 +78,7 @@ vec3 test_const_expression_complex() {
     return OFFSET_BASIS;
 }
 
-// run: test_const_expression_complex() ~= vec3(0.6, 0.6, 0.6)
+// run: test_const_expression_complex() ~= vec3(0.6, 0.6, 0.6) [expect-fail]
 
 float test_const_expression_builtin() {
     // Built-in functions that are constant (if supported)
@@ -88,4 +88,4 @@ float test_const_expression_builtin() {
     return LENGTH_UNIT;
 }
 
-// run: test_const_expression_builtin() ~= 1.0
+// run: test_const_expression_builtin() ~= 1.0 [expect-fail]

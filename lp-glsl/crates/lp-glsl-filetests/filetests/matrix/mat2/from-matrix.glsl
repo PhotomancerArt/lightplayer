@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Matrix: mat2(mat3) or mat2(mat4) - construct from larger matrix

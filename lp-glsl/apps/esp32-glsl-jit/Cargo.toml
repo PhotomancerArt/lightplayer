@@ -1,18 +1,26 @@
 [package]
-name = "esp32-glsl-jit"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-
-[[bin]]
-name = "esp32-glsl-jit"
-path = "src/main.rs"
-test = false
+name    = "esp32-glsl-jit"
+version = "0.0.0"
+edition = "2024"
+publish = false
 
 [dependencies]
-# GLSL compiler for JIT compilation
+embassy-executor = "0.9.1"
+embassy-time = "0.4.0"
+esp-backtrace = { version = "0.18.1", features = [
+    "panic-handler",
+    "println",
+] }
+esp-bootloader-esp-idf = { version = "0.2.0" }
+esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }
+esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
+esp-println = { version = "0.16.1", features = ["log-04"] }
+esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
+hashbrown = { workspace = true }
+
 lp-glsl-compiler = { path = "../../crates/lp-glsl-compiler", default-features = false, features = ["core"] }
-glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false }
+lp-jit-util = { path = "../../crates/lp-jit-util", default-features = false }
+lp-builtins = { path = "../../crates/lp-builtins" }
 
 # Cranelift for JIT compilation on ESP32-C3/C6 (RISC-V32)
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
@@ -20,25 +28,48 @@ cranelift-frontend = { workspace = true, features = ["core"] }
 cranelift-module = { workspace = true, features = ["core"] }
 cranelift-control = { workspace = true }
 target-lexicon = { workspace = true }
-hashbrown = { workspace = true }
 
-# ESP32-C6 HAL and runtime
-esp-hal = { version = "=1.0.0-rc.0", features = ["defmt", "esp32c6", "unstable"] }
-esp-hal-embassy = { version = "0.9.0", features = ["defmt", "esp32c6"] }
-esp-alloc = { version = "0.8.0", features = ["defmt"] }
-panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
-rtt-target = { version = "0.6.1", features = ["defmt"] }
-defmt = "1.0.1"
-embassy-executor = { version = "0.7.0", features = ["defmt", "task-arena-size-20480"] }
-embassy-time = { version = "0.4.0", features = ["defmt"] }
-esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32c6"] }
-
-# Disable unsafe-assume-single-core feature for portable-atomic
-# ESP32-C6 supports atomic CAS, so this feature is incompatible
-[dependencies.portable-atomic]
-version = "1.11"
-default-features = false
-
-# Note: Release profile optimizations are configured in workspace root Cargo.toml
-# under [profile.release.package.esp32-glsl-jit] to work when building from workspace root
-
+[features]
+default = ["esp32c6"]
+esp32 = [
+    "esp-backtrace/esp32",
+    "esp-bootloader-esp-idf/esp32",
+    "esp-rtos/esp32",
+    "esp-hal/esp32",
+]
+esp32c2 = [
+    "esp-backtrace/esp32c2",
+    "esp-bootloader-esp-idf/esp32c2",
+    "esp-rtos/esp32c2",
+    "esp-hal/esp32c2",
+]
+esp32c3 = [
+    "esp-backtrace/esp32c3",
+    "esp-bootloader-esp-idf/esp32c3",
+    "esp-rtos/esp32c3",
+    "esp-hal/esp32c3",
+]
+esp32c6 = [
+    "esp-backtrace/esp32c6",
+    "esp-bootloader-esp-idf/esp32c6",
+    "esp-rtos/esp32c6",
+    "esp-hal/esp32c6",
+]
+esp32h2 = [
+    "esp-backtrace/esp32h2",
+    "esp-bootloader-esp-idf/esp32h2",
+    "esp-rtos/esp32h2",
+    "esp-hal/esp32h2",
+]
+esp32s2 = [
+    "esp-backtrace/esp32s2",
+    "esp-bootloader-esp-idf/esp32s2",
+    "esp-rtos/esp32s2",
+    "esp-hal/esp32s2",
+]
+esp32s3 = [
+    "esp-backtrace/esp32s3",
+    "esp-bootloader-esp-idf/esp32s3",
+    "esp-rtos/esp32s3",
+    "esp-hal/esp32s3",
+]

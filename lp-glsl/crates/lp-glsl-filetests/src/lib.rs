@@ -24,7 +24,7 @@ use walkdir::WalkDir;
 
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
-    let (result, _stats) = run_filetest_with_line_filter(path, None, OutputMode::Detail)?;
+    let (result, _stats, _, _) = run_filetest_with_line_filter(path, None, OutputMode::Detail)?;
     result
 }
 
@@ -56,12 +56,12 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 }
 
 /// Run a single filetest with optional line number filtering.
-/// Returns the result and test case statistics.
+/// Returns the result, test case statistics, and line numbers with unexpected passes.
 pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
-) -> Result<(Result<()>, test_run::TestCaseStats)> {
+) -> Result<(Result<()>, test_run::TestCaseStats, Vec<usize>, Vec<usize>)> {
     // Count test cases early, even if parsing fails later
     let early_stats = count_test_cases(path, line_filter);
 
@@ -69,7 +69,7 @@ pub fn run_filetest_with_line_filter(
         Ok(tf) => tf,
         Err(e) => {
             // Return error but preserve the test case count we already computed
-            return Ok((Err(e), early_stats));
+            return Ok((Err(e), early_stats, Vec::new(), Vec::new()));
         }
     };
 
@@ -94,9 +94,9 @@ pub fn run_filetest_with_line_filter(
     // TODO: Implement transform test in Phase 4
     if test_file
         .test_types
-        .contains(&parse::TestType::TransformFixed32)
+        .contains(&parse::TestType::TransformQ32)
     {
-        // test_transform::run_transform_fixed32_test(...)?;
+        // test_transform::run_transform_q32_test(...)?;
     }
 
     // Run execution tests if requested
@@ -105,11 +105,16 @@ pub fn run_filetest_with_line_filter(
         .iter()
         .any(|t| matches!(t, parse::TestType::Run))
     {
-        let (result, stats) =
+        let (result, stats, unexpected_pass_lines, failed_lines) =
             test_run::run_test_file_with_line_filter(&test_file, path, line_filter, output_mode)?;
-        Ok((result, stats))
+        Ok((result, stats, unexpected_pass_lines, failed_lines))
     } else {
-        Ok((Ok(()), test_run::TestCaseStats::default()))
+        Ok((
+            Ok(()),
+            test_run::TestCaseStats::default(),
+            Vec::new(),
+            Vec::new(),
+        ))
     }
 }
 
@@ -133,7 +138,57 @@ struct FileSpec {
 /// Mode is determined by test count:
 /// - Single test (1 file): Full detailed output with all error information
 /// - Multiple tests (>1 file): Minimal output with colored checkmarks
-pub fn run(files: &[String]) -> anyhow::Result<()> {
+///
+/// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
+/// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
+pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
+    // Check environment variable if flag not provided
+    let fix_xfail = fix_xfail
+        || std::env::var("LP_FIX_XFAIL")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+
+    // Check for baseline marking feature
+    let mark_failing_expected = std::env::var("LP_MARK_FAILING_TESTS_EXPECTED")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+
+    if mark_failing_expected {
+        // Show stern warning and require confirmation
+        println!(
+            "\n{}",
+            colors::colorize(
+                "WARNING: This will mark ALL currently failing tests with [expect-fail] markers.",
+                colors::RED
+            )
+        );
+        println!(
+            "{}",
+            colors::colorize(
+                "This should only be done when establishing a baseline for expected-fail tracking.",
+                colors::YELLOW
+            )
+        );
+        println!();
+        println!(
+            "{}",
+            colors::colorize(
+                "This operation will modify test files. Make sure you have committed your changes.",
+                colors::YELLOW
+            )
+        );
+        print!("\nType 'yes' to confirm: ");
+        use std::io::Write;
+        std::io::stdout().flush()?;
+
+        let mut confirmation = String::new();
+        std::io::stdin().read_line(&mut confirmation)?;
+        let confirmation = confirmation.trim();
+
+        if confirmation != "yes" {
+            anyhow::bail!("Baseline marking cancelled. Type 'yes' exactly to confirm.");
+        }
+    }
     let filetests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let mut test_specs = Vec::new();
 
@@ -205,70 +260,110 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
             relative_path_str
         };
 
-        let (result, stats) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_filetest_with_line_filter(&spec.path, spec.line_number, output_mode)
-        })) {
-            Ok(Ok((inner_result, inner_stats))) => (inner_result, inner_stats),
-            Ok(Err(e)) => (Err(e), test_run::TestCaseStats::default()),
-            Err(e) => {
-                let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
-                    msg.clone()
-                } else if let Some(msg) = e.downcast_ref::<&'static str>() {
-                    msg.to_string()
-                } else {
-                    format!("{e:?}")
-                };
-                (
-                    Err(anyhow::anyhow!("panicked: {panic_msg}")),
+        let (_result, stats, unexpected_pass_lines, _failed_lines) =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_filetest_with_line_filter(&spec.path, spec.line_number, output_mode)
+            })) {
+                Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {
+                    (inner_result, inner_stats, unexpected_lines, failed_lines)
+                }
+                Ok(Err(e)) => (
+                    Err(e),
                     test_run::TestCaseStats::default(),
-                )
-            }
-        };
-
-        match result {
-            Ok(()) => {
-                println!(
-                    "{}",
-                    colors::colorize(&format!("✓ {display_path}"), colors::GREEN)
-                );
-                let elapsed = start_time.elapsed();
-                println!(
-                    "\n{}",
-                    format_results_summary(stats.passed, stats.failed, stats.total, 1, 0, elapsed)
-                );
-                return Ok(());
-            }
-            Err(_e) => {
-                // Extract test expression and line number from error message
-                let error_str = format!("{_e:#}");
-                let (test_expr, line_num) =
-                    extract_test_info_from_error(&error_str, spec.line_number);
-                let filename_only = Path::new(&display_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&display_path)
-                    .to_string();
-                let failure_line = if let Some(expr) = test_expr {
-                    if let Some(line) = line_num {
-                        format!("{filename_only}:{line} {expr}")
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                Err(e) => {
+                    let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
+                        msg.clone()
+                    } else if let Some(msg) = e.downcast_ref::<&'static str>() {
+                        msg.to_string()
                     } else {
-                        format!("{filename_only} {expr}")
+                        format!("{e:?}")
+                    };
+                    (
+                        Err(anyhow::anyhow!("panicked: {panic_msg}")),
+                        test_run::TestCaseStats::default(),
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                }
+            };
+
+        // Check if file actually failed (has unexpected failures or unexpected passes)
+        let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0;
+
+        if !file_actually_failed {
+            println!(
+                "{}",
+                colors::colorize(&format!("✓ {display_path}"), colors::GREEN)
+            );
+            let elapsed = start_time.elapsed();
+            println!(
+                "\n{}",
+                format_results_summary(
+                    stats.passed,
+                    stats.failed,
+                    stats.total,
+                    1,
+                    0,
+                    elapsed,
+                    stats.expect_fail,
+                    stats.unexpected_pass,
+                    fix_xfail,
+                )
+            );
+
+            // Remove markers if fix is enabled
+            if fix_xfail && !unexpected_pass_lines.is_empty() {
+                let file_update = util::file_update::FileUpdate::new(&spec.path);
+                for line_number in unexpected_pass_lines {
+                    if let Err(e) = file_update.remove_expect_fail_marker(line_number) {
+                        eprintln!(
+                            "Warning: failed to remove [expect-fail] marker from line {line_number}: {e}"
+                        );
                     }
-                } else {
-                    filename_only
-                };
-                println!(
-                    "{}",
-                    colors::colorize(&format!("✗ {failure_line}"), colors::RED)
-                );
-                println!("\n{_e:#}");
-                let elapsed = start_time.elapsed();
-                println!(
-                    "\n{}",
-                    format_results_summary(stats.passed, stats.failed, stats.total, 0, 1, elapsed)
-                );
-                anyhow::bail!("1 test file(s) failed");
+                }
             }
+
+            return Ok(());
+        } else {
+            // File failed - show error details
+            println!(
+                "{}",
+                colors::colorize(&format!("✗ {display_path}"), colors::RED)
+            );
+            let elapsed = start_time.elapsed();
+            println!(
+                "\n{}",
+                format_results_summary(
+                    stats.passed,
+                    stats.failed,
+                    stats.total,
+                    0,
+                    1,
+                    elapsed,
+                    stats.expect_fail,
+                    stats.unexpected_pass,
+                    fix_xfail,
+                )
+            );
+
+            // Exit with error - check for unexpected passes first
+            if stats.unexpected_pass > 0 {
+                if fix_xfail {
+                    anyhow::bail!(
+                        "{} test case(s) marked [expect-fail] are now passing. Markers removed.",
+                        stats.unexpected_pass
+                    );
+                } else {
+                    anyhow::bail!(
+                        "{} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers.",
+                        stats.unexpected_pass
+                    );
+                }
+            }
+            anyhow::bail!("1 test file(s) failed");
         }
     }
 
@@ -279,13 +374,15 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
     enum TestState {
         New,
         Queued,
-        Done(Result<()>),
+        Done,
     }
 
     struct TestEntry {
         spec: FileSpec,
         state: TestState,
         stats: test_run::TestCaseStats,
+        unexpected_pass_lines: Vec<usize>,
+        failed_lines: Vec<usize>,
     }
 
     struct FailedTest {
@@ -299,6 +396,8 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
             spec,
             state: TestState::New,
             stats: test_run::TestCaseStats::default(),
+            unexpected_pass_lines: Vec::new(),
+            failed_lines: Vec::new(),
         })
         .collect();
 
@@ -310,6 +409,8 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
     let mut total_test_cases = 0;
     let mut passed_test_cases = 0;
     let mut failed_test_cases = 0;
+    let mut expect_fail_test_cases = 0;
+    let mut unexpected_pass_test_cases = 0;
     let mut failed_tests = Vec::new();
 
     // Queue all tests
@@ -332,18 +433,22 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
             match reply {
                 runner::concurrent::Reply::Done {
                     jobid,
-                    result,
+                    result: _result,
                     stats,
+                    unexpected_pass_lines,
+                    failed_lines,
                 } => {
                     tests[jobid].stats = stats;
-                    tests[jobid].state = TestState::Done(result);
+                    tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+                    tests[jobid].failed_lines = failed_lines;
+                    tests[jobid].state = TestState::Done;
                 }
             }
         }
 
         // Report next test in order if it's done
         if reported_tests < tests.len() {
-            if let TestState::Done(ref result) = tests[reported_tests].state {
+            if matches!(tests[reported_tests].state, TestState::Done) {
                 let spec = &tests[reported_tests].spec;
                 let relative_path_str = relative_path(&spec.path, &filetests_dir);
                 let display_path = if let Some(line) = spec.line_number {
@@ -356,10 +461,16 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
                 total_test_cases += stats.total;
                 passed_test_cases += stats.passed;
                 failed_test_cases += stats.failed;
+                expect_fail_test_cases += stats.expect_fail;
+                unexpected_pass_test_cases += stats.unexpected_pass;
 
                 // Determine color for counts based on pass/fail ratio
                 let counts_color = if stats.total > 0 {
-                    if stats.passed == stats.total {
+                    let denominator = stats.passed + stats.failed;
+                    if denominator == 0 {
+                        // All tests are expected failures - yellow
+                        colors::YELLOW
+                    } else if stats.passed == denominator {
                         // All passed - green
                         colors::GREEN
                     } else if stats.passed > 0 {
@@ -373,70 +484,63 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
                     colors::GREEN // Default to green if no test cases
                 };
 
-                match result {
-                    Ok(()) => {
-                        // Multi-test mode: minimal output with colored checkmark, test case counts, and dimmed path
-                        let status_marker = if colors::should_color() {
-                            format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
-                        } else {
-                            "✓ ".to_string()
-                        };
-                        let counts_str = if stats.total > 0 {
-                            let formatted = format!("{:2}/{:2}", stats.passed, stats.total);
-                            if colors::should_color() {
-                                format!("{}{}{}", counts_color, formatted, colors::RESET)
-                            } else {
-                                formatted
-                            }
-                        } else {
-                            String::new()
-                        };
-                        let path_colored = if colors::should_color() {
-                            format!("{status_marker}{counts_str} ")
-                                + &format!("{}{}{}", colors::DIM, display_path, colors::RESET)
-                        } else {
-                            format!("{status_marker}{counts_str} {display_path}")
-                        };
-                        println!("{path_colored}");
-                        // Flush stdout to ensure output appears immediately
-                        use std::io::Write;
-                        let _ = std::io::stdout().flush();
-                        passed += 1;
-                    }
-                    Err(_e) => {
-                        // Multi-test mode: minimal output with colored X, test case counts, and dimmed path
-                        // Error details (including panic messages) are suppressed in multi-test mode
-                        let status_marker = if colors::should_color() {
+                let has_unexpected_failures = stats.failed > 0;
+                let (counts_str, parentheticals) =
+                    format_file_counts(stats, has_unexpected_failures);
+
+                // Determine if this file actually failed (has unexpected failures or unexpected passes)
+                let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0;
+
+                // Choose status marker and color based on whether file actually failed
+                let (status_marker, should_mark_failed) = if file_actually_failed {
+                    (
+                        if colors::should_color() {
                             format!("{}{}{} ", colors::RED, "✗", colors::RESET)
                         } else {
                             "✗ ".to_string()
-                        };
-                        let counts_str = if stats.total > 0 {
-                            let formatted = format!("{:2}/{:2}", stats.passed, stats.total);
-                            if colors::should_color() {
-                                format!("{}{}{}", counts_color, formatted, colors::RESET)
-                            } else {
-                                formatted
-                            }
+                        },
+                        true,
+                    )
+                } else {
+                    (
+                        if colors::should_color() {
+                            format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
                         } else {
-                            String::new()
-                        };
-                        let path_colored = if colors::should_color() {
-                            format!("{status_marker}{counts_str} ")
-                                + &format!("{}{}{}", colors::DIM, display_path, colors::RESET)
-                        } else {
-                            format!("{status_marker}{counts_str} {display_path}")
-                        };
-                        println!("{path_colored}");
-                        // Flush stdout to ensure output appears immediately
-                        use std::io::Write;
-                        let _ = std::io::stdout().flush();
-                        failed += 1;
-                        failed_tests.push(FailedTest {
-                            path: spec.path.clone(),
-                            line_number: spec.line_number,
-                        });
-                    }
+                            "✓ ".to_string()
+                        },
+                        false,
+                    )
+                };
+
+                let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                    format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                } else {
+                    counts_str.clone()
+                };
+                let path_colored = if colors::should_color() {
+                    format!(
+                        "{status_marker}{counts_colored} {}{}{}{}",
+                        colors::DIM,
+                        display_path,
+                        colors::RESET,
+                        parentheticals
+                    )
+                } else {
+                    format!("{status_marker}{counts_colored} {display_path}{parentheticals}")
+                };
+                println!("{path_colored}");
+                // Flush stdout to ensure output appears immediately
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+
+                if should_mark_failed {
+                    failed += 1;
+                    failed_tests.push(FailedTest {
+                        path: spec.path.clone(),
+                        line_number: spec.line_number,
+                    });
+                } else {
+                    passed += 1;
                 }
                 reported_tests += 1;
                 continue;
@@ -452,11 +556,15 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
             match reply {
                 runner::concurrent::Reply::Done {
                     jobid,
-                    result,
+                    result: _result,
                     stats,
+                    unexpected_pass_lines,
+                    failed_lines,
                 } => {
                     tests[jobid].stats = stats;
-                    tests[jobid].state = TestState::Done(result);
+                    tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+                    tests[jobid].failed_lines = failed_lines;
+                    tests[jobid].state = TestState::Done;
                 }
             }
         }
@@ -467,11 +575,15 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
                 match reply {
                     runner::concurrent::Reply::Done {
                         jobid,
-                        result,
+                        result: _result,
                         stats,
+                        unexpected_pass_lines,
+                        failed_lines,
                     } => {
                         tests[jobid].stats = stats;
-                        tests[jobid].state = TestState::Done(result);
+                        tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+                        tests[jobid].failed_lines = failed_lines;
+                        tests[jobid].state = TestState::Done;
                     }
                 }
             }
@@ -508,6 +620,77 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
         }
     }
 
+    // Collect all unexpected passes for marker removal
+    let mut all_unexpected_passes: Vec<(PathBuf, usize)> = Vec::new();
+    for test in &tests {
+        for line_number in &test.unexpected_pass_lines {
+            all_unexpected_passes.push((test.spec.path.clone(), *line_number));
+        }
+    }
+
+    // Remove markers if fix is enabled
+    if fix_xfail && !all_unexpected_passes.is_empty() {
+        // Group by file to create FileUpdate instances
+        use std::collections::HashMap;
+        let mut file_updates: HashMap<PathBuf, util::file_update::FileUpdate> = HashMap::new();
+        for (path, line_number) in &all_unexpected_passes {
+            let file_update = file_updates
+                .entry(path.clone())
+                .or_insert_with(|| util::file_update::FileUpdate::new(path));
+            if let Err(e) = file_update.remove_expect_fail_marker(*line_number) {
+                eprintln!(
+                    "Warning: failed to remove [expect-fail] marker from {}:{}: {}",
+                    path.display(),
+                    line_number,
+                    e
+                );
+            }
+        }
+    }
+
+    // Baseline marking: mark all failing tests with [expect-fail]
+    if mark_failing_expected {
+        // Collect specific failing directives (unexpected failures, not expected ones)
+        let mut failing_directives: Vec<(PathBuf, usize)> = Vec::new();
+        for test in &tests {
+            for line_number in &test.failed_lines {
+                failing_directives.push((test.spec.path.clone(), *line_number));
+            }
+        }
+
+        if !failing_directives.is_empty() {
+            println!(
+                "\nMarking {} failing test directive(s) with [expect-fail]...",
+                failing_directives.len()
+            );
+            use std::collections::HashMap;
+            let mut file_updates: HashMap<PathBuf, util::file_update::FileUpdate> = HashMap::new();
+            let mut total_marked = 0;
+
+            for (file_path, line_number) in &failing_directives {
+                let file_update = file_updates
+                    .entry(file_path.clone())
+                    .or_insert_with(|| util::file_update::FileUpdate::new(file_path));
+
+                // Mark this specific directive that failed
+                if let Err(e) = file_update.add_expect_fail_marker(*line_number) {
+                    eprintln!(
+                        "Warning: failed to add [expect-fail] marker to {}:{}: {}",
+                        file_path.display(),
+                        line_number,
+                        e
+                    );
+                } else {
+                    total_marked += 1;
+                }
+            }
+
+            println!("Marked {total_marked} test directive(s) with [expect-fail]");
+        } else {
+            println!("\nNo failing tests to mark.");
+        }
+    }
+
     println!(
         "\n{}",
         format_results_summary(
@@ -516,12 +699,27 @@ pub fn run(files: &[String]) -> anyhow::Result<()> {
             total_test_cases,
             passed,
             failed,
-            elapsed
+            elapsed,
+            expect_fail_test_cases,
+            unexpected_pass_test_cases,
+            fix_xfail,
         )
     );
 
+    // Exit with error if there are unexpected failures or unexpected passes
     if failed > 0 {
         anyhow::bail!("{failed} test file(s) failed");
+    }
+    if unexpected_pass_test_cases > 0 {
+        if fix_xfail {
+            anyhow::bail!(
+                "{unexpected_pass_test_cases} test case(s) marked [expect-fail] are now passing. Markers removed."
+            );
+        } else {
+            anyhow::bail!(
+                "{unexpected_pass_test_cases} test case(s) marked [expect-fail] are now passing.\nTo fix: rerun tests with LP_FIX_XFAIL=1 or --fix flag to automatically remove markers."
+            );
+        }
     }
 
     Ok(())
@@ -624,65 +822,74 @@ fn relative_path(path: &Path, filetests_dir: &Path) -> String {
         .to_string_lossy()
         .to_string()
 }
+/// Format per-file test counts with expected-fail information.
+fn format_file_counts(
+    stats: &test_run::TestCaseStats,
+    has_unexpected_failures: bool,
+) -> (String, String) {
+    // Denominator excludes expected-fail tests (only count non-marked tests)
+    let denominator = stats.passed + stats.failed;
+    let numerator = if stats.unexpected_pass > 0 {
+        // Show over 100% when there are unexpected passes
+        stats.passed + stats.unexpected_pass
+    } else {
+        stats.passed
+    };
 
-/// Extract test expression and line number from error message for failure marker display.
-fn extract_test_info_from_error(
-    error_str: &str,
-    fallback_line: Option<usize>,
-) -> (Option<String>, Option<usize>) {
-    // Look for line number in rerun command (scripts/glsl-filetests.sh filename:line)
-    let mut line_num = fallback_line;
-    if let Some(script_pos) = error_str.find("scripts/glsl-filetests.sh") {
-        if let Some(colon_pos) = error_str[script_pos..].find(':') {
-            let after_colon = &error_str[script_pos + colon_pos + 1..];
-            if let Some(end_pos) = after_colon.find(&['\n', ' '][..]) {
-                if let Ok(num) = after_colon[..end_pos].trim().parse::<usize>() {
-                    line_num = Some(num);
-                }
-            }
+    let counts_str = if denominator > 0 {
+        format!("{numerator:2}/{denominator:2}")
+    } else if stats.total > 0 {
+        // All tests are expected failures - show 0/total in yellow
+        format!("{numerator:2}/{total:2}", total = stats.total)
+    } else {
+        String::new()
+    };
+
+    // Build suffix with expected-fail/unexpected info, with colors
+    let mut suffix_parts = Vec::new();
+    if !has_unexpected_failures && stats.expect_fail > 0 {
+        // Show expected-fail count if no unexpected failures (grey/default)
+        suffix_parts.push(format!("({} expect-fail)", stats.expect_fail));
+    }
+    if stats.failed > 0 {
+        // Show unexpected failure count (red)
+        let part = format!("({} unexpected)", stats.failed);
+        if colors::should_color() {
+            suffix_parts.push(format!("{}{}{}", colors::RED, part, colors::RESET));
+        } else {
+            suffix_parts.push(part);
+        }
+    }
+    if stats.unexpected_pass > 0 {
+        // Show unexpected pass count (green - good thing!)
+        let part = format!("({} unexpected-pass)", stats.unexpected_pass);
+        if colors::should_color() {
+            suffix_parts.push(format!("{}{}{}", colors::GREEN, part, colors::RESET));
+        } else {
+            suffix_parts.push(part);
         }
     }
 
-    // Look for // run: line in error message
-    let test_expr = if let Some(run_start) = error_str.find("// run:") {
-        if let Some(run_end) = error_str[run_start..].find('\n') {
-            let run_line = &error_str[run_start + 7..run_start + run_end].trim();
-            // Extract expression part (everything before == or ~=) and the expected value
-            if let Some(op_pos) = run_line.rfind(" == ") {
-                let expr = run_line[..op_pos].trim();
-                let expected = run_line[op_pos + 4..]
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("");
-                Some(format!("{expr} == {expected}"))
-            } else if let Some(op_pos) = run_line.rfind(" ~= ") {
-                let expr = run_line[..op_pos].trim();
-                let expected = run_line[op_pos + 4..]
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("");
-                Some(format!("{expr} ~= {expected}"))
-            } else {
-                Some(run_line.to_string())
-            }
-        } else {
-            None
-        }
+    let parentheticals = if suffix_parts.is_empty() {
+        String::new()
     } else {
-        None
+        format!(" {}", suffix_parts.join(" "))
     };
 
-    (test_expr, line_num)
+    (counts_str, parentheticals)
 }
 
 /// Format results summary with colors and timing.
 fn format_results_summary(
     passed_test_cases: usize,
     failed_test_cases: usize,
-    total_test_cases: usize,
+    _total_test_cases: usize, // Kept for API compatibility but not used (denominator excludes expect-fail)
     passed_files: usize,
     failed_files: usize,
     elapsed: std::time::Duration,
+    expect_fail_count: usize,
+    unexpected_pass_count: usize,
+    fix_enabled: bool,
 ) -> String {
     let seconds = elapsed.as_secs_f64();
     let time_str = if seconds < 1.0 {
@@ -695,9 +902,18 @@ fn format_results_summary(
         format!("{mins}m {remaining_secs:.2}s")
     };
 
+    // Denominator excludes expected-fail tests
+    let denominator = passed_test_cases + failed_test_cases;
+    let numerator = if unexpected_pass_count > 0 {
+        // Show over 100% when there are unexpected passes
+        passed_test_cases + unexpected_pass_count
+    } else {
+        passed_test_cases
+    };
+
     if colors::should_color() {
         // Use red if there are failures, green if all passed
-        let test_cases_color = if failed_test_cases > 0 {
+        let test_cases_color = if failed_test_cases > 0 || unexpected_pass_count > 0 {
             colors::RED
         } else {
             colors::GREEN
@@ -708,47 +924,64 @@ fn format_results_summary(
             colors::GREEN
         };
 
-        let test_cases_part = if total_test_cases > 0 {
-            format!(
+        let mut parts = Vec::new();
+        if denominator > 0 {
+            parts.push(format!(
                 "{}{}/{} tests passed{}",
                 test_cases_color,
-                passed_test_cases,
-                total_test_cases,
+                numerator,
+                denominator,
                 colors::RESET
-            )
-        } else {
-            String::new()
-        };
-        let files_part = format!(
+            ));
+        }
+        if expect_fail_count > 0 {
+            parts.push(format!("{expect_fail_count} expect-fail"));
+        }
+        parts.push(format!(
             "{}{}/{} files passed{}",
             files_color,
             passed_files,
             passed_files + failed_files,
             colors::RESET
-        );
+        ));
+        parts.push(time_str.to_string());
 
-        if total_test_cases > 0 {
-            format!("{test_cases_part}, {files_part} in {time_str}")
+        let summary = parts.join(", ");
+        if unexpected_pass_count > 0 {
+            let removal_msg = if fix_enabled {
+                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] removed.")
+            } else {
+                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] not removed.")
+            };
+            format!("{summary}{removal_msg}")
         } else {
-            format!("{files_part} in {time_str}")
+            summary
         }
     } else {
-        if total_test_cases > 0 {
-            format!(
-                "{}/{} tests passed, {}/{} files passed in {}",
-                passed_test_cases,
-                total_test_cases,
-                passed_files,
-                passed_files + failed_files,
-                time_str
-            )
+        let mut parts = Vec::new();
+        if denominator > 0 {
+            parts.push(format!("{numerator}/{denominator} tests passed"));
+        }
+        if expect_fail_count > 0 {
+            parts.push(format!("{expect_fail_count} expect-fail"));
+        }
+        parts.push(format!(
+            "{}/{} files passed",
+            passed_files,
+            passed_files + failed_files
+        ));
+        parts.push(format!("in {time_str}"));
+
+        let summary = parts.join(", ");
+        if unexpected_pass_count > 0 {
+            let removal_msg = if fix_enabled {
+                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] removed.")
+            } else {
+                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] not removed.")
+            };
+            format!("{summary}{removal_msg}")
         } else {
-            format!(
-                "{}/{} files passed in {}",
-                passed_files,
-                passed_files + failed_files,
-                time_str
-            )
+            summary
         }
     }
 }

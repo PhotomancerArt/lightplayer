@@ -30,6 +30,10 @@ pub enum Reply {
         result: Result<()>,
         /// Test case statistics.
         stats: TestCaseStats,
+        /// Line numbers with unexpected passes (tests marked [expect-fail] that passed).
+        unexpected_pass_lines: Vec<usize>,
+        /// Line numbers that failed (tests not marked [expect-fail] that failed).
+        failed_lines: Vec<usize>,
     },
 }
 
@@ -147,43 +151,57 @@ fn worker_thread(
                 };
 
                 // Use AssertUnwindSafe to allow catching panics from code that isn't unwind-safe
-                let (result, stats) = match catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    crate::run_filetest_with_line_filter(path.as_path(), line_filter, output_mode)
-                })) {
-                    Ok(Ok((inner_result, inner_stats))) => (inner_result, inner_stats),
-                    Ok(Err(e)) => {
-                        // Error occurred, but try to preserve test case count
-                        // Count test cases even on error so we can show stats
-                        let error_stats = crate::count_test_cases(path.as_path(), line_filter);
-                        (Err(e), error_stats)
-                    }
-                    Err(e) => {
-                        // The test panicked, leaving us a `Box<Any>`.
-                        // Panics are usually strings or &str.
-                        let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
-                            msg.clone()
-                        } else if let Some(msg) = e.downcast_ref::<&'static str>() {
-                            msg.to_string()
-                        } else {
-                            // Try to format the panic payload as debug string
-                            format!("{e:?}")
-                        };
+                let (result, stats, unexpected_pass_lines, failed_lines) =
+                    match catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::run_filetest_with_line_filter(
+                            path.as_path(),
+                            line_filter,
+                            output_mode,
+                        )
+                    })) {
+                        Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {
+                            (inner_result, inner_stats, unexpected_lines, failed_lines)
+                        }
+                        Ok(Err(e)) => {
+                            // Error occurred, but try to preserve test case count
+                            // Count test cases even on error so we can show stats
+                            let error_stats = crate::count_test_cases(path.as_path(), line_filter);
+                            (Err(e), error_stats, Vec::new(), Vec::new())
+                        }
+                        Err(e) => {
+                            // The test panicked, leaving us a `Box<Any>`.
+                            // Panics are usually strings or &str.
+                            let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
+                                msg.clone()
+                            } else if let Some(msg) = e.downcast_ref::<&'static str>() {
+                                msg.to_string()
+                            } else {
+                                // Try to format the panic payload as debug string
+                                format!("{e:?}")
+                            };
 
-                        // Extract just the essential panic message (first line usually)
-                        let short_msg = panic_msg.lines().next().unwrap_or("panic").to_string();
+                            // Extract just the essential panic message (first line usually)
+                            let short_msg = panic_msg.lines().next().unwrap_or("panic").to_string();
 
-                        // Count test cases even on panic so we can show stats
-                        let panic_stats = crate::count_test_cases(path.as_path(), line_filter);
+                            // Count test cases even on panic so we can show stats
+                            let panic_stats = crate::count_test_cases(path.as_path(), line_filter);
 
-                        (Err(anyhow::anyhow!("panicked: {short_msg}")), panic_stats)
-                    }
-                };
+                            (
+                                Err(anyhow::anyhow!("panicked: {short_msg}")),
+                                panic_stats,
+                                Vec::new(),
+                                Vec::new(),
+                            )
+                        }
+                    };
 
                 replies
                     .send(Reply::Done {
                         jobid,
                         result,
                         stats,
+                        unexpected_pass_lines,
+                        failed_lines,
                     })
                     .unwrap();
             }

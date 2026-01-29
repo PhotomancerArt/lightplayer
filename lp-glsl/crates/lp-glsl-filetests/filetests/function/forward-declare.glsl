@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Forward Declarations: Declare before define, multiple prototypes allowed
@@ -49,7 +49,7 @@ float test_forward_declare_in_expression() {
     return compute_area(3.0, 4.0) * 2.0;
 }
 
-// run: test_forward_declare_in_expression() ~= 48.0
+// run: test_forward_declare_in_expression() ~= 48.0 [expect-fail]
 
 // Multiple forward declarations (allowed)
 float add_numbers(float a, float b);

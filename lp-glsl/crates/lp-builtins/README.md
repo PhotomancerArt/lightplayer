@@ -8,7 +8,7 @@ This crate implements the core builtin functions used by compiled GLSL shaders. 
 
 ## Modules
 
-- **fixed32**: Fixed-point 16.16 arithmetic functions (sin, cos, sqrt, exp, log, etc.)
+- **q32**: Fixed-point 16.16 arithmetic functions (sin, cos, sqrt, exp, log, etc.)
 - **mem**: Memory operations (memcpy, memset, memcmp) for no_std environments
 - **host**: Host interface functions for debug output and system calls
 
@@ -23,7 +23,7 @@ lp-builtins = { path = "../../crates/lp-builtins" }
 
 Functions are automatically registered via the generated registry in `lp-glsl-compiler`. To add a new builtin function:
 
-1. Create a new file in `src/fixed32/` with your function implementation
+1. Create a new file in `src/q32/` with your function implementation
 2. Run the generator to update boilerplate: `cargo run --bin lp-builtin-gen --manifest-path lightplayer/apps/lp-builtin-gen/Cargo.toml`
 3. Rebuild the builtins app: `scripts/build-builtins.sh`
 

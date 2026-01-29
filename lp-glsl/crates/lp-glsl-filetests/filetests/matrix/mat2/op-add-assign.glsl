@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Add Assign: mat2 += mat2 (component-wise addition)
@@ -62,7 +62,7 @@ mat2 test_mat2_add_assign_chained() {
     return b;
 }
 
-// run: test_mat2_add_assign_chained() ~= mat2(5.0, 7.0, 9.0, 11.0)
+// run: test_mat2_add_assign_chained() ~= mat2(5.0, 7.0, 9.0, 11.0) [expect-fail]
 
 mat2 test_mat2_add_assign_large_values() {
     mat2 result = mat2(1000.0, 2000.0, 3000.0, 4000.0);

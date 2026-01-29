@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Not Equal: != operator -> bool (aggregate), notEqual(bvec2, bvec2) -> bvec2 (component-wise)

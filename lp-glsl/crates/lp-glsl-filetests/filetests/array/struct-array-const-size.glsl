@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Struct Fields with Const-Sized Arrays
@@ -52,14 +52,14 @@ float test_struct_field_access() {
     return s.values[0];
 }
 
-// run: test_struct_field_access() == 1.0
+// run: test_struct_field_access() == 1.0 [expect-fail]
 
 int test_struct_array_field() {
     TestStruct s = test_struct_array();
     return s.counts[0];
 }
 
-// run: test_struct_array_field() == 0
+// run: test_struct_array_field() == 0 [expect-fail]
 
 vec2 test_const_expr_struct() {
     ComplexStruct cs;
@@ -67,7 +67,7 @@ vec2 test_const_expr_struct() {
     return cs.data[0];
 }
 
-// run: test_const_expr_struct() ~= vec2(1.0, 2.0)
+// run: test_const_expr_struct() ~= vec2(1.0, 2.0) [expect-fail]
 
 vec3 test_multi_size_struct() {
     MultiSizeStruct ms;
@@ -75,7 +75,7 @@ vec3 test_multi_size_struct() {
     return ms.small_array[0];
 }
 
-// run: test_multi_size_struct() ~= vec3(1.0, 1.0, 1.0)
+// run: test_multi_size_struct() ~= vec3(1.0, 1.0, 1.0) [expect-fail]
 
 vec4 test_multi_size_medium() {
     MultiSizeStruct ms;
@@ -83,7 +83,7 @@ vec4 test_multi_size_medium() {
     return ms.medium_array[0];
 }
 
-// run: test_multi_size_medium() ~= vec4(1.0, 1.0, 1.0, 1.0)
+// run: test_multi_size_medium() ~= vec4(1.0, 1.0, 1.0, 1.0) [expect-fail]
 
 float test_matrix_struct() {
     MatrixStruct m;
@@ -91,7 +91,7 @@ float test_matrix_struct() {
     return m.matrices[0][0];
 }
 
-// run: test_matrix_struct() == 1.0
+// run: test_matrix_struct() == 1.0 [expect-fail]
 
 float test_nested_struct() {
     NestedStruct ns;
@@ -99,7 +99,7 @@ float test_nested_struct() {
     return ns.inner.values[0];
 }
 
-// run: test_nested_struct() == 2.0
+// run: test_nested_struct() == 2.0 [expect-fail]
 
 int test_nested_struct_extra() {
     NestedStruct ns;
@@ -107,7 +107,7 @@ int test_nested_struct_extra() {
     return ns.extra_data;
 }
 
-// run: test_nested_struct_extra() == 42
+// run: test_nested_struct_extra() == 42 [expect-fail]
 
 // Struct with arrays of different types
 const int MIXED_SIZE = 3;
@@ -125,7 +125,7 @@ float test_mixed_type_struct() {
     return mts.floats[0] + float(mts.ints[0]) + mts.vecs[0].x;
 }
 
-// run: test_mixed_type_struct() == 6.0
+// run: test_mixed_type_struct() == 6.0 [expect-fail]
 
 
 

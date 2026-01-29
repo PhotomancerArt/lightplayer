@@ -9,7 +9,7 @@
 mod macros;
 mod registry;
 
-pub use registry::HostId;
+pub use registry::HostFn;
 
 // Macros are exported at crate root via #[macro_export]
 // Users should use: lp_builtins::host_debug! and lp_builtins::host_println!

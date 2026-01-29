@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use lp_model::nodes::fixture::ColorOrder;
+use lp_model::nodes::fixture::{ColorOrder, MappingConfig};
 use lp_model::nodes::{
     NodeSpecifier, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
     texture::TextureConfig,
@@ -245,8 +245,10 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let fixture_config = FixtureConfig {
         output_spec: NodeSpecifier::from("/src/strip.output"),
         texture_spec: NodeSpecifier::from("/src/main.texture"),
-        mapping: String::from("linear"),
-        lamp_type: String::from("rgb"),
+        mapping: MappingConfig::PathPoints {
+            paths: vec![],
+            sample_diameter: 2.0,
+        },
         color_order: ColorOrder::Rgb,
         transform: [
             [1.0, 0.0, 0.0, 0.0],
@@ -521,8 +523,10 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         let fixture_config = FixtureConfig {
             output_spec: NodeSpecifier::from("/src/strip.output"),
             texture_spec: NodeSpecifier::from("/src/main.texture"),
-            mapping: String::from("linear"),
-            lamp_type: String::from("rgb"),
+            mapping: MappingConfig::PathPoints {
+                paths: vec![],
+                sample_diameter: 2.0,
+            },
             color_order: ColorOrder::Rgb,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],

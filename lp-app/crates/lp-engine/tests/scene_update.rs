@@ -65,6 +65,7 @@ fn test_node_json_modification() {
         .get_changes(
             before_frame,
             &lp_model::project::api::ApiNodeSpecifier::ByHandles(vec![shader_handle]),
+            None,
         )
         .unwrap();
 

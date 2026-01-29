@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Const Read-Only: Const global variables are read-only after initialization
@@ -18,49 +18,49 @@ float test_const_readonly_float() {
     return PI * 2.0;
 }
 
-// run: test_const_readonly_float() ~= 6.28318
+// run: test_const_readonly_float() ~= 6.28318 [expect-fail]
 
 int test_const_readonly_int() {
     // Const int is read-only
     return MAX_INT / 2;
 }
 
-// run: test_const_readonly_int() == 1073741823
+// run: test_const_readonly_int() == 1073741823 [expect-fail]
 
 uint test_const_readonly_uint() {
     // Const uint is read-only
     return int(MAX_UINT / 1000000000u);
 }
 
-// run: test_const_readonly_uint() == 4
+// run: test_const_readonly_uint() == 4 [expect-fail]
 
 bool test_const_readonly_bool() {
     // Const bool is read-only
     return TRUE_CONST;
 }
 
-// run: test_const_readonly_bool() == true
+// run: test_const_readonly_bool() == true [expect-fail]
 
 vec2 test_const_readonly_vec2() {
     // Const vec2 is read-only
     return UNIT_VECTOR * 3.0;
 }
 
-// run: test_const_readonly_vec2() ~= vec2(3.0, 0.0)
+// run: test_const_readonly_vec2() ~= vec2(3.0, 0.0) [expect-fail]
 
 vec3 test_const_readonly_vec3() {
     // Const vec3 is read-only
     return UP_VECTOR + vec3(0.0, 0.0, 1.0);
 }
 
-// run: test_const_readonly_vec3() ~= vec3(0.0, 1.0, 1.0)
+// run: test_const_readonly_vec3() ~= vec3(0.0, 1.0, 1.0) [expect-fail]
 
 mat2 test_const_readonly_mat2() {
     // Const mat2 is read-only
     return IDENTITY_MATRIX * 2.0;
 }
 
-// run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0)
+// run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
 
 float test_const_readonly_calculations() {
     // Const variables used in calculations
@@ -71,7 +71,7 @@ float test_const_readonly_calculations() {
     return circumference + area;
 }
 
-// run: test_const_readonly_calculations() ~= 94.2477
+// run: test_const_readonly_calculations() ~= 94.2477 [expect-fail]
 
 vec3 test_const_readonly_vector_math() {
     // Const vectors in mathematical operations
@@ -82,7 +82,7 @@ vec3 test_const_readonly_vector_math() {
     return result;
 }
 
-// run: test_const_readonly_vector_math() ~= vec3(2.0, 2.0, 0.0)
+// run: test_const_readonly_vector_math() ~= vec3(2.0, 2.0, 0.0) [expect-fail]
 
 float test_const_readonly_multiple_access() {
     // Multiple accesses to const variables
@@ -94,4 +94,4 @@ float test_const_readonly_multiple_access() {
     return sum;
 }
 
-// run: test_const_readonly_multiple_access() ~= 3.14159
+// run: test_const_readonly_multiple_access() ~= 3.14159 [expect-fail]

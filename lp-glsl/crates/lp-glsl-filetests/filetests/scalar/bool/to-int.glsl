@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Conversion: int(bool) - converts bool to int (false -> 0, true -> 1)

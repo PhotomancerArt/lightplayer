@@ -1,9 +1,10 @@
 //! Project builder for creating test projects with a fluent API
 
 use crate::fs::LpFs;
-use alloc::{format, rc::Rc, string::String};
+use alloc::{format, rc::Rc, string::String, vec};
 use core::cell::RefCell;
 use lp_model::nodes::fixture::ColorOrder;
+use lp_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 use lp_model::nodes::{
     NodeSpecifier, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
     texture::TextureConfig,
@@ -59,8 +60,7 @@ pub struct OutputBuilder {
 pub struct FixtureBuilder {
     output_path: LpPathBuf,
     texture_path: LpPathBuf,
-    mapping: String,
-    lamp_type: String,
+    mapping: MappingConfig,
     color_order: ColorOrder,
     transform: [[f32; 4]; 4],
 }
@@ -109,7 +109,7 @@ impl ProjectBuilder {
         ShaderBuilder {
             texture_path: texture_path.clone(),
             glsl_source: String::from(
-                "vec4 main(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(mod(time, 1.0), 0.0, 0.0, 1.0);\n}",
+                "vec4 main(vec2 fragCoord, vec2 outputSize, float time) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }",
             ),
             render_order: 0,
         }
@@ -125,8 +125,18 @@ impl ProjectBuilder {
         FixtureBuilder {
             output_path: output_path.clone(),
             texture_path: texture_path.clone(),
-            mapping: String::from("linear"),
-            lamp_type: String::from("rgb"),
+            mapping: MappingConfig::PathPoints {
+                paths: vec![PathSpec::RingArray {
+                    center: (0.5, 0.5),
+                    diameter: 1.0,
+                    start_ring_inclusive: 0,
+                    end_ring_exclusive: 1,
+                    ring_lamp_counts: vec![1],
+                    offset_angle: 0.0,
+                    order: RingOrder::InnerFirst,
+                }],
+                sample_diameter: 2.0,
+            },
             color_order: ColorOrder::Rgb,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],
@@ -265,15 +275,9 @@ impl OutputBuilder {
 }
 
 impl FixtureBuilder {
-    /// Set the mapping type
-    pub fn mapping(mut self, mapping: &str) -> Self {
-        self.mapping = String::from(mapping);
-        self
-    }
-
-    /// Set the lamp type
-    pub fn lamp_type(mut self, lamp_type: &str) -> Self {
-        self.lamp_type = String::from(lamp_type);
+    /// Set the mapping configuration
+    pub fn mapping(mut self, mapping: MappingConfig) -> Self {
+        self.mapping = mapping;
         self
     }
 
@@ -301,7 +305,6 @@ impl FixtureBuilder {
             output_spec: NodeSpecifier::from(self.output_path.as_str()),
             texture_spec: NodeSpecifier::from(self.texture_path.as_str()),
             mapping: self.mapping,
-            lamp_type: self.lamp_type,
             color_order: self.color_order,
             transform: self.transform,
         };

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Vectors: mat2(vec2, vec2) - construct matrix from column vectors

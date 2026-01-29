@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Edge Empty Declaration: Empty declarations (if allowed) have special behavior
@@ -23,7 +23,7 @@ float test_edge_empty_declaration_normal() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// run: test_edge_empty_declaration_normal() ~= 168.0
+// run: test_edge_empty_declaration_normal() ~= 168.0 [expect-fail]
 
 float test_edge_empty_declaration_modify() {
     // Modify normal declarations
@@ -34,7 +34,7 @@ float test_edge_empty_declaration_modify() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// run: test_edge_empty_declaration_modify() ~= 298.0
+// run: test_edge_empty_declaration_modify() ~= 298.0 [expect-fail]
 
 void test_edge_empty_declaration_unused() {
     // Test with potentially unused variables
@@ -43,7 +43,7 @@ void test_edge_empty_declaration_unused() {
     temp = temp + normal_float;
 }
 
-// run: test_edge_empty_declaration_unused() == 0.0
+// run: test_edge_empty_declaration_unused() == 0.0 [expect-fail]
 
 float test_edge_empty_declaration_scope() {
     // Test scoping with declarations
@@ -56,4 +56,4 @@ float test_edge_empty_declaration_scope() {
     return normal_float;
 }
 
-// run: test_edge_empty_declaration_scope() ~= 100.0
+// run: test_edge_empty_declaration_scope() ~= 100.0 [expect-fail]

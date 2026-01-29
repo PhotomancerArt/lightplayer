@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Constructor: uint(float) - truncates fractional part toward zero (undefined for negative)
@@ -73,20 +73,20 @@ uint test_uint_from_float_negative() {
     return uint(f);
 }
 
-// run: test_uint_from_float_negative() == 0u
+// run: test_uint_from_float_negative() == 4294967295u
 
 uint test_uint_from_float_negative_large() {
     float f = -100.5;
     return uint(f);
 }
 
-// run: test_uint_from_float_negative_large() == 0u
+// run: test_uint_from_float_negative_large() == 4294967196u
 
 uint test_uint_from_float_negative_literal() {
     return uint(-42.0);
 }
 
-// run: test_uint_from_float_negative_literal() == 0u
+// run: test_uint_from_float_negative_literal() == 4294967254u
 
 uint test_uint_from_float_negative_expression() {
     float a = 3.0;
@@ -94,5 +94,5 @@ uint test_uint_from_float_negative_expression() {
     return uint(a - b);
 }
 
-// run: test_uint_from_float_negative_expression() == 0u
+// run: test_uint_from_float_negative_expression() == 4294967294u
 

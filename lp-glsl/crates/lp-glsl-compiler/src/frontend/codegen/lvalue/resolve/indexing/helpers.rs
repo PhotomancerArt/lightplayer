@@ -37,7 +37,7 @@ pub fn extract_base_vars_and_ty<M: cranelift_module::Module>(
 
         // Get base variables and type
         match base_lvalue {
-            LValue::Variable { vars, ty } => Ok((vars, ty)),
+            LValue::Variable { vars, ty, .. } => Ok((vars, ty)),
             LValue::Component {
                 base_vars, base_ty, ..
             } => Ok((base_vars, base_ty)),
@@ -50,6 +50,13 @@ pub fn extract_base_vars_and_ty<M: cranelift_module::Module>(
             LValue::VectorElement {
                 base_vars, base_ty, ..
             } => Ok((base_vars, base_ty)),
+            LValue::PointerBased { .. } => {
+                // TODO: Handle PointerBased in Phase 2/3
+                return Err(GlslError::new(
+                    ErrorCode::E0400,
+                    "PointerBased LValue indexing not yet implemented",
+                ));
+            }
             LValue::ArrayElement { ref element_ty, .. } => {
                 // Array element contains a matrix/vector - need to load it first
                 // This handles cases like mats[0][0][0] where mats[0] is an ArrayElement

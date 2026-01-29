@@ -4,7 +4,7 @@ Code generator that automatically generates boilerplate code for builtin functio
 
 ## Overview
 
-This tool eliminates manual maintenance of boilerplate code when adding new builtin functions. It scans `lp-glsl/crates/lp-builtins/src/fixed32/` for function definitions and generates:
+This tool eliminates manual maintenance of boilerplate code when adding new builtin functions. It scans `lp-glsl/crates/lp-builtins/src/q32/` for function definitions and generates:
 
 - **registry.rs**: `BuiltinId` enum, `name()`, `signature()`, `all()`, and `get_function_pointer()` methods
 - **builtin_refs.rs**: Function references to prevent dead code elimination in `lp-builtins-app`
@@ -26,17 +26,17 @@ The generator is automatically invoked by `scripts/build-builtins.sh` before bui
 
 ## How It Works
 
-1. Scans `crates/lp-builtins/src/fixed32/*.rs` (excluding `mod.rs` and `test_helpers.rs`)
-2. Parses Rust source files using `syn` to find `#[unsafe(no_mangle)] pub extern "C" fn __lp_fixed32_*` declarations
+1. Scans `crates/lp-builtins/src/q32/*.rs` (excluding `mod.rs` and `test_helpers.rs`)
+2. Parses Rust source files using `syn` to find `#[unsafe(no_mangle)] pub extern "C" fn __lp_q32_*` declarations
 3. Extracts function metadata: name, parameter count, symbol name
-4. Generates enum variant names (e.g., `__lp_fixed32_sqrt` → `Fixed32Sqrt`)
+4. Generates enum variant names (e.g., `__lp_q32_sqrt` → `Q32Sqrt`)
 5. Writes generated code to appropriate locations
 
 ## Adding New Builtins
 
 When adding a new builtin function:
 
-1. Create the function implementation in `crates/lp-builtins/src/fixed32/your_function.rs`
+1. Create the function implementation in `crates/lp-builtins/src/q32/your_function.rs`
 2. Run the build script: `scripts/build-builtins.sh`
 3. The generator will automatically update all boilerplate files
 

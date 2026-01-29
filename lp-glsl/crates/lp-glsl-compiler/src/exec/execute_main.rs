@@ -149,6 +149,10 @@ pub fn execute_function(
             .call_uvec(name, args, 4)
             .map(|v| GlslValue::UVec4([v[0], v[1], v[2], v[3]]))
             .map_err(|e| format_error(e, executable)),
+        Type::Void => executable
+            .call_void(name, args)
+            .map(|_| GlslValue::F32(0.0))
+            .map_err(|e| format_error(e, executable)),
         _ => anyhow::bail!("unsupported return type: {:?}", sig.return_type),
     }
 }

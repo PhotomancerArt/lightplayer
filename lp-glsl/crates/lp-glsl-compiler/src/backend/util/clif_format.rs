@@ -48,7 +48,7 @@ pub fn format_clif_module<M: Module>(module: &GlModule<M>) -> Result<String, Gls
 /// Format a single function as CLIF text.
 /// The function is cloned and its name is set to the provided name, and external function
 /// references are updated to use testcase names.
-pub(crate) fn format_function(
+pub fn format_function(
     func: &cranelift_codegen::ir::Function,
     name: &str,
     name_mapping: &HashMap<String, String>,

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Divide: ivec3 / ivec3 -> ivec3 (component-wise, truncates toward zero)

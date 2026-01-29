@@ -30,7 +30,7 @@ use crate::backend::module::gl_module::GlModule;
 #[cfg(feature = "std")]
 use crate::backend::target::Target;
 #[cfg(feature = "std")]
-use crate::backend::transform::fixed32::{Fixed32Transform, FixedPointFormat};
+use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
 use crate::error::GlslError;
 use crate::exec::executable::{GlslExecutable, GlslOptions, RunMode};
 use cranelift_jit::JITModule;
@@ -95,21 +95,15 @@ pub fn compile_glsl_to_gl_module_jit(
 
         // Apply transformations
         match options.decimal_format {
-            DecimalFormat::Fixed32 => {
-                let transform = Fixed32Transform::new(FixedPointFormat::Fixed16x16);
+            DecimalFormat::Q32 => {
+                let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
                 module = module.apply_transform(transform)?;
-            }
-            DecimalFormat::Fixed64 => {
-                return Err(GlslError::new(
-                    crate::error::ErrorCode::E0400,
-                    "Fixed64 format is not yet supported. Only Fixed32 format is currently supported.",
-                ));
             }
             DecimalFormat::Float => {
                 return Err(GlslError::new(
                     crate::error::ErrorCode::E0400,
-                    "Float format is not yet supported. Only Fixed32 format is currently supported. \
-                     Float format will cause TestCase relocation errors. Use Fixed32 format instead.",
+                    "Float format is not yet supported. Only Q32 format is currently supported. \
+                     Float format will cause TestCase relocation errors. Use Q32 format instead.",
                 ));
             }
         }
@@ -156,8 +150,8 @@ pub fn compile_glsl_to_gl_module_object(
 
     // Apply transformations
     let transformed_clif = match options.decimal_format {
-        DecimalFormat::Fixed32 => {
-            let transform = Fixed32Transform::new(FixedPointFormat::Fixed16x16);
+        DecimalFormat::Q32 => {
+            let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
             module = module.apply_transform(transform)?;
             // Capture transformed CLIF IR after transformation (only in std builds)
             #[cfg(feature = "std")]
@@ -168,12 +162,6 @@ pub fn compile_glsl_to_gl_module_object(
             {
                 None
             }
-        }
-        DecimalFormat::Fixed64 => {
-            return Err(GlslError::new(
-                crate::error::ErrorCode::E0400,
-                "Fixed64 not yet supported",
-            ));
         }
         DecimalFormat::Float => {
             // No transformation needed, so transformed_clif is same as original_clif

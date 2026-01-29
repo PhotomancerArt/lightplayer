@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Shortening: uvec2(uvec3), uvec2(uvec4) - shortening constructors

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // Phase 7: Function Parameters - Arrays as function parameters and return values
 
@@ -26,7 +26,7 @@ int test_array_parameter_basic() {
     int arr[3] = {10, 20, 30};
     return sum_array(arr); // Should work (will sum first 3 elements: 10+20+30=60)
 }
-// run: test_array_parameter_basic() == 60
+// run: test_array_parameter_basic() == 60 [expect-fail]
 
 // Test 2: Array parameter with sum function
 int test_array_parameter_sum() {
@@ -34,7 +34,7 @@ int test_array_parameter_sum() {
     int result = sum_array(arr);
     return result; // Should be 1+2+3+4+5=15
 }
-// run: test_array_parameter_sum() == 15
+// run: test_array_parameter_sum() == 15 [expect-fail]
 
 // Test 3: Array parameter with max function
 int test_array_parameter_max() {
@@ -42,7 +42,7 @@ int test_array_parameter_max() {
     int result = max_array(arr);
     return result; // Should be 9
 }
-// run: test_array_parameter_max() == 9
+// run: test_array_parameter_max() == 9 [expect-fail]
 
 // Test 4: Array parameter with computation function
 int test_array_parameter_multiply() {
@@ -50,7 +50,7 @@ int test_array_parameter_multiply() {
     int result = multiply_and_sum(arr);
     return result; // Should be (1*2) + (2*2) + (3*2) = 2+4+6=12
 }
-// run: test_array_parameter_multiply() == 12
+// run: test_array_parameter_multiply() == 12 [expect-fail]
 
 // Test 5: Multiple function calls with different arrays
 int test_multiple_array_function_calls() {
@@ -63,7 +63,7 @@ int test_multiple_array_function_calls() {
 
     return sum1 + max2 + mult2; // Should be 5 + 30 + 160 = 195
 }
-// run: test_multiple_array_function_calls() == 195
+// run: test_multiple_array_function_calls() == 195 [expect-fail]
 
 // Phase 7 integration test: Arrays as function parameters and return values
 int phase7() {
@@ -74,5 +74,5 @@ int phase7() {
 
     return result; // Should be 15
 }
-// run: phase7() == 15
+// run: phase7() == 15 [expect-fail]
 

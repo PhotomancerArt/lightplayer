@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 use alloc::string::String;
 pub mod builtins;
 pub mod functions;
+pub mod lpfx;
 pub mod passes;
 pub mod scope;
 pub mod type_check;

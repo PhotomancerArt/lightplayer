@@ -1,4 +1,4 @@
-//! Target value parsing (riscv32.fixed32 -> RunMode/DecimalFormat).
+//! Target value parsing (riscv32.q32 -> RunMode/DecimalFormat).
 
 use anyhow::Result;
 use lp_glsl_compiler::{DecimalFormat, RunMode};
@@ -12,7 +12,7 @@ const DEFAULT_STACK_SIZE: usize = 64 * 1024; // 64KB
 /// Default maximum instructions for emulator.
 const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
 
-/// Parse target string (e.g., "riscv32.fixed32") into run mode and decimal format.
+/// Parse target string (e.g., "riscv32.q32") into run mode and decimal format.
 pub fn parse_target(target: &str) -> Result<(RunMode, DecimalFormat)> {
     let parts: Vec<&str> = target.split('.').collect();
     if parts.len() != 2 {
@@ -32,7 +32,7 @@ pub fn parse_target(target: &str) -> Result<(RunMode, DecimalFormat)> {
     };
 
     let decimal_format = match format {
-        "fixed32" => DecimalFormat::Fixed32,
+        "q32" => DecimalFormat::Q32,
         "float" => DecimalFormat::Float,
         _ => anyhow::bail!("unsupported format: {format}"),
     };
@@ -45,10 +45,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_target_riscv32_fixed32() {
-        let (run_mode, format) = parse_target("riscv32.fixed32").unwrap();
+    fn test_parse_target_riscv32_q32() {
+        let (run_mode, format) = parse_target("riscv32.q32").unwrap();
         assert!(matches!(run_mode, RunMode::Emulator { .. }));
-        assert_eq!(format, DecimalFormat::Fixed32);
+        assert_eq!(format, DecimalFormat::Q32);
     }
 
     #[test]
@@ -65,12 +65,12 @@ mod tests {
 
     #[test]
     fn test_parse_target_invalid_arch() {
-        assert!(parse_target("x86_64.fixed32").is_err());
+        assert!(parse_target("x86_64.q32").is_err());
     }
 
     #[test]
     fn test_parse_target_invalid_structure() {
         assert!(parse_target("riscv32").is_err());
-        assert!(parse_target("riscv32.fixed32.extra").is_err());
+        assert!(parse_target("riscv32.q32.extra").is_err());
     }
 }

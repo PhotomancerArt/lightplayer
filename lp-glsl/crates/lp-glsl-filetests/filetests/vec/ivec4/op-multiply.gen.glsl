@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/ivec4/op-multiply --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Multiply: ivec4 * ivec4 -> ivec4 (component-wise)

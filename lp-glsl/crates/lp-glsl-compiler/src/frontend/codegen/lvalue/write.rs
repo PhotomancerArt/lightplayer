@@ -7,7 +7,7 @@ use cranelift_codegen::ir::{InstBuilder, Value};
 use alloc::format;
 
 use super::super::expr::component;
-use super::types::LValue;
+use super::types::{LValue, PointerAccessPattern};
 
 /// Write new value(s) to an LValue
 ///
@@ -21,7 +21,227 @@ pub fn write_lvalue<M: cranelift_module::Module>(
     ctx.ensure_block()?;
 
     match lvalue {
+        LValue::PointerBased {
+            ptr,
+            base_ty,
+            access_pattern,
+        } => {
+            let flags = cranelift_codegen::ir::MemFlags::trusted();
+            match access_pattern {
+                PointerAccessPattern::Direct { component_count } => {
+                    // Store all components
+                    if values.len() != *component_count {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!(
+                                "component count mismatch: expected {}, got {}",
+                                component_count,
+                                values.len()
+                            ),
+                        ));
+                    }
+                    let base_cranelift_ty = if base_ty.is_vector() {
+                        base_ty
+                            .vector_base_type()
+                            .unwrap()
+                            .to_cranelift_type()
+                            .map_err(|e| {
+                                GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!("Failed to convert type: {}", e.message),
+                                )
+                            })?
+                    } else if base_ty.is_matrix() {
+                        cranelift_codegen::ir::types::F32
+                    } else {
+                        base_ty.to_cranelift_type().map_err(|e| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("Failed to convert type: {}", e.message),
+                            )
+                        })?
+                    };
+                    let component_size_bytes = base_cranelift_ty.bytes() as usize;
+                    for (i, &val) in values.iter().enumerate() {
+                        let offset = (i * component_size_bytes) as i32;
+                        ctx.builder.ins().store(flags, val, *ptr, offset);
+                    }
+                    Ok(())
+                }
+                PointerAccessPattern::Component { indices, .. } => {
+                    // Store only requested components
+                    if values.len() != indices.len() {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!(
+                                "component count mismatch: {} indices, {} values",
+                                indices.len(),
+                                values.len()
+                            ),
+                        ));
+                    }
+                    let base_cranelift_ty = base_ty
+                        .vector_base_type()
+                        .unwrap()
+                        .to_cranelift_type()
+                        .map_err(|e| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("Failed to convert type: {}", e.message),
+                            )
+                        })?;
+                    let component_size_bytes = base_cranelift_ty.bytes() as usize;
+                    for (idx, val) in indices.iter().zip(values.iter()) {
+                        let offset = (*idx * component_size_bytes) as i32;
+                        ctx.builder.ins().store(flags, *val, *ptr, offset);
+                    }
+                    Ok(())
+                }
+                PointerAccessPattern::ArrayElement {
+                    index,
+                    index_val,
+                    element_ty,
+                    element_size_bytes,
+                    component_indices,
+                } => {
+                    // Calculate element offset
+                    let (final_ptr, base_offset) = if let Some(compile_idx) = index {
+                        // Compile-time constant offset
+                        let offset = (compile_idx * element_size_bytes) as i32;
+                        (*ptr, offset)
+                    } else if let Some(runtime_idx) = index_val {
+                        // Runtime offset calculation
+                        let element_size_const = ctx.builder.ins().iconst(
+                            cranelift_codegen::ir::types::I32,
+                            *element_size_bytes as i64,
+                        );
+                        let offset_val = ctx.builder.ins().imul(*runtime_idx, element_size_const);
+                        let pointer_type = ctx.gl_module.module_internal().isa().pointer_type();
+                        let offset_for_ptr = if pointer_type == cranelift_codegen::ir::types::I32 {
+                            offset_val
+                        } else {
+                            ctx.builder.ins().uextend(pointer_type, offset_val)
+                        };
+                        let final_ptr = ctx.builder.ins().iadd(*ptr, offset_for_ptr);
+                        (final_ptr, 0)
+                    } else {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            "array element access requires index",
+                        ));
+                    };
+
+                    // Get base Cranelift type for storing
+                    let base_cranelift_ty = if element_ty.is_vector() {
+                        let base_ty = element_ty.vector_base_type().unwrap();
+                        base_ty.to_cranelift_type().map_err(|e| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("Failed to convert vector base type: {}", e.message),
+                            )
+                        })?
+                    } else if element_ty.is_matrix() {
+                        cranelift_codegen::ir::types::F32
+                    } else {
+                        element_ty.to_cranelift_type().map_err(|e| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("Failed to convert element type: {}", e.message),
+                            )
+                        })?
+                    };
+                    let component_size_bytes = base_cranelift_ty.bytes() as usize;
+
+                    // Handle component access (e.g., arr[i].x = value)
+                    if let Some(component_indices) = component_indices {
+                        if !element_ty.is_vector() {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                "component access only supported for vector array elements",
+                            ));
+                        }
+                        if component_indices.len() != values.len() {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                format!(
+                                    "component count mismatch: {} indices, {} values",
+                                    component_indices.len(),
+                                    values.len()
+                                ),
+                            ));
+                        }
+                        for (&comp_idx, &val) in component_indices.iter().zip(values.iter()) {
+                            let component_offset = (comp_idx * component_size_bytes) as i32;
+                            let total_offset = base_offset + component_offset;
+                            ctx.builder.ins().store(flags, val, final_ptr, total_offset);
+                        }
+                        Ok(())
+                    } else {
+                        // Store entire element
+                        if element_ty.is_scalar() {
+                            if values.len() != 1 {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "scalar array element requires 1 value, got {}",
+                                        values.len()
+                                    ),
+                                ));
+                            }
+                            ctx.builder
+                                .ins()
+                                .store(flags, values[0], final_ptr, base_offset);
+                            Ok(())
+                        } else if element_ty.is_vector() {
+                            let component_count = element_ty.component_count().unwrap();
+                            if values.len() != component_count {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "vector array element requires {} values, got {}",
+                                        component_count,
+                                        values.len()
+                                    ),
+                                ));
+                            }
+                            for (i, &val) in values.iter().enumerate() {
+                                let component_offset = (i * component_size_bytes) as i32;
+                                let total_offset = base_offset + component_offset;
+                                ctx.builder.ins().store(flags, val, final_ptr, total_offset);
+                            }
+                            Ok(())
+                        } else if element_ty.is_matrix() {
+                            let component_count = element_ty.matrix_element_count().unwrap();
+                            if values.len() != component_count {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "matrix array element requires {} values, got {}",
+                                        component_count,
+                                        values.len()
+                                    ),
+                                ));
+                            }
+                            for (i, &val) in values.iter().enumerate() {
+                                let component_offset = (i * component_size_bytes) as i32;
+                                let total_offset = base_offset + component_offset;
+                                ctx.builder.ins().store(flags, val, final_ptr, total_offset);
+                            }
+                            Ok(())
+                        } else {
+                            Err(GlslError::new(
+                                ErrorCode::E0400,
+                                format!("unsupported array element type: {element_ty:?}"),
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+
         LValue::Variable { vars, .. } => {
+            // Normal variable: use vars
+            // Out/inout parameters now use PointerBased variant
             if vars.len() != values.len() {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -41,6 +261,8 @@ pub fn write_lvalue<M: cranelift_module::Module>(
         LValue::Component {
             base_vars, indices, ..
         } => {
+            // Normal component access: use vars
+            // Out/inout component access now uses PointerBased variant
             if indices.len() != values.len() {
                 return Err(GlslError::new(
                     ErrorCode::E0400,

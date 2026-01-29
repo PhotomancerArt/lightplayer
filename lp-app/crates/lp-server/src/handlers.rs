@@ -19,6 +19,7 @@ pub fn handle_client_message(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     client_msg: ClientMessage,
+    theoretical_fps: Option<f32>,
 ) -> Result<ServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
 
@@ -33,7 +34,7 @@ pub fn handle_client_message(
             handle_unload_project(project_manager, handle)?
         }
         lp_model::ClientRequest::ProjectRequest { handle, request } => {
-            handle_project_request(project_manager, handle, request)?
+            handle_project_request(project_manager, handle, request, theoretical_fps)?
         }
         lp_model::ClientRequest::ListAvailableProjects => {
             handle_list_available_projects(project_manager, base_fs)?
@@ -122,6 +123,7 @@ fn handle_project_request(
     project_manager: &mut ProjectManager,
     handle: lp_model::project::ProjectHandle,
     request: lp_model::project::api::ProjectRequest,
+    theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let project = project_manager
         .get_project_mut(handle)
@@ -134,7 +136,7 @@ fn handle_project_request(
         } => {
             let response = project
                 .runtime_mut()
-                .get_changes(since_frame, &detail_specifier)
+                .get_changes(since_frame, &detail_specifier, theoretical_fps)
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let serializable_response = response

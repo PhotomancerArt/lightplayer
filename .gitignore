@@ -31,3 +31,4 @@ testcase*.json
 perf.data*
 .cursor
 .DS_Store
+.builtins-source-hash

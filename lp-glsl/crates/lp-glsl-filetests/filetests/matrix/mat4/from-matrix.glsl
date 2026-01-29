@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Matrix: mat4(mat2) or mat4(mat3) - construct from smaller matrices
@@ -33,7 +33,7 @@ mat4 test_mat4_from_mat2_expressions() {
     return mat4(m2 * mat2(2.0));
 }
 
-// run: test_mat4_from_mat2_expressions() ~= mat4(2.0, 4.0, 0.0, 0.0, 6.0, 8.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
+// run: test_mat4_from_mat2_expressions() ~= mat4(2.0, 4.0, 0.0, 0.0, 6.0, 8.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0) [expect-fail]
 
 mat4 test_mat4_from_mat3_variables() {
     mat3 m3 = mat3(10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0);

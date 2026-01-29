@@ -9,7 +9,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     /// Helper to declare and get FuncRef for external math library function
     ///
     /// Creates external function calls using TestCase names (e.g., "sinf", "cosf").
-    /// These are converted to fixed32 builtins by the transform.
+    /// These are converted to q32 builtins by the transform.
     pub fn get_math_libcall(&mut self, func_name: &str) -> Result<FuncRef, GlslError> {
         // Create signature: f32 -> f32
         let mut sig = Signature::new(CallConv::SystemV);
@@ -30,7 +30,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     /// Helper to declare and get FuncRef for 2-arg math function
     ///
     /// Creates external function calls using TestCase names (e.g., "atan2f", "powf").
-    /// These are converted to fixed32 builtins by the transform.
+    /// These are converted to q32 builtins by the transform.
     pub fn get_math_libcall_2arg(&mut self, func_name: &str) -> Result<FuncRef, GlslError> {
         // Create signature: (f32, f32) -> f32
         let mut sig = Signature::new(CallConv::SystemV);
@@ -52,7 +52,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     /// Helper to declare and get FuncRef for atan2 (2-arg function)
     ///
     /// Creates external function calls using TestCase name "atan2f".
-    /// This is converted to fixed32 builtins by the transform.
+    /// This is converted to q32 builtins by the transform.
     pub fn get_atan2_libcall(&mut self) -> Result<FuncRef, GlslError> {
         self.get_math_libcall_2arg("atan2f")
     }

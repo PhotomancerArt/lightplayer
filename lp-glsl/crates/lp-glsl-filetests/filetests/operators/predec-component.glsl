@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 float test_predec_component() {
     vec2 v = vec2(3.0, 4.0);

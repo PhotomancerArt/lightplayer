@@ -60,7 +60,7 @@ Test files use GLSL syntax with embedded directives:
 
 ```glsl
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 float add_float(float a, float b) {
     return a + b;

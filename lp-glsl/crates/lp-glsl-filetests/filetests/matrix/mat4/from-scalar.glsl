@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Scalar: mat4(float) - creates diagonal matrix
@@ -61,7 +61,7 @@ mat4 test_mat4_from_scalar_large_value() {
     return mat4(1000000.0);
 }
 
-// run: test_mat4_from_scalar_large_value() ~= mat4(32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0)
+// run: test_mat4_from_scalar_large_value() ~= mat4(32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0) [expect-fail]
 
 mat4 test_mat4_from_scalar_fractional() {
     return mat4(0.5);

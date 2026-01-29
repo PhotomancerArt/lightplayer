@@ -4,6 +4,28 @@ LightPlayer is a framework for building and deploying interactive visual effects
 
 Effects are written as GLSL shaders a custom native compiler is used to allow running them on hardware without OpenGL, including microcontrollers.
 
+## Quick Start
+
+To run the demo project:
+
+1. **Initialize the development environment:**
+
+   ```bash
+   scripts/dev-init.sh
+   ```
+
+2. **Run the demo:**
+
+   ```bash
+   just demo
+   ```
+
+   This will start the lp-cli development server with the `basic` example project. To run a different example:
+
+   ```bash
+   just demo -- <example-name>
+   ```
+
 ## Development Setup
 
 To get started with development:

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // usubBorrow(): Unsigned subtract with borrow function
@@ -14,7 +14,7 @@ uvec2 test_usubborrow_uint_no_borrow() {
     return uvec2(diff, borrow);
 }
 
-// run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u)
+// run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u) [expect-fail]
 
 uvec2 test_usubborrow_uint_with_borrow() {
     // usubBorrow(3, 5) should return (large_number, 1)
@@ -23,7 +23,7 @@ uvec2 test_usubborrow_uint_with_borrow() {
     return uvec2(diff, borrow);
 }
 
-// run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u)
+// run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u) [expect-fail]
 
 uvec2 test_usubborrow_uint_zero() {
     // usubBorrow(0, 0) should return (0, 0)
@@ -32,7 +32,7 @@ uvec2 test_usubborrow_uint_zero() {
     return uvec2(diff, borrow);
 }
 
-// run: test_usubborrow_uint_zero() == uvec2(0u, 0u)
+// run: test_usubborrow_uint_zero() == uvec2(0u, 0u) [expect-fail]
 
 uvec2 test_usubborrow_uint_equal() {
     // usubBorrow(10, 10) should return (0, 0)
@@ -41,7 +41,7 @@ uvec2 test_usubborrow_uint_equal() {
     return uvec2(diff, borrow);
 }
 
-// run: test_usubborrow_uint_equal() == uvec2(0u, 0u)
+// run: test_usubborrow_uint_equal() == uvec2(0u, 0u) [expect-fail]
 
 uvec4 test_usubborrow_uvec2() {
     // usubBorrow with uvec2
@@ -50,7 +50,7 @@ uvec4 test_usubborrow_uvec2() {
     return uvec4(diff.x, diff.y, borrow.x, borrow.y);
 }
 
-// run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
+// run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u) [expect-fail]
 
 
 

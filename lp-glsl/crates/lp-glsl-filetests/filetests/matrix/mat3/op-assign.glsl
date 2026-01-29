@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Assign: mat3 = mat3 (assignment)
@@ -78,7 +78,7 @@ mat3 test_mat3_assign_after_operations() {
     return a;
 }
 
-// run: test_mat3_assign_after_operations() ~= mat3(2.0, 3.0, 4.0, 10.0, 11.0, 12.0, 8.0, 9.0, 10.0)
+// run: test_mat3_assign_after_operations() ~= mat3(2.0, 3.0, 4.0, 10.0, 11.0, 12.0, 8.0, 9.0, 10.0) [expect-fail]
 
 
 

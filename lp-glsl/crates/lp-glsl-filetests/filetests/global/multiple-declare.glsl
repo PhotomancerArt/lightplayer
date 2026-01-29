@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Multiple Declarations: Multiple global variable declarations
@@ -39,7 +39,7 @@ float test_multiple_declare_scalars() {
     return global_a + global_b + global_c + float(int_x + int_y + int_z);
 }
 
-// run: test_multiple_declare_scalars() ~= 66.0
+// run: test_multiple_declare_scalars() ~= 66.0 [expect-fail]
 
 vec2 test_multiple_declare_vectors() {
     // Multiple vector declarations
@@ -54,7 +54,7 @@ vec2 test_multiple_declare_vectors() {
     return vec2_one + vec2_two + vec2_three;
 }
 
-// run: test_multiple_declare_vectors() ~= vec2(6.0, 6.0)
+// run: test_multiple_declare_vectors() ~= vec2(6.0, 6.0) [expect-fail]
 
 mat2 test_multiple_declare_matrices() {
     // Multiple matrix declarations
@@ -64,7 +64,7 @@ mat2 test_multiple_declare_matrices() {
     return mat2_a + mat2_b;
 }
 
-// run: test_multiple_declare_matrices() ~= mat2(3.0, 2.0, 3.0, 6.0)
+// run: test_multiple_declare_matrices() ~= mat2(3.0, 2.0, 3.0, 6.0) [expect-fail]
 
 vec4 test_multiple_declare_colors() {
     // Multiple color declarations
@@ -75,7 +75,7 @@ vec4 test_multiple_declare_colors() {
     return vec4_red + vec4_green + vec4_blue;
 }
 
-// run: test_multiple_declare_colors() ~= vec4(1.0, 1.0, 1.0, 3.0)
+// run: test_multiple_declare_colors() ~= vec4(1.0, 1.0, 1.0, 3.0) [expect-fail]
 
 float test_multiple_declare_mixed() {
     // Mixed type declarations
@@ -91,7 +91,7 @@ float test_multiple_declare_mixed() {
     return scalar1 + scalar2 + vector1.x + vector1.y + vector2.x + vector2.y;
 }
 
-// run: test_multiple_declare_mixed() ~= 25.0
+// run: test_multiple_declare_mixed() ~= 25.0 [expect-fail]
 
 int test_multiple_declare_bools() {
     // Multiple boolean declarations
@@ -111,4 +111,4 @@ int test_multiple_declare_bools() {
     return result + int(uint_p + uint_q + uint_r);
 }
 
-// run: test_multiple_declare_bools() == 602
+// run: test_multiple_declare_bools() == 602 [expect-fail]

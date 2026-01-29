@@ -67,6 +67,16 @@ impl ShaderRuntime {
     pub fn get_config(&self) -> Option<&ShaderConfig> {
         self.config.as_ref()
     }
+
+    /// Check if shader has compilation error
+    pub fn has_compilation_error(&self) -> bool {
+        self.compilation_error.is_some()
+    }
+
+    /// Get compilation error message
+    pub fn compilation_error(&self) -> Option<&str> {
+        self.compilation_error.as_deref()
+    }
 }
 
 impl NodeRuntime for ShaderRuntime {
@@ -80,7 +90,9 @@ impl NodeRuntime for ShaderRuntime {
         self.resolve_texture_handle(&config, ctx)?;
 
         // Load and compile shader
-        self.load_and_compile_shader(&config, ctx)?;
+        // Don't fail on compilation errors - store them and return Ok()
+        // The caller will check compilation_error and update status accordingly
+        let _ = self.load_and_compile_shader(&config, ctx);
 
         Ok(())
     }
@@ -231,7 +243,9 @@ impl NodeRuntime for ShaderRuntime {
                         node_path: format!("shader-{}", self.node_handle.as_i32()),
                         reason: "Config not set".to_string(),
                     })?;
-                    self.load_and_compile_shader(&config, ctx)?;
+                    // Don't fail on compilation errors - store them and return Ok()
+                    // The caller will check compilation_error and update status accordingly
+                    let _ = self.load_and_compile_shader(&config, ctx);
                 }
                 lp_shared::fs::fs_event::ChangeType::Delete => {
                     // Clear shader executable
@@ -298,7 +312,7 @@ impl ShaderRuntime {
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Fixed32,
+            decimal_format: DecimalFormat::Q32,
         };
 
         match glsl_jit(glsl_source, options) {

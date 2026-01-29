@@ -2,11 +2,22 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use lp_model::{
     FrameId, LpPathBuf, NodeConfig, NodeHandle, NodeKind,
     project::api::{ApiNodeSpecifier, NodeChange, NodeState, NodeStatus},
 };
+
+/// Status change information
+#[derive(Debug, Clone)]
+pub struct StatusChange {
+    /// Node path
+    pub path: LpPathBuf,
+    /// Previous status
+    pub old_status: NodeStatus,
+    /// New status
+    pub new_status: NodeStatus,
+}
 
 /// Client view of project
 pub struct ClientProjectView {
@@ -16,6 +27,8 @@ pub struct ClientProjectView {
     pub nodes: BTreeMap<NodeHandle, ClientNodeEntry>,
     /// Which nodes we're tracking detail for
     pub detail_tracking: BTreeSet<NodeHandle>,
+    /// Previous status for each node (for detecting status changes)
+    previous_status: BTreeMap<NodeHandle, NodeStatus>,
 }
 
 /// Client node entry
@@ -27,6 +40,7 @@ pub struct ClientNodeEntry {
     pub state: Option<NodeState>, // Only present if in detail_tracking
     pub state_ver: FrameId,
     pub status: NodeStatus,
+    pub status_ver: FrameId,
 }
 
 impl ClientProjectView {
@@ -36,6 +50,7 @@ impl ClientProjectView {
             frame_id: FrameId::default(),
             nodes: BTreeMap::new(),
             detail_tracking: BTreeSet::new(),
+            previous_status: BTreeMap::new(),
         }
     }
 
@@ -63,16 +78,20 @@ impl ClientProjectView {
     }
 
     /// Sync with server (update view from response)
+    ///
+    /// Returns a list of all status changes that the caller can use for logging or other purposes.
     pub fn apply_changes(
         &mut self,
         response: &lp_model::project::api::ProjectResponse,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<StatusChange>, String> {
+        let mut status_changes = Vec::new();
         match response {
             lp_model::project::api::ProjectResponse::GetChanges {
                 current_frame,
                 node_handles,
                 node_changes,
                 node_details,
+                theoretical_fps: _,
             } => {
                 // Update frame ID
                 self.frame_id = *current_frame;
@@ -105,14 +124,18 @@ impl ClientProjectView {
                                     Box::new(lp_model::nodes::fixture::FixtureConfig {
                                         output_spec: lp_model::NodeSpecifier::from(""),
                                         texture_spec: lp_model::NodeSpecifier::from(""),
-                                        mapping: String::new(),
-                                        lamp_type: String::new(),
+                                        mapping:
+                                            lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                                paths: vec![],
+                                                sample_diameter: 2.0,
+                                            },
                                         color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
                                     })
                                 }
                             };
 
+                            let initial_status = NodeStatus::Created;
                             self.nodes.insert(
                                 *handle,
                                 ClientNodeEntry {
@@ -122,9 +145,12 @@ impl ClientProjectView {
                                     config_ver: FrameId::default(),
                                     state: None,
                                     state_ver: FrameId::default(),
-                                    status: NodeStatus::Created,
+                                    status: initial_status.clone(),
+                                    status_ver: FrameId::default(),
                                 },
                             );
+                            // Track initial status
+                            self.previous_status.insert(*handle, initial_status);
                         }
                         NodeChange::ConfigUpdated { handle, config_ver } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
@@ -140,12 +166,32 @@ impl ClientProjectView {
                         }
                         NodeChange::StatusChanged { handle, status } => {
                             if let Some(entry) = self.nodes.get_mut(handle) {
-                                entry.status = status.clone();
+                                let old_status = entry.status.clone();
+                                let new_status = status.clone();
+
+                                // Track all status changes - StatusChanged event indicates a change occurred
+                                status_changes.push(StatusChange {
+                                    path: entry.path.clone(),
+                                    old_status: old_status.clone(),
+                                    new_status: new_status.clone(),
+                                });
+
+                                entry.status = new_status.clone();
+                                // Update status_ver - we use frame_id as proxy since StatusChanged
+                                // doesn't include status_ver. The actual status_ver from server
+                                // triggered this event, so we use current frame_id.
+                                entry.status_ver = self.frame_id;
+                                // Update previous status for next comparison
+                                self.previous_status.insert(*handle, new_status);
+                            } else {
+                                // Node doesn't exist yet - just track the status
+                                self.previous_status.insert(*handle, status.clone());
                             }
                         }
                         NodeChange::Removed { handle } => {
                             self.nodes.remove(handle);
                             self.detail_tracking.remove(handle);
+                            self.previous_status.remove(handle);
                         }
                     }
                 }
@@ -174,8 +220,10 @@ impl ClientProjectView {
                                 Box::new(lp_model::nodes::fixture::FixtureConfig {
                                     output_spec: lp_model::NodeSpecifier::from(""),
                                     texture_spec: lp_model::NodeSpecifier::from(""),
-                                    mapping: String::new(),
-                                    lamp_type: String::new(),
+                                    mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                        paths: vec![],
+                                        sample_diameter: 2.0,
+                                    },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                 })
@@ -184,7 +232,7 @@ impl ClientProjectView {
 
                         entry.config = config;
                         entry.state = Some(detail.state.clone());
-                        entry.status = detail.status.clone();
+                        // Status is no longer in node_details, it comes via StatusChanged events
                     } else {
                         // Create new entry from detail (node exists but wasn't in Created changes)
                         // Note: NodeDetail doesn't have kind field, so we infer from state
@@ -214,8 +262,10 @@ impl ClientProjectView {
                                 Box::new(lp_model::nodes::fixture::FixtureConfig {
                                     output_spec: lp_model::NodeSpecifier::from(""),
                                     texture_spec: lp_model::NodeSpecifier::from(""),
-                                    mapping: String::new(),
-                                    lamp_type: String::new(),
+                                    mapping: lp_model::nodes::fixture::MappingConfig::PathPoints {
+                                        paths: vec![],
+                                        sample_diameter: 2.0,
+                                    },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
                                 })
@@ -231,13 +281,16 @@ impl ClientProjectView {
                                 config_ver: FrameId::default(),
                                 state: Some(detail.state.clone()),
                                 state_ver: FrameId::default(),
-                                status: detail.status.clone(),
+                                status: NodeStatus::Created,
+                                status_ver: FrameId::default(),
                             },
                         );
+                        // Status will come via StatusChanged events, initialize to Created
+                        self.previous_status.insert(*handle, NodeStatus::Created);
                     }
                 }
 
-                Ok(())
+                Ok(status_changes)
             }
         }
     }

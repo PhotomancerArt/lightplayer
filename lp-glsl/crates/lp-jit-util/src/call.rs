@@ -2,18 +2,13 @@
 //!
 //! These functions handle platform-specific calling conventions for
 //! calling JIT-compiled functions that use StructReturn.
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
 use crate::error::JitCallError;
+use core::marker::Copy;
+use core::result::Result;
 use cranelift_codegen::ir::{Type, types};
 use cranelift_codegen::isa::CallConv;
 
-#[cfg(not(feature = "std"))]
 use alloc::string::String;
-
-#[cfg(feature = "std")]
-use std::string::String;
 
 /// Call a JIT-compiled function that uses StructReturn.
 ///
@@ -600,17 +595,19 @@ fn validate_call_args(
     }
 
     // Validate pointer type matches platform
-    let actual_width = if cfg!(target_pointer_width = "32") {
+    // Use size_of to determine pointer width at runtime
+    let pointer_size = core::mem::size_of::<*const ()>();
+    let actual_width = if pointer_size == 4 {
         "32"
-    } else if cfg!(target_pointer_width = "64") {
+    } else if pointer_size == 8 {
         "64"
     } else {
         "unknown"
     };
 
     match pointer_type {
-        types::I32 if cfg!(target_pointer_width = "32") => Ok(()),
-        types::I64 if cfg!(target_pointer_width = "64") => Ok(()),
+        types::I32 if pointer_size == 4 => Ok(()),
+        types::I64 if pointer_size == 8 => Ok(()),
         _ => Err(JitCallError::PointerTypeMismatch {
             expected: pointer_type,
             actual_pointer_width: String::from(actual_width),

@@ -17,9 +17,9 @@ use alloc::{format, vec, vec::Vec};
 pub struct VarInfo {
     pub cranelift_vars: Vec<Variable>, // Changed from single Variable to support vectors
     pub glsl_type: GlslType,
-    // Array storage: pointer to stack-allocated memory block
-    pub array_ptr: Option<Value>, // Pointer to array memory (for arrays)
-    pub stack_slot: Option<StackSlot>, // Stack slot for array storage (for arrays)
+    // Pointer-based storage: array memory or out/inout parameter pointer
+    pub array_ptr: Option<Value>, // Pointer to array memory (for arrays) or out/inout param (for non-arrays)
+    pub stack_slot: Option<StackSlot>, // Stack slot for array storage (for arrays only)
 }
 
 pub struct CodegenContext<'a, M: Module> {

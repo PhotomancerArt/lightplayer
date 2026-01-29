@@ -18,6 +18,9 @@ enum Commands {
 struct TestOptions {
     /// Specify input files or directories to test (default: all tests)
     files: Vec<String>,
+    /// Automatically remove [expect-fail] markers from tests that pass
+    #[arg(long)]
+    fix: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,7 +36,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 t.files
             };
-            lp_glsl_filetests::run(&files)?;
+            lp_glsl_filetests::run(&files, t.fix)?;
         }
     }
 

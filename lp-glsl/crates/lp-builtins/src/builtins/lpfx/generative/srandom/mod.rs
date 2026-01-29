@@ -1,0 +1,10 @@
+pub mod srandom1_f32;
+pub mod srandom1_q32;
+pub mod srandom2_f32;
+pub mod srandom2_q32;
+pub mod srandom3_f32;
+pub mod srandom3_q32;
+pub mod srandom3_tile_f32;
+pub mod srandom3_tile_q32;
+pub mod srandom3_vec_f32;
+pub mod srandom3_vec_q32;

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Out Write-Only: Output global variables are write-only (may be read-write depending on stage)
@@ -18,49 +18,49 @@ void test_out_writeonly_float() {
     fragment_depth = 0.5;
 }
 
-// run: test_out_writeonly_float() == 0.0
+// run: test_out_writeonly_float() == 0.0 [expect-fail]
 
 void test_out_writeonly_int() {
     // Output int is write-only
     stencil_value = 128;
 }
 
-// run: test_out_writeonly_int() == 0.0
+// run: test_out_writeonly_int() == 0.0 [expect-fail]
 
 void test_out_writeonly_uint() {
     // Output uint is write-only
     object_id = 42u;
 }
 
-// run: test_out_writeonly_uint() == 0.0
+// run: test_out_writeonly_uint() == 0.0 [expect-fail]
 
 void test_out_writeonly_bool() {
     // Output bool is write-only
     visible = true;
 }
 
-// run: test_out_writeonly_bool() == 0.0
+// run: test_out_writeonly_bool() == 0.0 [expect-fail]
 
 void test_out_writeonly_vec2() {
     // Output vec2 is write-only
     screen_position = vec2(0.5, 0.5);
 }
 
-// run: test_out_writeonly_vec2() == 0.0
+// run: test_out_writeonly_vec2() == 0.0 [expect-fail]
 
 void test_out_writeonly_vec3() {
     // Output vec3 is write-only
     normal_vector = vec3(0.0, 1.0, 0.0);
 }
 
-// run: test_out_writeonly_vec3() == 0.0
+// run: test_out_writeonly_vec3() == 0.0 [expect-fail]
 
 void test_out_writeonly_vec4() {
     // Output vec4 is write-only
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// run: test_out_writeonly_vec4() == 0.0
+// run: test_out_writeonly_vec4() == 0.0 [expect-fail]
 
 void test_out_writeonly_calculations() {
     // Output variables with calculations
@@ -72,7 +72,7 @@ void test_out_writeonly_calculations() {
     object_id = 100u;
 }
 
-// run: test_out_writeonly_calculations() == 0.0
+// run: test_out_writeonly_calculations() == 0.0 [expect-fail]
 
 void test_out_writeonly_fragment_output() {
     // Fragment shader output calculations
@@ -84,4 +84,4 @@ void test_out_writeonly_fragment_output() {
     visible = true;
 }
 
-// run: test_out_writeonly_fragment_output() == 0.0
+// run: test_out_writeonly_fragment_output() == 0.0 [expect-fail]

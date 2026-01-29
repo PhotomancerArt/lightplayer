@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/ivec4/op-add --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Add: ivec4 + ivec4 -> ivec4 (component-wise)
@@ -65,7 +65,7 @@ return result;
 // run: test_ivec4_add_in_assignment() == ivec4(15, 10, 10, 10)
 
 ivec4 test_ivec4_add_large_numbers() {
-// Large numbers are clamped to fixed16x16 max (32767.99998)
+// Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
 // Addition saturates to max for each component
 ivec4 a = ivec4(100000, 50000, 25000, 10000);
 ivec4 b = ivec4(200000, 30000, 15000, 5000);

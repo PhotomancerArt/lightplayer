@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 int test_incdec_edge_cases() {
     int x = 5;

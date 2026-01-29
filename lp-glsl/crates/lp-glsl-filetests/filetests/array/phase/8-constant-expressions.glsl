@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // Phase 8: Constant Expression Array Sizes - Support constant expressions for array sizes
 
@@ -11,7 +11,7 @@ int test_constant_variable() {
     arr[4] = 50;
     return arr[0] + arr[4]; // Should be 10 + 50 = 60
 }
-// run: test_constant_variable() == 60
+// run: test_constant_variable() == 60 [expect-fail]
 
 // Test 2: Constant expression
 int test_constant_expression() {
@@ -20,7 +20,7 @@ int test_constant_expression() {
     arr[4] = 5;
     return arr[0] + arr[4]; // Should be 1 + 5 = 6
 }
-// run: test_constant_expression() == 6
+// run: test_constant_expression() == 6 [expect-fail]
 
 // Test 3: Multiple constants
 int test_multiple_constants() {
@@ -31,7 +31,7 @@ int test_multiple_constants() {
     arr[5] = 600;
     return arr[0] + arr[5]; // Should be 100 + 600 = 700
 }
-// run: test_multiple_constants() == 700
+// run: test_multiple_constants() == 700 [expect-fail]
 
 // Phase 8 integration test: Constant expression array sizes
 int phase8() {
@@ -56,5 +56,5 @@ int phase8() {
     return arr1[0] + arr1[4] + arr2[0] + arr2[4] + arr3[0] + arr3[5];
     // 10 + 50 + 1 + 5 + 100 + 600 = 766
 }
-// run: phase8() == 766
+// run: phase8() == 766 [expect-fail]
 

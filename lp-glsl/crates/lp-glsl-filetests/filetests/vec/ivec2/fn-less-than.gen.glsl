@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/ivec2/fn-less-than --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Less Than: lessThan(ivec2, ivec2) -> bvec2 (component-wise)

@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/vec2/fn-max --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Max: max(vec2, vec2) -> vec2 (component-wise maximum)

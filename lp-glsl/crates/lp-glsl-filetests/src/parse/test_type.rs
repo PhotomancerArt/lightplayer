@@ -5,8 +5,8 @@
 pub enum TestType {
     /// `test compile` - verify CLIF IR before transformations
     Compile,
-    /// `test transform.fixed32` - verify CLIF IR after fixed32 transformation
-    TransformFixed32,
+    /// `test transform.q32` - verify CLIF IR after q32 transformation
+    TransformQ32,
     /// `test run` - execute and verify results
     Run,
 }
@@ -16,8 +16,8 @@ pub enum TestType {
 pub struct ClifExpectations {
     /// Pre-transform CLIF (for `test compile`).
     pub pre_transform: Option<String>,
-    /// Post-transform fixed32 CLIF (for `test transform.fixed32`).
-    pub post_transform_fixed32: Option<String>,
+    /// Post-transform q32 CLIF (for `test transform.q32`).
+    pub post_transform_q32: Option<String>,
 }
 
 /// Comparison operator for run directives.
@@ -42,6 +42,8 @@ pub struct RunDirective {
     pub tolerance: Option<f32>,
     /// Line number for bless mode updates.
     pub line_number: usize,
+    /// Whether this test is marked as expected to fail with `[expect-fail]`.
+    pub expect_fail: bool,
 }
 
 /// A trap expectation parsed from a `// EXPECT_TRAP:` or `// EXPECT_TRAP_CODE:` line.
@@ -63,7 +65,7 @@ pub struct TestFile {
     pub run_directives: Vec<RunDirective>,
     /// All trap expectations found in the file.
     pub trap_expectations: Vec<TrapExpectation>,
-    /// Target specification (e.g., "riscv32.fixed32").
+    /// Target specification (e.g., "riscv32.q32").
     pub target: Option<String>,
     /// Whether this is a "test run" file.
     pub is_test_run: bool,

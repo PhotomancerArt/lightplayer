@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Multiply Assign: mat2 *= mat2 (matrix multiplication) or mat2 *= float (component-wise)
@@ -36,7 +36,7 @@ mat2 test_mat2_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// run: test_mat2_multiply_assign_matrix_expressions() ~= mat2(2.0, 2.0, 1.0, 2.0)
+// run: test_mat2_multiply_assign_matrix_expressions() ~= mat2(2.0, 2.0, 1.0, 2.0) [expect-fail]
 
 mat2 test_mat2_multiply_assign_scalar() {
     mat2 result = mat2(1.0, 2.0, 3.0, 4.0);

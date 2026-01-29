@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/uvec4/fn-greater-equal --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Less Than Equal: lessThanEqual(uvec4, uvec4) -> bvec4 (component-wise)

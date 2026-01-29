@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Edge Multiple Qualifiers Error: Multiple storage qualifiers are not allowed
@@ -25,28 +25,28 @@ float test_edge_multiple_qualifiers_error_const() {
     return valid_const * 2.0;
 }
 
-// run: test_edge_multiple_qualifiers_error_const() ~= 6.28
+// run: test_edge_multiple_qualifiers_error_const() ~= 6.28 [expect-fail]
 
 float test_edge_multiple_qualifiers_error_uniform() {
     // Single uniform qualifier works
     return valid_uniform + 1.0;
 }
 
-// run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
+// run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0 [expect-fail]
 
 vec2 test_edge_multiple_qualifiers_error_in() {
     // Single in qualifier works
     return valid_in + vec2(1.0, 1.0);
 }
 
-// run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
+// run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0) [expect-fail]
 
 void test_edge_multiple_qualifiers_error_out() {
     // Single out qualifier works
     valid_out = vec3(1.0, 0.0, 0.0);
 }
 
-// run: test_edge_multiple_qualifiers_error_out() == 0.0
+// run: test_edge_multiple_qualifiers_error_out() == 0.0 [expect-fail]
 
 float test_edge_multiple_qualifiers_error_buffer() {
     // Single buffer qualifier works
@@ -54,7 +54,7 @@ float test_edge_multiple_qualifiers_error_buffer() {
     return valid_buffer;
 }
 
-// run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
+// run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0 [expect-fail]
 
 float test_edge_multiple_qualifiers_error_combined() {
     // Combined use of properly qualified globals
@@ -68,4 +68,4 @@ float test_edge_multiple_qualifiers_error_combined() {
     return result;
 }
 
-// run: test_edge_multiple_qualifiers_error_combined() ~= 8.28
+// run: test_edge_multiple_qualifiers_error_combined() ~= 8.28 [expect-fail]

@@ -1,5 +1,5 @@
 // test error
-// target riscv32.fixed32
+// target riscv32.q32
 
 void test_incdec_nested() {
     int x = 5;

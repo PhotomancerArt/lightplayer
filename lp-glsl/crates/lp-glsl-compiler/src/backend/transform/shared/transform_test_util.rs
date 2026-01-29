@@ -109,12 +109,12 @@ pub fn assert_identity_transform(message: &str, clif_input: &str) {
     );
 }
 
-/// Assert that fixed32 transform produces identical CLIF output for code without floats
-/// (i.e., fixed32 should be a no-op for integer-only code)
-pub fn assert_nop_fixed32_transform(message: &str, clif_input: &str) {
-    use crate::backend::transform::fixed32::{Fixed32Transform, FixedPointFormat};
+/// Assert that q32 transform produces identical CLIF output for code without floats
+/// (i.e., q32 should be a no-op for integer-only code)
+pub fn assert_nop_q32_transform(message: &str, clif_input: &str) {
+    use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
 
-    let transform = Fixed32Transform::new(FixedPointFormat::Fixed16x16);
+    let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
     let (parsed_buf, transformed_buf) = parse_and_transform(clif_input, transform);
 
     let normalized_parsed = normalize_clif(&parsed_buf);
@@ -175,7 +175,7 @@ fn build_and_run_module(
 #[cfg(feature = "emulator")]
 pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
     use crate::backend::target::Target;
-    use crate::backend::transform::fixed32::{Fixed32Transform, FixedPointFormat};
+    use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
     use crate::frontend::glsl_compiler::GlslCompiler;
 
     // Print input GLSL
@@ -216,23 +216,23 @@ pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
         .expect("Failed to apply identity transform");
     let identity_result = build_and_run_module(identity_module, "identity");
 
-    // Compile GLSL for fixed32 transform
-    eprintln!("\n=== Compiling GLSL (fixed32 transform) ===");
-    let fixed32_module = compiler
+    // Compile GLSL for q32 transform
+    eprintln!("\n=== Compiling GLSL (q32 transform) ===");
+    let q32_module = compiler
         .compile_to_gl_module_object(glsl_source, target.clone())
         .expect("Failed to compile GLSL");
-    let fixed32_transform = Fixed32Transform::new(FixedPointFormat::Fixed16x16);
-    let fixed32_module = fixed32_module
-        .apply_transform(fixed32_transform)
-        .expect("Failed to apply fixed32 transform");
-    let fixed32_result = build_and_run_module(fixed32_module, "fixed32");
+    let q32_transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+    let q32_module = q32_module
+        .apply_transform(q32_transform)
+        .expect("Failed to apply q32 transform");
+    let q32_result = build_and_run_module(q32_module, "q32");
 
     // Verify all results match expected value
     eprintln!("\n=== Results ===");
     eprintln!("Expected: {expected_int}");
     eprintln!("Raw:      {raw_result}");
     eprintln!("Identity: {identity_result}");
-    eprintln!("Fixed32:  {fixed32_result}");
+    eprintln!("Q32:  {q32_result}");
 
     assert_eq!(
         raw_result, expected_int,
@@ -243,15 +243,15 @@ pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
         "Identity transform failed: expected {expected_int}, got {identity_result}"
     );
     assert_eq!(
-        fixed32_result, expected_int,
-        "Fixed32 transform failed: expected {expected_int}, got {fixed32_result}"
+        q32_result, expected_int,
+        "Q32 transform failed: expected {expected_int}, got {q32_result}"
     );
     assert_eq!(
         raw_result, identity_result,
         "Raw and identity results differ: raw={raw_result}, identity={identity_result}"
     );
     assert_eq!(
-        raw_result, fixed32_result,
-        "Raw and fixed32 results differ: raw={raw_result}, fixed32={fixed32_result}"
+        raw_result, q32_result,
+        "Raw and q32 results differ: raw={raw_result}, q32={q32_result}"
     );
 }

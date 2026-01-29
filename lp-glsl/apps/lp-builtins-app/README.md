@@ -6,7 +6,7 @@ Executable that links all builtin functions into a static library used for `lp-f
 
 This application serves as the runtime foundation for compiled GLSL programs running in emulator mode. It:
 
-- Links all `__lp_fixed32_*` builtin functions from `lp-builtins`
+- Links all `__lp_q32_*` builtin functions from `lp-builtins`
 - Provides the entry point (`_entry`) that initializes .bss and .data sections
 - Implements the panic handler that reports errors to the host VM
 - Ensures all builtin functions are included via generated references (prevents dead code elimination)
@@ -29,7 +29,7 @@ The build script automatically runs the code generator before building, so manua
 
 ## Output
 
-The compiled binary contains all builtin function symbols (`__lp_fixed32_*`) that are linked into GLSL programs at runtime. The binary is statically linked and can be used as a library by the emulator.
+The compiled binary contains all builtin function symbols (`__lp_q32_*`) that are linked into GLSL programs at runtime. The binary is statically linked and can be used as a library by the emulator.
 
 ## Target
 

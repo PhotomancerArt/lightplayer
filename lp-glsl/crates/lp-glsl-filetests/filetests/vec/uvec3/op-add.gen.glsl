@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/uvec3/op-add --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Add: uvec3 + uvec3 -> uvec3 (component-wise)
@@ -49,7 +49,7 @@ return result;
 // run: test_uvec3_add_in_assignment() == uvec3(15u, 10u, 10u)
 
 uvec3 test_uvec3_add_large_numbers() {
-// Large numbers are clamped to fixed16x16 max (32767.99998)
+// Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
 // Addition saturates to max for each component
 uvec3 a = uvec3(100000u, 50000u, 25000u);
 uvec3 b = uvec3(200000u, 30000u, 15000u);

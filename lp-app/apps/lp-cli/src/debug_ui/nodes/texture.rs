@@ -4,7 +4,14 @@ use lp_engine_client::ClientNodeEntry;
 use lp_model::nodes::texture::TextureState;
 
 /// Render texture panel
-pub fn render_texture_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &TextureState) {
+pub fn render_texture_panel(
+    ui: &mut egui::Ui,
+    entry: &ClientNodeEntry,
+    state: &TextureState,
+    show_background: bool,
+    _show_labels: bool,
+    _show_strokes: bool,
+) {
     ui.heading("Texture");
     ui.separator();
 
@@ -19,7 +26,7 @@ pub fn render_texture_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &
     ui.separator();
 
     // Display texture image
-    if !state.texture_data.is_empty() && state.width > 0 && state.height > 0 {
+    if show_background && !state.texture_data.is_empty() && state.width > 0 && state.height > 0 {
         let color_image = texture_data_to_color_image(
             &state.texture_data,
             state.width,
@@ -46,6 +53,8 @@ pub fn render_texture_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &
             Image::new(&texture_handle)
                 .fit_to_exact_size(egui::Vec2::new(display_width, display_height)),
         );
+    } else if !show_background {
+        ui.label("Texture background hidden (enable in Texture Display Options)");
     } else {
         ui.label("No texture data available");
     }

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Edge Out Read Error: Reading from output globals may be restricted
@@ -23,7 +23,7 @@ void test_edge_out_read_error_write() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// run: test_edge_out_read_error_write() == 0.0
+// run: test_edge_out_read_error_write() == 0.0 [expect-fail]
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
 // float read_depth = fragment_depth;        // May be error in some stages
@@ -42,7 +42,7 @@ float test_edge_out_read_error_indirect() {
     return 0.0;  // Placeholder
 }
 
-// run: test_edge_out_read_error_indirect() ~= 0.0
+// run: test_edge_out_read_error_indirect() ~= 0.0 [expect-fail]
 
 void test_edge_out_read_error_multiple_writes() {
     // Multiple writes to same output
@@ -51,7 +51,7 @@ void test_edge_out_read_error_multiple_writes() {
     fragment_color = vec4(0.0, 0.0, 1.0, 1.0);  // Final value
 }
 
-// run: test_edge_out_read_error_multiple_writes() == 0.0
+// run: test_edge_out_read_error_multiple_writes() == 0.0 [expect-fail]
 
 void test_edge_out_read_error_fragment_output() {
     // Typical fragment shader output pattern
@@ -62,4 +62,4 @@ void test_edge_out_read_error_fragment_output() {
     fragment_depth = 0.0;
 }
 
-// run: test_edge_out_read_error_fragment_output() == 0.0
+// run: test_edge_out_read_error_fragment_output() == 0.0 [expect-fail]

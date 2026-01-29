@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Control If: if (any(bvec2)), if (all(bvec2)) - control flow with bvec2

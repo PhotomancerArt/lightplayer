@@ -24,6 +24,8 @@ pub struct LpServer {
     project_manager: ProjectManager,
     /// Base filesystem (server root, projects in `projects/` subdirectory)
     base_fs: Box<dyn LpFs>,
+    /// Last frame processing time in microseconds (for theoretical FPS calculation)
+    last_frame_time_us: RefCell<Option<u64>>,
 }
 
 impl LpServer {
@@ -60,6 +62,7 @@ impl LpServer {
             output_provider,
             project_manager,
             base_fs,
+            last_frame_time_us: RefCell::new(None),
         }
     }
 
@@ -106,11 +109,13 @@ impl LpServer {
             match message {
                 Message::Client(client_msg) => {
                     // Process client message and generate response
+                    let theoretical_fps = self.theoretical_fps();
                     let response = handlers::handle_client_message(
                         &mut self.project_manager,
                         &mut *self.base_fs,
                         &self.output_provider,
                         client_msg,
+                        theoretical_fps,
                     )?;
                     responses.push(Message::Server(response));
                 }
@@ -229,5 +234,30 @@ impl LpServer {
     /// to load projects.
     pub fn base_fs_mut(&mut self) -> &mut dyn LpFs {
         &mut *self.base_fs
+    }
+
+    /// Set the last frame processing time (called by server loop)
+    ///
+    /// # Arguments
+    ///
+    /// * `time_us` - Frame processing time in microseconds
+    pub fn set_last_frame_time(&self, time_us: u64) {
+        *self.last_frame_time_us.borrow_mut() = Some(time_us);
+    }
+
+    /// Get the last frame processing time in microseconds
+    ///
+    /// Returns `None` if no frame has been processed yet.
+    pub fn last_frame_time_us(&self) -> Option<u64> {
+        *self.last_frame_time_us.borrow()
+    }
+
+    /// Get theoretical FPS based on last frame processing time
+    ///
+    /// Returns `None` if no frame has been processed yet.
+    /// Returns theoretical FPS as `1000000.0 / frame_time_us`.
+    pub fn theoretical_fps(&self) -> Option<f32> {
+        self.last_frame_time_us()
+            .map(|time_us| 1_000_000.0 / time_us as f32)
     }
 }

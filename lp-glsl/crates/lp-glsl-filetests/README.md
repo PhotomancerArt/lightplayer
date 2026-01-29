@@ -41,7 +41,7 @@ Test files use GLSL's native comment syntax with directives and expectations:
 
 ```glsl
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 float add_float(float a, float b) {
     return a + b;
@@ -62,8 +62,8 @@ int add_int(int a, int b) {
 
 - `// test run` - Marks this file as a test run file (required for execution tests)
 - `// target <arch>.<format>` - Specifies target architecture and format
-  - Examples: `riscv32.fixed32`, `riscv32.float`
-  - Default: `riscv32.fixed32` if not specified
+  - Examples: `riscv32.q32`, `riscv32.float`
+  - Default: `riscv32.q32` if not specified
 
 ### Run Directives
 
@@ -143,7 +143,7 @@ Tests are organized in the `filetests/` directory:
 
    ```glsl
    // test run
-   // target riscv32.fixed32
+   // target riscv32.q32
 
    float my_function(float x) {
        return x * 2.0;

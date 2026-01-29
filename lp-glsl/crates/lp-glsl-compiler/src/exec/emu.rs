@@ -1711,32 +1711,40 @@ impl GlslExecutable for GlslEmulatorModule {
         // Get function signature (clone to avoid borrow conflicts)
         let sig = self.get_function_signature(name)?.clone();
 
+        // Check if function uses StructReturn (before processing arguments)
+        let uses_struct_return = sig
+            .params
+            .iter()
+            .any(|p| p.purpose == ArgumentPurpose::StructReturn);
+
         // Convert arguments to DataValue
-        let mut arg_idx = 0;
+        // Skip StructReturn parameter if present (it's handled internally by emulator)
+        let mut arg_idx = if uses_struct_return { 1 } else { 0 };
         let mut data_args = Vec::new();
         for arg in args {
             data_args.extend(self.glsl_value_to_data_value(arg, &sig, &mut arg_idx)?);
         }
 
-        // Validate argument count matches signature
-        if data_args.len() != sig.params.len() {
+        // Validate argument count matches signature (excluding StructReturn parameter)
+        let expected_params = if uses_struct_return {
+            // StructReturn parameter is added internally, don't count it
+            sig.params.len() - 1
+        } else {
+            sig.params.len()
+        };
+
+        if data_args.len() != expected_params {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
-                    "Argument count mismatch calling function '{}': expected {} parameter(s), got {} argument(s). Signature: {:?}",
+                    "Argument count mismatch calling function '{}': expected {} parameter(s) (excluding StructReturn), got {} argument(s). Signature: {:?}",
                     name,
-                    sig.params.len(),
+                    expected_params,
                     data_args.len(),
                     sig
                 ),
             ));
         }
-
-        // Check if function uses StructReturn
-        let uses_struct_return = sig
-            .params
-            .iter()
-            .any(|p| p.purpose == ArgumentPurpose::StructReturn);
 
         if uses_struct_return {
             // Clone signature before mutable borrow
@@ -1858,7 +1866,7 @@ mod tests {
     use crate::{GlslOptions, glsl_emu_riscv32};
 
     /// Convert float to 16.16 fixed-point for comparison
-    fn float_to_fixed32(f: f32) -> i32 {
+    fn float_to_q32(f: f32) -> i32 {
         let clamped = f.clamp(-32768.0, 32767.9999847412109375);
         let scaled = clamped * 65536.0;
         if scaled >= 0.0 {
@@ -1869,7 +1877,7 @@ mod tests {
     }
 
     /// Convert fixed-point back to float
-    fn fixed32_to_float(fixed: i32) -> f32 {
+    fn q32_to_float(fixed: i32) -> f32 {
         fixed as f32 / 65536.0
     }
 
@@ -1906,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emu_float_constant_fixed32() {
+    fn test_emu_float_constant_q32() {
         let source = r#"
         float main() {
             return 3.14159;
@@ -1919,8 +1927,8 @@ mod tests {
         let result = executable.call_f32("main", &[]).expect("Execution failed");
 
         // The emulator returns fixed-point as f32, so we need to check the fixed-point value
-        let expected_fixed = float_to_fixed32(3.14159);
-        let result_fixed = float_to_fixed32(result);
+        let expected_fixed = float_to_q32(3.14159);
+        let result_fixed = float_to_q32(result);
 
         // Allow some tolerance for fixed-point conversion
         assert!(
@@ -1933,7 +1941,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emu_float_addition_fixed32() {
+    fn test_emu_float_addition_q32() {
         let source = r#"
         float main() {
             float a = 2.5;
@@ -1948,7 +1956,7 @@ mod tests {
         let result = executable.call_f32("main", &[]).expect("Execution failed");
 
         let expected = 3.75;
-        let result_float = fixed32_to_float(float_to_fixed32(result));
+        let result_float = q32_to_float(float_to_q32(result));
         assert!(
             (result_float - expected).abs() < 0.0001,
             "Expected ~{expected}, got {result_float}"
@@ -1956,7 +1964,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emu_float_multiplication_fixed32() {
+    fn test_emu_float_multiplication_q32() {
         let source = r#"
         float main() {
             float a = 2.0;
@@ -1971,7 +1979,7 @@ mod tests {
         let result = executable.call_f32("main", &[]).expect("Execution failed");
 
         let expected = 7.0;
-        let result_float = fixed32_to_float(float_to_fixed32(result));
+        let result_float = q32_to_float(float_to_q32(result));
         assert!(
             (result_float - expected).abs() < 0.001,
             "Expected ~{expected}, got {result_float}"
@@ -1979,7 +1987,7 @@ mod tests {
     }
 
     #[test]
-    fn test_emu_user_fn_fixed32() {
+    fn test_emu_user_fn_q32() {
         let source = r#"
         float main() {
             float a = 2.0;
@@ -1998,7 +2006,7 @@ mod tests {
         let result = executable.call_f32("main", &[]).expect("Execution failed");
 
         let expected = 7.0;
-        let result_float = fixed32_to_float(float_to_fixed32(result));
+        let result_float = q32_to_float(float_to_q32(result));
         assert!(
             (result_float - expected).abs() < 0.001,
             "Expected ~{expected}, got {result_float}"
@@ -2007,7 +2015,7 @@ mod tests {
 
     #[test]
     fn test_emu_builtin_sqrt_linked() {
-        // Test that sqrt() uses the linked __lp_fixed32_sqrt function
+        // Test that sqrt() uses the linked __lp_q32_sqrt function
         let source = r#"
         float main() {
             return sqrt(4.0);
@@ -2020,7 +2028,7 @@ mod tests {
         let result = executable.call_f32("main", &[]).expect("Execution failed");
 
         let expected = 2.0;
-        let result_float = fixed32_to_float(float_to_fixed32(result));
+        let result_float = q32_to_float(float_to_q32(result));
         assert!(
             (result_float - expected).abs() < 0.01,
             "Expected sqrt(4.0) ≈ {expected}, got {result_float}"

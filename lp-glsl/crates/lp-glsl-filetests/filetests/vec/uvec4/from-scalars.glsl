@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Scalars: uvec4(uint, uint, uint, uint) - from 4 uint values

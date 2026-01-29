@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Mixed: uvec4(int, float, bool, ivec4, bvec4, vec4) - type conversions
@@ -43,7 +43,7 @@ uvec4 test_uvec4_from_mixed_vec4() {
     return uvec4(source);
 }
 
-// run: test_uvec4_from_mixed_vec4() == uvec4(1u, 0u, 3u, 0u)
+// run: test_uvec4_from_mixed_vec4() == uvec4(1u, 4294967294u, 3u, 0u)
 
 uvec4 test_uvec4_from_mixed_zero_values() {
     return uvec4(0, 0.0, false, 0);
@@ -55,7 +55,7 @@ uvec4 test_uvec4_from_mixed_negative_values() {
     return uvec4(-1, -2.5, -3, -4.9);
 }
 
-// run: test_uvec4_from_mixed_negative_values() == uvec4(4294967295u, 0u, 4294967293u, 0u)
+// run: test_uvec4_from_mixed_negative_values() == uvec4(4294967295u, 4294967294u, 4294967293u, 4294967292u)
 
 uvec4 test_uvec4_from_mixed_large_values() {
     return uvec4(100000, 999.9, true, 50000);

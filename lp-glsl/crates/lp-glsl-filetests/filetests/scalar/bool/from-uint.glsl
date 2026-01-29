@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Constructor: bool(uint) - converts uint to bool (0u -> false, non-zero -> true)

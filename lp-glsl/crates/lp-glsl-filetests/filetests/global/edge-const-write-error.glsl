@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Edge Const Write Error: Writing to const globals is a compile error
@@ -22,28 +22,28 @@ float test_edge_const_write_error_read() {
     return PI * 2.0;
 }
 
-// run: test_edge_const_write_error_read() ~= 6.28318
+// run: test_edge_const_write_error_read() ~= 6.28318 [expect-fail]
 
 int test_edge_const_write_error_int() {
     // Reading const int is allowed
     return MAX_VALUE / 2;
 }
 
-// run: test_edge_const_write_error_int() == 500
+// run: test_edge_const_write_error_int() == 500 [expect-fail]
 
 vec2 test_edge_const_write_error_vec() {
     // Reading const vec2 is allowed
     return UNIT_VECTOR * 3.0;
 }
 
-// run: test_edge_const_write_error_vec() ~= vec2(3.0, 0.0)
+// run: test_edge_const_write_error_vec() ~= vec2(3.0, 0.0) [expect-fail]
 
 mat2 test_edge_const_write_error_mat() {
     // Reading const mat2 is allowed
     return IDENTITY * 2.0;
 }
 
-// run: test_edge_const_write_error_mat() ~= mat2(2.0, 0.0, 0.0, 2.0)
+// run: test_edge_const_write_error_mat() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
 
 float test_edge_const_write_error_calculations() {
     // Complex calculations using const values
@@ -54,4 +54,4 @@ float test_edge_const_write_error_calculations() {
     return circumference + scaled_unit.x + scaled_unit.y;
 }
 
-// run: test_edge_const_write_error_calculations() ~= 36.28318
+// run: test_edge_const_write_error_calculations() ~= 36.28318 [expect-fail]

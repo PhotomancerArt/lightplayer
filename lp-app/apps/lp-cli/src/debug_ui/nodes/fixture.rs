@@ -1,19 +1,9 @@
 use crate::debug_ui::nodes::texture;
-use eframe::epaint::{Color32, TextureHandle};
+use eframe::epaint::Color32;
 use egui::Painter;
 use lp_engine_client::{ClientNodeEntry, ClientProjectView};
+use lp_model::NodeKind;
 use lp_model::nodes::fixture::{FixtureState, MappingCell};
-use lp_model::{NodeHandle, NodeKind};
-
-/// Generate a color for a fixture based on its handle
-pub fn fixture_color(handle: &NodeHandle) -> Color32 {
-    // Generate distinct colors for different fixtures
-    // Hash the handle to get a consistent number
-    let hash: u32 = format!("{handle:?}").chars().map(|c| c as u32).sum();
-    let hue = (hash as f32 * 137.508) % 360.0; // Golden angle for distribution
-    let (r, g, b) = hsv_to_rgb(hue / 360.0, 0.8, 0.9);
-    Color32::from_rgb(r, g, b)
-}
 
 /// Render fixture panel
 pub fn render_fixture_panel(
@@ -21,7 +11,9 @@ pub fn render_fixture_panel(
     view: &ClientProjectView,
     entry: &ClientNodeEntry,
     state: &FixtureState,
-    fixture_handle: &NodeHandle,
+    show_background: bool,
+    show_labels: bool,
+    show_strokes: bool,
 ) {
     ui.heading("Fixture");
     ui.separator();
@@ -60,7 +52,7 @@ pub fn render_fixture_panel(
 
                 // Create texture handle
                 let texture_name = format!("fixture_texture_{:?}", entry.path);
-                let texture_handle: TextureHandle =
+                let texture_handle =
                     ui.ctx()
                         .load_texture(texture_name, color_image, Default::default());
 
@@ -73,22 +65,33 @@ pub fn render_fixture_panel(
                 let display_width = texture_state.width as f32 * scale;
                 let display_height = texture_state.height as f32 * scale;
 
-                // Display texture image first (using Image widget like texture.rs)
-                let image_response = ui.add(
-                    egui::Image::new(&texture_handle)
-                        .fit_to_exact_size(egui::Vec2::new(display_width, display_height)),
-                );
+                // Display texture image first (using Image widget like texture.rs) if enabled
+                let image_rect = if show_background {
+                    let image_response = ui.add(
+                        egui::Image::new(&texture_handle)
+                            .fit_to_exact_size(egui::Vec2::new(display_width, display_height)),
+                    );
+                    image_response.rect
+                } else {
+                    // Allocate space for overlay even if background is hidden
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(display_width, display_height),
+                        egui::Sense::hover(),
+                    );
+                    rect
+                };
 
                 // Draw mapping overlay on top of the image
                 // Use the image's rect for overlay positioning
                 draw_mapping_overlay(
                     ui.painter(),
-                    image_response.rect,
+                    image_rect,
                     texture_state.width,
                     texture_state.height,
-                    fixture_handle,
                     &state.mapping_cells,
-                    true, // Show labels
+                    &state.lamp_colors,
+                    show_labels,
+                    show_strokes,
                 );
             } else {
                 ui.label("No texture data available for fixture");
@@ -111,12 +114,13 @@ fn draw_mapping_overlay(
     texture_rect: egui::Rect,
     _texture_width: u32,
     _texture_height: u32,
-    fixture_handle: &NodeHandle,
     mapping_cells: &[MappingCell],
+    lamp_colors: &[u8],
     show_labels: bool,
+    show_strokes: bool,
 ) {
-    let color = fixture_color(fixture_handle);
-    let stroke_color = Color32::from_rgb(255, 255, 255); // White outline for visibility
+    let stroke_color = Color32::from_rgb(128, 128, 128); // Grey stroke
+    let text_color = Color32::from_rgb(255, 255, 255); // White text
 
     for cell in mapping_cells {
         // Convert normalized coordinates [0, 1] to screen coordinates
@@ -129,50 +133,34 @@ fn draw_mapping_overlay(
 
         let center = egui::pos2(center_x, center_y);
 
-        // Draw circle outline (radius)
-        painter.circle_stroke(center, radius_pixels, egui::Stroke::new(1.0, stroke_color));
+        // Get lamp color from lamp_colors (RGB per lamp, ordered by channel index)
+        // Each lamp uses 3 bytes (RGB), so channel * 3 gives us the start index
+        let fill_color = if (cell.channel as usize * 3 + 2) < lamp_colors.len() {
+            let idx = cell.channel as usize * 3;
+            Color32::from_rgb(lamp_colors[idx], lamp_colors[idx + 1], lamp_colors[idx + 2])
+        } else {
+            // Default to black if no color data available
+            Color32::from_rgb(0, 0, 0)
+        };
 
-        // Draw center point
-        painter.circle_filled(center, 3.0, color);
-        painter.circle_stroke(center, 3.0, egui::Stroke::new(1.0, stroke_color));
+        // Draw filled circle
+        painter.circle_filled(center, radius_pixels, fill_color);
 
-        // Draw label if requested
+        // Draw circle outline (1px grey stroke) if enabled
+        if show_strokes {
+            painter.circle_stroke(center, radius_pixels, egui::Stroke::new(1.0, stroke_color));
+        }
+
+        // Draw label if requested (just the channel number, no "Ch" prefix)
         if show_labels {
-            let label = format!("Ch{}", cell.channel);
+            let label = format!("{}", cell.channel);
             painter.text(
-                center + egui::Vec2::new(radius_pixels + 5.0, 0.0),
-                egui::Align2::LEFT_CENTER,
+                center,
+                egui::Align2::CENTER_CENTER,
                 label,
                 egui::FontId::monospace(10.0),
-                color,
+                text_color,
             );
         }
     }
-}
-
-/// Convert HSV to RGB (simple approximation)
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
-    let c = v * s;
-    let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-
-    let (r, g, b) = if h < 1.0 / 6.0 {
-        (c, x, 0.0)
-    } else if h < 2.0 / 6.0 {
-        (x, c, 0.0)
-    } else if h < 3.0 / 6.0 {
-        (0.0, c, x)
-    } else if h < 4.0 / 6.0 {
-        (0.0, x, c)
-    } else if h < 5.0 / 6.0 {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-
-    (
-        ((r + m) * 255.0) as u8,
-        ((g + m) * 255.0) as u8,
-        ((b + m) * 255.0) as u8,
-    )
 }

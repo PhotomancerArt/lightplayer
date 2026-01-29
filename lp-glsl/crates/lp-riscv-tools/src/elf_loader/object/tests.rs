@@ -359,7 +359,7 @@ mod tests {
         println!("Correctly rejected invalid object file: {:?}", result.err());
     }
 
-    /// Create an _init object file that calls __lp_fixed32_sqrt
+    /// Create an _init object file that calls __lp_q32_sqrt
     fn create_init_object_with_builtin_call() -> Vec<u8> {
         use cranelift_codegen::ir::types;
         use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, Signature};
@@ -401,14 +401,14 @@ mod tests {
             .declare_function("_init", Linkage::Export, &init_sig)
             .unwrap();
 
-        // Declare __lp_fixed32_sqrt external function
+        // Declare __lp_q32_sqrt external function
         let sqrt_sig = Signature {
             params: vec![AbiParam::new(types::I32)],
             returns: vec![AbiParam::new(types::I32)],
             call_conv: cranelift_codegen::isa::CallConv::SystemV,
         };
         let sqrt_func_id = module
-            .declare_function("__lp_fixed32_sqrt", Linkage::Import, &sqrt_sig)
+            .declare_function("__lp_q32_sqrt", Linkage::Import, &sqrt_sig)
             .unwrap();
 
         // Build _init function
@@ -426,7 +426,7 @@ mod tests {
             builder.switch_to_block(entry_block);
             builder.seal_block(entry_block);
 
-            // Call __lp_fixed32_sqrt with argument 0x10000 (1.0 in fixed32)
+            // Call __lp_q32_sqrt with argument 0x10000 (1.0 in q32)
             // Expected result: sqrt(1.0) = 1.0 = 0x10000
             let arg = builder.ins().iconst(types::I32, 0x10000);
             let sqrt_ref = module.declare_func_in_func(sqrt_func_id, &mut builder.func);
@@ -468,7 +468,7 @@ mod tests {
 
         println!("Found builtins executable: {} bytes", builtins_exe.len());
 
-        // Create _init object file (calls __lp_fixed32_sqrt)
+        // Create _init object file (calls __lp_q32_sqrt)
         let init_obj = create_init_object_with_builtin_call();
 
         // Load base executable
@@ -489,12 +489,12 @@ mod tests {
             "_init symbol should be found in object file"
         );
 
-        // Verify __lp_fixed32_sqrt is in symbol map
+        // Verify __lp_q32_sqrt is in symbol map
         assert!(
-            load_info.symbol_map.contains_key("__lp_fixed32_sqrt"),
-            "__lp_fixed32_sqrt should be in merged symbol map"
+            load_info.symbol_map.contains_key("__lp_q32_sqrt"),
+            "__lp_q32_sqrt should be in merged symbol map"
         );
-        let sqrt_addr = load_info.symbol_map.get("__lp_fixed32_sqrt").unwrap();
+        let sqrt_addr = load_info.symbol_map.get("__lp_q32_sqrt").unwrap();
 
         // Get RAM size before moving it into emulator
         let ram_size = load_info.ram.len();
@@ -549,7 +549,7 @@ mod tests {
                     // Track a0 register (return value register in RISC-V)
                     last_a0 = emu.get_register(Gpr::A0);
 
-                    // Check if we've jumped into __lp_fixed32_sqrt (function was called)
+                    // Check if we've jumped into __lp_q32_sqrt (function was called)
                     // Use a wider range to catch the call (functions can be larger than 100 bytes)
                     if pc_after >= *sqrt_addr && pc_after < *sqrt_addr + 1000 {
                         called_sqrt = true;
@@ -590,10 +590,10 @@ mod tests {
 
         println!("Program executed successfully for {steps} steps");
         assert!(steps > 0, "Program should execute at least one instruction");
-        assert!(called_sqrt, "__lp_fixed32_sqrt should have been called");
+        assert!(called_sqrt, "__lp_q32_sqrt should have been called");
 
-        // Verify that __lp_fixed32_sqrt was called and returned a result
-        // sqrt(1.0) = 1.0 = 0x10000 in fixed32 format
+        // Verify that __lp_q32_sqrt was called and returned a result
+        // sqrt(1.0) = 1.0 = 0x10000 in q32 format
         println!(
             "Final a0 register value: 0x{:x} ({})",
             last_a0 as u32, last_a0
@@ -602,13 +602,13 @@ mod tests {
         if last_a0 != 0 {
             assert_eq!(
                 last_a0 as u32, 0x10000,
-                "__lp_fixed32_sqrt(0x10000) should return 0x10000 (sqrt(1.0) = 1.0), got 0x{:x}",
+                "__lp_q32_sqrt(0x10000) should return 0x10000 (sqrt(1.0) = 1.0), got 0x{:x}",
                 last_a0 as u32
             );
         } else {
             // If a0 is still 0, that's okay as long as we called the function
             // (the function might not have returned yet)
-            println!("Note: a0 is still 0, but __lp_fixed32_sqrt was called");
+            println!("Note: a0 is still 0, but __lp_q32_sqrt was called");
         }
     }
 }

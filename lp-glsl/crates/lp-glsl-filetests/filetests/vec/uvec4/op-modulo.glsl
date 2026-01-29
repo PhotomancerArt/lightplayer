@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Modulo: uvec4 % uvec4 -> uvec4 (component-wise)

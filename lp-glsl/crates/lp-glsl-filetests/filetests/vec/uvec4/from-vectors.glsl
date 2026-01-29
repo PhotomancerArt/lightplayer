@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Vectors: uvec4(uvec2, uint, uint), uvec4(uint, uvec2, uint), uvec4(uint, uint, uvec2), uvec4(uvec3, uint), uvec4(uint, uvec3) - vector combinations

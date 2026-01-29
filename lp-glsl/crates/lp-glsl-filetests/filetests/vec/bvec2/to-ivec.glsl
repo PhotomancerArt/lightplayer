@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // To ivec: ivec2(bvec2) - component-wise conversion (false -> 0, true -> 1)

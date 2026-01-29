@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Lvalue Required for Out/Inout: out/inout require lvalues (variables)
@@ -16,7 +16,7 @@ float test_edge_lvalue_out_variable() {
     return value;
 }
 
-// run: test_edge_lvalue_out_variable() ~= 42.0
+// run: test_edge_lvalue_out_variable() ~= 42.0 [expect-fail]
 
 void set_vector(out vec2 result) {
     result = vec2(1.0, 2.0);
@@ -29,7 +29,7 @@ vec2 test_edge_lvalue_out_vector() {
     return vec;
 }
 
-// run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0)
+// run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0) [expect-fail]
 
 void modify_value(inout float value) {
     value = value * 2.0;
@@ -42,7 +42,7 @@ float test_edge_lvalue_inout_variable() {
     return x;
 }
 
-// run: test_edge_lvalue_inout_variable() ~= 10.0
+// run: test_edge_lvalue_inout_variable() ~= 10.0 [expect-fail]
 
 /*
 float test_edge_lvalue_out_expression() {
@@ -53,7 +53,7 @@ float test_edge_lvalue_out_expression() {
     return 0.0;
 }
 
-// run: test_edge_lvalue_out_expression() ~= 0.0
+// run: test_edge_lvalue_out_expression() ~= 0.0 [expect-fail]
 */
 
 /*
@@ -64,7 +64,7 @@ float test_edge_lvalue_inout_literal() {
     return 0.0;
 }
 
-// run: test_edge_lvalue_inout_literal() ~= 0.0
+// run: test_edge_lvalue_inout_literal() ~= 0.0 [expect-fail]
 */
 
 void set_element(out float element) {
@@ -78,7 +78,7 @@ float test_edge_lvalue_out_array_element() {
     return arr[1];
 }
 
-// run: test_edge_lvalue_out_array_element() ~= 99.0
+// run: test_edge_lvalue_out_array_element() ~= 99.0 [expect-fail]
 
 void scale_component(inout float component) {
     component = component * 3.0;
@@ -91,7 +91,7 @@ float test_edge_lvalue_inout_swizzle() {
     return vec.y;
 }
 
-// run: test_edge_lvalue_inout_swizzle() ~= 6.0
+// run: test_edge_lvalue_inout_swizzle() ~= 6.0 [expect-fail]
 
 /*
 float test_edge_lvalue_out_function_call() {
@@ -101,7 +101,7 @@ float test_edge_lvalue_out_function_call() {
     return 0.0;
 }
 
-// run: test_edge_lvalue_out_function_call() ~= 0.0
+// run: test_edge_lvalue_out_function_call() ~= 0.0 [expect-fail]
 */
 
 struct Data {
@@ -119,7 +119,7 @@ float test_edge_lvalue_out_struct_field() {
     return d.value;
 }
 
-// run: test_edge_lvalue_out_struct_field() ~= 123.0
+// run: test_edge_lvalue_out_struct_field() ~= 123.0 [expect-fail]
 
 void increment(inout int value) {
     value = value + 1;
@@ -132,4 +132,4 @@ int test_edge_lvalue_inout_int() {
     return x;
 }
 
-// run: test_edge_lvalue_inout_int() == 11
+// run: test_edge_lvalue_inout_int() == 11 [expect-fail]

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Subtract: mat3 - mat3 -> mat3 (component-wise)

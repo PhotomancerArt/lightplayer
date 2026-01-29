@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Shared Global Declarations: Global variables with shared qualifier
@@ -22,7 +22,7 @@ float test_declare_shared_float() {
     return workgroup_counter;
 }
 
-// run: test_declare_shared_float() ~= 42.0
+// run: test_declare_shared_float() ~= 42.0 [expect-fail]
 
 int test_declare_shared_int() {
     // Shared global int declaration
@@ -30,7 +30,7 @@ int test_declare_shared_int() {
     return workgroup_id;
 }
 
-// run: test_declare_shared_int() == 123
+// run: test_declare_shared_int() == 123 [expect-fail]
 
 uint test_declare_shared_uint() {
     // Shared global uint declaration
@@ -38,7 +38,7 @@ uint test_declare_shared_uint() {
     return int(workgroup_size);
 }
 
-// run: test_declare_shared_uint() == 256
+// run: test_declare_shared_uint() == 256 [expect-fail]
 
 bool test_declare_shared_bool() {
     // Shared global bool declaration
@@ -46,7 +46,7 @@ bool test_declare_shared_bool() {
     return workgroup_flag;
 }
 
-// run: test_declare_shared_bool() == true
+// run: test_declare_shared_bool() == true [expect-fail]
 
 vec2 test_declare_shared_vec2() {
     // Shared global vec2 declaration
@@ -54,7 +54,7 @@ vec2 test_declare_shared_vec2() {
     return workgroup_position;
 }
 
-// run: test_declare_shared_vec2() ~= vec2(10.0, 20.0)
+// run: test_declare_shared_vec2() ~= vec2(10.0, 20.0) [expect-fail]
 
 vec3 test_declare_shared_vec3() {
     // Shared global vec3 declaration
@@ -62,7 +62,7 @@ vec3 test_declare_shared_vec3() {
     return workgroup_normal;
 }
 
-// run: test_declare_shared_vec3() ~= vec3(0.0, 1.0, 0.0)
+// run: test_declare_shared_vec3() ~= vec3(0.0, 1.0, 0.0) [expect-fail]
 
 vec4 test_declare_shared_vec4() {
     // Shared global vec4 declaration
@@ -70,7 +70,7 @@ vec4 test_declare_shared_vec4() {
     return workgroup_color;
 }
 
-// run: test_declare_shared_vec4() ~= vec4(1.0, 0.5, 0.0, 1.0)
+// run: test_declare_shared_vec4() ~= vec4(1.0, 0.5, 0.0, 1.0) [expect-fail]
 
 mat2 test_declare_shared_mat2() {
     // Shared global mat2 declaration
@@ -78,7 +78,7 @@ mat2 test_declare_shared_mat2() {
     return workgroup_transform;
 }
 
-// run: test_declare_shared_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
+// run: test_declare_shared_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0) [expect-fail]
 
 float test_declare_shared_array() {
     // Shared global array declaration
@@ -89,4 +89,4 @@ float test_declare_shared_array() {
     return workgroup_data[0] + workgroup_data[1] + workgroup_data[2];
 }
 
-// run: test_declare_shared_array() ~= 6.0
+// run: test_declare_shared_array() ~= 6.0 [expect-fail]

@@ -14,7 +14,7 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// target riscv32.fixed32\n");
+    content.push_str("// target riscv32.q32\n");
     content.push_str("\n");
 
     // Add section comment
@@ -363,9 +363,9 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
         VecType::Vec => {
             // For floating point, values may be clamped
             match dimension {
-                Dimension::D2 => vec![32767, 32767],
-                Dimension::D3 => vec![32767, 32767, 32767], // 25000 + 15000 = 40000, but clamped to 32767
-                Dimension::D4 => vec![32767, 32767, 32767, 15000], // 10000 + 5000 = 15000
+                Dimension::D2 => vec![32768, 32768],
+                Dimension::D3 => vec![32768, 32768, 32768], // 25000 + 15000 = 40000, but clamped to 32768
+                Dimension::D4 => vec![32768, 32768, 32768, 15000], // 10000 + 5000 = 15000
             }
         }
         _ => {
@@ -384,7 +384,7 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
 
     format!(
         "{type_name} test_{type_name}_add_large_numbers() {{\n\
-    // Large numbers are clamped to fixed16x16 max (32767.99998)\n\
+    // Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)\n\
     // Addition saturates to max for each component\n\
     {type_name} a = {a_constructor};\n\
     {type_name} b = {b_constructor};\n\

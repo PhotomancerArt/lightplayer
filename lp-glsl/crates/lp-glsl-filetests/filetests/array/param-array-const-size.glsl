@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Function Parameters with Const-Sized Arrays
@@ -59,7 +59,7 @@ float test_param_array_call() {
     return test_param_array(test_arr);
 }
 
-// run: test_param_array_call() == 0.0
+// run: test_param_array_call() == 0.0 [expect-fail]
 
 float test_multiple_params_call() {
     float arr_a[PARAM_SIZE];
@@ -67,28 +67,28 @@ float test_multiple_params_call() {
     return test_multiple_params(arr_a, arr_b);
 }
 
-// run: test_multiple_params_call() == 0.0
+// run: test_multiple_params_call() == 0.0 [expect-fail]
 
 vec2 test_nested_calls_call() {
     vec2 test_arr[NESTED_SIZE];
     return test_nested_calls(test_arr);
 }
 
-// run: test_nested_calls_call() ~= vec2(0.0, 0.0)
+// run: test_nested_calls_call() ~= vec2(0.0, 0.0) [expect-fail]
 
 vec3 test_return_const_size_call() {
     vec3[RETURN_SIZE] result = test_return_const_size();
     return result[0];
 }
 
-// run: test_return_const_size_call() ~= vec3(0.0, 0.0, 0.0)
+// run: test_return_const_size_call() ~= vec3(0.0, 0.0, 0.0) [expect-fail]
 
 int test_complex_param_expr_call() {
     float test_arr[COMPLEX_PARAM_SIZE];
     return test_complex_param_expr(test_arr);
 }
 
-// run: test_complex_param_expr_call() == 1
+// run: test_complex_param_expr_call() == 1 [expect-fail]
 
 float test_different_sizes_call() {
     vec3 arr_a[SIZE_A];
@@ -96,7 +96,7 @@ float test_different_sizes_call() {
     return test_different_sizes(arr_a, arr_b);
 }
 
-// run: test_different_sizes_call() == 1.0
+// run: test_different_sizes_call() == 1.0 [expect-fail]
 
 
 

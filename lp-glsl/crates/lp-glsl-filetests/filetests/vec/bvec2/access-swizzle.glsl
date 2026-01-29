@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Access Swizzle: bvec2.xy, bvec2.yx, bvec2.xx, etc. - component swizzling

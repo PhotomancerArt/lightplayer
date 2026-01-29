@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Constructor: uint(int) - preserves value if non-negative (undefined for negative)

@@ -38,7 +38,6 @@ impl GlModule<JITModule> {
                 // Add builtin and host symbol lookup function before creating module
                 {
                     use crate::backend::builtins::registry::{BuiltinId, get_function_pointer};
-                    #[cfg(feature = "std")]
                     use crate::backend::host::{HostId, get_host_function_pointer};
                     match &mut builder {
                         crate::backend::target::builder::ModuleBuilder::JIT(jit_builder) => {
@@ -52,7 +51,7 @@ impl GlModule<JITModule> {
                                             return Some(get_function_pointer(*builtin));
                                         }
                                     }
-                                    #[cfg(feature = "std")]
+                                    // Check host functions (works in both std and no_std)
                                     for host in HostId::all() {
                                         if host.name() == name {
                                             return get_host_function_pointer(*host);
@@ -87,7 +86,8 @@ impl GlModule<JITModule> {
                 // Declare builtin functions when module is created
                 {
                     use crate::backend::builtins::declare_builtins;
-                    declare_builtins(&mut module)?;
+                    let pointer_type = module.isa().pointer_type();
+                    declare_builtins(&mut module, pointer_type)?;
                 }
 
                 Ok(Self {
@@ -131,7 +131,8 @@ impl GlModule<ObjectModule> {
                 // Declare builtin functions when module is created
                 {
                     use crate::backend::builtins::declare_builtins;
-                    declare_builtins(&mut module)?;
+                    let pointer_type = module.isa().pointer_type();
+                    declare_builtins(&mut module, pointer_type)?;
                 }
 
                 // Declare host functions when module is created (for emulator)
@@ -358,6 +359,7 @@ impl<M: Module> GlModule<M> {
 
     /// Internal helper for apply_transform - contains common logic
     fn apply_transform_impl<T: crate::backend::transform::pipeline::Transform>(
+        old_module_builtins: &HashMap<cranelift_module::FuncId, alloc::string::String>,
         fns: HashMap<String, GlFunc>,
         transform: T,
         mut new_module: Self,
@@ -392,18 +394,26 @@ impl<M: Module> GlModule<M> {
             old_func_id_map.insert(gl_func.func_id, name.clone());
         }
 
-        // 1.5. Add builtin function FuncIds to func_id_map
+        // 1.5. Add builtin function FuncIds to func_id_map and old_func_id_map
         // Builtins are declared when the module is created, so they should always be available
         {
             use crate::backend::builtins::registry::BuiltinId;
             use cranelift_module::FuncOrDataId;
             for builtin in BuiltinId::all() {
                 let name = builtin.name();
-                // Get FuncId from module declarations (builtins are declared at module creation)
+                // Get FuncId from NEW module declarations
                 if let Some(FuncOrDataId::Func(func_id)) =
                     new_module.module_internal().declarations().get_name(name)
                 {
                     func_id_map.insert(alloc::string::String::from(name), func_id);
+                }
+                // Get FuncId from OLD module builtins map and add to old_func_id_map
+                // Find the FuncId for this builtin name in the old module
+                for (old_func_id, builtin_name) in old_module_builtins.iter() {
+                    if builtin_name == name {
+                        old_func_id_map.insert(*old_func_id, alloc::string::String::from(name));
+                        break;
+                    }
                 }
             }
         }
@@ -487,6 +497,21 @@ impl GlModule<JITModule> {
         self,
         transform: T,
     ) -> Result<Self, GlslError> {
+        // Extract old module's builtin FuncIds before moving self
+        let old_module_builtins: HashMap<_, _> = {
+            use crate::backend::builtins::registry::BuiltinId;
+            use cranelift_module::FuncOrDataId;
+            let mut map = HashMap::new();
+            for builtin in BuiltinId::all() {
+                let name = builtin.name();
+                if let Some(FuncOrDataId::Func(func_id)) =
+                    self.module_internal().declarations().get_name(name)
+                {
+                    map.insert(func_id, alloc::string::String::from(name));
+                }
+            }
+            map
+        };
         let target = self.target.clone();
         let function_registry = self.function_registry;
         let glsl_signatures = self.glsl_signatures;
@@ -501,7 +526,7 @@ impl GlModule<JITModule> {
         new_module.source_text = source_text;
         new_module.source_loc_manager = source_loc_manager;
         new_module.source_map = source_map;
-        Self::apply_transform_impl(fns, transform, new_module)
+        Self::apply_transform_impl(&old_module_builtins, fns, transform, new_module)
     }
 }
 
@@ -542,6 +567,21 @@ impl GlModule<ObjectModule> {
         self,
         transform: T,
     ) -> Result<Self, GlslError> {
+        // Extract old module's builtin FuncIds before moving self
+        let old_module_builtins: HashMap<_, _> = {
+            use crate::backend::builtins::registry::BuiltinId;
+            use cranelift_module::FuncOrDataId;
+            let mut map = hashbrown::HashMap::new();
+            for builtin in BuiltinId::all() {
+                let name = builtin.name();
+                if let Some(FuncOrDataId::Func(func_id)) =
+                    self.module_internal().declarations().get_name(name)
+                {
+                    map.insert(func_id, alloc::string::String::from(name));
+                }
+            }
+            map
+        };
         let target = self.target.clone();
         let function_registry = self.function_registry;
         let glsl_signatures = self.glsl_signatures;
@@ -556,7 +596,67 @@ impl GlModule<ObjectModule> {
         new_module.source_text = source_text;
         new_module.source_loc_manager = source_loc_manager;
         new_module.source_map = source_map;
-        Self::apply_transform_impl(fns, transform, new_module)
+        Self::apply_transform_impl(&old_module_builtins, fns, transform, new_module)
+    }
+
+    /// Compile a function and extract vcode and assembly
+    ///
+    /// This compiles the function to machine code and extracts the vcode (intermediate
+    /// representation) and assembly (disassembly) if available.
+    #[cfg(feature = "std")]
+    pub fn compile_function_and_extract_codegen(
+        &mut self,
+        name: &str,
+        func: cranelift_codegen::ir::Function,
+        func_id: cranelift_module::FuncId,
+    ) -> Result<(Option<alloc::string::String>, Option<alloc::string::String>), GlslError> {
+        // Create context
+        let mut ctx = self.module_mut_internal().make_context();
+        ctx.func = func;
+
+        // Enable disassembly
+        ctx.set_disasm(true);
+
+        // Define function (compiles it)
+        self.module_mut_internal()
+            .define_function(func_id, &mut ctx)
+            .map_err(|e| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    format!("Failed to define function '{name}': {e}"),
+                )
+            })?;
+
+        // Extract vcode and assembly
+        let (vcode, disasm) = if let Some(compiled_code) = ctx.compiled_code() {
+            // Get VCode (intermediate representation)
+            let vcode = compiled_code.vcode.as_ref().map(|s| s.clone());
+
+            // Try to generate RISC-V disassembly using Capstone
+            let disasm = {
+                let isa = self.module_internal().isa();
+                if let Ok(cs) = isa.to_capstone() {
+                    if let Ok(disasm_str) = compiled_code.disassemble(Some(&ctx.func.params), &cs) {
+                        Some(disasm_str)
+                    } else {
+                        // Fall back to vcode if Capstone disassembly fails
+                        vcode.clone()
+                    }
+                } else {
+                    // Fall back to vcode if Capstone isn't available
+                    vcode.clone()
+                }
+            };
+
+            (vcode, disasm)
+        } else {
+            (None, None)
+        };
+
+        // Clear context
+        self.module_internal().clear_context(&mut ctx);
+
+        Ok((vcode, disasm))
     }
 }
 

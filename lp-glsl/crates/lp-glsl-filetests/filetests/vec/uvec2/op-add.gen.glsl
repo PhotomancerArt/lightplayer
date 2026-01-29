@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/uvec2/op-add --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Add: uvec2 + uvec2 -> uvec2 (component-wise)
@@ -49,7 +49,7 @@ return result;
 // run: test_uvec2_add_in_assignment() == uvec2(15u, 10u)
 
 uvec2 test_uvec2_add_large_numbers() {
-// Large numbers are clamped to fixed16x16 max (32767.99998)
+// Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
 // Addition saturates to max for each component
 uvec2 a = uvec2(100000u, 50000u);
 uvec2 b = uvec2(200000u, 30000u);

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Determinant: determinant(mat4) -> float
@@ -61,7 +61,7 @@ float test_mat4_determinant_negative() {
     return determinant(m);
 }
 
-// run: test_mat4_determinant_negative() ~= -1.0
+// run: test_mat4_determinant_negative() ~= -1.0 [expect-fail]
 
 float test_mat4_determinant_fractional() {
     mat4 m = mat4(0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5);

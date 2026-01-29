@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Not: not(bvec3) -> bvec3 (component-wise logical NOT)

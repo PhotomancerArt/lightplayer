@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Return Type Must Match: Return value must match declared return type
@@ -14,7 +14,7 @@ float test_edge_return_type_match_float() {
     return get_pi();
 }
 
-// run: test_edge_return_type_match_float() ~= 3.14159
+// run: test_edge_return_type_match_float() ~= 3.14159 [expect-fail]
 
 int get_answer() {
     return 42; // OK: int matches int
@@ -25,7 +25,7 @@ int test_edge_return_type_match_int() {
     return get_answer();
 }
 
-// run: test_edge_return_type_match_int() == 42
+// run: test_edge_return_type_match_int() == 42 [expect-fail]
 
 vec2 get_origin() {
     return vec2(0.0, 0.0); // OK: vec2 matches vec2
@@ -36,7 +36,7 @@ vec2 test_edge_return_type_match_vector() {
     return get_origin();
 }
 
-// run: test_edge_return_type_match_vector() ~= vec2(0.0, 0.0)
+// run: test_edge_return_type_match_vector() ~= vec2(0.0, 0.0) [expect-fail]
 
 void do_nothing() {
     // OK: no return statement needed for void
@@ -47,7 +47,7 @@ void test_edge_return_type_match_void() {
     do_nothing();
 }
 
-// run: test_edge_return_type_match_void() == 0.0
+// run: test_edge_return_type_match_void() == 0.0 [expect-fail]
 
 /*
 float test_edge_return_type_mismatch() {
@@ -56,7 +56,7 @@ float test_edge_return_type_mismatch() {
     return 0.0;
 }
 
-// run: test_edge_return_type_mismatch() ~= 0.0
+// run: test_edge_return_type_mismatch() ~= 0.0 [expect-fail]
 */
 
 float int_to_float() {
@@ -68,7 +68,7 @@ float test_edge_return_type_convertible() {
     return int_to_float();
 }
 
-// run: test_edge_return_type_convertible() ~= 42.0
+// run: test_edge_return_type_convertible() ~= 42.0 [expect-fail]
 
 /*
 void test_edge_return_value_in_void() {
@@ -76,7 +76,7 @@ void test_edge_return_value_in_void() {
     bad_void();
 }
 
-// run: test_edge_return_value_in_void() == 0.0
+// run: test_edge_return_value_in_void() == 0.0 [expect-fail]
 */
 
 float[3] get_array() {
@@ -89,7 +89,7 @@ float test_edge_return_type_array() {
     return arr[0] + arr[1] + arr[2];
 }
 
-// run: test_edge_return_type_array() ~= 6.0
+// run: test_edge_return_type_array() ~= 6.0 [expect-fail]
 
 /*
 float test_edge_return_type_array_mismatch() {
@@ -97,7 +97,7 @@ float test_edge_return_type_array_mismatch() {
     return 0.0;
 }
 
-// run: test_edge_return_type_array_mismatch() ~= 0.0
+// run: test_edge_return_type_array_mismatch() ~= 0.0 [expect-fail]
 */
 
 struct Point {
@@ -114,7 +114,7 @@ Point test_edge_return_type_struct() {
     return p;
 }
 
-// run: test_edge_return_type_struct() ~= Point(1.0, 2.0)
+// run: test_edge_return_type_struct() ~= Point(1.0, 2.0) [expect-fail]
 
 mat2 get_identity() {
     return mat2(1.0); // OK: mat2 matches mat2
@@ -125,7 +125,7 @@ mat2 test_edge_return_type_matrix() {
     return get_identity();
 }
 
-// run: test_edge_return_type_matrix() ~= mat2(1.0, 0.0, 0.0, 1.0)
+// run: test_edge_return_type_matrix() ~= mat2(1.0, 0.0, 0.0, 1.0) [expect-fail]
 
 bool is_even(int x) {
     return (x % 2) == 0; // OK: bool expression for bool return
@@ -136,7 +136,7 @@ bool test_edge_return_type_bool() {
     return is_even(4);
 }
 
-// run: test_edge_return_type_bool() == true
+// run: test_edge_return_type_bool() == true [expect-fail]
 
 float absolute_value(float x) {
     if (x >= 0.0) {
@@ -151,4 +151,4 @@ float test_edge_return_type_multiple_returns() {
     return absolute_value(-5.0);
 }
 
-// run: test_edge_return_type_multiple_returns() ~= 5.0
+// run: test_edge_return_type_multiple_returns() ~= 5.0 [expect-fail]

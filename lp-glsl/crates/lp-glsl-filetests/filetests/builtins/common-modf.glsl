@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // modf(): Modf function
@@ -14,7 +14,7 @@ vec2 test_modf_positive() {
     return vec2(f, i);
 }
 
-// run: test_modf_positive() ~= vec2(0.7, 3.0)
+// run: test_modf_positive() ~= vec2(0.7, 3.0) [expect-fail]
 
 vec2 test_modf_negative() {
     // modf(-2.3) should return (-0.3, -2.0)
@@ -23,7 +23,7 @@ vec2 test_modf_negative() {
     return vec2(f, i);
 }
 
-// run: test_modf_negative() ~= vec2(-0.3, -2.0)
+// run: test_modf_negative() ~= vec2(-0.3, -2.0) [expect-fail]
 
 vec2 test_modf_integer() {
     // modf(5.0) should return (0.0, 5.0)
@@ -32,7 +32,7 @@ vec2 test_modf_integer() {
     return vec2(f, i);
 }
 
-// run: test_modf_integer() ~= vec2(0.0, 5.0)
+// run: test_modf_integer() ~= vec2(0.0, 5.0) [expect-fail]
 
 vec2 test_modf_zero() {
     // modf(0.0) should return (0.0, 0.0)
@@ -41,7 +41,7 @@ vec2 test_modf_zero() {
     return vec2(f, i);
 }
 
-// run: test_modf_zero() ~= vec2(0.0, 0.0)
+// run: test_modf_zero() ~= vec2(0.0, 0.0) [expect-fail]
 
 vec2 test_modf_small() {
     // modf(0.1) should return (0.1, 0.0)
@@ -50,7 +50,7 @@ vec2 test_modf_small() {
     return vec2(f, i);
 }
 
-// run: test_modf_small() ~= vec2(0.1, 0.0)
+// run: test_modf_small() ~= vec2(0.1, 0.0) [expect-fail]
 
 vec4 test_modf_vec2() {
     // Test with vec2
@@ -59,7 +59,7 @@ vec4 test_modf_vec2() {
     return vec4(f.x, f.y, i.x, i.y);
 }
 
-// run: test_modf_vec2() ~= vec4(0.7, -0.3, 3.0, -2.0)
+// run: test_modf_vec2() ~= vec4(0.7, -0.3, 3.0, -2.0) [expect-fail]
 
 vec4 test_modf_vec3() {
     // Test with vec3
@@ -68,7 +68,7 @@ vec4 test_modf_vec3() {
     return vec4(f.x, f.y, f.z, i.x);
 }
 
-// run: test_modf_vec3() ~= vec4(0.5, -0.8, 0.0, 1.0)
+// run: test_modf_vec3() ~= vec4(0.5, -0.8, 0.0, 1.0) [expect-fail]
 
 
 

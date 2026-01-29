@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Constructor: bool(float) - converts float to bool (0.0 -> false, non-zero -> true)

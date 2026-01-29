@@ -12,7 +12,7 @@ mod write;
 
 pub use read::read_lvalue;
 pub use resolve::resolve_lvalue;
-pub use types::LValue;
+pub use types::{LValue, PointerAccessPattern};
 pub use write::write_lvalue;
 
 use crate::frontend::codegen::context::CodegenContext;

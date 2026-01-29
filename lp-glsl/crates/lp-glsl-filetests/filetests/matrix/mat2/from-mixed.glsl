@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Mixed: mat2(vec2, float, float) - construct matrix from mixed types

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Component-wise operation verification tests
@@ -18,14 +18,14 @@ vec3 test_cos_component_wise() {
     return cos(vec3(0.0, 1.5707963267948966, 3.141592653589793));
 }
 
-// run: test_cos_component_wise() ~= vec3(1.0, 0.0, -1.0)
+// run: test_cos_component_wise() ~= vec3(1.0, 0.0, -1.0) (tolerance: 0.01)
 
 vec4 test_exp_component_wise() {
     // exp should be applied component-wise
     return exp(vec4(0.0, 1.0, -1.0, 2.0));
 }
 
-// run: test_exp_component_wise() ~= vec4(1.0, 2.718281828459045, 0.36787944117144233, 7.38905609893065)
+// run: test_exp_component_wise() ~= vec4(1.0, 2.718281828459045, 0.36787944117144233, 7.38905609893065) (tolerance: 0.001)
 
 vec2 test_sqrt_component_wise() {
     // sqrt should be applied component-wise

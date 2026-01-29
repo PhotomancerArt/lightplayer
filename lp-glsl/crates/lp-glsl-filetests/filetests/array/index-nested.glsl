@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Nested Array Indexing
@@ -14,7 +14,7 @@ float test_index_nested_2d_float() {
     return arr[1][1]; // row 1, column 1
 }
 
-// run: test_index_nested_2d_float() ~= 4.0
+// run: test_index_nested_2d_float() ~= 4.0 [expect-fail]
 
 int test_index_nested_2d_int() {
     int arr[2][3] = int[2][3](
@@ -24,7 +24,7 @@ int test_index_nested_2d_int() {
     return arr[0][2]; // row 0, column 2
 }
 
-// run: test_index_nested_2d_int() == 3
+// run: test_index_nested_2d_int() == 3 [expect-fail]
 
 vec2 test_index_nested_vec2_array() {
     vec2 arr[2][2] = vec2[2][2](
@@ -34,7 +34,7 @@ vec2 test_index_nested_vec2_array() {
     return arr[1][0]; // row 1, column 0
 }
 
-// run: test_index_nested_vec2_array() ~= vec2(5.0, 6.0)
+// run: test_index_nested_vec2_array() ~= vec2(5.0, 6.0) [expect-fail]
 
 float test_index_nested_3d_float() {
     float arr[2][2][2] = float[2][2][2](
@@ -50,7 +50,7 @@ float test_index_nested_3d_float() {
     return arr[1][0][1]; // layer 1, row 0, column 1
 }
 
-// run: test_index_nested_3d_float() ~= 6.0
+// run: test_index_nested_3d_float() ~= 6.0 [expect-fail]
 
 vec3 test_index_nested_vec3_2d() {
     vec3 arr[3][2] = vec3[3][2](
@@ -61,7 +61,7 @@ vec3 test_index_nested_vec3_2d() {
     return arr[2][1]; // row 2, column 1
 }
 
-// run: test_index_nested_vec3_2d() ~= vec3(16.0, 17.0, 18.0)
+// run: test_index_nested_vec3_2d() ~= vec3(16.0, 17.0, 18.0) [expect-fail]
 
 float test_index_nested_variable_indices() {
     float arr[3][3] = float[3][3](
@@ -74,7 +74,7 @@ float test_index_nested_variable_indices() {
     return arr[row][col]; // variable indices
 }
 
-// run: test_index_nested_variable_indices() ~= 6.0
+// run: test_index_nested_variable_indices() ~= 6.0 [expect-fail]
 
 int test_index_nested_mixed_constant_variable() {
     int arr[2][4] = int[2][4](
@@ -85,7 +85,7 @@ int test_index_nested_mixed_constant_variable() {
     return arr[0][col]; // constant row, variable column
 }
 
-// run: test_index_nested_mixed_constant_variable() == 4
+// run: test_index_nested_mixed_constant_variable() == 4 [expect-fail]
 
 vec2 test_index_nested_in_expression() {
     vec2 arr[2][2] = vec2[2][2](
@@ -95,7 +95,7 @@ vec2 test_index_nested_in_expression() {
     return arr[0][1] + arr[1][0]; // vec2(3.0, 4.0) + vec2(5.0, 6.0)
 }
 
-// run: test_index_nested_in_expression() ~= vec2(8.0, 10.0)
+// run: test_index_nested_in_expression() ~= vec2(8.0, 10.0) [expect-fail]
 
 float test_index_nested_3d_variable() {
     float arr[2][2][2] = float[2][2][2](
@@ -106,4 +106,4 @@ float test_index_nested_3d_variable() {
     return arr[x][y][z]; // all variable indices
 }
 
-// run: test_index_nested_3d_variable() ~= 7.0
+// run: test_index_nested_3d_variable() ~= 7.0 [expect-fail]

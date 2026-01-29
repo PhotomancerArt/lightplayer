@@ -385,7 +385,7 @@ impl GlslCompiler {
         let expected_param_count: usize = func
             .parameters
             .iter()
-            .map(|p| SignatureBuilder::count_parameters(&p.ty))
+            .map(|p| SignatureBuilder::count_parameters(&p.ty, p.qualifier))
             .sum::<usize>()
             + if uses_struct_return { 1 } else { 0 };
 
@@ -404,59 +404,113 @@ impl GlslCompiler {
         let mut param_idx = if uses_struct_return { 1 } else { 0 };
 
         for param in &func.parameters {
-            let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector() {
-                let count = param.ty.component_count().unwrap();
-                let mut vals = Vec::new();
-                for _ in 0..count {
-                    if param_idx >= block_params.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!(
-                                "not enough block parameters for function parameter `{}`",
-                                param.name
-                            ),
-                        ));
-                    }
-                    vals.push(block_params[param_idx]);
-                    param_idx += 1;
-                }
-                vals
-            } else if param.ty.is_matrix() {
-                let count = param.ty.matrix_element_count().unwrap();
-                let mut vals = Vec::new();
-                for _ in 0..count {
-                    if param_idx >= block_params.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!(
-                                "not enough block parameters for function parameter `{}`",
-                                param.name
-                            ),
-                        ));
-                    }
-                    vals.push(block_params[param_idx]);
-                    param_idx += 1;
-                }
-                vals
-            } else {
-                if param_idx >= block_params.len() {
-                    return Err(GlslError::new(
-                        ErrorCode::E0400,
-                        format!(
-                            "not enough block parameters for function parameter `{}`",
-                            param.name
-                        ),
-                    ));
-                }
-                let val = vec![block_params[param_idx]];
-                param_idx += 1;
-                val
-            };
+            use crate::semantic::functions::ParamQualifier;
 
-            // Declare parameter as variable and initialize
-            let vars = codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
-            for (var, val) in vars.iter().zip(param_vals) {
-                codegen_ctx.builder.def_var(*var, val);
+            match param.qualifier {
+                ParamQualifier::Out | ParamQualifier::InOut => {
+                    // Out/inout parameters: arrive as pointers
+                    if param_idx >= block_params.len() {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!(
+                                "not enough block parameters for function parameter `{}`",
+                                param.name
+                            ),
+                        ));
+                    }
+                    let pointer_val = block_params[param_idx];
+                    param_idx += 1;
+
+                    // For arrays: store pointer in array_ptr field
+                    // For non-arrays: also store pointer in array_ptr (even though not an array)
+                    if param.ty.is_array() {
+                        // Arrays: create VarInfo with array_ptr
+                        use crate::frontend::codegen::context::VarInfo;
+                        let var_info = VarInfo {
+                            cranelift_vars: Vec::new(),
+                            glsl_type: param.ty.clone(),
+                            array_ptr: Some(pointer_val),
+                            stack_slot: None,
+                        };
+                        if let Some(current_scope) = codegen_ctx.variable_scopes.last_mut() {
+                            current_scope.insert(param.name.clone(), var_info);
+                        }
+                    } else {
+                        // Non-arrays: declare variable and store pointer in array_ptr
+                        let _vars =
+                            codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
+
+                        // Store pointer in VarInfo (using array_ptr even though not an array)
+                        if let Some(current_scope) = codegen_ctx.variable_scopes.last_mut() {
+                            if let Some(info) = current_scope.remove(&param.name) {
+                                use crate::frontend::codegen::context::VarInfo;
+                                let updated_info = VarInfo {
+                                    array_ptr: Some(pointer_val),
+                                    ..info
+                                };
+                                current_scope.insert(param.name.clone(), updated_info);
+                            }
+                        }
+                    }
+                }
+                ParamQualifier::In => {
+                    // In parameters: arrive as values (existing behavior)
+                    let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector() {
+                        let count = param.ty.component_count().unwrap();
+                        let mut vals = Vec::new();
+                        for _ in 0..count {
+                            if param_idx >= block_params.len() {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "not enough block parameters for function parameter `{}`",
+                                        param.name
+                                    ),
+                                ));
+                            }
+                            vals.push(block_params[param_idx]);
+                            param_idx += 1;
+                        }
+                        vals
+                    } else if param.ty.is_matrix() {
+                        let count = param.ty.matrix_element_count().unwrap();
+                        let mut vals = Vec::new();
+                        for _ in 0..count {
+                            if param_idx >= block_params.len() {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "not enough block parameters for function parameter `{}`",
+                                        param.name
+                                    ),
+                                ));
+                            }
+                            vals.push(block_params[param_idx]);
+                            param_idx += 1;
+                        }
+                        vals
+                    } else {
+                        if param_idx >= block_params.len() {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                format!(
+                                    "not enough block parameters for function parameter `{}`",
+                                    param.name
+                                ),
+                            ));
+                        }
+                        let val = vec![block_params[param_idx]];
+                        param_idx += 1;
+                        val
+                    };
+
+                    // Declare parameter as variable and initialize
+                    let vars =
+                        codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
+                    for (var, val) in vars.iter().zip(param_vals) {
+                        codegen_ctx.builder.def_var(*var, val);
+                    }
+                }
             }
         }
 
@@ -558,7 +612,7 @@ impl GlslCompiler {
         let expected_param_count: usize = main_func
             .parameters
             .iter()
-            .map(|p| SignatureBuilder::count_parameters(&p.ty))
+            .map(|p| SignatureBuilder::count_parameters(&p.ty, p.qualifier))
             .sum::<usize>()
             + if uses_struct_return { 1 } else { 0 };
 

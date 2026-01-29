@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/vec3/fn-greater-than --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Greater Than: greaterThan(vec3, vec3) -> bvec3 (component-wise)

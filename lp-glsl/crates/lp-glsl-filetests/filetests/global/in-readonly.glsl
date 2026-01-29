@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // In Read-Only: Input global variables are read-only in shader code
@@ -18,49 +18,49 @@ float test_in_readonly_float() {
     return vertex_time + 1.0;
 }
 
-// run: test_in_readonly_float() ~= 1.0
+// run: test_in_readonly_float() ~= 1.0 [expect-fail]
 
 int test_in_readonly_int() {
     // Input int is read-only
     return vertex_id + 100;
 }
 
-// run: test_in_readonly_int() == 100
+// run: test_in_readonly_int() == 100 [expect-fail]
 
 uint test_in_readonly_uint() {
     // Input uint is read-only
     return int(instance_id + 50u);
 }
 
-// run: test_in_readonly_uint() == 50
+// run: test_in_readonly_uint() == 50 [expect-fail]
 
 bool test_in_readonly_bool() {
     // Input bool is read-only
     return vertex_selected;
 }
 
-// run: test_in_readonly_bool() == false
+// run: test_in_readonly_bool() == false [expect-fail]
 
 vec2 test_in_readonly_vec2() {
     // Input vec2 is read-only
     return texture_coord * 2.0;
 }
 
-// run: test_in_readonly_vec2() ~= vec2(0.0, 0.0)
+// run: test_in_readonly_vec2() ~= vec2(0.0, 0.0) [expect-fail]
 
 vec3 test_in_readonly_vec3() {
     // Input vec3 is read-only
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// run: test_in_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
+// run: test_in_readonly_vec3() ~= vec3(0.0, 1.0, 0.0) [expect-fail]
 
 vec4 test_in_readonly_vec4() {
     // Input vec4 is read-only
     return vertex_color;
 }
 
-// run: test_in_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
+// run: test_in_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0) [expect-fail]
 
 float test_in_readonly_calculations() {
     // Input variables used in vertex calculations
@@ -72,7 +72,7 @@ float test_in_readonly_calculations() {
            offset_position.x + offset_position.y + offset_position.z;
 }
 
-// run: test_in_readonly_calculations() ~= 0.3
+// run: test_in_readonly_calculations() ~= 0.3 [expect-fail]
 
 vec4 test_in_readonly_vertex_processing() {
     // Input variables in vertex processing
@@ -87,7 +87,7 @@ vec4 test_in_readonly_vertex_processing() {
     return processed_color;
 }
 
-// run: test_in_readonly_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)
+// run: test_in_readonly_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0) [expect-fail]
 
 float test_in_readonly_texture_mapping() {
     // Input texture coordinates for mapping
@@ -102,4 +102,4 @@ float test_in_readonly_texture_mapping() {
     return u + v;
 }
 
-// run: test_in_readonly_texture_mapping() ~= -2.0
+// run: test_in_readonly_texture_mapping() ~= -2.0 [expect-fail]

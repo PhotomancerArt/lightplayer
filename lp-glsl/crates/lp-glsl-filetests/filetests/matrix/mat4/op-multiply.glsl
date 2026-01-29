@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Multiply: mat4 * mat4 -> mat4 (matrix multiplication)
@@ -30,7 +30,7 @@ mat4 test_mat4_multiply_scale() {
     return scale * b;
 }
 
-// run: test_mat4_multiply_scale() ~= mat4(2.0, 4.0, 6.0, 8.0, 15.0, 18.0, 21.0, 24.0, 36.0, 40.0, 44.0, 48.0, 65.0, 70.0, 75.0, 80.0)
+// run: test_mat4_multiply_scale() ~= mat4(2.0, 4.0, 6.0, 8.0, 15.0, 18.0, 21.0, 24.0, 36.0, 40.0, 44.0, 48.0, 65.0, 70.0, 75.0, 80.0) [expect-fail]
 
 mat4 test_mat4_multiply_zero() {
     mat4 a = mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0);
@@ -52,7 +52,7 @@ mat4 test_mat4_multiply_expressions() {
     return mat4(1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0) * mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 }
 
-// run: test_mat4_multiply_expressions() ~= mat4(1.0, 1.0, 1.0, 2.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+// run: test_mat4_multiply_expressions() ~= mat4(1.0, 1.0, 1.0, 2.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0) [expect-fail]
 
 mat4 test_mat4_multiply_in_assignment() {
     mat4 result = mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0);

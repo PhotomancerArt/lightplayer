@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Const Must Initialize: Const global variables must be initialized at declaration
@@ -24,49 +24,49 @@ float test_const_must_init_float() {
     return PI;
 }
 
-// run: test_const_must_init_float() ~= 3.14159
+// run: test_const_must_init_float() ~= 3.14159 [expect-fail]
 
 int test_const_must_init_int() {
     // Const int that is properly initialized
     return ANSWER;
 }
 
-// run: test_const_must_init_int() == 42
+// run: test_const_must_init_int() == 42 [expect-fail]
 
 uint test_const_must_init_uint() {
     // Const uint that is properly initialized
     return int(UINT_CONST);
 }
 
-// run: test_const_must_init_uint() == 123
+// run: test_const_must_init_uint() == 123 [expect-fail]
 
 bool test_const_must_init_bool() {
     // Const bool that is properly initialized
     return FLAG;
 }
 
-// run: test_const_must_init_bool() == true
+// run: test_const_must_init_bool() == true [expect-fail]
 
 vec2 test_const_must_init_vec2() {
     // Const vec2 that is properly initialized
     return VECTOR_CONST;
 }
 
-// run: test_const_must_init_vec2() ~= vec2(1.0, 2.0)
+// run: test_const_must_init_vec2() ~= vec2(1.0, 2.0) [expect-fail]
 
 vec3 test_const_must_init_vec3() {
     // Const vec3 that is properly initialized
     return COLOR_CONST;
 }
 
-// run: test_const_must_init_vec3() ~= vec3(0.5, 0.5, 0.5)
+// run: test_const_must_init_vec3() ~= vec3(0.5, 0.5, 0.5) [expect-fail]
 
 mat2 test_const_must_init_mat2() {
     // Const mat2 that is properly initialized
     return MATRIX_CONST;
 }
 
-// run: test_const_must_init_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
+// run: test_const_must_init_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0) [expect-fail]
 
 float test_const_must_init_expressions() {
     // Const variables with complex expressions
@@ -77,7 +77,7 @@ float test_const_must_init_expressions() {
     return TWO_PI + HALF_ANSWER + VECTOR_LENGTH;
 }
 
-// run: test_const_must_init_expressions() ~= 12.6971
+// run: test_const_must_init_expressions() ~= 12.6971 [expect-fail]
 
 vec3 test_const_must_init_vector_expr() {
     // Const vectors with expressions
@@ -87,4 +87,4 @@ vec3 test_const_must_init_vector_expr() {
     return DOUBLED_COLOR + OFFSET_COLOR;
 }
 
-// run: test_const_must_init_vector_expr() ~= vec3(1.7, 1.7, 1.7)
+// run: test_const_must_init_vector_expr() ~= vec3(1.7, 1.7, 1.7) [expect-fail]

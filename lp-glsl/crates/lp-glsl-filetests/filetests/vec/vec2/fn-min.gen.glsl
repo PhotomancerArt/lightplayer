@@ -3,7 +3,7 @@
 //   lp-filetests-gen vec/vec2/fn-min --write
 //
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Min: min(vec2, vec2) -> vec2 (component-wise minimum)

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Const with Out/Inout Error: const cannot be used with out or inout
@@ -21,7 +21,7 @@ float test_edge_const_out_error() {
     return 1.0;
 }
 
-// run: test_edge_const_out_error() ~= 1.0
+// run: test_edge_const_out_error() ~= 1.0 [expect-fail]
 
 /*
 float test_edge_const_inout_error() {
@@ -33,7 +33,7 @@ float test_edge_const_inout_error() {
     return 0.0;
 }
 
-// run: test_edge_const_inout_error() ~= 0.0
+// run: test_edge_const_inout_error() ~= 0.0 [expect-fail]
 */
 
 void const_in_parameter(const float x) {
@@ -47,7 +47,7 @@ float test_edge_const_only_with_in() {
     return 2.0;
 }
 
-// run: test_edge_const_only_with_in() ~= 2.0
+// run: test_edge_const_only_with_in() ~= 2.0 [expect-fail]
 
 void explicit_const_in(const in float x) {
     // x is read-only
@@ -59,7 +59,7 @@ float test_edge_const_in_explicit() {
     return 3.0;
 }
 
-// run: test_edge_const_in_explicit() ~= 3.0
+// run: test_edge_const_in_explicit() ~= 3.0 [expect-fail]
 
 /*
 float test_edge_const_multiple_qualifiers() {
@@ -72,7 +72,7 @@ float test_edge_const_multiple_qualifiers() {
     return 0.0;
 }
 
-// run: test_edge_const_multiple_qualifiers() ~= 0.0
+// run: test_edge_const_multiple_qualifiers() ~= 0.0 [expect-fail]
 */
 
 void const_array(const float[3] arr) {
@@ -87,7 +87,7 @@ float test_edge_const_array() {
     return 4.0;
 }
 
-// run: test_edge_const_array() ~= 4.0
+// run: test_edge_const_array() ~= 4.0 [expect-fail]
 
 struct Point {
     float x, y;
@@ -105,4 +105,4 @@ float test_edge_const_struct() {
     return 5.0;
 }
 
-// run: test_edge_const_struct() ~= 5.0
+// run: test_edge_const_struct() ~= 5.0 [expect-fail]

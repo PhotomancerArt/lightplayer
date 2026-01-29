@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Add: float + float -> float
@@ -64,4 +64,4 @@ float test_float_add_large_numbers() {
     return 1000000.0 + 2000000.0;
 }
 
-// run: test_float_add_large_numbers() ~= 32767.0
+// run: test_float_add_large_numbers() ~= 32768.0

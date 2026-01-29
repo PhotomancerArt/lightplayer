@@ -7,8 +7,8 @@ pub fn parse_test_type(line: &str) -> Option<TestType> {
     let trimmed = line.trim();
     if trimmed == "// test compile" {
         Some(TestType::Compile)
-    } else if trimmed == "// test transform.fixed32" {
-        Some(TestType::TransformFixed32)
+    } else if trimmed == "// test transform.q32" {
+        Some(TestType::TransformQ32)
     } else if trimmed.starts_with("// test run") {
         Some(TestType::Run)
     } else {
@@ -32,12 +32,12 @@ mod tests {
     #[test]
     fn test_parse_test_type_transform() {
         assert_eq!(
-            parse_test_type("// test transform.fixed32"),
-            Some(TestType::TransformFixed32)
+            parse_test_type("// test transform.q32"),
+            Some(TestType::TransformQ32)
         );
         assert_eq!(
-            parse_test_type("  // test transform.fixed32  "),
-            Some(TestType::TransformFixed32)
+            parse_test_type("  // test transform.q32  "),
+            Some(TestType::TransformQ32)
         );
     }
 

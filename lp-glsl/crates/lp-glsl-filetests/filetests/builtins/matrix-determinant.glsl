@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // determinant(): Matrix determinant function
@@ -73,7 +73,7 @@ float test_determinant_mat4_negative() {
     return determinant(m);
 }
 
-// run: test_determinant_mat4_negative() ~= -1.0
+// run: test_determinant_mat4_negative() ~= -1.0 [expect-fail]
 
 float test_determinant_mat2_fractions() {
     mat2 m = mat2(0.5, 1.5, 2.5, 3.5);

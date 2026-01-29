@@ -1212,10 +1212,10 @@ impl GlslExecutable for GlslJitModule {
 
         // Check return type: I32 means fixed-point, F32 means native float
         // For struct return, we can't check the StructReturn parameter type (it's a pointer/I8)
-        // Instead, check the argument types - if arguments are I32, return is also I32 (Fixed32)
+        // Instead, check the argument types - if arguments are I32, return is also I32 (Q32)
         // Otherwise, check return registers if available
         let return_type = if uses_struct_return {
-            // Check if any non-StructReturn parameter is I32 (indicates Fixed32 format)
+            // Check if any non-StructReturn parameter is I32 (indicates Q32 format)
             let has_i32_params =
                 sig.params.iter().skip(1).any(|p| {
                     p.purpose != ArgumentPurpose::StructReturn && p.value_type == types::I32
@@ -1460,7 +1460,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Fixed32,
+            decimal_format: DecimalFormat::Q32,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1480,7 +1480,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Fixed32,
+            decimal_format: DecimalFormat::Q32,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1498,12 +1498,12 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Fixed32,
+            decimal_format: DecimalFormat::Q32,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
         let result = executable.call_f32("main", &[]).expect("Execution failed");
-        // Fixed32 format: allow tolerance for fixed-point conversion precision
+        // Q32 format: allow tolerance for fixed-point conversion precision
         assert!((result - 3.14).abs() < 0.01);
     }
 
@@ -1517,7 +1517,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Fixed32,
+            decimal_format: DecimalFormat::Q32,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");

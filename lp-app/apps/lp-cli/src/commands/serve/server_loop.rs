@@ -6,10 +6,15 @@ use anyhow::Result;
 use lp_model::{Message, TransportError};
 use lp_server::LpServer;
 use lp_shared::transport::ServerTransport;
+use std::time::{Duration, Instant};
+
+/// Target frame time for 60 FPS (16.67ms per frame)
+const TARGET_FRAME_TIME_MS: u32 = 16;
 
 /// Run the server main loop
 ///
 /// Processes incoming messages from clients and routes responses back.
+/// Ticks continuously at ~60 FPS to advance frames regardless of message activity.
 /// This function accepts `LpServer` and transport as parameters for testability.
 ///
 /// # Arguments
@@ -17,12 +22,14 @@ use lp_shared::transport::ServerTransport;
 /// * `server` - The LpServer instance
 /// * `transport` - The server transport (handles connections)
 pub fn run_server_loop<T: ServerTransport>(mut server: LpServer, mut transport: T) -> Result<()> {
-    // Main server loop
-    loop {
-        // Collect incoming messages from all connections
-        let mut incoming_messages = Vec::new();
+    let mut last_tick = Instant::now();
 
-        // Poll transport for messages (non-blocking)
+    // Main server loop - runs at ~60 FPS
+    loop {
+        let frame_start = Instant::now();
+
+        // Collect incoming messages from all connections (non-blocking)
+        let mut incoming_messages = Vec::new();
         loop {
             match transport.receive() {
                 Ok(Some(client_msg)) => {
@@ -45,28 +52,48 @@ pub fn run_server_loop<T: ServerTransport>(mut server: LpServer, mut transport: 
             }
         }
 
-        // Process messages if any
-        if !incoming_messages.is_empty() {
-            match server.tick(16, incoming_messages) {
-                Ok(responses) => {
-                    // Send responses back via transport
-                    for response in responses {
-                        if let Message::Server(server_msg) = response {
-                            if let Err(e) = transport.send(server_msg) {
-                                eprintln!("Failed to send response: {e}");
-                            }
+        // Calculate delta time since last tick
+        let delta_time = last_tick.elapsed();
+        let delta_ms = delta_time.as_millis().min(u32::MAX as u128) as u32;
+
+        // Measure frame processing time
+        let tick_start = Instant::now();
+
+        // Always tick the server to advance frames, even if there are no messages
+        // This ensures continuous frame progression at ~60 FPS
+        match server.tick(delta_ms.max(1), incoming_messages) {
+            Ok(responses) => {
+                // Record frame processing time (in microseconds)
+                let frame_time_us = tick_start.elapsed().as_micros() as u64;
+                server.set_last_frame_time(frame_time_us);
+
+                // Send responses back via transport
+                for response in responses {
+                    if let Message::Server(server_msg) = response {
+                        if let Err(e) = transport.send(server_msg) {
+                            eprintln!("Failed to send response: {e}");
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Server error: {e}");
-                    // Continue running despite errors
-                }
+            }
+            Err(e) => {
+                eprintln!("Server error: {e}");
+                // Continue running despite errors
             }
         }
 
-        // Small sleep to avoid busy-waiting
-        // In a real implementation, we might want to use a more sophisticated approach
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        last_tick = frame_start;
+
+        // Sleep to maintain ~60 FPS
+        // Calculate how long to sleep to hit target frame time
+        let frame_duration = frame_start.elapsed();
+        if frame_duration < Duration::from_millis(TARGET_FRAME_TIME_MS as u64) {
+            let sleep_duration =
+                Duration::from_millis(TARGET_FRAME_TIME_MS as u64) - frame_duration;
+            std::thread::sleep(sleep_duration);
+        } else {
+            // Frame took longer than target - yield to avoid busy-waiting
+            std::thread::yield_now();
+        }
     }
 }

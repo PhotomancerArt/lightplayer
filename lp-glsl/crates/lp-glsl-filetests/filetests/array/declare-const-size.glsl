@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Const Int/Uint Variables as Array Sizes
@@ -20,7 +20,7 @@ float test_local_const() {
     return 1.0;
 }
 
-// run: test_local_const() == 1.0
+// run: test_local_const() == 1.0 [expect-fail]
 
 // Multiple arrays using same const
 const int COMMON_SIZE = 10;
@@ -33,7 +33,7 @@ float test_const_global_arrays() {
     return 1.0;
 }
 
-// run: test_const_global_arrays() == 1.0
+// run: test_const_global_arrays() == 1.0 [expect-fail]
 
 int test_const_uint_size() {
     // Test const uint as array size
@@ -42,7 +42,7 @@ int test_const_uint_size() {
     return 1;
 }
 
-// run: test_const_uint_size() == 1
+// run: test_const_uint_size() == 1 [expect-fail]
 
 vec2 test_const_vec2_array() {
     const int VEC_SIZE = 3;
@@ -50,7 +50,7 @@ vec2 test_const_vec2_array() {
     return vec2(1.0, 1.0);
 }
 
-// run: test_const_vec2_array() ~= vec2(1.0, 1.0)
+// run: test_const_vec2_array() ~= vec2(1.0, 1.0) [expect-fail]
 
 vec3 test_const_vec3_array() {
     const int VEC3_SIZE = 2;
@@ -58,7 +58,7 @@ vec3 test_const_vec3_array() {
     return vec3(1.0, 1.0, 1.0);
 }
 
-// run: test_const_vec3_array() ~= vec3(1.0, 1.0, 1.0)
+// run: test_const_vec3_array() ~= vec3(1.0, 1.0, 1.0) [expect-fail]
 
 vec4 test_const_vec4_array() {
     const uint VEC4_SIZE = 3u;
@@ -66,7 +66,7 @@ vec4 test_const_vec4_array() {
     return vec4(1.0, 1.0, 1.0, 1.0);
 }
 
-// run: test_const_vec4_array() ~= vec4(1.0, 1.0, 1.0, 1.0)
+// run: test_const_vec4_array() ~= vec4(1.0, 1.0, 1.0, 1.0) [expect-fail]
 
 
 

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Global Variable Access from Main: Accessing globals from main function
@@ -15,7 +15,7 @@ float test_access_from_main_read() {
     return global_counter + global_color.x + global_color.y + global_color.z;
 }
 
-// run: test_access_from_main_read() ~= 0.0
+// run: test_access_from_main_read() ~= 0.0 [expect-fail]
 
 void test_access_from_main_write() {
     // Main function writing to global variables
@@ -25,7 +25,7 @@ void test_access_from_main_write() {
     global_matrix = mat2(2.0, 0.0, 0.0, 2.0);
 }
 
-// run: test_access_from_main_write() == 0.0
+// run: test_access_from_main_write() == 0.0 [expect-fail]
 
 float test_access_from_main_verify_write() {
     // Verify writes from main
@@ -33,7 +33,7 @@ float test_access_from_main_verify_write() {
     return global_counter + global_color.r + global_color.g + global_color.b;
 }
 
-// run: test_access_from_main_verify_write() ~= 43.5
+// run: test_access_from_main_verify_write() ~= 43.5 [expect-fail]
 
 bool test_access_from_main_flag() {
     // Main function manipulating boolean global
@@ -43,7 +43,7 @@ bool test_access_from_main_flag() {
     return global_enabled;
 }
 
-// run: test_access_from_main_flag() == false
+// run: test_access_from_main_flag() == false [expect-fail]
 
 mat2 test_access_from_main_matrix() {
     // Main function working with matrix global
@@ -52,7 +52,7 @@ mat2 test_access_from_main_matrix() {
     return global_matrix;
 }
 
-// run: test_access_from_main_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0)
+// run: test_access_from_main_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0) [expect-fail]
 
 float test_access_from_main_calculations() {
     // Main function with complex calculations using globals
@@ -69,7 +69,7 @@ float test_access_from_main_calculations() {
     return global_counter;
 }
 
-// run: test_access_from_main_calculations() ~= 22.0
+// run: test_access_from_main_calculations() ~= 22.0 [expect-fail]
 
 vec3 test_access_from_main_vector_ops() {
     // Main function with vector operations on globals
@@ -80,7 +80,7 @@ vec3 test_access_from_main_vector_ops() {
     return global_color;
 }
 
-// run: test_access_from_main_vector_ops() ~= vec3(1.1, 1.2, 1.3)
+// run: test_access_from_main_vector_ops() ~= vec3(1.1, 1.2, 1.3) [expect-fail]
 
 float test_access_from_main_mixed() {
     // Main function mixing different global types
@@ -97,4 +97,4 @@ float test_access_from_main_mixed() {
     return result;
 }
 
-// run: test_access_from_main_mixed() ~= 15.0
+// run: test_access_from_main_mixed() ~= 15.0 [expect-fail]

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // To Float: float(bvec2) - converts first component (false -> 0.0, true -> 1.0)

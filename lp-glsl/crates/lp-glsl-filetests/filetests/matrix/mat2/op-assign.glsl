@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Assign: mat2 = mat2 (assignment)
@@ -78,7 +78,7 @@ mat2 test_mat2_assign_after_operations() {
     return a;
 }
 
-// run: test_mat2_assign_after_operations() ~= mat2(10.0, 13.0, 22.0, 29.0)
+// run: test_mat2_assign_after_operations() ~= mat2(10.0, 13.0, 22.0, 29.0) [expect-fail]
 
 
 

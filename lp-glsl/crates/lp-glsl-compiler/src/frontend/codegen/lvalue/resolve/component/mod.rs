@@ -21,7 +21,7 @@ mod variable;
 use array_element::resolve_component_on_array_element;
 use matrix_column::resolve_component_on_matrix_column;
 use nested::resolve_component_on_component;
-use variable::resolve_component_on_variable;
+use variable::{resolve_component_on_pointer_based, resolve_component_on_variable};
 
 /// Resolve component access (Dot expression) to an LValue
 pub fn resolve_component_lvalue<M: cranelift_module::Module>(
@@ -39,6 +39,7 @@ pub fn resolve_component_lvalue<M: cranelift_module::Module>(
         LValue::Component { result_ty, .. } => result_ty.clone(),
         LValue::MatrixColumn { result_ty, .. } => result_ty.clone(),
         LValue::ArrayElement { element_ty, .. } => element_ty.clone(),
+        LValue::PointerBased { base_ty, .. } => base_ty.clone(),
         LValue::MatrixElement { .. } | LValue::VectorElement { .. } => {
             // Can't access components of a scalar
             let span = extract_span_from_expr(base_expr);
@@ -78,9 +79,13 @@ pub fn resolve_component_lvalue<M: cranelift_module::Module>(
     match base_lvalue {
         LValue::Variable {
             vars, ty: base_ty, ..
-        } => Ok(resolve_component_on_variable(
-            vars, base_ty, indices, result_ty,
-        )),
+        } => {
+            // Regular variable: use SSA vars
+            // Out/inout parameters now use PointerBased variant directly
+            Ok(resolve_component_on_variable(
+                vars, base_ty, indices, result_ty,
+            ))
+        }
         LValue::Component {
             base_vars, base_ty, ..
         } => Ok(resolve_component_on_component(
@@ -111,6 +116,15 @@ pub fn resolve_component_lvalue<M: cranelift_module::Module>(
             element_size_bytes,
             indices,
         )),
+        LValue::PointerBased { ptr, base_ty, .. } => {
+            // Component access on PointerBased (out/inout parameter)
+            Ok(resolve_component_on_pointer_based(
+                ptr,
+                base_ty.clone(),
+                indices,
+                result_ty,
+            ))
+        }
         LValue::MatrixElement { .. } | LValue::VectorElement { .. } => unreachable!(), // Already handled above
     }
 }

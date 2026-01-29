@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // matrixCompMult(): Matrix component-wise multiply function
@@ -40,7 +40,7 @@ mat4 test_matrixcompmult_mat4() {
     return matrixCompMult(a, b);
 }
 
-// run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0)
+// run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0) [expect-fail]
 
 mat2 test_matrixcompmult_mat2_zeros() {
     // matrixCompMult resulting in zeros

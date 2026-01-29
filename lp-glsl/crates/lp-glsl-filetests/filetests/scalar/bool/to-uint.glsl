@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Conversion: uint(bool) - converts bool to uint (false -> 0u, true -> 1u)

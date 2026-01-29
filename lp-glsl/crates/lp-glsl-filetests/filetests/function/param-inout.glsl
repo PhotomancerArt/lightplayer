@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Inout Parameters: Copy in and copy out
@@ -72,7 +72,7 @@ float test_param_inout_modify_components() {
     return vec.x + vec.y + vec.z;
 }
 
-// run: test_param_inout_modify_components() ~= 7.5
+// run: test_param_inout_modify_components() ~= 8.5
 
 void toggle(inout bool flag) {
     flag = !flag;

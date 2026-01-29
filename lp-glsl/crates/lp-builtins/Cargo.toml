@@ -14,3 +14,7 @@ default = []
 std = []
 test = ["std"]
 
+[dependencies]
+lpfx-impl-macro = { path = "../lpfx-impl-macro" }
+
+[dev-dependencies]

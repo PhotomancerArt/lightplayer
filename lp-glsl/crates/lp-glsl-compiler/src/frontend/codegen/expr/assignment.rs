@@ -115,6 +115,37 @@ pub fn emit_assignment_typed<M: cranelift_module::Module>(
                 ));
             }
         }
+        crate::frontend::codegen::lvalue::LValue::PointerBased { access_pattern, .. } => {
+            match access_pattern {
+                crate::frontend::codegen::lvalue::PointerAccessPattern::Direct {
+                    component_count,
+                } => *component_count,
+                crate::frontend::codegen::lvalue::PointerAccessPattern::Component {
+                    indices,
+                    ..
+                } => indices.len(),
+                crate::frontend::codegen::lvalue::PointerAccessPattern::ArrayElement {
+                    element_ty,
+                    component_indices,
+                    ..
+                } => {
+                    if let Some(indices) = component_indices {
+                        indices.len()
+                    } else if element_ty.is_scalar() {
+                        1
+                    } else if element_ty.is_vector() {
+                        element_ty.component_count().unwrap()
+                    } else if element_ty.is_matrix() {
+                        element_ty.matrix_element_count().unwrap()
+                    } else {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!("unsupported array element type: {element_ty:?}"),
+                        ));
+                    }
+                }
+            }
+        }
     };
 
     if expected_count != rhs_vals.len() {

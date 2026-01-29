@@ -134,8 +134,8 @@ fn parse_clif_expectations(lines: &[&String], test_types: &[TestType]) -> Result
 
     if let Some(start) = clif_boundaries.transform_start {
         let end = clif_boundaries.transform_end.unwrap_or(lines.len());
-        if test_types.contains(&TestType::TransformFixed32) {
-            expectations.post_transform_fixed32 = Some(extract_clif_from_lines(&lines[start..end]));
+        if test_types.contains(&TestType::TransformQ32) {
+            expectations.post_transform_q32 = Some(extract_clif_from_lines(&lines[start..end]));
         }
     }
 
@@ -170,7 +170,7 @@ fn find_local_clif_boundaries(lines: &[&String], test_types: &[TestType]) -> Loc
     // If no markers found, try to split by blank comment lines
     if compile_start.is_none() && transform_start.is_none() {
         let has_compile = test_types.contains(&TestType::Compile);
-        let has_transform = test_types.contains(&TestType::TransformFixed32);
+        let has_transform = test_types.contains(&TestType::TransformQ32);
 
         if has_compile && has_transform {
             // Split by blank comment line

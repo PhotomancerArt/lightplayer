@@ -17,14 +17,32 @@ use alloc::{format, string::String, vec::Vec};
 
 /// Inline map_value utility
 /// Resolves aliases in the old function before mapping to ensure correct value translation
-fn map_value(old_func: &Function, value_map: &HashMap<Value, Value>, old_value: Value) -> Value {
+///
+/// Returns an error if the value is not found in value_map, as Values are function-scoped
+/// and we cannot use Values from the old function in the new function.
+fn map_value(
+    old_func: &Function,
+    value_map: &HashMap<Value, Value>,
+    old_value: Value,
+) -> Result<Value, GlslError> {
     // Resolve aliases in the old function first
     // This is critical: if old_value is an alias (e.g., v10 -> v16), we need to resolve
     // it to the actual value (v16) before looking it up in the value_map
     let resolved_value = old_func.dfg.resolve_aliases(old_value);
 
     // Now map the resolved value
-    *value_map.get(&resolved_value).unwrap_or(&resolved_value)
+    // Values are function-scoped, so we MUST find it in value_map - we cannot use the old value
+    value_map.get(&resolved_value).copied().ok_or_else(|| {
+        GlslError::new(
+            ErrorCode::E0301,
+            format!(
+                "Value {resolved_value:?} (resolved from {old_value:?}) not found in value_map. \
+                 This indicates a bug in instruction copying - all values must be copied/transformed \
+                 before they are used. The value may be from a block that hasn't been processed yet, \
+                 or it may be a constant that needs to be pre-created."
+            ),
+        )
+    })
 }
 
 /// Copy an instruction from old function to new function.
@@ -38,7 +56,7 @@ fn map_value(old_func: &Function, value_map: &HashMap<Value, Value>, old_value: 
 ///
 /// * `func_ref_map` - Optional mapping from function names to FuncRefs (currently unused,
 ///   kept for API compatibility with TransformContext).
-/// * `map_param_type` - Callback to map block parameter types (e.g., F32 → I32 for fixed32 transform)
+/// * `map_param_type` - Callback to map block parameter types (e.g., F32 → I32 for q32 transform)
 pub fn copy_instruction(
     old_func: &Function,
     old_inst: Inst,
@@ -95,7 +113,10 @@ pub fn copy_instruction(
                 .collect();
             let new_args: Vec<BlockArg> = old_args
                 .iter()
-                .map(|&v| map_value(old_func, value_map, v).into())
+                .map(|&v| map_value(old_func, value_map, v))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|v| v.into())
                 .collect();
 
             // Emit jump
@@ -108,7 +129,7 @@ pub fn copy_instruction(
             ..
         } => {
             // Map condition
-            let condition = map_value(old_func, value_map, *arg);
+            let condition = map_value(old_func, value_map, *arg)?;
 
             // Extract blocks from BlockCalls
             let old_then_block = block_then_call.block(&old_func.dfg.value_lists);
@@ -153,11 +174,17 @@ pub fn copy_instruction(
 
             let new_then_args: Vec<BlockArg> = old_then_args
                 .iter()
-                .map(|&v| map_value(old_func, value_map, v).into())
+                .map(|&v| map_value(old_func, value_map, v))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|v| v.into())
                 .collect();
             let new_else_args: Vec<BlockArg> = old_else_args
                 .iter()
-                .map(|&v| map_value(old_func, value_map, v).into())
+                .map(|&v| map_value(old_func, value_map, v))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|v| v.into())
                 .collect();
 
             // Emit brif
@@ -172,7 +199,7 @@ pub fn copy_instruction(
         }
         InstructionData::BranchTable { arg, table, .. } => {
             // Map condition
-            let condition = map_value(old_func, value_map, *arg);
+            let condition = map_value(old_func, value_map, *arg)?;
 
             // Get old jump table
             let old_table = &old_func.dfg.jump_tables[*table];
@@ -201,7 +228,10 @@ pub fn copy_instruction(
                 .collect();
             let new_default_args: Vec<BlockArg> = old_default_args
                 .iter()
-                .map(|&v| map_value(old_func, value_map, v).into())
+                .map(|&v| map_value(old_func, value_map, v))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|v| v.into())
                 .collect();
             let new_default_block_call = builder
                 .func
@@ -233,7 +263,10 @@ pub fn copy_instruction(
                     .collect();
                 let new_args: Vec<BlockArg> = old_args
                     .iter()
-                    .map(|&v| map_value(old_func, value_map, v).into())
+                    .map(|&v| map_value(old_func, value_map, v))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .map(|v| v.into())
                     .collect();
                 let new_block_call = builder.func.dfg.block_call(new_block, &new_args);
                 new_table_blocks.push(new_block_call);
@@ -251,7 +284,7 @@ pub fn copy_instruction(
         }
         InstructionData::CondTrap { code, arg, .. } => {
             // Trap instructions (trapnz, trapz): map the condition value and emit trap
-            let condition = map_value(old_func, value_map, *arg);
+            let condition = map_value(old_func, value_map, *arg)?;
             if opcode == cranelift_codegen::ir::Opcode::Trapnz {
                 builder.ins().trapnz(condition, *code);
             } else if opcode == cranelift_codegen::ir::Opcode::Trapz {
@@ -276,7 +309,7 @@ pub fn copy_instruction(
                 let new_args: Vec<Value> = old_args
                     .iter()
                     .map(|&v| map_value(old_func, value_map, v))
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 // Emit return
                 builder.ins().return_(&new_args);
@@ -294,10 +327,10 @@ pub fn copy_instruction(
             let new_args: Vec<Value> = old_args
                 .iter()
                 .map(|&v| map_value(old_func, value_map, v))
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
 
             // Map FuncRef: import the external function into the builder's function context
-            // Similar to fixed32 transform: import signature first, then handle external names
+            // Similar to q32 transform: import signature first, then handle external names
             let old_ext_func = &old_func.dfg.ext_funcs[*func_ref];
             let old_sig_ref = old_ext_func.signature;
 
@@ -325,7 +358,7 @@ pub fn copy_instruction(
                         })?;
                     // Declare the imported user function in the new function
                     // Note: FuncId remapping for transforms is handled at the transform level
-                    // (e.g., in identity/transform.rs and fixed32/converters/calls.rs)
+                    // (e.g., in identity/transform.rs and q32/converters/calls.rs)
                     let new_user_ref = builder
                         .func
                         .declare_imported_user_function(user_name.clone());
@@ -374,11 +407,11 @@ pub fn copy_instruction(
             let new_sig_ref = builder.func.import_signature(old_sig.clone());
 
             let old_args = args.as_slice(&old_func.dfg.value_lists);
-            let func_addr = map_value(old_func, value_map, old_args[0]);
+            let func_addr = map_value(old_func, value_map, old_args[0])?;
             let call_args: Vec<Value> = old_args[1..]
                 .iter()
                 .map(|&v| map_value(old_func, value_map, v))
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
 
             // Emit indirect call with imported signature reference
             let call_inst = builder
@@ -421,13 +454,13 @@ pub fn copy_instruction(
     let ctrl_type = if opcode == cranelift_codegen::ir::Opcode::Fcmp {
         // Fcmp has float operands, so use the first operand's type
         let first_arg = old_func.dfg.inst_args(old_inst)[0];
-        let mapped_first_arg = map_value(old_func, value_map, first_arg);
+        let mapped_first_arg = map_value(old_func, value_map, first_arg)?;
         let operand_type = builder.func.dfg.value_type(mapped_first_arg);
         map_param_type(operand_type)
     } else if opcode.constraints().requires_typevar_operand() {
         // Get type from first operand
         let first_arg = old_func.dfg.inst_args(old_inst)[0];
-        let mapped_first_arg = map_value(old_func, value_map, first_arg);
+        let mapped_first_arg = map_value(old_func, value_map, first_arg)?;
         let operand_type = builder.func.dfg.value_type(mapped_first_arg);
         map_param_type(operand_type)
     } else {
@@ -441,7 +474,7 @@ pub fn copy_instruction(
     let mapped_args: Vec<Value> = old_args
         .iter()
         .map(|&v| map_value(old_func, value_map, v))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Reconstruct instruction data with mapped operands
     let new_inst_data = match inst_data {

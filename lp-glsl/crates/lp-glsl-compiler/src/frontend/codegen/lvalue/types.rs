@@ -2,7 +2,31 @@
 
 use crate::semantic::types::Type as GlslType;
 use alloc::vec::Vec;
+use cranelift_codegen::ir::Value;
 use cranelift_frontend::Variable;
+
+/// Describes how to access data from a pointer
+#[derive(Debug, Clone)]
+pub enum PointerAccessPattern {
+    /// Direct access: entire variable/vector/matrix
+    /// Examples: `arr` (array variable), `v` (out/inout vec3 param)
+    Direct { component_count: usize },
+    /// Component access: `v.x`, `arr[i].xy`
+    /// Examples: `v.x` (out/inout param component), `arr[0].x` (array element component)
+    Component {
+        indices: Vec<usize>,
+        result_ty: GlslType,
+    },
+    /// Array element access: `arr[i]`
+    /// Examples: `arr[0]`, `arr[idx]`
+    ArrayElement {
+        index: Option<usize>,     // Compile-time constant
+        index_val: Option<Value>, // Runtime index
+        element_ty: GlslType,
+        element_size_bytes: usize,
+        component_indices: Option<Vec<usize>>, // For arr[i].x
+    },
+}
 
 /// Represents a modifiable location (LValue) in GLSL
 ///
@@ -49,6 +73,12 @@ pub enum LValue {
         element_size_bytes: usize,
         component_indices: Option<Vec<usize>>, // For component access like arr[i].x
     },
+    /// Pointer-based storage: arrays, out/inout params, future structs
+    PointerBased {
+        ptr: Value,
+        base_ty: GlslType,
+        access_pattern: PointerAccessPattern,
+    },
 }
 
 impl LValue {
@@ -83,6 +113,35 @@ impl LValue {
                     }
                 } else {
                     element_ty.clone()
+                }
+            }
+            LValue::PointerBased {
+                base_ty,
+                access_pattern,
+                ..
+            } => {
+                match access_pattern {
+                    PointerAccessPattern::Direct { .. } => base_ty.clone(),
+                    PointerAccessPattern::Component { result_ty, .. } => result_ty.clone(),
+                    PointerAccessPattern::ArrayElement {
+                        element_ty,
+                        component_indices,
+                        ..
+                    } => {
+                        // Similar to ArrayElement variant logic
+                        if let Some(indices) = component_indices {
+                            if indices.len() == 1 {
+                                element_ty.vector_base_type().unwrap_or(element_ty.clone())
+                            } else {
+                                element_ty
+                                    .vector_base_type()
+                                    .and_then(|base| GlslType::vector_type(&base, indices.len()))
+                                    .unwrap_or(element_ty.clone())
+                            }
+                        } else {
+                            element_ty.clone()
+                        }
+                    }
                 }
             }
         }

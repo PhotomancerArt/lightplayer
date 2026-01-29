@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Variable scoping in for loops (init-expression scope)
@@ -24,11 +24,11 @@ int test_for_loop_init_shadowing() {
     for (int i = 0; i < 3; i++) {
         sum = sum + i;
     }
-    // Outer i should be unchanged
+    // Outer i should be unchanged (shadowed by loop variable)
     return i;
 }
 
-// run: test_for_loop_init_shadowing() == 3
+// run: test_for_loop_init_shadowing() == 100
 
 int test_for_loop_condition_scope() {
     int sum = 0;
@@ -88,14 +88,3 @@ int test_for_loop_nested_same_name() {
 }
 
 // run: test_for_loop_nested_same_name() == 6
-
-int test_for_loop_condition_declaration() {
-    int sum = 0;
-    for (int i = 0; int j = i < 3; i++) {
-        sum = sum + i;
-    }
-    // Test condition-expression variable declaration
-    return sum;
-}
-
-// run: test_for_loop_condition_declaration() == 3

@@ -211,7 +211,7 @@ fn sync_client_view_from_server(
 
     let response = project
         .runtime()
-        .get_changes(client_view.frame_id, &client_view.detail_specifier())
+        .get_changes(client_view.frame_id, &client_view.detail_specifier(), None)
         .expect("get_changes should succeed");
     client_view
         .apply_changes(&response)

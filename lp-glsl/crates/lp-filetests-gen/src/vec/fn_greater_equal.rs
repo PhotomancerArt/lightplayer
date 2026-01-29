@@ -18,7 +18,7 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// target riscv32.fixed32\n");
+    content.push_str("// target riscv32.q32\n");
     content.push_str("\n");
 
     // Add section comment

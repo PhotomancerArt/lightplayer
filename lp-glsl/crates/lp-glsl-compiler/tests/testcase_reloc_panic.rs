@@ -54,20 +54,19 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 }
 "#;
 
-    // Test with Fixed32 format (the only supported format)
-    let options_fixed32 = GlslOptions {
+    // Test with Q32 format (the only supported format)
+    let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Fixed32,
+        decimal_format: DecimalFormat::Q32,
     };
 
-    // This should not panic - Fixed32 format goes through transform that converts TestCase names
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        glsl_jit(glsl, options_fixed32)
-    }));
+    // This should not panic - Q32 format goes through transform that converts TestCase names
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| glsl_jit(glsl, options_q32)));
 
     match result {
         Ok(Ok(_executable)) => {
-            // Success - compilation worked with Fixed32 format
+            // Success - compilation worked with Q32 format
             // This confirms the bug is fixed
         }
         Ok(Err(e)) => {

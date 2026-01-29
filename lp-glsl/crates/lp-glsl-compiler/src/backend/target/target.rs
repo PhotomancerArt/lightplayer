@@ -92,26 +92,7 @@ impl Target {
                 isa,
             } => {
                 if isa.is_none() {
-                    #[cfg(feature = "std")]
-                    {
-                        use cranelift_native;
-                        let isa_builder = cranelift_native::builder().map_err(|e| {
-                            GlslError::new(
-                                ErrorCode::E0400,
-                                format!("host machine is not supported: {e}"),
-                            )
-                        })?;
-                        *isa = Some(isa_builder.finish(_flags.clone()).map_err(|e| {
-                            GlslError::new(ErrorCode::E0400, format!("ISA creation failed: {e}"))
-                        })?);
-                    }
-                    #[cfg(not(feature = "std"))]
-                    {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            "std feature required for host JIT",
-                        ));
-                    }
+                    *isa = Some(create_host_isa(_flags.clone())?);
                 }
                 Ok(isa.as_ref().unwrap())
             }
@@ -155,6 +136,14 @@ fn default_riscv32_flags() -> Result<Flags, GlslError> {
                 format!("failed to set enable_multi_ret_implicit_sret: {e}"),
             )
         })?;
+    flag_builder
+        .set("regalloc_algorithm", "single_pass")
+        .map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("failed to set regalloc_algorithm: {e}"),
+            )
+        })?;
 
     Ok(settings::Flags::new(flag_builder))
 }
@@ -183,12 +172,52 @@ fn default_host_flags() -> Result<Flags, GlslError> {
                 format!("failed to set enable_multi_ret_implicit_sret: {e}"),
             )
         })?;
+    flag_builder
+        .set("regalloc_algorithm", "single_pass")
+        .map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("failed to set regalloc_algorithm: {e}"),
+            )
+        })?;
 
     Ok(settings::Flags::new(flag_builder))
 }
 
+/// Helper: Create ISA for host JIT target
+/// In std mode: uses cranelift_native for auto-detection
+/// In no_std mode: only supports riscv32, uses architecture-specific builder
+fn create_host_isa(flags: Flags) -> Result<OwnedTargetIsa, GlslError> {
+    #[cfg(feature = "std")]
+    {
+        use cranelift_native;
+        let isa_builder = cranelift_native::builder().map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("host machine is not supported: {e}"),
+            )
+        })?;
+        isa_builder
+            .finish(flags)
+            .map_err(|e| GlslError::new(ErrorCode::E0400, format!("ISA creation failed: {e}")))
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        // In no_std mode, only support riscv32
+        let triple = riscv32_triple();
+        use cranelift_codegen::isa::riscv32::isa_builder;
+        isa_builder(triple).finish(flags).map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("ISA creation failed (no_std mode only supports riscv32): {e}"),
+            )
+        })
+    }
+}
+
 /// Helper: Get RISC-V 32-bit triple
-#[cfg(feature = "emulator")]
+/// Available in both emulator and no_std modes
+#[allow(dead_code, reason = "Used in no_std mode via create_host_isa()")]
 fn riscv32_triple() -> target_lexicon::Triple {
     use target_lexicon::{
         Architecture, BinaryFormat, Environment, OperatingSystem, Riscv32Architecture, Triple,
@@ -196,7 +225,7 @@ fn riscv32_triple() -> target_lexicon::Triple {
     };
 
     Triple {
-        architecture: Architecture::Riscv32(Riscv32Architecture::Riscv32imac),
+        architecture: Architecture::Riscv32(Riscv32Architecture::Riscv32imafc),
         vendor: Vendor::Unknown,
         operating_system: OperatingSystem::None_,
         environment: Environment::Unknown,

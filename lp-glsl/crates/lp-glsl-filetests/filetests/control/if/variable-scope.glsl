@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Variable scoping within if blocks
@@ -30,12 +30,12 @@ int test_if_variable_shadowing() {
     int x = 5;
     if (true) {
         int x = 10;
-        // Inner x shadows outer x
+        // Inner x shadows outer x, so outer x remains unchanged
     }
     return x;
 }
 
-// run: test_if_variable_shadowing() == 10
+// run: test_if_variable_shadowing() == 5
 
 int test_if_variable_independent() {
     int x = 0;

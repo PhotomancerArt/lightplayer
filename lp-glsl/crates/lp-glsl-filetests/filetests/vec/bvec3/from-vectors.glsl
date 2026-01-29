@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // From Vectors: bvec3(bvec2, bool), bvec3(bool, bvec2) - vector combinations

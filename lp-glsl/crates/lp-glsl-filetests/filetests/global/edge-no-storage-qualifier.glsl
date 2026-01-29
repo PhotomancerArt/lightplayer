@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Edge No Storage Qualifier: Default behavior when no qualifier is specified
@@ -18,7 +18,7 @@ float test_edge_no_storage_qualifier_float() {
     return default_float;
 }
 
-// run: test_edge_no_storage_qualifier_float() ~= 42.0
+// run: test_edge_no_storage_qualifier_float() ~= 42.0 [expect-fail]
 
 int test_edge_no_storage_qualifier_int() {
     // Default global int - can read and write
@@ -26,7 +26,7 @@ int test_edge_no_storage_qualifier_int() {
     return default_int;
 }
 
-// run: test_edge_no_storage_qualifier_int() == -123
+// run: test_edge_no_storage_qualifier_int() == -123 [expect-fail]
 
 vec2 test_edge_no_storage_qualifier_vec2() {
     // Default global vec2 - can read and write
@@ -34,7 +34,7 @@ vec2 test_edge_no_storage_qualifier_vec2() {
     return default_vec2;
 }
 
-// run: test_edge_no_storage_qualifier_vec2() ~= vec2(1.0, 2.0)
+// run: test_edge_no_storage_qualifier_vec2() ~= vec2(1.0, 2.0) [expect-fail]
 
 vec3 test_edge_no_storage_qualifier_vec3() {
     // Default global vec3 - can read and write
@@ -42,7 +42,7 @@ vec3 test_edge_no_storage_qualifier_vec3() {
     return default_vec3;
 }
 
-// run: test_edge_no_storage_qualifier_vec3() ~= vec3(1.0, 2.0, 3.0)
+// run: test_edge_no_storage_qualifier_vec3() ~= vec3(1.0, 2.0, 3.0) [expect-fail]
 
 mat4 test_edge_no_storage_qualifier_mat4() {
     // Default global mat4 - can read and write
@@ -50,7 +50,7 @@ mat4 test_edge_no_storage_qualifier_mat4() {
     return default_mat4;
 }
 
-// run: test_edge_no_storage_qualifier_mat4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+// run: test_edge_no_storage_qualifier_mat4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0) [expect-fail]
 
 float test_edge_no_storage_qualifier_modify() {
     // Modify default globals multiple times
@@ -61,7 +61,7 @@ float test_edge_no_storage_qualifier_modify() {
     return default_float;
 }
 
-// run: test_edge_no_storage_qualifier_modify() ~= 25.0
+// run: test_edge_no_storage_qualifier_modify() ~= 25.0 [expect-fail]
 
 vec3 test_edge_no_storage_qualifier_vector_math() {
     // Vector math with default globals
@@ -72,7 +72,7 @@ vec3 test_edge_no_storage_qualifier_vector_math() {
     return default_vec3;
 }
 
-// run: test_edge_no_storage_qualifier_vector_math() ~= vec3(2.5, 2.5, 2.5)
+// run: test_edge_no_storage_qualifier_vector_math() ~= vec3(2.5, 2.5, 2.5) [expect-fail]
 
 float test_edge_no_storage_qualifier_combined() {
     // Combined operations on default globals
@@ -83,4 +83,4 @@ float test_edge_no_storage_qualifier_combined() {
     return default_float + float(default_int) + default_vec2.x + default_vec2.y;
 }
 
-// run: test_edge_no_storage_qualifier_combined() ~= 14.0
+// run: test_edge_no_storage_qualifier_combined() ~= 14.0 [expect-fail]

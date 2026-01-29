@@ -793,18 +793,69 @@ fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, 
 }
 
 /// Parse a matrix constructor expression into a matrix array
-/// Matrices are constructed from column vectors (e.g., mat2(vec2(1.0, 2.0), vec2(3.0, 4.0)))
+/// Supports two formats:
+/// 1. Column vectors: mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))
+/// 2. Flat scalars: mat2(1.0, 2.0, 3.0, 4.0) - fills in column-major order
 /// Returns a fixed-size array that will be converted to the appropriate matrix type
 fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], GlslError> {
     let mut matrix = [[0.0f32; 4]; 4];
 
-    // Matrix constructors take column vectors
+    // Check if all arguments are scalars (flat constructor format)
+    let expected_scalar_count = dim * dim;
+    let all_scalars = args.iter().all(|arg| {
+        matches!(
+            arg,
+            Expr::FloatConst(_, _)
+                | Expr::IntConst(_, _)
+                | Expr::Unary(glsl::syntax::UnaryOp::Minus, _, _)
+        )
+    });
+
+    if all_scalars && args.len() == expected_scalar_count {
+        // Flat scalar constructor: mat4(1.0, 2.0, ..., 16.0)
+        // Values are filled in column-major order
+        let mut components = Vec::new();
+        for arg in args {
+            match arg {
+                Expr::FloatConst(f, _) => components.push(*f),
+                Expr::IntConst(n, _) => components.push(*n as f32),
+                Expr::Unary(glsl::syntax::UnaryOp::Minus, unary_expr, _) => match **unary_expr {
+                    Expr::FloatConst(f, _) => components.push(-f),
+                    Expr::IntConst(n, _) => components.push(-(n as f32)),
+                    _ => {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            "invalid matrix constructor scalar argument",
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(GlslError::new(
+                        ErrorCode::E0400,
+                        "invalid matrix constructor scalar argument",
+                    ));
+                }
+            }
+        }
+
+        // Fill matrix in column-major order: components[col*dim + row] -> matrix[col][row]
+        for col_idx in 0..dim {
+            for row_idx in 0..dim {
+                matrix[col_idx][row_idx] = components[col_idx * dim + row_idx];
+            }
+        }
+
+        return Ok(matrix);
+    }
+
+    // Column vector constructor: mat2(vec2(...), vec2(...))
     if args.len() != dim {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
-                "matrix constructor expects {} column vectors, got {}",
+                "matrix constructor expects {} column vectors or {} scalars, got {}",
                 dim,
+                expected_scalar_count,
                 args.len()
             ),
         ));
@@ -846,7 +897,7 @@ fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], 
                     } else {
                         return Err(GlslError::new(
                             ErrorCode::E0400,
-                            "matrix constructor requires column vectors",
+                            "matrix constructor requires column vectors or scalars",
                         ));
                     }
                 } else {
@@ -859,7 +910,7 @@ fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], 
             _ => {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
-                    "matrix constructor requires column vectors",
+                    "matrix constructor requires column vectors or scalars",
                 ));
             }
         }

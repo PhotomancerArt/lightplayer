@@ -14,12 +14,12 @@ mod tests {
     #[test]
     fn test_parse_target_directive() {
         assert_eq!(
-            parse_target_directive("// target riscv32.fixed32"),
-            Some("riscv32.fixed32".to_string())
+            parse_target_directive("// target riscv32.q32"),
+            Some("riscv32.q32".to_string())
         );
         assert_eq!(
-            parse_target_directive("  // target riscv32.fixed32  "),
-            Some("riscv32.fixed32".to_string())
+            parse_target_directive("  // target riscv32.q32  "),
+            Some("riscv32.q32".to_string())
         );
         assert_eq!(
             parse_target_directive("// target riscv32.float"),
@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn test_parse_target_directive_invalid() {
         assert_eq!(parse_target_directive("// target"), None);
-        assert_eq!(parse_target_directive("target riscv32.fixed32"), None);
+        assert_eq!(parse_target_directive("target riscv32.q32"), None);
         assert_eq!(parse_target_directive("// target "), None);
         assert_eq!(parse_target_directive(""), None);
     }

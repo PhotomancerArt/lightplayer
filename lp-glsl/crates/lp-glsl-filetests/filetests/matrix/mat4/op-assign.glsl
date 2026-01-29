@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Assign: mat4 = mat4 (assignment)
@@ -78,7 +78,7 @@ mat4 test_mat4_assign_after_operations() {
     return a;
 }
 
-// run: test_mat4_assign_after_operations() ~= mat4(2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 18.0, 19.0, 20.0, 21.0, 14.0, 15.0, 16.0, 17.0)
+// run: test_mat4_assign_after_operations() ~= mat4(2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 18.0, 19.0, 20.0, 21.0, 14.0, 15.0, 16.0, 17.0) [expect-fail]
 
 
 

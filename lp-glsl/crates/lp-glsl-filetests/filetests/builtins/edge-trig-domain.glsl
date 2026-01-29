@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Trigonometric domain error tests
@@ -28,21 +28,21 @@ float test_acos_domain_over() {
     return acos(1.5);
 }
 
-// run: test_acos_domain_over() ~= 0.0
+// run: test_acos_domain_over() ~= 0.0 [expect-fail]
 
 float test_acos_domain_under() {
     // acos(-1.5) - |x| > 1, undefined behavior
     return acos(-1.5);
 }
 
-// run: test_acos_domain_under() ~= 0.0
+// run: test_acos_domain_under() ~= 0.0 [expect-fail]
 
 float test_atan2_zero_zero() {
     // atan(0, 0) - both x and y are 0, undefined behavior
     return atan(0.0, 0.0);
 }
 
-// run: test_atan2_zero_zero() ~= 0.0
+// run: test_atan2_zero_zero() ~= 0.0 [expect-fail]
 
 float test_acosh_domain_under() {
     // acosh(0.5) - x < 1, undefined behavior

@@ -14,14 +14,28 @@ pub fn parse_run_directive_line(line: &str) -> Option<&str> {
 
 /// Parse a single `// run:` line into a `RunDirective`.
 pub fn parse_run_directive(line: &str, line_number: usize) -> Result<RunDirective> {
+    // Check for [expect-fail] marker at the end and strip it first
+    let (line_without_marker, expect_fail) = if line.trim_end().ends_with("[expect-fail]") {
+        let without_marker = line
+            .trim_end()
+            .strip_suffix("[expect-fail]")
+            .unwrap()
+            .trim_end();
+        (without_marker, true)
+    } else {
+        (line, false)
+    };
+
     // Parse format: <expression> == <expected> or <expression> ~= <expected> [ (tolerance: <value>) ]
-    let (comparison, expr, expected_with_tolerance) = if let Some(pos) = line.rfind(" == ") {
-        let expr = line[..pos].trim();
-        let expected = line[pos + 4..].trim();
+    let (comparison, expr, expected_with_tolerance) = if let Some(pos) =
+        line_without_marker.rfind(" == ")
+    {
+        let expr = line_without_marker[..pos].trim();
+        let expected = line_without_marker[pos + 4..].trim();
         (ComparisonOp::Exact, expr, expected)
-    } else if let Some(pos) = line.rfind(" ~= ") {
-        let expr = line[..pos].trim();
-        let expected = line[pos + 4..].trim();
+    } else if let Some(pos) = line_without_marker.rfind(" ~= ") {
+        let expr = line_without_marker[..pos].trim();
+        let expected = line_without_marker[pos + 4..].trim();
         (ComparisonOp::Approx, expr, expected)
     } else {
         anyhow::bail!("invalid run directive format at line {line_number}: expected '==' or '~='");
@@ -62,6 +76,7 @@ pub fn parse_run_directive(line: &str, line_number: usize) -> Result<RunDirectiv
         expected_str: expected.to_string(),
         tolerance,
         line_number,
+        expect_fail,
     })
 }
 
@@ -132,5 +147,42 @@ mod tests {
         assert!(parse_run_directive("test()", 1).is_err());
         assert!(parse_run_directive("test() = 1", 1).is_err());
         assert!(parse_run_directive("", 1).is_err());
+    }
+
+    #[test]
+    fn test_parse_run_directive_with_expect_fail() {
+        let dir = parse_run_directive("test() == 1 [expect-fail]", 5).unwrap();
+        assert_eq!(dir.expression_str, "test()");
+        assert_eq!(dir.comparison, ComparisonOp::Exact);
+        assert_eq!(dir.expected_str, "1");
+        assert_eq!(dir.expect_fail, true);
+        assert_eq!(dir.line_number, 5);
+    }
+
+    #[test]
+    fn test_parse_run_directive_with_expect_fail_and_tolerance() {
+        let dir = parse_run_directive("test() ~= 1.0 (tolerance: 0.001) [expect-fail]", 6).unwrap();
+        assert_eq!(dir.expression_str, "test()");
+        assert_eq!(dir.comparison, ComparisonOp::Approx);
+        assert_eq!(dir.expected_str, "1.0");
+        assert_eq!(dir.tolerance, Some(0.001));
+        assert_eq!(dir.expect_fail, true);
+        assert_eq!(dir.line_number, 6);
+    }
+
+    #[test]
+    fn test_parse_run_directive_with_expect_fail_and_comment() {
+        let dir = parse_run_directive("test() == 1 // comment [expect-fail]", 7).unwrap();
+        assert_eq!(dir.expression_str, "test()");
+        assert_eq!(dir.comparison, ComparisonOp::Exact);
+        assert_eq!(dir.expected_str, "1");
+        assert_eq!(dir.expect_fail, true);
+        assert_eq!(dir.line_number, 7);
+    }
+
+    #[test]
+    fn test_parse_run_directive_without_expect_fail() {
+        let dir = parse_run_directive("test() == 1", 8).unwrap();
+        assert_eq!(dir.expect_fail, false);
     }
 }

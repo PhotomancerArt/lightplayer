@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Not Equal: mat4 != mat4 -> bool (aggregate inequality)

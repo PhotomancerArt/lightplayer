@@ -40,10 +40,20 @@ impl Target {
             )),
             Target::HostJit { .. } => {
                 // HostJit creates JITModule
-                Ok(ModuleBuilder::JIT(JITBuilder::with_isa(
-                    isa,
-                    default_libcall_names(),
-                )))
+                #[allow(
+                    unused_mut,
+                    reason = "Builder needs to be mutable for no_std memory provider configuration"
+                )]
+                let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
+
+                // In no_std mode, set default memory provider
+                #[cfg(not(feature = "std"))]
+                {
+                    use crate::backend::memory::AllocJitMemoryProvider;
+                    builder.memory_provider(alloc::boxed::Box::new(AllocJitMemoryProvider::new()));
+                }
+
+                Ok(ModuleBuilder::JIT(builder))
             }
         }
     }
@@ -52,7 +62,20 @@ impl Target {
     /// This allows Rv32Emu to create JITModule (for embedded JIT) instead of ObjectModule
     pub fn create_jit_builder(&mut self) -> Result<JITBuilder, GlslError> {
         let isa = self.create_isa()?.clone();
-        Ok(JITBuilder::with_isa(isa, default_libcall_names()))
+        #[allow(
+            unused_mut,
+            reason = "Builder needs to be mutable for no_std memory provider configuration"
+        )]
+        let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
+
+        // In no_std mode, set default memory provider
+        #[cfg(not(feature = "std"))]
+        {
+            use crate::backend::memory::AllocJitMemoryProvider;
+            builder.memory_provider(alloc::boxed::Box::new(AllocJitMemoryProvider::new()));
+        }
+
+        Ok(builder)
     }
 }
 

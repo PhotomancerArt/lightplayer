@@ -61,6 +61,11 @@ pub fn emit_function_call<M: cranelift_module::Module>(
         return emit_builtin_call_expr(ctx, func_name, args, span.clone());
     }
 
+    // Check if it's an LPFX function
+    if crate::frontend::semantic::lpfx::lpfx_fn_registry::is_lpfx_fn(func_name) {
+        return emit_lp_lib_fn_call_expr(ctx, func_name, args, span.clone());
+    }
+
     // User-defined function
     emit_user_function_call(ctx, func_name, args, span.clone())
 }
@@ -97,6 +102,175 @@ fn emit_builtin_call_expr<M: cranelift_module::Module>(
     // Delegate to built-in implementation and add span to any errors
     match ctx.emit_builtin_call(name, translated_args) {
         Ok(result) => Ok(result),
+        Err(mut error) => {
+            // Add location and span_text if not already present
+            if error.location.is_none() {
+                error = error.with_location(source_span_to_location(&call_span));
+            }
+            Err(ctx.add_span_to_error(error, &call_span))
+        }
+    }
+}
+
+fn emit_lp_lib_fn_call_expr<M: cranelift_module::Module>(
+    ctx: &mut CodegenContext<'_, M>,
+    name: &str,
+    args: &[glsl::syntax::Expr],
+    call_span: glsl::syntax::SourceSpan,
+) -> Result<(Vec<cranelift_codegen::ir::Value>, GlslType), GlslError> {
+    use crate::frontend::codegen::constants::F32_SIZE_BYTES;
+    use crate::frontend::codegen::lvalue::{read_lvalue, resolve_lvalue};
+    use crate::semantic::functions::ParamQualifier;
+
+    // Get function signature to check for out/inout parameters
+    let (_, arg_types) = prepare_function_arguments(ctx, args)?;
+    let func = crate::frontend::semantic::lpfx::lpfx_fn_registry::find_lpfx_fn(name, &arg_types)
+        .ok_or_else(|| {
+            GlslError::new(
+                crate::error::ErrorCode::E0400,
+                format!("Unknown LPFX function: {name}"),
+            )
+            .with_location(source_span_to_location(&call_span))
+        })?;
+
+    // Validate LPFX function call before codegen
+    match crate::frontend::semantic::lpfx::lpfx_fn_registry::check_lpfx_fn_call(name, &arg_types) {
+        Ok(_return_type) => {
+            // Validation passed, proceed with codegen
+        }
+        Err(err_msg) => {
+            // Convert validation error to GlslError
+            let error = GlslError::new(crate::error::ErrorCode::E0114, err_msg)
+                .with_location(source_span_to_location(&call_span));
+            return Err(ctx.add_span_to_error(error, &call_span));
+        }
+    }
+
+    // Prepare arguments: handle out/inout by getting addresses, in by evaluating expressions
+    let mut translated_args = Vec::new();
+    let mut out_inout_args = Vec::new();
+    let pointer_type = ctx.gl_module.module_internal().isa().pointer_type();
+
+    for (arg_expr, param) in args.iter().zip(func.glsl_sig.parameters.iter()) {
+        match param.qualifier {
+            ParamQualifier::Out | ParamQualifier::InOut => {
+                // Out/inout: resolve as lvalue and get address
+                let lvalue = resolve_lvalue(ctx, arg_expr).map_err(|mut err| {
+                    if err.message.contains("not a valid LValue") {
+                        err.message = format!(
+                            "out/inout parameter requires an lvalue (variable, array element, etc.), but got an expression"
+                        );
+                    }
+                    err
+                })?;
+
+                // For arrays: use existing array pointer directly (no copy-back needed)
+                let stack_slot_ptr = if param.ty.is_array() {
+                    match &lvalue {
+                        crate::frontend::codegen::lvalue::LValue::PointerBased { ptr, .. } => {
+                            // Out/inout arrays use PointerBased variant
+                            *ptr
+                        }
+                        crate::frontend::codegen::lvalue::LValue::Variable { .. } => {
+                            // Regular arrays: extract variable name from expression to look up array_ptr
+                            if let glsl::syntax::Expr::Variable(ident, _) = arg_expr {
+                                if let Some(var_info) = ctx.lookup_var_info(&ident.name) {
+                                    if let Some(arr_ptr) = var_info.array_ptr {
+                                        // Use existing array pointer - function writes directly to array
+                                        arr_ptr
+                                    } else {
+                                        return Err(GlslError::new(
+                                            ErrorCode::E0400,
+                                            format!(
+                                                "Array variable {} does not have array pointer",
+                                                ident.name
+                                            ),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(GlslError::new(
+                                        ErrorCode::E0400,
+                                        format!("Variable {} not found", ident.name),
+                                    ));
+                                }
+                            } else {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    "Array out/inout parameter must be array variable, not array element",
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                "Array out/inout parameter must be array variable, not array element",
+                            ));
+                        }
+                    }
+                } else {
+                    // Non-array: create temporary stack slot
+                    let size_bytes = if param.ty.is_vector() {
+                        let component_count = param.ty.component_count().unwrap();
+                        component_count * F32_SIZE_BYTES
+                    } else if param.ty.is_matrix() {
+                        let element_count = param.ty.matrix_element_count().unwrap();
+                        element_count * F32_SIZE_BYTES
+                    } else {
+                        F32_SIZE_BYTES
+                    };
+
+                    // Allocate stack slot for out/inout parameter
+                    let stack_slot = ctx.builder.func.create_sized_stack_slot(
+                        cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            size_bytes as u32,
+                            crate::frontend::codegen::constants::F32_ALIGN_SHIFT,
+                        ),
+                    );
+                    let ptr = ctx.builder.ins().stack_addr(pointer_type, stack_slot, 0);
+
+                    // For inout: copy current value to stack slot before call
+                    if param.qualifier == ParamQualifier::InOut {
+                        let (current_vals, _) = read_lvalue(ctx, &lvalue)?;
+                        let flags = cranelift_codegen::ir::MemFlags::trusted();
+                        for (i, &val) in current_vals.iter().enumerate() {
+                            let offset = (i * F32_SIZE_BYTES) as i32;
+                            ctx.builder.ins().store(flags, val, ptr, offset);
+                        }
+                    }
+
+                    ptr
+                };
+
+                // Pass pointer as argument
+                translated_args.push((vec![stack_slot_ptr], param.ty.clone()));
+
+                // Store info for copy-back after call (only for non-arrays, arrays are written directly)
+                if !param.ty.is_array() {
+                    out_inout_args.push(OutInoutArgInfo {
+                        lvalue,
+                        param_ty: param.ty.clone(),
+                        stack_slot_ptr,
+                    });
+                }
+            }
+            ParamQualifier::In => {
+                // In: evaluate expression normally
+                let (vals, ty) = ctx.emit_expr_typed(arg_expr)?;
+                translated_args.push((vals, ty));
+            }
+        }
+    }
+
+    // Delegate to LP library function implementation
+    let result = ctx.emit_lp_lib_fn_call(name, translated_args);
+
+    // Copy back out/inout parameters
+    copy_back_out_parameters(ctx, &out_inout_args)?;
+
+    // Return result with span handling
+    match result {
+        Ok((result_vals, return_type)) => Ok((result_vals, return_type)),
         Err(mut error) => {
             // Add location and span_text if not already present
             if error.location.is_none() {
@@ -171,13 +345,40 @@ fn lookup_function_signature<M: cranelift_module::Module>(
 }
 
 /// Validate that function call arguments can be coerced to parameter types
+/// Also validates that out/inout arguments are lvalues
 fn validate_function_call<M: cranelift_module::Module>(
-    ctx: &CodegenContext<'_, M>,
+    ctx: &mut CodegenContext<'_, M>,
     func_sig: &crate::frontend::semantic::functions::FunctionSignature,
+    args: &[glsl::syntax::Expr],
     arg_types: &[GlslType],
     name: &str,
     call_span: &glsl::syntax::SourceSpan,
 ) -> Result<(), GlslError> {
+    use crate::frontend::codegen::lvalue::resolve_lvalue;
+    use crate::semantic::functions::ParamQualifier;
+
+    // Validate out/inout arguments are lvalues
+    for (param, arg_expr) in func_sig.parameters.iter().zip(args) {
+        match param.qualifier {
+            ParamQualifier::Out | ParamQualifier::InOut => {
+                // Try to resolve as lvalue - this will fail with a good error if not an lvalue
+                resolve_lvalue(ctx, arg_expr).map_err(|mut err| {
+                    // Improve error message for out/inout parameters
+                    if err.message.contains("not a valid LValue") {
+                        err.message = format!(
+                            "out/inout parameter requires an lvalue (variable, array element, etc.), but got an expression"
+                        );
+                    }
+                    err
+                })?;
+            }
+            ParamQualifier::In => {
+                // In parameters don't need lvalue validation
+            }
+        }
+    }
+
+    // Validate type compatibility
     for (param, arg_ty) in func_sig.parameters.iter().zip(arg_types) {
         let arg_base = if arg_ty.is_vector() {
             arg_ty.vector_base_type().unwrap()
@@ -269,68 +470,254 @@ fn setup_struct_return_buffer<M: cranelift_module::Module>(
     Ok(Some(ctx.builder.ins().stack_addr(pointer_type, slot, 0)))
 }
 
+/// Information about out/inout arguments for copy-back after call
+struct OutInoutArgInfo {
+    lvalue: crate::frontend::codegen::lvalue::LValue,
+    param_ty: GlslType,
+    stack_slot_ptr: cranelift_codegen::ir::Value,
+}
+
 /// Prepare call arguments with coercion
+/// Returns call arguments and information about out/inout parameters for copy-back
 fn prepare_call_arguments<M: cranelift_module::Module>(
     ctx: &mut CodegenContext<'_, M>,
     func_sig: &crate::frontend::semantic::functions::FunctionSignature,
-    arg_vals_flat: &[cranelift_codegen::ir::Value],
+    args: &[glsl::syntax::Expr],
     arg_types: &[GlslType],
     return_buffer_ptr: Option<cranelift_codegen::ir::Value>,
     call_span: &glsl::syntax::SourceSpan,
-) -> Result<Vec<cranelift_codegen::ir::Value>, GlslError> {
+) -> Result<(Vec<cranelift_codegen::ir::Value>, Vec<OutInoutArgInfo>), GlslError> {
+    use crate::frontend::codegen::constants::F32_SIZE_BYTES;
+    use crate::frontend::codegen::lvalue::{read_lvalue, resolve_lvalue};
+    use crate::semantic::functions::ParamQualifier;
+
     let mut call_args = Vec::new();
+    let mut out_inout_args = Vec::new();
 
     // Add StructReturn parameter first if present
     if let Some(buffer_ptr) = return_buffer_ptr {
         call_args.push(buffer_ptr);
     }
 
-    // Add all normal parameters (expanded from GLSL params)
-    let mut arg_val_idx = 0;
+    // Add all parameters
     for (glsl_param_idx, param) in func_sig.parameters.iter().enumerate() {
+        let arg_expr = &args[glsl_param_idx];
         let arg_ty = &arg_types[glsl_param_idx];
+        let pointer_type = ctx.gl_module.module_internal().isa().pointer_type();
 
-        let component_count = if param.ty.is_vector() {
-            param.ty.component_count().unwrap()
-        } else if param.ty.is_matrix() {
-            param.ty.matrix_element_count().unwrap()
+        match param.qualifier {
+            ParamQualifier::Out | ParamQualifier::InOut => {
+                // Out/inout parameters: validate argument is an lvalue, then resolve and get address
+                // Try to resolve as lvalue - this will fail with a good error if not an lvalue
+                let lvalue = resolve_lvalue(ctx, arg_expr).map_err(|mut err| {
+                    // Improve error message for out/inout parameters
+                    if err.message.contains("not a valid LValue") {
+                        err.message = format!(
+                            "out/inout parameter requires an lvalue (variable, array element, etc.), but got an expression"
+                        );
+                    }
+                    err
+                })?;
+
+                // For arrays: use existing array pointer directly (no copy-back needed)
+                let stack_slot_ptr = if param.ty.is_array() {
+                    match &lvalue {
+                        crate::frontend::codegen::lvalue::LValue::PointerBased { ptr, .. } => {
+                            // Out/inout arrays use PointerBased variant
+                            *ptr
+                        }
+                        crate::frontend::codegen::lvalue::LValue::Variable { .. } => {
+                            // Regular arrays: extract variable name from expression to look up array_ptr
+                            if let glsl::syntax::Expr::Variable(ident, _) = arg_expr {
+                                if let Some(var_info) = ctx.lookup_var_info(&ident.name) {
+                                    if let Some(arr_ptr) = var_info.array_ptr {
+                                        // Use existing array pointer - function writes directly to array
+                                        arr_ptr
+                                    } else {
+                                        return Err(GlslError::new(
+                                            ErrorCode::E0400,
+                                            format!(
+                                                "Array variable {} does not have array pointer",
+                                                ident.name
+                                            ),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(GlslError::new(
+                                        ErrorCode::E0400,
+                                        format!("Variable {} not found", ident.name),
+                                    ));
+                                }
+                            } else {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    "Array out/inout parameter must be array variable, not array element",
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                "Array out/inout parameter must be array variable, not array element",
+                            ));
+                        }
+                    }
+                } else {
+                    // Non-array: create temporary stack slot
+                    let size_bytes = if param.ty.is_vector() {
+                        let component_count = param.ty.component_count().unwrap();
+                        component_count * F32_SIZE_BYTES
+                    } else if param.ty.is_matrix() {
+                        let element_count = param.ty.matrix_element_count().unwrap();
+                        element_count * F32_SIZE_BYTES
+                    } else {
+                        F32_SIZE_BYTES
+                    };
+
+                    // Allocate stack slot for out/inout parameter
+                    let stack_slot = ctx.builder.func.create_sized_stack_slot(
+                        cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            size_bytes as u32,
+                            crate::frontend::codegen::constants::F32_ALIGN_SHIFT,
+                        ),
+                    );
+                    let ptr = ctx.builder.ins().stack_addr(pointer_type, stack_slot, 0);
+
+                    // For inout: copy current value to stack slot before call
+                    if param.qualifier == ParamQualifier::InOut {
+                        let (current_vals, _) = read_lvalue(ctx, &lvalue)?;
+
+                        let flags = cranelift_codegen::ir::MemFlags::trusted();
+                        for (i, &val) in current_vals.iter().enumerate() {
+                            let offset = (i * F32_SIZE_BYTES) as i32;
+                            ctx.builder.ins().store(flags, val, ptr, offset);
+                        }
+                    }
+
+                    ptr
+                };
+
+                // Pass pointer as argument
+                call_args.push(stack_slot_ptr);
+
+                // Store info for copy-back after call (only for non-arrays, arrays are written directly)
+                if !param.ty.is_array() {
+                    out_inout_args.push(OutInoutArgInfo {
+                        lvalue,
+                        param_ty: param.ty.clone(),
+                        stack_slot_ptr,
+                    });
+                }
+            }
+            ParamQualifier::In => {
+                // In parameters: evaluate expression and expand to components (existing behavior)
+                let (arg_vals_flat, _) = ctx.emit_expr_typed(arg_expr)?;
+                let mut arg_val_idx = 0;
+
+                let component_count = if param.ty.is_vector() {
+                    param.ty.component_count().unwrap()
+                } else if param.ty.is_matrix() {
+                    param.ty.matrix_element_count().unwrap()
+                } else {
+                    1
+                };
+
+                let arg_base = if arg_ty.is_vector() {
+                    arg_ty.vector_base_type().unwrap()
+                } else {
+                    arg_ty.clone()
+                };
+                let param_base = if param.ty.is_vector() {
+                    param.ty.vector_base_type().unwrap()
+                } else {
+                    param.ty.clone()
+                };
+
+                for _ in 0..component_count {
+                    if arg_val_idx >= arg_vals_flat.len() {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!("Not enough argument values for parameter {glsl_param_idx}"),
+                        ));
+                    }
+
+                    let arg_val = arg_vals_flat[arg_val_idx];
+                    let converted = coercion::coerce_to_type_with_location(
+                        ctx,
+                        arg_val,
+                        &arg_base,
+                        &param_base,
+                        Some(call_span.clone()),
+                    )?;
+                    call_args.push(converted);
+                    arg_val_idx += 1;
+                }
+            }
+        }
+    }
+
+    Ok((call_args, out_inout_args))
+}
+
+/// Copy back values from out/inout parameters to original lvalues
+fn copy_back_out_parameters<M: cranelift_module::Module>(
+    ctx: &mut CodegenContext<'_, M>,
+    out_inout_args: &[OutInoutArgInfo],
+) -> Result<(), GlslError> {
+    use crate::frontend::codegen::constants::F32_SIZE_BYTES;
+    use crate::frontend::codegen::lvalue::write_lvalue;
+
+    let flags = cranelift_codegen::ir::MemFlags::trusted();
+
+    for arg_info in out_inout_args {
+        // Load values from stack slot
+        let component_count = if arg_info.param_ty.is_vector() {
+            arg_info.param_ty.component_count().unwrap()
+        } else if arg_info.param_ty.is_matrix() {
+            arg_info.param_ty.matrix_element_count().unwrap()
         } else {
             1
         };
 
-        let arg_base = if arg_ty.is_vector() {
-            arg_ty.vector_base_type().unwrap()
+        let base_cranelift_ty = if arg_info.param_ty.is_vector() {
+            arg_info
+                .param_ty
+                .vector_base_type()
+                .unwrap()
+                .to_cranelift_type()
+                .map_err(|e| {
+                    GlslError::new(
+                        ErrorCode::E0400,
+                        format!("Failed to convert type: {}", e.message),
+                    )
+                })?
+        } else if arg_info.param_ty.is_matrix() {
+            cranelift_codegen::ir::types::F32
         } else {
-            arg_ty.clone()
-        };
-        let param_base = if param.ty.is_vector() {
-            param.ty.vector_base_type().unwrap()
-        } else {
-            param.ty.clone()
-        };
-
-        for _ in 0..component_count {
-            if arg_val_idx >= arg_vals_flat.len() {
-                return Err(GlslError::new(
+            arg_info.param_ty.to_cranelift_type().map_err(|e| {
+                GlslError::new(
                     ErrorCode::E0400,
-                    format!("Not enough argument values for parameter {glsl_param_idx}"),
-                ));
-            }
+                    format!("Failed to convert type: {}", e.message),
+                )
+            })?
+        };
 
-            let arg_val = arg_vals_flat[arg_val_idx];
-            let converted = coercion::coerce_to_type_with_location(
-                ctx,
-                arg_val,
-                &arg_base,
-                &param_base,
-                Some(call_span.clone()),
-            )?;
-            call_args.push(converted);
-            arg_val_idx += 1;
+        let mut loaded_vals = Vec::new();
+        for i in 0..component_count {
+            let offset = (i * F32_SIZE_BYTES) as i32;
+            let val =
+                ctx.builder
+                    .ins()
+                    .load(base_cranelift_ty, flags, arg_info.stack_slot_ptr, offset);
+            loaded_vals.push(val);
         }
+
+        // Write back to original lvalue
+        write_lvalue(ctx, &arg_info.lvalue, &loaded_vals)?;
     }
 
-    Ok(call_args)
+    Ok(())
 }
 
 /// Execute function call and get return values
@@ -433,14 +820,14 @@ fn emit_user_function_call<M: cranelift_module::Module>(
     args: &[glsl::syntax::Expr],
     call_span: glsl::syntax::SourceSpan,
 ) -> Result<(Vec<cranelift_codegen::ir::Value>, GlslType), GlslError> {
-    // Step 1: Prepare arguments
-    let (arg_vals_flat, arg_types) = prepare_function_arguments(ctx, args)?;
+    // Step 1: Prepare arguments (get types for lookup)
+    let (_, arg_types) = prepare_function_arguments(ctx, args)?;
 
     // Step 2: Lookup function signature
     let (func_id, func_sig) = lookup_function_signature(ctx, name, &arg_types, &call_span)?;
 
-    // Step 3: Validate call
-    validate_function_call(ctx, &func_sig, &arg_types, name, &call_span)?;
+    // Step 3: Validate call (including lvalue validation for out/inout)
+    validate_function_call(ctx, &func_sig, args, &arg_types, name, &call_span)?;
 
     // Step 4: Import function and setup StructReturn if needed
     let func_ref = ctx
@@ -449,11 +836,11 @@ fn emit_user_function_call<M: cranelift_module::Module>(
         .declare_func_in_func(func_id, ctx.builder.func);
     let return_buffer_ptr = setup_struct_return_buffer(ctx, &func_sig, func_ref)?;
 
-    // Step 5: Prepare call arguments
-    let call_args = prepare_call_arguments(
+    // Step 5: Prepare call arguments (now handles out/inout)
+    let (call_args, out_inout_args) = prepare_call_arguments(
         ctx,
         &func_sig,
-        &arg_vals_flat,
+        args,
         &arg_types,
         return_buffer_ptr,
         &call_span,
@@ -462,6 +849,9 @@ fn emit_user_function_call<M: cranelift_module::Module>(
     // Step 6: Execute call
     let return_vals =
         execute_function_call(ctx, func_ref, &call_args, &func_sig, return_buffer_ptr)?;
+
+    // Step 7: Copy back out/inout parameters
+    copy_back_out_parameters(ctx, &out_inout_args)?;
     crate::debug!(
         "translate_user_function_call: loaded {} return values, func_sig.return_type={:?}",
         return_vals.len(),
@@ -471,7 +861,7 @@ fn emit_user_function_call<M: cranelift_module::Module>(
         crate::debug!("  return_vals[{}] = {:?}", _i, _val);
     }
 
-    // Step 7: Package return values
+    // Step 8: Package return values
     let (packaged_vals, packaged_ty) = package_return_values(return_vals, &func_sig.return_type)?;
     crate::debug!(
         "translate_user_function_call: packaged to {} values, type={:?}",

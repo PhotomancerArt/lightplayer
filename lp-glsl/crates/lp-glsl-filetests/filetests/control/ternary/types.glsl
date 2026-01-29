@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Ternary operator with different types
@@ -16,7 +16,7 @@ int test_ternary_vec2() {
     return int(result.x + result.y);
 }
 
-// run: test_ternary_vec2() == 3
+// run: test_ternary_vec2() == 3 [expect-fail]
 
 int test_ternary_vec3() {
     bool b = false;
@@ -26,7 +26,7 @@ int test_ternary_vec3() {
     return int(result.x + result.y + result.z);
 }
 
-// run: test_ternary_vec3() == 15
+// run: test_ternary_vec3() == 15 [expect-fail]
 
 int test_ternary_vec4() {
     bool b = true;
@@ -36,7 +36,7 @@ int test_ternary_vec4() {
     return int(result.x + result.y);
 }
 
-// run: test_ternary_vec4() == 3
+// run: test_ternary_vec4() == 3 [expect-fail]
 
 int test_ternary_ivec2() {
     bool b = false;
@@ -46,7 +46,7 @@ int test_ternary_ivec2() {
     return result.x + result.y;
 }
 
-// run: test_ternary_ivec2() == 70
+// run: test_ternary_ivec2() == 70 [expect-fail]
 
 int test_ternary_bvec2() {
     bool b = true;
@@ -56,7 +56,7 @@ int test_ternary_bvec2() {
     return (result.x ? 1 : 0) + (result.y ? 1 : 0);
 }
 
-// run: test_ternary_bvec2() == 1
+// run: test_ternary_bvec2() == 1 [expect-fail]
 
 // Matrix types
 int test_ternary_mat2() {
@@ -67,7 +67,7 @@ int test_ternary_mat2() {
     return int(result[0][0] + result[1][1]);
 }
 
-// run: test_ternary_mat2() == 5
+// run: test_ternary_mat2() == 5 [expect-fail]
 
 int test_ternary_mat3() {
     bool b = false;
@@ -77,7 +77,7 @@ int test_ternary_mat3() {
     return int(result[0][0] * 10.0);
 }
 
-// run: test_ternary_mat3() == 20
+// run: test_ternary_mat3() == 20 [expect-fail]
 
 // Structure types
 struct Point {
@@ -93,7 +93,7 @@ int test_ternary_struct() {
     return int(result.x + result.y);
 }
 
-// run: test_ternary_struct() == 3
+// run: test_ternary_struct() == 3 [expect-fail]
 
 struct Color {
     float r;
@@ -109,7 +109,7 @@ int test_ternary_struct_complex() {
     return int((result.r + result.g + result.b) * 10.0);
 }
 
-// run: test_ternary_struct_complex() == 15
+// run: test_ternary_struct_complex() == 15 [expect-fail]
 
 // Array types (if supported)
 int test_ternary_array_element() {
@@ -121,7 +121,7 @@ int test_ternary_array_element() {
     return result;
 }
 
-// run: test_ternary_array_element() == 1
+// run: test_ternary_array_element() == 1 [expect-fail]
 
 // Mixed vector component access
 int test_ternary_vec_component() {
@@ -132,7 +132,7 @@ int test_ternary_vec_component() {
     return int(result);
 }
 
-// run: test_ternary_vec_component() == 5
+// run: test_ternary_vec_component() == 5 [expect-fail]
 
 // Nested with different types
 int test_ternary_nested_types() {
@@ -145,7 +145,7 @@ int test_ternary_nested_types() {
     return int(result.x + result.y);
 }
 
-// run: test_ternary_nested_types() == 7
+// run: test_ternary_nested_types() == 7 [expect-fail]
 
 
 

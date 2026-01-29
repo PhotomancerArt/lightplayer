@@ -30,7 +30,7 @@ impl SignatureBuilder {
         // Add StructReturn FIRST if needed (before regular params, like cranelift-examples)
         Self::add_return_type(&mut sig, return_type, pointer_type);
         // Then add regular parameters
-        Self::add_parameters(&mut sig, parameters);
+        Self::add_parameters(&mut sig, parameters, pointer_type);
         sig
     }
 
@@ -49,14 +49,14 @@ impl SignatureBuilder {
         // Add StructReturn FIRST if needed (before regular params, like cranelift-examples)
         Self::add_return_type(&mut sig, return_type, pointer_type);
         // Then add regular parameters
-        Self::add_parameters(&mut sig, parameters);
+        Self::add_parameters(&mut sig, parameters, pointer_type);
         sig
     }
 
     /// Add parameters to a signature from GLSL parameters.
-    pub fn add_parameters(sig: &mut Signature, parameters: &[Parameter]) {
+    pub fn add_parameters(sig: &mut Signature, parameters: &[Parameter], pointer_type: IrType) {
         for param in parameters {
-            Self::add_type_as_params(sig, &param.ty);
+            Self::add_type_as_params(sig, &param.ty, param.qualifier, pointer_type);
         }
     }
 
@@ -69,32 +69,50 @@ impl SignatureBuilder {
     }
 
     /// Add a GLSL type as parameters (expanding vectors/matrices into components).
-    fn add_type_as_params(sig: &mut Signature, ty: &Type) {
-        if ty.is_vector() {
-            // Vector: pass each component as separate parameter
-            let base_ty = ty.vector_base_type().unwrap();
-            let cranelift_ty = base_ty
-                .to_cranelift_type()
-                .expect("vector base type should be convertible");
-            let count = ty.component_count().unwrap();
-            for _ in 0..count {
-                sig.params.push(AbiParam::new(cranelift_ty));
+    /// For out/inout parameters, passes a pointer instead of expanding to components.
+    fn add_type_as_params(
+        sig: &mut Signature,
+        ty: &Type,
+        qualifier: crate::semantic::functions::ParamQualifier,
+        pointer_type: IrType,
+    ) {
+        use crate::semantic::functions::ParamQualifier;
+
+        match qualifier {
+            ParamQualifier::Out | ParamQualifier::InOut => {
+                // Out/inout parameters: pass as single pointer (regardless of type)
+                // For vectors/matrices, pointer points to first element
+                sig.params.push(AbiParam::new(pointer_type));
             }
-        } else if ty.is_matrix() {
-            // Matrix: pass each element as separate parameter (column-major)
-            let element_count = ty.matrix_element_count().unwrap();
-            let cranelift_ty = Type::Float
-                .to_cranelift_type()
-                .expect("Float type should be convertible");
-            for _ in 0..element_count {
-                sig.params.push(AbiParam::new(cranelift_ty));
+            ParamQualifier::In => {
+                // In parameters: expand to components (existing behavior)
+                if ty.is_vector() {
+                    // Vector: pass each component as separate parameter
+                    let base_ty = ty.vector_base_type().unwrap();
+                    let cranelift_ty = base_ty
+                        .to_cranelift_type()
+                        .expect("vector base type should be convertible");
+                    let count = ty.component_count().unwrap();
+                    for _ in 0..count {
+                        sig.params.push(AbiParam::new(cranelift_ty));
+                    }
+                } else if ty.is_matrix() {
+                    // Matrix: pass each element as separate parameter (column-major)
+                    let element_count = ty.matrix_element_count().unwrap();
+                    let cranelift_ty = Type::Float
+                        .to_cranelift_type()
+                        .expect("Float type should be convertible");
+                    for _ in 0..element_count {
+                        sig.params.push(AbiParam::new(cranelift_ty));
+                    }
+                } else {
+                    // Scalar: single parameter
+                    let cranelift_ty = ty
+                        .to_cranelift_type()
+                        .expect("scalar type should be convertible");
+                    sig.params.push(AbiParam::new(cranelift_ty));
+                }
             }
-        } else {
-            // Scalar: single parameter
-            let cranelift_ty = ty
-                .to_cranelift_type()
-                .expect("scalar type should be convertible");
-            sig.params.push(AbiParam::new(cranelift_ty));
         }
     }
 
@@ -130,13 +148,28 @@ impl SignatureBuilder {
     }
 
     /// Count how many Cranelift parameters a GLSL type will expand to.
-    pub fn count_parameters(ty: &Type) -> usize {
-        if ty.is_vector() {
-            ty.component_count().unwrap()
-        } else if ty.is_matrix() {
-            ty.matrix_element_count().unwrap()
-        } else {
-            1
+    /// For out/inout parameters, returns 1 (pointer). For in parameters, expands to components.
+    pub fn count_parameters(
+        ty: &Type,
+        qualifier: crate::semantic::functions::ParamQualifier,
+    ) -> usize {
+        use crate::semantic::functions::ParamQualifier;
+
+        match qualifier {
+            ParamQualifier::Out | ParamQualifier::InOut => {
+                // Out/inout parameters: single pointer
+                1
+            }
+            ParamQualifier::In => {
+                // In parameters: expand to components
+                if ty.is_vector() {
+                    ty.component_count().unwrap()
+                } else if ty.is_matrix() {
+                    ty.matrix_element_count().unwrap()
+                } else {
+                    1
+                }
+            }
         }
     }
 

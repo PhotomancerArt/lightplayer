@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Logical XOR: ^^ operator - logical exclusive or on scalar boolean expressions

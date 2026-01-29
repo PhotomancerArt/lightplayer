@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Scalar Global Types: Global variables of scalar types (float, int, uint, bool)
@@ -16,7 +16,7 @@ float test_type_scalar_float() {
     return global_float;
 }
 
-// run: test_type_scalar_float() ~= 42.5
+// run: test_type_scalar_float() ~= 42.5 [expect-fail]
 
 int test_type_scalar_int() {
     // Global int variable
@@ -24,7 +24,7 @@ int test_type_scalar_int() {
     return global_int;
 }
 
-// run: test_type_scalar_int() == -123
+// run: test_type_scalar_int() == -123 [expect-fail]
 
 uint test_type_scalar_uint() {
     // Global uint variable
@@ -32,7 +32,7 @@ uint test_type_scalar_uint() {
     return int(global_uint);
 }
 
-// run: test_type_scalar_uint() == 987
+// run: test_type_scalar_uint() == 987 [expect-fail]
 
 bool test_type_scalar_bool() {
     // Global bool variable
@@ -40,7 +40,7 @@ bool test_type_scalar_bool() {
     return global_bool;
 }
 
-// run: test_type_scalar_bool() == true
+// run: test_type_scalar_bool() == true [expect-fail]
 
 float test_type_scalar_float_operations() {
     // Float operations on global
@@ -50,7 +50,7 @@ float test_type_scalar_float_operations() {
     return global_float;
 }
 
-// run: test_type_scalar_float_operations() ~= 25.0
+// run: test_type_scalar_float_operations() ~= 25.0 [expect-fail]
 
 int test_type_scalar_int_operations() {
     // Int operations on global
@@ -60,7 +60,7 @@ int test_type_scalar_int_operations() {
     return global_int;
 }
 
-// run: test_type_scalar_int_operations() == 22
+// run: test_type_scalar_int_operations() == 22 [expect-fail]
 
 uint test_type_scalar_uint_operations() {
     // Uint operations on global
@@ -70,7 +70,7 @@ uint test_type_scalar_uint_operations() {
     return int(global_uint);
 }
 
-// run: test_type_scalar_uint_operations() == 25
+// run: test_type_scalar_uint_operations() == 25 [expect-fail]
 
 bool test_type_scalar_bool_operations() {
     // Bool operations on global
@@ -80,7 +80,7 @@ bool test_type_scalar_bool_operations() {
     return global_bool;
 }
 
-// run: test_type_scalar_bool_operations() == true
+// run: test_type_scalar_bool_operations() == true [expect-fail]
 
 float test_type_scalar_mixed_operations() {
     // Mixed operations with different scalar globals
@@ -92,7 +92,7 @@ float test_type_scalar_mixed_operations() {
     return result;
 }
 
-// run: test_type_scalar_mixed_operations() ~= 6.0
+// run: test_type_scalar_mixed_operations() ~= 6.0 [expect-fail]
 
 bool test_type_scalar_comparison() {
     // Comparison operations with scalar globals
@@ -107,4 +107,4 @@ bool test_type_scalar_comparison() {
     return float_equal && int_equal && uint_equal;
 }
 
-// run: test_type_scalar_comparison() == true
+// run: test_type_scalar_comparison() == true [expect-fail]

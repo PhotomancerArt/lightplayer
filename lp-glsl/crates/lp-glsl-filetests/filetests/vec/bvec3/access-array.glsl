@@ -1,5 +1,5 @@
 // test run
-// target riscv32.fixed32
+// target riscv32.q32
 
 // ============================================================================
 // Access Array: bvec3[0], bvec3[1], bvec3[2] - array-style indexing
