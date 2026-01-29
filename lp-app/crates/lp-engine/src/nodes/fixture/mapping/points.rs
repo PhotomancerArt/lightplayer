@@ -1,6 +1,7 @@
 //! Mapping point generation from configuration
 
 use alloc::vec::Vec;
+use libm;
 use lp_model::nodes::fixture::mapping::{MappingConfig, PathSpec, RingOrder};
 
 /// Mapping point representing a single LED sampling location
@@ -116,8 +117,8 @@ fn generate_ring_array_points(
             let angle = (2.0 * core::f32::consts::PI * lamp_index as f32 / lamp_count as f32)
                 + offset_angle;
 
-            let x = center_x + ring_radius * angle.cos();
-            let y = center_y + ring_radius * angle.sin();
+            let x = center_x + ring_radius * libm::cosf(angle);
+            let y = center_y + ring_radius * libm::sinf(angle);
 
             // Clamp to [0, 1] range
             let x = x.max(0.0).min(1.0);

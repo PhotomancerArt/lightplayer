@@ -1,6 +1,7 @@
 //! Pre-computed mapping computation
 
 use alloc::vec::Vec;
+use libm;
 use lp_builtins::glsl::q32::types::q32::Q32;
 use lp_model::FrameId;
 use lp_model::nodes::fixture::mapping::MappingConfig;
@@ -54,12 +55,12 @@ pub fn compute_mapping(
                 let radius = mapping_point.radius * texture_width.max(texture_height) as f32;
 
                 // Find pixels that might overlap with this circle
-                let min_x = ((center_x - radius).floor() as i32).max(0) as u32;
+                let min_x = (libm::floorf(center_x - radius) as i32).max(0) as u32;
                 let max_x =
-                    ((center_x + radius).ceil() as i32).min(texture_width as i32 - 1) as u32;
-                let min_y = ((center_y - radius).floor() as i32).max(0) as u32;
+                    (libm::ceilf(center_x + radius) as i32).min(texture_width as i32 - 1) as u32;
+                let min_y = (libm::floorf(center_y - radius) as i32).max(0) as u32;
                 let max_y =
-                    ((center_y + radius).ceil() as i32).min(texture_height as i32 - 1) as u32;
+                    (libm::ceilf(center_y + radius) as i32).min(texture_height as i32 - 1) as u32;
 
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {

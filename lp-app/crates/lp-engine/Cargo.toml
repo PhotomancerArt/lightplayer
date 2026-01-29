@@ -10,19 +10,21 @@ workspace = true
 [features]
 default = ["std"]
 std = [
-    "lp-shared/std"
+    "lp-shared/std",
+    "lp-glsl-compiler/std"
 ]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 hashbrown = { workspace = true }
-lp-glsl-compiler = { path = "../../../lp-glsl/crates/lp-glsl-compiler", default-features = false, features = ["std"] }
+lp-glsl-compiler = { path = "../../../lp-glsl/crates/lp-glsl-compiler", default-features = false, features = ["core"] }
 lp-builtins = { path = "../../../lp-glsl/crates/lp-builtins", default-features = false }
 log = { version = "0.4", default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
+libm = "0.2"
 
 [dev-dependencies]
 lp-shared = { path = "../lp-shared", default-features = false, features = ["std"] }
