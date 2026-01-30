@@ -40,6 +40,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-emu-guest-test-app/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/apps/esp32-glsl-jit/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
