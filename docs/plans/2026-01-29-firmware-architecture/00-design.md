@@ -143,6 +143,7 @@ lp-app/
 **Purpose**: Generic `no_std` code shared between firmware implementations.
 
 **Components**:
+
 1. **SerialIo Trait** (`serial/io.rs`)
    - `write(data: &[u8]) -> Result<(), SerialError>` - Blocking write
    - `read_available(buf: &mut [u8]) -> Result<usize, SerialError>` - Non-blocking read
@@ -163,6 +164,7 @@ lp-app/
 ### lp-shared (`lp-app/crates/lp-shared`)
 
 **New Component**:
+
 - **TimeProvider Trait** (`time/provider.rs`)
   - `now_ms() -> u64` - Get current time in milliseconds since boot
   - `elapsed_ms(start: u64) -> u64` - Calculate elapsed time
@@ -172,6 +174,7 @@ lp-app/
 **Purpose**: ESP32-specific firmware application.
 
 **Components**:
+
 1. **Board-Specific Code** (`board/esp32c6.rs`)
    - ESP32-C6 specific initialization
    - Feature-gated (can add more boards later)
@@ -205,6 +208,7 @@ lp-app/
 **Purpose**: Firmware application that runs in RISC-V32 emulator for testing.
 
 **Components**:
+
 1. **Syscall-Based SerialIo** (`serial/syscall.rs`)
    - Implements `SerialIo` trait
    - Uses syscalls for read/write
@@ -239,6 +243,7 @@ Host → USB-serial → SerialIo → SerialTransport → LpServer → OutputProv
 ```
 
 For `fw-emu`:
+
 ```
 Host → Syscalls → SerialIo → SerialTransport → LpServer → OutputProvider → Syscalls → Host
 ```

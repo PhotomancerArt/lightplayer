@@ -17,6 +17,7 @@ Create the `fw-core` crate with basic structure and the `SerialIo` trait definit
 ### 1. Create crate structure
 
 Create `lp-app/crates/fw-core/` directory with:
+
 - `Cargo.toml` - Crate configuration
 - `src/lib.rs` - Library entry point
 - `src/serial/mod.rs` - Serial module
@@ -181,6 +182,7 @@ cargo test --package fw-core
 ```
 
 Ensure:
+
 - Crate compiles with `no_std`
 - All tests pass
 - No warnings

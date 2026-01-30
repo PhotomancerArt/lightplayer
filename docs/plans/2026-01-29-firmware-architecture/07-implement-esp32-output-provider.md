@@ -162,6 +162,7 @@ cargo check --package fw-esp32 --features esp32c6
 ```
 
 Ensure:
+
 - OutputProvider compiles
 - Implements OutputProvider trait correctly
 - No warnings (except for TODO stubs for actual driver code)

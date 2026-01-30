@@ -17,6 +17,7 @@ Create the basic structure for the `lp-emu-guest` crate, including directory, `C
 ### 1. Create Crate Directory
 
 Create the directory structure:
+
 ```
 lp-glsl/crates/lp-emu-guest/
 ├── Cargo.toml
@@ -55,6 +56,7 @@ crate-type = ["lib"]
 Create stub files for each module:
 
 **src/lib.rs**:
+
 ```rust
 #![no_std]
 
@@ -62,30 +64,35 @@ Create stub files for each module:
 ```
 
 **src/entry.rs**:
+
 ```rust
 #![allow(unused)]
 // Entry point code will be added in next phase
 ```
 
 **src/panic.rs**:
+
 ```rust
 #![allow(unused)]
 // Panic handler will be added in later phase
 ```
 
 **src/syscall.rs**:
+
 ```rust
 #![allow(unused)]
 // Syscall implementation will be added in later phase
 ```
 
 **src/host.rs**:
+
 ```rust
 #![allow(unused)]
 // Host communication will be added in later phase
 ```
 
 **src/print.rs**:
+
 ```rust
 #![allow(unused)]
 // Print macros will be added in later phase
@@ -104,6 +111,7 @@ Add it after `lp-glsl/crates/lp-riscv-tools` in the members list.
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest
 ```

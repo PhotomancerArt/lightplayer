@@ -51,17 +51,20 @@ The entry point functions (`_entry`, `_code_entry`) are `#[no_mangle]` so they'l
 ### 2. Verify Module Exports
 
 Ensure all public modules are properly exported:
+
 - `entry` - Entry point functions (public, but functions are `#[no_mangle]`)
 - `host` - Host communication functions (`__host_debug`, `__host_println`)
 - `print` - Print macros and `_print` function
 
 Internal modules:
+
 - `panic` - Panic handler (automatically registered via `#[panic_handler]`)
 - `syscall` - Syscall implementation (internal only)
 
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
 ```

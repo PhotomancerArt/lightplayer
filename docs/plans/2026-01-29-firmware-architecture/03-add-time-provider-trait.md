@@ -17,6 +17,7 @@ Add the `TimeProvider` trait to `lp-shared` crate. This provides a generic abstr
 ### 1. Create time module structure
 
 Create `lp-app/crates/lp-shared/src/time/` directory with:
+
 - `mod.rs` - Module entry point
 - `provider.rs` - TimeProvider trait
 
@@ -149,6 +150,7 @@ cargo test --package lp-shared
 ```
 
 Ensure:
+
 - Trait compiles with `no_std`
 - All tests pass
 - No warnings

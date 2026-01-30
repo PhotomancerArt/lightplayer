@@ -214,6 +214,7 @@ cargo check --package fw-esp32 --features esp32c6
 ```
 
 Ensure:
+
 - Server loop compiles
 - Main entry point integrates all components
 - No warnings (except for TODO stubs for USB-serial integration)

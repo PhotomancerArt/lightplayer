@@ -51,6 +51,7 @@ No changes needed unless there are specific references to source files that move
 ## Validate
 
 Run from workspace root:
+
 ```bash
 # Check that lp-emu-guest compiles
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf

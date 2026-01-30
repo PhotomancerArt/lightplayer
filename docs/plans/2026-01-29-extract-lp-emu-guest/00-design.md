@@ -111,6 +111,7 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
 **Purpose**: Thin binary wrapper that links all builtins into a static library.
 
 **Changes**:
+
 - Depends on `lp-emu-guest` crate
 - Removes most code (moved to crate)
 - Keeps `_lp_main()` function that references builtins
@@ -118,6 +119,7 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
 - Calls entry point from `lp-emu-guest`
 
 **Entry Flow**:
+
 1. `_entry` (from `lp-emu-guest`) initializes registers
 2. `_code_entry` (from `lp-emu-guest`) initializes memory sections
 3. `_code_entry` calls `_lp_main()` (from `lp-builtins-app`)

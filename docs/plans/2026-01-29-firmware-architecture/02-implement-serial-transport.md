@@ -280,6 +280,7 @@ cargo test --package fw-core
 ```
 
 Ensure:
+
 - All tests pass
 - No warnings
 - Code compiles with `no_std`

@@ -23,6 +23,7 @@ Read `lp-builtins-app/src/main.rs` and extract:
 3. The `__USER_MAIN_PTR` static variable (lines ~217-220) - **NOTE**: This should stay in `lp-builtins-app` since it's app-specific. We'll handle this differently.
 
 Actually, looking at the code more carefully:
+
 - `_entry` and `_code_entry` are generic and should be in the crate
 - `__USER_MAIN_PTR` is app-specific (used by `_lp_main`)
 - `_code_entry` calls `_lp_main()` which is app-specific
@@ -137,6 +138,7 @@ pub mod entry;
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
 ```

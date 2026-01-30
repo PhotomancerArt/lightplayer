@@ -126,6 +126,7 @@ cargo check --package fw-esp32 --features esp32c6
 ```
 
 Ensure:
+
 - USB-serial SerialIo compiles
 - Implements SerialIo trait correctly
 - No warnings (except for TODO stubs)

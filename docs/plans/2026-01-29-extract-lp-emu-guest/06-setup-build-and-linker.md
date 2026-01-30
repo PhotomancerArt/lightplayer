@@ -63,6 +63,7 @@ The build script will automatically be used by Cargo.
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
 ```

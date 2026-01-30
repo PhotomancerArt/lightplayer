@@ -184,6 +184,7 @@ cargo check --package fw-emu
 ```
 
 Ensure:
+
 - Server loop compiles
 - Main entry point integrates all components
 - No warnings (except for TODO stubs for syscalls and emulator integration)

@@ -70,9 +70,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ## Questions
 
 ### Q1: Initial Filesystem Implementation
+
 **Question**: Should we start with `LpFsMemory` for both `fw-esp32` and `fw-emu`, or implement a real filesystem for ESP32 from the start?
 
-**Context**: 
+**Context**:
+
 - `LpFsMemory` is simple and works for testing
 - ESP32 will eventually need real filesystem (littlefs, etc.)
 - Starting with `LpFsMemory` allows faster iteration
@@ -82,9 +84,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q2: Output Provider Implementation
+
 **Question**: How should we structure the output provider? Should `fw-core` have a generic implementation, or should each firmware app implement it?
 
 **Context**:
+
 - ESP32 needs GPIO/LED drivers (hardware-specific)
 - Emulator needs mock implementation (in-memory)
 - `OutputProvider` trait exists in `lp-shared`
@@ -94,9 +98,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q3: Time Provider Trait Location
+
 **Question**: Where should the `TimeProvider` trait live? In `fw-core` or `lp-shared`?
 
 **Context**:
+
 - Time provider is firmware-specific (not used by desktop apps)
 - But it's a generic abstraction that could be useful elsewhere
 - `lp-shared` already has other abstractions
@@ -106,9 +112,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q4: Server Loop Location
+
 **Question**: Should the server loop be in `fw-core` or should each firmware app implement its own?
 
 **Context**:
+
 - Server loop logic is generic and doesn't depend on hardware
 - But ESP32 might need async version, emulator might need sync version
 - Main loop needs to handle firmware-specific things like hardware I/O, async runtime setup, etc.
@@ -118,9 +126,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q5: SerialIo Trait Location
+
 **Question**: Where should the `SerialIo` trait live? In `fw-core` or `lp-shared`?
 
 **Context**:
+
 - Serial I/O is firmware-specific (desktop uses websockets)
 - But it's a generic abstraction
 - Transport layer needs to know about it
@@ -130,14 +140,17 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q6: Initial ESP32 Target
+
 **Question**: Should we support both ESP32-C6 and ESP32-C3 from the start, or start with just C6?
 
 **Context**:
+
 - ESP32-C6 is the primary target
 - ESP32-C3 is similar but has some differences
 - Feature flags can handle both
 
 **Answer**: Start with ESP32-C6 only, but structure for variants from the start:
+
 - Use feature flags and gating
 - Higher-level gating (function level) where possible
 - Board-specific code in a single file like `esp32c6.rs` for easy copy-paste to new boards
@@ -146,9 +159,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q7: Testing Strategy
+
 **Question**: How should we test `fw-core`? Unit tests, integration tests in `fw-emu`, or both?
 
 **Context**:
+
 - `fw-core` is `no_std`, so unit tests need `#![cfg(test)]` with `std` feature
 - `fw-emu` provides integration testing
 - Both approaches have value
@@ -158,9 +173,11 @@ Implement the firmware architecture separation to enable testing firmware code w
 ---
 
 ### Q8: Migration from Prototype
+
 **Question**: Should we migrate code from `esp32-glsl-jit` prototype, or start fresh?
 
 **Context**:
+
 - Prototype has working GLSL compilation
 - But it's structured differently (no server, just shader execution)
 - New architecture is quite different

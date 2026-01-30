@@ -17,6 +17,7 @@ Add comprehensive tests, clean up any temporary code, fix warnings, and validate
 ### 1. Add unit tests for fw-core
 
 Add comprehensive tests for `SerialTransport`:
+
 - Test message framing (complete messages)
 - Test partial message buffering
 - Test multiple messages
@@ -26,6 +27,7 @@ Add comprehensive tests for `SerialTransport`:
 ### 2. Add integration tests for fw-emu
 
 Add end-to-end tests that exercise the full stack:
+
 - Test message round-trip
 - Test server loop behavior
 - Test filesystem operations
@@ -34,6 +36,7 @@ Add end-to-end tests that exercise the full stack:
 ### 3. Clean up temporary code
 
 Search for and remove:
+
 - `TODO` comments that are no longer needed
 - `todo!()` macros that should be implemented or removed
 - Debug prints
@@ -43,6 +46,7 @@ Search for and remove:
 ### 4. Fix warnings
 
 Run `cargo check` and fix all warnings:
+
 - Unused code
 - Dead code
 - Unused imports
@@ -57,6 +61,7 @@ cargo +nightly fmt
 ### 6. Documentation
 
 Ensure all public APIs are documented:
+
 - Module-level documentation
 - Trait documentation
 - Function documentation
@@ -83,6 +88,7 @@ cargo clippy --workspace -- -D warnings
 ```
 
 Ensure:
+
 - All code compiles without warnings
 - All tests pass
 - Code is properly formatted

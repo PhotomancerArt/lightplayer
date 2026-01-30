@@ -132,6 +132,7 @@ For now, just re-export the print macros. Applications can use `lp_emu_guest::pr
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
 ```

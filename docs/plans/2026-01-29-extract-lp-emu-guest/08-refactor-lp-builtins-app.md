@@ -164,6 +164,7 @@ pub use panic::ebreak;
 ```
 
 But `panic` module is private, so we can't re-export from it. We need to either:
+
 1. Make `panic` module public (but we don't want to expose the panic handler implementation)
 2. Move `ebreak` to a separate module
 3. Make `ebreak` a standalone function
@@ -315,6 +316,7 @@ And make `ebreak` public in `panic.rs` (already done in phase 3, but verify it's
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-builtins-app --target riscv32imac-unknown-none-elf
 ```

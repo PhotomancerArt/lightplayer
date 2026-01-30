@@ -18,6 +18,7 @@ Create the `fw-esp32` app structure with Cargo.toml, basic project layout, and b
 ### 1. Create app structure
 
 Create `lp-app/apps/fw-esp32/` directory with:
+
 - `Cargo.toml` - App configuration
 - `src/main.rs` - Main entry point (stub for now)
 - `src/board/mod.rs` - Board module
@@ -191,6 +192,7 @@ cargo check --package fw-esp32 --features esp32c6
 ```
 
 Ensure:
+
 - App structure compiles
 - Feature flags work correctly
 - No warnings (except for TODO stubs)

@@ -17,6 +17,7 @@ Create the `fw-emu` app structure with Cargo.toml, basic project layout, and sys
 ### 1. Create app structure
 
 Create `lp-app/apps/fw-emu/` directory with:
+
 - `Cargo.toml` - App configuration
 - `src/main.rs` - Main entry point (stub for now)
 - `src/serial/mod.rs` - Serial module
@@ -251,6 +252,7 @@ cargo check --package fw-emu
 ```
 
 Ensure:
+
 - App structure compiles
 - All stubs are in place with `todo!()` markers
 - No warnings (except for TODO stubs)

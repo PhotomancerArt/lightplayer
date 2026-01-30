@@ -96,6 +96,7 @@ mod syscall;
 ## Validate
 
 Run from workspace root:
+
 ```bash
 cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
 ```
