@@ -48,7 +48,7 @@ build-rv32-jit-test: install-rv32-target
 
 # riscv32: fw-esp32
 build-fw-esp32: install-rv32-target
-    cd lp-app/apps/fw-esp32 && cargo build --target {{rv32_target}} --release --features esp32c6
+    cd lp-fw/fw-esp32 && cargo build --target {{rv32_target}} --release --features esp32c6
 
 [parallel]
 build: build-host build-rv32
@@ -105,7 +105,7 @@ clippy-rv32-jit-test: install-rv32-target
 
 # riscv32: fw-esp32 clippy
 clippy-fw-esp32: install-rv32-target
-    cd lp-app/apps/fw-esp32 && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
+    cd lp-fw/fw-esp32 && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -229,5 +229,5 @@ merge: check
 # Usage: just demo [example-name]
 # Example: just demo basic
 demo example="basic":
-    cd lp-app/apps/lp-cli && cargo run -- dev ../../../examples/{{example}}
+    cd lp-cli && cargo run -- dev ../examples/{{example}}
 

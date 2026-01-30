@@ -2,10 +2,8 @@
 
 # Warnings: Fix warnings before committing. Don't just ignore them. If you can't fix them easily, ask for help.
 
-# Commits: Commit frequently with small incremental changes
-
 # Commits: Use Conventional Commits format: `<type>(<scope>): <description>`
-#   - Types: feat, fix, chore, docs, etc.
+#   - Types: feat, fix, chore, docs, refactor, etc.
 #   - Scope: sbs, osmt, wrappers, etc. (or component name)
 #   - Description: short description of the commit
 #   - Body: optional, include only if changes are not obvious from description

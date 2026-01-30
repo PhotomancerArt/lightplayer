@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 lp-glsl-compiler = { path = "../lp-glsl-compiler", features = ["std", "emulator"] }
-lp-riscv-tools = { path = "../lp-riscv-tools", features = ["std"] }
+lp-riscv-tools = { path = "../../../lp-rv32/lp-riscv-tools", features = ["std"] }
 lp-jit-util = { path = "../lp-jit-util" }
 anyhow = { workspace = true }
 cranelift-codegen = { workspace = true, features = ["host-arch"] }

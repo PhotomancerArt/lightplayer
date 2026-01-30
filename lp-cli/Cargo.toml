@@ -1,0 +1,35 @@
+[package]
+name = "lp-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tungstenite = { version = "0.21", features = ["native-tls"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+egui = "0.27"
+eframe = "0.27"
+notify = "6"
+lp-model = { path = "../lp-core/lp-model" }
+lp-server = { path = "../lp-core/lp-server" }
+lp-shared = { path = "../lp-core/lp-shared" }
+lp-engine-client = { path = "../lp-core/lp-engine-client" }
+
+[dev-dependencies]
+tempfile = "3"
+lp-server = { path = "../lp-core/lp-server" }
+lp-shared = { path = "../lp-core/lp-shared" }
+lp-model = { path = "../lp-core/lp-model" }
+serde_json = "1"
+
+[lints]
+workspace = true
