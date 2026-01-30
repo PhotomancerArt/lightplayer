@@ -9,6 +9,7 @@
 //! - Host communication functions
 //! - Print macros for no_std environments
 
+pub mod allocator;
 pub mod entry;
 pub mod host;
 pub mod panic;
@@ -18,3 +19,6 @@ mod syscall;
 
 // Re-export ebreak function for convenience
 pub use panic::ebreak;
+
+// Re-export _print function for convenience (macros are already exported at crate root via #[macro_export])
+pub use print::_print;

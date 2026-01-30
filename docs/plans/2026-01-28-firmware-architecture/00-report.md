@@ -199,17 +199,223 @@ Implementations:
 
 ### 3. Serial I/O Trait
 
+The `SerialIo` trait provides a simple, synchronous interface for reading and writing raw bytes. The transport layer handles message framing, buffering, and JSON parsing.
+
 ```rust
 pub trait SerialIo {
+    /// Write bytes to the serial port (blocking)
+    ///
+    /// This is a blocking operation that writes all bytes before returning.
+    /// For async implementations, this can be a wrapper that blocks on the async write.
+    ///
+    /// # Arguments
+    /// * `data` - Bytes to write
+    ///
+    /// # Returns
+    /// * `Ok(())` if all bytes were written successfully
+    /// * `Err(SerialError)` if writing failed
     fn write(&mut self, data: &[u8]) -> Result<(), SerialError>;
+
+    /// Read available bytes from the serial port (non-blocking)
+    ///
+    /// Reads up to `buf.len()` bytes that are currently available.
+    /// Returns immediately with whatever data is available (may be 0 bytes).
+    /// Does not block waiting for data.
+    ///
+    /// # Arguments
+    /// * `buf` - Buffer to read into
+    ///
+    /// # Returns
+    /// * `Ok(n)` - Number of bytes read (0 if no data available)
+    /// * `Err(SerialError)` if reading failed
     fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, SerialError>;
+
+    /// Check if data is available to read (optional optimization)
+    ///
+    /// Returns `true` if `read_available()` would return at least 1 byte.
+    /// This is an optimization hint - implementations can always return `true`
+    /// and let `read_available()` return 0 if no data is available.
+    ///
+    /// # Returns
+    /// * `true` if data is available
+    /// * `false` if no data is available
     fn has_data(&self) -> bool;
 }
 ```
 
-Implementations:
-- `fw-esp32`: Uses `esp-hal` UART
-- `fw-emu`: Uses stdin/stdout or in-memory buffer
+**Key Design Decisions:**
+
+1. **Synchronous Interface**: The trait is synchronous, not async. This keeps the transport layer simple and allows it to work with both blocking and async UART implementations.
+
+2. **Non-blocking Reads**: `read_available()` never blocks. It reads whatever is currently available and returns immediately. This allows the server loop to poll for messages without blocking.
+
+3. **Blocking Writes**: `write()` is blocking, which is fine for sending complete messages. If we need async writes later, we can add an async version or wrap it.
+
+4. **Transport Handles Buffering**: The `SerialTransport` implementation (in `fw-core`) handles:
+   - Buffering partial reads until a complete message (`\n` terminated)
+   - Parsing JSON
+   - Error handling (parse errors are ignored with warnings)
+
+**Example Transport Implementation:**
+
+```rust
+pub struct SerialTransport<Io: SerialIo> {
+    io: Io,
+    read_buffer: Vec<u8>,  // Buffer for partial messages
+}
+
+impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
+    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        // Read available bytes (non-blocking)
+        let mut temp_buf = [0u8; 256];
+        match self.io.read_available(&mut temp_buf) {
+            Ok(n) if n > 0 => {
+                // Append to read buffer
+                self.read_buffer.extend_from_slice(&temp_buf[..n]);
+            }
+            Ok(_) => {
+                // No data available
+            }
+            Err(e) => {
+                return Err(TransportError::Other(format!("Serial read error: {e}")));
+            }
+        }
+
+        // Look for complete message (ends with \n)
+        if let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
+            // Extract message (without \n)
+            let message_bytes = self.read_buffer.drain(..=newline_pos).collect::<Vec<_>>();
+            let message_str = match core::str::from_utf8(&message_bytes[..message_bytes.len()-1]) {
+                Ok(s) => s,
+                Err(_) => {
+                    // Invalid UTF-8, ignore with warning
+                    return Ok(None);
+                }
+            };
+
+            // Parse JSON
+            match serde_json::from_str::<ClientMessage>(message_str) {
+                Ok(msg) => Ok(Some(msg)),
+                Err(e) => {
+                    // Parse error - ignore with warning (as specified)
+                    // In no_std, we can't easily log, so just return None
+                    Ok(None)
+                }
+            }
+        } else {
+            // No complete message yet
+            Ok(None)
+        }
+    }
+
+    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+        // Serialize to JSON
+        let json = serde_json::to_string(&msg)
+            .map_err(|e| TransportError::Serialization(format!("{e}")))?;
+        
+        // Write JSON + newline (blocking)
+        self.io.write(json.as_bytes())
+            .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
+        self.io.write(b"\n")
+            .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
+        
+        Ok(())
+    }
+}
+```
+
+**Implementations:**
+
+- **fw-esp32**: Uses `esp-hal` UART (can be blocking or async, wrapped in sync interface)
+- **fw-emu**: Uses stdin/stdout or in-memory buffer for testing
+
+**ESP32 UART Implementation Example:**
+
+For ESP32, we can use `esp-hal` UART in blocking mode:
+
+```rust
+use esp_hal::uart::Uart;
+
+pub struct Esp32SerialIo {
+    uart: Uart<'static>,
+}
+
+impl SerialIo for Esp32SerialIo {
+    fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
+        // Blocking write - esp-hal UART has blocking write methods
+        self.uart.write_bytes(data)
+            .map_err(|e| SerialError::WriteFailed(format!("{e}")))?;
+        Ok(())
+    }
+
+    fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, SerialError> {
+        // Non-blocking read - check if data available, read what's there
+        // esp-hal UART has methods to check available bytes and read them
+        let available = self.uart.read_available();
+        if available == 0 {
+            return Ok(0);
+        }
+        
+        let to_read = available.min(buf.len());
+        self.uart.read_bytes(&mut buf[..to_read])
+            .map_err(|e| SerialError::ReadFailed(format!("{e}")))?;
+        Ok(to_read)
+    }
+
+    fn has_data(&self) -> bool {
+        // Check if UART has data available
+        self.uart.read_available() > 0
+    }
+}
+```
+
+**For Async UART (if needed later):**
+
+If we want to use async UART with Embassy, we can wrap it:
+
+```rust
+use embassy_sync::channel::Channel;
+use embassy_sync::blocking_mutex::raw::RawMutex;
+
+pub struct Esp32AsyncSerialIo<M: RawMutex> {
+    // Use channels to bridge async UART to sync interface
+    rx_channel: Channel<M, u8, 256>,
+    tx_channel: Channel<M, u8, 256>,
+}
+
+impl<M: RawMutex> SerialIo for Esp32AsyncSerialIo<M> {
+    fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
+        // Send bytes to async task via channel (blocking send)
+        for &byte in data {
+            self.tx_channel.try_send(byte)
+                .map_err(|_| SerialError::WriteFailed("Channel full".into()))?;
+        }
+        Ok(())
+    }
+
+    fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, SerialError> {
+        // Try to receive bytes from async task (non-blocking)
+        let mut count = 0;
+        for byte_slot in buf.iter_mut() {
+            match self.rx_channel.try_receive() {
+                Ok(byte) => {
+                    *byte_slot = byte;
+                    count += 1;
+                }
+                Err(_) => break,  // No more data available
+            }
+        }
+        Ok(count)
+    }
+
+    fn has_data(&self) -> bool {
+        // Check if channel has data
+        !self.rx_channel.is_empty()
+    }
+}
+```
+
+The async UART task would run in the background, reading from UART and writing to channels.
 
 ### 4. Filesystem Factory
 
@@ -223,16 +429,38 @@ Implementations:
 - `fw-esp32`: Creates ESP32 filesystem instance
 - `fw-emu`: Creates `LpFsMemory` instance
 
-## Server Loop Structure
+## Async vs Synchronous Design
 
-The server loop in `fw-core` would look like:
+### Current State
+
+The `lp-server` crate is **synchronous** - `server.tick()` is not async. The `ServerTransport` trait is also synchronous - `receive()` returns `Option<ClientMessage>`, not a `Future`.
+
+The websocket transport implementation uses async internally (tokio) but wraps it in a synchronous interface using channels. This pattern works well.
+
+### Do We Need Async Now?
+
+**Short answer: No, not right now.**
+
+**Reasons:**
+1. **ServerTransport is already synchronous** - The trait returns `Option<ClientMessage>`, perfect for polling
+2. **Serial I/O can be synchronous** - We can use blocking UART reads wrapped in non-blocking interface
+3. **Server loop can be synchronous** - We poll `transport.receive()` in a loop, which is non-blocking
+4. **Simpler to start** - No need to deal with async traits, executors, etc. initially
+
+**When we might need async:**
+1. **lp-server becomes async** - If `server.tick()` becomes async in the future
+2. **Multiple concurrent operations** - If we need to handle multiple things simultaneously
+3. **Better resource utilization** - Async can be more efficient for I/O-bound operations
+
+### Server Loop Structure
+
+The server loop can be **synchronous** initially:
 
 ```rust
-pub async fn run_server_loop<T: ServerTransport, TP: TimeProvider, SP: SleepProvider>(
+pub fn run_server_loop<T: ServerTransport, TP: TimeProvider>(
     mut server: LpServer,
     mut transport: T,
     time_provider: TP,
-    sleep_provider: SP,
 ) -> Result<(), ServerError> {
     let mut last_tick = time_provider.now_ms();
     const TARGET_FRAME_TIME_MS: u32 = 16; // 60 FPS
@@ -240,14 +468,14 @@ pub async fn run_server_loop<T: ServerTransport, TP: TimeProvider, SP: SleepProv
     loop {
         let frame_start = time_provider.now_ms();
 
-        // Collect incoming messages
+        // Collect incoming messages (non-blocking)
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive() {
                 Ok(Some(msg)) => incoming_messages.push(Message::Client(msg)),
-                Ok(None) => break,
+                Ok(None) => break,  // No more messages available
                 Err(e) => {
-                    // Handle error
+                    // Handle error (log and continue, or return)
                     break;
                 }
             }
@@ -257,7 +485,7 @@ pub async fn run_server_loop<T: ServerTransport, TP: TimeProvider, SP: SleepProv
         let delta_time = time_provider.elapsed_ms(last_tick);
         let delta_ms = delta_time.min(u32::MAX as u64) as u32;
 
-        // Tick server
+        // Tick server (synchronous)
         let responses = server.tick(delta_ms.max(1), incoming_messages)?;
 
         // Send responses
@@ -269,15 +497,78 @@ pub async fn run_server_loop<T: ServerTransport, TP: TimeProvider, SP: SleepProv
 
         last_tick = frame_start;
 
-        // Sleep to maintain 60 FPS
+        // Sleep to maintain 60 FPS (if we have a sleep provider)
+        // For now, we can use a busy-wait or yield, or make this async later
         let frame_duration = time_provider.elapsed_ms(frame_start);
         if frame_duration < TARGET_FRAME_TIME_MS as u64 {
-            let sleep_ms = TARGET_FRAME_TIME_MS as u64 - frame_duration;
-            sleep_provider.sleep_ms(sleep_ms as u32).await;
+            // Busy-wait or yield (can be made async later)
+            // For ESP32, we can use embassy's Timer::after() in an async version
         }
     }
 }
 ```
+
+**For ESP32 with Embassy:**
+
+If we want to use Embassy's async runtime, we can make the server loop async:
+
+```rust
+pub async fn run_server_loop_async<T: ServerTransport, TP: TimeProvider>(
+    mut server: LpServer,
+    mut transport: T,
+    time_provider: TP,
+) -> Result<(), ServerError> {
+    use embassy_time::{Duration, Timer};
+    
+    let mut last_tick = time_provider.now_ms();
+    const TARGET_FRAME_TIME_MS: u32 = 16;
+
+    loop {
+        let frame_start = time_provider.now_ms();
+
+        // Collect messages (non-blocking)
+        let mut incoming_messages = Vec::new();
+        loop {
+            match transport.receive() {
+                Ok(Some(msg)) => incoming_messages.push(Message::Client(msg)),
+                Ok(None) => break,
+                Err(e) => break,
+            }
+        }
+
+        // Tick server
+        let delta_time = time_provider.elapsed_ms(last_tick);
+        let delta_ms = delta_time.min(u32::MAX as u64) as u32;
+        let responses = server.tick(delta_ms.max(1), incoming_messages)?;
+
+        // Send responses
+        for response in responses {
+            if let Message::Server(server_msg) = response {
+                transport.send(server_msg)?;
+            }
+        }
+
+        last_tick = frame_start;
+
+        // Sleep using Embassy
+        let frame_duration = time_provider.elapsed_ms(frame_start);
+        if frame_duration < TARGET_FRAME_TIME_MS as u64 {
+            let sleep_ms = TARGET_FRAME_TIME_MS as u64 - frame_duration;
+            Timer::after(Duration::from_millis(sleep_ms)).await;
+        } else {
+            // Frame took too long, yield to other tasks
+            embassy_futures::yield_now().await;
+        }
+    }
+}
+```
+
+**Recommendation:**
+
+1. **Start synchronous** - Make `fw-core` server loop synchronous, works with both blocking and async UART
+2. **Add async version later** - When we need it, add `run_server_loop_async()` that uses async sleep
+3. **Keep SerialIo synchronous** - The trait is simple and works with both blocking and async implementations
+4. **Transport stays synchronous** - `ServerTransport` trait remains synchronous, implementations can use async internally
 
 ## What Can Be Tested in fw-emu
 
@@ -405,11 +696,62 @@ Even with `fw-emu`, some things still need hardware:
    - Examples for each implementation
    - Migration guide for adding new platforms
 
+## SerialIo Design Summary
+
+### How SerialIo Works
+
+1. **Simple, Synchronous Interface**
+   - `write(data)` - Blocking write (sends complete message)
+   - `read_available(buf)` - Non-blocking read (returns whatever is available, 0 if nothing)
+   - `has_data()` - Optional optimization hint
+
+2. **Transport Layer Handles Complexity**
+   - Buffers partial reads until complete message (`\n` terminated)
+   - Parses JSON
+   - Handles errors (parse errors ignored with warnings)
+   - Returns `Option<ClientMessage>` to server loop
+
+3. **Works with Both Blocking and Async UART**
+   - Blocking: Direct UART read/write calls
+   - Async: Wrap async UART with channels or blocking wrapper
+
+### Async Considerations
+
+**Do we need async right now? No.**
+
+**Reasons:**
+- `ServerTransport` trait is already synchronous (returns `Option<ClientMessage>`)
+- Server loop can poll `transport.receive()` synchronously
+- Serial I/O can be blocking, wrapped in non-blocking interface
+- Simpler to start, can add async later if needed
+
+**When async might be needed:**
+- If `lp-server::tick()` becomes async in the future
+- If we need multiple concurrent operations
+- For better resource utilization with I/O-bound operations
+
+**Migration path:**
+- Start with synchronous server loop
+- Add async version later if needed (`run_server_loop_async()`)
+- Keep `SerialIo` trait synchronous (works with both blocking and async implementations)
+- Keep `ServerTransport` trait synchronous (implementations can use async internally)
+
 ## Conclusion
 
 The proposed architecture separates concerns well:
 - **fw-core**: Testable, hardware-agnostic server logic
 - **fw-esp32**: Hardware-specific ESP32 implementation
 - **fw-emu**: Testing platform using RISC-V emulator
+
+**SerialIo Design:**
+- Simple, synchronous trait for raw byte I/O
+- Transport layer handles message framing, buffering, and JSON parsing
+- Works with both blocking and async UART implementations
+- Non-blocking reads allow polling-based server loop
+
+**Async Strategy:**
+- Start synchronous (simpler, works now)
+- Add async version later if needed
+- Keep traits synchronous, implementations can use async internally
 
 This allows testing most firmware code without hardware, while keeping hardware-specific code isolated and minimal. The abstractions are reasonable and don't add too much complexity.

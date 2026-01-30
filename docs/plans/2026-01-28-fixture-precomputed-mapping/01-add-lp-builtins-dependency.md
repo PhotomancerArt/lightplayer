@@ -37,6 +37,7 @@ We'll add this import in the next phase when we create `mapping_compute.rs`.
 ## Validate
 
 Run:
+
 ```bash
 cd lp-app && cargo check --package lp-engine
 ```

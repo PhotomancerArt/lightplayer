@@ -2453,6 +2453,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "fw-core"
+version = "40.0.0"
+dependencies = [
+ "lp-model",
+ "lp-server",
+ "lp-shared",
+ "serde_json",
+]
+
+[[package]]
+name = "fw-emu"
+version = "40.0.0"
+dependencies = [
+ "fw-core",
+ "hashbrown 0.15.5",
+ "lp-builtins",
+ "lp-emu-guest",
+ "lp-model",
+ "lp-riscv-tools",
+ "lp-server",
+ "lp-shared",
+ "serde_json",
+]
+
+[[package]]
+name = "fw-esp32"
+version = "40.0.0"
+dependencies = [
+ "embassy-executor",
+ "embassy-time",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "esp-println",
+ "esp-rtos",
+ "fw-core",
+ "hashbrown 0.15.5",
+ "lp-model",
+ "lp-server",
+ "lp-shared",
+]
+
+[[package]]
 name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3202,6 +3246,9 @@ name = "linked_list_allocator"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9afa463f5405ee81cdb9cc2baf37e08ec7e4c8209442b5d72c04cfb2cd6e6286"
+dependencies = [
+ "spinning_top",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -3301,6 +3348,9 @@ dependencies = [
 [[package]]
 name = "lp-emu-guest"
 version = "40.0.0"
+dependencies = [
+ "linked_list_allocator",
+]
 
 [[package]]
 name = "lp-engine"
@@ -4816,6 +4866,15 @@ name = "somni-parser"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0f368519fc6c85fc1afdb769fb5a51123f6158013e143656e25a3485a0d401c"
+
+[[package]]
+name = "spinning_top"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b9eb1a2f4c41445a3a0ff9abc5221c5fcd28e1f13cd7c0397706f9ac938ddb0"
+dependencies = [
+ "lock_api",
+]
 
 [[package]]
 name = "spirv"

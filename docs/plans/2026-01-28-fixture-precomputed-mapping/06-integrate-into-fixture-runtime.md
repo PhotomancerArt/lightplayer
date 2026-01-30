@@ -30,6 +30,7 @@ pub struct FixtureRuntime {
 ### 2. Update regenerate_mapping_if_needed
 
 Modify `regenerate_mapping_if_needed()` to:
+
 - Check config versions (fixture config version and texture config version)
 - Compare with `mapping_data_ver` from `PrecomputedMapping`
 - Recompute if `max(our_config_ver, texture_config_ver) > mapping_data_ver`
@@ -73,7 +74,7 @@ fn regenerate_mapping_if_needed(
             texture_height,
             max_config_ver,
         );
-        
+
         self.precomputed_mapping = Some(mapping);
 
         // Update texture dimensions
@@ -106,6 +107,7 @@ pub fn new() -> Self {
 ## Validate
 
 Run:
+
 ```bash
 cd lp-app && cargo check --package lp-engine
 ```

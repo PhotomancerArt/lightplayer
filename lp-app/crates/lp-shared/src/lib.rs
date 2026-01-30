@@ -14,6 +14,7 @@ pub mod util; // Temporarily enabled for Texture
 
 pub mod output;
 pub mod project;
+pub mod time;
 pub mod transport;
 
 pub use error::{FsError, OutputError, TextureError};

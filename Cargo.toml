@@ -5,7 +5,10 @@ members = [
     "lp-app/crates/lp-engine-client",
     "lp-app/crates/lp-shared",
     "lp-app/crates/lp-server",
+    "lp-app/crates/fw-core",
     "lp-app/apps/lp-cli",
+    "lp-app/apps/fw-esp32",
+    "lp-app/apps/fw-emu",
     "lp-app/crates/lp-model",
     # lp-glsl workspace members
     "lp-glsl/crates/lp-builtins",
@@ -24,15 +27,16 @@ members = [
 ]
 resolver = "2"
 
-# Exclude lp-builtins-app and esp32-glsl-jit from default workspace builds (they're no_std, only build for RISC-V)
+# Exclude lp-builtins-app, esp32-glsl-jit, and fw-esp32 from default workspace builds (they're no_std, only build for RISC-V)
 # They're still in workspace members so they can use workspace dependencies
-# Build them explicitly with: just build-builtins or just esp32-build
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
     # lp-app workspace members
     "lp-app/crates/lp-engine",
     "lp-app/crates/lp-engine-client",
     "lp-app/crates/lp-shared",
     "lp-app/crates/lp-server",
+    "lp-app/crates/fw-core",
     "lp-app/apps/lp-cli",
     "lp-app/crates/lp-model",
     # lp-glsl workspace members (excluding lp-builtins-app)

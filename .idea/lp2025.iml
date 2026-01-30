@@ -37,6 +37,9 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lpfx-impl-macro/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/q32-metrics/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-emu-guest/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/apps/fw-esp32/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/fw-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/apps/fw-emu/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/apps/esp32-glsl-jit/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

@@ -14,17 +14,20 @@ Replace the current per-frame texture sampling approach with a pre-computed pixe
 ## Current State
 
 ### Current Implementation
+
 - **Location**: `lp-app/crates/lp-engine/src/nodes/fixture/runtime.rs`
 - **Sampling approach**: Per-frame iteration through mapping points
 - **Kernel-based sampling**: Uses `SamplingKernel` with precomputed sample points in a circle
 - **Performance issue**: Iterates through every mapping point and samples multiple positions per frame
 
 ### Current Data Structures
+
 - `MappingPoint`: Contains channel, center (texture space [0,1]), and radius
 - `SamplingKernel`: Precomputed sample points with offsets and weights
 - `FixtureRuntime`: Stores mapping points, kernel, and sampled lamp colors
 
 ### Current Sampling Flow
+
 1. For each mapping point:
    - Calculate center position in texture space
    - Sample texture at multiple kernel positions (scaled by radius)
@@ -33,6 +36,7 @@ Replace the current per-frame texture sampling approach with a pre-computed pixe
    - Store in lamp_colors array
 
 ### Current Limitations
+
 - Per-frame sampling overhead (iterates through all mappings every frame)
 - Kernel-based sampling doesn't accurately compute circle-pixel overlap
 - No pre-computation of pixel contributions
@@ -50,6 +54,7 @@ Replace the current per-frame texture sampling approach with a pre-computed pixe
 **Context**: We need to store a variable-length list of channel mappings per pixel. Each entry is 32 bits (bit-packed). We need to efficiently iterate through mappings for rendering.
 
 **Answer**: Use a flat `Vec<PixelMappingEntry>` ordered by pixel (x, y), where:
+
 - Entries for each pixel are consecutive
 - The last entry for each pixel has `has_more = false`
 - Pixels with no contributions get a SKIP sentinel entry (channel index = sentinel value, `has_more = true`)
@@ -57,6 +62,7 @@ Replace the current per-frame texture sampling approach with a pre-computed pixe
 - During rendering, iterate sequentially and advance `pixel_index` when `has_more` is false
 
 This provides:
+
 - Fast sequential access for rendering (just iterate the vec)
 - Simple structure (no offset table needed)
 - Memory efficient (only stores entries that exist)
@@ -70,12 +76,14 @@ This provides:
 ### Q4: Where should the pre-computation logic live?
 
 **Context**: The pre-computation needs to:
+
 - Take mapping configuration and texture dimensions
 - Compute pixel-to-channel weights using circle-pixel overlap
 - Build the flat `Vec<PixelMappingEntry>` structure
 - Handle normalization
 
 **Answer**: Create a separate module `lp-engine/src/nodes/fixture/mapping_compute.rs` that contains:
+
 - Circle-pixel overlap calculation utilities
 - Pre-computation logic that builds the `Vec<PixelMappingEntry>`
 - Well-organized, testable functions

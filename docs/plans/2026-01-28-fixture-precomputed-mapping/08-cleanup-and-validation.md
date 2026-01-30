@@ -22,11 +22,13 @@ Remove unused code, fix warnings, run full test suite, and update documentation.
 ### 2. Fix warnings
 
 Run:
+
 ```bash
 cd lp-app && cargo clippy --package lp-engine
 ```
 
 Fix all warnings:
+
 - Unused variables
 - Unused functions
 - Dead code
@@ -61,6 +63,7 @@ cd lp-app && cargo +nightly fmt
 ## Validate
 
 Run:
+
 ```bash
 cd lp-app && cargo check --package lp-engine
 cd lp-app && cargo test --package lp-engine
@@ -68,6 +71,7 @@ cd lp-app && cargo clippy --package lp-engine
 ```
 
 Expected:
+
 - Code compiles without warnings
 - All tests pass
 - No clippy warnings

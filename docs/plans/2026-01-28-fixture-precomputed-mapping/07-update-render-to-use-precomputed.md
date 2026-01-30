@@ -60,35 +60,35 @@ fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
         })
         .max()
         .unwrap_or(0);
-    
+
     let mut ch_values: Vec<i32> = vec![0; (max_channel + 1) as usize];
 
     // Iterate through entries and accumulate
     let mut pixel_index = 0u32;
     let mut entry_iter = mapping.entries.iter();
-    
+
     while let Some(entry) = entry_iter.next() {
         if entry.is_skip() {
             // SKIP entry - advance to next pixel
             pixel_index += 1;
             continue;
         }
-        
+
         // Get pixel coordinates
         let x = pixel_index % texture_width;
         let y = pixel_index / texture_width;
-        
+
         // Get pixel value from texture
         if let Some(pixel) = texture.get_pixel(x, y) {
             // Decode contribution: (65536 - stored) / 65536
             let stored = (entry.to_raw() >> 16) & 0xFFFF;
             let contribution_fractional = 65536u32.saturating_sub(stored as u32);
-            
+
             // Convert pixel to 16.16 fixed-point (shift left by 16)
             let pixel_r = (pixel[0] as i32) << 16;
             let pixel_g = (pixel[1] as i32) << 16;
             let pixel_b = (pixel[2] as i32) << 16;
-            
+
             // Accumulate: ch_value += contribution * pixel_value
             // contribution is 0-65535 (fractional part), so we multiply and shift
             let channel = entry.channel() as usize;
@@ -100,7 +100,7 @@ fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
                 ch_values[channel] += accumulated_r as i32;
             }
         }
-        
+
         // Advance pixel_index if this is the last entry for this pixel
         if !entry.has_more() {
             pixel_index += 1;
@@ -135,7 +135,7 @@ fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
         let r_u8 = (r >> 16).clamp(0, 255) as u8;
         let g_u8 = (g >> 16).clamp(0, 255) as u8;
         let b_u8 = (b >> 16).clamp(0, 255) as u8;
-        
+
         let start_ch = channel_offset + (channel as u32) * 3;
         let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
         self.color_order.write_rgb(buffer, 0, r_u8, g_u8, b_u8);
@@ -146,6 +146,7 @@ fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
 ```
 
 Note: This is a simplified version. We'll need to:
+
 1. Handle RGB channels properly (currently just using R)
 2. Get proper config versions from context
 3. Fix the accumulation math to handle Q32 properly
@@ -157,6 +158,7 @@ Update existing tests to work with the new rendering approach.
 ## Validate
 
 Run:
+
 ```bash
 cd lp-app && cargo test --package lp-engine fixture
 ```

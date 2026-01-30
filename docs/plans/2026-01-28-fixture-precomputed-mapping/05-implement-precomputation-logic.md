@@ -22,13 +22,13 @@ use lp_model::nodes::fixture::mapping::{MappingConfig, PathSpec};
 use lp_model::FrameId;
 
 /// Compute pre-computed mapping from configuration
-/// 
+///
 /// # Arguments
 /// * `config` - Mapping configuration
 /// * `texture_width` - Texture width in pixels
 /// * `texture_height` - Texture height in pixels
 /// * `mapping_data_ver` - FrameId for version tracking
-/// 
+///
 /// # Returns
 /// PrecomputedMapping with entries ordered by pixel (x, y)
 pub fn compute_mapping(
@@ -38,7 +38,7 @@ pub fn compute_mapping(
     mapping_data_ver: FrameId,
 ) -> PrecomputedMapping {
     let mut mapping = PrecomputedMapping::new(texture_width, texture_height, mapping_data_ver);
-    
+
     match config {
         MappingConfig::PathPoints {
             paths,
@@ -47,7 +47,7 @@ pub fn compute_mapping(
             // First pass: collect all mapping points (circles)
             let mut mapping_points = Vec::new();
             let mut channel_offset = 0u32;
-            
+
             for path_spec in paths {
                 let points = match path_spec {
                     PathSpec::RingArray { .. } => {
@@ -63,26 +63,26 @@ pub fn compute_mapping(
                         )
                     }
                 };
-                
+
                 channel_offset += points.len() as u32;
                 mapping_points.extend(points);
             }
-            
+
             // Second pass: for each pixel, compute contributions from all circles
-            let mut pixel_contributions: Vec<Vec<(u32, f32)>> = 
+            let mut pixel_contributions: Vec<Vec<(u32, f32)>> =
                 vec![Vec::new(); (texture_width * texture_height) as usize];
-            
+
             for mapping_point in &mapping_points {
                 let center_x = mapping_point.center[0] * texture_width as f32;
                 let center_y = mapping_point.center[1] * texture_height as f32;
                 let radius = mapping_point.radius * texture_width.max(texture_height) as f32;
-                
+
                 // Find pixels that might overlap with this circle
                 let min_x = ((center_x - radius).floor() as i32).max(0) as u32;
                 let max_x = ((center_x + radius).ceil() as i32).min(texture_width as i32 - 1) as u32;
                 let min_y = ((center_y - radius).floor() as i32).max(0) as u32;
                 let max_y = ((center_y + radius).ceil() as i32).min(texture_height as i32 - 1) as u32;
-                
+
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
                         let weight = circle_pixel_overlap(center_x, center_y, radius, x, y);
@@ -93,13 +93,13 @@ pub fn compute_mapping(
                     }
                 }
             }
-            
+
             // Third pass: normalize weights per-channel and build entries
             for y in 0..texture_height {
                 for x in 0..texture_width {
                     let pixel_idx = (y * texture_width + x) as usize;
                     let contributions = &pixel_contributions[pixel_idx];
-                    
+
                     if contributions.is_empty() {
                         // No contributions - add SKIP entry
                         mapping.entries.push(PixelMappingEntry::skip());
@@ -112,7 +112,7 @@ pub fn compute_mapping(
                                 .iter()
                                 .map(|(ch, w)| (*ch, w / total_weight))
                                 .collect();
-                            
+
                             // Add entries (last one has has_more = false)
                             for (idx, (channel, weight)) in normalized.iter().enumerate() {
                                 let has_more = idx < normalized.len() - 1;
@@ -132,7 +132,7 @@ pub fn compute_mapping(
             }
         }
     }
-    
+
     mapping
 }
 
@@ -183,7 +183,7 @@ Note: We'll need to either extract `generate_ring_array_points` from `runtime.rs
 mod compute_mapping_tests {
     use super::*;
     use lp_model::nodes::fixture::mapping::{PathSpec, RingOrder};
-    
+
     #[test]
     fn test_empty_mapping() {
         // TODO: Create minimal config
@@ -191,7 +191,7 @@ mod compute_mapping_tests {
         // let mapping = compute_mapping(&config, 100, 100, FrameId::new(1));
         // assert_eq!(mapping.len(), 10000); // All pixels should have SKIP entries
     }
-    
+
     // More tests to be added as we implement the full logic
 }
 ```
@@ -199,6 +199,7 @@ mod compute_mapping_tests {
 ## Validate
 
 Run:
+
 ```bash
 cd lp-app && cargo check --package lp-engine
 ```

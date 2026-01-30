@@ -77,6 +77,7 @@ lp-app/crates/lp-engine/Cargo.toml            # UPDATE: Add lp-builtins dependen
 ### PixelMappingEntry
 
 Bit-packed 32-bit entry encoding:
+
 - Bit 0: `has_more` flag (1 = more entries for this pixel follow)
 - Bits 1-15: Channel index (15 bits, max 32767; sentinel value indicates SKIP)
 - Bits 16-31: Contribution fraction (16 bits, stored as `65536 - contribution`)
@@ -84,6 +85,7 @@ Bit-packed 32-bit entry encoding:
 ### PrecomputedMapping
 
 Container for pre-computed mapping data:
+
 - `entries: Vec<PixelMappingEntry>` - Flat list ordered by pixel (x, y)
 - `mapping_data_ver: FrameId` - Version when this mapping was computed
 

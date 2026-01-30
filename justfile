@@ -4,6 +4,7 @@
 # Variables
 rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "esp32-glsl-jit lp-builtins-app"
+rv32_firmware_packages := "fw-esp32"
 lp_glsl_dir := "lp-glsl"
 
 # Default recipe - show available commands
@@ -37,21 +38,24 @@ build-host:
 build-host-release:
     cargo build --release
 
-build-rv32: install-rv32-target
-    @echo "Building RISC-V packages ({{rv32_target}})..."
+build-rv32: install-rv32-target build-rv32-jit-test build-fw-esp32
+build-rv32-release: build-rv32
+
+# riscv32: jit-test
+build-rv32-jit-test: install-rv32-target
     cargo build --target {{rv32_target}} -p lp-builtins-app
     cd lp-glsl/apps/esp32-glsl-jit && cargo build --target {{rv32_target}} --release --features esp32c6
 
-build-rv32-release: install-rv32-target
-    @echo "Building RISC-V packages in release mode ({{rv32_target}})..."
-    cargo build --target {{rv32_target}} -p lp-builtins-app --release
-    cd lp-glsl/apps/esp32-glsl-jit && cargo build --target {{rv32_target}} --release --features esp32c6
+# riscv32: fw-esp32
+build-fw-esp32: install-rv32-target
+    cd lp-app/apps/fw-esp32 && cargo build --target {{rv32_target}} --release --features esp32c6
 
 [parallel]
 build: build-host build-rv32
 
 [parallel]
 build-release: build-host-release build-rv32-release
+
 
 # ============================================================================
 # Build commands - lp-app only
@@ -91,11 +95,17 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target
-    @echo "Running clippy on RISC-V packages ({{rv32_target}})..."
+clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32
+
+# riscv32: jit-test clippy
+clippy-rv32-jit-test: install-rv32-target
     cd lp-glsl/apps/esp32-glsl-jit && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: fw-esp32 clippy
+clippy-fw-esp32: install-rv32-target
+    cd lp-app/apps/fw-esp32 && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -173,16 +183,16 @@ ci-app: fmt-check clippy-app build-app test-app
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
 # Fix code issues then run CI (sequential, not parallel)
-fixci: fix ci
+fci: fix ci
 
 # Fix code issues then run CI for lp-app (sequential, not parallel)
-fixci-app:
+fci-app:
     @just fmt
     @just clippy-app-fix
     @just ci-app
 
 # Fix code issues then run CI for lp-glsl (sequential, not parallel)
-fixci-glsl:
+fci-glsl:
     @just fmt
     @just clippy-glsl-fix
     @just ci-glsl
