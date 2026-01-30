@@ -21,7 +21,7 @@ hashbrown = { workspace = true }
 object = { workspace = true, optional = true }
 target-lexicon = { workspace = true }
 lp-jit-util = { path = "../lp-jit-util", default-features = false }
-lp-riscv-tools = { path = "../../../lp-rv32/lp-riscv-tools", optional = true, features = ["std"] }
+lp-riscv-tools = { path = "../../../lp-riscv/lp-riscv-tools", optional = true, features = ["std"] }
 lp-builtins = { path = "../lp-builtins" }
 anyhow = { workspace = true, optional = true }
 

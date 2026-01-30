@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Clean up the overly conservative guest code in `lp-emu-guest-test-app` and `fw-emu` to use `Vec`, `format!`, and proper Rust idioms.
+Clean up the overly conservative guest code in `lp-emu-guest-test-app` and `fw-emu` to use `Vec`,
+`format!`, and proper Rust idioms.
 
 ## Code Organization Reminders
 
@@ -14,7 +15,7 @@ Clean up the overly conservative guest code in `lp-emu-guest-test-app` and `fw-e
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-emu-guest-test-app/src/main.rs`
+### 1. Update `lp-riscv/lp-emu-guest-test-app/src/main.rs`
 
 **Remove chunking logic from `write_serial()`**:
 

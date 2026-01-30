@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Add syscall number constants to `lp-emu-guest` for the new syscalls: YIELD, SERIAL_WRITE, SERIAL_READ, SERIAL_HAS_DATA, and TIME_MS.
+Add syscall number constants to `lp-emu-guest` for the new syscalls: YIELD, SERIAL_WRITE,
+SERIAL_READ, SERIAL_HAS_DATA, and TIME_MS.
 
 ## Code Organization Reminders
 
@@ -14,7 +15,7 @@ Add syscall number constants to `lp-emu-guest` for the new syscalls: YIELD, SERI
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-emu-guest/src/syscall.rs`
+### 1. Update `lp-riscv/lp-emu-guest/src/syscall.rs`
 
 Add new syscall number constants after the existing ones:
 
@@ -44,7 +45,8 @@ pub(crate) const SYSCALL_SERIAL_HAS_DATA: i32 = 7;
 pub(crate) const SYSCALL_TIME_MS: i32 = 8;
 ```
 
-Note: Keep existing `SYSCALL_WRITE` and `SYSCALL_DEBUG` constants if they exist, or add them if missing.
+Note: Keep existing `SYSCALL_WRITE` and `SYSCALL_DEBUG` constants if they exist, or add them if
+missing.
 
 ## Validate
 

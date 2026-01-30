@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Remove temporary code, fix warnings, ensure everything compiles and tests pass, and finalize the refactoring.
+Remove temporary code, fix warnings, ensure everything compiles and tests pass, and finalize the
+refactoring.
 
 ## Code Organization Reminders
 
@@ -29,7 +30,7 @@ Search for and remove:
 Run clippy and fix all warnings:
 
 ```bash
-cargo clippy --package lp-riscv-shared
+cargo clippy --package lp-emu-shared
 cargo clippy --package lp-emu-guest
 cargo clippy --package lp-riscv-tools
 cargo clippy --package lp-emu-guest-test-app
@@ -39,7 +40,7 @@ cargo clippy --package fw-emu
 ### 3. Format code
 
 ```bash
-cargo fmt --package lp-riscv-shared
+cargo fmt --package lp-emu-shared
 cargo fmt --package lp-emu-guest
 cargo fmt --package lp-riscv-tools
 cargo fmt --package lp-emu-guest-test-app

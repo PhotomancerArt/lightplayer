@@ -2,9 +2,9 @@ fn main() {
     // Use the linker script from lp-emu-guest crate
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
-    // Go from lp-rv32/lp-emu-guest-test-app to lp-rv32/lp-emu-guest
+    // Go from lp-riscv/lp-emu-guest-test-app to lp-riscv/lp-emu-guest
     let emu_guest_path = std::path::Path::new(&manifest_dir)
-        .parent() // lp-rv32/
+        .parent() // lp-riscv/
         .and_then(|p| p.join("lp-emu-guest").canonicalize().ok())
         .expect("Failed to find lp-emu-guest crate directory");
 

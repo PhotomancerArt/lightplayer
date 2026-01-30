@@ -2,12 +2,14 @@
 
 ## Scope of Work
 
-Optimize the RISC-V32 emulator for performance-critical use cases by making debugging features (especially instruction logging) have zero overhead when disabled. The main optimization is to avoid creating `InstLog` structs when logging is disabled.
+Optimize the RISC-V32 emulator for performance-critical use cases by making debugging features (
+especially instruction logging) have zero overhead when disabled. The main optimization is to avoid
+creating `InstLog` structs when logging is disabled.
 
 ## File Structure
 
 ```
-lp-rv32/lp-riscv-tools/src/emu/
+lp-riscv/lp-riscv-tools/src/emu/
 ├── executor.rs                    # UPDATE: Make InstLog creation conditional
 ├── emulator/
 │   ├── execution.rs               # UPDATE: Pass instruction_word and log_level
@@ -19,6 +21,7 @@ lp-rv32/lp-riscv-tools/src/emu/
 ## Conceptual Architecture
 
 ### Current Flow (with overhead)
+
 ```
 step()
   ├─ fetch_instruction() → instruction_word
@@ -33,6 +36,7 @@ step()
 ```
 
 ### Optimized Flow (zero overhead when disabled)
+
 ```
 step()
   ├─ fetch_instruction() → instruction_word
@@ -48,11 +52,13 @@ step()
 ## Main Components and Interactions
 
 ### 1. ExecutionResult Changes
+
 - Change `log: InstLog` to `log: Option<InstLog>`
 - When `log_level == LogLevel::None`, `log` will be `None`
 - When logging is enabled, `log` will be `Some(InstLog)`
 
 ### 2. execute_instruction() Signature Changes
+
 - Add `instruction_word: u32` parameter (from fetch_instruction)
 - Add `log_level: LogLevel` parameter
 - Only create `InstLog` when `log_level != LogLevel::None`
@@ -60,10 +66,12 @@ step()
 - Use `instruction_word` directly instead of calling `inst.encode()`
 
 ### 3. step() Changes
+
 - Pass `instruction_word` and `self.log_level` to `execute_instruction()`
 - Only call `set_cycle()` and `log_instruction()` if `exec_result.log.is_some()`
 
 ### 4. log_instruction() Changes
+
 - Accept `Option<InstLog>` instead of `InstLog`
 - If `None`, return early
 - Otherwise, proceed with existing logic
@@ -71,8 +79,10 @@ step()
 ## Performance Improvements
 
 1. **Zero InstLog Creation Overhead**: When `LogLevel::None`, no InstLog structs are created
-2. **No Register Reads for Logging**: Register values like `rd_old`, `rs1_val`, `rs2_val` are only read when needed for logging
-3. **No Instruction Encoding**: Use the already-fetched `instruction_word` instead of encoding from `Inst` enum
+2. **No Register Reads for Logging**: Register values like `rd_old`, `rs1_val`, `rs2_val` are only
+   read when needed for logging
+3. **No Instruction Encoding**: Use the already-fetched `instruction_word` instead of encoding from
+   `Inst` enum
 4. **No Cycle Setting**: `set_cycle()` is only called when logging is enabled
 5. **Early Returns**: `log_instruction()` can return early if log is `None`
 

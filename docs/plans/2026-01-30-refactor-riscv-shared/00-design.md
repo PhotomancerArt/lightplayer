@@ -2,10 +2,10 @@
 
 ## Scope of Work
 
-Clean up serial code and move shared constants into `lp-riscv-shared`:
+Clean up serial code and move shared constants into `lp-emu-shared`:
 
-1. Move SYSCALL constants from `lp-emu-guest` to `lp-riscv-shared`
-2. Move error code constants to `lp-riscv-shared`
+1. Move SYSCALL constants from `lp-emu-guest` to `lp-emu-shared`
+2. Move error code constants to `lp-emu-shared`
 3. Refactor `SerialHost` in `lp-riscv-tools` - extract from emulator, make testable
 4. Add guest-side syscall wrappers in `lp-emu-guest`
 5. Add `GuestSerial` helper with trait-based generics for testability
@@ -14,23 +14,23 @@ Clean up serial code and move shared constants into `lp-riscv-shared`:
 ## File Structure
 
 ```
-lp-rv32/lp-riscv-shared/src/
+lp-riscv/lp-emu-shared/src/
 ├── lib.rs                          # UPDATE: Re-export syscall and error constants
 ├── syscall.rs                      # NEW: SYSCALL number constants
 └── guest_serial.rs                # UPDATE: Error code constants (remove struct)
 
-lp-rv32/lp-riscv-tools/src/emu/
+lp-riscv/lp-riscv-tools/src/emu/
 ├── emulator/
 │   ├── state.rs                    # UPDATE: Use SerialHost instead of direct buffers
 │   └── execution.rs                # UPDATE: Use SerialHost methods
 └── serial_host.rs                   # NEW: SerialHost struct with full implementation
 
-lp-rv32/lp-emu-guest/src/
+lp-riscv/lp-emu-guest/src/
 ├── lib.rs                          # UPDATE: Re-export syscall wrappers
 ├── syscall.rs                      # UPDATE: Re-export constants from shared, add wrappers
 └── guest_serial.rs                 # NEW: GuestSerial<S: SerialSyscall> helper
 
-lp-rv32/lp-emu-guest-test-app/src/
+lp-riscv/lp-emu-guest-test-app/src/
 └── main.rs                         # UPDATE: Clean up - use Vec, format!, remove chunking
 
 lp-fw/fw-emu/src/serial/
@@ -41,7 +41,7 @@ lp-fw/fw-emu/src/serial/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ lp-riscv-shared                                             │
+│ lp-emu-shared                                             │
 │                                                             │
 │  syscall.rs:                                                │
 │  - SYSCALL_PANIC, SYSCALL_WRITE, SYSCALL_DEBUG, etc.       │
@@ -75,7 +75,7 @@ lp-fw/fw-emu/src/serial/
 
 ## Main Components
 
-### 1. Shared Constants (`lp-riscv-shared`)
+### 1. Shared Constants (`lp-emu-shared`)
 
 **`syscall.rs`**:
 
@@ -85,9 +85,9 @@ lp-fw/fw-emu/src/serial/
 **`guest_serial.rs`**:
 
 - Error code constants:
-  - `SERIAL_ERROR_INVALID_POINTER = -1`
-  - `SERIAL_ERROR_BUFFER_FULL = -2`
-  - (add more as needed)
+    - `SERIAL_ERROR_INVALID_POINTER = -1`
+    - `SERIAL_ERROR_BUFFER_FULL = -2`
+    - (add more as needed)
 
 ### 2. SerialHost (`lp-riscv-tools/src/emu/serial_host.rs`)
 
@@ -155,7 +155,8 @@ pub struct GuestSerial<S: SerialSyscall> {
 **Emulator (`lp-riscv-tools`)**:
 
 - `state.rs`: Replace direct buffer access with `SerialHost` instance
-- `execution.rs`: Call `SerialHost::guest_write()` / `guest_read()` instead of direct buffer manipulation
+- `execution.rs`: Call `SerialHost::guest_write()` / `guest_read()` instead of direct buffer
+  manipulation
 
 **Guest Code**:
 

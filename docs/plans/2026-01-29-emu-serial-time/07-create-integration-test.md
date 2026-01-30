@@ -2,7 +2,9 @@
 
 ## Scope of phase
 
-Create an integration test that runs the emulator with `lp-emu-guest-test-app`, handles serial communication, and verifies the serial and time functionality works correctly. The test will have a main loop that runs the emulator until yield, processes serial messages, and repeats.
+Create an integration test that runs the emulator with `lp-emu-guest-test-app`, handles serial
+communication, and verifies the serial and time functionality works correctly. The test will have a
+main loop that runs the emulator until yield, processes serial messages, and repeats.
 
 ## Code Organization Reminders
 
@@ -14,7 +16,7 @@ Create an integration test that runs the emulator with `lp-emu-guest-test-app`, 
 
 ## Implementation Details
 
-### 1. Create `lp-rv32/lp-riscv-tools/tests/integration_fw_emu.rs`
+### 1. Create `lp-riscv/lp-riscv-tools/tests/integration_fw_emu.rs`
 
 ```rust
 //! Integration test for emulator serial and time functionality

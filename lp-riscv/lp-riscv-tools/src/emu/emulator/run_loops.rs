@@ -7,7 +7,7 @@ use super::state::Riscv32Emulator;
 use super::types::{StepResult, SyscallInfo};
 use crate::Gpr;
 use alloc::string::String;
-use lp_riscv_shared::SYSCALL_YIELD;
+use lp_emu_shared::SYSCALL_YIELD;
 
 impl Riscv32Emulator {
     /// Run until EBREAK is encountered, returning the value in a0.

@@ -2,7 +2,9 @@
 
 ## Scope of phase
 
-Create a new test binary application `lp-emu-guest-test-app` that runs in the emulator and handles simple serial commands for testing. This binary will be used by integration tests to verify serial and time functionality.
+Create a new test binary application `lp-emu-guest-test-app` that runs in the emulator and handles
+simple serial commands for testing. This binary will be used by integration tests to verify serial
+and time functionality.
 
 ## Code Organization Reminders
 
@@ -14,16 +16,16 @@ Create a new test binary application `lp-emu-guest-test-app` that runs in the em
 
 ## Implementation Details
 
-### 1. Create `lp-rv32/lp-emu-guest-test-app/` directory structure
+### 1. Create `lp-riscv/lp-emu-guest-test-app/` directory structure
 
 ```
-lp-rv32/lp-emu-guest-test-app/
+lp-riscv/lp-emu-guest-test-app/
 ├── Cargo.toml
 └── src/
     └── main.rs
 ```
 
-### 2. Create `lp-rv32/lp-emu-guest-test-app/Cargo.toml`
+### 2. Create `lp-riscv/lp-emu-guest-test-app/Cargo.toml`
 
 ```toml
 [package]
@@ -41,7 +43,7 @@ test = false
 lp-emu-guest = { path = "../lp-emu-guest" }
 ```
 
-### 3. Create `lp-rv32/lp-emu-guest-test-app/src/main.rs`
+### 3. Create `lp-riscv/lp-emu-guest-test-app/src/main.rs`
 
 ```rust
 //! Test application for emulator serial and time functionality

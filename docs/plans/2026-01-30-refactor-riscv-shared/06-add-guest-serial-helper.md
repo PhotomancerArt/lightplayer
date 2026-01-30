@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Implement `GuestSerial` helper struct with trait-based generics so it can be used both on guest (with syscalls) and in tests (with direct SerialHost calls).
+Implement `GuestSerial` helper struct with trait-based generics so it can be used both on guest (
+with syscalls) and in tests (with direct SerialHost calls).
 
 ## Code Organization Reminders
 
@@ -14,7 +15,7 @@ Implement `GuestSerial` helper struct with trait-based generics so it can be use
 
 ## Implementation Details
 
-### 1. Create `lp-rv32/lp-emu-guest/src/guest_serial.rs`
+### 1. Create `lp-riscv/lp-emu-guest/src/guest_serial.rs`
 
 ```rust
 use alloc::collections::VecDeque;
@@ -123,7 +124,7 @@ impl SerialSyscall for GuestSyscallImpl {
 }
 ```
 
-### 2. Update `lp-rv32/lp-emu-guest/src/lib.rs`
+### 2. Update `lp-riscv/lp-emu-guest/src/lib.rs`
 
 Add module and re-export:
 
@@ -135,7 +136,7 @@ pub use guest_serial::{GuestSerial, GuestSyscallImpl, SerialSyscall};
 
 ### 3. Add test implementation (for use in host tests)
 
-In `lp-rv32/lp-riscv-tools/src/emu/serial_host.rs` (or separate test file):
+In `lp-riscv/lp-riscv-tools/src/emu/serial_host.rs` (or separate test file):
 
 ```rust
 #[cfg(test)]
@@ -160,7 +161,8 @@ impl SerialSyscall for SerialHost {
 }
 ```
 
-**Note**: The trait design may need adjustment - `SerialHost` methods require `&mut self`, but trait has `&self`. We may need:
+**Note**: The trait design may need adjustment - `SerialHost` methods require `&mut self`, but trait
+has `&self`. We may need:
 
 - Interior mutability (RefCell)
 - Or adjust trait to take `&mut self`

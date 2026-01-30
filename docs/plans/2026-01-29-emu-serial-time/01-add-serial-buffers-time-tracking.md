@@ -2,7 +2,9 @@
 
 ## Scope of phase
 
-Add serial input/output buffers and time tracking to the `Riscv32Emulator` state. Buffers use lazy allocation (only allocate when first used) to save memory. Add public methods for host access to serial buffers.
+Add serial input/output buffers and time tracking to the `Riscv32Emulator` state. Buffers use lazy
+allocation (only allocate when first used) to save memory. Add public methods for host access to
+serial buffers.
 
 ## Code Organization Reminders
 
@@ -14,13 +16,14 @@ Add serial input/output buffers and time tracking to the `Riscv32Emulator` state
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-riscv-tools/src/emu/emulator/state.rs`
+### 1. Update `lp-riscv/lp-riscv-tools/src/emu/emulator/state.rs`
 
 Add fields to `Riscv32Emulator`:
 
 - `serial_input_buffer: Option<VecDeque<u8>>` - Input buffer (host → firmware), lazy allocation
 - `serial_output_buffer: Option<VecDeque<u8>>` - Output buffer (firmware → host), lazy allocation
-- `start_time: Option<Instant>` - Start time for elapsed time calculation (only when std feature enabled)
+- `start_time: Option<Instant>` - Start time for elapsed time calculation (only when std feature
+  enabled)
 
 Add imports:
 
@@ -62,8 +65,10 @@ pub fn add_serial_input(&mut self, data: &[u8]) {
 
 Implementation notes:
 
-- `drain_serial_output()`: If buffer is `None`, return empty `Vec`. Otherwise, drain all bytes and return them.
-- `add_serial_input()`: If buffer is `None`, allocate with `VecDeque::with_capacity(128 * 1024)`. Add bytes, but if total would exceed 128KB, drop excess from the end (FIFO - keep oldest bytes).
+- `drain_serial_output()`: If buffer is `None`, return empty `Vec`. Otherwise, drain all bytes and
+  return them.
+- `add_serial_input()`: If buffer is `None`, allocate with `VecDeque::with_capacity(128 * 1024)`.
+  Add bytes, but if total would exceed 128KB, drop excess from the end (FIFO - keep oldest bytes).
 
 ### 3. Add helper methods for buffer access (private)
 
@@ -97,10 +102,12 @@ fn elapsed_ms(&self) -> u32 {
 
 Implementation notes:
 
-- `get_or_create_input_buffer()`: If `None`, allocate with capacity 128KB, then return mutable reference
+- `get_or_create_input_buffer()`: If `None`, allocate with capacity 128KB, then return mutable
+  reference
 - `get_or_create_output_buffer()`: Same as above
 - `init_start_time_if_needed()`: If `start_time` is `None`, set it to `Instant::now()`
-- `elapsed_ms()`: If `start_time` is `Some`, calculate `elapsed().as_millis()` and cast to `u32`. Return 0 if `None` or std feature disabled.
+- `elapsed_ms()`: If `start_time` is `Some`, calculate `elapsed().as_millis()` and cast to `u32`.
+  Return 0 if `None` or std feature disabled.
 
 ## Validate
 

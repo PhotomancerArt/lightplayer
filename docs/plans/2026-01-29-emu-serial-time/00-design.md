@@ -7,19 +7,20 @@ Add serial I/O and time support to the RISC-V32 emulator to enable integration t
 1. Run firmware in the emulator
 2. Connect the emulator to a client via serial communication
 3. Have the firmware yield control back to the host at the end of each main loop cycle
-4. Allow the host to process serial messages, update the client, and feed serial input back to the emulator
+4. Allow the host to process serial messages, update the client, and feed serial input back to the
+   emulator
 
 ## File Structure
 
 ```
-lp-rv32/lp-riscv-tools/
+lp-riscv/lp-riscv-tools/
 └── src/
     └── emu/
         └── emulator/
             ├── state.rs                    # UPDATE: Add serial buffers and start_time
             └── execution.rs                 # UPDATE: Handle new syscalls (4-8)
 
-lp-rv32/lp-emu-guest/
+lp-riscv/lp-emu-guest/
 └── src/
     └── syscall.rs                          # UPDATE: Add syscall numbers 4-8
 
@@ -31,11 +32,11 @@ lp-fw/fw-emu/
     │   └── syscall.rs                      # UPDATE: Implement syscall wrapper
     └── server_loop.rs                      # UPDATE: Implement server loop with yield
 
-lp-rv32/lp-emu-guest-test-app/             # NEW: Test binary application for emulator
+lp-riscv/lp-emu-guest-test-app/             # NEW: Test binary application for emulator
 └── src/
     └── main.rs                             # NEW: Simple command handler (echo, time, etc.)
 
-lp-rv32/lp-riscv-tools/
+lp-riscv/lp-riscv-tools/
 └── tests/
     └── integration_fw_emu.rs              # NEW: Integration test with emulator loop
 ```
@@ -105,19 +106,20 @@ lp-rv32/lp-riscv-tools/
 
 - **SYSCALL_YIELD (4)**: Return `StepResult::Syscall` to yield control to host
 - **SYSCALL_SERIAL_WRITE (5)**: Write bytes from memory to output buffer
-  - Args: a0 = pointer, a1 = length
-  - Returns: a0 = bytes written (or negative error code)
+    - Args: a0 = pointer, a1 = length
+    - Returns: a0 = bytes written (or negative error code)
 - **SYSCALL_SERIAL_READ (6)**: Read bytes from input buffer to memory
-  - Args: a0 = pointer, a1 = max length
-  - Returns: a0 = bytes read (or negative error code)
+    - Args: a0 = pointer, a1 = max length
+    - Returns: a0 = bytes read (or negative error code)
 - **SYSCALL_SERIAL_HAS_DATA (7)**: Check if input buffer has data
-  - Returns: a0 = 1 if data available, 0 otherwise
+    - Returns: a0 = 1 if data available, 0 otherwise
 - **SYSCALL_TIME_MS (8)**: Get elapsed milliseconds since start
-  - Returns: a0 = elapsed ms (u32)
+    - Returns: a0 = elapsed ms (u32)
 
 ### 3. Syscall Numbers (`lp-emu-guest/src/syscall.rs`)
 
-- Add constants: SYSCALL_YIELD, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA, SYSCALL_TIME_MS
+- Add constants: SYSCALL_YIELD, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA,
+  SYSCALL_TIME_MS
 
 ### 4. Firmware Syscall Wrappers (`fw-emu`)
 
@@ -134,15 +136,18 @@ lp-rv32/lp-riscv-tools/
 ### 6. Integration Test (`integration_fw_emu.rs`)
 
 - Main loop that:
-  1. Runs emulator with fuel limit until yield
-  2. Drains serial output and processes messages
-  3. Updates client
-  4. Adds client messages to serial input
-  5. Repeats
+    1. Runs emulator with fuel limit until yield
+    2. Drains serial output and processes messages
+    3. Updates client
+    4. Adds client messages to serial input
+    5. Repeats
 
 ## Component Interactions
 
-1. **Firmware → Emulator**: Firmware calls syscalls (yield, serial, time) which are handled by emulator
-2. **Emulator → Host**: Host calls `drain_serial_output()` and `add_serial_input()` to interact with buffers
+1. **Firmware → Emulator**: Firmware calls syscalls (yield, serial, time) which are handled by
+   emulator
+2. **Emulator → Host**: Host calls `drain_serial_output()` and `add_serial_input()` to interact with
+   buffers
 3. **Host → Emulator**: Host calls `emulator.step()` repeatedly until yield syscall
-4. **Integration Test**: Coordinates emulator execution, serial buffer management, and client communication
+4. **Integration Test**: Coordinates emulator execution, serial buffer management, and client
+   communication

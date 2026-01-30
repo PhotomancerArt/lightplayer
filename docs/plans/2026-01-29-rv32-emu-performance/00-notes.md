@@ -5,6 +5,7 @@
 Optimize the RISC-V32 emulator for performance-critical use cases, particularly `fw-emu` which will run long-running server loops. The emulator needs to execute many instructions efficiently while maintaining the ability to enable debugging features when needed.
 
 Key goals:
+
 1. Make debugging features (instruction logging, etc.) easily disableable with zero overhead when disabled
 2. Identify and implement other easy performance improvements
 3. Ensure the emulator remains usable for debugging/testing scenarios

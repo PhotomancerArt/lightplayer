@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Complete the `SerialHost` implementation in `lp-riscv-tools/src/emu/serial_host.rs` with all methods, proper error handling, and comprehensive tests.
+Complete the `SerialHost` implementation in `lp-riscv-tools/src/emu/serial_host.rs` with all
+methods, proper error handling, and comprehensive tests.
 
 ## Code Organization Reminders
 
@@ -18,7 +19,7 @@ Complete the `SerialHost` implementation in `lp-riscv-tools/src/emu/serial_host.
 
 ```rust
 use alloc::collections::VecDeque;
-use lp_riscv_shared::{
+use lp_emu_shared::{
     SERIAL_ERROR_BUFFER_FULL, SERIAL_ERROR_BUFFER_NOT_ALLOCATED,
 };
 

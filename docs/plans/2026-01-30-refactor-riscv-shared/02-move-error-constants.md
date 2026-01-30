@@ -1,8 +1,9 @@
-# Phase 2: Move Error Code Constants to lp-riscv-shared
+# Phase 2: Move Error Code Constants to lp-emu-shared
 
 ## Scope of phase
 
-Define serial error code constants in `lp-riscv-shared` so both host and guest can use consistent error codes.
+Define serial error code constants in `lp-emu-shared` so both host and guest can use consistent
+error codes.
 
 ## Code Organization Reminders
 
@@ -14,7 +15,7 @@ Define serial error code constants in `lp-riscv-shared` so both host and guest c
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-riscv-shared/src/guest_serial.rs`
+### 1. Update `lp-riscv/lp-emu-shared/src/guest_serial.rs`
 
 Replace the sketched struct with error constants:
 
@@ -31,7 +32,7 @@ pub const SERIAL_ERROR_BUFFER_FULL: i32 = -2;
 pub const SERIAL_ERROR_BUFFER_NOT_ALLOCATED: i32 = -3;
 ```
 
-### 2. Update `lp-rv32/lp-riscv-shared/src/lib.rs`
+### 2. Update `lp-riscv/lp-emu-shared/src/lib.rs`
 
 Add re-export:
 
@@ -57,7 +58,7 @@ Add documentation explaining:
 Run from workspace root:
 
 ```bash
-cargo check --package lp-riscv-shared
+cargo check --package lp-emu-shared
 ```
 
 Ensure:

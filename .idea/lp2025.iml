@@ -27,11 +27,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-esp32/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-emu-guest/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-riscv-shared/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-riscv-tools/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-riscv-tools/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-riscv-tools/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/src" isTestSource="false" />
@@ -40,7 +35,12 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-rv32/lp-emu-guest-test-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-guest-test-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-guest/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/apps/esp32-glsl-jit/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

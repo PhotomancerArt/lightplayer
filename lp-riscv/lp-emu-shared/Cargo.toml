@@ -1,5 +1,5 @@
 [package]
-name = "lp-riscv-shared"
+name = "lp-emu-shared"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

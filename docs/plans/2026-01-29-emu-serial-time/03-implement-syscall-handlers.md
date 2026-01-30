@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Implement syscall handlers in the emulator execution module for yield, serial write/read/has_data, and time syscalls. These handlers will use the serial buffers and time tracking added in phase 1.
+Implement syscall handlers in the emulator execution module for yield, serial write/read/has_data,
+and time syscalls. These handlers will use the serial buffers and time tracking added in phase 1.
 
 ## Code Organization Reminders
 
@@ -14,9 +15,10 @@ Implement syscall handlers in the emulator execution module for yield, serial wr
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-riscv-tools/src/emu/emulator/execution.rs`
+### 1. Update `lp-riscv/lp-riscv-tools/src/emu/emulator/execution.rs`
 
-In the syscall handling section (around line 114-240), add handlers for the new syscalls after the existing handlers (SYSCALL_PANIC, SYSCALL_WRITE, SYSCALL_DEBUG).
+In the syscall handling section (around line 114-240), add handlers for the new syscalls after the
+existing handlers (SYSCALL_PANIC, SYSCALL_WRITE, SYSCALL_DEBUG).
 
 #### SYSCALL_YIELD (4)
 
@@ -168,7 +170,8 @@ After handling syscall 3, add:
 
 ### 2. Add helper function for reading memory bytes
 
-If `read_memory_string` exists but we need a more general `read_bytes` function, add it near the existing memory reading helpers:
+If `read_memory_string` exists but we need a more general `read_bytes` function, add it near the
+existing memory reading helpers:
 
 ```rust
 /// Read bytes from emulator memory
@@ -212,7 +215,8 @@ fn write_bytes(memory: &mut Memory, ptr: u32, data: &[u8]) -> Result<(), String>
 }
 ```
 
-Note: Check if these functions already exist in the memory module or elsewhere. If they do, use the existing ones.
+Note: Check if these functions already exist in the memory module or elsewhere. If they do, use the
+existing ones.
 
 ## Validate
 

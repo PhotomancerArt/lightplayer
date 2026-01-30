@@ -14,7 +14,7 @@ Add simple wrapper functions for serial syscalls in `lp-emu-guest` to make them 
 
 ## Implementation Details
 
-### 1. Update `lp-rv32/lp-emu-guest/src/syscall.rs`
+### 1. Update `lp-riscv/lp-emu-guest/src/syscall.rs`
 
 Add wrapper functions:
 
@@ -70,7 +70,7 @@ pub fn sys_serial_has_data() -> bool {
 }
 ```
 
-### 2. Update `lp-rv32/lp-emu-guest/src/lib.rs`
+### 2. Update `lp-riscv/lp-emu-guest/src/lib.rs`
 
 Add re-exports:
 

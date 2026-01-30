@@ -3332,7 +3332,7 @@ name = "lp-emu-guest"
 version = "40.0.0"
 dependencies = [
  "linked_list_allocator",
- "lp-riscv-shared",
+ "lp-emu-shared",
 ]
 
 [[package]]
@@ -3341,6 +3341,10 @@ version = "40.0.0"
 dependencies = [
  "lp-emu-guest",
 ]
+
+[[package]]
+name = "lp-emu-shared"
+version = "40.0.0"
 
 [[package]]
 name = "lp-engine"
@@ -3438,10 +3442,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-riscv-shared"
-version = "40.0.0"
-
-[[package]]
 name = "lp-riscv-tools"
 version = "40.0.0"
 dependencies = [
@@ -3451,7 +3451,7 @@ dependencies = [
  "cranelift-object",
  "elf",
  "hashbrown 0.15.5",
- "lp-riscv-shared",
+ "lp-emu-shared",
  "nom",
  "object",
  "target-lexicon",

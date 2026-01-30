@@ -1,8 +1,9 @@
-# Phase 1: Move SYSCALL Constants to lp-riscv-shared
+# Phase 1: Move SYSCALL Constants to lp-emu-shared
 
 ## Scope of phase
 
-Move all SYSCALL number constants from `lp-emu-guest` to `lp-riscv-shared` so they can be shared between host and guest code.
+Move all SYSCALL number constants from `lp-emu-guest` to `lp-emu-shared` so they can be shared
+between host and guest code.
 
 ## Code Organization Reminders
 
@@ -14,7 +15,7 @@ Move all SYSCALL number constants from `lp-emu-guest` to `lp-riscv-shared` so th
 
 ## Implementation Details
 
-### 1. Create `lp-rv32/lp-riscv-shared/src/syscall.rs`
+### 1. Create `lp-riscv/lp-emu-shared/src/syscall.rs`
 
 Create new file with all SYSCALL constants:
 
@@ -49,7 +50,7 @@ pub const SYSCALL_TIME_MS: i32 = 8;
 pub const SYSCALL_ARGS: usize = 7;
 ```
 
-### 2. Update `lp-rv32/lp-riscv-shared/src/lib.rs`
+### 2. Update `lp-riscv/lp-emu-shared/src/lib.rs`
 
 Add module and re-export:
 
@@ -63,13 +64,13 @@ pub use syscall::{
 };
 ```
 
-### 3. Update `lp-rv32/lp-emu-guest/src/syscall.rs`
+### 3. Update `lp-riscv/lp-emu-guest/src/syscall.rs`
 
 Replace constant definitions with re-exports:
 
 ```rust
 // Re-export syscall constants from shared crate
-pub use lp_riscv_shared::{
+pub use lp_emu_shared::{
     SYSCALL_ARGS, SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA,
     SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE,
     SYSCALL_YIELD,
@@ -81,12 +82,12 @@ pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
 }
 ```
 
-### 4. Update `lp-rv32/lp-riscv-tools/src/emu/emulator/execution.rs`
+### 4. Update `lp-riscv/lp-riscv-tools/src/emu/emulator/execution.rs`
 
 Replace hardcoded numbers with constants:
 
 ```rust
-use lp_riscv_shared::{
+use lp_emu_shared::{
     SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
     SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
 };
@@ -111,7 +112,7 @@ if syscall_info.number == SYSCALL_PANIC {
 }
 ```
 
-### 5. Update `lp-rv32/lp-emu-guest/src/lib.rs`
+### 5. Update `lp-riscv/lp-emu-guest/src/lib.rs`
 
 Ensure re-exports still work (should be unchanged, but verify):
 
@@ -125,18 +126,18 @@ pub use syscall::{
 
 ### 6. Add dependency
 
-Update `lp-rv32/lp-emu-guest/Cargo.toml`:
+Update `lp-riscv/lp-emu-guest/Cargo.toml`:
 
 ```toml
 [dependencies]
-lp-riscv-shared = { path = "../lp-riscv-shared" }
+lp-emu-shared = { path = "../lp-emu-shared" }
 ```
 
-Update `lp-rv32/lp-riscv-tools/Cargo.toml`:
+Update `lp-riscv/lp-riscv-tools/Cargo.toml`:
 
 ```toml
 [dependencies]
-lp-riscv-shared = { path = "../lp-riscv-shared" }
+lp-emu-shared = { path = "../lp-emu-shared" }
 ```
 
 ## Validate
@@ -144,7 +145,7 @@ lp-riscv-shared = { path = "../lp-riscv-shared" }
 Run from workspace root:
 
 ```bash
-cargo check --package lp-riscv-shared
+cargo check --package lp-emu-shared
 cargo check --package lp-emu-guest
 cargo check --package lp-riscv-tools
 ```
