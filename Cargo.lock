@@ -3272,6 +3272,7 @@ name = "lp-builtins-app"
 version = "40.0.0"
 dependencies = [
  "lp-builtins",
+ "lp-emu-guest",
 ]
 
 [[package]]
@@ -3298,10 +3299,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-guest"
+version = "40.0.0"
+
+[[package]]
 name = "lp-engine"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "libm",
  "log",
  "lp-builtins",
  "lp-engine-client",

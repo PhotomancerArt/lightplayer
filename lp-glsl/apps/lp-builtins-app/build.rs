@@ -1,8 +1,29 @@
 fn main() {
-    println!("cargo:rerun-if-changed=memory.ld");
+    // Use the linker script from lp-emu-guest crate
+    // CARGO_MANIFEST_DIR points to lp-builtins-app directory
+    // We need to go up to apps/, then to crates/, then to lp-emu-guest
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+
+    // Go from apps/lp-builtins-app to crates/lp-emu-guest
+    let emu_guest_path = std::path::Path::new(&manifest_dir)
+        .parent() // apps/
+        .and_then(|p| p.parent()) // lp-glsl/
+        .and_then(|p| p.join("crates").join("lp-emu-guest").canonicalize().ok())
+        .expect("Failed to find lp-emu-guest crate directory");
+
+    let linker_script = emu_guest_path.join("memory.ld");
+
+    if !linker_script.exists() {
+        panic!(
+            "Linker script not found at: {}. Ensure lp-emu-guest crate exists.",
+            linker_script.display()
+        );
+    }
+
+    println!("cargo:rerun-if-changed={}", linker_script.display());
     println!(
         "cargo:rustc-link-search=native={}",
-        std::env::var("CARGO_MANIFEST_DIR").unwrap()
+        emu_guest_path.display()
     );
     println!("cargo:rustc-link-arg=-Tmemory.ld");
 }

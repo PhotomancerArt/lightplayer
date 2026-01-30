@@ -1,6 +1,6 @@
 use core::fmt::{self, Write};
 
-use crate::{SYSCALL_ARGS, syscall};
+use crate::syscall::{SYSCALL_ARGS, syscall};
 
 /// Syscall number for write
 const SYSCALL_WRITE: i32 = 2;

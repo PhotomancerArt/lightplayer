@@ -15,6 +15,7 @@ members = [
     "lp-glsl/crates/lp-jit-util",
     "lp-glsl/crates/lp-riscv-shared",
     "lp-glsl/crates/lp-riscv-tools",
+    "lp-glsl/crates/lp-emu-guest",
     "lp-glsl/apps/lp-builtin-gen",
     "lp-glsl/apps/lp-builtins-app",
     "lp-glsl/apps/lp-test",
