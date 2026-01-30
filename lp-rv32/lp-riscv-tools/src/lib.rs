@@ -39,6 +39,7 @@ pub mod inst;
 // pub mod inst_buffer;  // TODO: Adapt to use cranelift types or remove
 pub mod register_role;
 pub mod regs;
+pub mod serial;
 
 // Re-exports for convenience
 pub use decode::decode_instruction;

@@ -13,6 +13,7 @@ workspace = true
 # Use hashbrown for no_std HashMap support
 hashbrown = { workspace = true }
 nom = { version = "7", default-features = false, features = ["alloc"] }
+lp-riscv-shared = { path = "../lp-riscv-shared" }
 
 # For ABI integration and DataValue types
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
