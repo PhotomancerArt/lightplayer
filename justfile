@@ -38,7 +38,7 @@ build-host:
 build-host-release:
     cargo build --release
 
-build-rv32: install-rv32-target build-rv32-jit-test build-fw-esp32
+build-rv32: install-rv32-target build-rv32-jit-test build-fw-esp32 build-rv32-emu-guest-test-app
 build-rv32-release: build-rv32
 
 # riscv32: jit-test
@@ -49,6 +49,10 @@ build-rv32-jit-test: install-rv32-target
 # riscv32: fw-esp32
 build-fw-esp32: install-rv32-target
     cd lp-fw/fw-esp32 && cargo build --target {{rv32_target}} --release --features esp32c6
+
+# riscv32: emu-guest-test-app
+build-rv32-emu-guest-test-app: install-rv32-target
+    cd lp-rv32/lp-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{rv32_target}} --release
 
 [parallel]
 build: build-host build-rv32
@@ -95,9 +99,9 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-emu-guest-test-app -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32
+clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
 # riscv32: jit-test clippy
 clippy-rv32-jit-test: install-rv32-target
@@ -106,6 +110,10 @@ clippy-rv32-jit-test: install-rv32-target
 # riscv32: fw-esp32 clippy
 clippy-fw-esp32: install-rv32-target
     cd lp-fw/fw-esp32 && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: emu-guest-test-app clippy
+clippy-rv32-emu-guest-test-app: install-rv32-target
+    cd lp-rv32/lp-emu-guest-test-app && cargo clippy --target {{rv32_target}} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 

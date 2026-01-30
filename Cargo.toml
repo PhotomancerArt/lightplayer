@@ -19,6 +19,7 @@ members = [
     "lp-rv32/lp-riscv-shared",
     "lp-rv32/lp-riscv-tools",
     "lp-rv32/lp-emu-guest",
+    "lp-rv32/lp-emu-guest-test-app",
     "lp-glsl/apps/lp-builtin-gen",
     "lp-glsl/apps/lp-builtins-app",
     "lp-glsl/apps/lp-test",
