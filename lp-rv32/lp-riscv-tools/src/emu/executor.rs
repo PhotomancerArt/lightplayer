@@ -2,7 +2,7 @@
 
 use super::{
     error::EmulatorError,
-    logging::{InstLog, SystemKind},
+    logging::{InstLog, LogLevel, SystemKind},
     memory::Memory,
 };
 use crate::{Gpr, Inst};
@@ -16,8 +16,8 @@ pub struct ExecutionResult {
     pub should_halt: bool,
     /// Whether a syscall was encountered (ECALL)
     pub syscall: bool,
-    /// Log entry for this instruction
-    pub log: InstLog,
+    /// Log entry for this instruction (None if logging is disabled)
+    pub log: Option<InstLog>,
 }
 
 /// Helper to read register (x0 always returns 0)
@@ -32,58 +32,80 @@ fn read_reg(regs: &[i32; 32], reg: Gpr) -> i32 {
 /// Execute a decoded instruction.
 pub fn execute_instruction(
     inst: Inst,
+    instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut Memory,
+    log_level: LogLevel,
 ) -> Result<ExecutionResult, EmulatorError> {
     let mut new_pc: Option<u32> = None;
     let mut should_halt = false;
     let mut syscall = false;
-    let instruction_word = inst.encode();
 
+    // Execute instruction and conditionally create log
     let log = match inst {
         Inst::Add { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             let result = val1.wrapping_add(val2);
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Sub { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             let result = val1.wrapping_sub(val2);
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Mulh { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // MULH: high 32 bits of signed multiply
             let val1_i64 = val1 as i64;
             let val2_i64 = val2 as i64;
@@ -92,21 +114,29 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Mulhsu { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // MULHSU: high 32 bits of signed * unsigned multiply
             let val1_i64 = val1 as i64;
             let val2_u64 = (val2 as u32) as u64;
@@ -115,21 +145,29 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Mulhu { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // MULHU: high 32 bits of unsigned multiply
             let val1_u64 = (val1 as u32) as u64;
             let val2_u64 = (val2 as u32) as u64;
@@ -138,40 +176,56 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Mul { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             let result = val1.wrapping_mul(val2);
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Div { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // Handle division by zero: RISC-V specifies result is all 1s
             let result = if val2 == 0 {
                 -1i32
@@ -185,21 +239,29 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Divu { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // DIVU: unsigned division
             // Handle division by zero: RISC-V specifies result is all 1s (max value)
             let val1_u = val1 as u32;
@@ -212,21 +274,29 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Rem { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // Handle division by zero: RISC-V specifies result is dividend
             let result = if val2 == 0 {
                 val1
@@ -239,21 +309,29 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Remu { rd, rs1, rs2 } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             // REMU: unsigned remainder
             // Handle division by zero: RISC-V specifies result is dividend
             let val1_u = val1 as u32;
@@ -266,33 +344,45 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Addi { rd, rs1, imm } => {
             let val1 = read_reg(regs, rs1);
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             let result = val1.wrapping_add(imm);
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old: rd_old.unwrap(),
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Lb { rd, rs1, imm } => {
@@ -316,21 +406,29 @@ pub fn execute_instruction(
             })?;
             let value = byte_val as i32; // Sign extend
 
-            let rd_old = read_reg(regs, rd);
+            let rd_old = if log_level != LogLevel::None {
+                Some(read_reg(regs, rd))
+            } else {
+                None
+            };
             if rd.num() != 0 {
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old: rd_old.unwrap(),
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Lh { rd, rs1, imm } => {
@@ -367,16 +465,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Lw { rd, rs1, imm } => {
@@ -413,16 +515,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Lbu { rd, rs1, imm } => {
@@ -451,16 +557,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Lhu { rd, rs1, imm } => {
@@ -497,16 +607,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Sb { rs1, rs2, imm } => {
@@ -533,15 +647,19 @@ pub fn execute_instruction(
                 e
             })?;
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: (value as i8) as i32,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: (value as i8) as i32,
+                })
+            } else {
+                None
             }
         }
         Inst::Sh { rs1, rs2, imm } => {
@@ -578,15 +696,19 @@ pub fn execute_instruction(
                     e
                 })?;
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: (value as i16) as i32,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: (value as i16) as i32,
+                })
+            } else {
+                None
             }
         }
         Inst::Sw { rs1, rs2, imm } => {
@@ -622,15 +744,19 @@ pub fn execute_instruction(
                 e
             })?;
 
-            InstLog::Store {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Jal { rd, imm } => {
@@ -642,17 +768,21 @@ pub fn execute_instruction(
             }
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd_old,
-                rd_new: if rd.num() == 0 {
-                    None
-                } else {
-                    Some(next_pc as i32)
-                },
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd_old,
+                    rd_new: if rd.num() == 0 {
+                        None
+                    } else {
+                        Some(next_pc as i32)
+                    },
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
         Inst::Jalr { rd, rs1, imm } => {
@@ -665,23 +795,28 @@ pub fn execute_instruction(
             }
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd_old,
-                rd_new: if rd.num() == 0 {
-                    None
-                } else {
-                    Some(next_pc as i32)
-                },
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd_old,
+                    rd_new: if rd.num() == 0 {
+                        None
+                    } else {
+                        Some(next_pc as i32)
+                    },
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
         Inst::Beq { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             let taken = val1 == val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -689,21 +824,25 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1,
-                rs2_val: val2,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1,
+                    rs2_val: val2,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Bne { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             let taken = val1 != val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -711,21 +850,25 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1,
-                rs2_val: val2,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1,
+                    rs2_val: val2,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Blt { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             let taken = val1 < val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -733,21 +876,25 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1,
-                rs2_val: val2,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1,
+                    rs2_val: val2,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Bge { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1);
             let val2 = read_reg(regs, rs2);
             let taken = val1 >= val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -755,21 +902,25 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1,
-                rs2_val: val2,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1,
+                    rs2_val: val2,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Bltu { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1) as u32;
             let val2 = read_reg(regs, rs2) as u32;
             let taken = val1 < val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -777,21 +928,25 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1 as i32,
-                rs2_val: val2 as i32,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1 as i32,
+                    rs2_val: val2 as i32,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Bgeu { rs1, rs2, imm } => {
             let val1 = read_reg(regs, rs1) as u32;
             let val2 = read_reg(regs, rs2) as u32;
             let taken = val1 >= val2;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(imm as u32);
                 new_pc = Some(target);
@@ -799,15 +954,18 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rs1_val: val1 as i32,
-                rs2_val: val2 as i32,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val1 as i32,
+                    rs2_val: val2 as i32,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
         Inst::Lui { rd, imm } => {
@@ -824,13 +982,17 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Immediate {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Immediate {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Auipc { rd, imm } => {
@@ -842,13 +1004,17 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Immediate {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                rd,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Immediate {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
         Inst::Slt { rd, rs1, rs2 } => {
@@ -859,15 +1025,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Slti { rd, rs1, imm } => {
@@ -877,15 +1047,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Sltu { rd, rs1, rs2 } => {
@@ -896,15 +1070,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1 as i32,
-                rs2_val: Some(val2 as i32),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1 as i32,
+                    rs2_val: Some(val2 as i32),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Sltiu { rd, rs1, imm } => {
@@ -915,15 +1093,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1 as i32,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1 as i32,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Xori { rd, rs1, imm } => {
@@ -933,15 +1115,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::And { rd, rs1, rs2 } => {
@@ -952,15 +1138,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Andi { rd, rs1, imm } => {
@@ -970,15 +1160,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Or { rd, rs1, rs2 } => {
@@ -989,15 +1183,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Ori { rd, rs1, imm } => {
@@ -1007,15 +1205,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Xor { rd, rs1, rs2 } => {
@@ -1026,15 +1228,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Sll { rd, rs1, rs2 } => {
@@ -1046,15 +1252,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Slli { rd, rs1, imm } => {
@@ -1065,15 +1275,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Srl { rd, rs1, rs2 } => {
@@ -1085,15 +1299,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Srli { rd, rs1, imm } => {
@@ -1104,15 +1322,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Sra { rd, rs1, rs2 } => {
@@ -1124,15 +1346,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
         Inst::Srai { rd, rs1, imm } => {
@@ -1143,15 +1369,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1167,15 +1397,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1188,15 +1422,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1209,15 +1447,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1229,15 +1471,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1254,15 +1500,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1276,15 +1526,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1298,15 +1552,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1319,15 +1577,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1346,15 +1608,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1370,15 +1636,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1390,15 +1660,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1412,15 +1686,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1431,15 +1709,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1450,15 +1732,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1474,15 +1760,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1496,15 +1786,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1518,15 +1812,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1545,15 +1843,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1571,15 +1873,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result as i32;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result as i32,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result as i32,
+                })
+            } else {
+                None
             }
         }
 
@@ -1598,15 +1904,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result as i32;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result as i32,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result as i32,
+                })
+            } else {
+                None
             }
         }
 
@@ -1621,15 +1931,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1643,15 +1957,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1663,15 +1981,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1685,15 +2007,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1708,15 +2034,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1728,15 +2058,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1748,15 +2082,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1771,15 +2109,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1791,15 +2133,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1811,15 +2157,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1832,52 +2182,72 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
         Inst::Ecall => {
             syscall = true;
-            InstLog::System {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ecall,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ecall,
+                })
+            } else {
+                None
             }
         }
         Inst::Ebreak => {
             should_halt = true;
-            InstLog::System {
-                cycle: 0, // Will be set by emu
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0, // Will be set by emu
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
         Inst::Fence => {
             // FENCE: Memory ordering (no-op in single-threaded emulator)
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+                })
+            } else {
+                None
             }
         }
         Inst::FenceI => {
             // FENCE.I: Instruction cache synchronization (no-op in emulator)
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+                })
+            } else {
+                None
             }
         }
         Inst::Csrrw { rd, rs1: _, csr: _ } => {
@@ -1888,11 +2258,15 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak, // Use existing kind (doesn't matter for logging)
+                })
+            } else {
+                None
             }
         }
         Inst::Csrrs { rd, rs1: _, csr: _ } => {
@@ -1902,11 +2276,15 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
         Inst::Csrrc { rd, rs1: _, csr: _ } => {
@@ -1916,11 +2294,15 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
         Inst::Csrrwi { rd, imm: _, csr: _ } => {
@@ -1930,11 +2312,15 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
         Inst::Csrrsi { rd, imm: _, csr: _ } => {
@@ -1944,13 +2330,18 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
+
         Inst::Csrrci { rd, imm: _, csr: _ } => {
             // CSRRCI: rd = CSR; CSR = CSR & ~imm
             // In emulator, CSR operations are no-ops
@@ -1958,11 +2349,15 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
 
@@ -1977,15 +2372,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -1995,15 +2394,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = imm;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: 0,
-                rs2_val: None,
-                rd_old,
-                rd_new: imm,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: 0,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: imm,
+                })
+            } else {
+                None
             }
         }
 
@@ -2013,13 +2416,17 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = imm;
             }
-            InstLog::Immediate {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rd_old,
-                rd_new: imm,
+            if log_level != LogLevel::None {
+                Some(InstLog::Immediate {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rd_old,
+                    rd_new: imm,
+                })
+            } else {
+                None
             }
         }
 
@@ -2030,15 +2437,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = val;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: 0,
-                rs2_val: Some(val),
-                rd_old,
-                rd_new: val,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: 0,
+                    rs2_val: Some(val),
+                    rd_old,
+                    rd_new: val,
+                })
+            } else {
+                None
             }
         }
 
@@ -2051,15 +2462,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2072,15 +2487,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2093,15 +2512,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2114,15 +2537,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2135,15 +2562,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: Some(val2),
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: Some(val2),
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2181,16 +2612,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2226,15 +2661,19 @@ pub fn execute_instruction(
                 e
             })?;
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2243,13 +2682,17 @@ pub fn execute_instruction(
             let target = pc.wrapping_add(offset as u32);
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd_old: 0,
-                rd_new: None,
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd_old: 0,
+                    rd_new: None,
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
 
@@ -2259,13 +2702,17 @@ pub fn execute_instruction(
             let target = (base as u32) & !1; // Clear bottom bit for alignment
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd_old: 0,
-                rd_new: None,
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd_old: 0,
+                    rd_new: None,
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
 
@@ -2277,13 +2724,17 @@ pub fn execute_instruction(
             regs[Gpr::Ra.num() as usize] = next_pc as i32;
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd_old: read_reg(regs, Gpr::Ra),
-                rd_new: Some(next_pc as i32),
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd_old: read_reg(regs, Gpr::Ra),
+                    rd_new: Some(next_pc as i32),
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
 
@@ -2291,6 +2742,7 @@ pub fn execute_instruction(
             // c.beqz: if rs == 0, pc = pc + offset
             let val = read_reg(regs, rs);
             let taken = val == 0;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(offset as u32);
                 new_pc = Some(target);
@@ -2298,15 +2750,18 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: val,
-                rs2_val: 0,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val,
+                    rs2_val: 0,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
 
@@ -2314,6 +2769,7 @@ pub fn execute_instruction(
             // c.bnez: if rs != 0, pc = pc + offset
             let val = read_reg(regs, rs);
             let taken = val != 0;
+
             let target_pc = if taken {
                 let target = pc.wrapping_add(offset as u32);
                 new_pc = Some(target);
@@ -2321,15 +2777,18 @@ pub fn execute_instruction(
             } else {
                 None
             };
-
-            InstLog::Branch {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: val,
-                rs2_val: 0,
-                taken,
-                target_pc,
+            if log_level != LogLevel::None {
+                Some(InstLog::Branch {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: val,
+                    rs2_val: 0,
+                    taken,
+                    target_pc,
+                })
+            } else {
+                None
             }
         }
 
@@ -2342,15 +2801,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2363,15 +2826,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2384,15 +2851,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2404,15 +2875,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2421,15 +2896,19 @@ pub fn execute_instruction(
             let val1 = read_reg(regs, Gpr::Sp);
             let result = val1.wrapping_add(imm);
             regs[Gpr::Sp.num() as usize] = result;
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd: Gpr::Sp,
-                rs1_val: val1,
-                rs2_val: None,
-                rd_old: val1,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd: Gpr::Sp,
+                    rs1_val: val1,
+                    rs2_val: None,
+                    rd_old: val1,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2441,15 +2920,19 @@ pub fn execute_instruction(
             if rd.num() != 0 {
                 regs[rd.num() as usize] = result;
             }
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: sp_val,
-                rs2_val: None,
-                rd_old,
-                rd_new: result,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: sp_val,
+                    rs2_val: None,
+                    rd_old,
+                    rd_new: result,
+                })
+            } else {
+                None
             }
         }
 
@@ -2487,16 +2970,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: sp_val,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: sp_val,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2532,15 +3019,19 @@ pub fn execute_instruction(
                 e
             })?;
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: sp_val,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: sp_val,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2551,38 +3042,50 @@ pub fn execute_instruction(
             regs[Gpr::Ra.num() as usize] = next_pc as i32;
             new_pc = Some(target);
 
-            InstLog::Jump {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd_old: read_reg(regs, Gpr::Ra),
-                rd_new: Some(next_pc as i32),
-                target_pc: target,
+            if log_level != LogLevel::None {
+                Some(InstLog::Jump {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd_old: read_reg(regs, Gpr::Ra),
+                    rd_new: Some(next_pc as i32),
+                    target_pc: target,
+                })
+            } else {
+                None
             }
         }
 
         Inst::CNop => {
             // c.nop: no operation
-            InstLog::Arithmetic {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd: Gpr::Zero,
-                rs1_val: 0,
-                rs2_val: None,
-                rd_old: 0,
-                rd_new: 0,
+            if log_level != LogLevel::None {
+                Some(InstLog::Arithmetic {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd: Gpr::Zero,
+                    rs1_val: 0,
+                    rs2_val: None,
+                    rd_old: 0,
+                    rd_new: 0,
+                })
+            } else {
+                None
             }
         }
 
         Inst::CEbreak => {
             // c.ebreak: same as ebreak
             should_halt = true;
-            InstLog::System {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                kind: SystemKind::Ebreak,
+            if log_level != LogLevel::None {
+                Some(InstLog::System {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    kind: SystemKind::Ebreak,
+                })
+            } else {
+                None
             }
         }
 
@@ -2624,16 +3127,20 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = value;
             }
 
-            InstLog::Load {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rd,
-                rs1_val: base,
-                addr: address,
-                mem_val: value,
-                rd_old,
-                rd_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Load {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rd,
+                    rs1_val: base,
+                    addr: address,
+                    mem_val: value,
+                    rd_old,
+                    rd_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2674,15 +3181,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = 0;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2744,15 +3255,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = old_value;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: new_value,
-                addr: address,
-                mem_old: old_value,
-                mem_new: new_value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: new_value,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: new_value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2815,15 +3330,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = old_value;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: addend,
-                addr: address,
-                mem_old: old_value,
-                mem_new: new_value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: addend,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: new_value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2886,15 +3405,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = old_value;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: xor_val,
-                addr: address,
-                mem_old: old_value,
-                mem_new: new_value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: xor_val,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: new_value,
+                })
+            } else {
+                None
             }
         }
 
@@ -2957,15 +3480,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = old_value;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: and_val,
-                addr: address,
-                mem_old: old_value,
-                mem_new: new_value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: and_val,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: new_value,
+                })
+            } else {
+                None
             }
         }
 
@@ -3028,15 +3555,19 @@ pub fn execute_instruction(
                 regs[rd.num() as usize] = old_value;
             }
 
-            InstLog::Store {
-                cycle: 0,
-                pc,
-                instruction: instruction_word,
-                rs1_val: base,
-                rs2_val: or_val,
-                addr: address,
-                mem_old: old_value,
-                mem_new: new_value,
+            if log_level != LogLevel::None {
+                Some(InstLog::Store {
+                    cycle: 0,
+                    pc,
+                    instruction: instruction_word,
+                    rs1_val: base,
+                    rs2_val: or_val,
+                    addr: address,
+                    mem_old: old_value,
+                    mem_new: new_value,
+                })
+            } else {
+                None
             }
         }
     };

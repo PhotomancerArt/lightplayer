@@ -30,8 +30,11 @@ impl Riscv32Emulator {
 
     /// Log an instruction based on the current log level.
     pub fn log_instruction(&mut self, log: InstLog) {
+        // This is only called when log is Some, so we know logging is enabled
         match self.log_level {
-            LogLevel::None => {}
+            LogLevel::None => {
+                // Should not happen, but handle gracefully
+            }
             LogLevel::Errors => {
                 // Only log on errors (handled elsewhere)
             }

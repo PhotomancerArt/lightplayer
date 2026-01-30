@@ -9,7 +9,8 @@ use super::super::{
 use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use crate::{Gpr, Inst};
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
+use lp_riscv_shared::SERIAL_ERROR_INVALID_POINTER;
 
 impl Riscv32Emulator {
     /// Execute a single instruction.
@@ -75,7 +76,14 @@ impl Riscv32Emulator {
         };
 
         // Execute instruction
-        let exec_result = execute_instruction(decoded, self.pc, &mut self.regs, &mut self.memory)?;
+        let exec_result = execute_instruction(
+            decoded,
+            inst_word,
+            self.pc,
+            &mut self.regs,
+            &mut self.memory,
+            self.log_level,
+        )?;
 
         // Update PC (2 bytes for compressed, 4 for standard)
         let pc_increment = if is_compressed { 2 } else { 4 };
@@ -83,9 +91,11 @@ impl Riscv32Emulator {
             .new_pc
             .unwrap_or(self.pc.wrapping_add(pc_increment));
 
-        // Log instruction with cycle count
-        let log_with_cycle = exec_result.log.set_cycle(self.instruction_count);
-        self.log_instruction(log_with_cycle);
+        // Log instruction with cycle count (only if logging is enabled)
+        if let Some(log) = exec_result.log {
+            let log_with_cycle = log.set_cycle(self.instruction_count);
+            self.log_instruction(log_with_cycle);
+        }
 
         // Handle special cases
         if exec_result.should_halt {
@@ -118,7 +128,7 @@ impl Riscv32Emulator {
             };
 
             // Check if this is a panic syscall (SYSCALL_PANIC = 1)
-            if syscall_info.number == 1 {
+            if syscall_info.number == lp_riscv_shared::SYSCALL_PANIC {
                 // Extract panic information from syscall args
                 // args[0] = message pointer (as i32, cast to u32)
                 // args[1] = message length
@@ -154,8 +164,8 @@ impl Riscv32Emulator {
                             crate::debug!("Read file name from memory: '{}'", f);
                             Some(f)
                         }
-                        Err(e) => {
-                            crate::debug!("Failed to read file name from 0x{:x}: {}", file_ptr, e);
+                        Err(_e) => {
+                            crate::debug!("Failed to read file name from 0x{:x}: {}", file_ptr, _e);
                             None
                         }
                     }
@@ -173,7 +183,7 @@ impl Riscv32Emulator {
                 };
 
                 Ok(StepResult::Panic(panic_info))
-            } else if syscall_info.number == 2 {
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_WRITE {
                 // SYSCALL_WRITE: Write string to host (always prints)
                 // args[0] = pointer to string (as i32, cast to u32)
                 // args[1] = length of string
@@ -182,19 +192,19 @@ impl Riscv32Emulator {
 
                 // Read string from memory and print it
                 match read_memory_string(&self.memory, msg_ptr, msg_len) {
-                    Ok(s) => {
+                    Ok(_s) => {
                         #[cfg(feature = "std")]
                         {
                             use std::io::Write;
-                            let _ = std::io::stderr().write_all(s.as_bytes());
+                            let _ = std::io::stderr().write_all(_s.as_bytes());
                             let _ = std::io::stderr().flush();
                         }
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         crate::debug!(
                             "Failed to read write syscall string from 0x{:x}: {}",
                             msg_ptr,
-                            e
+                            _e
                         );
                     }
                 }
@@ -202,7 +212,7 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == 3 {
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_DEBUG {
                 // SYSCALL_DEBUG: Debug output (delegates to debug! macro)
                 // args[0] = pointer to string (as i32, cast to u32)
                 // args[1] = length of string
@@ -211,20 +221,137 @@ impl Riscv32Emulator {
 
                 // Read string from memory and delegate to debug! macro
                 match read_memory_string(&self.memory, msg_ptr, msg_len) {
-                    Ok(s) => {
-                        crate::debug!("{}", s);
+                    Ok(_s) => {
+                        crate::debug!("{}", _s);
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         crate::debug!(
                             "Failed to read debug syscall string from 0x{:x}: {}",
                             msg_ptr,
-                            e
+                            _e
                         );
                     }
                 }
 
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
+                Ok(StepResult::Continue)
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_YIELD {
+                // SYSCALL_YIELD: Yield control back to host
+                // No arguments, no return value
+                // Just return Syscall result so host can handle it
+                Ok(StepResult::Syscall(syscall_info))
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_SERIAL_WRITE {
+                // SYSCALL_SERIAL_WRITE: Write bytes to serial output buffer
+                // args[0] = pointer to data (as i32, cast to u32)
+                // args[1] = length of data
+                // Returns: a0 = bytes written (or negative error code)
+                let ptr = syscall_info.args[0] as u32;
+                let len = syscall_info.args[1] as usize;
+
+                // Validate length (prevent excessive reads)
+                const MAX_WRITE_LEN: usize = 64 * 1024; // 64KB max per write
+                let len = len.min(MAX_WRITE_LEN);
+
+                // Read data from memory
+                let mut data = Vec::with_capacity(len);
+                let mut read_ok = true;
+                for i in 0..len {
+                    match self.memory.read_u8(ptr.wrapping_add(i as u32)) {
+                        Ok(byte) => data.push(byte),
+                        Err(_) => {
+                            read_ok = false;
+                            break;
+                        }
+                    }
+                }
+
+                if !read_ok {
+                    // Invalid pointer - return error
+                    self.regs[Gpr::A0.num() as usize] = SERIAL_ERROR_INVALID_POINTER;
+                    Ok(StepResult::Continue)
+                } else {
+                    let serial = self.get_or_create_serial_host();
+                    let result = serial.guest_write(&data);
+                    self.regs[Gpr::A0.num() as usize] = result;
+                    Ok(StepResult::Continue)
+                }
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_SERIAL_READ {
+                // SYSCALL_SERIAL_READ: Read bytes from serial input buffer
+                // args[0] = pointer to buffer (as i32, cast to u32)
+                // args[1] = max length to read
+                // Returns: a0 = bytes read (or negative error code)
+                let ptr = syscall_info.args[0] as u32;
+                let max_len = syscall_info.args[1] as usize;
+
+                // Validate max_len
+                const MAX_READ_LEN: usize = 64 * 1024; // 64KB max per read
+                let max_len = max_len.min(MAX_READ_LEN);
+
+                // Allocate buffer for reading
+                let mut buffer = vec![0u8; max_len];
+                let serial = self.get_or_create_serial_host();
+                let bytes_read = serial.guest_read(&mut buffer);
+
+                if bytes_read < 0 {
+                    // Error
+                    self.regs[Gpr::A0.num() as usize] = bytes_read;
+                    Ok(StepResult::Continue)
+                } else if bytes_read == 0 {
+                    // No data
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                    Ok(StepResult::Continue)
+                } else {
+                    // Write to memory
+                    let bytes_read = bytes_read as usize;
+                    let mut write_ok = true;
+                    for (i, &byte) in buffer[..bytes_read].iter().enumerate() {
+                        match self
+                            .memory
+                            .write_byte(ptr.wrapping_add(i as u32), byte as i8)
+                        {
+                            Ok(_) => {}
+                            Err(_) => {
+                                write_ok = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !write_ok {
+                        self.regs[Gpr::A0.num() as usize] = SERIAL_ERROR_INVALID_POINTER;
+                        Ok(StepResult::Continue)
+                    } else {
+                        self.regs[Gpr::A0.num() as usize] = bytes_read as i32;
+                        Ok(StepResult::Continue)
+                    }
+                }
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_SERIAL_HAS_DATA {
+                // SYSCALL_SERIAL_HAS_DATA: Check if serial input has data
+                // Returns: a0 = 1 if data available, 0 otherwise
+                let has_data = self
+                    .serial_host
+                    .as_ref()
+                    .map(|s| s.has_data())
+                    .unwrap_or(false);
+
+                self.regs[Gpr::A0.num() as usize] = if has_data { 1 } else { 0 };
+                Ok(StepResult::Continue)
+            } else if syscall_info.number == lp_riscv_shared::SYSCALL_TIME_MS {
+                // SYSCALL_TIME_MS: Get elapsed milliseconds since emulator start
+                // Returns: a0 = elapsed milliseconds (u32)
+                #[cfg(feature = "std")]
+                {
+                    self.init_start_time_if_needed();
+                    let elapsed = self.elapsed_ms();
+                    self.regs[Gpr::A0.num() as usize] = elapsed as i32;
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    // Return 0 if std feature not enabled
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                }
+
                 Ok(StepResult::Continue)
             } else {
                 Ok(StepResult::Syscall(syscall_info))
