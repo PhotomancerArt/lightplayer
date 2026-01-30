@@ -181,10 +181,9 @@ mod tests {
         // Only use release builds (filetests-setup builds in release mode)
         let profile = "release";
         // Path to the executable
-        // Try both workspace root and lightplayer/ subdirectory
+        // Go up to workspace root, then to target directory
         let exe_path = current_dir
-            .join("../../../../../lp-app")
-            .join("../../../../target")
+            .join("../../../../../target")
             .join(target)
             .join(profile)
             .join("lp-builtins-app");
