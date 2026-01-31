@@ -11,7 +11,7 @@ fw-core = { path = "../fw-core", default-features = false }
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
-lp-riscv-tools = { path = "../../lp-riscv/lp-riscv-tools", default-features = false }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }
 lp-emu-guest = { path = "../../lp-riscv/lp-emu-guest" }
 lp-builtins = { path = "../../lp-glsl/crates/lp-builtins", default-features = false }
 hashbrown = { workspace = true }

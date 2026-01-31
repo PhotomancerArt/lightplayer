@@ -1,0 +1,19 @@
+[package]
+name = "lp-riscv-inst"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+description = "RISC-V 32-bit instruction encoding/decoding utilities"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Only alloc for String in error messages
+
+[features]
+std = []  # For debug macro (std::env::var, std::eprintln)
+
+[dev-dependencies]
+lp-riscv-emu = { path = "../lp-riscv-emu" }

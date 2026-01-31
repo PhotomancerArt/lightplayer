@@ -9,7 +9,8 @@ use crate::exec::glsl_value::GlslValue;
 use crate::frontend::semantic::functions::FunctionSignature;
 use crate::frontend::src_loc::GlSourceMap;
 use hashbrown::HashMap;
-use lp_riscv_tools::emu::error::{EmulatorError, trap_code_to_string};
+use lp_riscv_emu::{EmulatorError, trap_code_to_string};
+use lp_riscv_inst::format_instruction;
 
 use alloc::{format, string::String, vec::Vec};
 
@@ -18,7 +19,7 @@ use alloc::{format, string::String, vec::Vec};
 /// Currently only supports calling `main` with no arguments
 #[cfg(feature = "emulator")]
 pub struct GlslEmulatorModule {
-    pub(crate) emulator: lp_riscv_tools::emu::emulator::Riscv32Emulator,
+    pub(crate) emulator: lp_riscv_emu::Riscv32Emulator,
     pub(crate) signatures: HashMap<String, FunctionSignature>,
     // Store Cranelift signatures for proper function calling with arguments
     pub(crate) cranelift_signatures: HashMap<String, cranelift_codegen::ir::Signature>,
@@ -484,7 +485,7 @@ impl GlslEmulatorModule {
         reason = "Reserved for future use when manual buffer allocation is needed"
     )]
     fn allocate_buffer_in_ram(&mut self, size: usize) -> Result<u32, GlslError> {
-        // DEFAULT_RAM_START is 0x80000000 (from lp-riscv-tools/src/emu/memory.rs)
+        // DEFAULT_RAM_START is 0x80000000 (from lp-riscv-emu/src/emu/memory.rs)
         const DEFAULT_RAM_START: u32 = 0x80000000;
 
         // Get current RAM size
@@ -869,7 +870,7 @@ impl GlslEmulatorModule {
                     } else {
                         // Show short zero runs
                         for i in 0..zero_count {
-                            let inst_str = lp_riscv_tools::format_instruction(0);
+                            let inst_str = format_instruction(0);
                             disasm.push_str(&format!(
                                 "  {:08x}: {:08x}    {}\n",
                                 zero_start + i * 4,
@@ -881,7 +882,7 @@ impl GlslEmulatorModule {
                 }
 
                 // Use proper disassembly formatting
-                let inst_str = lp_riscv_tools::format_instruction(instruction);
+                let inst_str = lp_riscv_inst::format_instruction(instruction);
                 disasm.push_str(&format!(
                     "  {offset:08x}: {instruction:08x}    {inst_str}\n"
                 ));
@@ -899,7 +900,7 @@ impl GlslEmulatorModule {
                 ));
             } else {
                 for i in 0..zero_count {
-                    let inst_str = lp_riscv_tools::format_instruction(0);
+                    let inst_str = lp_riscv_inst::format_instruction(0);
                     disasm.push_str(&format!(
                         "  {:08x}: {:08x}    {}\n",
                         zero_start + i * 4,

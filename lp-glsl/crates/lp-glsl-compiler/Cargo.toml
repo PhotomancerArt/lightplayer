@@ -21,13 +21,15 @@ hashbrown = { workspace = true }
 object = { workspace = true, optional = true }
 target-lexicon = { workspace = true }
 lp-jit-util = { path = "../lp-jit-util", default-features = false }
-lp-riscv-tools = { path = "../../../lp-riscv/lp-riscv-tools", optional = true, features = ["std"] }
+lp-riscv-emu = { path = "../../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
+lp-riscv-elf = { path = "../../../lp-riscv/lp-riscv-elf", optional = true }
+lp-riscv-inst = { path = "../../../lp-riscv/lp-riscv-inst", optional = true }
 lp-builtins = { path = "../lp-builtins" }
 anyhow = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-emulator = ["lp-riscv-tools", "cranelift-object", "object", "cranelift-codegen/disas"]  # Enable RISC-V 32-bit emulator support and disassembly
+emulator = ["lp-riscv-emu", "lp-riscv-elf", "lp-riscv-inst", "cranelift-object", "object", "cranelift-codegen/disas"]  # Enable RISC-V 32-bit emulator support and disassembly
 std = [
     "glsl/std",
     "cranelift-codegen/std",

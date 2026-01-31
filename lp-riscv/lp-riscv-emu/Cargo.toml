@@ -1,0 +1,25 @@
+[package]
+name = "lp-riscv-emu"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+description = "RISC-V 32-bit emulator runtime"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-riscv-inst = { path = "../lp-riscv-inst" }
+lp-emu-shared = { path = "../lp-emu-shared" }
+cranelift-codegen = { workspace = true, features = ["riscv32"] }
+hashbrown = { workspace = true }
+
+[features]
+std = []  # For time tracking (std::time::Instant) and debug output (std::io::Write)
+
+[dev-dependencies]
+cranelift-codegen = { workspace = true, features = ["riscv32"] }
+cranelift-frontend = { workspace = true }
+cranelift-module = { workspace = true }
+lp-riscv-elf = { path = "../lp-riscv-elf", features = ["std"] }

@@ -9,7 +9,9 @@ workspace = true
 
 [dependencies]
 lp-glsl-compiler = { path = "../lp-glsl-compiler", features = ["std", "emulator"] }
-lp-riscv-tools = { path = "../../../lp-riscv/lp-riscv-tools", features = ["std"] }
+lp-riscv-emu = { path = "../../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-riscv-elf = { path = "../../../lp-riscv/lp-riscv-elf" }
+lp-riscv-inst = { path = "../../../lp-riscv/lp-riscv-inst" }
 lp-jit-util = { path = "../lp-jit-util" }
 anyhow = { workspace = true }
 cranelift-codegen = { workspace = true, features = ["host-arch"] }

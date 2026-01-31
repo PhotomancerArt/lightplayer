@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 pub fn link_and_verify_builtins(
     elf_bytes: &[u8],
     builtins_exe_bytes: &[u8],
-) -> Result<lp_riscv_tools::ElfLoadInfo, GlslError> {
+) -> Result<lp_riscv_elf::ElfLoadInfo, GlslError> {
     use crate::backend::builtins::registry::BuiltinId;
 
     crate::debug!("=== Loading object file into builtins executable ===");
@@ -41,7 +41,7 @@ pub fn link_and_verify_builtins(
 
     // Load the base executable
     crate::debug!("Loading base executable...");
-    let mut load_info = lp_riscv_tools::load_elf(builtins_exe_bytes).map_err(|e| {
+    let mut load_info = lp_riscv_elf::load_elf(builtins_exe_bytes).map_err(|e| {
         GlslError::new(
             ErrorCode::E0400,
             format!(
@@ -55,7 +55,7 @@ pub fn link_and_verify_builtins(
 
     // Load the object file into the base executable
     crate::debug!("Loading object file...");
-    let _obj_info = lp_riscv_tools::elf_loader::load_object_file(
+    let _obj_info = lp_riscv_elf::load_object_file(
         elf_bytes,
         &mut load_info.code,
         &mut load_info.ram,

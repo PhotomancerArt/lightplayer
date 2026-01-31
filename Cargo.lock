@@ -1506,12 +1506,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elf"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
-
-[[package]]
 name = "emath"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2464,7 +2458,7 @@ dependencies = [
  "lp-builtins",
  "lp-emu-guest",
  "lp-model",
- "lp-riscv-tools",
+ "lp-riscv-emu",
  "lp-server",
  "lp-shared",
  "serde_json",
@@ -3397,7 +3391,9 @@ dependencies = [
  "hashbrown 0.15.5",
  "lp-builtins",
  "lp-jit-util",
- "lp-riscv-tools",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
  "object",
  "target-lexicon",
 ]
@@ -3416,7 +3412,9 @@ dependencies = [
  "glsl",
  "lp-glsl-compiler",
  "lp-jit-util",
- "lp-riscv-tools",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
  "num_cpus",
  "regex",
  "target-lexicon",
@@ -3442,19 +3440,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-riscv-tools"
+name = "lp-riscv-elf"
 version = "40.0.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-module",
  "cranelift-object",
- "elf",
  "hashbrown 0.15.5",
- "lp-emu-shared",
- "nom",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
  "object",
  "target-lexicon",
+]
+
+[[package]]
+name = "lp-riscv-emu"
+version = "40.0.0"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "hashbrown 0.15.5",
+ "lp-emu-shared",
+ "lp-riscv-elf",
+ "lp-riscv-inst",
+]
+
+[[package]]
+name = "lp-riscv-inst"
+version = "40.0.0"
+dependencies = [
+ "lp-riscv-emu",
 ]
 
 [[package]]

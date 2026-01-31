@@ -9,12 +9,7 @@ fn main() {
         .parent() // apps/
         .and_then(|p| p.parent()) // lp-glsl/
         .and_then(|p| p.parent()) // root/
-        .and_then(|p| {
-            p.join("../../../lp-riscv")
-                .join("lp-emu-guest")
-                .canonicalize()
-                .ok()
-        })
+        .and_then(|p| p.join("lp-riscv").join("lp-emu-guest").canonicalize().ok())
         .expect("Failed to find lp-emu-guest crate directory");
 
     let linker_script = emu_guest_path.join("memory.ld");

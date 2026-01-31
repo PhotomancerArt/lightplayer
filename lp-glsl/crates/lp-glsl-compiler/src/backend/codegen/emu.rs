@@ -45,12 +45,10 @@ pub fn build_emu_executable(
     original_clif: Option<String>,
     transformed_clif: Option<String>,
 ) -> Result<GlslEmulatorModule, GlslError> {
-    use lp_riscv_tools::Gpr;
-    use lp_riscv_tools::StepResult;
-    #[cfg(not(feature = "std"))]
-    use lp_riscv_tools::elf_loader::load_elf;
-    use lp_riscv_tools::emu::LogLevel;
-    use lp_riscv_tools::emu::emulator::Riscv32Emulator;
+    use lp_riscv_emu::LogLevel;
+    use lp_riscv_emu::Riscv32Emulator;
+    use lp_riscv_emu::StepResult;
+    use lp_riscv_inst::Gpr;
     use object::{Object, ObjectSymbol};
 
     // Builtin functions are already declared when the module was created
