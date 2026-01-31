@@ -16,7 +16,7 @@ test = []
 
 [dependencies]
 lp-builtins = { path = "../../crates/lp-builtins" }
-lp-emu-guest = { path = "../../../lp-riscv/lp-emu-guest" }
+lp-riscv-emu-guest = { path = "../../../lp-riscv/lp-riscv-emu-guest" }
 
 [build-dependencies]
 

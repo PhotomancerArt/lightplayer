@@ -244,7 +244,7 @@ These have different use cases and dependencies.
 
 - `alloc` (for `Vec`, `VecDeque`, `String`)
 - `cranelift-codegen` (for ABI, trap codes)
-- `lp-emu-shared` (for syscall constants)
+- `lp-riscv-emu-shared` (for syscall constants)
 - `hashbrown` (for `HashMap` in `no_std`)
 
 **Public API:**
@@ -405,7 +405,7 @@ These have different use cases and dependencies.
 ```toml
 hashbrown = { workspace = true }
 nom = { version = "7", default-features = false, features = ["alloc"] }
-lp-emu-shared = { path = "../lp-emu-shared" }
+lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true, optional = true }
 elf = { version = "0.7", optional = true }
@@ -426,7 +426,7 @@ object = { version = "0.37.3", optional = true, features = ["write"] }
 ```toml
 [dependencies]
 lp-riscv-inst = { path = "../lp-riscv-inst" }
-lp-emu-shared = { path = "../lp-emu-shared" }
+lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 hashbrown = { workspace = true }
 

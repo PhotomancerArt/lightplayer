@@ -1,8 +1,9 @@
-# Phase 1: Create lp-emu-guest Crate Structure
+# Phase 1: Create lp-riscv-emu-guest Crate Structure
 
 ## Scope of Phase
 
-Create the basic structure for the `lp-emu-guest` crate, including directory, `Cargo.toml`, and initial module files.
+Create the basic structure for the `lp-riscv-emu-guest` crate, including directory, `Cargo.toml`,
+and initial module files.
 
 ## Code Organization Reminders
 
@@ -19,7 +20,7 @@ Create the basic structure for the `lp-emu-guest` crate, including directory, `C
 Create the directory structure:
 
 ```
-lp-glsl/crates/lp-emu-guest/
+lp-glsl/crates/lp-riscv-emu-guest/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -32,11 +33,11 @@ lp-glsl/crates/lp-emu-guest/
 
 ### 2. Create Cargo.toml
 
-Create `lp-glsl/crates/lp-emu-guest/Cargo.toml`:
+Create `lp-glsl/crates/lp-riscv-emu-guest/Cargo.toml`:
 
 ```toml
 [package]
-name = "lp-emu-guest"
+name = "lp-riscv-emu-guest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -103,7 +104,7 @@ Create stub files for each module:
 Update `Cargo.toml` (workspace root) to add the new crate to `members`:
 
 ```toml
-"lp-glsl/crates/lp-emu-guest",
+"lp-glsl/crates/lp-riscv-emu-guest",
 ```
 
 Add it after `lp-glsl/crates/lp-riscv-tools` in the members list.
@@ -113,7 +114,7 @@ Add it after `lp-glsl/crates/lp-riscv-tools` in the members list.
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest
+cargo check --package lp-riscv-emu-guest
 ```
 
 This should compile successfully (with warnings about unused code, which is expected).

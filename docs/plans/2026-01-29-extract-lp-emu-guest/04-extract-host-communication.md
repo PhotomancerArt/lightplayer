@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Extract the host communication functions (`__host_debug` and `__host_println`) from `lp-builtins-app/src/host.rs` into `lp-emu-guest/src/host.rs`.
+Extract the host communication functions (`__host_debug` and `__host_println`) from
+`lp-builtins-app/src/host.rs` into `lp-riscv-emu-guest/src/host.rs`.
 
 ## Code Organization Reminders
 
@@ -20,7 +21,7 @@ Read `lp-builtins-app/src/host.rs` and extract the entire file content.
 
 ### 2. Create host.rs
 
-Create `lp-emu-guest/src/host.rs`:
+Create `lp-riscv-emu-guest/src/host.rs`:
 
 ```rust
 use crate::syscall::{syscall, SYSCALL_ARGS};
@@ -82,7 +83,7 @@ pub extern "C" fn __host_println(ptr: *const u8, len: usize) {
 
 ### 3. Update lib.rs
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 #![no_std]
@@ -98,7 +99,8 @@ mod syscall;
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
-This should compile successfully. The `__host_debug` and `__host_println` functions are `#[no_mangle]` so they'll be accessible from code that links against this crate.
+This should compile successfully. The `__host_debug` and `__host_println` functions are
+`#[no_mangle]` so they'll be accessible from code that links against this crate.

@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Extract the panic handler implementation from `lp-builtins-app/src/main.rs` into `lp-emu-guest/src/panic.rs`.
+Extract the panic handler implementation from `lp-builtins-app/src/main.rs` into
+`lp-riscv-emu-guest/src/panic.rs`.
 
 ## Code Organization Reminders
 
@@ -24,7 +25,7 @@ Read `lp-builtins-app/src/main.rs` and extract:
 
 ### 2. Create panic.rs
 
-Create `lp-emu-guest/src/panic.rs`:
+Create `lp-riscv-emu-guest/src/panic.rs`:
 
 ```rust
 use core::{
@@ -130,11 +131,12 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 ```
 
-**Note**: This uses `crate::syscall` which we'll create in the next phase. For now, we'll need to create a stub.
+**Note**: This uses `crate::syscall` which we'll create in the next phase. For now, we'll need to
+create a stub.
 
 ### 3. Create syscall.rs Stub
 
-Create `lp-emu-guest/src/syscall.rs` with minimal content for now:
+Create `lp-riscv-emu-guest/src/syscall.rs` with minimal content for now:
 
 ```rust
 /// Syscall number for panic
@@ -166,7 +168,7 @@ pub(crate) fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
 
 ### 4. Update lib.rs
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 #![no_std]
@@ -181,7 +183,8 @@ mod syscall;
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
-This should compile successfully. The panic handler will be automatically registered via the `#[panic_handler]` attribute.
+This should compile successfully. The panic handler will be automatically registered via the
+`#[panic_handler]` attribute.

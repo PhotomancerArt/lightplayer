@@ -1,8 +1,8 @@
-# Phase 2: Add syscall numbers to lp-emu-guest
+# Phase 2: Add syscall numbers to lp-riscv-emu-guest
 
 ## Scope of phase
 
-Add syscall number constants to `lp-emu-guest` for the new syscalls: YIELD, SERIAL_WRITE,
+Add syscall number constants to `lp-riscv-emu-guest` for the new syscalls: YIELD, SERIAL_WRITE,
 SERIAL_READ, SERIAL_HAS_DATA, and TIME_MS.
 
 ## Code Organization Reminders
@@ -15,7 +15,7 @@ SERIAL_READ, SERIAL_HAS_DATA, and TIME_MS.
 
 ## Implementation Details
 
-### 1. Update `lp-riscv/lp-emu-guest/src/syscall.rs`
+### 1. Update `lp-riscv/lp-riscv-emu-guest/src/syscall.rs`
 
 Add new syscall number constants after the existing ones:
 
@@ -53,7 +53,7 @@ missing.
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest
+cargo check --package lp-riscv-emu-guest
 ```
 
 Ensure:

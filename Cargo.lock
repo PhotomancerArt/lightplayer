@@ -2456,9 +2456,9 @@ dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
  "lp-builtins",
- "lp-emu-guest",
  "lp-model",
  "lp-riscv-emu",
+ "lp-riscv-emu-guest",
  "lp-server",
  "lp-shared",
  "serde_json",
@@ -3295,7 +3295,7 @@ name = "lp-builtins-app"
 version = "40.0.0"
 dependencies = [
  "lp-builtins",
- "lp-emu-guest",
+ "lp-riscv-emu-guest",
 ]
 
 [[package]]
@@ -3320,25 +3320,6 @@ dependencies = [
  "tokio-tungstenite",
  "tungstenite",
 ]
-
-[[package]]
-name = "lp-emu-guest"
-version = "40.0.0"
-dependencies = [
- "linked_list_allocator",
- "lp-emu-shared",
-]
-
-[[package]]
-name = "lp-emu-guest-test-app"
-version = "40.0.0"
-dependencies = [
- "lp-emu-guest",
-]
-
-[[package]]
-name = "lp-emu-shared"
-version = "40.0.0"
 
 [[package]]
 name = "lp-engine"
@@ -3462,10 +3443,29 @@ dependencies = [
  "cranelift-frontend",
  "cranelift-module",
  "hashbrown 0.15.5",
- "lp-emu-shared",
  "lp-riscv-elf",
+ "lp-riscv-emu-shared",
  "lp-riscv-inst",
 ]
+
+[[package]]
+name = "lp-riscv-emu-guest"
+version = "40.0.0"
+dependencies = [
+ "linked_list_allocator",
+ "lp-riscv-emu-shared",
+]
+
+[[package]]
+name = "lp-riscv-emu-guest-test-app"
+version = "40.0.0"
+dependencies = [
+ "lp-riscv-emu-guest",
+]
+
+[[package]]
+name = "lp-riscv-emu-shared"
+version = "40.0.0"
 
 [[package]]
 name = "lp-riscv-inst"

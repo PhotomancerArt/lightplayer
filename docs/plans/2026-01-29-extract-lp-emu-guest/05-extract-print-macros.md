@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Extract the print macros and writer implementation from `lp-builtins-app/src/print.rs` into `lp-emu-guest/src/print.rs`.
+Extract the print macros and writer implementation from `lp-builtins-app/src/print.rs` into
+`lp-riscv-emu-guest/src/print.rs`.
 
 ## Code Organization Reminders
 
@@ -20,7 +21,7 @@ Read `lp-builtins-app/src/print.rs` and extract the entire file content.
 
 ### 2. Create print.rs
 
-Create `lp-emu-guest/src/print.rs`:
+Create `lp-riscv-emu-guest/src/print.rs`:
 
 ```rust
 use core::fmt::{self, Write};
@@ -102,11 +103,12 @@ macro_rules! println {
 }
 ```
 
-**Note**: The macros use `#[macro_export]` so they'll be available at the crate root. We'll re-export them in `lib.rs`.
+**Note**: The macros use `#[macro_export]` so they'll be available at the crate root. We'll
+re-export them in `lib.rs`.
 
 ### 3. Update lib.rs
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 #![no_std]
@@ -121,20 +123,31 @@ mod syscall;
 pub use print::{print, println};
 ```
 
-**Note**: We can't re-export `#[macro_export]` macros directly, but they'll be available as `lp_emu_guest::print!` and `lp_emu_guest::println!`. Alternatively, we can create wrapper macros. Let's check how `lp-builtins-app` uses them.
+**Note**: We can't re-export `#[macro_export]` macros directly, but they'll be available as
+`lp_riscv_emu_guest::print!` and `lp_riscv_emu_guest::println!`. Alternatively, we can create
+wrapper macros.
+Let's check how `lp-builtins-app` uses them.
 
-Actually, looking at the original code, the macros are `#[macro_export]` which means they're available at the crate root. When we re-export them, they'll be available as `lp_emu_guest::print!` etc. But for convenience, we might want to also provide `host_debug!` and `host_println!` macros that use the host functions.
+Actually, looking at the original code, the macros are `#[macro_export]` which means they're
+available at the crate root. When we re-export them, they'll be available as
+`lp_riscv_emu_guest::print!`
+etc. But for convenience, we might want to also provide `host_debug!` and `host_println!` macros
+that use the host functions.
 
-Let's check if `lp-builtins` provides these macros... Actually, `host_debug!` is used in `lp-builtins-app/src/main.rs` but it's not defined there. It must come from `lp-builtins`. We don't need to provide it here.
+Let's check if `lp-builtins` provides these macros... Actually, `host_debug!` is used in
+`lp-builtins-app/src/main.rs` but it's not defined there. It must come from `lp-builtins`. We don't
+need to provide it here.
 
-For now, just re-export the print macros. Applications can use `lp_emu_guest::print!` or import them.
+For now, just re-export the print macros. Applications can use `lp_riscv_emu_guest::print!` or
+import
+them.
 
 ## Validate
 
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
 This should compile successfully. The macros will be available at the crate root.

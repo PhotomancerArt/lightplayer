@@ -2,7 +2,7 @@
 //!
 //! Uses emulator syscalls to get time from the host.
 
-use lp_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
+use lp_riscv_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
 use lp_shared::time::TimeProvider;
 
 /// Syscall-based TimeProvider implementation

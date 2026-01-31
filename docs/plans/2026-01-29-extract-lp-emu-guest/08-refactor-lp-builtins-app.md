@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Refactor `lp-builtins-app` to use `lp-emu-guest` crate instead of containing all the code itself. This involves updating dependencies, simplifying `main.rs`, and removing the build script.
+Refactor `lp-builtins-app` to use `lp-riscv-emu-guest` crate instead of containing all the code
+itself. This involves updating dependencies, simplifying `main.rs`, and removing the build script.
 
 ## Code Organization Reminders
 
@@ -37,10 +38,10 @@ test = []
 
 [dependencies]
 lp-builtins = { path = "../../crates/lp-builtins" }
-lp-emu-guest = { path = "../../crates/lp-emu-guest" }
+lp-riscv-emu-guest = { path = "../../crates/lp-riscv-emu-guest" }
 ```
 
-Add `lp-emu-guest` as a dependency.
+Add `lp-riscv-emu-guest` as a dependency.
 
 ### 2. Simplify main.rs
 
@@ -53,10 +54,10 @@ Update `lp-builtins-app/src/main.rs` to be a thin wrapper:
 mod builtin_refs;
 
 // Re-export _print so macros can find it
-pub use lp_emu_guest::print::_print;
+pub use lp_riscv_emu_guest::print::_print;
 
 use lp_builtins::host_debug;
-use lp_emu_guest::entry;
+use lp_riscv_emu_guest::entry;
 
 /// User _init pointer - will be overwritten by object loader to point to actual user _init()
 /// Initialized to sentinel value 0xDEADBEEF to make it obvious if relocation isn't applied
@@ -79,8 +80,8 @@ pub extern "C" fn _lp_main() -> () {
 
     // Reference host functions to prevent dead code elimination
     unsafe {
-        let _debug_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_debug;
-        let _println_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_println;
+        let _debug_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_debug;
+        let _println_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_println;
         let _ = core::ptr::read_volatile(&_debug_fn as *const _);
         let _ = core::ptr::read_volatile(&_println_fn as *const _);
     }
@@ -92,7 +93,7 @@ pub extern "C" fn _lp_main() -> () {
     if user_init_ptr == 0 || user_init_ptr == 0xDEADBEEF {
         // No user _init set - halt gracefully
         host_debug!("[lp-builtins-app::main()] no user _init specified. halting.");
-        lp_emu_guest::panic::ebreak();
+        lp_riscv_emu_guest::panic::ebreak();
     }
 
     host_debug!(
@@ -116,9 +117,12 @@ pub extern "C" fn _lp_main() -> () {
 }
 ```
 
-**Wait**: We need to make `ebreak` accessible. Let's check if we need to export it from `lp-emu-guest`. Actually, `ebreak` is used in `panic.rs` but it's `pub(crate)`. We might need to make it public, or provide a different way to halt.
+**Wait**: We need to make `ebreak` accessible. Let's check if we need to export it from
+`lp-riscv-emu-guest`. Actually, `ebreak` is used in `panic.rs` but it's `pub(crate)`. We might need
+to make it public, or provide a different way to halt.
 
-Actually, looking at the original code, `ebreak()` is called directly. Let's make it `pub` in `lp-emu-guest/src/panic.rs`:
+Actually, looking at the original code, `ebreak()` is called directly. Let's make it `pub` in
+`lp-riscv-emu-guest/src/panic.rs`:
 
 ```rust
 /// Exit the interpreter
@@ -128,13 +132,14 @@ pub fn ebreak() -> ! {
 }
 ```
 
-And update `lp-emu-guest/src/lib.rs`:
+And update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 pub mod panic;  // Make panic module public so ebreak can be accessed
 ```
 
-Actually, wait. The panic handler needs to be registered, but we don't need to export the module. Let's just export `ebreak`:
+Actually, wait. The panic handler needs to be registered, but we don't need to export the module.
+Let's just export `ebreak`:
 
 ```rust
 mod panic;
@@ -142,9 +147,13 @@ mod panic;
 pub use panic::ebreak;
 ```
 
-But that won't work because `panic` module needs to be accessible for `#[panic_handler]`. Let's keep it as `mod panic` but export `ebreak`:
+But that won't work because `panic` module needs to be accessible for `#[panic_handler]`. Let's keep
+it as `mod panic` but export `ebreak`:
 
-Actually, let's check the original usage. In `lp-builtins-app/src/main.rs`, `ebreak()` is defined locally. So we can just call `lp_emu_guest::panic::ebreak()` if we make it public, or we can provide a wrapper.
+Actually, let's check the original usage. In `lp-builtins-app/src/main.rs`, `ebreak()` is defined
+locally. So we can just call `lp_riscv_emu_guest::panic::ebreak()` if we make it public, or we can
+provide
+a wrapper.
 
 Let's make `ebreak` public in `panic.rs` and re-export it in `lib.rs`:
 
@@ -152,7 +161,10 @@ Let's make `ebreak` public in `panic.rs` and re-export it in `lib.rs`:
 pub use panic::ebreak;
 ```
 
-Actually, simpler: just make `ebreak` public in `panic.rs` and users can access it via `lp_emu_guest::panic::ebreak()`. But that requires making `panic` module public, which we don't want.
+Actually, simpler: just make `ebreak` public in `panic.rs` and users can access it via
+`lp_riscv_emu_guest::panic::ebreak()`. But that requires making `panic` module public, which we
+don't
+want.
 
 Better: export `ebreak` directly from `lib.rs`:
 
@@ -169,9 +181,12 @@ But `panic` module is private, so we can't re-export from it. We need to either:
 2. Move `ebreak` to a separate module
 3. Make `ebreak` a standalone function
 
-Let's go with option 3 - move `ebreak` to `syscall.rs` or create a small `halt.rs` module. Actually, `ebreak` is used by panic handler, so it makes sense to keep it in `panic.rs` but make the module public with only `ebreak` being public.
+Let's go with option 3 - move `ebreak` to `syscall.rs` or create a small `halt.rs` module. Actually,
+`ebreak` is used by panic handler, so it makes sense to keep it in `panic.rs` but make the module
+public with only `ebreak` being public.
 
-Actually, let's just make `panic` module public but document that only `ebreak` is part of the public API:
+Actually, let's just make `panic` module public but document that only `ebreak` is part of the
+public API:
 
 ```rust
 pub mod panic;  // Public for ebreak() function
@@ -187,13 +202,15 @@ pub mod panic;
 pub use panic::ebreak;
 ```
 
-This way users can use `lp_emu_guest::ebreak()` without accessing the panic module directly.
+This way users can use `lp_riscv_emu_guest::ebreak()` without accessing the panic module directly.
 
-Actually, Rust doesn't allow re-exporting from a private module. So we need to make `panic` public. That's fine - we can document that the panic handler is automatically registered and users shouldn't need to interact with it directly.
+Actually, Rust doesn't allow re-exporting from a private module. So we need to make `panic` public.
+That's fine - we can document that the panic handler is automatically registered and users shouldn't
+need to interact with it directly.
 
 Let's proceed with making `panic` module public and exporting `ebreak`:
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 pub mod panic;
@@ -201,7 +218,7 @@ pub mod panic;
 pub use panic::ebreak;
 ```
 
-And update `lp-emu-guest/src/panic.rs` to make `ebreak` public:
+And update `lp-riscv-emu-guest/src/panic.rs` to make `ebreak` public:
 
 ```rust
 /// Exit the interpreter
@@ -214,14 +231,16 @@ pub fn ebreak() -> ! {
 Now update `lp-builtins-app/src/main.rs`:
 
 ```rust
-use lp_emu_guest::ebreak;
+use lp_riscv_emu_guest::ebreak;
 ```
 
 And use `ebreak()` instead of calling it directly.
 
-Actually, wait - we also need to handle the entry point. The entry point is in `lp-emu-guest` but it's `#[no_mangle]` so it will be automatically linked. We don't need to do anything special.
+Actually, wait - we also need to handle the entry point. The entry point is in `lp-riscv-emu-guest`
+but it's `#[no_mangle]` so it will be automatically linked. We don't need to do anything special.
 
-But wait - `_lp_main` is called from `_code_entry` in `lp-emu-guest`, so we need to make sure `_lp_main` is `#[no_mangle]` and accessible. It already is.
+But wait - `_lp_main` is called from `_code_entry` in `lp-riscv-emu-guest`, so we need to make sure
+`_lp_main` is `#[no_mangle]` and accessible. It already is.
 
 Let me revise the `main.rs`:
 
@@ -232,10 +251,10 @@ Let me revise the `main.rs`:
 mod builtin_refs;
 
 // Re-export _print so macros can find it
-pub use lp_emu_guest::print::_print;
+pub use lp_riscv_emu_guest::print::_print;
 
 use lp_builtins::host_debug;
-use lp_emu_guest::ebreak;
+use lp_riscv_emu_guest::ebreak;
 
 /// User _init pointer - will be overwritten by object loader to point to actual user _init()
 /// Initialized to sentinel value 0xDEADBEEF to make it obvious if relocation isn't applied
@@ -258,8 +277,8 @@ pub extern "C" fn _lp_main() -> () {
 
     // Reference host functions to prevent dead code elimination
     unsafe {
-        let _debug_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_debug;
-        let _println_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_println;
+        let _debug_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_debug;
+        let _println_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_println;
         let _ = core::ptr::read_volatile(&_debug_fn as *const _);
         let _ = core::ptr::read_volatile(&_println_fn as *const _);
     }
@@ -297,13 +316,13 @@ pub extern "C" fn _lp_main() -> () {
 
 ### 3. Remove build.rs
 
-Delete `lp-builtins-app/build.rs` since the linker script is now handled by `lp-emu-guest`.
+Delete `lp-builtins-app/build.rs` since the linker script is now handled by `lp-riscv-emu-guest`.
 
 ### 4. Update Previous Phases
 
 We need to update phase 7 to export `ebreak`:
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 pub mod panic;
@@ -311,7 +330,8 @@ pub mod panic;
 pub use panic::ebreak;
 ```
 
-And make `ebreak` public in `panic.rs` (already done in phase 3, but verify it's `pub` not `pub(crate)`).
+And make `ebreak` public in `panic.rs` (already done in phase 3, but verify it's `pub` not
+`pub(crate)`).
 
 ## Validate
 
@@ -321,4 +341,4 @@ Run from workspace root:
 cargo check --package lp-builtins-app --target riscv32imac-unknown-none-elf
 ```
 
-This should compile successfully. The app should now be a thin wrapper around `lp-emu-guest`.
+This should compile successfully. The app should now be a thin wrapper around `lp-riscv-emu-guest`.

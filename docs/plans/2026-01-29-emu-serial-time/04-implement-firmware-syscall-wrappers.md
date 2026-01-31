@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Implement the `SerialIo` and `TimeProvider` trait implementations in `fw-emu` that use the syscalls implemented in phase 3. These will replace the `todo!()` stubs.
+Implement the `SerialIo` and `TimeProvider` trait implementations in `fw-emu` that use the syscalls
+implemented in phase 3. These will replace the `todo!()` stubs.
 
 ## Code Organization Reminders
 
@@ -20,7 +21,7 @@ Replace the `todo!()` implementations with actual syscall calls:
 
 ```rust
 use fw_core::serial::{SerialError, SerialIo};
-use lp_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA, syscall};
+use lp_riscv_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA, syscall};
 
 impl SerialIo for SyscallSerialIo {
     fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
@@ -62,14 +63,17 @@ impl SerialIo for SyscallSerialIo {
 }
 ```
 
-**Note**: The actual implementation will need to handle memory allocation in the guest. We may need to use a helper from `lp-emu-guest` or allocate on the heap. For now, we can use a simpler approach:
+**Note**: The actual implementation will need to handle memory allocation in the guest. We may need
+to use a helper from `lp-riscv-emu-guest` or allocate on the heap. For now, we can use a simpler
+approach:
 
 1. For small writes/reads (< 256 bytes), use stack-allocated buffers
 2. For larger writes/reads, allocate on the heap using `alloc::vec::Vec`
 
-Let me check what memory allocation utilities are available in `lp-emu-guest`:
+Let me check what memory allocation utilities are available in `lp-riscv-emu-guest`:
 
-Actually, looking at the syscall signature, the syscall expects pointers in guest memory. We need to:
+Actually, looking at the syscall signature, the syscall expects pointers in guest memory. We need
+to:
 
 1. Allocate space in guest memory (heap or stack)
 2. Copy data to that space
@@ -152,7 +156,7 @@ Replace the `todo!()` implementation:
 
 ```rust
 use lp_shared::time::TimeProvider;
-use lp_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
+use lp_riscv_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
 
 impl TimeProvider for SyscallTimeProvider {
     fn now_ms(&self) -> u64 {
@@ -164,9 +168,10 @@ impl TimeProvider for SyscallTimeProvider {
 }
 ```
 
-### 3. Add syscall exports to `lp-emu-guest/src/lib.rs` or `mod.rs`
+### 3. Add syscall exports to `lp-riscv-emu-guest/src/lib.rs` or `mod.rs`
 
-Ensure the new syscall constants are exported if needed. Check if `syscall.rs` is already public or if constants need to be re-exported.
+Ensure the new syscall constants are exported if needed. Check if `syscall.rs` is already public or
+if constants need to be re-exported.
 
 ## Validate
 

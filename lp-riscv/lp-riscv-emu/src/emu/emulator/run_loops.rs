@@ -6,7 +6,7 @@ use super::super::error::EmulatorError;
 use super::state::Riscv32Emulator;
 use super::types::{StepResult, SyscallInfo};
 use alloc::string::String;
-use lp_emu_shared::SYSCALL_YIELD;
+use lp_riscv_emu_shared::SYSCALL_YIELD;
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {

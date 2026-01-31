@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Move the linker script (`memory.ld`) and build script (`build.rs`) from `lp-builtins-app` to `lp-emu-guest` crate.
+Move the linker script (`memory.ld`) and build script (`build.rs`) from `lp-builtins-app` to
+`lp-riscv-emu-guest` crate.
 
 ## Code Organization Reminders
 
@@ -16,17 +17,17 @@ Move the linker script (`memory.ld`) and build script (`build.rs`) from `lp-buil
 
 ### 1. Copy memory.ld
 
-Copy `lp-builtins-app/memory.ld` to `lp-emu-guest/memory.ld`:
+Copy `lp-builtins-app/memory.ld` to `lp-riscv-emu-guest/memory.ld`:
 
 ```bash
-cp lp-glsl/apps/lp-builtins-app/memory.ld lp-glsl/crates/lp-emu-guest/memory.ld
+cp lp-glsl/apps/lp-builtins-app/memory.ld lp-glsl/crates/lp-riscv-emu-guest/memory.ld
 ```
 
 The file should remain unchanged.
 
 ### 2. Create build.rs
 
-Create `lp-emu-guest/build.rs`:
+Create `lp-riscv-emu-guest/build.rs`:
 
 ```rust
 fn main() {
@@ -43,11 +44,11 @@ This is the same as the original `lp-builtins-app/build.rs`.
 
 ### 3. Update Cargo.toml
 
-Update `lp-emu-guest/Cargo.toml` to indicate this crate uses a build script:
+Update `lp-riscv-emu-guest/Cargo.toml` to indicate this crate uses a build script:
 
 ```toml
 [package]
-name = "lp-emu-guest"
+name = "lp-riscv-emu-guest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -65,7 +66,7 @@ The build script will automatically be used by Cargo.
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
 This should compile successfully and the linker script should be used during linking.

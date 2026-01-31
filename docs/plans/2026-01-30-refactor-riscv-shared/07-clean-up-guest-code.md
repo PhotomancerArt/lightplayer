@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Clean up the overly conservative guest code in `lp-emu-guest-test-app` and `fw-emu` to use `Vec`,
+Clean up the overly conservative guest code in `lp-riscv-emu-guest-test-app` and `fw-emu` to use
+`Vec`,
 `format!`, and proper Rust idioms.
 
 ## Code Organization Reminders
@@ -15,7 +16,7 @@ Clean up the overly conservative guest code in `lp-emu-guest-test-app` and `fw-e
 
 ## Implementation Details
 
-### 1. Update `lp-riscv/lp-emu-guest-test-app/src/main.rs`
+### 1. Update `lp-riscv/lp-riscv-emu-guest-test-app/src/main.rs`
 
 **Remove chunking logic from `write_serial()`**:
 
@@ -36,7 +37,7 @@ fn write_serial(data: &[u8]) {
 ```rust
 use alloc::string::String;
 use alloc::vec::Vec;
-use lp_emu_guest::{sys_serial_read, sys_serial_has_data, yield_syscall};
+use lp_riscv_emu_guest::{sys_serial_read, sys_serial_has_data, yield_syscall};
 
 /// Read a command from serial (until newline or EOF)
 fn read_serial_command() -> String {
@@ -80,45 +81,45 @@ fn read_serial_command() -> String {
 ```rust
 // Execute command
 if command.starts_with("echo ") {
-    let text = &command[5..];
-    let response = format!("echo: {}\n", text);
-    write_serial(response.as_bytes());
+let text = & command[5..];
+let response = format ! ("echo: {}\n", text);
+write_serial(response.as_bytes());
 } else if command == "time" {
-    let time_ms = get_time_ms();
-    let response = format!("time: {} ms\n", time_ms);
-    write_serial(response.as_bytes());
+let time_ms = get_time_ms();
+let response = format ! ("time: {} ms\n", time_ms);
+write_serial(response.as_bytes());
 } else if command == "yield" {
-    yield_syscall();
-} else if !command.is_empty() {
-    write_serial(b"unknown command\n");
+yield_syscall();
+} else if ! command.is_empty() {
+write_serial(b"unknown command\n");
 }
 ```
 
 **Or use `GuestSerial` helper**:
 
 ```rust
-use lp_emu_guest::{GuestSerial, GuestSyscallImpl};
+use lp_riscv_emu_guest::{GuestSerial, GuestSyscallImpl};
 
 let mut serial = GuestSerial::new(GuestSyscallImpl::new());
 
 loop {
-    let command = serial.read_line();
+let command = serial.read_line();
 
-    if command.starts_with("echo ") {
-        let text = &command[5..];
-        let response = format!("echo: {}\n", text);
-        serial.write(response.as_bytes());
-    } else if command == "time" {
-        let time_ms = get_time_ms();
-        let response = format!("time: {} ms\n", time_ms);
-        serial.write(response.as_bytes());
-    } else if command == "yield" {
-        yield_syscall();
-    } else if !command.is_empty() {
-        serial.write(b"unknown command\n");
-    }
+if command.starts_with("echo ") {
+let text = & command[5..];
+let response = format ! ("echo: {}\n", text);
+serial.write(response.as_bytes());
+} else if command == "time" {
+let time_ms = get_time_ms();
+let response = format ! ("time: {} ms\n", time_ms);
+serial.write(response.as_bytes());
+} else if command == "yield" {
+yield_syscall();
+} else if ! command.is_empty() {
+serial.write(b"unknown command\n");
+}
 
-    yield_syscall();
+yield_syscall();
 }
 ```
 
@@ -134,7 +135,7 @@ impl SerialIo for SyscallSerialIo {
         }
 
         // Use syscall wrapper - no chunking needed
-        let result = lp_emu_guest::sys_serial_write(data);
+        let result = lp_riscv_emu_guest::sys_serial_write(data);
         if result < 0 {
             Err(SerialError::WriteFailed(format!(
                 "Syscall returned error: {}",
@@ -150,7 +151,7 @@ impl SerialIo for SyscallSerialIo {
             return Ok(0);
         }
 
-        let result = lp_emu_guest::sys_serial_read(buf);
+        let result = lp_riscv_emu_guest::sys_serial_read(buf);
         if result < 0 {
             Err(SerialError::ReadFailed(format!(
                 "Syscall returned error: {}",
@@ -162,7 +163,7 @@ impl SerialIo for SyscallSerialIo {
     }
 
     fn has_data(&self) -> bool {
-        lp_emu_guest::sys_serial_has_data()
+        lp_riscv_emu_guest::sys_serial_has_data()
     }
 }
 ```
@@ -172,7 +173,7 @@ impl SerialIo for SyscallSerialIo {
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest-test-app
+cargo check --package lp-riscv-emu-guest-test-app
 cargo check --package fw-emu
 cargo test --test integration_fw_emu
 ```

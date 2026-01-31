@@ -1,8 +1,8 @@
-# Phase 5: Add Syscall Wrappers in lp-emu-guest
+# Phase 5: Add Syscall Wrappers in lp-riscv-emu-guest
 
 ## Scope of phase
 
-Add simple wrapper functions for serial syscalls in `lp-emu-guest` to make them easier to use.
+Add simple wrapper functions for serial syscalls in `lp-riscv-emu-guest` to make them easier to use.
 
 ## Code Organization Reminders
 
@@ -14,7 +14,7 @@ Add simple wrapper functions for serial syscalls in `lp-emu-guest` to make them 
 
 ## Implementation Details
 
-### 1. Update `lp-riscv/lp-emu-guest/src/syscall.rs`
+### 1. Update `lp-riscv/lp-riscv-emu-guest/src/syscall.rs`
 
 Add wrapper functions:
 
@@ -70,7 +70,7 @@ pub fn sys_serial_has_data() -> bool {
 }
 ```
 
-### 2. Update `lp-riscv/lp-emu-guest/src/lib.rs`
+### 2. Update `lp-riscv/lp-riscv-emu-guest/src/lib.rs`
 
 Add re-exports:
 
@@ -86,8 +86,8 @@ pub use syscall::{
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest
-cargo check --package lp-emu-guest-test-app
+cargo check --package lp-riscv-emu-guest
+cargo check --package lp-riscv-emu-guest-test-app
 ```
 
 Ensure:

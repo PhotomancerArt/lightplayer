@@ -20,7 +20,7 @@ lp-riscv/lp-riscv-tools/
             ├── state.rs                    # UPDATE: Add serial buffers and start_time
             └── execution.rs                 # UPDATE: Handle new syscalls (4-8)
 
-lp-riscv/lp-emu-guest/
+lp-riscv/lp-riscv-emu-guest/
 └── src/
     └── syscall.rs                          # UPDATE: Add syscall numbers 4-8
 
@@ -32,7 +32,7 @@ lp-fw/fw-emu/
     │   └── syscall.rs                      # UPDATE: Implement syscall wrapper
     └── server_loop.rs                      # UPDATE: Implement server loop with yield
 
-lp-riscv/lp-emu-guest-test-app/             # NEW: Test binary application for emulator
+lp-riscv/lp-riscv-emu-guest-test-app/             # NEW: Test binary application for emulator
 └── src/
     └── main.rs                             # NEW: Simple command handler (echo, time, etc.)
 
@@ -116,7 +116,7 @@ lp-riscv/lp-riscv-tools/
 - **SYSCALL_TIME_MS (8)**: Get elapsed milliseconds since start
     - Returns: a0 = elapsed ms (u32)
 
-### 3. Syscall Numbers (`lp-emu-guest/src/syscall.rs`)
+### 3. Syscall Numbers (`lp-riscv-emu-guest/src/syscall.rs`)
 
 - Add constants: SYSCALL_YIELD, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA,
   SYSCALL_TIME_MS
@@ -127,7 +127,7 @@ lp-riscv/lp-riscv-tools/
 - Implement `TimeProvider` trait using time syscall
 - Implement server loop that calls yield at end of each tick
 
-### 5. Test Binary (`lp-emu-guest-test-app`)
+### 5. Test Binary (`lp-riscv-emu-guest-test-app`)
 
 - Simple command handler that reads serial commands
 - Commands: "echo <text>", "time"

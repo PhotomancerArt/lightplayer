@@ -166,7 +166,7 @@ Ok(StepResult::Continue)
 
 ```rust
 use super::super::serial_host::SerialHost;
-use lp_emu_shared::SERIAL_ERROR_INVALID_POINTER;
+use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 ```
 
 ### 4. Update module structure

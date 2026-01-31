@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Update the workspace `Cargo.toml` to include `lp-emu-guest` in the workspace members, and verify that all build scripts and references are updated correctly.
+Update the workspace `Cargo.toml` to include `lp-riscv-emu-guest` in the workspace members, and
+verify that all build scripts and references are updated correctly.
 
 ## Code Organization Reminders
 
@@ -16,26 +17,28 @@ Update the workspace `Cargo.toml` to include `lp-emu-guest` in the workspace mem
 
 ### 1. Update Workspace Cargo.toml
 
-Update the root `Cargo.toml` to add `lp-emu-guest` to the workspace members:
+Update the root `Cargo.toml` to add `lp-riscv-emu-guest` to the workspace members:
 
 ```toml
 [workspace]
 members = [
     # ... existing members ...
-    "lp-glsl/crates/lp-emu-guest",  # Add after lp-riscv-tools
+    "lp-glsl/crates/lp-riscv-emu-guest",  # Add after lp-riscv-tools
     # ... rest of members ...
 ]
 ```
 
 Add it in the `lp-glsl` section, after `lp-glsl/crates/lp-riscv-tools`.
 
-**Note**: `lp-emu-guest` should NOT be added to `default-members` since it's `no_std` and only builds for RISC-V target, similar to `lp-builtins-app`.
+**Note**: `lp-riscv-emu-guest` should NOT be added to `default-members` since it's `no_std` and only
+builds for RISC-V target, similar to `lp-builtins-app`.
 
 ### 2. Verify Build Scripts
 
 Check if any build scripts reference `lp-builtins-app` and need updating:
 
-- `lp-glsl/crates/lp-glsl-compiler/build.rs` - This references `lp-builtins-app` executable. This should still work since `lp-builtins-app` still exists, just as a thin wrapper.
+- `lp-glsl/crates/lp-glsl-compiler/build.rs` - This references `lp-builtins-app` executable. This
+  should still work since `lp-builtins-app` still exists, just as a thin wrapper.
 
 No changes needed here - `lp-builtins-app` still produces the same binary output.
 
@@ -53,8 +56,8 @@ No changes needed unless there are specific references to source files that move
 Run from workspace root:
 
 ```bash
-# Check that lp-emu-guest compiles
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+# Check that lp-riscv-emu-guest compiles
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 
 # Check that lp-builtins-app still compiles
 cargo check --package lp-builtins-app --target riscv32imac-unknown-none-elf

@@ -1,7 +1,7 @@
 use super::host_serial::{HostSerial, SerialError};
 use alloc::rc::Rc;
 use core::cell::RefCell;
-use lp_emu_shared::{GuestSerial, SerialSyscall};
+use lp_riscv_emu_shared::{GuestSerial, SerialSyscall};
 
 /// Test implementation of SerialSyscall that uses HostSerial directly
 /// This allows testing GuestSerial with HostSerial without the emulator

@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Create an integration test that runs the emulator with `lp-emu-guest-test-app`, handles serial
+Create an integration test that runs the emulator with `lp-riscv-emu-guest-test-app`, handles serial
 communication, and verifies the serial and time functionality works correctly. The test will have a
 main loop that runs the emulator until yield, processes serial messages, and repeats.
 
@@ -61,7 +61,7 @@ mod tests {
             .join("target")
             .join(target)
             .join(profile)
-            .join("lp-emu-guest-test-app");
+            .join("lp-riscv-emu-guest-test-app");
 
         if exe_path.exists() {
             return std::fs::read(&exe_path).ok();
@@ -78,12 +78,12 @@ mod tests {
         }
 
         // Build it
-        println!("Building lp-emu-guest-test-app...");
+        println!("Building lp-riscv-emu-guest-test-app...");
         let output = std::process::Command::new("cargo")
             .args([
                 "build",
                 "--package",
-                "lp-emu-guest-test-app",
+                "lp-riscv-emu-guest-test-app",
                 "--target",
                 "riscv32imac-unknown-none-elf",
                 "--release",

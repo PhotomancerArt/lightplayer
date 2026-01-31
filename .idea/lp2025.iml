@@ -35,12 +35,12 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-guest-test-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-guest/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-emu-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-guest-test-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-guest/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-inst/src" isTestSource="false" />

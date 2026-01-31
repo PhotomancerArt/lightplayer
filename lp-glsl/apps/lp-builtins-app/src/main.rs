@@ -4,10 +4,10 @@
 mod builtin_refs;
 
 // Re-export _print so macros can find it
-pub use lp_emu_guest::print::_print;
+pub use lp_riscv_emu_guest::print::_print;
 
 use lp_builtins::host_debug;
-use lp_emu_guest::ebreak;
+use lp_riscv_emu_guest::ebreak;
 
 /// User _init pointer - will be overwritten by object loader to point to actual user _init()
 /// Initialized to sentinel value 0xDEADBEEF to make it obvious if relocation isn't applied
@@ -30,8 +30,8 @@ pub extern "C" fn _lp_main() {
 
     // Reference host functions to prevent dead code elimination
     unsafe {
-        let _debug_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_debug;
-        let _println_fn: extern "C" fn(*const u8, usize) = lp_emu_guest::host::__host_println;
+        let _debug_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_debug;
+        let _println_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_println;
         let _ = core::ptr::read_volatile(&_debug_fn as *const _);
         let _ = core::ptr::read_volatile(&_println_fn as *const _);
     }

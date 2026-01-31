@@ -1,11 +1,11 @@
 [package]
-name = "lp-emu-guest-test-app"
+name = "lp-riscv-emu-guest-test-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lp-emu-guest-test-app"
+name = "lp-riscv-emu-guest-test-app"
 path = "src/main.rs"
 test = false
 
@@ -15,4 +15,4 @@ panic = "abort"
 [build-dependencies]
 
 [dependencies]
-lp-emu-guest = { path = "../lp-emu-guest" }
+lp-riscv-emu-guest = { path = "../lp-riscv-emu-guest" }

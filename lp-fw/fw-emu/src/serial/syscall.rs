@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use fw_core::serial::{SerialError, SerialIo};
-use lp_emu_guest::syscall::{
+use lp_riscv_emu_guest::syscall::{
     SYSCALL_ARGS, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, syscall,
 };
 

@@ -1,8 +1,10 @@
-# Extract lp-emu-guest Crate - Notes
+# Extract lp-riscv-emu-guest Crate - Notes
 
 ## Scope of Work
 
-Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-builtins-app` into a new common crate `lp-glsl/crates/lp-emu-guest`. This guest code provides the runtime foundation for code running in the RISC-V emulator and needs to be reusable by firmware and other applications.
+Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-builtins-app` into a new common crate
+`lp-glsl/crates/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
+running in the RISC-V emulator and needs to be reusable by firmware and other applications.
 
 The extracted code includes:
 
@@ -47,7 +49,8 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 
 ### Q1: Crate Structure - Library vs Binary
 
-**Question**: Should `lp-emu-guest` be a library crate that provides functions/modules, or should it also provide a binary entry point?
+**Question**: Should `lp-riscv-emu-guest` be a library crate that provides functions/modules, or
+should it also provide a binary entry point?
 
 **Context**:
 
@@ -56,19 +59,21 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 - Future firmware will also need to use this guest code
 - The entry point code (`_entry`, `_code_entry`) is generic and reusable
 
-**Suggested Answer**: Make `lp-emu-guest` a library crate that provides:
+**Suggested Answer**: Make `lp-riscv-emu-guest` a library crate that provides:
 
 - Public modules for syscalls, host communication, print macros
 - Public functions for entry point (`_entry`, `_code_entry`) that can be called from a binary
 - The binary (`lp-builtins-app`) will become a thin wrapper that calls these functions
 
-**Answer**: Agreed. `lp-emu-guest` will be a library crate with public modules and functions. `lp-builtins-app` becomes a thin wrapper.
+**Answer**: Agreed. `lp-riscv-emu-guest` will be a library crate with public modules and functions.
+`lp-builtins-app` becomes a thin wrapper.
 
 ---
 
 ### Q2: Linker Script Location
 
-**Question**: Should `memory.ld` be part of `lp-emu-guest` crate or remain in the application (`lp-builtins-app`)?
+**Question**: Should `memory.ld` be part of `lp-riscv-emu-guest` crate or remain in the
+application (`lp-builtins-app`)?
 
 **Context**:
 
@@ -77,15 +82,19 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 - However, the current layout seems appropriate for emulator use cases
 - The linker script is referenced in `build.rs`
 
-**Suggested Answer**: Include `memory.ld` in `lp-emu-guest` crate. Applications can override it if needed, but the default should work for most emulator use cases. The crate's `build.rs` will set up the linker script.
+**Suggested Answer**: Include `memory.ld` in `lp-riscv-emu-guest` crate. Applications can override
+it if needed, but the default should work for most emulator use cases. The crate's `build.rs` will
+set up the linker script.
 
-**Answer**: Agreed. `memory.ld` will be included in `lp-emu-guest` crate with the crate's `build.rs` setting it up.
+**Answer**: Agreed. `memory.ld` will be included in `lp-riscv-emu-guest` crate with the crate's
+`build.rs` setting it up.
 
 ---
 
 ### Q3: Builtin References Generation
 
-**Question**: How should `builtin_refs.rs` be handled? Should it be generated as part of the crate, or remain app-specific?
+**Question**: How should `builtin_refs.rs` be handled? Should it be generated as part of the crate,
+or remain app-specific?
 
 **Context**:
 
@@ -94,15 +103,20 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 - `lp-builtins-app` needs this to ensure builtins are included
 - Future firmware might not need all builtins, or might need different ones
 
-**Suggested Answer**: Make builtin references optional via a feature flag. The crate can provide a default implementation that references all builtins, but allow applications to provide their own `builtin_refs` module if they need custom behavior. For `lp-builtins-app`, we'll use the default.
+**Suggested Answer**: Make builtin references optional via a feature flag. The crate can provide a
+default implementation that references all builtins, but allow applications to provide their own
+`builtin_refs` module if they need custom behavior. For `lp-builtins-app`, we'll use the default.
 
-**Answer**: Builtin references are app-specific. `lp-emu-guest` will NOT include `builtin_refs.rs`. Each application (`lp-builtins-app`, firmware, etc.) will provide its own `builtin_refs` module if needed.
+**Answer**: Builtin references are app-specific. `lp-riscv-emu-guest` will NOT include
+`builtin_refs.rs`. Each application (`lp-builtins-app`, firmware, etc.) will provide its own
+`builtin_refs` module if needed.
 
 ---
 
 ### Q4: Public API Design
 
-**Question**: What should be the public API of `lp-emu-guest`? Should all modules be public, or should there be a more controlled API surface?
+**Question**: What should be the public API of `lp-riscv-emu-guest`? Should all modules be public,
+or should there be a more controlled API surface?
 
 **Context**:
 
@@ -118,20 +132,23 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 - Re-export macros: `print!`, `println!`, `host_debug!`, `host_println!`
 - Internal: `syscall`, `panic_syscall`, `ebreak` (keep as `pub(crate)` or private)
 
-**Answer**: Agreed. Public API will expose `host` and `print` modules, entry point functions, and re-export macros. Internal implementation details will be private.
+**Answer**: Agreed. Public API will expose `host` and `print` modules, entry point functions, and
+re-export macros. Internal implementation details will be private.
 
 ---
 
 ### Q5: Feature Flags
 
-**Question**: Should `lp-emu-guest` have feature flags for optional components?
+**Question**: Should `lp-riscv-emu-guest` have feature flags for optional components?
 
 **Context**:
 
 - All current functionality seems essential for emulator guest code
-- Future might need optional components (e.g., different panic handlers, different syscall implementations)
+- Future might need optional components (e.g., different panic handlers, different syscall
+  implementations)
 
-**Suggested Answer**: Start without feature flags. Add them later if needed. Keep the API simple initially.
+**Suggested Answer**: Start without feature flags. Add them later if needed. Keep the API simple
+initially.
 
 **Answer**: Agreed. No feature flags for now. Keep it simple.
 
@@ -139,7 +156,8 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 
 ### Q6: lp-builtins-app Refactoring
 
-**Question**: After extraction, what should `lp-builtins-app` become? A thin binary wrapper, or should it be removed entirely?
+**Question**: After extraction, what should `lp-builtins-app` become? A thin binary wrapper, or
+should it be removed entirely?
 
 **Context**:
 
@@ -149,9 +167,10 @@ The guest code currently lives in `lp-glsl/apps/lp-builtins-app/src/`:
 
 **Suggested Answer**: `lp-builtins-app` becomes a thin binary that:
 
-- Depends on `lp-emu-guest`
+- Depends on `lp-riscv-emu-guest`
 - Provides `_lp_main()` function that references builtins (this is app-specific)
-- Calls the entry point from `lp-emu-guest`
+- Calls the entry point from `lp-riscv-emu-guest`
 - Can be simplified significantly since most code moves to the crate
 
-**Answer**: Agreed. `lp-builtins-app` will become a thin binary wrapper that depends on `lp-emu-guest` and provides the app-specific `_lp_main()` function.
+**Answer**: Agreed. `lp-builtins-app` will become a thin binary wrapper that depends on
+`lp-riscv-emu-guest` and provides the app-specific `_lp_main()` function.

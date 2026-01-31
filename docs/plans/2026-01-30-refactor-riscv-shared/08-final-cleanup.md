@@ -30,20 +30,20 @@ Search for and remove:
 Run clippy and fix all warnings:
 
 ```bash
-cargo clippy --package lp-emu-shared
-cargo clippy --package lp-emu-guest
+cargo clippy --package lp-riscv-emu-shared
+cargo clippy --package lp-riscv-emu-guest
 cargo clippy --package lp-riscv-tools
-cargo clippy --package lp-emu-guest-test-app
+cargo clippy --package lp-riscv-emu-guest-test-app
 cargo clippy --package fw-emu
 ```
 
 ### 3. Format code
 
 ```bash
-cargo fmt --package lp-emu-shared
-cargo fmt --package lp-emu-guest
+cargo fmt --package lp-riscv-emu-shared
+cargo fmt --package lp-riscv-emu-guest
 cargo fmt --package lp-riscv-tools
-cargo fmt --package lp-emu-guest-test-app
+cargo fmt --package lp-riscv-emu-guest-test-app
 cargo fmt --package fw-emu
 ```
 
@@ -52,7 +52,7 @@ cargo fmt --package fw-emu
 ```bash
 cargo test --package lp-riscv-tools
 cargo test --test integration_fw_emu
-cargo test --package lp-emu-guest-test-app  # if it has tests
+cargo test --package lp-riscv-emu-guest-test-app  # if it has tests
 ```
 
 ### 5. Verify integration

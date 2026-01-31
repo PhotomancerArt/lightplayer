@@ -16,7 +16,7 @@ Set up the public API in `lib.rs` to properly export modules, functions, and mac
 
 ### 1. Update lib.rs
 
-Update `lp-emu-guest/src/lib.rs` to provide a clean public API:
+Update `lp-riscv-emu-guest/src/lib.rs` to provide a clean public API:
 
 ```rust
 #![no_std]
@@ -38,15 +38,18 @@ mod panic;
 mod syscall;
 
 // Re-export commonly used macros
-// Note: #[macro_export] macros are available at crate root as lp_emu_guest::print! etc.
+// Note: #[macro_export] macros are available at crate root as lp_riscv_emu_guest::print! etc.
 // We can't re-export them directly, but users can import them:
-//   use lp_emu_guest::print;
+//   use lp_riscv_emu_guest::print;
 //   print!("Hello");
 ```
 
-**Note**: The `#[macro_export]` macros (`print!`, `println!`) are automatically available at the crate root. Users can access them as `lp_emu_guest::print!` and `lp_emu_guest::println!`.
+**Note**: The `#[macro_export]` macros (`print!`, `println!`) are automatically available at the
+crate root. Users can access them as `lp_riscv_emu_guest::print!` and
+`lp_riscv_emu_guest::println!`.
 
-The entry point functions (`_entry`, `_code_entry`) are `#[no_mangle]` so they'll be automatically linked when the crate is used.
+The entry point functions (`_entry`, `_code_entry`) are `#[no_mangle]` so they'll be automatically
+linked when the crate is used.
 
 ### 2. Verify Module Exports
 
@@ -66,7 +69,7 @@ Internal modules:
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
 This should compile successfully. The public API should be clean and well-documented.

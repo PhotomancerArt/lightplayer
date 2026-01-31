@@ -170,17 +170,17 @@ mod tests {
             .join("target")
             .join(target)
             .join(profile)
-            .join("lp-emu-guest-test-app");
+            .join("lp-riscv-emu-guest-test-app");
 
         // Always rebuild
-        println!("Building lp-emu-guest-test-app...");
+        println!("Building lp-riscv-emu-guest-test-app...");
         let output = std::process::Command::new("cargo")
             .current_dir(&workspace_root)
             .env("RUSTFLAGS", "-C target-feature=-c") // Disable compressed instructions
             .args([
                 "build",
                 "--package",
-                "lp-emu-guest-test-app",
+                "lp-riscv-emu-guest-test-app",
                 "--target",
                 target,
                 "--release",
@@ -190,7 +190,7 @@ mod tests {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            println!("lp-emu-guest-test-app build failed");
+            println!("lp-riscv-emu-guest-test-app build failed");
             println!("{}", stderr);
             return Err(format!("Build failed"));
         }

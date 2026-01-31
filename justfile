@@ -53,7 +53,7 @@ build-fw-esp32: install-rv32-target
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
+    cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
 [parallel]
 build: build-host build-rv32
@@ -76,10 +76,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo build --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
 
 build-glsl-release:
-    cargo build --release --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo build --release --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
 
 # ============================================================================
 # Formatting
@@ -98,7 +98,7 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-emu-guest-test-app -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app -- --no-deps -D warnings
 
 clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
@@ -112,7 +112,7 @@ clippy-fw-esp32: install-rv32-target
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
+    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -136,10 +136,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics -- --no-deps -D warnings
+    cargo clippy --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo clippy --fix --allow-dirty --allow-staged --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -166,7 +166,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo test --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh

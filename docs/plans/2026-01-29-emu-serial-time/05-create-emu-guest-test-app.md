@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Create a new test binary application `lp-emu-guest-test-app` that runs in the emulator and handles
+Create a new test binary application `lp-riscv-emu-guest-test-app` that runs in the emulator and
+handles
 simple serial commands for testing. This binary will be used by integration tests to verify serial
 and time functionality.
 
@@ -16,34 +17,34 @@ and time functionality.
 
 ## Implementation Details
 
-### 1. Create `lp-riscv/lp-emu-guest-test-app/` directory structure
+### 1. Create `lp-riscv/lp-riscv-emu-guest-test-app/` directory structure
 
 ```
-lp-riscv/lp-emu-guest-test-app/
+lp-riscv/lp-riscv-emu-guest-test-app/
 ├── Cargo.toml
 └── src/
     └── main.rs
 ```
 
-### 2. Create `lp-riscv/lp-emu-guest-test-app/Cargo.toml`
+### 2. Create `lp-riscv/lp-riscv-emu-guest-test-app/Cargo.toml`
 
 ```toml
 [package]
-name = "lp-emu-guest-test-app"
+name = "lp-riscv-emu-guest-test-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lp-emu-guest-test-app"
+name = "lp-riscv-emu-guest-test-app"
 path = "src/main.rs"
 test = false
 
 [dependencies]
-lp-emu-guest = { path = "../lp-emu-guest" }
+lp-riscv-emu-guest = { path = "../lp-riscv-emu-guest" }
 ```
 
-### 3. Create `lp-riscv/lp-emu-guest-test-app/src/main.rs`
+### 3. Create `lp-riscv/lp-riscv-emu-guest-test-app/src/main.rs`
 
 ```rust
 //! Test application for emulator serial and time functionality
@@ -59,7 +60,7 @@ lp-emu-guest = { path = "../lp-emu-guest" }
 extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
-use lp_emu_guest::{println, syscall::{SYSCALL_ARGS, SYSCALL_YIELD, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA, SYSCALL_TIME_MS, syscall}};
+use lp_riscv_emu_guest::{println, syscall::{SYSCALL_ARGS, SYSCALL_YIELD, SYSCALL_SERIAL_WRITE, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_HAS_DATA, SYSCALL_TIME_MS, syscall}};
 
 /// Main entry point
 #[no_mangle]
@@ -161,22 +162,22 @@ fn yield_syscall() {
 
 **Note**: The actual implementation may need adjustments based on:
 
-1. How `lp-emu-guest` handles entry points
+1. How `lp-riscv-emu-guest` handles entry points
 2. Memory allocation patterns
 3. String handling in no_std environment
 
-Check `lp-emu-guest/src/entry.rs` to see how entry points work.
+Check `lp-riscv-emu-guest/src/entry.rs` to see how entry points work.
 
 ### 4. Add package to workspace `Cargo.toml`
 
-Add `lp-emu-guest-test-app` to the workspace members if it's not automatically included.
+Add `lp-riscv-emu-guest-test-app` to the workspace members if it's not automatically included.
 
 ## Validate
 
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest-test-app --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest-test-app --target riscv32imac-unknown-none-elf
 ```
 
 Ensure:

@@ -9,7 +9,7 @@ use super::super::{
 use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
-use lp_emu_shared::SERIAL_ERROR_INVALID_POINTER;
+use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 use lp_riscv_inst::{Gpr, Inst};
 
 impl Riscv32Emulator {
@@ -128,7 +128,7 @@ impl Riscv32Emulator {
             };
 
             // Check if this is a panic syscall (SYSCALL_PANIC = 1)
-            if syscall_info.number == lp_emu_shared::SYSCALL_PANIC {
+            if syscall_info.number == lp_riscv_emu_shared::SYSCALL_PANIC {
                 // Extract panic information from syscall args
                 // args[0] = message pointer (as i32, cast to u32)
                 // args[1] = message length
@@ -179,7 +179,7 @@ impl Riscv32Emulator {
                 };
 
                 Ok(StepResult::Panic(panic_info))
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_WRITE {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_WRITE {
                 // SYSCALL_WRITE: Write string to host (always prints)
                 // args[0] = pointer to string (as i32, cast to u32)
                 // args[1] = length of string
@@ -207,7 +207,7 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_DEBUG {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_DEBUG {
                 // SYSCALL_DEBUG: Debug output (delegates to debug! macro)
                 // args[0] = pointer to string (as i32, cast to u32)
                 // args[1] = length of string
@@ -230,12 +230,12 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_YIELD {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_YIELD {
                 // SYSCALL_YIELD: Yield control back to host
                 // No arguments, no return value
                 // Just return Syscall result so host can handle it
                 Ok(StepResult::Syscall(syscall_info))
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_SERIAL_WRITE {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_WRITE {
                 // SYSCALL_SERIAL_WRITE: Write bytes to serial output buffer
                 // args[0] = pointer to data (as i32, cast to u32)
                 // args[1] = length of data
@@ -270,7 +270,7 @@ impl Riscv32Emulator {
                     self.regs[Gpr::A0.num() as usize] = result;
                     Ok(StepResult::Continue)
                 }
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_SERIAL_READ {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_READ {
                 // SYSCALL_SERIAL_READ: Read bytes from serial input buffer
                 // args[0] = pointer to buffer (as i32, cast to u32)
                 // args[1] = max length to read
@@ -320,7 +320,7 @@ impl Riscv32Emulator {
                         Ok(StepResult::Continue)
                     }
                 }
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_SERIAL_HAS_DATA {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_HAS_DATA {
                 // SYSCALL_SERIAL_HAS_DATA: Check if serial input has data
                 // Returns: a0 = 1 if data available, 0 otherwise
                 let has_data = self
@@ -331,7 +331,7 @@ impl Riscv32Emulator {
 
                 self.regs[Gpr::A0.num() as usize] = if has_data { 1 } else { 0 };
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_emu_shared::SYSCALL_TIME_MS {
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_TIME_MS {
                 // SYSCALL_TIME_MS: Get elapsed milliseconds since emulator start
                 // Returns: a0 = elapsed milliseconds (u32)
                 #[cfg(feature = "std")]

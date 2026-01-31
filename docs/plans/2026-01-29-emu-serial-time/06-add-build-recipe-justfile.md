@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Add a build recipe for `lp-emu-guest-test-app` to the justfile, similar to `build-rv32-jit-test`.
+Add a build recipe for `lp-riscv-emu-guest-test-app` to the justfile, similar to
+`build-rv32-jit-test`.
 Add it to the `build-rv32` dependencies so it gets built as part of the RISC-V32 build process.
 
 ## Code Organization Reminders
@@ -22,7 +23,7 @@ Add a new build recipe after `build-rv32-jit-test`:
 ```justfile
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-emu-guest-test-app && cargo build --target {{rv32_target}} --release
+    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo build --target {{rv32_target}} --release
 ```
 
 ### 2. Update `build-rv32` recipe
@@ -40,7 +41,7 @@ Add clippy check for the test app:
 ```justfile
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-emu-guest-test-app && cargo clippy --target {{rv32_target}} --release -- --no-deps -D warnings
+    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{rv32_target}} --release -- --no-deps -D warnings
 ```
 
 And add it to `clippy-rv32`:
@@ -60,7 +61,7 @@ just build-rv32-emu-guest-test-app
 Ensure:
 
 - Binary builds successfully
-- Binary is created at `target/riscv32imac-unknown-none-elf/release/lp-emu-guest-test-app`
+- Binary is created at `target/riscv32imac-unknown-none-elf/release/lp-riscv-emu-guest-test-app`
 - No warnings
 
 Then verify it's included in full build:

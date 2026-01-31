@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use lp_emu_shared::SERIAL_ERROR_BUFFER_FULL;
+use lp_riscv_emu_shared::SERIAL_ERROR_BUFFER_FULL;
 
 /// Serial host for managing bidirectional serial communication
 pub struct HostSerial {

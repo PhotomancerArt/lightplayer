@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Extract the entry point code (`_entry` assembly and `_code_entry` function) from `lp-builtins-app/src/main.rs` into `lp-emu-guest/src/entry.rs`.
+Extract the entry point code (`_entry` assembly and `_code_entry` function) from
+`lp-builtins-app/src/main.rs` into `lp-riscv-emu-guest/src/entry.rs`.
 
 ## Code Organization Reminders
 
@@ -20,7 +21,8 @@ Read `lp-builtins-app/src/main.rs` and extract:
 
 1. The `global_asm!` block that defines `_entry` (lines ~142-159)
 2. The `_code_entry` function (lines ~163-213)
-3. The `__USER_MAIN_PTR` static variable (lines ~217-220) - **NOTE**: This should stay in `lp-builtins-app` since it's app-specific. We'll handle this differently.
+3. The `__USER_MAIN_PTR` static variable (lines ~217-220) - **NOTE**: This should stay in
+   `lp-builtins-app` since it's app-specific. We'll handle this differently.
 
 Actually, looking at the code more carefully:
 
@@ -28,17 +30,19 @@ Actually, looking at the code more carefully:
 - `__USER_MAIN_PTR` is app-specific (used by `_lp_main`)
 - `_code_entry` calls `_lp_main()` which is app-specific
 
-**Solution**: `_code_entry` should call a function pointer that the app provides. We'll need to modify the design slightly:
+**Solution**: `_code_entry` should call a function pointer that the app provides. We'll need to
+modify the design slightly:
 
 - `_code_entry` will call a function pointer stored in a static variable
 - The app will set this function pointer to its main function
 - For now, we'll use a sentinel value and the app will override it
 
-Actually, let's keep it simpler: `_code_entry` will call `_lp_main()` which is `#[no_mangle]` and will be provided by the app. The crate doesn't need to know about it.
+Actually, let's keep it simpler: `_code_entry` will call `_lp_main()` which is `#[no_mangle]` and
+will be provided by the app. The crate doesn't need to know about it.
 
 ### 2. Update entry.rs
 
-Create `lp-emu-guest/src/entry.rs`:
+Create `lp-riscv-emu-guest/src/entry.rs`:
 
 ```rust
 use core::arch::global_asm;
@@ -123,11 +127,12 @@ pub unsafe extern "C" fn _code_entry() -> ! {
 }
 ```
 
-**Note**: `_code_entry` calls `_lp_main()` which will be provided by the app. This keeps the crate generic.
+**Note**: `_code_entry` calls `_lp_main()` which will be provided by the app. This keeps the crate
+generic.
 
 ### 3. Update lib.rs
 
-Update `lp-emu-guest/src/lib.rs`:
+Update `lp-riscv-emu-guest/src/lib.rs`:
 
 ```rust
 #![no_std]
@@ -140,7 +145,8 @@ pub mod entry;
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 ```
 
-This should compile successfully. The entry point functions are `#[no_mangle]` so they'll be accessible from binaries that link against this crate.
+This should compile successfully. The entry point functions are `#[no_mangle]` so they'll be
+accessible from binaries that link against this crate.

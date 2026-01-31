@@ -15,7 +15,7 @@ with syscalls) and in tests (with direct SerialHost calls).
 
 ## Implementation Details
 
-### 1. Create `lp-riscv/lp-emu-guest/src/guest_serial.rs`
+### 1. Create `lp-riscv/lp-riscv-emu-guest/src/guest_serial.rs`
 
 ```rust
 use alloc::collections::VecDeque;
@@ -124,7 +124,7 @@ impl SerialSyscall for GuestSyscallImpl {
 }
 ```
 
-### 2. Update `lp-riscv/lp-emu-guest/src/lib.rs`
+### 2. Update `lp-riscv/lp-riscv-emu-guest/src/lib.rs`
 
 Add module and re-export:
 
@@ -140,7 +140,7 @@ In `lp-riscv/lp-riscv-tools/src/emu/serial_host.rs` (or separate test file):
 
 ```rust
 #[cfg(test)]
-use lp_emu_guest::guest_serial::SerialSyscall;
+use lp_riscv_emu_guest::guest_serial::SerialSyscall;
 
 #[cfg(test)]
 impl SerialSyscall for SerialHost {
@@ -175,7 +175,7 @@ For now, document this as a known issue to resolve.
 Run from workspace root:
 
 ```bash
-cargo check --package lp-emu-guest
+cargo check --package lp-riscv-emu-guest
 cargo check --package lp-riscv-tools
 ```
 

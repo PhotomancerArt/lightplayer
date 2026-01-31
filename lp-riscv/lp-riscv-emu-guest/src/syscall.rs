@@ -1,5 +1,5 @@
 // Re-export syscall constants from shared crate
-pub use lp_emu_shared::{
+pub use lp_riscv_emu_shared::{
     SYSCALL_ARGS, SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
     SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
 };

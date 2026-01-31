@@ -31,10 +31,10 @@ pub use panic::ebreak;
 pub use print::_print;
 
 // Re-export guest serial types from shared crate
-pub use lp_emu_shared::{GuestSerial, SerialSyscall};
+pub use lp_riscv_emu_shared::{GuestSerial, SerialSyscall};
 
 /// Implementation for actual guest syscalls
-/// This is guest-specific, so it stays in lp-emu-guest
+/// This is guest-specific, so it stays in lp-riscv-emu-guest
 pub struct GuestSyscallImpl;
 
 impl SerialSyscall for GuestSyscallImpl {

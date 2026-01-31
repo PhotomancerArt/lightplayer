@@ -36,7 +36,7 @@ Key requirements:
 - Has empty `server_loop.rs` that needs implementation
 - Main entry point (`_lp_main`) is a stub
 
-### Syscall Numbers (from `lp-emu-guest`)
+### Syscall Numbers (from `lp-riscv-emu-guest`)
 
 - 1: SYSCALL_PANIC
 - 2: SYSCALL_WRITE
@@ -64,7 +64,8 @@ Key requirements:
 
 4. **Integration test location**: Where should the integration test live? In
    `lp-riscv/lp-riscv-tools/tests/` or `lp-fw/fw-emu/tests/` or elsewhere?
-    - **Answer**: Create a new test binary application `lp-riscv/lp-emu-guest-test-app/` that is a
+    - **Answer**: Create a new test binary application `lp-riscv/lp-riscv-emu-guest-test-app/` that
+      is a
       simple binary running in the emulator. It takes serial commands like "echo hello" (echoes
       back), "time" (prints current time). The integration tests will be in
       `lp-riscv/lp-riscv-tools/tests/` and will run this test binary in the emulator.

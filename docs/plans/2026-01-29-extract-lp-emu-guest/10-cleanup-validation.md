@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Final cleanup, remove any temporary code, fix warnings, and validate that everything works correctly.
+Final cleanup, remove any temporary code, fix warnings, and validate that everything works
+correctly.
 
 ## Code Organization Reminders
 
@@ -20,7 +21,7 @@ Grep for any temporary code, TODOs, or debug prints:
 
 ```bash
 # From workspace root
-grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/crates/lp-emu-guest/
+grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/crates/lp-riscv-emu-guest/
 grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/apps/lp-builtins-app/src/
 ```
 
@@ -31,7 +32,7 @@ Remove any temporary code found.
 Run clippy and fix any warnings:
 
 ```bash
-cargo clippy --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo clippy --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 cargo clippy --package lp-builtins-app --target riscv32imac-unknown-none-elf
 ```
 
@@ -42,7 +43,7 @@ Fix all warnings.
 Run rustfmt on all changed files:
 
 ```bash
-cargo +nightly fmt --package lp-emu-guest
+cargo +nightly fmt --package lp-riscv-emu-guest
 cargo +nightly fmt --package lp-builtins-app
 ```
 
@@ -79,7 +80,7 @@ This should build successfully and embed `lp-builtins-app` as before.
 Verify the final file structure matches the design:
 
 ```
-lp-glsl/crates/lp-emu-guest/
+lp-glsl/crates/lp-riscv-emu-guest/
 ├── Cargo.toml
 ├── build.rs
 ├── memory.ld
@@ -102,12 +103,12 @@ lp-glsl/apps/lp-builtins-app/
 
 Check that the public API is clean:
 
-- `lp-emu-guest::entry` - Entry point module (functions are `#[no_mangle]`)
-- `lp-emu-guest::host` - Host communication functions
-- `lp-emu-guest::print` - Print macros
-- `lp-emu-guest::ebreak` - Halt function
-- `lp-emu-guest::print!` - Print macro
-- `lp-emu-guest::println!` - Println macro
+- `lp-riscv-emu-guest::entry` - Entry point module (functions are `#[no_mangle]`)
+- `lp-riscv-emu-guest::host` - Host communication functions
+- `lp-riscv-emu-guest::print` - Print macros
+- `lp-riscv-emu-guest::ebreak` - Halt function
+- `lp-riscv-emu-guest::print!` - Print macro
+- `lp-riscv-emu-guest::println!` - Println macro
 
 ## Validate
 
@@ -115,16 +116,16 @@ Run the full validation suite:
 
 ```bash
 # Check compilation
-cargo check --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 cargo check --package lp-builtins-app --target riscv32imac-unknown-none-elf
 cargo check --package lp-glsl-compiler
 
 # Check formatting
-cargo +nightly fmt --check --package lp-emu-guest
+cargo +nightly fmt --check --package lp-riscv-emu-guest
 cargo +nightly fmt --check --package lp-builtins-app
 
 # Check clippy
-cargo clippy --package lp-emu-guest --target riscv32imac-unknown-none-elf
+cargo clippy --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 cargo clippy --package lp-builtins-app --target riscv32imac-unknown-none-elf
 
 # Build lp-builtins-app

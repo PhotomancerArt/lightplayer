@@ -19,7 +19,7 @@ methods, proper error handling, and comprehensive tests.
 
 ```rust
 use alloc::collections::VecDeque;
-use lp_emu_shared::{
+use lp_riscv_emu_shared::{
     SERIAL_ERROR_BUFFER_FULL, SERIAL_ERROR_BUFFER_NOT_ALLOCATED,
 };
 
