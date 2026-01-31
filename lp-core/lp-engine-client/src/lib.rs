@@ -1,3 +1,9 @@
+//! LightPlayer engine client API.
+//!
+//! This crate provides a client-side view of the engine state, allowing clients
+//! to query project information and track status changes without direct access
+//! to the engine internals.
+
 #![no_std]
 
 extern crate alloc;

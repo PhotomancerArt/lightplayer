@@ -1,6 +1,8 @@
-//! Firmware emulator application
+//! Firmware emulator application.
 //!
-//! Runs lp-server firmware in RISC-V32 emulator for testing without hardware.
+//! This binary runs the LightPlayer server firmware in a RISC-V 32-bit emulator,
+//! allowing testing and development without physical hardware. It provides syscall-based
+//! implementations for serial I/O, time, and output operations.
 
 #![no_std]
 #![no_main]

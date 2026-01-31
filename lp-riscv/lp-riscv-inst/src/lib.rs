@@ -1,9 +1,9 @@
 //! RISC-V 32-bit instruction encoding/decoding utilities.
 //!
 //! This crate provides:
-//! - Instruction encoding/decoding
-//! - Register and instruction definitions
-//! - Instruction formatting
+//! - Instruction encoding and decoding (including compressed RVC instructions)
+//! - Register definitions and instruction types
+//! - Instruction formatting and disassembly
 
 #![no_std]
 

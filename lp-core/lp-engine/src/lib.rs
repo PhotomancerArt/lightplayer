@@ -1,3 +1,12 @@
+//! LightPlayer rendering engine.
+//!
+//! This crate provides the core rendering engine that executes shaders and manages
+//! the node graph. It handles:
+//! - Project loading and runtime management
+//! - Node execution (shaders, textures, fixtures, outputs)
+//! - Frame rendering and timing
+//! - Output channel management
+
 #![no_std]
 
 extern crate alloc;

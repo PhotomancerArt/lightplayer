@@ -1,3 +1,12 @@
+//! LightPlayer data models and protocol definitions.
+//!
+//! This crate defines the core data structures and message types used throughout
+//! the LightPlayer system, including:
+//! - Project and node configurations
+//! - Client-server message protocol
+//! - File system API definitions
+//! - Path handling utilities
+
 #![no_std]
 
 extern crate alloc;

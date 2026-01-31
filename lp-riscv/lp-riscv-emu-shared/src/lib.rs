@@ -1,7 +1,7 @@
-//! Shared code for RISC-V JIT testing using Cranelift.
+//! Shared code between RISC-V emulator host and guest.
 //!
-//! This crate provides common functionality for building and compiling
-//! toy language code to RISC-V that can be used both in the embive VM and on real hardware.
+//! This crate provides common definitions and types shared between the emulator runtime
+//! and code running inside the emulator, including syscall constants and serial communication types.
 
 #![no_std]
 

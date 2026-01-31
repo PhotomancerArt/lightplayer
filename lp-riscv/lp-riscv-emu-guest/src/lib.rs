@@ -1,13 +1,14 @@
-#![no_std]
-
-//! RISC-V32 emulator guest runtime library
+//! RISC-V 32-bit emulator guest runtime library.
 //!
-//! This crate provides the runtime foundation for code running in the RISC-V emulator.
+//! This crate provides the runtime foundation for code running inside the RISC-V emulator.
 //! It includes:
 //! - Entry point and bootstrap code
 //! - Panic handler with syscall reporting
-//! - Host communication functions
+//! - Host communication functions and syscall wrappers
 //! - Print macros for no_std environments
+//! - Heap allocator for dynamic allocation
+
+#![no_std]
 
 pub mod allocator;
 pub mod entry;

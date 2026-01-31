@@ -1,6 +1,8 @@
-//! ESP32 firmware application
+//! ESP32 firmware application.
 //!
-//! Main entry point for ESP32 firmware running lp-server.
+//! This binary is the main entry point for LightPlayer server firmware running on
+//! ESP32 microcontrollers. It initializes the hardware, sets up serial communication,
+//! and runs the LightPlayer server loop.
 
 #![no_std]
 #![no_main]

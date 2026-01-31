@@ -1,7 +1,10 @@
 //! RISC-V 32-bit ELF loading and linking utilities.
 //!
-//! This module provides utilities to load RISC-V ELF files into the emulator's memory.
-//! It handles section loading and relocation application.
+//! This crate provides utilities for loading and linking RISC-V ELF files:
+//! - Loading ELF files into emulator memory
+//! - Applying relocations and resolving symbols
+//! - Linking multiple object files into a single executable
+//! - Support for both object files and fully linked executables
 
 extern crate alloc;
 

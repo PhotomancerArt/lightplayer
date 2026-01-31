@@ -1,10 +1,11 @@
 //! RISC-V 32-bit emulator runtime.
 //!
-//! This crate provides:
-//! - RISC-V 32-bit emulator for testing generated code
-//! - Serial communication support
-//! - Memory management
-//! - Instruction execution
+//! This crate provides a complete RISC-V 32-bit emulator for testing and debugging
+//! generated code. It includes:
+//! - Full RISC-V 32-bit instruction set emulation
+//! - Serial communication support for I/O
+//! - Memory management and protection
+//! - Step-by-step execution with logging and debugging capabilities
 
 #![no_std]
 
