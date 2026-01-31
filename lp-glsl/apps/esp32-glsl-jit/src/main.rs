@@ -14,14 +14,14 @@ mod shader_call;
 use alloc::string::String;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Timer};
-use esp_backtrace as _;
+use esp_backtrace as _; // Import to activate panic handler
 use esp_hal::clock::CpuClock;
 use esp_hal::{interrupt::software::SoftwareInterruptControl, timer::timg::TimerGroup};
 use hashbrown::HashMap;
 
 use cranelift_codegen::isa::riscv32::isa_builder;
 use cranelift_codegen::settings::{self, Configurable};
-use lp_builtins::glsl::q32::types::q32::Q32;
+use lp_glsl_builtins::glsl::q32::types::q32::Q32;
 use lp_glsl_compiler::Compiler;
 use lp_glsl_compiler::backend::transform::q32::{FixedPointFormat, Q32Transform};
 use target_lexicon::Triple;

@@ -2,20 +2,21 @@
 
 ## Description
 
-Create the `worley/` subdirectory under `lpfx/` and set up the module structure. This follows the same pattern as the `simplex/` module.
+Create the `worley/` subdirectory under `lpfx/` and set up the module structure. This follows the
+same pattern as the `simplex/` module.
 
 ## Implementation
 
 ### Files to Create
 
-1. **`lp-builtins/src/builtins/lpfx/worley/mod.rs`**
-   - Module file that will export the worley functions
-   - Initially empty or with placeholder comments
+1. **`lp-glsl-builtins/src/builtins/lpfx/worley/mod.rs`**
+    - Module file that will export the worley functions
+    - Initially empty or with placeholder comments
 
 ### Files to Update
 
-1. **`lp-builtins/src/builtins/lpfx/mod.rs`**
-   - Add `pub mod worley;` to export the worley module
+1. **`lp-glsl-builtins/src/builtins/lpfx/mod.rs`**
+    - Add `pub mod worley;` to export the worley module
 
 ## Success Criteria
 

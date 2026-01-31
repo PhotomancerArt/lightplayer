@@ -6,12 +6,13 @@ Implement the `Mat3Q32` type with all operations, methods, and operator overload
 
 ## Implementation
 
-Create `lp-glsl/crates/lp-builtins/src/util/mat3_q32.rs` with:
+Create `lp-glsl/crates/lp-glsl-builtins/src/util/mat3_q32.rs` with:
 
 - `Mat3Q32` struct with `m: [Q32; 9]` field (column-major storage)
 - Construction methods: `new()`, `from_f32()`, `from_vec3()`, `identity()`, `zero()`
 - Element access: `get()`, `set()`, `col0()`, `col1()`, `col2()`
-- Operations: `mul()` (matrix-matrix), `mul_vec3()` (matrix-vector), `transpose()`, `determinant()` (Sarrus' rule), `inverse()`
+- Operations: `mul()` (matrix-matrix), `mul_vec3()` (matrix-vector), `transpose()`,
+  `determinant()` (Sarrus' rule), `inverse()`
 - Operator overloads: `Add`, `Sub`, `Mul<Mat3Q32>`, `Mul<Vec3Q32>`, `Mul<Q32>`, `Div<Q32>`, `Neg`
 
 All operations use Q32's fast operators directly.
@@ -43,6 +44,7 @@ Update `util/mod.rs` to export `Mat3Q32`.
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

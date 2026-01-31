@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 ///
 /// # Arguments
 /// * `elf_bytes` - The ELF object file bytes to load into the executable
-/// * `builtins_exe_bytes` - The lp-builtins-app executable bytes
+/// * `builtins_exe_bytes` - The lp-glsl-builtins-emu-app executable bytes
 ///
 /// # Returns
 /// * `Ok(ElfLoadInfo)` - The loaded ELF info with object file loaded
@@ -34,7 +34,7 @@ pub fn link_and_verify_builtins(
     if builtins_exe_bytes.is_empty() {
         return Err(GlslError::new(
             ErrorCode::E0400,
-            "lp-builtins-app executable is empty or not available. \
+            "lp-glsl-builtins-emu-app executable is empty or not available. \
              Build it with: scripts/build-builtins.sh",
         ));
     }
@@ -46,7 +46,7 @@ pub fn link_and_verify_builtins(
             ErrorCode::E0400,
             format!(
                 "Failed to load base executable: {e}. \
-                     Ensure lp-builtins-app is correctly compiled."
+                     Ensure lp-glsl-builtins-emu-app is correctly compiled."
             ),
         )
     })?;
@@ -113,7 +113,7 @@ pub fn link_and_verify_builtins(
             format!(
                 "Builtin symbols are undefined after loading: {undefined_symbols:?}. \
                  These symbols were declared but not resolved. \
-                 Ensure lp-builtins library is built and linked correctly."
+                 Ensure lp-glsl-builtins library is built and linked correctly."
             ),
         ));
     }
@@ -123,7 +123,7 @@ pub fn link_and_verify_builtins(
             ErrorCode::E0400,
             format!(
                 "Builtin symbols not found after loading: {missing_symbols:?}. \
-                 Ensure lp-builtins library is built and contains these symbols."
+                 Ensure lp-glsl-builtins library is built and contains these symbols."
             ),
         ));
     }

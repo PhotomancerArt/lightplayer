@@ -35,7 +35,8 @@ Fix all warnings, format code, verify all tests pass, and ensure code quality.
 1. Run `cargo +nightly fmt` on entire workspace
 2. Run `cargo build` and fix any warnings
 3. Run all filetests: `scripts/glsl-filetests.sh`
-4. Test with `--fix` flag: `lp-test test --fix function/expect-fail-removal.glsl`
-5. Test with `LP_FIX_XFAIL=1`: `LP_FIX_XFAIL=1 lp-test test function/expect-fail-removal.glsl`
+4. Test with `--fix` flag: `lp-glsl-filetests-app test --fix function/expect-fail-removal.glsl`
+5. Test with `LP_FIX_XFAIL=1`:
+   `LP_FIX_XFAIL=1 lp-glsl-filetests-app test function/expect-fail-removal.glsl`
 6. Verify error messages are clear
 7. Verify reporting format is correct

@@ -222,30 +222,37 @@ builder.rs
 
 ### Type-Safe IDs
 
-All node references use newtype wrappers (`TextureId`, `OutputId`, etc.) instead of raw `u32` for compile-time type safety. IDs use `#[serde(transparent)]` to serialize as `u32` (which becomes a string in JSON). IDs implement `From<u32>` and `Into<u32>` for conversion. Configs use type-safe IDs directly - no conversion needed during init.
+All node references use newtype wrappers (`TextureId`, `OutputId`, etc.) instead of raw `u32` for
+compile-time type safety. IDs use `#[serde(transparent)]` to serialize as `u32` (which becomes a
+string in JSON). IDs implement `From<u32>` and `Into<u32>` for conversion. Configs use type-safe IDs
+directly - no conversion needed during init.
 
 ### Texture Abstraction
 
-The `Texture` struct in `util/texture.rs` is a low-level utility for managing pixel buffers. It provides:
+The `Texture` struct in `util/texture.rs` is a low-level utility for managing pixel buffers. It
+provides:
 
 - Fixed-size buffer (not resizable)
 - Format metadata (RGB8, RGBA8, R8)
 - Format query methods (`format()`, `bytes_per_pixel()`)
 - Sampling methods (get_pixel, sample with normalized coordinates)
 - Helper methods like `compute_all` for batch operations
-- `set_pixel()` writes based on format: shaders always return vec4 (RGBA), but only relevant bytes are written (RGB8=first 3 bytes, R8=first byte, RGBA8=all 4 bytes)
+- `set_pixel()` writes based on format: shaders always return vec4 (RGBA), but only relevant bytes
+  are written (RGB8=first 3 bytes, R8=first byte, RGBA8=all 4 bytes)
 
-This will eventually move to `lp-builtins` as part of the core GLSL system.
+This will eventually move to `lp-glsl-builtins` as part of the core GLSL system.
 
 ### Node Lifecycle
 
 All node runtimes implement `NodeLifecycle` trait with:
 
-- `init()`: Initialize from config, validate dependencies (including shader signature validation), allocate resources, compile shaders
+- `init()`: Initialize from config, validate dependencies (including shader signature validation),
+  allocate resources, compile shaders
 - `update()`: Update state using type-specific render context
 - `destroy()`: Cleanup resources (called when unloading entire project)
 
-For now, we only support unloading/reloading the whole project. `ProjectRuntime` calls `destroy()` on all nodes when being replaced. Future: per-node updates will be supported later.
+For now, we only support unloading/reloading the whole project. `ProjectRuntime` calls `destroy()`
+on all nodes when being replaced. Future: per-node updates will be supported later.
 
 The trait uses two associated types:
 
@@ -256,9 +263,11 @@ This ensures type safety - each node can only access what it needs, and the comp
 
 ### Contexts
 
-**InitContext**: Provides read-only access to project config during initialization. Used for dependency validation.
+**InitContext**: Provides read-only access to project config during initialization. Used for
+dependency validation.
 
-**Type-Specific Render Contexts**: Each node type has its own render context with only the access it needs:
+**Type-Specific Render Contexts**: Each node type has its own render context with only the access it
+needs:
 
 - **TextureRenderContext**: Only timing (no other node access needed)
 - **ShaderRenderContext**: Timing + mutable access to textures (for writing rendered pixels)
@@ -273,22 +282,52 @@ This approach:
 
 ### Node Runtimes
 
-- **TextureNodeRuntime**: Wraps a `Texture` instance. `init()` creates texture via `Texture::new()` with config size and format, initializing buffer to zeros.
-- **ShaderNodeRuntime**: Stores compiled `Box<dyn GlslExecutable>` (None if compilation failed). Shader main signature: `vec4 main(vec2 fragCoord, vec2 outputSize, float time)`. During `init()`, validates GLSL has matching signature before compilation. During `update()`, iterates over all texture pixels, calls shader with pixel coordinates, texture size, and `frame_time.total_ms` as time, writes result via `texture.set_pixel()`. Note: `set_pixel()` abstraction is slower than optimized pointer-based code, but shader call overhead is much larger, so acceptable for now. Shaders currently only write to textures (no texture reading/sampling) - texture sampling will be added later when GLSL compiler supports it.
-- **FixtureNodeRuntime**: Precomputes one `SamplingKernel` in `init()` (reused for all mapping points), samples textures and writes to outputs in `update()` via `FixtureRenderContext` (which provides mutable access to outputs). Each mapping point uses the same kernel but at its own center position.
-- **OutputNodeRuntime**: Holds firmware-specific `LedOutput` (HAL-style LED hardware access) and pixel buffer. `init()` derives `bytes_per_pixel` from config chip type (e.g., "ws2812" = 3 bytes RGB) and allocates buffer (`pixel_count * bytes_per_pixel`). `OutputProvider.create_output()` sets up hardware based on config (for `GpioStrip`: configures GPIO pin from `config.gpio_pin`, sets up chip driver). `LedOutput` trait remains simple (HAL-style) - setup is handled by provider. Fixtures write to buffer via `FixtureRenderContext.get_output_mut().buffer_mut()` which returns `&mut [u8]`. Multiple fixtures can write to the same output (valid use case - fixtures can be strung together). Each fixture writes to specific channels/pixels based on its mapping. For now, no overlap validation - if mappings overlap, later fixtures overwrite earlier ones. Future: could add validation to ensure mappings don't overlap. `update()` reads buffer and calls `handle.write_pixels()` to send to hardware (ESP32) or update UI (host). Note: `LedOutput` is for built-in LED hardware; future outputs (UDP, etc.) will have different traits.
+- **TextureNodeRuntime**: Wraps a `Texture` instance. `init()` creates texture via `Texture::new()`
+  with config size and format, initializing buffer to zeros.
+- **ShaderNodeRuntime**: Stores compiled `Box<dyn GlslExecutable>` (None if compilation failed).
+  Shader main signature: `vec4 main(vec2 fragCoord, vec2 outputSize, float time)`. During `init()`,
+  validates GLSL has matching signature before compilation. During `update()`, iterates over all
+  texture pixels, calls shader with pixel coordinates, texture size, and `frame_time.total_ms` as
+  time, writes result via `texture.set_pixel()`. Note: `set_pixel()` abstraction is slower than
+  optimized pointer-based code, but shader call overhead is much larger, so acceptable for now.
+  Shaders currently only write to textures (no texture reading/sampling) - texture sampling will be
+  added later when GLSL compiler supports it.
+- **FixtureNodeRuntime**: Precomputes one `SamplingKernel` in `init()` (reused for all mapping
+  points), samples textures and writes to outputs in `update()` via `FixtureRenderContext` (which
+  provides mutable access to outputs). Each mapping point uses the same kernel but at its own center
+  position.
+- **OutputNodeRuntime**: Holds firmware-specific `LedOutput` (HAL-style LED hardware access) and
+  pixel buffer. `init()` derives `bytes_per_pixel` from config chip type (e.g., "ws2812" = 3 bytes
+  RGB) and allocates buffer (`pixel_count * bytes_per_pixel`). `OutputProvider.create_output()` sets
+  up hardware based on config (for `GpioStrip`: configures GPIO pin from `config.gpio_pin`, sets up
+  chip driver). `LedOutput` trait remains simple (HAL-style) - setup is handled by provider.
+  Fixtures write to buffer via `FixtureRenderContext.get_output_mut().buffer_mut()` which returns
+  `&mut [u8]`. Multiple fixtures can write to the same output (valid use case - fixtures can be
+  strung together). Each fixture writes to specific channels/pixels based on its mapping. For now,
+  no overlap validation - if mappings overlap, later fixtures overwrite earlier ones. Future: could
+  add validation to ensure mappings don't overlap. `update()` reads buffer and calls
+  `handle.write_pixels()` to send to hardware (ESP32) or update UI (host). Note: `LedOutput` is for
+  built-in LED hardware; future outputs (UDP, etc.) will have different traits.
 
 ### Project Runtime
 
 `ProjectRuntime` manages the lifecycle of all nodes:
 
-- `init()`: Initializes nodes in order (textures → shaders → fixtures → outputs), allows partial failures
-- `update(delta_ms)`: Updates nodes in hard-coded order (shaders → fixtures → outputs), updates `frame_time.total_ms`. Creates appropriate type-specific contexts with `FrameTime` struct. Creates appropriate type-specific contexts for each node:
-  - Shaders get `ShaderRenderContext` with mutable texture access (for writing rendered pixels)
-  - Fixtures get `FixtureRenderContext` with read-only texture access and mutable output buffer access (write pixel data)
-  - Outputs get `OutputRenderContext` with no other node access. `OutputNodeRuntime.update()` reads its buffer and calls `handle.write_pixels()` to send to hardware/UI
-- `destroy()`: Calls `destroy()` on all nodes in reverse order (outputs → fixtures → shaders → textures) when unloading entire project. For now, only whole-project unloading is supported; per-node updates will be added later.
-- Runtime instances are the source of truth for status. `get_runtime_nodes()` derives `RuntimeNodes` from runtime instances for serialization.
+- `init()`: Initializes nodes in order (textures → shaders → fixtures → outputs), allows partial
+  failures
+- `update(delta_ms)`: Updates nodes in hard-coded order (shaders → fixtures → outputs), updates
+  `frame_time.total_ms`. Creates appropriate type-specific contexts with `FrameTime` struct. Creates
+  appropriate type-specific contexts for each node:
+    - Shaders get `ShaderRenderContext` with mutable texture access (for writing rendered pixels)
+    - Fixtures get `FixtureRenderContext` with read-only texture access and mutable output buffer
+      access (write pixel data)
+    - Outputs get `OutputRenderContext` with no other node access. `OutputNodeRuntime.update()`
+      reads its buffer and calls `handle.write_pixels()` to send to hardware/UI
+- `destroy()`: Calls `destroy()` on all nodes in reverse order (outputs → fixtures → shaders →
+  textures) when unloading entire project. For now, only whole-project unloading is supported;
+  per-node updates will be added later.
+- Runtime instances are the source of truth for status. `get_runtime_nodes()` derives `RuntimeNodes`
+  from runtime instances for serialization.
 
 ### Project Builder
 
@@ -305,4 +344,6 @@ Fluent API for constructing test projects:
 - Lifecycle methods return `Result<(), Error>`
 - Errors update `NodeStatus` in runtime
 - Partial failures allowed - project can init even if some nodes fail
-- **Error Cascading**: If a node's dependency fails (e.g., fixture's texture is missing), the node's `update()` returns `Err` and sets status to `Error`. Output buffers keep previous frame's values (graceful degradation). Project continues running.
+- **Error Cascading**: If a node's dependency fails (e.g., fixture's texture is missing), the node's
+  `update()` returns `Err` and sets status to `Error`. Output buffers keep previous frame's values (
+  graceful degradation). Project continues running.

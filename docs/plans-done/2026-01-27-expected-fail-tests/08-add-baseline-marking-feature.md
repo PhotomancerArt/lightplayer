@@ -2,7 +2,9 @@
 
 ## Description
 
-Add feature to automatically mark all currently failing tests with `[expect-fail]` markers. This requires explicit confirmation with a stern warning, as it should only be used when establishing a baseline.
+Add feature to automatically mark all currently failing tests with `[expect-fail]` markers. This
+requires explicit confirmation with a stern warning, as it should only be used when establishing a
+baseline.
 
 ## Changes
 
@@ -26,9 +28,10 @@ Add feature to automatically mark all currently failing tests with `[expect-fail
 - Show summary of how many tests were marked
 - Exit with appropriate code
 
-### `apps/lp-test/src/main.rs`
+### `apps/lp-glsl-filetests-app/src/main.rs`
 
-- Document `LP_MARK_FAILING_TESTS_EXPECTED` in help text (but don't add as flag - keep it env var only)
+- Document `LP_MARK_FAILING_TESTS_EXPECTED` in help text (but don't add as flag - keep it env var
+  only)
 
 ## Success Criteria
 

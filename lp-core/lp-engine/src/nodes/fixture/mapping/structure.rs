@@ -51,7 +51,7 @@ impl PrecomputedMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_builtins::glsl::q32::types::q32::Q32;
+    use lp_glsl_builtins::glsl::q32::types::q32::Q32;
 
     #[test]
     fn test_new_empty() {

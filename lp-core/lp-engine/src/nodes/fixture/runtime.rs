@@ -328,7 +328,7 @@ mod tests {
         // Test that pixel_index advances correctly
         // Simulate: pixel 0 has 2 entries (channels 0 and 1), pixel 1 has 1 entry (channel 0)
         use crate::nodes::fixture::mapping::{PixelMappingEntry, PrecomputedMapping};
-        use lp_builtins::glsl::q32::types::q32::Q32;
+        use lp_glsl_builtins::glsl::q32::types::q32::Q32;
         use lp_model::FrameId;
 
         let mut mapping = PrecomputedMapping::new(2, 1, FrameId::new(1));

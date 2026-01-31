@@ -2,11 +2,12 @@
 
 ## Description
 
-Add `--fix` command-line flag to `lp-test` and support for `LP_FIX_XFAIL` environment variable to enable automatic marker removal.
+Add `--fix` command-line flag to `lp-glsl-filetests-app` and support for `LP_FIX_XFAIL` environment
+variable to enable automatic marker removal.
 
 ## Changes
 
-### `apps/lp-test/src/main.rs`
+### `apps/lp-glsl-filetests-app/src/main.rs`
 
 - Add `fix: bool` field to `TestOptions` struct with `#[arg(long)]` attribute
 - Pass `fix` flag value to `lp_glsl_filetests::run()` function

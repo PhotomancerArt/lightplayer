@@ -2,21 +2,24 @@
 
 ## Description
 
-Create `worley2_value_q32.rs` implementing 2D Worley noise that returns the hash value of the nearest cell.
+Create `worley2_value_q32.rs` implementing 2D Worley noise that returns the hash value of the
+nearest cell.
 
 ## Implementation
 
 ### Files to Create
 
-1. **`lp-builtins/src/builtins/lpfx/worley/worley2_value_q32.rs`**
-   - `__lpfx_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
-   - 2D Worley noise returning hash value
+1. **`lp-glsl-builtins/src/builtins/lpfx/worley/worley2_value_q32.rs`**
+    - `__lpfx_worley2_value_q32(x: i32, y: i32, seed: u32) -> i32`
+    - 2D Worley noise returning hash value
 
 ### Algorithm Reference
 
-Reference implementation: `noise-rs/src/core/worley.rs` - `worley_2d` function with `ReturnType::Value`
+Reference implementation: `noise-rs/src/core/worley.rs` - `worley_2d` function with
+`ReturnType::Value`
 
 Key components:
+
 - Same cell determination and feature point finding as distance variant
 - Instead of returning distance, return hash value of the seed_cell
 - Hash value normalized to [0, 1] then scaled to [-1, 1]

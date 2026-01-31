@@ -2,12 +2,14 @@
 
 ## Overview
 
-Implement matrix types for Q32 fixed-point arithmetic to enable easy porting of GLSL code to Rust. These types provide a clean, ergonomic API similar to GLSL matrices while using fast Q32 fixed-point arithmetic.
+Implement matrix types for Q32 fixed-point arithmetic to enable easy porting of GLSL code to Rust.
+These types provide a clean, ergonomic API similar to GLSL matrices while using fast Q32 fixed-point
+arithmetic.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/util/
+lp-glsl/crates/lp-glsl-builtins/src/util/
 ├── mat2_q32.rs              # NEW: Mat2Q32 type and implementation
 ├── mat3_q32.rs              # NEW: Mat3Q32 type and implementation
 ├── mat4_q32.rs              # NEW: Mat4Q32 type and implementation
@@ -129,7 +131,8 @@ Matrices use column-major storage to match GLSL specification:
 - Access: `m[col * rows + row]` for element at `row`, `col`
 - Mat2Q32: `[m00, m10, m01, m11]` (4 elements)
 - Mat3Q32: `[m00, m10, m20, m01, m11, m21, m02, m12, m22]` (9 elements)
-- Mat4Q32: `[m00, m10, m20, m30, m01, m11, m21, m31, m02, m12, m22, m32, m03, m13, m23, m33]` (16 elements)
+- Mat4Q32: `[m00, m10, m20, m30, m01, m11, m21, m31, m02, m12, m22, m32, m03, m13, m23, m33]` (16
+  elements)
 
 ### 2. Fast Q32 Operators
 
@@ -170,17 +173,21 @@ All matrix types are `no_std` compatible:
 
 ### 7. Separate Files
 
-Each matrix type is in its own file (`mat2_q32.rs`, `mat3_q32.rs`, `mat4_q32.rs`) for organization and easier navigation.
+Each matrix type is in its own file (`mat2_q32.rs`, `mat3_q32.rs`, `mat4_q32.rs`) for organization
+and easier navigation.
 
 ### 8. Module Exports
 
-Matrix types are exported from `util/mod.rs` only. They can be re-exported at crate root later if needed.
+Matrix types are exported from `util/mod.rs` only. They can be re-exported at crate root later if
+needed.
 
 ## Implementation Notes
 
 ### Reference Implementation
 
-The reference implementation at `/Users/yona/dev/photomancer/lpmini2024/crates/lp-math/src/fixed/mat3.rs` provides the structure and API to follow. Key differences:
+The reference implementation at
+`/Users/yona/dev/photomancer/lpmini2024/crates/lp-math/src/fixed/mat3.rs` provides the structure and
+API to follow. Key differences:
 
 - Reference uses `Fixed` type, we use `Q32`
 - Reference uses `Fixed` operators, we use `Q32` operators (both are fast)
@@ -235,7 +242,7 @@ Comprehensive tests similar to reference implementation:
 
 ### Module Structure
 
-Matrix types are added to `lp-builtins/src/util/`:
+Matrix types are added to `lp-glsl-builtins/src/util/`:
 
 - `mat2_q32.rs` - Mat2Q32 implementation
 - `mat3_q32.rs` - Mat3Q32 implementation
@@ -253,7 +260,7 @@ Matrix types are added to `lp-builtins/src/util/`:
 ### Usage Example
 
 ```rust
-use lp_builtins::util::{Mat2Q32, Mat3Q32, Vec2Q32, Vec3Q32, Q32};
+use lp_glsl_builtins::util::{Mat2Q32, Mat3Q32, Vec2Q32, Vec3Q32, Q32};
 
 // Create matrices
 let m2 = Mat2Q32::identity();

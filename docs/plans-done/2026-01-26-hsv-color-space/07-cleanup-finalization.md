@@ -2,7 +2,8 @@
 
 ## Description
 
-Final cleanup phase: remove any temporary code, fix warnings, ensure all tests pass, and verify code quality.
+Final cleanup phase: remove any temporary code, fix warnings, ensure all tests pass, and verify code
+quality.
 
 ## Implementation
 
@@ -14,7 +15,8 @@ Final cleanup phase: remove any temporary code, fix warnings, ensure all tests p
 4. Verify code is clean and readable
 5. Run `cargo +nightly fmt` on entire workspace
 6. Verify module exports are correct
-7. Check that all functions are properly registered (will be auto-discovered by lp-builtin-gen)
+7. Check that all functions are properly registered (will be auto-discovered by
+   lp-glsl-builtin-gen-app)
 
 ### Verification
 
@@ -48,7 +50,8 @@ Final cleanup phase: remove any temporary code, fix warnings, ensure all tests p
 ### Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Code is never done, never perfect, never fully ready, never fully complete
 - Use measured, factual descriptions of what was implemented

@@ -2,12 +2,14 @@
 
 ## Overview
 
-Port HSV/HSB color space conversion functions from lygia to lp-builtins, using Q32 fixed-point arithmetic and the new q32 vector helpers (Vec3Q32, Vec4Q32). This enables easy porting of GLSL color manipulation code to Rust.
+Port HSV/HSB color space conversion functions from lygia to lp-glsl-builtins, using Q32 fixed-point
+arithmetic and the new q32 vector helpers (Vec3Q32, Vec4Q32). This enables easy porting of GLSL
+color manipulation code to Rust.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/builtins/lpfx/
+lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/
 ├── color/
 │   └── space/
 │       ├── mod.rs                    # NEW: Module declaration for color/space
@@ -89,26 +91,30 @@ lpfx_rgb2hsv_vec4_q32(rgb: Vec4Q32) -> Vec4Q32
 ### Epsilon Handling
 
 The `rgb2hsv` function uses an epsilon value to avoid division by zero. For Q32:
+
 - Use minimum representable Q32 value or a very small but representable Q32 value
 - Ensure epsilon is actually useful for avoiding division by zero
-- Test cases must cover epsilon scenarios (colors with very small or zero differences between RGB components)
+- Test cases must cover epsilon scenarios (colors with very small or zero differences between RGB
+  components)
 
 ### Function Pattern
 
 Each function follows this two-layer pattern:
 
 1. **`lpfx_*`** - Public Rust function with nice types (Q32, Vec3Q32, Vec4Q32)
-   - Contains the actual implementation
-   - Can be inlined when called from other Rust code
-   - Allows ergonomic calls between lpfx functions (e.g., `hsv2rgb` can call `hue2rgb` and `saturate` with nice types)
+    - Contains the actual implementation
+    - Can be inlined when called from other Rust code
+    - Allows ergonomic calls between lpfx functions (e.g., `hsv2rgb` can call `hue2rgb` and
+      `saturate` with nice types)
 
 2. **`__lpfx_*`** - Extern C wrapper with expanded types (i32, flattened vectors)
-   - Wraps the `lpfx_*` function for compiler/GLSL calls
-   - Takes expanded types: Q32 becomes i32, Vec3Q32 becomes three i32 parameters
-   - Has `#[lpfx_impl_macro::lpfx_impl]` annotation for auto-registration
-   - Has `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
+    - Wraps the `lpfx_*` function for compiler/GLSL calls
+    - Takes expanded types: Q32 becomes i32, Vec3Q32 becomes three i32 parameters
+    - Has `#[lpfx_impl_macro::lpfx_impl]` annotation for auto-registration
+    - Has `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
 
 Example:
+
 ```rust
 // Public Rust API - can be inlined
 #[inline(always)]
@@ -125,7 +131,8 @@ pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
 }
 ```
 
-**Note:** This is a new pattern being established. Existing functions (noise, hash) should also be refactored to follow this pattern in the future, but that's out of scope for this plan.
+**Note:** This is a new pattern being established. Existing functions (noise, hash) should also be
+refactored to follow this pattern in the future, but that's out of scope for this plan.
 
 ### Dependencies
 
@@ -134,7 +141,8 @@ pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
 - `lpfx_hsv2rgb_q32` depends on `lpfx_hue2rgb_q32` and `lpfx_saturate_vec3_q32`
 - `lpfx_rgb2hsv_q32` is standalone (uses epsilon constant)
 
-All functions call each other using the `lpfx_*` names with nice types, allowing inlining and ergonomic Rust code.
+All functions call each other using the `lpfx_*` names with nice types, allowing inlining and
+ergonomic Rust code.
 
 ## Testing Requirements
 

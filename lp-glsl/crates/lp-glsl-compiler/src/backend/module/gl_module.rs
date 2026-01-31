@@ -138,7 +138,7 @@ impl GlModule<ObjectModule> {
                 // Declare host functions when module is created (for emulator)
                 // Note: Host functions use fmt::Arguments which can't be represented in Cranelift,
                 // so these declarations are placeholders. The actual functions are linked from
-                // lp-builtins-app and will be resolved by the linker.
+                // lp-glsl-builtins-emu-app and will be resolved by the linker.
                 #[cfg(feature = "std")]
                 {
                     use crate::backend::host::declare_host_functions;

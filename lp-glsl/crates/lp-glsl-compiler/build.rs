@@ -1,8 +1,8 @@
 //! Build script for lp-glsl-compiler
 //!
-//! This script sets up the path to lp-builtins static library.
+//! This script sets up the path to lp-glsl-builtins static library.
 //! The library must be built manually with:
-//!   cargo build --target riscv32imac-unknown-none-elf --package lp-builtins
+//!   cargo build --target riscv32imac-unknown-none-elf --package lp-glsl-builtins
 
 #[cfg(feature = "emulator")]
 fn main() {
@@ -16,18 +16,18 @@ fn main() {
     let workspace_root = find_workspace_root(&out_dir)
         .expect("Could not find workspace root (looking for Cargo.toml with [workspace])");
 
-    // Path to the lp-builtins-app executable
+    // Path to the lp-glsl-builtins-emu-app executable
     // Try release first (since build-builtins.sh builds in release mode), then fall back to profile
     let exe_path_release = workspace_root
         .join("target")
         .join(target)
         .join("release")
-        .join("lp-builtins-app");
+        .join("lp-glsl-builtins-emu-app");
     let exe_path_profile = workspace_root
         .join("target")
         .join(target)
         .join(&profile)
-        .join("lp-builtins-app");
+        .join("lp-glsl-builtins-emu-app");
 
     // Prefer release build, fall back to profile-specific build
     let exe_path = if exe_path_release.exists() {
@@ -42,7 +42,7 @@ fn main() {
     // Check if executable exists and copy to OUT_DIR for compile-time inclusion
     if !exe_path.exists() {
         println!(
-            "cargo:warning=lp-builtins-app executable not found at: {}",
+            "cargo:warning=lp-glsl-builtins-emu-app executable not found at: {}",
             exe_path.display()
         );
         println!("cargo:warning=Also checked: {}", exe_path_profile.display());
@@ -55,9 +55,9 @@ fn main() {
         // Executable found - set up rerun-if-changed (no warning needed for success case)
         println!("cargo:rerun-if-changed={}", exe_path.display());
         // Copy executable to OUT_DIR
-        let out_file = std::path::Path::new(&out_dir).join("lp-builtins-app");
+        let out_file = std::path::Path::new(&out_dir).join("lp-glsl-builtins-emu-app");
         std::fs::copy(&exe_path, &out_file)
-            .expect("Failed to copy lp-builtins-app executable to OUT_DIR");
+            .expect("Failed to copy lp-glsl-builtins-emu-app executable to OUT_DIR");
 
         // Generate a module that includes the executable bytes
         let include_file = std::path::Path::new(&out_dir).join("lp_builtins_lib.rs");
@@ -75,8 +75,8 @@ fn main() {
         .expect("Failed to write builtins exe include file");
     }
 
-    // Tell Cargo to rerun if lp-builtins-app source changes
-    let builtins_app_path = workspace_root.join("apps").join("lp-builtins-app");
+    // Tell Cargo to rerun if lp-glsl-builtins-emu-app source changes
+    let builtins_app_path = workspace_root.join("apps").join("lp-glsl-builtins-emu-app");
     println!(
         "cargo:rerun-if-changed={}",
         builtins_app_path.join("Cargo.toml").display()

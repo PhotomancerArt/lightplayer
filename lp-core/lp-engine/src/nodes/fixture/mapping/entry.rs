@@ -1,6 +1,6 @@
 //! Pixel mapping entry encoding and decoding
 
-use lp_builtins::glsl::q32::types::q32::Q32;
+use lp_glsl_builtins::glsl::q32::types::q32::Q32;
 
 /// Sentinel value for channel index indicating no mapping (SKIP)
 pub const CHANNEL_SKIP: u32 = 0x7FFF; // Max value for 15-bit channel index

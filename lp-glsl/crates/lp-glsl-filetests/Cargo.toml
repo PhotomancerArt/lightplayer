@@ -12,7 +12,7 @@ lp-glsl-compiler = { path = "../lp-glsl-compiler", features = ["std", "emulator"
 lp-riscv-emu = { path = "../../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-elf = { path = "../../../lp-riscv/lp-riscv-elf" }
 lp-riscv-inst = { path = "../../../lp-riscv/lp-riscv-inst" }
-lp-jit-util = { path = "../lp-jit-util" }
+lp-glsl-jit-util = { path = "../lp-glsl-jit-util" }
 anyhow = { workspace = true }
 cranelift-codegen = { workspace = true, features = ["host-arch"] }
 cranelift-module = { workspace = true }

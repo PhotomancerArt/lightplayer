@@ -1,7 +1,7 @@
 //! This file is AUTO-GENERATED. Do not edit manually.
 //!
 //! To regenerate this file, run:
-//!     cargo run --bin lp-builtin-gen --manifest-path lp-glsl/apps/lp-builtin-gen/Cargo.toml
+//!     cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
 //!
 //! Or use the build script:
 //!     scripts/build-builtins.sh
@@ -336,10 +336,8 @@ impl BuiltinId {
     pub fn signature(&self, pointer_type: types::Type) -> Signature {
         let mut sig = Signature::new(CallConv::SystemV);
         match self {
-            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
-                // Out parameter function: (7 i32 params, pointer_type) -> i32
-                sig.params.push(AbiParam::new(types::I32));
-                sig.params.push(AbiParam::new(types::I32));
+            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
+                // Out parameter function: (5 i32 params, pointer_type) -> i32
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
@@ -348,8 +346,10 @@ impl BuiltinId {
                 sig.params.push(AbiParam::new(pointer_type));
                 sig.returns.push(AbiParam::new(types::I32));
             }
-            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
-                // Out parameter function: (5 i32 params, pointer_type) -> i32
+            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
+                // Out parameter function: (7 i32 params, pointer_type) -> i32
+                sig.params.push(AbiParam::new(types::I32));
+                sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
@@ -626,7 +626,7 @@ impl BuiltinId {
 ///
 /// Returns the function pointer that can be registered with JITModule.
 pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
-    use lp_builtins::builtins::{lpfx::color, lpfx::generative, lpfx::hash, lpfx::math, q32};
+    use lp_glsl_builtins::builtins::{lpfx::color, lpfx::generative, lpfx::hash, lpfx::math, q32};
     match builtin {
         BuiltinId::LpQ32Acos => q32::__lp_q32_acos as *const u8,
         BuiltinId::LpQ32Acosh => q32::__lp_q32_acosh as *const u8,

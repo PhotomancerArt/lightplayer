@@ -2,7 +2,9 @@
 
 ## Overview
 
-Add support for function overloading in LPFX functions, allowing multiple implementations with the same GLSL name but different parameter signatures (e.g., `lpfx_hsv2rgb(vec3)` and `lpfx_hsv2rgb(vec4)`). This enables porting lygia functions that use overloading.
+Add support for function overloading in LPFX functions, allowing multiple implementations with the
+same GLSL name but different parameter signatures (e.g., `lpfx_hsv2rgb(vec3)` and
+`lpfx_hsv2rgb(vec4)`). This enables porting lygia functions that use overloading.
 
 ## Architecture
 
@@ -19,7 +21,7 @@ lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/
 ├── lpfx_fns.rs                   # UPDATE: Extract arg types and pass to find_lpfx_fn
 └── lp_lib_fns.rs                 # UPDATE: Extract arg types and pass to find_lpfx_fn
 
-lp-glsl/apps/lp-builtin-gen/src/lpfx/
+lp-glsl/apps/lp-glsl-builtin-gen-app/src/lpfx/
 ├── generate.rs                   # UPDATE: Generate multiple LpfxFn entries per unique signature
 └── validate.rs                   # UPDATE: Validate distinct signatures for overloads
 ```
@@ -46,7 +48,7 @@ emit_lp_lib_fn_call(name: &str, args: Vec<(Vec<Value>, Type)>) -> Result<...>
   # UPDATE: Extract arg_types from args, pass to find_lpfx_fn
 ```
 
-#### Codegen Tool (`lp-builtin-gen/src/lpfx/generate.rs`)
+#### Codegen Tool (`lp-glsl-builtin-gen-app/src/lpfx/generate.rs`)
 
 ```
 generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String
@@ -63,7 +65,8 @@ validate_overloads(functions: &[ParsedLpfxFunction]) -> Result<(), Error>
 
 ### 1. Registry Structure
 
-Keep the flat array structure (`&'static [LpfxFn]`), allowing multiple entries with the same GLSL name. This requires minimal changes and maintains the current memory layout.
+Keep the flat array structure (`&'static [LpfxFn]`), allowing multiple entries with the same GLSL
+name. This requires minimal changes and maintains the current memory layout.
 
 ### 2. Overload Resolution
 
@@ -73,7 +76,8 @@ Keep the flat array structure (`&'static [LpfxFn]`), allowing multiple entries w
 
 ### 3. Lookup Function Signature
 
-Change `find_lpfx_fn` to require `arg_types` parameter since overload resolution always needs argument types. All current call sites have access to argument types, so this is a clean change.
+Change `find_lpfx_fn` to require `arg_types` parameter since overload resolution always needs
+argument types. All current call sites have access to argument types, so this is a clean change.
 
 ### 4. Codegen Tool Updates
 
@@ -83,7 +87,8 @@ Change `find_lpfx_fn` to require `arg_types` parameter since overload resolution
 
 ### 5. Backward Compatibility
 
-No backward compatibility needed - all call sites are internal and can be updated together. The signature change is breaking but acceptable since it's compiler-internal code.
+No backward compatibility needed - all call sites are internal and can be updated together. The
+signature change is breaking but acceptable since it's compiler-internal code.
 
 ## Implementation Notes
 

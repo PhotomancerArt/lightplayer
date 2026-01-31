@@ -2,12 +2,15 @@
 
 ## Overview
 
-Extend the `q32-metrics` app to generate vcode and assembly files in addition to CLIF files, enabling size comparison at multiple compilation stages. The app will switch from `JITModule` to `ObjectModule` to access compiled code, use RISC-V 32-bit target, and add vcode/assembly size metrics to statistics.
+Extend the `lp-glsl-q32-metrics-app` app to generate vcode and assembly files in addition to CLIF
+files, enabling size comparison at multiple compilation stages. The app will switch from `JITModule`
+to `ObjectModule` to access compiled code, use RISC-V 32-bit target, and add vcode/assembly size
+metrics to statistics.
 
 ## File Structure
 
 ```
-lp-glsl/apps/q32-metrics/
+lp-glsl/apps/lp-glsl-q32-metrics-app/
 ├── src/
 │   ├── main.rs                    # UPDATE: Change to use ObjectModule
 │   ├── cli.rs                     # No changes
@@ -39,6 +42,7 @@ reports/yyyy-mm-ddThh.mm.ss/
 ### Updated Types
 
 **FunctionStats:**
+
 ```rust
 pub struct FunctionStats {
     pub name: String,
@@ -52,6 +56,7 @@ pub struct FunctionStats {
 ```
 
 **ModuleStats:**
+
 ```rust
 pub struct ModuleStats {
     pub total_blocks: usize,
@@ -65,6 +70,7 @@ pub struct ModuleStats {
 ```
 
 **StatsDelta:**
+
 ```rust
 pub struct StatsDelta {
     pub blocks: i32,
@@ -398,19 +404,26 @@ lp-glsl-compiler = { path = "../../crates/lp-glsl-compiler", default-features = 
 
 ## Implementation Notes
 
-1. **Module Type Change**: Switch from `JITModule` to `ObjectModule` to access compiled code via `ctx.compiled_code()`.
+1. **Module Type Change**: Switch from `JITModule` to `ObjectModule` to access compiled code via
+   `ctx.compiled_code()`.
 
-2. **Target Change**: Use `Target::riscv32_emulator()` instead of `Target::host_jit()` to generate RISC-V 32-bit code.
+2. **Target Change**: Use `Target::riscv32_emulator()` instead of `Target::host_jit()` to generate
+   RISC-V 32-bit code.
 
-3. **Compilation**: Functions must be compiled (via `define_function`) to generate vcode and assembly. This happens after CLIF IR is generated but before statistics are collected.
+3. **Compilation**: Functions must be compiled (via `define_function`) to generate vcode and
+   assembly. This happens after CLIF IR is generated but before statistics are collected.
 
-4. **Disassembly**: Use Capstone disassembler (via `isa.to_capstone()`) to generate real RISC-V assembly. Fall back to vcode if Capstone fails.
+4. **Disassembly**: Use Capstone disassembler (via `isa.to_capstone()`) to generate real RISC-V
+   assembly. Fall back to vcode if Capstone fails.
 
-5. **Size Metrics**: Track vcode and assembly text sizes (in bytes) similar to CLIF size, and include deltas and percentages in statistics.
+5. **Size Metrics**: Track vcode and assembly text sizes (in bytes) similar to CLIF size, and
+   include deltas and percentages in statistics.
 
-6. **File Naming**: Use `.vcode` extension for vcode files and `.s` extension for assembly files, following the pattern of `.pre` and `.post` suffixes.
+6. **File Naming**: Use `.vcode` extension for vcode files and `.s` extension for assembly files,
+   following the pattern of `.pre` and `.post` suffixes.
 
-7. **Feature Requirement**: The `emulator` feature must be enabled in `lp-glsl-compiler` dependency to access RISC-V target and Capstone disassembly.
+7. **Feature Requirement**: The `emulator` feature must be enabled in `lp-glsl-compiler` dependency
+   to access RISC-V target and Capstone disassembly.
 
 ## Success Criteria
 

@@ -2,7 +2,10 @@
 
 ## Overview
 
-Implement support for marking tests as expected to fail using `[expect-fail]` syntax. This enables tracking known failures separately from new regressions, making it easier to see when tests start passing or when new failures are introduced. Tests marked `[expect-fail]` that pass will automatically have the marker removed (unless `LP_KEEP_XFAIL=1` is set).
+Implement support for marking tests as expected to fail using `[expect-fail]` syntax. This enables
+tracking known failures separately from new regressions, making it easier to see when tests start
+passing or when new failures are introduced. Tests marked `[expect-fail]` that pass will
+automatically have the marker removed (unless `LP_KEEP_XFAIL=1` is set).
 
 ## File Structure
 
@@ -18,7 +21,7 @@ lp-glsl/crates/lp-glsl-filetests/src/
 │   └── file_update.rs                  # UPDATE: Add remove_expect_fail_marker() method
 └── lib.rs                              # UPDATE: Update reporting format, exit code logic, add fix_xfail parameter
 
-lp-glsl/apps/lp-test/src/
+lp-glsl/apps/lp-glsl-filetests-app/src/
 └── main.rs                             # UPDATE: Add --fix flag to TestOptions, pass to run()
 ```
 
@@ -130,7 +133,7 @@ add_expect_fail_marker(&self, line_number: usize) -> Result<()>
   # Handle multiple additions in same file (track line_diff)
 ```
 
-### TestOptions (`apps/lp-test/src/main.rs`)
+### TestOptions (`apps/lp-glsl-filetests-app/src/main.rs`)
 
 ```
 TestOptions - # UPDATE: Add fix flag
@@ -151,7 +154,8 @@ TestOptions - # UPDATE: Add fix flag
 
 - **Normal:** `150/150 tests passed, 162 expect-fail, 14/40 files passed in 650ms`
 - **With unexpected passes:** `155/150 tests passed, 162 expect-fail, 14/40 files passed in 650ms`
-- **Removal message:** `5 tests newly pass. [expect-fail] removed.` (or `not removed` if `LP_KEEP_XFAIL=1`)
+- **Removal message:** `5 tests newly pass. [expect-fail] removed.` (or `not removed` if
+  `LP_KEEP_XFAIL=1`)
 
 ## Exit Code Logic
 
@@ -177,7 +181,8 @@ TestOptions - # UPDATE: Add fix flag
 
 ## Baseline Marking Feature
 
-A separate feature to automatically mark all currently failing tests with `[expect-fail]` markers. This is useful for establishing a baseline when introducing this feature to an existing codebase.
+A separate feature to automatically mark all currently failing tests with `[expect-fail]` markers.
+This is useful for establishing a baseline when introducing this feature to an existing codebase.
 
 - **Environment variable:** `LP_MARK_FAILING_TESTS_EXPECTED=1`
 - **Purpose:** Mark all failing tests as expected failures (establish baseline)
@@ -194,11 +199,17 @@ A separate feature to automatically mark all currently failing tests with `[expe
 
 ## Implementation Notes
 
-1. **Parsing:** Strip `[expect-fail]` from the end of run directive lines before parsing expected value
+1. **Parsing:** Strip `[expect-fail]` from the end of run directive lines before parsing expected
+   value
 2. **Statistics:** Denominator excludes expect-fail tests (count only non-marked tests)
-3. **File Updates:** Process all marker removals at end of run, only if `LP_FIX_XFAIL=1` or `--fix` flag is set
+3. **File Updates:** Process all marker removals at end of run, only if `LP_FIX_XFAIL=1` or `--fix`
+   flag is set
 4. **Backward Compatibility:** Existing tests without `[expect-fail]` work unchanged
-5. **CI Integration:** Tests fail on unexpected passes by default (no file modifications), use `LP_FIX_XFAIL=1` or `--fix` to enable auto-removal
-6. **Command-line flag:** Add `--fix` flag to `TestOptions` in `lp-test/src/main.rs`, pass to `run()` function
-7. **Flag precedence:** Check both `LP_FIX_XFAIL` env var and `--fix` flag (either enables auto-removal)
-8. **Baseline marking:** Separate feature with `LP_MARK_FAILING_TESTS_EXPECTED=1`, requires explicit "yes" confirmation
+5. **CI Integration:** Tests fail on unexpected passes by default (no file modifications), use
+   `LP_FIX_XFAIL=1` or `--fix` to enable auto-removal
+6. **Command-line flag:** Add `--fix` flag to `TestOptions` in `lp-glsl-filetests-app/src/main.rs`,
+   pass to `run()` function
+7. **Flag precedence:** Check both `LP_FIX_XFAIL` env var and `--fix` flag (either enables
+   auto-removal)
+8. **Baseline marking:** Separate feature with `LP_MARK_FAILING_TESTS_EXPECTED=1`, requires
+   explicit "yes" confirmation

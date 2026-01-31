@@ -2,12 +2,15 @@
 
 ## Overview
 
-Adapt the Fractal Brownian Motion (FBM) noise function from Lygia to work as an LPFX builtin function. This includes implementing gnoise (gradient noise) and all its dependencies (random, srandom, cubic, quintic interpolation, and mix/lerp functions) to keep the Rust code as close as possible to the original GLSL code.
+Adapt the Fractal Brownian Motion (FBM) noise function from Lygia to work as an LPFX builtin
+function. This includes implementing gnoise (gradient noise) and all its dependencies (random,
+srandom, cubic, quintic interpolation, and mix/lerp functions) to keep the Rust code as close as
+possible to the original GLSL code.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/
+lp-glsl/crates/lp-glsl-builtins/src/
 ├── glsl/q32/
 │   ├── types/
 │   │   ├── q32.rs                              # UPDATE: Add mix() method
@@ -196,17 +199,17 @@ Keep the Rust code structure as close as possible to the GLSL source:
    ```
 
 2. **Constants**: Use constants matching GLSL defaults:
-   - `FBM_VALUE_INITIAL = 0.0`
-   - `FBM_SCALE_SCALAR = 2.0` (lacunarity)
-   - `FBM_AMPLITUDE_INITIAL = 0.5`
-   - `FBM_AMPLITUDE_SCALAR = 0.5` (persistence)
+    - `FBM_VALUE_INITIAL = 0.0`
+    - `FBM_SCALE_SCALAR = 2.0` (lacunarity)
+    - `FBM_AMPLITUDE_INITIAL = 0.5`
+    - `FBM_AMPLITUDE_SCALAR = 0.5` (persistence)
 
 3. **Helper Functions**: Create helper functions that mirror GLSL function calls:
-   - `random()` → `lpfx_random()`
-   - `srandom3()` → `lpfx_srandom3_vec()`
-   - `cubic()` → `cubic()`
-   - `quintic()` → `quintic()`
-   - `mix()` → `mix()`
+    - `random()` → `lpfx_random()`
+    - `srandom3()` → `lpfx_srandom3_vec()`
+    - `cubic()` → `cubic()`
+    - `quintic()` → `quintic()`
+    - `mix()` → `mix()`
 
 ### Random Function Implementation
 
@@ -243,9 +246,9 @@ FBM combines multiple octaves of noise:
 
 1. Start with initial value and amplitude
 2. For each octave:
-   - Add `amplitude * noise(position)` to value
-   - Scale position by lacunarity (2.0)
-   - Scale amplitude by persistence (0.5)
+    - Add `amplitude * noise(position)` to value
+    - Scale position by lacunarity (2.0)
+    - Scale amplitude by persistence (0.5)
 3. Tilable variant normalizes by accumulated amplitude
 
 ### Function Pattern

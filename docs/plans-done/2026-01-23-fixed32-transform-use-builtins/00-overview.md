@@ -2,7 +2,9 @@
 
 ## Overview
 
-Update the q32 transform to use builtin functions for `add`, `sub`, and `div` operations instead of generating inline saturation code. This will reduce code bloat from ~20-30 instructions per operation to a single function call, following the same pattern already established for `mul`.
+Update the q32 transform to use builtin functions for `add`, `sub`, and `div` operations instead of
+generating inline saturation code. This will reduce code bloat from ~20-30 instructions per
+operation to a single function call, following the same pattern already established for `mul`.
 
 ## Phases
 
@@ -19,6 +21,6 @@ Update the q32 transform to use builtin functions for `add`, `sub`, and `div` op
 - `__lp_q32_add` and `__lp_q32_sub` builtins implemented and working
 - `convert_fadd`, `convert_fsub`, `convert_fdiv` use builtins instead of inline code
 - All tests pass (including unignored `test_q32_fdiv`)
-- Code size reduction verified via q32-metrics comparison
+- Code size reduction verified via lp-glsl-q32-metrics-app comparison
 - Code formatted with `cargo +nightly fmt`
 - All warnings fixed

@@ -2,13 +2,15 @@
 
 ## Goal
 
-Create `__lp_q32_add` and `__lp_q32_sub` builtin functions following the pattern established by `__lp_q32_mul`.
+Create `__lp_q32_add` and `__lp_q32_sub` builtin functions following the pattern established by
+`__lp_q32_mul`.
 
 ## Tasks
 
 ### 1.1 Create add.rs
 
-Create `lp-glsl/crates/lp-builtins/src/builtins/q32/add.rs`:
+Create `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/add.rs`:
+
 - Implement `__lp_q32_add(a: i32, b: i32) -> i32`
 - Use i64 for intermediate calculation to avoid overflow
 - Clamp result to [MIN_FIXED, MAX_FIXED]
@@ -17,7 +19,8 @@ Create `lp-glsl/crates/lp-builtins/src/builtins/q32/add.rs`:
 
 ### 1.2 Create sub.rs
 
-Create `lp-glsl/crates/lp-builtins/src/builtins/q32/sub.rs`:
+Create `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/sub.rs`:
+
 - Implement `__lp_q32_sub(a: i32, b: i32) -> i32`
 - Use i64 for intermediate calculation to avoid overflow
 - Clamp result to [MIN_FIXED, MAX_FIXED]
@@ -27,6 +30,7 @@ Create `lp-glsl/crates/lp-builtins/src/builtins/q32/sub.rs`:
 ### 1.3 Add #[unsafe(no_mangle)] Attributes
 
 Both functions must have:
+
 - `#[unsafe(no_mangle)]` attribute
 - `pub extern "C"` calling convention
 - Function names starting with `__lp_q32_`
@@ -53,6 +57,7 @@ Both functions must have:
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

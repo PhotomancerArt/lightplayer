@@ -9,7 +9,7 @@ Run the builtin generator to register all new functions in the builtin system.
 Run the builtin generator:
 
 ```bash
-cargo run --bin lp-builtin-gen --manifest-path lp-glsl/apps/lp-builtin-gen/Cargo.toml
+cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
 ```
 
 Or use the build script:
@@ -46,6 +46,7 @@ This will:
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

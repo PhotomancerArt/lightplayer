@@ -2,12 +2,14 @@
 
 ## Overview
 
-Update the q32 transform to use builtin functions for `add`, `sub`, and `div` operations instead of generating inline saturation code. This will reduce code bloat from ~20-30 instructions per operation to a single function call, following the same pattern already established for `mul`.
+Update the q32 transform to use builtin functions for `add`, `sub`, and `div` operations instead of
+generating inline saturation code. This will reduce code bloat from ~20-30 instructions per
+operation to a single function call, following the same pattern already established for `mul`.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/builtins/q32/
+lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/
 ├── add.rs                    # NEW: __lp_q32_add builtin implementation
 ├── sub.rs                    # NEW: __lp_q32_sub builtin implementation
 ├── div.rs                    # EXISTS: Verify edge case handling
@@ -20,7 +22,7 @@ lp-glsl/crates/lp-glsl-compiler/src/backend/transform/q32/converters/
 lp-glsl/crates/lp-glsl-compiler/src/backend/builtins/
 └── registry.rs               # AUTO-GENERATED: Will include Q32Add, Q32Sub
 
-lp-glsl/apps/lp-builtins-app/src/
+lp-glsl/apps/lp-glsl-builtins-emu-app/src/
 └── builtin_refs.rs           # AUTO-GENERATED: Will include add/sub references
 ```
 
@@ -29,6 +31,7 @@ lp-glsl/apps/lp-builtins-app/src/
 ### New Builtin Functions
 
 **__lp_q32_add(a: i32, b: i32) -> i32**
+
 - Fixed-point addition with saturation
 - Use i64 for intermediate calculation to avoid overflow
 - Clamp result to [MIN_FIXED, MAX_FIXED]
@@ -36,6 +39,7 @@ lp-glsl/apps/lp-builtins-app/src/
 - Pattern: Similar to `__lp_q32_mul` but simpler (no shift needed)
 
 **__lp_q32_sub(a: i32, b: i32) -> i32**
+
 - Fixed-point subtraction with saturation
 - Use i64 for intermediate calculation to avoid overflow
 - Clamp result to [MIN_FIXED, MAX_FIXED]
@@ -43,6 +47,7 @@ lp-glsl/apps/lp-builtins-app/src/
 - Pattern: Similar to `__lp_q32_add` but subtract instead of add
 
 **__lp_q32_div(dividend: i32, divisor: i32) -> i32**
+
 - EXISTS: Already implemented
 - Verify it handles edge cases correctly (division-by-zero, small divisors)
 - If issues found, fix before using
@@ -50,6 +55,7 @@ lp-glsl/apps/lp-builtins-app/src/
 ### Updated Transform Functions
 
 **convert_fadd()**
+
 - UPDATE: Replace inline saturation code (~20 instructions) with builtin call
 - Pattern: Follow `convert_fmul` implementation
 - Get FuncId from func_id_map
@@ -57,6 +63,7 @@ lp-glsl/apps/lp-builtins-app/src/
 - Call builtin function
 
 **convert_fsub()**
+
 - UPDATE: Replace inline saturation code (~20 instructions) with builtin call
 - Pattern: Follow `convert_fmul` implementation
 - Get FuncId from func_id_map
@@ -64,6 +71,7 @@ lp-glsl/apps/lp-builtins-app/src/
 - Call builtin function
 
 **convert_fdiv()**
+
 - UPDATE: Replace inline division code (~30 instructions) with builtin call
 - Pattern: Follow `convert_fmul` implementation
 - Get FuncId from func_id_map
@@ -114,16 +122,17 @@ All three converters will follow the `convert_fmul` pattern:
 ### Builtin Generation
 
 After creating `add.rs` and `sub.rs`:
+
 1. Run `scripts/build-builtins.sh` to auto-generate:
-   - `mod.rs` exports
-   - `registry.rs` enum variants and mappings
-   - `builtin_refs.rs` function references
+    - `mod.rs` exports
+    - `registry.rs` enum variants and mappings
+    - `builtin_refs.rs` function references
 
 ### Testing
 
 1. Unignore `test_q32_fdiv` test in `arithmetic.rs`
 2. Run filetests to verify correctness
-3. Run q32-metrics script to compare code sizes
+3. Run lp-glsl-q32-metrics-app script to compare code sizes
 
 ## Constants
 
@@ -136,5 +145,5 @@ After creating `add.rs` and `sub.rs`:
 - `convert_fadd`, `convert_fsub`, `convert_fdiv` use builtins instead of inline code
 - Builtin registry auto-generated with new entries
 - All tests pass (including unignored `test_q32_fdiv`)
-- Code size reduction verified via q32-metrics comparison
+- Code size reduction verified via lp-glsl-q32-metrics-app comparison
 - Code formatted with `cargo +nightly fmt`

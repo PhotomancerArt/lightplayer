@@ -2,14 +2,15 @@
 
 ## Description
 
-Create the directory structure for color/space and math modules, and set up the module files with proper exports.
+Create the directory structure for color/space and math modules, and set up the module files with
+proper exports.
 
 ## Implementation
 
 ### Create Directories
 
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/math/`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/`
 
 ### Create Module Files
 
@@ -44,7 +45,8 @@ Update `lpfx/mod.rs` to export the new `color` and `math` modules.
 ### Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Code is never done, never perfect, never fully ready, never fully complete
 - Use measured, factual descriptions of what was implemented

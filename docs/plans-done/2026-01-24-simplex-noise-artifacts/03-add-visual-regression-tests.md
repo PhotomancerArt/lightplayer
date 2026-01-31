@@ -2,15 +2,17 @@
 
 ## Description
 
-Add visual regression testing to catch artifacts and verify noise quality. Generate noise images and compare against reference implementations or previous known-good outputs.
+Add visual regression testing to catch artifacts and verify noise quality. Generate noise images and
+compare against reference implementations or previous known-good outputs.
 
 ## Implementation
 
 ### 1. Add Image Generation Test
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add visual output test:
+
 ```rust
 #[cfg(all(test, feature = "test_visual"))]
 mod visual_tests {
@@ -61,9 +63,10 @@ mod visual_tests {
 
 ### 2. Add Comparison Test Against noise-rs
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add comparison test:
+
 ```rust
 #[cfg(all(test, feature = "test"))]
 mod comparison_tests {
@@ -104,9 +107,10 @@ mod comparison_tests {
 
 ### 3. Add Artifact Detection Test
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add test to detect discontinuities:
+
 ```rust
 #[test]
 fn test_simplex2_no_discontinuities() {
@@ -143,8 +147,9 @@ fn test_simplex2_no_discontinuities() {
 ## Usage
 
 Generate visual output:
+
 ```bash
-cargo test --features test_visual --package lp-builtins test_simplex2_generate_image -- --nocapture
+cargo test --features test_visual --package lp-glsl-builtins test_simplex2_generate_image -- --nocapture
 ```
 
 ## Success Criteria

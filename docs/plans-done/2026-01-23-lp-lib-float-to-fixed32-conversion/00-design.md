@@ -2,7 +2,10 @@
 
 ## Overview
 
-Fix LP library functions (`lpfx_snoise1/2/3`, `lpfx_hash`) to follow the correct float→q32 conversion pattern. Currently, codegen directly calls builtins, bypassing the transform. Functions should emit TestCase calls that the q32 transform converts, matching the pattern used for `sin`/`cos`.
+Fix LP library functions (`lpfx_snoise1/2/3`, `lpfx_hash`) to follow the correct float→q32
+conversion pattern. Currently, codegen directly calls builtins, bypassing the transform. Functions
+should emit TestCase calls that the q32 transform converts, matching the pattern used for `sin`/
+`cos`.
 
 ## File Structure
 
@@ -23,7 +26,7 @@ lp-glsl/crates/lp-glsl-compiler/src/
 │               ├── calls.rs           # VERIFY: Already handles TestCase→builtin conversion correctly
 │               └── math.rs            # VERIFY: map_testcase_to_builtin() already has correct mappings
 
-lp-glsl/apps/lp-builtin-gen/
+lp-glsl/apps/lp-glsl-builtin-gen-app/
 └── src/
     └── main.rs                        # UPDATE: Use LpLibFn enum as source of truth instead of prefix matching
 ```
@@ -56,7 +59,7 @@ emit_lp_lib_fn_call() - # UPDATE: Change implementation
     └── Let q32 transform handle conversion
 ```
 
-### Generator Changes (`apps/lp-builtin-gen/src/main.rs`)
+### Generator Changes (`apps/lp-glsl-builtin-gen-app/src/main.rs`)
 
 ```
 discover_builtins() - # UPDATE: Use LpLibFn enum as source of truth
@@ -137,18 +140,22 @@ This ensures consistency across codegen, transform, and generator.
 
 ### 2. TestCase Names Represent Semantic Functions
 
-TestCase names like `"__lpfx_snoise3"` represent the semantic function (float version), not the implementation. The transform decides which implementation to use based on the target:
+TestCase names like `"__lpfx_snoise3"` represent the semantic function (float version), not the
+implementation. The transform decides which implementation to use based on the target:
 
 - Q32 target: `"__lpfx_snoise3"` → `__lp_q32_lpfx_snoise3`
 - Float target (future): `"__lpfx_snoise3"` → `__lp_float_lpfx_snoise3` (or similar)
 
 ### 3. Hash Functions Don't Need Conversion
 
-Hash functions operate on integers (`u32`), not floats, so they don't need float→q32 conversion. They can be called directly as builtins. The `needs_q32_mapping()` method returns `false` for hash functions.
+Hash functions operate on integers (`u32`), not floats, so they don't need float→q32 conversion.
+They can be called directly as builtins. The `needs_q32_mapping()` method returns `false` for hash
+functions.
 
 ### 4. Generator Uses LpLibFn Enum
 
-The generator reads `LpLibFn` enum to know what functions should exist, then matches discovered function names to expected names. This ensures the registry matches what `lp_lib_fns.rs` expects.
+The generator reads `LpLibFn` enum to know what functions should exist, then matches discovered
+function names to expected names. This ensures the registry matches what `lp_lib_fns.rs` expects.
 
 ### 5. Consistent with sin/cos Pattern
 

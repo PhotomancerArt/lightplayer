@@ -1,8 +1,10 @@
-# Plan: Extend lp-filetests-gen to Generate More Test Types
+# Plan: Extend lp-glsl-filetests-gen-app to Generate More Test Types
 
 ## Goal
 
-Extend `lp-filetests-gen` to generate additional test categories beyond comparison functions, reducing manual test file maintenance and ensuring consistency across all vector test types.
+Extend `lp-glsl-filetests-gen-app` to generate additional test categories beyond comparison
+functions, reducing manual test file maintenance and ensuring consistency across all vector test
+types.
 
 ## Current State Analysis
 
@@ -37,84 +39,92 @@ Based on `vec/vec4/` directory:
 
 1. **Function tests** (`fn-*`):
 
-   - Similar structure to comparison functions
-   - Test cases: mixed, all_true/all_false (or first_larger/second_larger for max/min), equal, negative, zero, variables, expressions, in_expression
-   - Return type: same as input for max/min, bvec for comparisons
+    - Similar structure to comparison functions
+    - Test cases: mixed, all_true/all_false (or first_larger/second_larger for max/min), equal,
+      negative, zero, variables, expressions, in_expression
+    - Return type: same as input for max/min, bvec for comparisons
 
 2. **Operator tests** (`op-*`):
 
-   - Use operators (`+`, `*`, `==`) instead of functions
-   - Similar test case patterns
-   - Use `~=` (approximate equality) for floating point operations instead of `==`
-   - Test cases: positive_positive, positive_negative, negative_negative, zero, variables, expressions, in_assignment, large_numbers, mixed_components, fractions
+    - Use operators (`+`, `*`, `==`) instead of functions
+    - Similar test case patterns
+    - Use `~=` (approximate equality) for floating point operations instead of `==`
+    - Test cases: positive_positive, positive_negative, negative_negative, zero, variables,
+      expressions, in_assignment, large_numbers, mixed_components, fractions
 
 3. **Constructor tests** (`from-*`):
-   - Different structure - single input, broadcast to all components
-   - Test cases: positive, negative, zero, variable, expression, function_result, in_assignment, large_value, fractional, computation
+    - Different structure - single input, broadcast to all components
+    - Test cases: positive, negative, zero, variable, expression, function_result, in_assignment,
+      large_value, fractional, computation
 
 ## Decisions Made
 
 1. **Priority/Scope**: ✅ Include both function tests and operator tests in separate phases
-   - Phase 1: Function tests (fn-max, fn-min)
-   - Phase 2: Operator tests (op-add, op-multiply, op-equal)
-   - Constructor tests (from-scalar) deferred for future work
+    - Phase 1: Function tests (fn-max, fn-min)
+    - Phase 2: Operator tests (op-add, op-multiply, op-equal)
+    - Constructor tests (from-scalar) deferred for future work
 
 ## Questions to Answer
 
 2. **Test Case Patterns**: ✅ Keep category-specific patterns
 
-   - Each category module defines its own test cases
-   - Extract shared utilities only when clear patterns emerge (e.g., formatting helpers)
-   - Keep each generator self-contained and easier to maintain
+    - Each category module defines its own test cases
+    - Extract shared utilities only when clear patterns emerge (e.g., formatting helpers)
+    - Keep each generator self-contained and easier to maintain
 
 3. **Floating Point Comparison**: ✅ Hardcode per test type
 
-   - Function tests (`fn-max`, `fn-min`): use `==` (exact equality)
-   - Operator arithmetic tests (`op-add`, `op-multiply`): use `~=` (approximate equality for floating point)
-   - Operator comparison tests (`op-equal`): use `==` (boolean result)
-   - Matches existing manual test patterns, keeps logic simple
+    - Function tests (`fn-max`, `fn-min`): use `==` (exact equality)
+    - Operator arithmetic tests (`op-add`, `op-multiply`): use `~=` (approximate equality for
+      floating point)
+    - Operator comparison tests (`op-equal`): use `==` (boolean result)
+    - Matches existing manual test patterns, keeps logic simple
 
 4. **Type Support**: ✅ Generate for all types that make sense
 
-   - `fn-max` and `fn-min`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4)
-   - `op-add` and `op-multiply`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4)
-   - `op-equal`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4) - returns `bvec`
-   - Matches pattern of existing comparison function generators for comprehensive coverage
+    - `fn-max` and `fn-min`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4)
+    - `op-add` and `op-multiply`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4)
+    - `op-equal`: support `vec`, `ivec`, `uvec` (all dimensions 2/3/4) - returns `bvec`
+    - Matches pattern of existing comparison function generators for comprehensive coverage
 
 5. **Code Organization**: ✅ Follow existing pattern
 
-   - Create `src/vec/fn_max.rs` and `src/vec/fn_min.rs` for function tests
-   - Create `src/vec/op_add.rs`, `src/vec/op_multiply.rs`, and `src/vec/op_equal.rs` for operator tests
-   - Each module exports a `generate()` function with same signature: `(VecType, Dimension) -> String`
-   - Add new generators to match statement in `generator.rs`
-   - Extract common utilities to `util.rs` only when patterns are clearly shared
+    - Create `src/vec/fn_max.rs` and `src/vec/fn_min.rs` for function tests
+    - Create `src/vec/op_add.rs`, `src/vec/op_multiply.rs`, and `src/vec/op_equal.rs` for operator
+      tests
+    - Each module exports a `generate()` function with same signature:
+      `(VecType, Dimension) -> String`
+    - Add new generators to match statement in `generator.rs`
+    - Extract common utilities to `util.rs` only when patterns are clearly shared
 
 6. **Backward Compatibility**: ✅ Generate `.gen.glsl` files alongside manual files
 
-   - Generate `.gen.glsl` files for all types/dimensions
-   - Keep manual `.glsl` files as-is (non-destructive approach)
-   - Allows gradual migration and comparison later
+    - Generate `.gen.glsl` files for all types/dimensions
+    - Keep manual `.glsl` files as-is (non-destructive approach)
+    - Allows gradual migration and comparison later
 
 7. **Acceptance Criteria**: ✅ Success criteria defined
-   - All generated tests compile (no syntax errors)
-   - All generated tests pass (match expected results)
-   - Generated tests match existing manual test patterns (same test cases, similar structure)
-   - Coverage: generate tests for all vector types (`vec2/3/4`, `ivec2/3/4`, `uvec2/3/4`) for each category
-   - Code compiles without warnings (except unused code that will be used later)
-   - Generator can be run via CLI: `lp-filetests-gen vec/vec4/fn-max --write`
+    - All generated tests compile (no syntax errors)
+    - All generated tests pass (match expected results)
+    - Generated tests match existing manual test patterns (same test cases, similar structure)
+    - Coverage: generate tests for all vector types (`vec2/3/4`, `ivec2/3/4`, `uvec2/3/4`) for each
+      category
+    - Code compiles without warnings (except unused code that will be used later)
+    - Generator can be run via CLI: `lp-glsl-filetests-gen-app vec/vec4/fn-max --write`
 
 ## Plan Phases
 
 ### Phase 1: Implement fn-max Generator
 
-**Goal**: Create generator for `fn-max` test files that match the pattern in `filetests/vec/vec4/fn-max.glsl`
+**Goal**: Create generator for `fn-max` test files that match the pattern in
+`filetests/vec/vec4/fn-max.glsl`
 
 **Step-by-step instructions**:
 
 1. **Create the module file**
-   - Create file: `lightplayer/crates/lp-filetests-gen/src/vec/fn_max.rs`
-   - Copy the structure from `src/vec/fn_equal.rs` as a template
-   - Start with this skeleton:
+    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs`
+    - Copy the structure from `src/vec/fn_equal.rs` as a template
+    - Start with this skeleton:
 
 ```rust
 //! Generator for fn-max test files.
@@ -158,9 +168,9 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 ```
 
 2. **Implement test case generators**
-   - Look at `filetests/vec/vec4/fn-max.glsl` for the exact test cases
-   - For each test case, create a function like `generate_test_first_larger()`
-   - Example for `generate_test_first_larger()`:
+    - Look at `filetests/vec/vec4/fn-max.glsl` for the exact test cases
+    - For each test case, create a function like `generate_test_first_larger()`
+    - Example for `generate_test_first_larger()`:
 
 ```rust
 fn generate_test_first_larger(vec_type: VecType, dimension: Dimension) -> String {
@@ -204,20 +214,20 @@ fn generate_test_first_larger(vec_type: VecType, dimension: Dimension) -> String
 ```
 
 - Implement all test case generators:
-  - `generate_test_first_larger()` - a has larger values
-  - `generate_test_second_larger()` - b has larger values
-  - `generate_test_mixed()` - mixed larger/smaller
-  - `generate_test_equal()` - equal vectors
-  - `generate_test_negative()` - negative values (return empty string for UVec)
-  - `generate_test_zero()` - zero values
-  - `generate_test_variables()` - variable inputs
-  - `generate_test_expressions()` - inline expressions
-  - `generate_test_in_expression()` - nested expressions
+    - `generate_test_first_larger()` - a has larger values
+    - `generate_test_second_larger()` - b has larger values
+    - `generate_test_mixed()` - mixed larger/smaller
+    - `generate_test_equal()` - equal vectors
+    - `generate_test_negative()` - negative values (return empty string for UVec)
+    - `generate_test_zero()` - zero values
+    - `generate_test_variables()` - variable inputs
+    - `generate_test_expressions()` - inline expressions
+    - `generate_test_in_expression()` - nested expressions
 
 3. **Complete the generate() function**
-   - Add calls to all test case generators in the `generate()` function
-   - Follow the pattern from `fn_equal.rs` lines 37-62
-   - Example:
+    - Add calls to all test case generators in the `generate()` function
+    - Follow the pattern from `fn_equal.rs` lines 37-62
+    - Example:
 
 ```rust
 pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
@@ -253,9 +263,9 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 ```
 
 4. **Register the module**
-   - Open `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs`
-   - Add line: `pub mod fn_max;`
-   - File should look like:
+    - Open `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs`
+    - Add line: `pub mod fn_max;`
+    - File should look like:
 
 ```rust
 //! Vector test generators.
@@ -270,10 +280,10 @@ pub mod util;
 ```
 
 5. **Add to generator dispatch**
-   - Open `lightplayer/crates/lp-filetests-gen/src/generator.rs`
-   - Find the match statement around line 55
-   - Add case: `"fn-max" => crate::vec::fn_max::generate(spec.vec_type, spec.dimension),`
-   - Example:
+    - Open `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs`
+    - Find the match statement around line 55
+    - Add case: `"fn-max" => crate::vec::fn_max::generate(spec.vec_type, spec.dimension),`
+    - Example:
 
 ```rust
 let content = match spec.category.as_str() {
@@ -291,21 +301,22 @@ let content = match spec.category.as_str() {
 
 6. **Test the generator**
 
-   - Build: `cd lightplayer && cargo build --bin lp-filetests-gen`
-   - Dry-run test: `cargo run --bin lp-filetests-gen -- vec/vec4/fn-max`
-   - Verify output matches `filetests/vec/vec4/fn-max.glsl` structure
-   - Generate file: `cargo run --bin lp-filetests-gen -- vec/vec4/fn-max --write`
-   - Verify generated file: `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-max.gen.glsl`
+    - Build: `cd lightplayer && cargo build --bin lp-glsl-filetests-gen-app`
+    - Dry-run test: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max`
+    - Verify output matches `filetests/vec/vec4/fn-max.glsl` structure
+    - Generate file: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max --write`
+    - Verify generated file:
+      `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-max.gen.glsl`
 
 7. **Test all vector types**
 
-   - Generate for all types: `cargo run --bin lp-filetests-gen -- vec/fn-max --write`
-   - This should create files for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
-   - Verify each generated file compiles and has correct structure
+    - Generate for all types: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max --write`
+    - This should create files for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
+    - Verify each generated file compiles and has correct structure
 
 8. **Verify tests pass**
-   - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
-   - Or run specific test: Check that generated `.gen.glsl` files are tested
+    - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
+    - Or run specific test: Check that generated `.gen.glsl` files are tested
 
 **Success criteria**:
 
@@ -316,13 +327,13 @@ let content = match spec.category.as_str() {
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/fn_max.rs` (new file)
-- `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-filetests-gen/src/generator.rs` (add match case)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs` (new file)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/fn_equal.rs` (structure template)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_equal.rs` (structure template)
 - `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-max.glsl` (expected output)
 
 ---
@@ -330,42 +341,45 @@ let content = match spec.category.as_str() {
 ### Phase 2: Implement fn-min Generator
 
 - Create `src/vec/fn_max.rs` module following pattern from `fn_equal.rs`
-- Implement `generate()` function signature: `pub fn generate(vec_type: VecType, dimension: Dimension) -> String`
+- Implement `generate()` function signature:
+  `pub fn generate(vec_type: VecType, dimension: Dimension) -> String`
 - Add header generation using `generate_header()` utility
 - Implement test case generators matching manual `fn-max.glsl`:
-  - `generate_test_first_larger()` - first vector has larger values
-  - `generate_test_second_larger()` - second vector has larger values
-  - `generate_test_mixed()` - mixed larger/smaller components
-  - `generate_test_equal()` - equal vectors
-  - `generate_test_negative()` - negative values (skip for uvec)
-  - `generate_test_zero()` - zero values
-  - `generate_test_variables()` - variable inputs
-  - `generate_test_expressions()` - inline expressions
-  - `generate_test_in_expression()` - nested expressions
+    - `generate_test_first_larger()` - first vector has larger values
+    - `generate_test_second_larger()` - second vector has larger values
+    - `generate_test_mixed()` - mixed larger/smaller components
+    - `generate_test_equal()` - equal vectors
+    - `generate_test_negative()` - negative values (skip for uvec)
+    - `generate_test_zero()` - zero values
+    - `generate_test_variables()` - variable inputs
+    - `generate_test_expressions()` - inline expressions
+    - `generate_test_in_expression()` - nested expressions
 - Return type: same as input (vec/ivec/uvec), use `==` for comparisons
 - Add module to `src/vec/mod.rs`
 - Add case to `generator.rs` match statement: `"fn-max" => crate::vec::fn_max::generate(...)`
-- Test generation: `lp-filetests-gen vec/vec4/fn-max` (dry-run)
-- Generate for all types: `lp-filetests-gen vec/fn-max --write` (should generate vec2/3/4, ivec2/3/4, uvec2/3/4)
+- Test generation: `lp-glsl-filetests-gen-app vec/vec4/fn-max` (dry-run)
+- Generate for all types: `lp-glsl-filetests-gen-app vec/fn-max --write` (should generate vec2/3/4,
+  ivec2/3/4, uvec2/3/4)
 - **Success criteria**: All generated fn-max tests compile and pass
-- **Code compiles**: lp-filetests-gen builds without warnings
+- **Code compiles**: lp-glsl-filetests-gen-app builds without warnings
 - **Tests relevant**: Generated tests match manual test patterns
 
 ### Phase 2: Implement fn-min Generator
 
-**Goal**: Create generator for `fn-min` test files, very similar to fn-max but using `min()` function
+**Goal**: Create generator for `fn-min` test files, very similar to fn-max but using `min()`
+function
 
 **Step-by-step instructions**:
 
 1. **Create the module file**
 
-   - Create file: `lightplayer/crates/lp-filetests-gen/src/vec/fn_min.rs`
-   - Copy from `fn_max.rs` and modify function names and logic
-   - Change `max()` to `min()` and reverse the logic (smaller values instead of larger)
+    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_min.rs`
+    - Copy from `fn_max.rs` and modify function names and logic
+    - Change `max()` to `min()` and reverse the logic (smaller values instead of larger)
 
 2. **Implement test case generators**
-   - Look at `filetests/vec/vec4/fn-min.glsl` for exact test cases
-   - Example for `generate_test_first_smaller()`:
+    - Look at `filetests/vec/vec4/fn-min.glsl` for exact test cases
+    - Example for `generate_test_first_smaller()`:
 
 ```rust
 fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> String {
@@ -412,28 +426,28 @@ fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> Strin
 
 3. **Register the module**
 
-   - Add `pub mod fn_min;` to `src/vec/mod.rs`
+    - Add `pub mod fn_min;` to `src/vec/mod.rs`
 
 4. **Add to generator dispatch**
 
-   - Add case: `"fn-min" => crate::vec::fn_min::generate(spec.vec_type, spec.dimension),`
+    - Add case: `"fn-min" => crate::vec::fn_min::generate(spec.vec_type, spec.dimension),`
 
 5. **Test the generator**
-   - Dry-run: `cargo run --bin lp-filetests-gen -- vec/vec4/fn-min`
-   - Generate: `cargo run --bin lp-filetests-gen -- vec/fn-min --write`
-   - Verify output matches `filetests/vec/vec4/fn-min.glsl`
+    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-min`
+    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-min --write`
+    - Verify output matches `filetests/vec/vec4/fn-min.glsl`
 
 **Success criteria**: Same as Phase 1, but for fn-min
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/fn_min.rs` (new file)
-- `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-filetests-gen/src/generator.rs` (add match case)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_min.rs` (new file)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/fn_max.rs` (structure template)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs` (structure template)
 - `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-min.glsl` (expected output)
 
 ---
@@ -442,7 +456,8 @@ fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> Strin
 
 ### Phase 3: Implement op-add Generator
 
-**Goal**: Create generator for `op-add` test files using the `+` operator, with `~=` for floating point comparisons
+**Goal**: Create generator for `op-add` test files using the `+` operator, with `~=` for floating
+point comparisons
 
 **Key differences from function tests**:
 
@@ -454,12 +469,12 @@ fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> Strin
 
 1. **Create the module file**
 
-   - Create file: `lightplayer/crates/lp-filetests-gen/src/vec/op_add.rs`
-   - Start with header similar to fn-max, but change function name and comment
+    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_add.rs`
+    - Start with header similar to fn-max, but change function name and comment
 
 2. **Add utility function for comparison operator**
-   - Need to choose `~=` or `==` based on vec_type
-   - Add helper function:
+    - Need to choose `~=` or `==` based on vec_type
+    - Add helper function:
 
 ```rust
 fn comparison_operator(vec_type: VecType) -> &'static str {
@@ -473,7 +488,7 @@ fn comparison_operator(vec_type: VecType) -> &'static str {
 ```
 
 3. **Implement test case generators**
-   - Example for `generate_test_positive_positive()`:
+    - Example for `generate_test_positive_positive()`:
 
 ```rust
 fn generate_test_positive_positive(vec_type: VecType, dimension: Dimension) -> String {
@@ -561,34 +576,34 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
 ```
 
 - Implement all test case generators:
-  - `generate_test_positive_positive()`
-  - `generate_test_positive_negative()` (skip for uvec)
-  - `generate_test_negative_negative()` (skip for uvec)
-  - `generate_test_zero()`
-  - `generate_test_variables()`
-  - `generate_test_expressions()`
-  - `generate_test_in_assignment()`
-  - `generate_test_large_numbers()` - note: values may be clamped
-  - `generate_test_mixed_components()` (skip for uvec)
-  - `generate_test_fractions()` - use fractional values like 1.5, 2.25
+    - `generate_test_positive_positive()`
+    - `generate_test_positive_negative()` (skip for uvec)
+    - `generate_test_negative_negative()` (skip for uvec)
+    - `generate_test_zero()`
+    - `generate_test_variables()`
+    - `generate_test_expressions()`
+    - `generate_test_in_assignment()`
+    - `generate_test_large_numbers()` - note: values may be clamped
+    - `generate_test_mixed_components()` (skip for uvec)
+    - `generate_test_fractions()` - use fractional values like 1.5, 2.25
 
 4. **Complete the generate() function**
 
-   - Add all test case generators, similar to fn-max
-   - Remember to skip negative tests for UVec
+    - Add all test case generators, similar to fn-max
+    - Remember to skip negative tests for UVec
 
 5. **Register the module**
 
-   - Add `pub mod op_add;` to `src/vec/mod.rs`
+    - Add `pub mod op_add;` to `src/vec/mod.rs`
 
 6. **Add to generator dispatch**
 
-   - Add case: `"op-add" => crate::vec::op_add::generate(spec.vec_type, spec.dimension),`
+    - Add case: `"op-add" => crate::vec::op_add::generate(spec.vec_type, spec.dimension),`
 
 7. **Test the generator**
-   - Dry-run: `cargo run --bin lp-filetests-gen -- vec/vec4/op-add`
-   - Verify `~=` appears for vec type, `==` for ivec/uvec
-   - Generate: `cargo run --bin lp-filetests-gen -- vec/op-add --write`
+    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-add`
+    - Verify `~=` appears for vec type, `==` for ivec/uvec
+    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-add --write`
 
 **Success criteria**:
 
@@ -599,9 +614,9 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/op_add.rs` (new file)
-- `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-filetests-gen/src/generator.rs` (add match case)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_add.rs` (new file)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
@@ -619,12 +634,12 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
 
 1. **Create the module file**
 
-   - Create file: `lightplayer/crates/lp-filetests-gen/src/vec/op_multiply.rs`
-   - Copy structure from `op_add.rs` and change operator from `+` to `*`
-   - Use same `comparison_operator()` helper function
+    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_multiply.rs`
+    - Copy structure from `op_add.rs` and change operator from `+` to `*`
+    - Use same `comparison_operator()` helper function
 
 2. **Implement test case generators**
-   - Example for `generate_test_by_zero()`:
+    - Example for `generate_test_by_zero()`:
 
 ```rust
 fn generate_test_by_zero(vec_type: VecType, dimension: Dimension) -> String {
@@ -709,20 +724,20 @@ fn generate_test_by_one(vec_type: VecType, dimension: Dimension) -> String {
 
 3. **Register the module and add to generator**
 
-   - Add `pub mod op_multiply;` to `src/vec/mod.rs`
-   - Add case: `"op-multiply" => crate::vec::op_multiply::generate(spec.vec_type, spec.dimension),`
+    - Add `pub mod op_multiply;` to `src/vec/mod.rs`
+    - Add case: `"op-multiply" => crate::vec::op_multiply::generate(spec.vec_type, spec.dimension),`
 
 4. **Test the generator**
-   - Dry-run: `cargo run --bin lp-filetests-gen -- vec/vec4/op-multiply`
-   - Generate: `cargo run --bin lp-filetests-gen -- vec/op-multiply --write`
+    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-multiply`
+    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-multiply --write`
 
 **Success criteria**: Same as Phase 3, but for multiplication
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/op_multiply.rs` (new file)
-- `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-filetests-gen/src/generator.rs` (add match case)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_multiply.rs` (new file)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
@@ -734,7 +749,8 @@ fn generate_test_by_one(vec_type: VecType, dimension: Dimension) -> String {
 
 ### Phase 5: Implement op-equal Generator
 
-**Goal**: Create generator for `op-equal` test files - this is special because it contains BOTH operator tests (returns `bool`) and function tests (returns `bvec`)
+**Goal**: Create generator for `op-equal` test files - this is special because it contains BOTH
+operator tests (returns `bool`) and function tests (returns `bvec`)
 
 **Key differences**:
 
@@ -746,11 +762,11 @@ fn generate_test_by_one(vec_type: VecType, dimension: Dimension) -> String {
 
 1. **Create the module file**
 
-   - Create file: `lightplayer/crates/lp-filetests-gen/src/vec/op_equal.rs`
-   - Import both `format_bvec_type_name` and `format_bvec_expected` utilities
+    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_equal.rs`
+    - Import both `format_bvec_type_name` and `format_bvec_expected` utilities
 
 2. **Implement operator test generators (return `bool`)**
-   - Example for `generate_test_operator_true()`:
+    - Example for `generate_test_operator_true()`:
 
 ```rust
 fn generate_test_operator_true(vec_type: VecType, dimension: Dimension) -> String {
@@ -818,15 +834,15 @@ fn generate_test_operator_partial_match(vec_type: VecType, dimension: Dimension)
 ```
 
 - Implement all operator test generators:
-  - `generate_test_operator_true()`
-  - `generate_test_operator_false()`
-  - `generate_test_operator_partial_match()`
-  - `generate_test_operator_all_zero()`
-  - `generate_test_operator_negative()` (skip for uvec)
-  - `generate_test_operator_after_assignment()`
+    - `generate_test_operator_true()`
+    - `generate_test_operator_false()`
+    - `generate_test_operator_partial_match()`
+    - `generate_test_operator_all_zero()`
+    - `generate_test_operator_negative()` (skip for uvec)
+    - `generate_test_operator_after_assignment()`
 
 3. **Implement function test generators (return `bvec`)**
-   - Example for `generate_test_function()`:
+    - Example for `generate_test_function()`:
 
 ```rust
 fn generate_test_function(vec_type: VecType, dimension: Dimension) -> String {
@@ -871,15 +887,15 @@ fn generate_test_function(vec_type: VecType, dimension: Dimension) -> String {
 ```
 
 - Implement all function test generators:
-  - `generate_test_function()`
-  - `generate_test_function_all_true()`
-  - `generate_test_function_all_false()`
-  - `generate_test_function_mixed()`
-  - `generate_test_function_floats()`
+    - `generate_test_function()`
+    - `generate_test_function_all_true()`
+    - `generate_test_function_all_false()`
+    - `generate_test_function_mixed()`
+    - `generate_test_function_floats()`
 
 4. **Complete the generate() function**
-   - Generate operator tests first, then function tests
-   - Structure:
+    - Generate operator tests first, then function tests
+    - Structure:
 
 ```rust
 pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
@@ -903,13 +919,13 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
 5. **Register the module and add to generator**
 
-   - Add `pub mod op_equal;` to `src/vec/mod.rs`
-   - Add case: `"op-equal" => crate::vec::op_equal::generate(spec.vec_type, spec.dimension),`
+    - Add `pub mod op_equal;` to `src/vec/mod.rs`
+    - Add case: `"op-equal" => crate::vec::op_equal::generate(spec.vec_type, spec.dimension),`
 
 6. **Test the generator**
-   - Dry-run: `cargo run --bin lp-filetests-gen -- vec/vec4/op-equal`
-   - Verify both operator and function tests are generated
-   - Generate: `cargo run --bin lp-filetests-gen -- vec/op-equal --write`
+    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-equal`
+    - Verify both operator and function tests are generated
+    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-equal --write`
 
 **Success criteria**:
 
@@ -920,9 +936,9 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-filetests-gen/src/vec/op_equal.rs` (new file)
-- `lightplayer/crates/lp-filetests-gen/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-filetests-gen/src/generator.rs` (add match case)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_equal.rs` (new file)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
@@ -934,70 +950,73 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
 ### Phase 6: Verification and Cleanup
 
-**Goal**: Ensure all generated tests work correctly, code is clean, and everything is properly formatted
+**Goal**: Ensure all generated tests work correctly, code is clean, and everything is properly
+formatted
 
 **Step-by-step instructions**:
 
 1. **Verify all generated tests compile**
 
-   - Build the filetests: `cd lightplayer && cargo build --package lp-glsl-filetests`
-   - If there are compilation errors, fix them in the generator code
-   - Re-generate tests: `cargo run --bin lp-filetests-gen -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write`
+    - Build the filetests: `cd lightplayer && cargo build --package lp-glsl-filetests`
+    - If there are compilation errors, fix them in the generator code
+    - Re-generate tests:
+      `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write`
 
 2. **Verify all generated tests pass**
 
-   - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
-   - Check for any failing tests
-   - If tests fail, compare generated output with manual test files to identify issues
-   - Fix generator logic and re-generate
+    - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
+    - Check for any failing tests
+    - If tests fail, compare generated output with manual test files to identify issues
+    - Fix generator logic and re-generate
 
 3. **Spot-check generated tests**
 
-   - Compare a few generated files with manual files:
-     - `filetests/vec/vec4/fn-max.gen.glsl` vs `filetests/vec/vec4/fn-max.glsl`
-     - `filetests/vec/vec4/op-add.gen.glsl` vs `filetests/vec/vec4/op-add.glsl`
-   - Verify structure and test cases match
-   - Check that all vector types (vec2/3/4, ivec2/3/4, uvec2/3/4) are generated correctly
+    - Compare a few generated files with manual files:
+        - `filetests/vec/vec4/fn-max.gen.glsl` vs `filetests/vec/vec4/fn-max.glsl`
+        - `filetests/vec/vec4/op-add.gen.glsl` vs `filetests/vec/vec4/op-add.glsl`
+    - Verify structure and test cases match
+    - Check that all vector types (vec2/3/4, ivec2/3/4, uvec2/3/4) are generated correctly
 
 4. **Test generator for all types**
 
-   - Run: `cargo run --bin lp-filetests-gen -- vec/fn-max --write`
-   - Verify files are created for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
-   - Repeat for each category: fn-min, op-add, op-multiply, op-equal
+    - Run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max --write`
+    - Verify files are created for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
+    - Repeat for each category: fn-min, op-add, op-multiply, op-equal
 
 5. **Remove temporary code**
 
-   - Search for TODOs: `grep -r "TODO" lightplayer/crates/lp-filetests-gen/`
-   - Search for debug prints: `grep -r "println!" lightplayer/crates/lp-filetests-gen/`
-   - Remove any temporary comments or unused code
-   - Remove any test/debug code that was added during development
+    - Search for TODOs: `grep -r "TODO" lightplayer/crates/lp-glsl-filetests-gen-app/`
+    - Search for debug prints: `grep -r "println!" lightplayer/crates/lp-glsl-filetests-gen-app/`
+    - Remove any temporary comments or unused code
+    - Remove any test/debug code that was added during development
 
 6. **Fix all warnings**
 
-   - Build: `cd lightplayer && cargo build --bin lp-filetests-gen`
-   - Fix any compiler warnings
-   - Common issues:
-     - Unused imports: remove them
-     - Unused variables: prefix with `_` or remove
-     - Dead code: remove or mark with `#[allow(dead_code)]` if needed later
+    - Build: `cd lightplayer && cargo build --bin lp-glsl-filetests-gen-app`
+    - Fix any compiler warnings
+    - Common issues:
+        - Unused imports: remove them
+        - Unused variables: prefix with `_` or remove
+        - Dead code: remove or mark with `#[allow(dead_code)]` if needed later
 
 7. **Ensure code is clean and readable**
 
-   - Review each generator module for consistency
-   - Ensure formatting is consistent
-   - Check that function names and variable names are clear
-   - Verify comments are helpful and accurate
+    - Review each generator module for consistency
+    - Ensure formatting is consistent
+    - Check that function names and variable names are clear
+    - Verify comments are helpful and accurate
 
 8. **Format code**
 
-   - Run formatter: `cd lightplayer && cargo +nightly fmt`
-   - Verify no changes were needed (if changes were made, review them)
+    - Run formatter: `cd lightplayer && cargo +nightly fmt`
+    - Verify no changes were needed (if changes were made, review them)
 
 9. **Final verification**
 
-   - Build everything: `cd lightplayer && cargo build`
-   - Run all tests: `cd lightplayer && cargo test --package lp-glsl-filetests`
-   - Verify generator works: `cargo run --bin lp-filetests-gen -- vec/vec4/fn-max` (dry-run)
+    - Build everything: `cd lightplayer && cargo build`
+    - Run all tests: `cd lightplayer && cargo test --package lp-glsl-filetests`
+    - Verify generator works: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max` (
+      dry-run)
 
 10. **Move plan file**
     - Create directory if needed: `mkdir -p lightplayer/plans/_done`
@@ -1007,7 +1026,7 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
 - ✅ All generated tests compile without errors
 - ✅ All generated tests pass
-- ✅ No compiler warnings in lp-filetests-gen
+- ✅ No compiler warnings in lp-glsl-filetests-gen-app
 - ✅ Code is clean, readable, and properly formatted
 - ✅ All vector types (vec2/3/4, ivec2/3/4, uvec2/3/4) work for all categories
 - ✅ Plan file moved to `_done/` directory
@@ -1017,14 +1036,14 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 ```bash
 # Build and test
 cd lightplayer
-cargo build --bin lp-filetests-gen
+cargo build --bin lp-glsl-filetests-gen-app
 cargo test --package lp-glsl-filetests
 
 # Format code
 cargo +nightly fmt
 
 # Generate all tests (final check)
-cargo run --bin lp-filetests-gen -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write
+cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write
 
 # Move plan
 mv plans/2026-01-02-filetests-gen-extend.md plans/_done/

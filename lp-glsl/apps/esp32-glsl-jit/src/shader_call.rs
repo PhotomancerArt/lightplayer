@@ -1,5 +1,5 @@
 /// Direct shader function calling without abstraction overhead
-use lp_jit_util::call_structreturn_with_args;
+use lp_glsl_jit_util::call_structreturn_with_args;
 
 /// Call a vec4 shader function directly using q32 format
 ///
@@ -18,7 +18,7 @@ pub unsafe fn call_vec4_shader(
     output_size: [i32; 2],
     time: i32,
     isa: &cranelift_codegen::isa::OwnedTargetIsa,
-) -> Result<[i32; 4], lp_jit_util::JitCallError> {
+) -> Result<[i32; 4], lp_glsl_jit_util::JitCallError> {
     // Prepare JIT call arguments (i32 values as u64)
     // vec2 expands to 2 i32s each, so we have 5 i32 parameters total
     let jit_args = alloc::vec![

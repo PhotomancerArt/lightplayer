@@ -2,20 +2,21 @@
 
 ## Description
 
-Update `Cargo.toml` to enable the `emulator` feature for `lp-glsl-compiler`, and update type signatures throughout the codebase to use `ObjectModule` instead of `JITModule`.
+Update `Cargo.toml` to enable the `emulator` feature for `lp-glsl-compiler`, and update type
+signatures throughout the codebase to use `ObjectModule` instead of `JITModule`.
 
 ## Implementation
 
-- Update `lp-glsl/apps/q32-metrics/Cargo.toml`:
-  - Add `emulator` feature to `lp-glsl-compiler` dependency
+- Update `lp-glsl/apps/lp-glsl-q32-metrics-app/Cargo.toml`:
+    - Add `emulator` feature to `lp-glsl-compiler` dependency
 - Update imports in `src/main.rs`:
-  - Change from `cranelift_jit::JITModule` to `cranelift_object::ObjectModule`
+    - Change from `cranelift_jit::JITModule` to `cranelift_object::ObjectModule`
 - Update type signatures in `src/main.rs`:
-  - Change `GlModule<JITModule>` to `GlModule<ObjectModule>` in function signatures
+    - Change `GlModule<JITModule>` to `GlModule<ObjectModule>` in function signatures
 - Update type signatures in `src/stats.rs`:
-  - Change `GlModule<JITModule>` to `GlModule<ObjectModule>`
+    - Change `GlModule<JITModule>` to `GlModule<ObjectModule>`
 - Update type signatures in `src/clif.rs`:
-  - Change `GlModule<JITModule>` to `GlModule<ObjectModule>`
+    - Change `GlModule<JITModule>` to `GlModule<ObjectModule>`
 
 ## Success Criteria
 
@@ -38,6 +39,7 @@ Update `Cargo.toml` to enable the `emulator` feature for `lp-glsl-compiler`, and
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

@@ -2117,9 +2117,9 @@ dependencies = [
  "esp-println",
  "esp-rtos",
  "hashbrown 0.15.5",
- "lp-builtins",
+ "lp-glsl-builtins",
  "lp-glsl-compiler",
- "lp-jit-util",
+ "lp-glsl-jit-util",
  "target-lexicon",
 ]
 
@@ -2455,7 +2455,7 @@ version = "40.0.0"
 dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
- "lp-builtins",
+ "lp-glsl-builtins",
  "lp-model",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
@@ -3272,33 +3272,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
-name = "lp-builtin-gen"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "lp-glsl-compiler",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
- "walkdir",
-]
-
-[[package]]
-name = "lp-builtins"
-version = "40.0.0"
-dependencies = [
- "lpfx-impl-macro",
-]
-
-[[package]]
-name = "lp-builtins-app"
-version = "40.0.0"
-dependencies = [
- "lp-builtins",
- "lp-riscv-emu-guest",
-]
-
-[[package]]
 name = "lp-cli"
 version = "40.0.0"
 dependencies = [
@@ -3328,8 +3301,8 @@ dependencies = [
  "hashbrown 0.15.5",
  "libm",
  "log",
- "lp-builtins",
  "lp-engine-client",
+ "lp-glsl-builtins",
  "lp-glsl-compiler",
  "lp-model",
  "lp-shared",
@@ -3346,12 +3319,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-filetests-gen"
+name = "lp-glsl-builtin-gen-app"
 version = "40.0.0"
 dependencies = [
- "anyhow",
- "clap",
+ "glsl",
+ "lp-glsl-compiler",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
  "walkdir",
+]
+
+[[package]]
+name = "lp-glsl-builtins"
+version = "40.0.0"
+dependencies = [
+ "lpfx-impl-macro",
+]
+
+[[package]]
+name = "lp-glsl-builtins-emu-app"
+version = "40.0.0"
+dependencies = [
+ "lp-glsl-builtins",
+ "lp-riscv-emu-guest",
 ]
 
 [[package]]
@@ -3370,8 +3361,8 @@ dependencies = [
  "cranelift-reader",
  "glsl",
  "hashbrown 0.15.5",
- "lp-builtins",
- "lp-jit-util",
+ "lp-glsl-builtins",
+ "lp-glsl-jit-util",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
@@ -3392,7 +3383,7 @@ dependencies = [
  "glob",
  "glsl",
  "lp-glsl-compiler",
- "lp-jit-util",
+ "lp-glsl-jit-util",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
@@ -3403,11 +3394,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-jit-util"
+name = "lp-glsl-filetests-app"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "lp-glsl-filetests",
+]
+
+[[package]]
+name = "lp-glsl-filetests-gen-app"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "walkdir",
+]
+
+[[package]]
+name = "lp-glsl-jit-util"
 version = "40.0.0"
 dependencies = [
  "cranelift-codegen",
  "target-lexicon",
+]
+
+[[package]]
+name = "lp-glsl-q32-metrics-app"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "cranelift-codegen",
+ "cranelift-module",
+ "cranelift-object",
+ "hashbrown 0.15.5",
+ "lp-glsl-compiler",
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -3496,16 +3522,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
-]
-
-[[package]]
-name = "lp-test"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "lp-glsl-filetests",
 ]
 
 [[package]]
@@ -4228,22 +4244,6 @@ name = "profiling"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
-
-[[package]]
-name = "q32-metrics"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "cranelift-codegen",
- "cranelift-module",
- "cranelift-object",
- "hashbrown 0.15.5",
- "lp-glsl-compiler",
- "serde",
- "toml",
-]
 
 [[package]]
 name = "quick-xml"

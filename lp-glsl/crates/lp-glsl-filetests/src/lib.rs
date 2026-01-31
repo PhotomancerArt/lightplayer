@@ -125,7 +125,7 @@ struct FileSpec {
     line_number: Option<usize>,
 }
 
-/// Main entry point for `lp-test test`.
+/// Main entry point for `lp-glsl-filetests-app test`.
 ///
 /// Take a list of filenames which can be either `.glsl` files or directories.
 /// Files can optionally include line numbers in the format `file.glsl:42`.

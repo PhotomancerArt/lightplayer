@@ -2,21 +2,24 @@
 
 ## Description
 
-Fix the critical sign errors in 2D and 3D simplex noise offset calculations that cause diagonal artifacts and discontinuities.
+Fix the critical sign errors in 2D and 3D simplex noise offset calculations that cause diagonal
+artifacts and discontinuities.
 
 ## Changes Required
 
 ### 1. Fix 2D Simplex Offset Calculation
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise2.rs`
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`
 
 **Line 98-99**: Change from:
+
 ```rust
 let offset2_x = offset1_x - order_x - UNSKEW_FACTOR_2D;
 let offset2_y = offset1_y - order_y - UNSKEW_FACTOR_2D;
 ```
 
 To:
+
 ```rust
 let offset2_x = offset1_x - order_x + UNSKEW_FACTOR_2D;
 let offset2_y = offset1_y - order_y + UNSKEW_FACTOR_2D;
@@ -24,9 +27,10 @@ let offset2_y = offset1_y - order_y + UNSKEW_FACTOR_2D;
 
 ### 2. Fix 3D Simplex Offset Calculation
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise3.rs`
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
 
 **Line 163-165**: Change from:
+
 ```rust
 let offset2_x = offset1_x - order1_x - UNSKEW_FACTOR_3D;
 let offset2_y = offset1_y - order1_y - UNSKEW_FACTOR_3D;
@@ -34,6 +38,7 @@ let offset2_z = offset1_z - order1_z - UNSKEW_FACTOR_3D;
 ```
 
 To:
+
 ```rust
 let offset2_x = offset1_x - order1_x + UNSKEW_FACTOR_3D;
 let offset2_y = offset1_y - order1_y + UNSKEW_FACTOR_3D;

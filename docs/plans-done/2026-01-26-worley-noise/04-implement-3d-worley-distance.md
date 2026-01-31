@@ -2,21 +2,23 @@
 
 ## Description
 
-Create `worley3_q32.rs` implementing 3D Worley noise that returns the euclidean squared distance to the nearest feature point.
+Create `worley3_q32.rs` implementing 3D Worley noise that returns the euclidean squared distance to
+the nearest feature point.
 
 ## Implementation
 
 ### Files to Create
 
-1. **`lp-builtins/src/builtins/lpfx/worley/worley3_q32.rs`**
-   - `__lpfx_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
-   - 3D Worley noise returning distance
+1. **`lp-glsl-builtins/src/builtins/lpfx/worley/worley3_q32.rs`**
+    - `__lpfx_worley3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
+    - 3D Worley noise returning distance
 
 ### Algorithm Reference
 
 Reference implementation: `noise-rs/src/core/worley.rs` - `worley_3d` function
 
 Key components:
+
 - Same as 2D but extended to 3D
 - Cell determination (floor coordinates in 3D)
 - Near/far cell selection based on fractional coordinates > 0.5
@@ -51,7 +53,7 @@ Key components:
 
 - Place helper utility functions at the bottom of files
 - Reference noise-rs implementation but adapt for Q32 fixed-point
-- Use existing Q32 utilities from `lp-builtins/src/util/q32/q32.rs`
+- Use existing Q32 utilities from `lp-glsl-builtins/src/util/q32/q32.rs`
 - Include comments explaining Worley noise algorithm steps
 - The `get_vec3` function from reference implementation generates feature point offsets
 - 3D version checks more adjacent cells (up to 7) compared to 2D (up to 3)

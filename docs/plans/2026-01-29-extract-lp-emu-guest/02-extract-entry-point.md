@@ -3,7 +3,7 @@
 ## Scope of Phase
 
 Extract the entry point code (`_entry` assembly and `_code_entry` function) from
-`lp-builtins-app/src/main.rs` into `lp-riscv-emu-guest/src/entry.rs`.
+`lp-glsl-builtins-emu-app/src/main.rs` into `lp-riscv-emu-guest/src/entry.rs`.
 
 ## Code Organization Reminders
 
@@ -17,12 +17,12 @@ Extract the entry point code (`_entry` assembly and `_code_entry` function) from
 
 ### 1. Extract Entry Point Code
 
-Read `lp-builtins-app/src/main.rs` and extract:
+Read `lp-glsl-builtins-emu-app/src/main.rs` and extract:
 
 1. The `global_asm!` block that defines `_entry` (lines ~142-159)
 2. The `_code_entry` function (lines ~163-213)
 3. The `__USER_MAIN_PTR` static variable (lines ~217-220) - **NOTE**: This should stay in
-   `lp-builtins-app` since it's app-specific. We'll handle this differently.
+   `lp-glsl-builtins-emu-app` since it's app-specific. We'll handle this differently.
 
 Actually, looking at the code more carefully:
 

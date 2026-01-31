@@ -23,7 +23,7 @@ Update the root `Cargo.toml` to add `lp-riscv-emu-guest` to the workspace member
 [workspace]
 members = [
     # ... existing members ...
-    "lp-glsl/crates/lp-riscv-emu-guest",  # Add after lp-riscv-tools
+    "lp-glsl/crates/lp-riscv-emu-guest", # Add after lp-riscv-tools
     # ... rest of members ...
 ]
 ```
@@ -31,22 +31,23 @@ members = [
 Add it in the `lp-glsl` section, after `lp-glsl/crates/lp-riscv-tools`.
 
 **Note**: `lp-riscv-emu-guest` should NOT be added to `default-members` since it's `no_std` and only
-builds for RISC-V target, similar to `lp-builtins-app`.
+builds for RISC-V target, similar to `lp-glsl-builtins-emu-app`.
 
 ### 2. Verify Build Scripts
 
-Check if any build scripts reference `lp-builtins-app` and need updating:
+Check if any build scripts reference `lp-glsl-builtins-emu-app` and need updating:
 
-- `lp-glsl/crates/lp-glsl-compiler/build.rs` - This references `lp-builtins-app` executable. This
-  should still work since `lp-builtins-app` still exists, just as a thin wrapper.
+- `lp-glsl/crates/lp-glsl-compiler/build.rs` - This references `lp-glsl-builtins-emu-app`
+  executable. This
+  should still work since `lp-glsl-builtins-emu-app` still exists, just as a thin wrapper.
 
-No changes needed here - `lp-builtins-app` still produces the same binary output.
+No changes needed here - `lp-glsl-builtins-emu-app` still produces the same binary output.
 
 ### 3. Verify Justfile/scripts
 
 Check `justfile` and `scripts/build-builtins.sh` to see if they need updates:
 
-- They should still work since they build `lp-builtins-app` which still exists
+- They should still work since they build `lp-glsl-builtins-emu-app` which still exists
 - The build process should be the same
 
 No changes needed unless there are specific references to source files that moved.
@@ -59,8 +60,8 @@ Run from workspace root:
 # Check that lp-riscv-emu-guest compiles
 cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 
-# Check that lp-builtins-app still compiles
-cargo check --package lp-builtins-app --target riscv32imac-unknown-none-elf
+# Check that lp-glsl-builtins-emu-app still compiles
+cargo check --package lp-glsl-builtins-emu-app --target riscv32imac-unknown-none-elf
 
 # Check that workspace still works
 cargo check --workspace

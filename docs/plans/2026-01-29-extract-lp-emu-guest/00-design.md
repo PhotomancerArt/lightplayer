@@ -2,7 +2,8 @@
 
 ## Scope of Work
 
-Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-builtins-app` into a new common crate
+Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-glsl-builtins-emu-app` into a new
+common crate
 `lp-glsl/crates/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
 running in the RISC-V emulator and needs to be reusable by firmware and other applications.
 
@@ -21,7 +22,7 @@ lp-glsl/crates/lp-riscv-emu-guest/          # NEW: Common guest runtime crate
     ├── host.rs                        # Host communication (__host_debug, __host_println)
     └── print.rs                       # Print macros and writer
 
-lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
+lp-glsl/apps/lp-glsl-builtins-emu-app/         # UPDATE: Thin binary wrapper
 ├── Cargo.toml                         # UPDATE: Add dependency on lp-riscv-emu-guest
 ├── build.rs                           # UPDATE: Remove (linker script now in crate)
 └── src/
@@ -55,7 +56,7 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
                         │ depends on
                         │
 ┌─────────────────────────────────────────────────────────┐
-│                 lp-builtins-app                        │
+│                 lp-glsl-builtins-emu-app                        │
 │  (Thin binary wrapper for builtins library)            │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
@@ -109,7 +110,7 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
     - Re-exports macros: `print!`, `println!`, `host_debug!`, `host_println!`
     - Entry point functions are `#[no_mangle]` so they're accessible from binaries
 
-### lp-builtins-app Refactoring
+### lp-glsl-builtins-emu-app Refactoring
 
 **Purpose**: Thin binary wrapper that links all builtins into a static library.
 
@@ -125,7 +126,7 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
 
 1. `_entry` (from `lp-riscv-emu-guest`) initializes registers
 2. `_code_entry` (from `lp-riscv-emu-guest`) initializes memory sections
-3. `_code_entry` calls `_lp_main()` (from `lp-builtins-app`)
+3. `_code_entry` calls `_lp_main()` (from `lp-glsl-builtins-emu-app`)
 4. `_lp_main()` references builtins and jumps to user code
 
 ## Design Decisions
@@ -141,4 +142,4 @@ lp-glsl/apps/lp-builtins-app/         # UPDATE: Thin binary wrapper
 
 5. **No Feature Flags**: Start simple, add features later if needed.
 
-6. **Thin Wrapper**: `lp-builtins-app` becomes a minimal binary that depends on the crate.
+6. **Thin Wrapper**: `lp-glsl-builtins-emu-app` becomes a minimal binary that depends on the crate.

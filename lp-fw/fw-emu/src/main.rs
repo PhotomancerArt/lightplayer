@@ -17,7 +17,7 @@ mod serial;
 mod server_loop;
 mod time;
 
-use lp_builtins::host_debug;
+use lp_glsl_builtins::host_debug;
 use lp_riscv_emu_guest::allocator;
 
 /// Main entry point for firmware emulator

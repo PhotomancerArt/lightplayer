@@ -3,7 +3,7 @@
 ## Scope of Phase
 
 Extract the host communication functions (`__host_debug` and `__host_println`) from
-`lp-builtins-app/src/host.rs` into `lp-riscv-emu-guest/src/host.rs`.
+`lp-glsl-builtins-emu-app/src/host.rs` into `lp-riscv-emu-guest/src/host.rs`.
 
 ## Code Organization Reminders
 
@@ -17,7 +17,7 @@ Extract the host communication functions (`__host_debug` and `__host_println`) f
 
 ### 1. Extract Host Communication Code
 
-Read `lp-builtins-app/src/host.rs` and extract the entire file content.
+Read `lp-glsl-builtins-emu-app/src/host.rs` and extract the entire file content.
 
 ### 2. Create host.rs
 

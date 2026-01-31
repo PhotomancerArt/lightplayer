@@ -6,15 +6,17 @@ Implement the `Mat4Q32` type with all operations, methods, and operator overload
 
 ## Implementation
 
-Create `lp-glsl/crates/lp-builtins/src/util/mat4_q32.rs` with:
+Create `lp-glsl/crates/lp-glsl-builtins/src/util/mat4_q32.rs` with:
 
 - `Mat4Q32` struct with `m: [Q32; 16]` field (column-major storage)
 - Construction methods: `new()`, `from_f32()`, `from_vec4()`, `identity()`, `zero()`
 - Element access: `get()`, `set()`, `col0()`, `col1()`, `col2()`, `col3()`
-- Operations: `mul()` (matrix-matrix), `mul_vec4()` (matrix-vector), `transpose()`, `determinant()` (Laplace expansion), `inverse()`
+- Operations: `mul()` (matrix-matrix), `mul_vec4()` (matrix-vector), `transpose()`,
+  `determinant()` (Laplace expansion), `inverse()`
 - Operator overloads: `Add`, `Sub`, `Mul<Mat4Q32>`, `Mul<Vec4Q32>`, `Mul<Q32>`, `Div<Q32>`, `Neg`
 
-All operations use Q32's fast operators directly. Determinant uses Laplace expansion (cofactor expansion).
+All operations use Q32's fast operators directly. Determinant uses Laplace expansion (cofactor
+expansion).
 
 Update `util/mod.rs` to export `Mat4Q32`.
 
@@ -43,6 +45,7 @@ Update `util/mod.rs` to export `Mat4Q32`.
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

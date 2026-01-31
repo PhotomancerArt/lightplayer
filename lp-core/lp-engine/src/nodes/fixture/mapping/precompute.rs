@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 use libm;
-use lp_builtins::glsl::q32::types::q32::Q32;
+use lp_glsl_builtins::glsl::q32::types::q32::Q32;
 use lp_model::FrameId;
 use lp_model::nodes::fixture::mapping::MappingConfig;
 

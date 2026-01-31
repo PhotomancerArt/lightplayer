@@ -2,24 +2,26 @@
 
 ## Description
 
-Update all extern C wrappers that return vectors to use StructReturn. The wrappers will take a pointer parameter and write all components to memory.
+Update all extern C wrappers that return vectors to use StructReturn. The wrappers will take a
+pointer parameter and write all components to memory.
 
 ## Changes
 
 ### Files to Update
 
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/hue2rgb_q32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/hue2rgb_f32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/hsv2rgb_q32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/hsv2rgb_f32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/rgb2hsv_q32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/color/space/rgb2hsv_f32.rs`
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/math/saturate_q32.rs` (vec3/vec4 variants)
-- `lp-glsl/crates/lp-builtins/src/builtins/lpfx/math/saturate_f32.rs` (vec3/vec4 variants)
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_q32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_f32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_q32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_f32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_q32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_f32.rs`
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/saturate_q32.rs` (vec3/vec4 variants)
+- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/saturate_f32.rs` (vec3/vec4 variants)
 
 ### Pattern for Each Wrapper
 
 Change from:
+
 ```rust
 pub extern "C" fn __lpfx_hue2rgb_q32(hue: i32) -> i32 {
     let result = lpfx_hue2rgb_q32(Q32::from_fixed(hue));
@@ -28,6 +30,7 @@ pub extern "C" fn __lpfx_hue2rgb_q32(hue: i32) -> i32 {
 ```
 
 To:
+
 ```rust
 pub extern "C" fn __lpfx_hue2rgb_q32(result_ptr: *mut i32, hue: i32) {
     let result = lpfx_hue2rgb_q32(Q32::from_fixed(hue));

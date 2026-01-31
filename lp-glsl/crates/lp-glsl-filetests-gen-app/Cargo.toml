@@ -1,0 +1,20 @@
+[package]
+name = "lp-glsl-filetests-gen-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generator for lp-glsl-compiler vector and matrix test files"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "lp-glsl-filetests-gen-app"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+anyhow = { workspace = true }
+walkdir = "2.4"
+

@@ -2,12 +2,14 @@
 
 ## Overview
 
-Refactor psrdnoise implementations to use vector helper types (Vec2Q32, Vec3Q32, Vec4Q32) instead of manually expanded component operations. Add missing GLSL-style functions to make the Rust code match the original GLSL as closely as possible.
+Refactor psrdnoise implementations to use vector helper types (Vec2Q32, Vec3Q32, Vec4Q32) instead of
+manually expanded component operations. Add missing GLSL-style functions to make the Rust code match
+the original GLSL as closely as possible.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/
+lp-glsl/crates/lp-glsl-builtins/src/
 ├── glsl/q32/
 │   ├── fns/                                    # UPDATE: Add standalone functions
 │   │   ├── mod.rs                              # UPDATE: Export new functions
@@ -144,11 +146,11 @@ Vec4Q32 - # UPDATE: Add new methods and constructors
 ### GLSL Compatibility
 
 - Functions match GLSL semantics exactly:
-  - `floor()`: Returns largest integer <= value for each component
-  - `fract()`: Returns fractional part (x - floor(x)) for each component
-  - `step()`: Returns 1.0 if edge <= x, else 0.0 for each component
-  - `min()`/`max()`: Component-wise minimum/maximum
-  - `mod()`: Component-wise modulo
+    - `floor()`: Returns largest integer <= value for each component
+    - `fract()`: Returns fractional part (x - floor(x)) for each component
+    - `step()`: Returns 1.0 if edge <= x, else 0.0 for each component
+    - `min()`/`max()`: Component-wise minimum/maximum
+    - `mod()`: Component-wise modulo
 
 ### Refactoring Strategy
 

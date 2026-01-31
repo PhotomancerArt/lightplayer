@@ -19,7 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 hashbrown = { workspace = true }
 lp-glsl-compiler = { path = "../../lp-glsl/crates/lp-glsl-compiler", default-features = false, features = ["core"] }
-lp-builtins = { path = "../../lp-glsl/crates/lp-builtins", default-features = false }
+lp-glsl-builtins = { path = "../../lp-glsl/crates/lp-glsl-builtins", default-features = false }
 log = { version = "0.4", default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }

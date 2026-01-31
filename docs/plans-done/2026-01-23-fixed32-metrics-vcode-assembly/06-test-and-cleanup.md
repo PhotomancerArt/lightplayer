@@ -2,11 +2,12 @@
 
 ## Description
 
-Run the app, verify all files are generated correctly, check that statistics and reports include new metrics, fix any issues, and clean up code.
+Run the app, verify all files are generated correctly, check that statistics and reports include new
+metrics, fix any issues, and clean up code.
 
 ## Implementation
 
-- Run `./scripts/q32-metrics.sh` to generate a report
+- Run `./scripts/lp-glsl-q32-metrics-app.sh` to generate a report
 - Verify vcode files (`.pre.vcode`, `.post.vcode`) are generated for all functions
 - Verify assembly files (`.pre.s`, `.post.s`) are generated for all functions
 - Check that `stats.toml` includes vcode_size and assembly_size fields
@@ -42,6 +43,7 @@ Run the app, verify all files are generated correctly, check that statistics and
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

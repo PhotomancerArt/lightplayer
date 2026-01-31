@@ -2,7 +2,9 @@
 
 ## Overview
 
-Port HSV/HSB color space conversion functions from lygia to lp-builtins, using Q32 fixed-point arithmetic and the new q32 vector helpers (Vec3Q32, Vec4Q32). This enables easy porting of GLSL color manipulation code to Rust.
+Port HSV/HSB color space conversion functions from lygia to lp-glsl-builtins, using Q32 fixed-point
+arithmetic and the new q32 vector helpers (Vec3Q32, Vec4Q32). This enables easy porting of GLSL
+color manipulation code to Rust.
 
 ## Phases
 

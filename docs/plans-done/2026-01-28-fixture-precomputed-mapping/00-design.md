@@ -2,7 +2,8 @@
 
 ## Scope of Work
 
-Replace the current per-frame texture sampling approach with a pre-computed pixel-to-channel mapping system that:
+Replace the current per-frame texture sampling approach with a pre-computed pixel-to-channel mapping
+system that:
 
 1. Pre-computes weights for each texture pixel mapping to fixture channels
 2. Uses bit-packed encoding (32 bits per entry) for memory efficiency in embedded context
@@ -25,7 +26,7 @@ lp-app/crates/lp-engine/src/nodes/fixture/
     ├── compute_mapping()                     # Main pre-computation function
     └── tests                                 # Comprehensive tests
 
-lp-app/crates/lp-engine/Cargo.toml            # UPDATE: Add lp-builtins dependency
+lp-app/crates/lp-engine/Cargo.toml            # UPDATE: Add lp-glsl-builtins dependency
 ```
 
 ## Conceptual Architecture
@@ -92,20 +93,20 @@ Container for pre-computed mapping data:
 ### Rendering Flow
 
 1. **Pre-computation** (when config/texture changes):
-   - For each mapping point (circle):
-     - For each pixel in texture:
-       - Compute circle-pixel overlap area
-       - Store contribution to channel
-   - Normalize weights per-channel (each channel's total from all pixels sums to 1.0)
-   - Build flat `Vec<PixelMappingEntry>` ordered by pixel
+    - For each mapping point (circle):
+        - For each pixel in texture:
+            - Compute circle-pixel overlap area
+            - Store contribution to channel
+    - Normalize weights per-channel (each channel's total from all pixels sums to 1.0)
+    - Build flat `Vec<PixelMappingEntry>` ordered by pixel
 
 2. **Per-frame rendering**:
-   - Initialize `ch_values: Vec<i32>` (one per channel)
-   - Iterate through `entries` sequentially:
-     - Decode contribution: `65536 - stored_value`
-     - Accumulate: `ch_values[channel] += contribution * pixel_value`
-     - Advance `pixel_index` when `has_more = false`
-   - Convert accumulated values to u8 and write to output
+    - Initialize `ch_values: Vec<i32>` (one per channel)
+    - Iterate through `entries` sequentially:
+        - Decode contribution: `65536 - stored_value`
+        - Accumulate: `ch_values[channel] += contribution * pixel_value`
+        - Advance `pixel_index` when `has_more = false`
+    - Convert accumulated values to u8 and write to output
 
 ### Version Tracking
 

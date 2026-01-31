@@ -2,15 +2,18 @@
 
 ## Description
 
-Add a feature flag and testing infrastructure to use deterministic hash values for comprehensive testing of simplex noise functions. This allows testing against known reference values and verifying algorithm correctness independent of hash function behavior.
+Add a feature flag and testing infrastructure to use deterministic hash values for comprehensive
+testing of simplex noise functions. This allows testing against known reference values and verifying
+algorithm correctness independent of hash function behavior.
 
 ## Implementation
 
 ### 1. Add Feature Flag
 
-**File**: `lp-glsl/crates/lp-builtins/Cargo.toml`
+**File**: `lp-glsl/crates/lp-glsl-builtins/Cargo.toml`
 
 Add feature:
+
 ```toml
 [features]
 test_hash_fixed = []
@@ -18,9 +21,10 @@ test_hash_fixed = []
 
 ### 2. Create Test Hash Function Module
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/shared/test_hash.rs` (new file)
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/test_hash.rs` (new file)
 
 Create deterministic hash functions for testing:
+
 ```rust
 #[cfg(feature = "test_hash_fixed")]
 pub mod test_hash {
@@ -47,9 +51,10 @@ pub mod test_hash {
 
 ### 3. Update Hash Module to Use Test Hash When Enabled
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/shared/lpfx_hash.rs`
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/lpfx_hash.rs`
 
 Add conditional compilation:
+
 ```rust
 #[cfg(feature = "test_hash_fixed")]
 use crate::builtins::shared::test_hash::{hash_1 as test_hash_1, hash_2 as test_hash_2, hash_3 as test_hash_3};
@@ -68,9 +73,10 @@ pub extern "C" fn __lpfx_hash_1(x: u32, seed: u32) -> u32 {
 
 ### 4. Add Reference Value Tests
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add test with fixed hash:
+
 ```rust
 #[cfg(all(test, feature = "test_hash_fixed"))]
 mod fixed_hash_tests {
@@ -131,15 +137,16 @@ mod fixed_hash_tests {
 
 ### 5. Add Similar Tests for 3D
 
-**File**: `lp-glsl/crates/lp-builtins/src/builtins/q32/lpfx_snoise3.rs`
+**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
 
 Add similar test module with fixed hash tests.
 
 ## Usage
 
 Run tests with fixed hash:
+
 ```bash
-cargo test --features test_hash_fixed --package lp-builtins
+cargo test --features test_hash_fixed --package lp-glsl-builtins
 ```
 
 ## Success Criteria

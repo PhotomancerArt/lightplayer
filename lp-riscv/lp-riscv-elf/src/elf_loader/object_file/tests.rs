@@ -106,7 +106,7 @@ mod tests {
             .join("../../../../../../target")
             .join(target)
             .join(profile)
-            .join("lp-builtins-app");
+            .join("lp-glsl-builtins-emu-app");
 
         let exe_path = if exe_path.exists() {
             exe_path
@@ -115,7 +115,7 @@ mod tests {
                 .join("../../../../../target")
                 .join(target)
                 .join(profile)
-                .join("lp-builtins-app")
+                .join("lp-glsl-builtins-emu-app")
         };
 
         if exe_path.exists() {

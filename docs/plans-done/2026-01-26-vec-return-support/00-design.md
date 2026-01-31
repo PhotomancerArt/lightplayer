@@ -2,7 +2,10 @@
 
 ## Overview
 
-Add support for vector return types (Vec2, Vec3, Vec4) in LPFX functions. Currently, LPFX functions only support scalar returns, causing a panic when encountering vector return types. This design uses StructReturn (pointer parameter) for vector returns, matching how user functions handle vector returns.
+Add support for vector return types (Vec2, Vec3, Vec4) in LPFX functions. Currently, LPFX functions
+only support scalar returns, causing a panic when encountering vector return types. This design uses
+StructReturn (pointer parameter) for vector returns, matching how user functions handle vector
+returns.
 
 ## File Structure
 
@@ -13,7 +16,7 @@ lp-glsl/crates/lp-glsl-compiler/src/frontend/
 └── codegen/
     └── lpfx_fns.rs                     # UPDATE: Handle StructReturn in LPFX calls
 
-lp-glsl/crates/lp-builtins/src/builtins/lpfx/
+lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/
 ├── color/space/
 │   ├── hue2rgb_q32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper
 │   ├── hue2rgb_f32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper
@@ -31,18 +34,21 @@ lp-glsl/crates/lp-builtins/src/builtins/lpfx/
 ### `lpfx_sig.rs`
 
 **`build_call_signature()`** - UPDATE
+
 - Add StructReturn parameter for vector return types (Vec2, Vec3, Vec4)
 - Insert StructReturn parameter FIRST (before regular params)
 - Clear returns (StructReturn functions return void)
 - Support Vec4 in addition to Vec2/Vec3
 
 **Helper functions** - NEW
+
 - `get_pointer_type()` - Get pointer type for StructReturn parameter
 - `calculate_struct_return_size()` - Calculate buffer size for vector return
 
 ### `lpfx_fns.rs`
 
 **`emit_lp_lib_fn_call()`** - UPDATE
+
 - Check if function uses StructReturn
 - Allocate stack slot for return buffer
 - Pass StructReturn pointer as first argument
@@ -50,11 +56,13 @@ lp-glsl/crates/lp-builtins/src/builtins/lpfx/
 - Handle both Decimal and NonDecimal implementations
 
 **`get_lpfx_testcase_call()`** - UPDATE
+
 - No changes needed (signature building handles StructReturn)
 
 ### Extern C Wrappers (all vector-returning functions)
 
 **`__lpfx_*_q32()` / `__lpfx_*_f32()`** - UPDATE
+
 - Add `*mut i32` / `*mut f32` parameter for StructReturn (first parameter)
 - Write all vector components to memory at offsets
 - Return void (or keep current return for compatibility during transition)
@@ -69,21 +77,21 @@ lp-glsl/crates/lp-builtins/src/builtins/lpfx/
    sig.returns.clear(); // StructReturn functions return void
    ```
 
-2. **Call Site**: 
-   - Allocate stack slot for return buffer
-   - Pass buffer pointer as first argument
-   - Call function
-   - Load values from buffer at offsets (4 bytes per f32/i32)
+2. **Call Site**:
+    - Allocate stack slot for return buffer
+    - Pass buffer pointer as first argument
+    - Call function
+    - Load values from buffer at offsets (4 bytes per f32/i32)
 
 3. **Extern C Wrappers**:
-   - Take pointer parameter as first argument
-   - Write components to memory: `*ptr.offset(0) = x; *ptr.offset(1) = y; ...`
-   - Return void
+    - Take pointer parameter as first argument
+    - Write components to memory: `*ptr.offset(0) = x; *ptr.offset(1) = y; ...`
+    - Return void
 
 ### Buffer Size Calculation
 
 - Vec2: 2 components × 4 bytes = 8 bytes
-- Vec3: 3 components × 4 bytes = 12 bytes  
+- Vec3: 3 components × 4 bytes = 12 bytes
 - Vec4: 4 components × 4 bytes = 16 bytes
 
 ### Offset Calculation

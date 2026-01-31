@@ -2,12 +2,14 @@
 
 ## Overview
 
-Implement vector types for Q32 fixed-point arithmetic to enable easy porting of GLSL code to Rust. These types provide a clean, ergonomic API similar to GLSL vectors while using the fast Q32 fixed-point arithmetic.
+Implement vector types for Q32 fixed-point arithmetic to enable easy porting of GLSL code to Rust.
+These types provide a clean, ergonomic API similar to GLSL vectors while using the fast Q32
+fixed-point arithmetic.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/util/
+lp-glsl/crates/lp-glsl-builtins/src/util/
 ├── vec2_q32.rs              # NEW: Vec2Q32 type and implementation
 ├── vec3_q32.rs              # NEW: Vec3Q32 type and implementation
 ├── vec4_q32.rs              # NEW: Vec4Q32 type and implementation
@@ -174,11 +176,13 @@ All arithmetic operations use Q32's fast operators directly (no saturation):
 - `Vec2Q32 * Q32` uses `Q32::mul` for each component
 - `Vec2Q32 / Q32` uses `Q32::div` for each component
 
-These are internal utilities optimized for performance. If saturation is needed, users can use the builtin functions directly.
+These are internal utilities optimized for performance. If saturation is needed, users can use the
+builtin functions directly.
 
 ### 3. Length Calculation Uses Builtin Sqrt
 
-While vector operations use fast Q32 operators, `length()` uses `__lp_q32_sqrt` from builtins since we need a sqrt function. This is the only builtin function used by the vector types.
+While vector operations use fast Q32 operators, `length()` uses `__lp_q32_sqrt` from builtins since
+we need a sqrt function. This is the only builtin function used by the vector types.
 
 ### 4. GLSL-Style Swizzle Methods
 
@@ -206,7 +210,8 @@ Matches GLSL:
 
 ### 7. Normalization Edge Case
 
-When normalizing a zero vector (length = 0), return a zero vector rather than panicking. This matches GLSL behavior and the reference implementation.
+When normalizing a zero vector (length = 0), return a zero vector rather than panicking. This
+matches GLSL behavior and the reference implementation.
 
 ### 8. no_std Compatibility
 
@@ -217,17 +222,20 @@ All vector types are `no_std` compatible:
 
 ### 9. Separate Files
 
-Each vector type is in its own file (`vec2_q32.rs`, `vec3_q32.rs`, `vec4_q32.rs`) for organization and easier navigation.
+Each vector type is in its own file (`vec2_q32.rs`, `vec3_q32.rs`, `vec4_q32.rs`) for organization
+and easier navigation.
 
 ### 10. Module Exports
 
-Vector types are exported from `util/mod.rs` only. They can be re-exported at crate root later if needed.
+Vector types are exported from `util/mod.rs` only. They can be re-exported at crate root later if
+needed.
 
 ## Implementation Notes
 
 ### Reference Implementation
 
-The reference implementation at `/Users/yona/dev/photomancer/lpmini2024/crates/lp-math/src/fixed/` provides the structure and API to follow. Key differences:
+The reference implementation at `/Users/yona/dev/photomancer/lpmini2024/crates/lp-math/src/fixed/`
+provides the structure and API to follow. Key differences:
 
 - Reference uses `Fixed` type, we use `Q32`
 - Reference uses `Fixed` operators, we use `Q32` operators (both are fast)
@@ -258,7 +266,7 @@ Comprehensive tests similar to reference implementation:
 
 ### Module Structure
 
-Vector types are added to `lp-builtins/src/util/`:
+Vector types are added to `lp-glsl-builtins/src/util/`:
 
 - `vec2_q32.rs` - Vec2Q32 implementation
 - `vec3_q32.rs` - Vec3Q32 implementation
@@ -274,7 +282,7 @@ Vector types are added to `lp-builtins/src/util/`:
 ### Usage Example
 
 ```rust
-use lp_builtins::util::{Vec2Q32, Vec3Q32, Q32};
+use lp_glsl_builtins::util::{Vec2Q32, Vec3Q32, Q32};
 
 // Create vectors
 let v2 = Vec2Q32::from_f32(1.0, 2.0);

@@ -1,0 +1,20 @@
+[package]
+name = "lp-glsl-builtins"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[features]
+default = []
+std = []
+test = ["std"]
+
+[dependencies]
+lpfx-impl-macro = { path = "../lpfx-impl-macro" }
+
+[dev-dependencies]

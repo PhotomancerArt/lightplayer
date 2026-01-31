@@ -8,7 +8,7 @@ use crate::exec::glsl_value::GlslValue;
 use crate::frontend::semantic::functions::FunctionSignature;
 use cranelift_codegen::ir::types;
 use hashbrown::HashMap;
-use lp_jit_util::{call_structreturn, call_structreturn_with_args};
+use lp_glsl_jit_util::{call_structreturn, call_structreturn_with_args};
 
 use alloc::{format, string::String, vec, vec::Vec};
 

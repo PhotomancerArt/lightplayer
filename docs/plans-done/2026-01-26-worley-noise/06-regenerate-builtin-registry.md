@@ -2,20 +2,22 @@
 
 ## Description
 
-Run the builtin generator to automatically register the new Worley noise functions in the builtin system. The generator scans `lpfx/worley/` directory and adds functions to the `BuiltinId` enum.
+Run the builtin generator to automatically register the new Worley noise functions in the builtin
+system. The generator scans `lpfx/worley/` directory and adds functions to the `BuiltinId` enum.
 
 ## Implementation
 
 ### Steps
 
-1. Run the builtin generator: `cargo run --bin lp-builtin-gen` (or appropriate command)
+1. Run the builtin generator: `cargo run --bin lp-glsl-builtin-gen-app` (or appropriate command)
 2. Verify that new functions are registered in `BuiltinId` enum
 3. Verify that function signatures are correctly parsed
 4. Ensure all functions are accessible via the builtin system
 
 ### Expected Changes
 
-- `BuiltinId` enum will have new variants: `LpWorley2`, `LpWorley2Value`, `LpWorley3`, `LpWorley3Value`
+- `BuiltinId` enum will have new variants: `LpWorley2`, `LpWorley2Value`, `LpWorley3`,
+  `LpWorley3Value`
 - Function signatures will be registered correctly
 - Functions will be callable from GLSL shaders
 
@@ -29,6 +31,7 @@ Run the builtin generator to automatically register the new Worley noise functio
 
 ## Notes
 
-- The builtin generator should automatically discover functions with `#[lpfx_impl_macro::lpfx_impl]` attributes
+- The builtin generator should automatically discover functions with `#[lpfx_impl_macro::lpfx_impl]`
+  attributes
 - If generator needs updates, those should be done in this phase
 - Verify that the generator correctly handles the `_value` suffix in function names

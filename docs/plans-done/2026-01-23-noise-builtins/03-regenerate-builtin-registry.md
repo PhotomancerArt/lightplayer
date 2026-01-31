@@ -2,18 +2,21 @@
 
 ## Description
 
-Run the builtin generator to automatically discover the new `__lp_*` functions and add them to the `BuiltinId` enum in the registry.
+Run the builtin generator to automatically discover the new `__lp_*` functions and add them to the
+`BuiltinId` enum in the registry.
 
 ## Implementation
 
 ### Run Builtin Generator
 
 Execute the builtin generator:
+
 ```bash
-cargo run --bin lp-builtin-gen --manifest-path lp-glsl/apps/lp-builtin-gen/Cargo.toml
+cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
 ```
 
 Or use the build script:
+
 ```bash
 scripts/build-builtins.sh
 ```
@@ -21,9 +24,12 @@ scripts/build-builtins.sh
 ### Expected Changes
 
 The generator will:
-1. Scan `lp-builtins/src/builtins/q32/` for new functions
-2. Detect `__lpfx_hash_1`, `__lpfx_hash_2`, `__lpfx_hash_3`, `__lpfx_snoise1`, `__lpfx_snoise2`, `__lpfx_snoise3`
-3. Add enum variants to `BuiltinId`: `LpHash1`, `LpHash2`, `LpHash3`, `LpSimplex1`, `LpSimplex2`, `LpSimplex3`
+
+1. Scan `lp-glsl-builtins/src/builtins/q32/` for new functions
+2. Detect `__lpfx_hash_1`, `__lpfx_hash_2`, `__lpfx_hash_3`, `__lpfx_snoise1`, `__lpfx_snoise2`,
+   `__lpfx_snoise3`
+3. Add enum variants to `BuiltinId`: `LpHash1`, `LpHash2`, `LpHash3`, `LpSimplex1`, `LpSimplex2`,
+   `LpSimplex3`
 4. Generate `name()` method returning symbol names
 5. Generate `signature()` method with correct parameter types
 6. Update `mod.rs` exports
@@ -32,6 +38,7 @@ The generator will:
 ### Verify Generated Code
 
 Check that `backend/builtins/registry.rs` includes:
+
 - New enum variants in `BuiltinId`
 - `name()` implementations returning `"__lpfx_hash_1"`, etc.
 - `signature()` implementations with correct parameter counts and types

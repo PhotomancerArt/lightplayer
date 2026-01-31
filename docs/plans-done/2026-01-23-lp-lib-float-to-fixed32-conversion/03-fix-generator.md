@@ -2,29 +2,35 @@
 
 ## Goal
 
-Update `lp-builtin-gen` to use `LpLibFn` enum as the source of truth instead of prefix matching. The generator should read the enum to know what functions exist, then match discovered functions to expected names.
+Update `lp-glsl-builtin-gen-app` to use `LpLibFn` enum as the source of truth instead of prefix
+matching. The generator should read the enum to know what functions exist, then match discovered
+functions to expected names.
 
 ## Tasks
 
 ### 3.1 Read LpLibFn Enum in Generator
 
-In `lp-glsl/apps/lp-builtin-gen/src/main.rs`:
+In `lp-glsl/apps/lp-glsl-builtin-gen-app/src/main.rs`:
+
 - Import or parse `LpLibFn` enum from `lp-glsl-compiler` crate
 - Iterate over all `LpLibFn` variants to know what functions should exist
 - For each variant, determine expected function name:
-  - Use `q32_name()` if it returns `Some(_)` (simplex functions)
-  - Use `symbol_name()` if `q32_name()` returns `None` (hash functions)
+    - Use `q32_name()` if it returns `Some(_)` (simplex functions)
+    - Use `symbol_name()` if `q32_name()` returns `None` (hash functions)
 
 ### 3.2 Update Function Discovery
 
 Modify `extract_builtin()` or discovery logic:
+
 - Match discovered function names against expected names from `LpLibFn`
-- Use `LpLibFn::builtin_id()` to determine `BuiltinId` variant name (e.g., `LpSimplex3`, not `Q32LpSimplex3`)
+- Use `LpLibFn::builtin_id()` to determine `BuiltinId` variant name (e.g., `LpSimplex3`, not
+  `Q32LpSimplex3`)
 - Generate `BuiltinInfo` with correct enum variant name
 
 ### 3.3 Update Registry Generation
 
 Ensure `generate_registry()`:
+
 - Uses `LpLibFn::builtin_id()` to get correct `BuiltinId` variant names
 - Maps `BuiltinId::LpSimplex3.name()` to actual function name (`__lp_q32_lpfx_snoise3`)
 - Generates correct enum variants matching what `lp_lib_fns.rs` expects
@@ -32,6 +38,7 @@ Ensure `generate_registry()`:
 ### 3.4 Update TestCase Mapping Generation
 
 Ensure `generate_testcase_mapping()`:
+
 - Uses `LpLibFn::symbol_name()` for TestCase names
 - Maps to correct `BuiltinId` variants from `LpLibFn::builtin_id()`
 
@@ -57,7 +64,8 @@ Ensure `generate_testcase_mapping()`:
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Code is never done, never perfect, never fully ready, never fully complete
 - Use measured, factual descriptions of what was implemented

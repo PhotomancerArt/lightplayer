@@ -2,13 +2,15 @@
 
 ## Description
 
-Create comprehensive tests for Worley noise functions, comparing against the noise-rs reference implementation and testing basic properties.
+Create comprehensive tests for Worley noise functions, comparing against the noise-rs reference
+implementation and testing basic properties.
 
 ## Implementation
 
 ### Test Files
 
 Add tests to each implementation file in `#[cfg(test)]` modules:
+
 - `worley2_q32.rs` - tests for 2D distance
 - `worley2_value_q32.rs` - tests for 2D value
 - `worley3_q32.rs` - tests for 3D distance
@@ -17,27 +19,27 @@ Add tests to each implementation file in `#[cfg(test)]` modules:
 ### Test Cases
 
 1. **Basic functionality tests**
-   - Different inputs produce different outputs
-   - Same input and seed produce same output (deterministic)
-   - Different seeds produce different outputs
+    - Different inputs produce different outputs
+    - Same input and seed produce same output (deterministic)
+    - Different seeds produce different outputs
 
 2. **Range tests**
-   - Output values are approximately in [-1, 1] range
-   - Test with various input coordinates
+    - Output values are approximately in [-1, 1] range
+    - Test with various input coordinates
 
 3. **Comparison with reference implementation**
-   - Convert Q32 outputs to f64
-   - Compare against noise-rs `worley_2d` / `worley_3d` outputs
-   - Allow for small differences due to fixed-point precision
+    - Convert Q32 outputs to f64
+    - Compare against noise-rs `worley_2d` / `worley_3d` outputs
+    - Allow for small differences due to fixed-point precision
 
 4. **Distance vs Value tests**
-   - Verify that distance and value variants produce different outputs
-   - Verify that value variant is deterministic based on cell
+    - Verify that distance and value variants produce different outputs
+    - Verify that value variant is deterministic based on cell
 
 ### Test Dependencies
 
 - Add `noise` crate as dev dependency if not already present
-- Use existing test helpers from `lp-builtins/src/util/test_helpers.rs`
+- Use existing test helpers from `lp-glsl-builtins/src/util/test_helpers.rs`
 
 ## Success Criteria
 

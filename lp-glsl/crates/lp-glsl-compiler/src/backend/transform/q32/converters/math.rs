@@ -21,7 +21,7 @@ use alloc::format;
 /// This function is AUTO-GENERATED. Do not edit manually.
 ///
 /// To regenerate this function, run:
-///     cargo run --bin lp-builtin-gen --manifest-path lp-glsl/apps/lp-builtin-gen/Cargo.toml
+///     cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
 ///
 /// Or use the build script:
 ///     scripts/build-builtins.sh

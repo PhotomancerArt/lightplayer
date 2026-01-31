@@ -1,0 +1,15 @@
+[package]
+name = "lp-glsl-jit-util"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+cranelift-codegen = { workspace = true, default-features = false }
+target-lexicon = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+

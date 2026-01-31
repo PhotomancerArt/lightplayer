@@ -3,7 +3,7 @@
 use super::entry::PixelMappingEntry;
 use super::sampling::create_sampler;
 use alloc::vec::Vec;
-use lp_builtins::glsl::q32::types::q32::{Q32, ToQ32};
+use lp_glsl_builtins::glsl::q32::types::q32::{Q32, ToQ32};
 
 /// Channel accumulator result
 pub struct ChannelAccumulators {

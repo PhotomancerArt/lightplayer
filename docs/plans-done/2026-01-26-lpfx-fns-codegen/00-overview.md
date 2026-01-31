@@ -2,7 +2,9 @@
 
 ## Overview
 
-Extend `lp-builtin-gen` to automatically generate `lpfx_fns.rs` by discovering LPFX functions annotated with `#[lpfx_impl(...)]` attributes, parsing their GLSL signatures, and generating the registry code.
+Extend `lp-glsl-builtin-gen-app` to automatically generate `lpfx_fns.rs` by discovering LPFX
+functions annotated with `#[lpfx_impl(...)]` attributes, parsing their GLSL signatures, and
+generating the registry code.
 
 ## Phases
 

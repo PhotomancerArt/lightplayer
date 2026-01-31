@@ -130,7 +130,7 @@ fn worker_thread(
     replies: Sender<Reply>,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
-        .name(format!("lp-test-worker-{thread_num}"))
+        .name(format!("lp-glsl-filetests-app-worker-{thread_num}"))
         .spawn(move || {
             // Set a custom panic hook for this worker thread that suppresses default output
             // since we catch panics with catch_unwind and convert them to test failures

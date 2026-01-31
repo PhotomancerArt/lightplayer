@@ -2,12 +2,14 @@
 
 ## Overview
 
-Add Worley noise (cellular noise) functions to the LP builtin library, following the same pattern as Simplex noise. Worley noise generates cellular patterns based on the distance to the nearest feature point in a grid.
+Add Worley noise (cellular noise) functions to the LP builtin library, following the same pattern as
+Simplex noise. Worley noise generates cellular patterns based on the distance to the nearest feature
+point in a grid.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-builtins/src/builtins/lpfx/
+lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/
 ├── hash.rs                    # EXISTING: Hash functions
 ├── simplex/                    # EXISTING: Simplex noise functions
 │   └── ...
@@ -34,9 +36,10 @@ lpfx_worley3(vec3 p, uint seed)     -> __lpfx_worley3_q32(i32 x, i32 y, i32 z, u
 lpfx_worley3_value(vec3 p, uint seed) -> __lpfx_worley3_value_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
 ```
 
-Internal functions are automatically registered by `lp-builtin-gen` which scans `lp-builtins/src/builtins/lpfx/` and adds them to the `BuiltinId` enum.
+Internal functions are automatically registered by `lp-glsl-builtin-gen-app` which scans
+`lp-glsl-builtins/src/builtins/lpfx/` and adds them to the `BuiltinId` enum.
 
-### Builtin Implementations (`lp-builtins/src/builtins/lpfx/worley/`)
+### Builtin Implementations (`lp-glsl-builtins/src/builtins/lpfx/worley/`)
 
 ```
 worley2_q32.rs:
@@ -65,13 +68,15 @@ worley3_value_q32.rs:
 ### 1. Integration with Builtin System
 
 Worley noise functions follow the same pattern as Simplex noise:
-- Implemented in `lp-builtins/src/builtins/lpfx/worley/` subdirectory
+
+- Implemented in `lp-glsl-builtins/src/builtins/lpfx/worley/` subdirectory
 - Use `#[lpfx_impl_macro::lpfx_impl]` attribute for auto-registration
-- Functions are automatically discovered and registered by `lp-builtin-gen`
+- Functions are automatically discovered and registered by `lp-glsl-builtin-gen-app`
 
 ### 2. Distance Function
 
 Only euclidean squared distance is implemented:
+
 - Fastest option (no sqrt required)
 - Sufficient for most use cases
 - Users can take sqrt in GLSL if actual distance is needed
@@ -79,6 +84,7 @@ Only euclidean squared distance is implemented:
 ### 3. Return Types
 
 Two variants per dimension:
+
 - Base function (`lpfx_worley2`, `lpfx_worley3`): Returns distance to nearest feature point
 - Value variant (`lpfx_worley2_value`, `lpfx_worley3_value`): Returns hash value of nearest cell
 
@@ -87,6 +93,7 @@ This matches lygia's convention where the base function returns distance.
 ### 4. Return Value Range
 
 All functions return values in approximately [-1, 1] range (Q32 fixed-point):
+
 - Matches Simplex noise convention
 - Matches lygia convention
 - Easy to convert to [0, 1] if needed: `* 0.5 + 0.5`
@@ -96,6 +103,7 @@ All functions return values in approximately [-1, 1] range (Q32 fixed-point):
 Reference implementation: `/Users/yona/dev/photomancer/oss/noise-rs/src/core/worley.rs`
 
 Key components:
+
 - Cell determination (floor coordinates)
 - Near/far cell selection based on fractional coordinates
 - Feature point generation using hash function
@@ -105,12 +113,13 @@ Key components:
 
 ### 6. Hash Function Usage
 
-Uses existing `__lpfx_hash_2` and `__lpfx_hash_3` functions from `lpfx::hash` module, same as Simplex noise.
+Uses existing `__lpfx_hash_2` and `__lpfx_hash_3` functions from `lpfx::hash` module, same as
+Simplex noise.
 
 ### 7. Q32 Fixed-Point Considerations
 
 - All coordinates and return values are Q32 (i32 with 16.16 format)
-- Use Q32 arithmetic operations (from `lp-builtins/src/util/q32/q32.rs`)
+- Use Q32 arithmetic operations (from `lp-glsl-builtins/src/util/q32/q32.rs`)
 - Distance calculations use fixed-point arithmetic
 - Final scaling accounts for Q32 format
 
@@ -133,6 +142,7 @@ float lpfx_worley3_value(vec3 p, uint seed);
 - `__lpfx_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
 
 **Return values:**
+
 - All return Q32 fixed-point values (i32) in range approximately [-1, 1]
 
 ## Implementation Notes
@@ -140,6 +150,7 @@ float lpfx_worley3_value(vec3 p, uint seed);
 ### Worley Noise Algorithm
 
 Worley noise requires:
+
 1. Cell determination (floor coordinates)
 2. Near/far cell selection (based on fractional coordinates > 0.5)
 3. Feature point generation using hash function (call `__lpfx_hash_*` functions)
@@ -151,8 +162,10 @@ Reference implementation: noise-rs `worley_2d` and `worley_3d` functions.
 
 ### Distance vs Value
 
-- **Distance**: Returns the euclidean squared distance to the nearest feature point. Creates the characteristic cellular pattern.
-- **Value**: Returns a hash value (normalized to [0, 1], then scaled to [-1, 1]) based on the nearest cell's coordinates. Useful for assigning random properties to cells.
+- **Distance**: Returns the euclidean squared distance to the nearest feature point. Creates the
+  characteristic cellular pattern.
+- **Value**: Returns a hash value (normalized to [0, 1], then scaled to [-1, 1]) based on the
+  nearest cell's coordinates. Useful for assigning random properties to cells.
 
 ### Testing Strategy
 
@@ -166,11 +179,14 @@ Reference implementation: noise-rs `worley_2d` and `worley_3d` functions.
 
 ### Module Declaration
 
-Worley noise functions are declared as builtins via the existing builtin system. The internal `__lpfx_worley*` functions are registered automatically by `lp-builtin-gen` which scans the `lpfx/worley/` directory.
+Worley noise functions are declared as builtins via the existing builtin system. The internal
+`__lpfx_worley*` functions are registered automatically by `lp-glsl-builtin-gen-app` which scans the
+`lpfx/worley/` directory.
 
 ### Function Call Codegen
 
 When emitting a function call:
+
 1. Check if name starts with `lpfx_`
 2. Lookup `LpLibFnId` by name (auto-generated from function attributes)
 3. Flatten vector arguments to scalars

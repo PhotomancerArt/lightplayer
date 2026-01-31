@@ -2,7 +2,7 @@
 
 ## Scope of Phase
 
-Extract the panic handler implementation from `lp-builtins-app/src/main.rs` into
+Extract the panic handler implementation from `lp-glsl-builtins-emu-app/src/main.rs` into
 `lp-riscv-emu-guest/src/panic.rs`.
 
 ## Code Organization Reminders
@@ -17,7 +17,7 @@ Extract the panic handler implementation from `lp-builtins-app/src/main.rs` into
 
 ### 1. Extract Panic Handler Code
 
-Read `lp-builtins-app/src/main.rs` and extract:
+Read `lp-glsl-builtins-emu-app/src/main.rs` and extract:
 
 1. The `panic_syscall` function (lines ~54-72)
 2. The `ebreak` function (lines ~75-78)
