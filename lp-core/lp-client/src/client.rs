@@ -15,7 +15,7 @@ use lp_model::{
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::client::transport::ClientTransport;
+use crate::transport::ClientTransport;
 
 /// Standalone client for communicating with LpServer
 ///

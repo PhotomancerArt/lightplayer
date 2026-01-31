@@ -1,28 +1,63 @@
 [workspace]
 members = [
     # lp-app workspace members
-    "lp-app/crates/lp-engine",
-    "lp-app/crates/lp-engine-client",
-    "lp-app/crates/lp-shared",
-    "lp-app/crates/lp-server",
-    "lp-app/apps/lp-cli",
-    "lp-app/crates/lp-model",
+    "lp-core/lp-engine",
+    "lp-core/lp-engine-client",
+    "lp-core/lp-shared",
+    "lp-core/lp-server",
+    "lp-core/lp-client",
+    "lp-fw/fw-core",
+    "lp-cli",
+    "lp-fw/fw-esp32",
+    "lp-fw/fw-emu",
+    "lp-core/lp-model",
     # lp-glsl workspace members
-    "lp-glsl/crates/lp-builtins",
-    "lp-glsl/crates/lp-filetests-gen",
-    "lp-glsl/crates/lp-glsl-compiler",
-    "lp-glsl/crates/lp-glsl-filetests",
-    "lp-glsl/crates/lp-jit-util",
-    "lp-glsl/crates/lp-riscv-shared",
-    "lp-glsl/crates/lp-riscv-tools",
-    "lp-glsl/apps/esp32-glsl-jit",
-    "lp-glsl/apps/lp-builtin-gen",
-    "lp-glsl/apps/lp-builtins-app",
-    "lp-glsl/apps/lp-test",
-    "lp-glsl/apps/test-structreturn",
+    "lp-glsl/lp-glsl-builtins",
+    "lp-glsl/lp-glsl-filetests-gen-app",
+    "lp-glsl/lp-glsl-compiler",
+    "lp-glsl/lp-glsl-filetests",
+    "lp-glsl/lp-glsl-jit-util",
+    "lp-riscv/lp-riscv-emu-shared",
+    "lp-riscv/lp-riscv-inst",
+    "lp-riscv/lp-riscv-emu",
+    "lp-riscv/lp-riscv-elf",
+    "lp-riscv/lp-riscv-emu-guest",
+    "lp-riscv/lp-riscv-emu-guest-test-app",
+    "lp-glsl/lp-glsl-builtins-gen-app",
+    "lp-glsl/lp-glsl-builtins-emu-app",
+    "lp-glsl/lp-glsl-filetests-app",
+    "lp-glsl/esp32-glsl-jit",
+    "lp-glsl/lp-glsl-q32-metrics-app",
 ]
 resolver = "2"
 
+# Exclude lp-glsl-builtins-emu-app, esp32-glsl-jit, and fw-esp32 from default workspace builds (they're no_std, only build for RISC-V)
+# They're still in workspace members so they can use workspace dependencies
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
+default-members = [
+    # lp-app workspace members
+    "lp-core/lp-engine",
+    "lp-core/lp-engine-client",
+    "lp-core/lp-shared",
+    "lp-core/lp-server",
+    "lp-core/lp-client",
+    "lp-fw/fw-core",
+    "lp-cli",
+    "lp-core/lp-model",
+    # lp-glsl workspace members (excluding lp-glsl-builtins-emu-app)
+    "lp-glsl/lp-glsl-builtins",
+    "lp-glsl/lp-glsl-filetests-gen-app",
+    "lp-glsl/lp-glsl-compiler",
+    "lp-glsl/lp-glsl-filetests",
+    "lp-glsl/lp-glsl-jit-util",
+    "lp-riscv/lp-riscv-emu-shared",
+    "lp-riscv/lp-riscv-inst",
+    "lp-riscv/lp-riscv-emu",
+    "lp-riscv/lp-riscv-elf",
+    "lp-glsl/lp-glsl-builtins-gen-app",
+    "lp-glsl/lp-glsl-filetests-app",
+    "lp-glsl/lp-glsl-q32-metrics-app",
+]
 [workspace.package]
 version = "40.0.0"
 authors = ["The Wasmtime Project Developers"]
@@ -57,20 +92,32 @@ extra_unused_type_parameters = 'warn'
 
 [workspace.dependencies]
 # Cranelift crates - git dependencies
-cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-cranelift-module = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-cranelift-jit = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-cranelift-native = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-cranelift-object = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-cranelift-reader = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-cranelift-control = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-codegen = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-frontend = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-module = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-jit = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-native = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-object = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-reader = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-control = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-interpreter = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+
+# Cranelift crates - path dependencies
+# cranelift-codegen = { path = "../feature/lp-cranelift-lp2025/cranelift/codegen", default-features = false }
+# cranelift-frontend = { path = "../feature/lp-cranelift-lp2025/cranelift/frontend", default-features = false }
+# cranelift-module = { path = "../feature/lp-cranelift-lp2025/cranelift/module", default-features = false }
+# cranelift-jit = { path = "../feature/lp-cranelift-lp2025/cranelift/jit", default-features = false }
+# cranelift-native = { path = "../feature/lp-cranelift-lp2025/cranelift/native" }
+# cranelift-object = { path = "../feature/lp-cranelift-lp2025/cranelift/object" }
+# cranelift-reader = { path = "../feature/lp-cranelift-lp2025/cranelift/reader" }
+# cranelift-control = { path = "../feature/lp-cranelift-lp2025/cranelift/control", default-features = false }
+# cranelift-interpreter = { path = "../feature/lp-cranelift-lp2025/cranelift/interpreter" }
 
 # Common dependencies
 target-lexicon = "0.13.0"
 hashbrown = { version = "0.15", default-features = false, features = ["alloc", "default-hasher"] }
 anyhow = { version = "1.0.100", default-features = false }
+log = { version = "0.4", default-features = false }
 regex = "1.9.1"
 glob = "0.3.3"
 object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
@@ -83,11 +130,12 @@ serde_json = { version = "1.0.80", default-features = false, features = ["alloc"
 # This applies to all packages in the workspace
 lto = true
 
+# ESP32 app release profile optimizations (embedded target)
 [profile.release.package.esp32-glsl-jit]
-# Size optimizations for embedded target (ESP32-C3)
 # Strip debuginfo but keep symbols (needed for defmt/probe-rs) - saves ~1-1.5 MB
 strip = "debuginfo"
 # Optimize for size instead of speed - saves ~200-500 KB
 opt-level = "z"
 # Single codegen unit for better dead code elimination - saves ~50-100 KB
 codegen-units = 1
+# Note: lto is inherited from workspace [profile.release]

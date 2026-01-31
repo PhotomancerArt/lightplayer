@@ -3,7 +3,7 @@
 //! Provides tokio channel-based transport for communication between server and client
 //! running in the same process. Uses unbounded channels for simplicity.
 
-use crate::client::transport::ClientTransport;
+use crate::transport::ClientTransport;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 use tokio::sync::mpsc;

@@ -23,6 +23,7 @@ lp-model = { path = "../lp-core/lp-model" }
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lp-engine-client = { path = "../lp-core/lp-engine-client" }
+lp-client = { path = "../lp-core/lp-client" }
 
 [dev-dependencies]
 tempfile = "3"

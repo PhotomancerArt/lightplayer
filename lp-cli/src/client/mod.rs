@@ -1,17 +1,10 @@
-pub mod client;
-pub mod client_connect;
-pub mod local;
-pub mod local_server;
-pub mod specifier;
-pub mod transport;
-pub mod transport_ws;
+// Re-export everything from lp-client for backward compatibility
+pub use lp_client::*;
 
-pub use client::{LpClient, serializable_response_to_project_response};
+// CLI-specific modules
+pub mod client_connect;
+pub mod local_server;
+
+// Re-export CLI-specific types
 pub use client_connect::client_connect;
-// Public API re-exports (may be used by external code)
-#[allow(unused_imports, reason = "Public API re-exports")]
 pub use local_server::LocalServerTransport;
-#[allow(unused_imports, reason = "Public API re-exports")]
-pub use specifier::HostSpecifier;
-#[allow(unused_imports, reason = "Public API re-exports")]
-pub use transport::ClientTransport;

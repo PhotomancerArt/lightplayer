@@ -2,7 +2,7 @@
 //!
 //! Implements `ClientTransport` using async `tokio-tungstenite`.
 
-use crate::client::transport::ClientTransport;
+use crate::transport::ClientTransport;
 use futures_util::{SinkExt, StreamExt};
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use tokio::net::TcpStream;
