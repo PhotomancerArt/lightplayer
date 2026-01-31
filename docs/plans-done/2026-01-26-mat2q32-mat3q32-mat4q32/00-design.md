@@ -9,7 +9,7 @@ arithmetic.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-builtins/src/util/
+lp-glsl/lp-glsl-builtins/src/util/
 ├── mat2_q32.rs              # NEW: Mat2Q32 type and implementation
 ├── mat3_q32.rs              # NEW: Mat3Q32 type and implementation
 ├── mat4_q32.rs              # NEW: Mat4Q32 type and implementation

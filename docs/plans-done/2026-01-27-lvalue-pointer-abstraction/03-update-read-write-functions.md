@@ -2,7 +2,8 @@
 
 ## Description
 
-Add handling for the `PointerBased` variant in `read_lvalue()` and `write_lvalue()` functions. Keep the old code path for `Variable` and `Component` variants with name lookup temporarily.
+Add handling for the `PointerBased` variant in `read_lvalue()` and `write_lvalue()` functions. Keep
+the old code path for `Variable` and `Component` variants with name lookup temporarily.
 
 ## Success Criteria
 
@@ -17,20 +18,20 @@ Add handling for the `PointerBased` variant in `read_lvalue()` and `write_lvalue
 
 ### Files to Modify
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
 
 ### Changes
 
 1. **Add `PointerBased` match arm to `read_lvalue()`**:
-   - Handle `Direct` pattern: load all components
-   - Handle `Component` pattern: load only requested components
-   - Handle `ArrayElement` pattern: calculate offset and load element(s)
+    - Handle `Direct` pattern: load all components
+    - Handle `Component` pattern: load only requested components
+    - Handle `ArrayElement` pattern: calculate offset and load element(s)
 
 2. **Add `PointerBased` match arm to `write_lvalue()`**:
-   - Handle `Direct` pattern: store all components
-   - Handle `Component` pattern: store only requested components
-   - Handle `ArrayElement` pattern: calculate offset and store element(s)
+    - Handle `Direct` pattern: store all components
+    - Handle `Component` pattern: store only requested components
+    - Handle `ArrayElement` pattern: calculate offset and store element(s)
 
 ### Implementation Details
 

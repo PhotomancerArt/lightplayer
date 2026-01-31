@@ -2,13 +2,15 @@
 
 ## Goal
 
-Add methods to `LpLibFn` enum to determine if a function needs q32 mapping and what the mapped name is. This keeps the source of truth in `LpLibFn` for conversion requirements.
+Add methods to `LpLibFn` enum to determine if a function needs q32 mapping and what the mapped name
+is. This keeps the source of truth in `LpLibFn` for conversion requirements.
 
 ## Tasks
 
 ### 1.1 Add `q32_name()` Method
 
-In `lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/lp_lib_fns.rs`:
+In `lp-glsl/lp-glsl-compiler/src/frontend/semantic/lp_lib_fns.rs`:
+
 - Add `q32_name(&self) -> Option<&'static str>` method to `LpLibFn` impl
 - Return `Some("__lp_q32_lpfx_snoise1")` for `Simplex1`
 - Return `Some("__lp_q32_lpfx_snoise2")` for `Simplex2`
@@ -18,6 +20,7 @@ In `lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/lp_lib_fns.rs`:
 ### 1.2 Add `needs_q32_mapping()` Method
 
 In the same file:
+
 - Add `needs_q32_mapping(&self) -> bool` method
 - Delegate to `q32_name().is_some()` to keep a single source of truth
 - This returns `true` for simplex functions, `false` for hash functions
@@ -25,6 +28,7 @@ In the same file:
 ### 1.3 Add Tests
 
 Add tests to verify:
+
 - `LpLibFn::Simplex1.needs_q32_mapping()` returns `true`
 - `LpLibFn::Simplex1.q32_name()` returns `Some("__lp_q32_lpfx_snoise1")`
 - `LpLibFn::Hash1.needs_q32_mapping()` returns `false`
@@ -52,7 +56,8 @@ Add tests to verify:
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Code is never done, never perfect, never fully ready, never fully complete
 - Use measured, factual descriptions of what was implemented

@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Default paths relative to workspace root
-TESTS_DIR="${WORKSPACE_ROOT}/lp-glsl/apps/lp-glsl-q32-metrics-app/glsl"
+TESTS_DIR="${WORKSPACE_ROOT}/lp-glsl/lp-glsl-q32-metrics-app/glsl"
 OUTPUT_DIR="${WORKSPACE_ROOT}/docs/reports/q32"
 FORMAT="Fixed16x16"
 

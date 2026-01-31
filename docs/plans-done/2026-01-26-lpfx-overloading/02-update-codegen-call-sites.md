@@ -2,20 +2,23 @@
 
 ## Description
 
-Update all call sites of `find_lpfx_fn` in codegen modules to extract argument types from the available arguments and pass them to the updated function signature.
+Update all call sites of `find_lpfx_fn` in codegen modules to extract argument types from the
+available arguments and pass them to the updated function signature.
 
 ## Implementation
 
-### File: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lpfx_fns.rs`
+### File: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lpfx_fns.rs`
 
 **Update `emit_lp_lib_fn_call`:**
+
 - Extract `arg_types: Vec<Type>` from `args: Vec<(Vec<Value>, Type)>`
 - Pass `arg_types` to `find_lpfx_fn(name, &arg_types)`
 - Update error message if needed to handle ambiguous/no match cases
 
-### File: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`
+### File: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`
 
 **Update `emit_lp_lib_fn_call`:**
+
 - Extract `arg_types: Vec<Type>` from `args: Vec<(Vec<Value>, Type)>`
 - Pass `arg_types` to `find_lpfx_fn(name, &arg_types)`
 - Update error message if needed to handle ambiguous/no match cases
@@ -44,7 +47,8 @@ Update all call sites of `find_lpfx_fn` in codegen modules to extract argument t
 ### Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Code is never done, never perfect, never fully ready, never fully complete
 - Use measured, factual descriptions of what was implemented

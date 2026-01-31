@@ -2,25 +2,27 @@
 
 ## Overview
 
-Analysis of filetest failures to identify which ones should be fixed before marking as expected failures. This report focuses on failures that seem odd or unexpected, as requested.
+Analysis of filetest failures to identify which ones should be fixed before marking as expected
+failures. This report focuses on failures that seem odd or unexpected, as requested.
 
 ## Executive Summary
 
 - **Total failing test files**: ~200+ files across multiple categories
 - **Focus areas**: Builtin precision, matrix ABI, control flow scoping, vec operations, type errors
-- **Key findings**: Several categories of failures that appear to be bugs rather than missing features
+- **Key findings**: Several categories of failures that appear to be bugs rather than missing
+  features
 
 ### Quick Reference
 
 | Category                 | Priority   | Status          | Affected Tests               | Issue Type              |
-| ------------------------ | ---------- | --------------- | ---------------------------- | ----------------------- |
+|--------------------------|------------|-----------------|------------------------------|-------------------------|
 | Matrix Struct Return ABI | **HIGH**   | Broken          | All matrix tests             | Test infrastructure bug |
 | Control Flow Scoping     | **HIGH**   | Broken          | for/if variable-scope        | Compiler bug            |
 | Builtin Precision        | **HIGH**   | Broken          | angle-degrees, radians, etc. | Precision/tolerance     |
 | Vec Comparison           | **MEDIUM** | Broken          | vec2/ivec2 fn-equal          | Function bug            |
 | Vec Conversion           | **MEDIUM** | Broken          | uvec2/3/4 from-scalars       | Cast function bug       |
 | Missing Builtins         | **LOW**    | Not Implemented | trunc, fma, frexp, etc.      | Feature not implemented |
-| Type Error Tests         | **N/A**    | ✅ Passing      | incdec-bool, etc.            | Previously fixed        |
+| Type Error Tests         | **N/A**    | ✅ Passing       | incdec-bool, etc.            | Previously fixed        |
 
 ## Summary
 
@@ -42,7 +44,8 @@ Analysis of filetest failures to identify which ones should be fixed before mark
 - `builtins/edge-trig-domain.glsl` - 3/10 tests failing
 - `builtins/matrix-determinant.glsl` - 1/21 tests failing
 
-**Issue**: Tests are failing due to floating-point precision mismatches. The actual values are very close to expected values but exceed the default tolerance.
+**Issue**: Tests are failing due to floating-point precision mismatches. The actual values are very
+close to expected values but exceed the default tolerance.
 
 **Example from `angle-degrees.glsl`**:
 
@@ -51,7 +54,9 @@ expected: 90.0
   actual: 90.000244
 ```
 
-**Root Cause**: The `degrees()` and `radians()` functions (and possibly others) are producing results with small precision errors. The tests use `~=` (approximate equality) but don't specify a tolerance, so the default tolerance may be too strict.
+**Root Cause**: The `degrees()` and `radians()` functions (and possibly others) are producing
+results with small precision errors. The tests use `~=` (approximate equality) but don't specify a
+tolerance, so the default tolerance may be too strict.
 
 **Recommendation**:
 
@@ -89,13 +94,16 @@ Signature: Signature { params: [AbiParam { value_type: types::I32, purpose: Stru
 **Root Cause**:
 
 - Matrix-returning functions use StructReturn ABI (correct)
-- The test runner (`execute_fn.rs` or test harness) doesn't handle StructReturn when calling test functions
-- The test runner calls functions with 0 arguments, but StructReturn functions expect 1 parameter (the return buffer pointer)
+- The test runner (`execute_fn.rs` or test harness) doesn't handle StructReturn when calling test
+  functions
+- The test runner calls functions with 0 arguments, but StructReturn functions expect 1 parameter (
+  the return buffer pointer)
 
 **Code Location**:
 
-- Function signature generation: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs:132-140`
-- Test execution: `lp-glsl/crates/lp-glsl-compiler/src/exec/execute_fn.rs` or test harness
+- Function signature generation:
+  `lp-glsl/lp-glsl-compiler/src/frontend/codegen/signature.rs:132-140`
+- Test execution: `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs` or test harness
 
 **Recommendation**:
 
@@ -136,7 +144,8 @@ int test_for_loop_init_shadowing() {
 **Expected**: Outer `i` should remain 100 (shadowed by loop variable)
 **Actual**: Outer `i` is 100 (test expects 3, but comment says "Outer i should be unchanged")
 
-**Note**: There's a discrepancy - the test expects `3` but the comment says outer `i` should be unchanged. This might be a test bug, but the variable scoping is definitely broken.
+**Note**: There's a discrepancy - the test expects `3` but the comment says outer `i` should be
+unchanged. This might be a test bug, but the variable scoping is definitely broken.
 
 **Additional Issue**: Line 92-101 has a compilation error:
 
@@ -144,7 +153,8 @@ int test_for_loop_init_shadowing() {
 for (int i = 0; int j = i < 3; i++) {
 ```
 
-This tries to declare a variable in the condition expression, which is invalid GLSL syntax. The test expects this to work, but it's not valid GLSL.
+This tries to declare a variable in the condition expression, which is invalid GLSL syntax. The test
+expects this to work, but it's not valid GLSL.
 
 #### If Block Scoping
 
@@ -168,7 +178,10 @@ int test_if_variable_shadowing() {
 **Expected**: Outer `x` should remain 5 (inner `x` shadows it)
 **Actual**: Outer `x` is 5 (test expects 10, but comment says inner shadows outer)
 
-**Note**: Again, there's a discrepancy between the test expectation and the comment. The comment says inner shadows outer (so outer should be 5), but test expects 10. This suggests the test might be wrong, OR the comment is wrong and the test is checking that shadowing doesn't work (which would be a bug).
+**Note**: Again, there's a discrepancy between the test expectation and the comment. The comment
+says inner shadows outer (so outer should be 5), but test expects 10. This suggests the test might
+be wrong, OR the comment is wrong and the test is checking that shadowing doesn't work (which would
+be a bug).
 
 **Recommendation**:
 
@@ -187,7 +200,8 @@ int test_if_variable_shadowing() {
 - `vec/ivec2/fn-equal.gen.glsl` - 7/8 tests passing
 - Possibly other vec comparison tests
 
-**Issue**: When `equal()` is called with bvec2 arguments (nested calls), it returns incorrect results.
+**Issue**: When `equal()` is called with bvec2 arguments (nested calls), it returns incorrect
+results.
 
 **Example from `vec/vec2/fn-equal.gen.glsl:67-78`**:
 
@@ -208,7 +222,8 @@ bvec2 test_vec2_equal_function_in_expression() {
 **Expected**: `bvec2(false, false)`
 **Actual**: `bvec2(false, true)`
 
-**Root Cause**: The `equal()` function may not be handling bvec2 arguments correctly, or there's an issue with nested function calls returning bvec2.
+**Root Cause**: The `equal()` function may not be handling bvec2 arguments correctly, or there's an
+issue with nested function calls returning bvec2.
 
 **Recommendation**:
 
@@ -242,7 +257,8 @@ uvec2 test_uvec2_from_scalars_function_results() {
 **Expected**: `uvec2(7u, 4294967293u)` (wraps -3.2 to large uint)
 **Actual**: `uvec2(7u, 0u)` (converts to 0 instead of wrapping)
 
-**Root Cause**: The `uint()` cast function may be clamping negative values to 0 instead of wrapping them according to GLSL spec (which should wrap).
+**Root Cause**: The `uint()` cast function may be clamping negative values to 0 instead of wrapping
+them according to GLSL spec (which should wrap).
 
 **Recommendation**:
 
@@ -283,7 +299,8 @@ uvec2 test_uvec2_from_scalars_function_results() {
 - `type_errors/incdec-nested.glsl` - ✅ Passing
 - `type_errors/incdec-non-lvalue.glsl` - ✅ Passing
 
-**Note**: These tests are now passing, suggesting they were fixed. The user mentioned these seemed odd, but they're working correctly now.
+**Note**: These tests are now passing, suggesting they were fixed. The user mentioned these seemed
+odd, but they're working correctly now.
 
 ## Recommendations
 

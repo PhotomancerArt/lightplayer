@@ -2,9 +2,9 @@
 
 ## Scope of Work
 
-Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-glsl-builtins-emu-app` into a new
+Extract the RISC-V32 emulator guest code from `lp-glsl/lp-glsl-builtins-emu-app` into a new
 common crate
-`lp-glsl/crates/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
+`lp-glsl/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
 running in the RISC-V emulator and needs to be reusable by firmware and other applications.
 
 The extracted code includes:
@@ -20,7 +20,7 @@ The extracted code includes:
 
 ### Source Location
 
-The guest code currently lives in `lp-glsl/apps/lp-glsl-builtins-emu-app/src/`:
+The guest code currently lives in `lp-glsl/lp-glsl-builtins-emu-app/src/`:
 
 - `main.rs` - Entry point, panic handler, syscall implementation, bootstrap code
 - `host.rs` - Host communication functions (debug, println syscalls)

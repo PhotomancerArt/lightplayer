@@ -9,7 +9,7 @@ compare against reference implementations or previous known-good outputs.
 
 ### 1. Add Image Generation Test
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add visual output test:
 
@@ -63,7 +63,7 @@ mod visual_tests {
 
 ### 2. Add Comparison Test Against noise-rs
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add comparison test:
 
@@ -107,7 +107,7 @@ mod comparison_tests {
 
 ### 3. Add Artifact Detection Test
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add test to detect discontinuities:
 

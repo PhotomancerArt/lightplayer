@@ -21,8 +21,8 @@ Grep for any temporary code, TODOs, or debug prints:
 
 ```bash
 # From workspace root
-grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/crates/lp-riscv-emu-guest/
-grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/apps/lp-glsl-builtins-emu-app/src/
+grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/lp-riscv-emu-guest/
+grep -r "TODO\|FIXME\|XXX\|HACK" lp-glsl/lp-glsl-builtins-emu-app/src/
 ```
 
 Remove any temporary code found.
@@ -80,7 +80,7 @@ This should build successfully and embed `lp-glsl-builtins-emu-app` as before.
 Verify the final file structure matches the design:
 
 ```
-lp-glsl/crates/lp-riscv-emu-guest/
+lp-glsl/lp-riscv-emu-guest/
 ├── Cargo.toml
 ├── build.rs
 ├── memory.ld
@@ -92,7 +92,7 @@ lp-glsl/crates/lp-riscv-emu-guest/
     ├── host.rs
     └── print.rs
 
-lp-glsl/apps/lp-glsl-builtins-emu-app/
+lp-glsl/lp-glsl-builtins-emu-app/
 ├── Cargo.toml
 └── src/
     ├── main.rs

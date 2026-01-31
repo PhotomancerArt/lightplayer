@@ -2,7 +2,9 @@
 
 ## Description
 
-Modify variable and component resolution functions to create `PointerBased` LValues for out/inout parameters instead of using the `name` field approach. Keep the old code path temporarily for safety.
+Modify variable and component resolution functions to create `PointerBased` LValues for out/inout
+parameters instead of using the `name` field approach. Keep the old code path temporarily for
+safety.
 
 ## Success Criteria
 
@@ -16,25 +18,25 @@ Modify variable and component resolution functions to create `PointerBased` LVal
 
 ### Files to Modify
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 
 ### Changes
 
 1. **Update `resolve_variable_lvalue()`**:
-   - When `is_out_inout` is true, get pointer from `var_info.out_inout_ptr`
-   - Create `LValue::PointerBased` with `Direct` pattern instead of `Variable` with `name`
-   - Keep old code path for non-out/inout variables
+    - When `is_out_inout` is true, get pointer from `var_info.out_inout_ptr`
+    - Create `LValue::PointerBased` with `Direct` pattern instead of `Variable` with `name`
+    - Keep old code path for non-out/inout variables
 
 2. **Update `resolve_component_on_variable()`**:
-   - Accept pointer parameter (or get from context)
-   - If pointer exists, create `PointerBased` with `Component` pattern
-   - Otherwise, create regular `Component` variant
+    - Accept pointer parameter (or get from context)
+    - If pointer exists, create `PointerBased` with `Component` pattern
+    - Otherwise, create regular `Component` variant
 
 3. **Update component resolution in `mod.rs`**:
-   - When resolving component on out/inout variable, pass pointer through
-   - Create `PointerBased` variant instead of `Component` with `name`
+    - When resolving component on out/inout variable, pass pointer through
+    - Create `PointerBased` variant instead of `Component` with `name`
 
 ### Example Changes
 

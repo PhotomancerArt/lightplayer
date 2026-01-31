@@ -2,28 +2,29 @@
 
 ## Description
 
-Update function signature generation to pass out/inout parameters as pointers instead of by value. This affects both user-defined functions and LPFX functions.
+Update function signature generation to pass out/inout parameters as pointers instead of by value.
+This affects both user-defined functions and LPFX functions.
 
 ## Implementation
 
 ### Files to Modify
 
-1. **`lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs`**
-   - Update `add_parameters()` to check `param.qualifier`
-   - Update `add_type_as_params()` to accept qualifier parameter
-   - For `Out`/`InOut`: Add pointer type parameter
-   - For `In`: Continue existing behavior (expand to components)
+1. **`lp-glsl/lp-glsl-compiler/src/frontend/codegen/signature.rs`**
+    - Update `add_parameters()` to check `param.qualifier`
+    - Update `add_type_as_params()` to accept qualifier parameter
+    - For `Out`/`InOut`: Add pointer type parameter
+    - For `In`: Continue existing behavior (expand to components)
 
 ### Changes
 
 1. **`SignatureBuilder::add_parameters()`**
-   - Iterate through parameters with qualifiers
-   - Call `add_type_as_params()` with qualifier information
+    - Iterate through parameters with qualifiers
+    - Call `add_type_as_params()` with qualifier information
 
 2. **`SignatureBuilder::add_type_as_params()`**
-   - Add parameter: `qualifier: ParamQualifier`
-   - If `Out` or `InOut`: Add single `pointer_type` parameter
-   - If `In`: Expand to components as before (vectors/matrices → multiple params)
+    - Add parameter: `qualifier: ParamQualifier`
+    - If `Out` or `InOut`: Add single `pointer_type` parameter
+    - If `In`: Expand to components as before (vectors/matrices → multiple params)
 
 ### Success Criteria
 

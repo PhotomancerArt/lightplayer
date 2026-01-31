@@ -10,7 +10,7 @@ automatically have the marker removed (unless `LP_KEEP_XFAIL=1` is set).
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-filetests/src/
+lp-glsl/lp-glsl-filetests/src/
 ├── parse/
 │   ├── parse_run.rs                    # UPDATE: Parse [expect-fail] marker
 │   └── test_type.rs                    # UPDATE: Add expect_fail field to RunDirective
@@ -21,7 +21,7 @@ lp-glsl/crates/lp-glsl-filetests/src/
 │   └── file_update.rs                  # UPDATE: Add remove_expect_fail_marker() method
 └── lib.rs                              # UPDATE: Update reporting format, exit code logic, add fix_xfail parameter
 
-lp-glsl/apps/lp-glsl-filetests-app/src/
+lp-glsl/lp-glsl-filetests-app/src/
 └── main.rs                             # UPDATE: Add --fix flag to TestOptions, pass to run()
 ```
 

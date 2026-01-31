@@ -2,25 +2,30 @@
 
 ## Goal
 
-Enable Fastalloc (single-pass) register allocator instead of Ion (backtracking) to reduce memory usage during compilation and prevent allocation failures on ESP32.
+Enable Fastalloc (single-pass) register allocator instead of Ion (backtracking) to reduce memory
+usage during compilation and prevent allocation failures on ESP32.
 
 ## Background
 
 The Perlin function compilation is failing with:
+
 ```
 memory allocation of 140 bytes failed
 ```
-at `regalloc2::ion::Env::init`, indicating that Ion's initialization data structures require too much memory. Fastalloc uses simpler data structures and should require less memory.
+
+at `regalloc2::ion::Env::init`, indicating that Ion's initialization data structures require too
+much memory. Fastalloc uses simpler data structures and should require less memory.
 
 ## Implementation Steps
 
 ### Step 1: Add Fastalloc Setting to ESP32 JIT Flags
 
-**File:** `lp-glsl/apps/esp32-glsl-jit/src/main.rs`
+**File:** `lp-glsl/esp32-glsl-jit/src/main.rs`
 
 **Location:** Around line 230-234 where ISA flags are created
 
 **Change:**
+
 ```rust
 // Before:
 let mut flag_builder = settings::builder();
@@ -38,15 +43,17 @@ flag_builder.set("regalloc_algorithm", "single_pass").unwrap();  // ADD THIS LIN
 let isa_flags = settings::Flags::new(flag_builder);
 ```
 
-**Rationale:** This is the direct compilation path used by ESP32, so this change will immediately affect the failing compilation.
+**Rationale:** This is the direct compilation path used by ESP32, so this change will immediately
+affect the failing compilation.
 
 ### Step 2: Add Fastalloc Setting to Default RISC-V32 Flags
 
-**File:** `lp-glsl/crates/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs`
 
 **Location:** `default_riscv32_flags()` function (around line 116-141)
 
 **Change:**
+
 ```rust
 fn default_riscv32_flags() -> Result<Flags, GlslError> {
     let mut flag_builder = settings::builder();
@@ -82,33 +89,38 @@ fn default_riscv32_flags() -> Result<Flags, GlslError> {
 }
 ```
 
-**Rationale:** This ensures all RISC-V32 emulator compilations use Fastalloc, providing consistent behavior.
+**Rationale:** This ensures all RISC-V32 emulator compilations use Fastalloc, providing consistent
+behavior.
 
 ### Step 3: Add Fastalloc Setting to Default Host Flags (Optional)
 
-**File:** `lp-glsl/crates/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs`
 
 **Location:** `default_host_flags()` function (around line 145-169)
 
 **Change:** Similar to Step 2, add the `regalloc_algorithm` setting.
 
-**Rationale:** For consistency, though host JIT compilation may not have memory constraints. This can be optional if we want to keep better code quality on host.
+**Rationale:** For consistency, though host JIT compilation may not have memory constraints. This
+can be optional if we want to keep better code quality on host.
 
-**Decision:** Make this optional - only add if we want consistency, or leave it as backtracking for better code quality on host systems.
+**Decision:** Make this optional - only add if we want consistency, or leave it as backtracking for
+better code quality on host systems.
 
 ### Step 4: Test Compilation
 
 **Test Case:** Compile the failing Perlin function on ESP32
 
 **Expected Result:**
+
 - Compilation succeeds without memory allocation errors
 - Generated code executes correctly
 - Code quality may be slightly worse (more spills/moves) but acceptable
 
 **Test Command:**
+
 ```bash
 # Build and flash ESP32 firmware
-cd lp-glsl/apps/esp32-glsl-jit
+cd lp-glsl/esp32-glsl-jit
 cargo build --release --target riscv32imac-unknown-none-elf
 # Flash and run on ESP32 hardware
 ```
@@ -118,6 +130,7 @@ cargo build --release --target riscv32imac-unknown-none-elf
 **If needed:** Compare generated code between Ion and Fastalloc
 
 **Metrics to check:**
+
 - Number of register spills
 - Number of register moves
 - Code size
@@ -153,12 +166,15 @@ If Fastalloc causes unacceptable code quality or other issues:
 - Fastalloc may produce slightly worse code quality (more spills/moves)
 - For embedded targets, this trade-off is usually acceptable
 - If code quality becomes an issue, we can investigate:
-  - Increasing heap size as a workaround
-  - Optimizing VCode size before register allocation
-  - Other memory reduction strategies
+    - Increasing heap size as a workaround
+    - Optimizing VCode size before register allocation
+    - Other memory reduction strategies
 
 ## Related Files
 
-- `lp-glsl/apps/esp32-glsl-jit/src/main.rs` - ESP32 JIT compilation entry point
-- `lp-glsl/crates/lp-glsl-compiler/src/backend/target/target.rs` - Default flag configuration
-- `/Users/yona/dev/photomancer/feature/lp-cranelift-lp2025/cranelift/codegen/src/machinst/compile.rs` - Register allocator selection logic
+- `lp-glsl/esp32-glsl-jit/src/main.rs` - ESP32 JIT compilation entry point
+- `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs` - Default flag configuration
+-
+
+`/Users/yona/dev/photomancer/feature/lp-cranelift-lp2025/cranelift/codegen/src/machinst/compile.rs` -
+Register allocator selection logic

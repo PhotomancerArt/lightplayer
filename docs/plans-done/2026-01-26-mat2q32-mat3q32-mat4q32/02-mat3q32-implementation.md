@@ -6,7 +6,7 @@ Implement the `Mat3Q32` type with all operations, methods, and operator overload
 
 ## Implementation
 
-Create `lp-glsl/crates/lp-glsl-builtins/src/util/mat3_q32.rs` with:
+Create `lp-glsl/lp-glsl-builtins/src/util/mat3_q32.rs` with:
 
 - `Mat3Q32` struct with `m: [Q32; 9]` field (column-major storage)
 - Construction methods: `new()`, `from_f32()`, `from_vec3()`, `identity()`, `zero()`

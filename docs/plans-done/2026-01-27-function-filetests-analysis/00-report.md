@@ -13,12 +13,12 @@ Analysis of 39 failing function-related filetests to categorize issues as:
 - **Total failing tests**: 39 files
 - **Tests passing**: 7/8 tests in `call-simple.glsl` (1 failing due to void)
 - **Main categories**:
-  1. Nested function definitions (parser limitation)
-  2. Void return types (execution layer limitation)
-  3. Out/InOut parameters (not implemented - pass by reference)
-  4. Overload resolution (depends on nested functions)
-  5. Forward declarations (needs verification)
-  6. Various edge cases
+    1. Nested function definitions (parser limitation)
+    2. Void return types (execution layer limitation)
+    3. Out/InOut parameters (not implemented - pass by reference)
+    4. Overload resolution (depends on nested functions)
+    5. Forward declarations (needs verification)
+    6. Various edge cases
 
 ## Detailed Findings
 
@@ -34,7 +34,9 @@ Analysis of 39 failing function-related filetests to categorize issues as:
 - `overload-same-name.glsl` - Likely fails (uses nested functions)
 - `define-simple.glsl` - Test `test_define_simple_nested` fails
 
-**Issue**: GLSL doesn't allow function definitions inside other functions, but these tests assume it's supported. The parser encounters a function definition inside another function and fails with a parse error.
+**Issue**: GLSL doesn't allow function definitions inside other functions, but these tests assume
+it's supported. The parser encounters a function definition inside another function and fails with a
+parse error.
 
 **Example from `return-scalar.glsl`**:
 
@@ -49,7 +51,8 @@ float test_return_float_simple() {
 
 **Error**: `error[E0001]: expected '}', found f`
 
-**Recommendation**: These tests should be rewritten to use top-level function definitions instead of nested ones, OR the parser should be updated to support nested functions (if that's desired).
+**Recommendation**: These tests should be rewritten to use top-level function definitions instead of
+nested ones, OR the parser should be updated to support nested functions (if that's desired).
 
 ### 2. Void Return Types (Execution Layer Limitation)
 
@@ -69,11 +72,15 @@ float test_return_float_simple() {
 - Execution layer (`execute_fn.rs:152`) doesn't handle void return types
 - Error: `unsupported return type: Void`
 
-**Root Cause**: In `lp-glsl/crates/lp-glsl-compiler/src/exec/execute_fn.rs`, the `execute_function` function has a match statement that handles all return types except `Type::Void`. When a void function is called, it hits the `_ => anyhow::bail!("unsupported return type: {:?}", sig.return_type)` case.
+**Root Cause**: In `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs`, the `execute_function`
+function has a match statement that handles all return types except `Type::Void`. When a void
+function is called, it hits the
+`_ => anyhow::bail!("unsupported return type: {:?}", sig.return_type)` case.
 
-**Code Location**: `lp-glsl/crates/lp-glsl-compiler/src/exec/execute_fn.rs:152`
+**Code Location**: `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs:152`
 
-**Fix Required**: Add `Type::Void => Ok(GlslValue::F32(0.0))` or similar to handle void functions. The test framework expects a value (typically `0.0`) when calling void functions.
+**Fix Required**: Add `Type::Void => Ok(GlslValue::F32(0.0))` or similar to handle void functions.
+The test framework expects a value (typically `0.0`) when calling void functions.
 
 ### 3. Out/InOut Parameters (Not Implemented)
 
@@ -136,9 +143,11 @@ float test_param_out_simple() {
 - `overload-ambiguous.glsl` - Likely fails
 - `overload-same-name.glsl` - Likely fails
 
-**Issue**: These tests use nested function definitions, which the parser doesn't support. Even if overload resolution were implemented, these tests would need to be rewritten.
+**Issue**: These tests use nested function definitions, which the parser doesn't support. Even if
+overload resolution were implemented, these tests would need to be rewritten.
 
-**Note**: The function registry (`FunctionRegistry`) appears to support multiple functions with the same name (overloading), but the tests can't run due to parser limitations.
+**Note**: The function registry (`FunctionRegistry`) appears to support multiple functions with the
+same name (overloading), but the tests can't run due to parser limitations.
 
 ### 5. Forward Declarations (Needs Verification)
 
@@ -154,7 +163,8 @@ float test_param_out_simple() {
 - Out parameters (which aren't implemented)
 - Array parameters with out qualifier
 
-**Needs Investigation**: Check if forward declarations are implemented in the parser/semantic analysis, or if failures are only due to void/out parameter issues.
+**Needs Investigation**: Check if forward declarations are implemented in the parser/semantic
+analysis, or if failures are only due to void/out parameter issues.
 
 ### 6. Other Function Features
 
@@ -188,65 +198,65 @@ float test_param_out_simple() {
 ### High Priority (Blocks Most Tests)
 
 1. **Void Return Types** - Quick fix, unblocks many tests
-   - Add void handling to `execute_fn.rs`
-   - Estimated effort: 1-2 hours
+    - Add void handling to `execute_fn.rs`
+    - Estimated effort: 1-2 hours
 
 2. **Out/InOut Parameters** - Core feature, needed for psrdnoise
-   - Update signature building
-   - Update call argument preparation
-   - Update function body codegen
-   - Estimated effort: 1-2 days
+    - Update signature building
+    - Update call argument preparation
+    - Update function body codegen
+    - Estimated effort: 1-2 days
 
 ### Medium Priority
 
 3. **Nested Function Definitions** - Parser enhancement
-   - Either update parser to support nested functions
-   - OR rewrite tests to use top-level functions
-   - Estimated effort: 2-3 days (parser) or 1-2 hours (test rewrite)
+    - Either update parser to support nested functions
+    - OR rewrite tests to use top-level functions
+    - Estimated effort: 2-3 days (parser) or 1-2 hours (test rewrite)
 
 ### Low Priority
 
 4. **Overload Resolution** - Depends on nested functions
-   - Verify if already implemented
-   - Test with top-level functions
-   - Estimated effort: 1-2 hours (verification)
+    - Verify if already implemented
+    - Test with top-level functions
+    - Estimated effort: 1-2 hours (verification)
 
 5. **Forward Declarations** - Verify implementation
-   - Check parser/semantic analysis
-   - Fix if needed
-   - Estimated effort: 2-4 hours
+    - Check parser/semantic analysis
+    - Fix if needed
+    - Estimated effort: 2-4 hours
 
 ## Recommendations
 
 1. **Immediate Actions**:
-   - Fix void return type handling in execution layer (quick win)
-   - Implement out/inout parameters (needed for psrdnoise)
+    - Fix void return type handling in execution layer (quick win)
+    - Implement out/inout parameters (needed for psrdnoise)
 
 2. **Test Cleanup**:
-   - Rewrite tests that use nested function definitions to use top-level functions
-   - This will allow proper testing of other features
+    - Rewrite tests that use nested function definitions to use top-level functions
+    - This will allow proper testing of other features
 
 3. **Verification**:
-   - Test features independently to isolate issues
-   - Create minimal test cases for each feature
+    - Test features independently to isolate issues
+    - Create minimal test cases for each feature
 
 4. **Documentation**:
-   - Document which GLSL features are supported
-   - Note any deviations from standard GLSL (e.g., nested functions)
+    - Document which GLSL features are supported
+    - Note any deviations from standard GLSL (e.g., nested functions)
 
 ## Code Locations
 
 ### Void Return Types
 
-- Execution: `lp-glsl/crates/lp-glsl-compiler/src/exec/execute_fn.rs:152`
-- Codegen: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/helpers.rs:16-18`
-- Codegen: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/stmt/return.rs:168-169`
+- Execution: `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs:152`
+- Codegen: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/helpers.rs:16-18`
+- Codegen: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/return.rs:168-169`
 
 ### Out/InOut Parameters
 
-- Parsing: `lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/passes/function_signature.rs:76-95`
-- Signature: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs:57-60`
-- Call args: `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/expr/function.rs:323-383`
+- Parsing: `lp-glsl/lp-glsl-compiler/src/frontend/semantic/passes/function_signature.rs:76-95`
+- Signature: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/signature.rs:57-60`
+- Call args: `lp-glsl/lp-glsl-compiler/src/frontend/codegen/expr/function.rs:323-383`
 
 ### Nested Functions
 

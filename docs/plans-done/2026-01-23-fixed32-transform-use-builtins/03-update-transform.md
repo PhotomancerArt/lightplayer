@@ -2,49 +2,54 @@
 
 ## Goal
 
-Update `convert_fadd`, `convert_fsub`, and `convert_fdiv` to use builtin functions instead of generating inline code.
+Update `convert_fadd`, `convert_fsub`, and `convert_fdiv` to use builtin functions instead of
+generating inline code.
 
 ## Tasks
 
 ### 3.1 Update convert_fadd
 
-In `lp-glsl/crates/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
+In `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
+
 - Replace inline saturation code (~20 instructions) with builtin call
 - Follow the pattern from `convert_fmul`:
-  - Get FuncId from func_id_map for `"__lp_q32_add"`
-  - Create signature: (i32, i32) -> i32
-  - Create UserExternalName with FuncId
-  - Import external function (colocated: false)
-  - Call builtin with mapped arguments
+    - Get FuncId from func_id_map for `"__lp_q32_add"`
+    - Create signature: (i32, i32) -> i32
+    - Create UserExternalName with FuncId
+    - Import external function (colocated: false)
+    - Call builtin with mapped arguments
 - Remove all inline saturation logic
 
 ### 3.2 Update convert_fsub
 
 In the same file:
+
 - Replace inline saturation code (~20 instructions) with builtin call
 - Follow the same pattern as `convert_fadd`:
-  - Get FuncId from func_id_map for `"__lp_q32_sub"`
-  - Create signature: (i32, i32) -> i32
-  - Create UserExternalName with FuncId
-  - Import external function (colocated: false)
-  - Call builtin with mapped arguments
+    - Get FuncId from func_id_map for `"__lp_q32_sub"`
+    - Create signature: (i32, i32) -> i32
+    - Create UserExternalName with FuncId
+    - Import external function (colocated: false)
+    - Call builtin with mapped arguments
 - Remove all inline saturation logic
 
 ### 3.3 Update convert_fdiv
 
 In the same file:
+
 - Replace inline division code (~30 instructions) with builtin call
 - Follow the same pattern as `convert_fmul`:
-  - Get FuncId from func_id_map for `"__lp_q32_div"`
-  - Create signature: (i32, i32) -> i32
-  - Create UserExternalName with FuncId
-  - Import external function (colocated: false)
-  - Call builtin with mapped arguments
+    - Get FuncId from func_id_map for `"__lp_q32_div"`
+    - Create signature: (i32, i32) -> i32
+    - Create UserExternalName with FuncId
+    - Import external function (colocated: false)
+    - Call builtin with mapped arguments
 - Remove all inline division logic (zero checks, small divisor handling, etc.)
 
 ### 3.4 Update Function Signature
 
 Ensure `convert_fadd` and `convert_fsub` accept `func_id_map` parameter:
+
 - Add `func_id_map: &HashMap<String, FuncId>` parameter (like `convert_fmul` has)
 - Update call sites in `instructions.rs` to pass func_id_map
 
@@ -71,6 +76,7 @@ Ensure `convert_fadd` and `convert_fsub` accept `func_id_map` parameter:
 ## Language and Tone
 
 - Keep language professional and restrained
-- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+- Avoid overly optimistic language like "comprehensive", "fully production ready", "complete
+  solution"
 - Avoid emoticons
 - Use measured, factual descriptions of what was implemented

@@ -19,17 +19,17 @@ suffixes, requiring string manipulation. This is fragile and incorrect.
 ### File Structure
 
 ```
-lp-glsl/crates/lp-glsl-compiler/src/backend/builtins/
+lp-glsl/lp-glsl-compiler/src/backend/builtins/
 └── registry.rs                      # UPDATE: Add builtin_id_from_name function
 
-lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/lpfx/
+lp-glsl/lp-glsl-compiler/src/frontend/semantic/lpfx/
 └── lpfx_fn_registry.rs              # UPDATE: Already has find_lpfx_fn_by_builtin_id
 
-lp-glsl/crates/lp-glsl-compiler/src/backend/transform/q32/converters/
+lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/
 ├── calls.rs                         # UPDATE: Use proper lookup chain for LPFX functions
 └── math.rs                          # UPDATE: Remove LPFX entries from map_testcase_to_builtin
 
-lp-glsl/apps/lp-glsl-builtin-gen-app/src/
+lp-glsl/lp-glsl-builtin-gen-app/src/
 └── main.rs                          # UPDATE: Generate builtin_id_from_name, remove LPFX from map_testcase_to_builtin
 ```
 

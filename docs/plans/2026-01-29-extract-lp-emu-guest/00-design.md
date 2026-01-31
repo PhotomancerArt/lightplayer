@@ -2,15 +2,15 @@
 
 ## Scope of Work
 
-Extract the RISC-V32 emulator guest code from `lp-glsl/apps/lp-glsl-builtins-emu-app` into a new
+Extract the RISC-V32 emulator guest code from `lp-glsl/lp-glsl-builtins-emu-app` into a new
 common crate
-`lp-glsl/crates/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
+`lp-glsl/lp-riscv-emu-guest`. This guest code provides the runtime foundation for code
 running in the RISC-V emulator and needs to be reusable by firmware and other applications.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-riscv-emu-guest/          # NEW: Common guest runtime crate
+lp-glsl/lp-riscv-emu-guest/          # NEW: Common guest runtime crate
 ├── Cargo.toml
 ├── build.rs                           # Sets up memory.ld linker script
 ├── memory.ld                          # Linker script for memory layout
@@ -22,7 +22,7 @@ lp-glsl/crates/lp-riscv-emu-guest/          # NEW: Common guest runtime crate
     ├── host.rs                        # Host communication (__host_debug, __host_println)
     └── print.rs                       # Print macros and writer
 
-lp-glsl/apps/lp-glsl-builtins-emu-app/         # UPDATE: Thin binary wrapper
+lp-glsl/lp-glsl-builtins-emu-app/         # UPDATE: Thin binary wrapper
 ├── Cargo.toml                         # UPDATE: Add dependency on lp-riscv-emu-guest
 ├── build.rs                           # UPDATE: Remove (linker script now in crate)
 └── src/

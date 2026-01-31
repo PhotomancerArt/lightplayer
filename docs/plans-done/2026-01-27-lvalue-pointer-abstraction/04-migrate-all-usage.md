@@ -2,7 +2,8 @@
 
 ## Description
 
-Update all LValue creation sites to use `PointerBased` for out/inout parameters. Ensure all out/inout params use the new variant, and remove `name` field usage for pointer detection.
+Update all LValue creation sites to use `PointerBased` for out/inout parameters. Ensure all
+out/inout params use the new variant, and remove `name` field usage for pointer detection.
 
 ## Success Criteria
 
@@ -17,26 +18,26 @@ Update all LValue creation sites to use `PointerBased` for out/inout parameters.
 
 ### Files to Modify
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 - Any other sites that create LValues for out/inout parameters
 
 ### Changes
 
 1. **Remove `name` field usage**:
-   - Stop setting `name: Some(...)` for out/inout parameters
-   - Remove checks for `name` field to detect out/inout
-   - All out/inout detection now happens via `PointerBased` variant
+    - Stop setting `name: Some(...)` for out/inout parameters
+    - Remove checks for `name` field to detect out/inout
+    - All out/inout detection now happens via `PointerBased` variant
 
 2. **Update all creation sites**:
-   - Ensure `resolve_variable_lvalue()` always creates `PointerBased` for out/inout
-   - Ensure component resolution always creates `PointerBased` for out/inout components
-   - Check for any other places that create LValues for out/inout params
+    - Ensure `resolve_variable_lvalue()` always creates `PointerBased` for out/inout
+    - Ensure component resolution always creates `PointerBased` for out/inout components
+    - Check for any other places that create LValues for out/inout params
 
 3. **Out/inout array parameters**:
-   - If arrays as out/inout params are encountered, use `PointerBased` with `Direct` pattern
-   - Array element access (`arr[i]`) continues to use `LValue::ArrayElement` for now
+    - If arrays as out/inout params are encountered, use `PointerBased` with `Direct` pattern
+    - Array element access (`arr[i]`) continues to use `LValue::ArrayElement` for now
 
 ### Verification
 

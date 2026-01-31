@@ -48,7 +48,7 @@ if [ "$current_hash" != "$stored_hash" ]; then
   echo "Building lp-glsl-builtins-emu-app for $TARGET with aggressive optimizations..."
   echo "Generating builtin boilerplate..."
   cd "$LIGHTPLAYER_DIR"
-  cargo run --bin lp-glsl-builtin-gen-app --manifest-path apps/lp-glsl-builtin-gen-app/Cargo.toml
+  cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl-builtins-gen-app/Cargo.toml
   store_hash "$current_hash"
 else
   echo "Builtins source unchanged, skipping code generation..."

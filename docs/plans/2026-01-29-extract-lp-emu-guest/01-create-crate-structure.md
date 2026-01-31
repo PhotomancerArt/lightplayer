@@ -20,7 +20,7 @@ and initial module files.
 Create the directory structure:
 
 ```
-lp-glsl/crates/lp-riscv-emu-guest/
+lp-glsl/lp-riscv-emu-guest/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -33,7 +33,7 @@ lp-glsl/crates/lp-riscv-emu-guest/
 
 ### 2. Create Cargo.toml
 
-Create `lp-glsl/crates/lp-riscv-emu-guest/Cargo.toml`:
+Create `lp-glsl/lp-riscv-emu-guest/Cargo.toml`:
 
 ```toml
 [package]
@@ -104,10 +104,10 @@ Create stub files for each module:
 Update `Cargo.toml` (workspace root) to add the new crate to `members`:
 
 ```toml
-"lp-glsl/crates/lp-riscv-emu-guest",
+"lp-glsl/lp-riscv-emu-guest",
 ```
 
-Add it after `lp-glsl/crates/lp-riscv-tools` in the members list.
+Add it after `lp-glsl/lp-riscv-tools` in the members list.
 
 ## Validate
 

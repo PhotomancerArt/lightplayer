@@ -10,7 +10,7 @@ functions to expected names.
 
 ### 3.1 Read LpLibFn Enum in Generator
 
-In `lp-glsl/apps/lp-glsl-builtin-gen-app/src/main.rs`:
+In `lp-glsl/lp-glsl-builtin-gen-app/src/main.rs`:
 
 - Import or parse `LpLibFn` enum from `lp-glsl-compiler` crate
 - Iterate over all `LpLibFn` variants to know what functions should exist

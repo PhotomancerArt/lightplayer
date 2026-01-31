@@ -2,12 +2,13 @@
 
 ## Overview
 
-Fix high-priority bugs identified in filetests failure analysis: variable scoping, precision tolerances, vec comparison functions, and vec conversion.
+Fix high-priority bugs identified in filetests failure analysis: variable scoping, precision
+tolerances, vec comparison functions, and vec conversion.
 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-filetests/filetests/
+lp-glsl/lp-glsl-filetests/filetests/
 ├── control/
 │   ├── for/variable-scope.glsl              # UPDATE: Fix test expectations
 │   └── if/variable-scope.glsl               # UPDATE: Fix test expectations
@@ -25,7 +26,7 @@ lp-glsl/crates/lp-glsl-filetests/filetests/
     ├── vec2/fn-equal.gen.glsl                # UPDATE: Fix test (investigate equal() bug)
     └── uvec2/from-scalars.glsl               # UPDATE: Fix test expectation (uint conversion)
 
-lp-glsl/crates/lp-glsl-compiler/src/
+lp-glsl/lp-glsl-compiler/src/
 ├── frontend/
 │   ├── codegen/
 │   │   ├── builtins/
@@ -96,15 +97,16 @@ if_stmt.rs - # UPDATE: Fix variable scoping
 ### Phase 1: Fix Test Expectations
 
 1. **Fix `control/for/variable-scope.glsl`**:
-   - Line 31: Change `test_for_loop_init_shadowing() == 3` to `== 100`
-   - Fix comment if needed to match expectation
+    - Line 31: Change `test_for_loop_init_shadowing() == 3` to `== 100`
+    - Fix comment if needed to match expectation
 
 2. **Fix `control/if/variable-scope.glsl`**:
-   - Line 38: Change `test_if_variable_shadowing() == 10` to `== 5`
-   - Fix comment if needed to match expectation
+    - Line 38: Change `test_if_variable_shadowing() == 10` to `== 5`
+    - Fix comment if needed to match expectation
 
 3. **Remove invalid test**:
-   - `control/for/variable-scope.glsl` line 92-101: Remove or fix invalid GLSL syntax test (`int j = i < 3` in for condition)
+    - `control/for/variable-scope.glsl` line 92-101: Remove or fix invalid GLSL syntax test (
+      `int j = i < 3` in for condition)
 
 ### Phase 2: Add Precision Tolerances
 
@@ -119,38 +121,38 @@ Add explicit tolerances to precision-sensitive tests:
 ### Phase 3: Fix equal() Function for bvec2
 
 1. **Investigate `builtin_equal()` in `relational.rs`**:
-   - Check how bvec2 arguments are handled
-   - Verify comparison logic for boolean vectors
-   - Ensure return type is correct
+    - Check how bvec2 arguments are handled
+    - Verify comparison logic for boolean vectors
+    - Ensure return type is correct
 
 2. **Fix implementation**:
-   - Ensure bvec2 arguments are compared correctly
-   - Verify nested calls work (e.g., `equal(equal(a, b), equal(b, c))`)
+    - Ensure bvec2 arguments are compared correctly
+    - Verify nested calls work (e.g., `equal(equal(a, b), equal(b, c))`)
 
 ### Phase 4: Fix uint() Cast for Negative Values
 
 1. **Fix `coercion.rs`**:
-   - Update `float_to_uint()` conversion to wrap negative values
-   - Use modulo 2^32 wrapping instead of clamping to 0
+    - Update `float_to_uint()` conversion to wrap negative values
+    - Use modulo 2^32 wrapping instead of clamping to 0
 
 2. **Fix `conversions.rs` (q32 backend)**:
-   - Update `fcvt_to_uint()` to wrap negative values
-   - Remove clamping logic, add wrapping logic
+    - Update `fcvt_to_uint()` to wrap negative values
+    - Remove clamping logic, add wrapping logic
 
 ### Phase 5: Fix Variable Scoping
 
 1. **Fix `scope.rs`**:
-   - Ensure `lookup_variable()` respects shadowing (inner shadows outer)
-   - Verify scope stack is managed correctly
+    - Ensure `lookup_variable()` respects shadowing (inner shadows outer)
+    - Verify scope stack is managed correctly
 
 2. **Fix `loop_for.rs`**:
-   - Ensure init-expression variables are scoped correctly
-   - Ensure loop variable shadows outer variables
-   - Properly push/pop scopes
+    - Ensure init-expression variables are scoped correctly
+    - Ensure loop variable shadows outer variables
+    - Properly push/pop scopes
 
 3. **Fix `if_stmt.rs`**:
-   - Ensure inner block variables shadow outer variables
-   - Properly push/pop scopes for if blocks
+    - Ensure inner block variables shadow outer variables
+    - Properly push/pop scopes for if blocks
 
 ## Success Criteria
 

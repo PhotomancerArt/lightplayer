@@ -7,7 +7,7 @@ signatures throughout the codebase to use `ObjectModule` instead of `JITModule`.
 
 ## Implementation
 
-- Update `lp-glsl/apps/lp-glsl-q32-metrics-app/Cargo.toml`:
+- Update `lp-glsl/lp-glsl-q32-metrics-app/Cargo.toml`:
     - Add `emulator` feature to `lp-glsl-compiler` dependency
 - Update imports in `src/main.rs`:
     - Change from `cranelift_jit::JITModule` to `cranelift_object::ObjectModule`

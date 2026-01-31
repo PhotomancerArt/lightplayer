@@ -2,7 +2,9 @@
 
 ## Overview
 
-Implement support for `out` and `inout` parameter qualifiers in GLSL functions. This enables functions to write values back to caller variables through parameters, which is needed for user-defined functions and native LPFX functions like `psrdnoise`.
+Implement support for `out` and `inout` parameter qualifiers in GLSL functions. This enables
+functions to write values back to caller variables through parameters, which is needed for
+user-defined functions and native LPFX functions like `psrdnoise`.
 
 ## Architecture
 
@@ -10,8 +12,8 @@ Implement support for `out` and `inout` parameter qualifiers in GLSL functions. 
 
 - **In parameters** (default): Passed by value (expanded to components for vectors/matrices)
 - **Out/inout parameters**: Passed as pointers (single pointer per parameter, regardless of type)
-  - For vectors/matrices: Pass pointer to first element (like arrays)
-  - Use `pointer_type` from ISA for all out/inout parameters
+    - For vectors/matrices: Pass pointer to first element (like arrays)
+    - Use `pointer_type` from ISA for all out/inout parameters
 
 ### Function Call Flow
 
@@ -36,7 +38,7 @@ Implement support for `out` and `inout` parameter qualifiers in GLSL functions. 
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-compiler/src/
+lp-glsl/lp-glsl-compiler/src/
 ├── frontend/
 │   ├── codegen/
 │   │   ├── signature.rs                    # UPDATE: Check qualifiers, pass pointers for out/inout
@@ -167,11 +169,12 @@ For in parameters:
 
 ## Testing Strategy
 
-- Review existing tests: `param-out.glsl`, `param-inout.glsl`, `param-mixed.glsl`, `edge-lvalue-out.glsl`
+- Review existing tests: `param-out.glsl`, `param-inout.glsl`, `param-mixed.glsl`,
+  `edge-lvalue-out.glsl`
 - Add tests for:
-  - Array out/inout parameters
-  - Multiple out parameters
-  - Out parameter aliasing
-  - Error cases: non-lvalue arguments
-  - Vector/matrix out parameters
-  - LPFX function out parameters
+    - Array out/inout parameters
+    - Multiple out parameters
+    - Out parameter aliasing
+    - Error cases: non-lvalue arguments
+    - Vector/matrix out parameters
+    - LPFX function out parameters

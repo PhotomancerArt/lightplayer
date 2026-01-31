@@ -6,7 +6,7 @@ Implement the `Vec3Q32` type with all operations, methods, and GLSL-style swizzl
 
 ## Implementation
 
-Create `lp-glsl/crates/lp-glsl-builtins/src/util/vec3_q32.rs` with:
+Create `lp-glsl/lp-glsl-builtins/src/util/vec3_q32.rs` with:
 
 - `Vec3Q32` struct with `x: Q32`, `y: Q32`, and `z: Q32` fields
 - Construction methods: `new()`, `from_f32()`, `from_i32()`, `zero()`, `one()`

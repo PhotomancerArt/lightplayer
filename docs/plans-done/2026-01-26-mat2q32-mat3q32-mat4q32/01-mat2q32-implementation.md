@@ -6,7 +6,7 @@ Implement the `Mat2Q32` type with all operations, methods, and operator overload
 
 ## Implementation
 
-Create `lp-glsl/crates/lp-glsl-builtins/src/util/mat2_q32.rs` with:
+Create `lp-glsl/lp-glsl-builtins/src/util/mat2_q32.rs` with:
 
 - `Mat2Q32` struct with `m: [Q32; 4]` field (column-major storage)
 - Construction methods: `new()`, `from_f32()`, `from_vec2()`, `identity()`, `zero()`

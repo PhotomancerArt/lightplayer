@@ -8,7 +8,7 @@ signatures.
 
 ## Implementation
 
-### File: `lp-glsl/apps/lp-glsl-builtin-gen-app/src/lpfx/generate.rs`
+### File: `lp-glsl/lp-glsl-builtin-gen-app/src/lpfx/generate.rs`
 
 **Update `generate_lpfx_fns`:**
 
@@ -22,7 +22,7 @@ signatures.
 - Helper function to compare function signatures (name + parameters)
 - Use this to identify unique signatures within a name group
 
-### File: `lp-glsl/apps/lp-glsl-builtin-gen-app/src/lpfx/validate.rs`
+### File: `lp-glsl/lp-glsl-builtin-gen-app/src/lpfx/validate.rs`
 
 **Add validation:**
 

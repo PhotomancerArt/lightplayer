@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Create the `fw-emu` app structure with Cargo.toml, basic project layout, and syscall-based provider stubs. This sets up the foundation for emulator-based firmware testing.
+Create the `fw-emu` app structure with Cargo.toml, basic project layout, and syscall-based provider
+stubs. This sets up the foundation for emulator-based firmware testing.
 
 ## Code Organization Reminders
 
@@ -44,7 +45,7 @@ fw-core = { path = "../../crates/fw-core", default-features = false }
 lp-server = { path = "../../crates/lp-server", default-features = false }
 lp-shared = { path = "../../crates/lp-shared", default-features = false }
 lp-model = { path = "../../crates/lp-model", default-features = false }
-lp-riscv-tools = { path = "../../../lp-glsl/crates/lp-riscv-tools", default-features = false }
+lp-riscv-tools = { path = "../../../lp-glsl/lp-riscv-tools", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 ```

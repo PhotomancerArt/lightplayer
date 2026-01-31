@@ -56,7 +56,7 @@ The new repo has:
 
 6. ✅ **Update Cross-References**
     - Updated `lp-app/crates/lp-engine/Cargo.toml` line 20: Changed path from
-      `../../../lp-glsl/crates/lp-glsl-compiler` to `../../../lp-glsl/crates/lp-glsl-compiler` (
+      `../../../lp-glsl/lp-glsl-compiler` to `../../../lp-glsl/lp-glsl-compiler` (
       correct relative path)
     - Updated `lp-glsl/Cargo.toml` to reference `lp-app/apps/lp-cli` (was `lp-core-cli`)
 
@@ -71,7 +71,7 @@ The new repo has:
 
 8. ✅ **Verify Build and Tests**
     - ✅ Fixed path issue: `lp-app/crates/lp-engine/Cargo.toml` - changed from
-      `../../lp-glsl/crates/lp-glsl-compiler` to `../../../lp-glsl/crates/lp-glsl-compiler`
+      `../../lp-glsl/lp-glsl-compiler` to `../../../lp-glsl/lp-glsl-compiler`
     - ✅ Fixed `cranelift-interpreter` dependency: Added to root workspace dependencies and updated
       `lp-glsl-compiler` to use workspace reference
     - ✅ Added missing `runtime-embive` crate to workspace members (later removed due to embedded
@@ -119,7 +119,7 @@ The new repo has:
 ## Known Issues
 
 1. ✅ **Path Issue**: Fixed - `lp-app/crates/lp-engine/Cargo.toml` line 20 now correctly references
-   `lp-glsl-compiler` with path `../../../lp-glsl/crates/lp-glsl-compiler`.
+   `lp-glsl-compiler` with path `../../../lp-glsl/lp-glsl-compiler`.
 
 2. ✅ **Workspace Structure**: Cargo doesn't support nested workspaces, so we consolidated everything
    into the root workspace. The lp-app and lp-glsl Cargo.toml files have their workspace sections

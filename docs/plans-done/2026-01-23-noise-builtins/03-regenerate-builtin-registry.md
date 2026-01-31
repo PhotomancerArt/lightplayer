@@ -12,7 +12,7 @@ Run the builtin generator to automatically discover the new `__lp_*` functions a
 Execute the builtin generator:
 
 ```bash
-cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
+cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl/lp-glsl-builtins-gen-app/Cargo.toml
 ```
 
 Or use the build script:

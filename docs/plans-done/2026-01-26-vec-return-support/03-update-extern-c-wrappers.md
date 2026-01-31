@@ -9,14 +9,14 @@ pointer parameter and write all components to memory.
 
 ### Files to Update
 
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_q32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_f32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_q32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_f32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_q32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_f32.rs`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/saturate_q32.rs` (vec3/vec4 variants)
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/saturate_f32.rs` (vec3/vec4 variants)
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_q32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/hue2rgb_f32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_q32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/hsv2rgb_f32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_q32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/rgb2hsv_f32.rs`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/math/saturate_q32.rs` (vec3/vec4 variants)
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/math/saturate_f32.rs` (vec3/vec4 variants)
 
 ### Pattern for Each Wrapper
 

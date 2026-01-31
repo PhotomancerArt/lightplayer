@@ -2,25 +2,26 @@
 
 ## Description
 
-Fix the `uint()` cast function to wrap negative float values according to GLSL spec (modulo 2^32) instead of clamping them to 0.
+Fix the `uint()` cast function to wrap negative float values according to GLSL spec (modulo 2^32)
+instead of clamping them to 0.
 
 ## Changes
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/expr/coercion.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/expr/coercion.rs`
 
 - **`float_to_uint()` conversion** (around line 98-101):
-  - Current: Uses `fcvt_to_uint` which may clamp negatives
-  - Fix: Wrap negative values using modulo 2^32
-  - Implementation: Convert to i32 first, then cast to u32 (wraps automatically)
+    - Current: Uses `fcvt_to_uint` which may clamp negatives
+    - Fix: Wrap negative values using modulo 2^32
+    - Implementation: Convert to i32 first, then cast to u32 (wraps automatically)
 
-### `lp-glsl/crates/lp-glsl-compiler/src/backend/transform/q32/converters/conversions.rs`
+### `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/conversions.rs`
 
 - **`convert_fcvt_to_uint()` function** (around line 189-236):
-  - Current: Clamps negative values to 0 (line 222: `select(is_negative, zero, shifted)`)
-  - Fix: Wrap negative values instead of clamping
-  - Implementation:
-    - For negative values, convert to i32, then cast to u32 (wraps)
-    - Remove clamping logic, use wrapping conversion
+    - Current: Clamps negative values to 0 (line 222: `select(is_negative, zero, shifted)`)
+    - Fix: Wrap negative values instead of clamping
+    - Implementation:
+        - For negative values, convert to i32, then cast to u32 (wraps)
+        - Remove clamping logic, use wrapping conversion
 
 ## Success Criteria
 

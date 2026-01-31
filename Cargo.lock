@@ -3319,18 +3319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-glsl-builtin-gen-app"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "lp-glsl-compiler",
- "proc-macro2",
- "quote",
- "syn 2.0.114",
- "walkdir",
-]
-
-[[package]]
 name = "lp-glsl-builtins"
 version = "40.0.0"
 dependencies = [
@@ -3343,6 +3331,18 @@ version = "40.0.0"
 dependencies = [
  "lp-glsl-builtins",
  "lp-riscv-emu-guest",
+]
+
+[[package]]
+name = "lp-glsl-builtins-gen-app"
+version = "40.0.0"
+dependencies = [
+ "glsl",
+ "lp-glsl-compiler",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+ "walkdir",
 ]
 
 [[package]]

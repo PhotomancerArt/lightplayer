@@ -21,7 +21,7 @@ to
 Copy `lp-glsl-builtins-emu-app/memory.ld` to `lp-riscv-emu-guest/memory.ld`:
 
 ```bash
-cp lp-glsl/apps/lp-glsl-builtins-emu-app/memory.ld lp-glsl/crates/lp-riscv-emu-guest/memory.ld
+cp lp-glsl/lp-glsl-builtins-emu-app/memory.ld lp-glsl/lp-riscv-emu-guest/memory.ld
 ```
 
 The file should remain unchanged.

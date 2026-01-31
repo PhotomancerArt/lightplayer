@@ -2,7 +2,8 @@
 
 ## Context
 
-During implementation of out parameter support, we discovered an architectural inconsistency in how pointer-based lvalues are handled:
+During implementation of out parameter support, we discovered an architectural inconsistency in how
+pointer-based lvalues are handled:
 
 - **Arrays**: Store pointer directly in `LValue::ArrayElement.array_ptr`
 - **Out/inout params**: Store pointer in `VarInfo.out_inout_ptr`, accessed via name lookup
@@ -32,18 +33,18 @@ This pattern is repeated in:
 
 **LValue Creation:**
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 
 **LValue Access:**
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs` (lines 23-77, 79-125)
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs` (lines 24-96, 98-148)
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs` (lines 23-77, 79-125)
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs` (lines 24-96, 98-148)
 
 **Storage:**
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/context.rs` (`VarInfo.out_inout_ptr`)
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/glsl_compiler.rs` (parameter declaration)
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/context.rs` (`VarInfo.out_inout_ptr`)
+- `lp-glsl/lp-glsl-compiler/src/frontend/glsl_compiler.rs` (parameter declaration)
 
 ## Questions
 
@@ -86,7 +87,8 @@ This pattern is repeated in:
 
 ### Q5: Name Field Usage
 
-**Question**: Should we keep the `name` field in `Variable` and `Component` variants for other purposes (debugging, error messages)?
+**Question**: Should we keep the `name` field in `Variable` and `Component` variants for other
+purposes (debugging, error messages)?
 
 **Considerations**:
 
@@ -94,7 +96,9 @@ This pattern is repeated in:
 - Could be useful for error messages and debugging
 - But adds complexity if kept
 
-**Answer**: Remove the `name` field after migration. If variable names are needed for error messages later, we can add them back or access them through other means (like the original AST node or source location).
+**Answer**: Remove the `name` field after migration. If variable names are needed for error messages
+later, we can add them back or access them through other means (like the original AST node or source
+location).
 
 ### Q6: Out/Inout Array Parameters
 
@@ -106,11 +110,14 @@ This pattern is repeated in:
 - Should they use `PointerBased` with `Direct` pattern?
 - Or keep current array handling separate?
 
-**Answer**: Migrate out/inout arrays to `PointerBased` with `Direct` pattern for full unification. The `ArrayElement` access pattern in `PointerBased` can still handle array element access (`arr[i]`), while `Direct` handles the array variable itself (`arr` as an out/inout parameter).
+**Answer**: Migrate out/inout arrays to `PointerBased` with `Direct` pattern for full unification.
+The `ArrayElement` access pattern in `PointerBased` can still handle array element access (
+`arr[i]`), while `Direct` handles the array variable itself (`arr` as an out/inout parameter).
 
 ### Q7: VarInfo.out_inout_ptr Cleanup
 
-**Question**: Should we remove `out_inout_ptr` from `VarInfo` after migration, or keep it for backwards compatibility?
+**Question**: Should we remove `out_inout_ptr` from `VarInfo` after migration, or keep it for
+backwards compatibility?
 
 **Considerations**:
 
@@ -118,7 +125,8 @@ This pattern is repeated in:
 - Keeping it allows gradual migration
 - Could deprecate and remove later
 
-**Answer**: Remove it immediately after migration. We're doing this refactoring in one shot, so cleaner is better.
+**Answer**: Remove it immediately after migration. We're doing this refactoring in one shot, so
+cleaner is better.
 
 ## Implementation Phases
 
@@ -163,13 +171,13 @@ This pattern is repeated in:
 ## Risks
 
 1. **Breaking Changes**: Risk of breaking existing functionality during migration
-   - **Mitigation**: Keep both code paths during migration, test thoroughly
+    - **Mitigation**: Keep both code paths during migration, test thoroughly
 
 2. **Complexity**: Adding new variant increases enum size
-   - **Mitigation**: Variant is well-designed, clear purpose
+    - **Mitigation**: Variant is well-designed, clear purpose
 
 3. **Migration Effort**: Need to update many sites
-   - **Mitigation**: Can be done incrementally, automated refactoring tools can help
+    - **Mitigation**: Can be done incrementally, automated refactoring tools can help
 
 ## Success Metrics
 
@@ -241,17 +249,25 @@ In `resolve_component_on_variable()`:
 
 DirectXShaderCompiler uses LLVM IR, which fundamentally differs from our approach:
 
-1. **LLVM Arguments as Pointers**: In LLVM IR, function arguments are already Values. For inout parameters, they're pointer types (`i32*`, `<4 x float>*`, etc.), so the pointer is inherent in the type system.
+1. **LLVM Arguments as Pointers**: In LLVM IR, function arguments are already Values. For inout
+   parameters, they're pointer types (`i32*`, `<4 x float>*`, etc.), so the pointer is inherent in
+   the type system.
 
-2. **No Custom LValue Abstraction**: They work directly with LLVM Values/Arguments. No equivalent to our `LValue` enum - they use LLVM's type system to distinguish storage models.
+2. **No Custom LValue Abstraction**: They work directly with LLVM Values/Arguments. No equivalent to
+   our `LValue` enum - they use LLVM's type system to distinguish storage models.
 
 3. **Inout Handling**: They process inout parameters twice:
-   - First as output (generate StoreOutput calls)
-   - Then as input (generate LoadInput calls)
-   - Tracked in `m_inoutArgSet` set for validation
+    - First as output (generate StoreOutput calls)
+    - Then as input (generate LoadInput calls)
+    - Tracked in `m_inoutArgSet` set for validation
 
-4. **Code Generation**: They replace loads/stores with DXIL intrinsics (`LoadInput`/`StoreOutput`) during a lowering pass, rather than generating pointer-based code upfront.
+4. **Code Generation**: They replace loads/stores with DXIL intrinsics (`LoadInput`/`StoreOutput`)
+   during a lowering pass, rather than generating pointer-based code upfront.
 
-**Key Insight**: Their approach works because LLVM's type system already distinguishes pointer types. Our approach needs to be explicit because Cranelift doesn't have the same semantic distinction - we need to track whether an LValue uses SSA variables or pointer-based storage.
+**Key Insight**: Their approach works because LLVM's type system already distinguishes pointer
+types. Our approach needs to be explicit because Cranelift doesn't have the same semantic
+distinction - we need to track whether an LValue uses SSA variables or pointer-based storage.
 
-**Our Design Comparison**: Our unified `PointerBased` variant is conceptually similar to how LLVM treats pointer-typed arguments - the storage model is explicit in the type. This validates our approach of making storage model explicit in the LValue type system.
+**Our Design Comparison**: Our unified `PointerBased` variant is conceptually similar to how LLVM
+treats pointer-typed arguments - the storage model is explicit in the type. This validates our
+approach of making storage model explicit in the LValue type system.

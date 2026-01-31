@@ -10,7 +10,7 @@ possible to the original GLSL code.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-builtins/src/
+lp-glsl/lp-glsl-builtins/src/
 ├── glsl/q32/
 │   ├── types/
 │   │   ├── q32.rs                              # UPDATE: Add mix() method

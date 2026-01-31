@@ -2,31 +2,32 @@
 
 ## Description
 
-Update LPFX function signature building to support out parameters. This enables native functions like `psrdnoise` to use out parameters.
+Update LPFX function signature building to support out parameters. This enables native functions
+like `psrdnoise` to use out parameters.
 
 ## Implementation
 
 ### Files to Modify
 
-1. **`lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_sig.rs`**
-   - Update `build_call_signature()` to check parameter qualifiers
-   - Update `convert_to_cranelift_types()` to handle qualifiers
+1. **`lp-glsl/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_sig.rs`**
+    - Update `build_call_signature()` to check parameter qualifiers
+    - Update `convert_to_cranelift_types()` to handle qualifiers
 
 ### Changes
 
 1. **`build_call_signature()`**
-   - Check `func.glsl_sig.parameters` for qualifiers
-   - For out/inout parameters: Add pointer type to signature
-   - For in parameters: Continue existing behavior (expand to components)
+    - Check `func.glsl_sig.parameters` for qualifiers
+    - For out/inout parameters: Add pointer type to signature
+    - For in parameters: Continue existing behavior (expand to components)
 
 2. **`convert_to_cranelift_types()`**
-   - Add parameter: `qualifiers: &[ParamQualifier]` (or iterate with parameters)
-   - For out/inout: Return pointer type
-   - For in: Return value types as before (expand vectors/matrices)
+    - Add parameter: `qualifiers: &[ParamQualifier]` (or iterate with parameters)
+    - For out/inout: Return pointer type
+    - For in: Return value types as before (expand vectors/matrices)
 
 3. **`expand_vector_args()`**
-   - May need updates if out parameters are passed differently
-   - Check if this function is used for LPFX calls
+    - May need updates if out parameters are passed differently
+    - Check if this function is used for LPFX calls
 
 ### Success Criteria
 

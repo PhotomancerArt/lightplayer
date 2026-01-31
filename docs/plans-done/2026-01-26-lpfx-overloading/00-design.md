@@ -11,17 +11,17 @@ same GLSL name but different parameter signatures (e.g., `lpfx_hsv2rgb(vec3)` an
 ### File Structure
 
 ```
-lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/lpfx/
+lp-glsl/lp-glsl-compiler/src/frontend/semantic/lpfx/
 ├── lpfx_fn.rs                    # UPDATE: No changes needed
 ├── lpfx_fns.rs                   # UPDATE: Generated code will have multiple entries per name
 ├── lpfx_fn_registry.rs           # UPDATE: Add overload resolution to find_lpfx_fn
 └── lpfx_sig.rs                   # No changes
 
-lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/
+lp-glsl/lp-glsl-compiler/src/frontend/codegen/
 ├── lpfx_fns.rs                   # UPDATE: Extract arg types and pass to find_lpfx_fn
 └── lp_lib_fns.rs                 # UPDATE: Extract arg types and pass to find_lpfx_fn
 
-lp-glsl/apps/lp-glsl-builtin-gen-app/src/lpfx/
+lp-glsl/lp-glsl-builtin-gen-app/src/lpfx/
 ├── generate.rs                   # UPDATE: Generate multiple LpfxFn entries per unique signature
 └── validate.rs                   # UPDATE: Validate distinct signatures for overloads
 ```

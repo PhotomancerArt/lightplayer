@@ -9,8 +9,8 @@ proper exports.
 
 ### Create Directories
 
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/math/`
 
 ### Create Module Files
 

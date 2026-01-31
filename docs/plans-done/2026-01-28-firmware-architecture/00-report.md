@@ -2,13 +2,16 @@
 
 ## Overview
 
-Study of the current firmware implementation and architecture design for separating firmware code into testable components. The goal is to maximize code that can be tested without hardware by creating a `fw-core` library and a `fw-emu` application that runs in the RISC-V32 emulator.
+Study of the current firmware implementation and architecture design for separating firmware code
+into testable components. The goal is to maximize code that can be tested without hardware by
+creating a `fw-core` library and a `fw-emu` application that runs in the RISC-V32 emulator.
 
 ## Current State
 
-### ESP32 Prototype (`lp-glsl/apps/esp32-glsl-jit`)
+### ESP32 Prototype (`lp-glsl/esp32-glsl-jit`)
 
 The current prototype demonstrates:
+
 - **GLSL compilation** on ESP32-C6 using Cranelift JIT
 - **Embassy async runtime** for task management
 - **Direct shader execution** with q32 fixed-point math
@@ -16,6 +19,7 @@ The current prototype demonstrates:
 - **Serial logging** via `esp-println`
 
 Key components:
+
 - `main.rs`: Main loop with shader compilation and rendering
 - `jit_fns.rs`: Host functions for debug/print (called by JIT code)
 - `shader_call.rs`: Direct shader function calling utilities
@@ -23,12 +27,14 @@ Key components:
 ### lp-server Library (`lp-app/crates/lp-server`)
 
 The `lp-server` crate is already `no_std` compatible and provides:
+
 - **Tick-based API**: `server.tick(delta_ms, incoming_messages)` - perfect for firmware
 - **Project management**: Handles multiple projects, filesystem changes, project loading
 - **Message processing**: Handles `ClientMessage` and returns `ServerMessage`
 - **Abstractions**: Uses `LpFs`, `OutputProvider`, and `ServerTransport` traits
 
 The server is designed to be platform-agnostic and works with:
+
 - In-memory filesystem (`LpFsMemory`)
 - Standard filesystem (`LpFsStd`)
 - Any `OutputProvider` implementation
@@ -37,15 +43,18 @@ The server is designed to be platform-agnostic and works with:
 ### Transport Layer (`lp-app/crates/lp-shared/src/transport`)
 
 The `ServerTransport` trait exists and defines:
+
 - `send(msg: ServerMessage) -> Result<(), TransportError>`
 - `receive() -> Result<Option<ClientMessage>, TransportError>`
 - `close() -> Result<(), TransportError>`
 
-Currently only websocket implementation exists (`lp-cli/src/server/transport_ws.rs`). Need serial implementation for firmware.
+Currently only websocket implementation exists (`lp-cli/src/server/transport_ws.rs`). Need serial
+implementation for firmware.
 
-### RISC-V Emulator (`lp-glsl/crates/lp-riscv-tools`)
+### RISC-V Emulator (`lp-glsl/lp-riscv-tools`)
 
 The emulator (`Riscv32Emulator`) can:
+
 - Execute RISC-V32 machine code
 - Handle function calls with proper ABI
 - Support syscalls (though limited)
@@ -62,34 +71,35 @@ This is perfect for `fw-emu` - we can run firmware code in the emulator without 
 **What goes in fw-core:**
 
 1. **Server Loop Logic**
-   - Main server loop that calls `lp_server::LpServer::tick()`
-   - Frame timing logic (60 FPS target)
-   - Message collection and dispatch
-   - This is the core logic that doesn't depend on hardware
+    - Main server loop that calls `lp_server::LpServer::tick()`
+    - Frame timing logic (60 FPS target)
+    - Message collection and dispatch
+    - This is the core logic that doesn't depend on hardware
 
 2. **Serial Transport Implementation**
-   - `ServerTransport` implementation for serial communication
-   - Message framing (JSON + `\n` termination)
-   - Buffering for partial messages
-   - Error handling (parse errors are ignored with warnings)
-   - This is generic enough to work with any serial-like interface
+    - `ServerTransport` implementation for serial communication
+    - Message framing (JSON + `\n` termination)
+    - Buffering for partial messages
+    - Error handling (parse errors are ignored with warnings)
+    - This is generic enough to work with any serial-like interface
 
 3. **Time/Timing Abstractions**
-   - Trait for getting current time (milliseconds since boot)
-   - Trait for sleeping/delaying
-   - Frame timing utilities
-   - These can be implemented differently for ESP32 vs emulator
+    - Trait for getting current time (milliseconds since boot)
+    - Trait for sleeping/delaying
+    - Frame timing utilities
+    - These can be implemented differently for ESP32 vs emulator
 
 4. **Filesystem Adapter**
-   - Adapter from `LpFs` trait to firmware filesystem (if needed)
-   - Or use `LpFsMemory` for in-memory storage
-   - ESP32-specific filesystem implementations would go in `fw-esp32`
+    - Adapter from `LpFs` trait to firmware filesystem (if needed)
+    - Or use `LpFsMemory` for in-memory storage
+    - ESP32-specific filesystem implementations would go in `fw-esp32`
 
 5. **Output Provider**
-   - Implementation of `OutputProvider` trait for firmware
-   - May need to be abstracted further if ESP32 needs GPIO-specific code
+    - Implementation of `OutputProvider` trait for firmware
+    - May need to be abstracted further if ESP32 needs GPIO-specific code
 
 **What does NOT go in fw-core:**
+
 - ESP32-specific hardware initialization (GPIO, UART, timers)
 - Embassy-specific async runtime setup
 - Hardware-specific filesystem (littlefs, etc.)
@@ -103,31 +113,32 @@ This is perfect for `fw-emu` - we can run firmware code in the emulator without 
 **What goes in fw-esp32:**
 
 1. **Hardware Initialization**
-   - ESP32 HAL initialization (`esp-hal`)
-   - UART setup for serial communication
-   - Timer setup for embassy runtime
-   - Heap allocation setup (`esp-alloc`)
+    - ESP32 HAL initialization (`esp-hal`)
+    - UART setup for serial communication
+    - Timer setup for embassy runtime
+    - Heap allocation setup (`esp-alloc`)
 
 2. **Serial Transport Implementation**
-   - ESP32-specific `ServerTransport` using `esp-hal` UART
-   - Wraps the generic serial transport from `fw-core` with ESP32 UART
+    - ESP32-specific `ServerTransport` using `esp-hal` UART
+    - Wraps the generic serial transport from `fw-core` with ESP32 UART
 
 3. **Filesystem Implementation**
-   - ESP32 filesystem using `esp-storage` + `littlefs2` (if needed)
-   - Or use `LpFsMemory` for initial implementation
-   - Implements `LpFs` trait
+    - ESP32 filesystem using `esp-storage` + `littlefs2` (if needed)
+    - Or use `LpFsMemory` for initial implementation
+    - Implements `LpFs` trait
 
 4. **Output Implementation**
-   - GPIO/LED driver code
-   - RMT driver for WS2812 LEDs
-   - Implements `OutputProvider` trait
+    - GPIO/LED driver code
+    - RMT driver for WS2812 LEDs
+    - Implements `OutputProvider` trait
 
 5. **Main Entry Point**
-   - Embassy async main function
-   - Spawns server loop task
-   - Handles hardware-specific setup
+    - Embassy async main function
+    - Spawns server loop task
+    - Handles hardware-specific setup
 
 **Features:**
+
 - `esp32c6` feature flag
 - `esp32c3` feature flag
 - Shared code with `fw-core` for server logic
@@ -139,30 +150,31 @@ This is perfect for `fw-emu` - we can run firmware code in the emulator without 
 **What goes in fw-emu:**
 
 1. **Emulator Integration**
-   - Uses `lp-riscv-tools` emulator
-   - Loads firmware code into emulator
-   - Executes server loop in emulator context
+    - Uses `lp-riscv-tools` emulator
+    - Loads firmware code into emulator
+    - Executes server loop in emulator context
 
 2. **Mock Transport Implementation**
-   - `ServerTransport` that reads/writes to stdin/stdout
-   - Or uses in-memory message queue for testing
-   - Allows testing without serial hardware
+    - `ServerTransport` that reads/writes to stdin/stdout
+    - Or uses in-memory message queue for testing
+    - Allows testing without serial hardware
 
 3. **Mock Filesystem**
-   - Uses `LpFsMemory` for in-memory filesystem
-   - Can load test projects from host filesystem
-   - Perfect for testing filesystem operations
+    - Uses `LpFsMemory` for in-memory filesystem
+    - Can load test projects from host filesystem
+    - Perfect for testing filesystem operations
 
 4. **Mock Output Provider**
-   - In-memory output provider (like `MemoryOutputProvider`)
-   - Can verify output without hardware
-   - Useful for testing shader rendering
+    - In-memory output provider (like `MemoryOutputProvider`)
+    - Can verify output without hardware
+    - Useful for testing shader rendering
 
 5. **Mock Time Provider**
-   - Simulated time that advances with emulator steps
-   - Allows testing timing-dependent code
+    - Simulated time that advances with emulator steps
+    - Allows testing timing-dependent code
 
 **Benefits:**
+
 - Test server logic without hardware
 - Test message handling
 - Test project loading/management
@@ -182,6 +194,7 @@ pub trait TimeProvider {
 ```
 
 Implementations:
+
 - `fw-esp32`: Uses `embassy-time::Instant`
 - `fw-emu`: Uses simulated time from emulator
 
@@ -194,12 +207,14 @@ pub trait SleepProvider {
 ```
 
 Implementations:
+
 - `fw-esp32`: Uses `embassy-time::Timer::after()`
 - `fw-emu`: Advances emulator time
 
 ### 3. Serial I/O Trait
 
-The `SerialIo` trait provides a simple, synchronous interface for reading and writing raw bytes. The transport layer handles message framing, buffering, and JSON parsing.
+The `SerialIo` trait provides a simple, synchronous interface for reading and writing raw bytes. The
+transport layer handles message framing, buffering, and JSON parsing.
 
 ```rust
 pub trait SerialIo {
@@ -245,16 +260,19 @@ pub trait SerialIo {
 
 **Key Design Decisions:**
 
-1. **Synchronous Interface**: The trait is synchronous, not async. This keeps the transport layer simple and allows it to work with both blocking and async UART implementations.
+1. **Synchronous Interface**: The trait is synchronous, not async. This keeps the transport layer
+   simple and allows it to work with both blocking and async UART implementations.
 
-2. **Non-blocking Reads**: `read_available()` never blocks. It reads whatever is currently available and returns immediately. This allows the server loop to poll for messages without blocking.
+2. **Non-blocking Reads**: `read_available()` never blocks. It reads whatever is currently available
+   and returns immediately. This allows the server loop to poll for messages without blocking.
 
-3. **Blocking Writes**: `write()` is blocking, which is fine for sending complete messages. If we need async writes later, we can add an async version or wrap it.
+3. **Blocking Writes**: `write()` is blocking, which is fine for sending complete messages. If we
+   need async writes later, we can add an async version or wrap it.
 
 4. **Transport Handles Buffering**: The `SerialTransport` implementation (in `fw-core`) handles:
-   - Buffering partial reads until a complete message (`\n` terminated)
-   - Parsing JSON
-   - Error handling (parse errors are ignored with warnings)
+    - Buffering partial reads until a complete message (`\n` terminated)
+    - Parsing JSON
+    - Error handling (parse errors are ignored with warnings)
 
 **Example Transport Implementation:**
 
@@ -426,6 +444,7 @@ pub trait FsFactory {
 ```
 
 Implementations:
+
 - `fw-esp32`: Creates ESP32 filesystem instance
 - `fw-emu`: Creates `LpFsMemory` instance
 
@@ -433,21 +452,28 @@ Implementations:
 
 ### Current State
 
-The `lp-server` crate is **synchronous** - `server.tick()` is not async. The `ServerTransport` trait is also synchronous - `receive()` returns `Option<ClientMessage>`, not a `Future`.
+The `lp-server` crate is **synchronous** - `server.tick()` is not async. The `ServerTransport` trait
+is also synchronous - `receive()` returns `Option<ClientMessage>`, not a `Future`.
 
-The websocket transport implementation uses async internally (tokio) but wraps it in a synchronous interface using channels. This pattern works well.
+The websocket transport implementation uses async internally (tokio) but wraps it in a synchronous
+interface using channels. This pattern works well.
 
 ### Do We Need Async Now?
 
 **Short answer: No, not right now.**
 
 **Reasons:**
-1. **ServerTransport is already synchronous** - The trait returns `Option<ClientMessage>`, perfect for polling
-2. **Serial I/O can be synchronous** - We can use blocking UART reads wrapped in non-blocking interface
-3. **Server loop can be synchronous** - We poll `transport.receive()` in a loop, which is non-blocking
+
+1. **ServerTransport is already synchronous** - The trait returns `Option<ClientMessage>`, perfect
+   for polling
+2. **Serial I/O can be synchronous** - We can use blocking UART reads wrapped in non-blocking
+   interface
+3. **Server loop can be synchronous** - We poll `transport.receive()` in a loop, which is
+   non-blocking
 4. **Simpler to start** - No need to deal with async traits, executors, etc. initially
 
 **When we might need async:**
+
 1. **lp-server becomes async** - If `server.tick()` becomes async in the future
 2. **Multiple concurrent operations** - If we need to handle multiple things simultaneously
 3. **Better resource utilization** - Async can be more efficient for I/O-bound operations
@@ -565,172 +591,179 @@ pub async fn run_server_loop_async<T: ServerTransport, TP: TimeProvider>(
 
 **Recommendation:**
 
-1. **Start synchronous** - Make `fw-core` server loop synchronous, works with both blocking and async UART
-2. **Add async version later** - When we need it, add `run_server_loop_async()` that uses async sleep
-3. **Keep SerialIo synchronous** - The trait is simple and works with both blocking and async implementations
-4. **Transport stays synchronous** - `ServerTransport` trait remains synchronous, implementations can use async internally
+1. **Start synchronous** - Make `fw-core` server loop synchronous, works with both blocking and
+   async UART
+2. **Add async version later** - When we need it, add `run_server_loop_async()` that uses async
+   sleep
+3. **Keep SerialIo synchronous** - The trait is simple and works with both blocking and async
+   implementations
+4. **Transport stays synchronous** - `ServerTransport` trait remains synchronous, implementations
+   can use async internally
 
 ## What Can Be Tested in fw-emu
 
 With this architecture, `fw-emu` can test:
 
 1. **Server Logic**
-   - Message handling
-   - Project management
-   - Filesystem change detection
-   - Project loading/unloading
+    - Message handling
+    - Project management
+    - Filesystem change detection
+    - Project loading/unloading
 
 2. **Transport Layer**
-   - Message serialization/deserialization
-   - Message framing
-   - Error handling
+    - Message serialization/deserialization
+    - Message framing
+    - Error handling
 
 3. **Filesystem Operations**
-   - File read/write
-   - Directory operations
-   - Change tracking
-   - Project structure
+    - File read/write
+    - Directory operations
+    - Change tracking
+    - Project structure
 
 4. **Output Provider**
-   - Shader rendering
-   - Output generation
-   - Frame updates
+    - Shader rendering
+    - Output generation
+    - Frame updates
 
 5. **Integration**
-   - End-to-end message flow
-   - Project sync
-   - Error recovery
+    - End-to-end message flow
+    - Project sync
+    - Error recovery
 
 ## What Still Requires Hardware
 
 Even with `fw-emu`, some things still need hardware:
 
 1. **GPIO/LED Drivers**
-   - Actual hardware output
-   - Timing-sensitive LED protocols (WS2812)
-   - GPIO configuration
+    - Actual hardware output
+    - Timing-sensitive LED protocols (WS2812)
+    - GPIO configuration
 
 2. **Real Filesystem**
-   - Flash storage behavior
-   - Filesystem corruption handling
-   - Power loss scenarios
+    - Flash storage behavior
+    - Filesystem corruption handling
+    - Power loss scenarios
 
 3. **Serial Communication**
-   - Real UART behavior
-   - Baud rate handling
-   - Hardware flow control
+    - Real UART behavior
+    - Baud rate handling
+    - Hardware flow control
 
 4. **Performance**
-   - Real memory constraints
-   - Real CPU performance
-   - Real timing behavior
+    - Real memory constraints
+    - Real CPU performance
+    - Real timing behavior
 
 ## Migration Path
 
 1. **Phase 1: Create fw-core**
-   - Extract server loop logic
-   - Create abstraction traits
-   - Implement serial transport (generic)
+    - Extract server loop logic
+    - Create abstraction traits
+    - Implement serial transport (generic)
 
 2. **Phase 2: Create fw-emu**
-   - Implement mock providers
-   - Integrate with RISC-V emulator
-   - Test basic server functionality
+    - Implement mock providers
+    - Integrate with RISC-V emulator
+    - Test basic server functionality
 
 3. **Phase 3: Refactor fw-esp32**
-   - Move ESP32 code to use fw-core
-   - Implement ESP32-specific providers
-   - Test on hardware
+    - Move ESP32 code to use fw-core
+    - Implement ESP32-specific providers
+    - Test on hardware
 
 4. **Phase 4: Expand Testing**
-   - Add more test scenarios to fw-emu
-   - Test edge cases
-   - Improve error handling
+    - Add more test scenarios to fw-emu
+    - Test edge cases
+    - Improve error handling
 
 ## Questions & Considerations
 
 1. **Async Runtime**
-   - Should `fw-core` be async or sync?
-   - Embassy requires async, but emulator might not
-   - Could use `async-trait` for flexibility
+    - Should `fw-core` be async or sync?
+    - Embassy requires async, but emulator might not
+    - Could use `async-trait` for flexibility
 
 2. **Memory Management**
-   - How to handle heap allocation in emulator?
-   - Can use `alloc` crate in both cases
-   - Emulator can simulate memory constraints
+    - How to handle heap allocation in emulator?
+    - Can use `alloc` crate in both cases
+    - Emulator can simulate memory constraints
 
 3. **Filesystem Choice**
-   - Start with `LpFsMemory` for both?
-   - Add real filesystem later?
-   - How to test filesystem-specific code?
+    - Start with `LpFsMemory` for both?
+    - Add real filesystem later?
+    - How to test filesystem-specific code?
 
 4. **Output Provider**
-   - How abstract should it be?
-   - ESP32 needs GPIO, emulator doesn't
-   - Can use trait objects for flexibility
+    - How abstract should it be?
+    - ESP32 needs GPIO, emulator doesn't
+    - Can use trait objects for flexibility
 
 5. **Testing Strategy**
-   - Unit tests for fw-core?
-   - Integration tests in fw-emu?
-   - Hardware tests in fw-esp32?
+    - Unit tests for fw-core?
+    - Integration tests in fw-emu?
+    - Hardware tests in fw-esp32?
 
 ## Recommendations
 
 1. **Start Simple**
-   - Begin with `fw-core` containing just the server loop
-   - Use `LpFsMemory` for both implementations initially
-   - Add abstractions as needed
+    - Begin with `fw-core` containing just the server loop
+    - Use `LpFsMemory` for both implementations initially
+    - Add abstractions as needed
 
 2. **Incremental Migration**
-   - Don't try to move everything at once
-   - Keep ESP32 prototype working while migrating
-   - Test each piece as you extract it
+    - Don't try to move everything at once
+    - Keep ESP32 prototype working while migrating
+    - Test each piece as you extract it
 
 3. **Focus on Testability**
-   - Prioritize code that can be tested in emulator
-   - Keep hardware-specific code minimal
-   - Use traits for all hardware interactions
+    - Prioritize code that can be tested in emulator
+    - Keep hardware-specific code minimal
+    - Use traits for all hardware interactions
 
 4. **Document Abstractions**
-   - Clear trait documentation
-   - Examples for each implementation
-   - Migration guide for adding new platforms
+    - Clear trait documentation
+    - Examples for each implementation
+    - Migration guide for adding new platforms
 
 ## SerialIo Design Summary
 
 ### How SerialIo Works
 
 1. **Simple, Synchronous Interface**
-   - `write(data)` - Blocking write (sends complete message)
-   - `read_available(buf)` - Non-blocking read (returns whatever is available, 0 if nothing)
-   - `has_data()` - Optional optimization hint
+    - `write(data)` - Blocking write (sends complete message)
+    - `read_available(buf)` - Non-blocking read (returns whatever is available, 0 if nothing)
+    - `has_data()` - Optional optimization hint
 
 2. **Transport Layer Handles Complexity**
-   - Buffers partial reads until complete message (`\n` terminated)
-   - Parses JSON
-   - Handles errors (parse errors ignored with warnings)
-   - Returns `Option<ClientMessage>` to server loop
+    - Buffers partial reads until complete message (`\n` terminated)
+    - Parses JSON
+    - Handles errors (parse errors ignored with warnings)
+    - Returns `Option<ClientMessage>` to server loop
 
 3. **Works with Both Blocking and Async UART**
-   - Blocking: Direct UART read/write calls
-   - Async: Wrap async UART with channels or blocking wrapper
+    - Blocking: Direct UART read/write calls
+    - Async: Wrap async UART with channels or blocking wrapper
 
 ### Async Considerations
 
 **Do we need async right now? No.**
 
 **Reasons:**
+
 - `ServerTransport` trait is already synchronous (returns `Option<ClientMessage>`)
 - Server loop can poll `transport.receive()` synchronously
 - Serial I/O can be blocking, wrapped in non-blocking interface
 - Simpler to start, can add async later if needed
 
 **When async might be needed:**
+
 - If `lp-server::tick()` becomes async in the future
 - If we need multiple concurrent operations
 - For better resource utilization with I/O-bound operations
 
 **Migration path:**
+
 - Start with synchronous server loop
 - Add async version later if needed (`run_server_loop_async()`)
 - Keep `SerialIo` trait synchronous (works with both blocking and async implementations)
@@ -739,19 +772,23 @@ Even with `fw-emu`, some things still need hardware:
 ## Conclusion
 
 The proposed architecture separates concerns well:
+
 - **fw-core**: Testable, hardware-agnostic server logic
 - **fw-esp32**: Hardware-specific ESP32 implementation
 - **fw-emu**: Testing platform using RISC-V emulator
 
 **SerialIo Design:**
+
 - Simple, synchronous trait for raw byte I/O
 - Transport layer handles message framing, buffering, and JSON parsing
 - Works with both blocking and async UART implementations
 - Non-blocking reads allow polling-based server loop
 
 **Async Strategy:**
+
 - Start synchronous (simpler, works now)
 - Add async version later if needed
 - Keep traits synchronous, implementations can use async internally
 
-This allows testing most firmware code without hardware, while keeping hardware-specific code isolated and minimal. The abstractions are reasonable and don't add too much complexity.
+This allows testing most firmware code without hardware, while keeping hardware-specific code
+isolated and minimal. The abstractions are reasonable and don't add too much complexity.

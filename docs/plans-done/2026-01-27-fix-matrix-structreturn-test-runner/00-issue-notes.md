@@ -29,18 +29,18 @@ Signature: Signature { params: [AbiParam { value_type: types::I32, purpose: Stru
 ### Current State
 
 1. **Function Signature Generation** (`signature.rs:132-140`):
-   - Matrix-returning functions correctly use StructReturn ABI
-   - StructReturn parameter is added as first parameter
-   - Function returns void (StructReturn functions don't return values)
+    - Matrix-returning functions correctly use StructReturn ABI
+    - StructReturn parameter is added as first parameter
+    - Function returns void (StructReturn functions don't return values)
 
 2. **Test Execution** (`execute_fn.rs:68-112`):
-   - `execute_function()` handles matrix types by calling `call_mat()`
-   - This should handle StructReturn correctly
+    - `execute_function()` handles matrix types by calling `call_mat()`
+    - This should handle StructReturn correctly
 
 3. **Error Location**:
-   - Error occurs when test runner tries to call the function
-   - Error message shows function signature expects 1 parameter (StructReturn pointer)
-   - But test runner is calling with 0 arguments
+    - Error occurs when test runner tries to call the function
+    - Error message shows function signature expects 1 parameter (StructReturn pointer)
+    - But test runner is calling with 0 arguments
 
 ### Investigation Needed
 
@@ -51,11 +51,12 @@ Signature: Signature { params: [AbiParam { value_type: types::I32, purpose: Stru
 
 ### Key Files to Investigate
 
-- `lp-glsl/crates/lp-glsl-compiler/src/exec/execute_fn.rs` - Test execution entry point
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs` - Signature generation
-- `lp-glsl/crates/lp-glsl-compiler/src/exec/emu.rs` - Emulator execution (check `call_mat()` implementation)
-- `lp-glsl/crates/lp-glsl-compiler/src/exec/jit.rs` - JIT execution (check `call_mat()` implementation)
-- `lp-glsl/crates/lp-glsl-filetests/src/test_run/run_detail.rs` - Test harness
+- `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs` - Test execution entry point
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/signature.rs` - Signature generation
+- `lp-glsl/lp-glsl-compiler/src/exec/emu.rs` - Emulator execution (check `call_mat()`
+  implementation)
+- `lp-glsl/lp-glsl-compiler/src/exec/jit.rs` - JIT execution (check `call_mat()` implementation)
+- `lp-glsl/lp-glsl-filetests/src/test_run/run_detail.rs` - Test harness
 
 ## Expected Behavior
 

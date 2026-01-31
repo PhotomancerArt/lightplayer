@@ -10,13 +10,13 @@ returns.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-compiler/src/frontend/
+lp-glsl/lp-glsl-compiler/src/frontend/
 ├── semantic/lpfx/
 │   └── lpfx_sig.rs                    # UPDATE: Add StructReturn support for vector returns
 └── codegen/
     └── lpfx_fns.rs                     # UPDATE: Handle StructReturn in LPFX calls
 
-lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/
+lp-glsl/lp-glsl-builtins/src/builtins/lpfx/
 ├── color/space/
 │   ├── hue2rgb_q32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper
 │   ├── hue2rgb_f32.rs                  # UPDATE: Add StructReturn parameter to extern C wrapper

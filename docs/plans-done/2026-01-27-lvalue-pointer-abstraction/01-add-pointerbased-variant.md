@@ -2,7 +2,9 @@
 
 ## Description
 
-Add the new `PointerBased` variant to the `LValue` enum and create the `PointerAccessPattern` enum to describe pointer access patterns. This phase adds the infrastructure without changing any behavior.
+Add the new `PointerBased` variant to the `LValue` enum and create the `PointerAccessPattern` enum
+to describe pointer access patterns. This phase adds the infrastructure without changing any
+behavior.
 
 ## Success Criteria
 
@@ -16,7 +18,7 @@ Add the new `PointerBased` variant to the `LValue` enum and create the `PointerA
 
 ### Files to Modify
 
-- `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/lvalue/types.rs`
+- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/types.rs`
 
 ### Changes
 

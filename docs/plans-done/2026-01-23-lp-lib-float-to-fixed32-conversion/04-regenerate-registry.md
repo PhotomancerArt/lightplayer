@@ -12,7 +12,7 @@ that match `LpLibFn::builtin_id()` expectations.
 Run the generator:
 
 ```bash
-cargo run --bin lp-glsl-builtin-gen-app --manifest-path lp-glsl/apps/lp-glsl-builtin-gen-app/Cargo.toml
+cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl/lp-glsl-builtins-gen-app/Cargo.toml
 ```
 
 Or use the build script:
@@ -23,7 +23,7 @@ scripts/build-builtins.sh
 
 ### 4.2 Verify Registry Output
 
-Check `lp-glsl/crates/lp-glsl-compiler/src/backend/builtins/registry.rs`:
+Check `lp-glsl/lp-glsl-compiler/src/backend/builtins/registry.rs`:
 
 - Should have `LpSimplex1`, `LpSimplex2`, `LpSimplex3` variants (not `Q32LpSimplex*`)
 - `BuiltinId::LpSimplex3.name()` should return `"__lp_q32_lpfx_snoise3"`

@@ -22,7 +22,7 @@ suffixes, requiring string manipulation. This is fragile and incorrect.
 `BuiltinId` enum variant.
 
 **Answer**: Add `builtin_id_from_name(name: &str) -> Option<BuiltinId>` to
-`lp-glsl/crates/lp-glsl-compiler/src/backend/builtins/registry.rs` as an `impl BuiltinId` method.
+`lp-glsl/lp-glsl-compiler/src/backend/builtins/registry.rs` as an `impl BuiltinId` method.
 This is the natural place since:
 
 - `BuiltinId::name()` already exists there (reverse mapping)

@@ -2,40 +2,41 @@
 
 ## Description
 
-Fix variable shadowing in for loops and if blocks so that inner scope variables correctly shadow outer scope variables, and outer variables remain unchanged when shadowed.
+Fix variable shadowing in for loops and if blocks so that inner scope variables correctly shadow
+outer scope variables, and outer variables remain unchanged when shadowed.
 
 ## Changes
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/semantic/scope.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/semantic/scope.rs`
 
 - **`lookup_variable()` function**: Ensure proper shadowing behavior
-  - Inner scope variables should shadow outer scope variables
-  - When looking up a variable, find the innermost declaration
-  - Verify scope stack is searched correctly (innermost first)
+    - Inner scope variables should shadow outer scope variables
+    - When looking up a variable, find the innermost declaration
+    - Verify scope stack is searched correctly (innermost first)
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/stmt/loop_for.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/loop_for.rs`
 
 - **For loop variable scoping**:
-  - Ensure init-expression variables are scoped correctly
-  - Push new scope for loop body
-  - Ensure loop variable shadows outer variables with same name
-  - Pop scope after loop body
-  - Verify init-expression variable is only in scope until end of loop body
+    - Ensure init-expression variables are scoped correctly
+    - Push new scope for loop body
+    - Ensure loop variable shadows outer variables with same name
+    - Pop scope after loop body
+    - Verify init-expression variable is only in scope until end of loop body
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/stmt/if_stmt.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/if_stmt.rs`
 
 - **If block variable scoping**:
-  - Ensure inner block variables shadow outer variables
-  - Push new scope for if block body
-  - Pop scope after if block body
-  - Verify variables declared in if block don't leak to outer scope
+    - Ensure inner block variables shadow outer variables
+    - Push new scope for if block body
+    - Pop scope after if block body
+    - Verify variables declared in if block don't leak to outer scope
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/context.rs`
 
 - **Scope management**: Verify scope stack is managed correctly
-  - Check `push_scope()` and `pop_scope()` usage
-  - Ensure scopes are pushed/popped at correct points
-  - Verify scope stack state is correct throughout codegen
+    - Check `push_scope()` and `pop_scope()` usage
+    - Ensure scopes are pushed/popped at correct points
+    - Verify scope stack state is correct throughout codegen
 
 ## Success Criteria
 

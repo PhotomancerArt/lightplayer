@@ -1,0 +1,56 @@
+[package]
+name = "lp-glsl-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false }
+cranelift-frontend = { workspace = true }
+cranelift-codegen = { workspace = true }
+cranelift-control = { workspace = true }
+cranelift-jit = { workspace = true, optional = true }
+cranelift-module = { workspace = true }
+cranelift-native = { workspace = true, optional = true }
+cranelift-object = { workspace = true, optional = true }
+cranelift-reader = { workspace = true, optional = true }
+hashbrown = { workspace = true }
+object = { workspace = true, optional = true }
+target-lexicon = { workspace = true }
+lp-glsl-jit-util = { path = "../lp-glsl-jit-util", default-features = false }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst", optional = true }
+lp-glsl-builtins = { path = "../lp-glsl-builtins" }
+anyhow = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+emulator = ["lp-riscv-emu", "lp-riscv-elf", "lp-riscv-inst", "cranelift-object", "object", "cranelift-codegen/disas"]  # Enable RISC-V 32-bit emulator support and disassembly
+std = [
+    "glsl/std",
+    "cranelift-codegen/std",
+    "cranelift-codegen/host-arch",
+    "cranelift-frontend/std",
+    "cranelift-module/std",
+    "cranelift-jit",
+    "cranelift-jit/std",
+    "cranelift-native",
+    "cranelift-reader",
+    "anyhow",
+    "lp-glsl-builtins/std"
+]
+core = [
+    "cranelift-codegen/core",
+    "cranelift-frontend/core",
+    "cranelift-module/core",
+    "cranelift-jit"  # JITModule supports no_std
+]
+
+[dev-dependencies]
+cranelift-reader = { workspace = true }
+cranelift-interpreter = { workspace = true }
+

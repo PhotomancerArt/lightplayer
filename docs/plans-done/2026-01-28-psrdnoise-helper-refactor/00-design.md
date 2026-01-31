@@ -9,7 +9,7 @@ the original GLSL as closely as possible.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-builtins/src/
+lp-glsl/lp-glsl-builtins/src/
 ├── glsl/q32/
 │   ├── fns/                                    # UPDATE: Add standalone functions
 │   │   ├── mod.rs                              # UPDATE: Export new functions

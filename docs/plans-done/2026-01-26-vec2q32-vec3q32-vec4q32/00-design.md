@@ -9,7 +9,7 @@ fixed-point arithmetic.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-builtins/src/util/
+lp-glsl/lp-glsl-builtins/src/util/
 ├── vec2_q32.rs              # NEW: Vec2Q32 type and implementation
 ├── vec3_q32.rs              # NEW: Vec3Q32 type and implementation
 ├── vec4_q32.rs              # NEW: Vec4Q32 type and implementation

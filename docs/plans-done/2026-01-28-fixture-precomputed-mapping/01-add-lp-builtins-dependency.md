@@ -20,7 +20,7 @@ Add `lp-glsl-builtins` dependency to `lp-app/crates/lp-engine/Cargo.toml`:
 ```toml
 [dependencies]
 # ... existing dependencies ...
-lp-glsl-builtins = { path = "../../../lp-glsl/crates/lp-glsl-builtins", default-features = false }
+lp-glsl-builtins = { path = "../../../lp-glsl/lp-glsl-builtins", default-features = false }
 ```
 
 Note: We'll use `default-features = false` to keep it minimal for embedded use.

@@ -126,7 +126,7 @@ fi
 
 # Show list of tests if requested
 if [ "$SHOW_LIST" = true ]; then
-  FILETESTS_DIR="$WORKSPACE_ROOT/lp-glsl/crates/lp-glsl-filetests/filetests"
+  FILETESTS_DIR="$WORKSPACE_ROOT/lp-glsl/lp-glsl-filetests/filetests"
 
   # Ensure lp-glsl directory exists
   if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then

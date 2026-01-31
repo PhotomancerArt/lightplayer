@@ -48,11 +48,11 @@ This causes incorrect positioning of simplex corners, leading to discontinuities
 
 ## Files to Modify
 
-1. `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`
-2. `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
-3. `lp-glsl/crates/lp-glsl-builtins/Cargo.toml` (add features)
-4. `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/lpfx_hash.rs` (conditional compilation)
-5. New: `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/test_hash.rs`
+1. `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`
+2. `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
+3. `lp-glsl/lp-glsl-builtins/Cargo.toml` (add features)
+4. `lp-glsl/lp-glsl-builtins/src/builtins/shared/lpfx_hash.rs` (conditional compilation)
+5. New: `lp-glsl/lp-glsl-builtins/src/builtins/shared/test_hash.rs`
 
 ## Success Criteria
 

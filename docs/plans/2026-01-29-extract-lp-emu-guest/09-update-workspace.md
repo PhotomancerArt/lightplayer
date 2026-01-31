@@ -23,12 +23,12 @@ Update the root `Cargo.toml` to add `lp-riscv-emu-guest` to the workspace member
 [workspace]
 members = [
     # ... existing members ...
-    "lp-glsl/crates/lp-riscv-emu-guest", # Add after lp-riscv-tools
+    "lp-glsl/lp-riscv-emu-guest", # Add after lp-riscv-tools
     # ... rest of members ...
 ]
 ```
 
-Add it in the `lp-glsl` section, after `lp-glsl/crates/lp-riscv-tools`.
+Add it in the `lp-glsl` section, after `lp-glsl/lp-riscv-tools`.
 
 **Note**: `lp-riscv-emu-guest` should NOT be added to `default-members` since it's `no_std` and only
 builds for RISC-V target, similar to `lp-glsl-builtins-emu-app`.
@@ -37,7 +37,7 @@ builds for RISC-V target, similar to `lp-glsl-builtins-emu-app`.
 
 Check if any build scripts reference `lp-glsl-builtins-emu-app` and need updating:
 
-- `lp-glsl/crates/lp-glsl-compiler/build.rs` - This references `lp-glsl-builtins-emu-app`
+- `lp-glsl/lp-glsl-compiler/build.rs` - This references `lp-glsl-builtins-emu-app`
   executable. This
   should still work since `lp-glsl-builtins-emu-app` still exists, just as a thin wrapper.
 

@@ -7,7 +7,7 @@ functions are now handled via the proper lookup chain.
 
 ## Implementation
 
-1. Update `lp-glsl/apps/lp-glsl-builtin-gen-app/src/main.rs`:
+1. Update `lp-glsl/lp-glsl-builtin-gen-app/src/main.rs`:
     - In `generate_map_testcase_to_builtin`, filter out LPFX functions
     - Only generate entries for regular q32 functions (e.g., `__lp_q32_sin`)
     - LPFX functions should be skipped entirely

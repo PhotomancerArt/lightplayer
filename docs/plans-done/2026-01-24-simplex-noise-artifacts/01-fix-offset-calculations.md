@@ -9,7 +9,7 @@ artifacts and discontinuities.
 
 ### 1. Fix 2D Simplex Offset Calculation
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`
 
 **Line 98-99**: Change from:
 
@@ -27,7 +27,7 @@ let offset2_y = offset1_y - order_y + UNSKEW_FACTOR_2D;
 
 ### 2. Fix 3D Simplex Offset Calculation
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
 
 **Line 163-165**: Change from:
 

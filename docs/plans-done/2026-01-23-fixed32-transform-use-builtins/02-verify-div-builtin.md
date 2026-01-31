@@ -9,7 +9,7 @@ the inline code currently handles.
 
 ### 2.1 Review div.rs Implementation
 
-Examine `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/div.rs`:
+Examine `lp-glsl/lp-glsl-builtins/src/builtins/q32/div.rs`:
 
 - Verify division-by-zero handling (saturates to max/min based on sign)
 - Check if small divisors (< 2^16) are handled correctly

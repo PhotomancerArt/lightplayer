@@ -44,7 +44,7 @@ stubs later following the same pattern as other lpfx functions if needed.
 ### Q4: What directory structure should we use?
 
 **Context:** The user wants to keep the same directory structure that lygia uses relative to
-`lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx`. Lygia has:
+`lp-glsl/lp-glsl-builtins/src/builtins/lpfx`. Lygia has:
 
 - `color/space/hsv2rgb.glsl`
 - `color/space/rgb2hsv.glsl`
@@ -53,8 +53,8 @@ stubs later following the same pattern as other lpfx functions if needed.
 
 **Answer:** Create the following structure:
 
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/color/space/` for HSV functions and `hue2rgb`
-- `lp-glsl/crates/lp-glsl-builtins/src/builtins/lpfx/math/` for `saturate`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/color/space/` for HSV functions and `hue2rgb`
+- `lp-glsl/lp-glsl-builtins/src/builtins/lpfx/math/` for `saturate`
 
 ### Q5: Should saturate be in a math subdirectory or color subdirectory?
 

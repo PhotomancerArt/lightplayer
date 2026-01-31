@@ -7,7 +7,7 @@ reverse lookup of `BuiltinId::name()`.
 
 ## Implementation
 
-1. Update `lp-glsl/apps/lp-glsl-builtin-gen-app/src/main.rs`:
+1. Update `lp-glsl/lp-glsl-builtin-gen-app/src/main.rs`:
     - Add function to generate `builtin_id_from_name` match statement
     - Insert generated function into `registry.rs` after `BuiltinId::name()` method
     - Use same pattern as `BuiltinId::name()` but reverse (name → variant)

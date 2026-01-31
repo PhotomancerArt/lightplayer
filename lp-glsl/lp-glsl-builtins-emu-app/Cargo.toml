@@ -1,0 +1,22 @@
+[package]
+name = "lp-glsl-builtins-emu-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lp-glsl-builtins-emu-app"
+path = "src/main.rs"
+test = false
+
+[features]
+# Optional features for macro compatibility (never enabled, just declared to avoid cfg warnings)
+std = []
+test = []
+
+[dependencies]
+lp-glsl-builtins = { path = "../lp-glsl-builtins" }
+lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
+
+[build-dependencies]
+

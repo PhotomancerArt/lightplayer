@@ -48,7 +48,7 @@ system that:
 ### Q1: Where should Q32 type come from?
 
 **Context**: We need Q32 (16.16 fixed-point) for storing pixel values and contribution fractions.
-Q32 is currently defined in `lp-glsl/crates/lp-glsl-builtins/src/glsl/q32/types/q32.rs`, but
+Q32 is currently defined in `lp-glsl/lp-glsl-builtins/src/glsl/q32/types/q32.rs`, but
 `lp-engine` doesn't currently depend on `lp-glsl-builtins`.
 
 **Answer**: Add `lp-glsl-builtins` as a dependency to `lp-engine`. We need Q32 for the fixed-point

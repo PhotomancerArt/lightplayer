@@ -9,14 +9,14 @@ but specific to Lightplayer's needs.
 ## File Structure
 
 ```
-lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/
+lp-glsl/lp-glsl-builtins/src/builtins/q32/
 ├── lpfx_hash.rs                 # NEW: Hash function (1D, 2D, 3D overloads)
 ├── lpfx_snoise1.rs             # NEW: 1D Simplex noise
 ├── lpfx_snoise2.rs             # NEW: 2D Simplex noise
 ├── lpfx_snoise3.rs             # NEW: 3D Simplex noise
 └── mod.rs                     # UPDATE: Add exports for new functions
 
-lp-glsl/crates/lp-glsl-compiler/src/
+lp-glsl/lp-glsl-compiler/src/
 ├── frontend/
 │   ├── semantic/
 │   │   └── lp_lib_fns.rs      # NEW: Semantic checking for lp_* functions

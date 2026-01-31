@@ -2,17 +2,19 @@
 
 ## Description
 
-Fix the `equal()` builtin function to correctly handle bvec2 arguments in nested calls. The test `test_vec2_equal_function_in_expression()` fails when calling `equal(equal(a, b), equal(b, c))` where the inner calls return bvec2.
+Fix the `equal()` builtin function to correctly handle bvec2 arguments in nested calls. The test
+`test_vec2_equal_function_in_expression()` fails when calling `equal(equal(a, b), equal(b, c))`
+where the inner calls return bvec2.
 
 ## Changes
 
-### `lp-glsl/crates/lp-glsl-compiler/src/frontend/codegen/builtins/relational.rs`
+### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/builtins/relational.rs`
 
 - **`builtin_equal()` function**: Investigate and fix bvec2 argument handling
-  - Check how bvec2 arguments are passed and compared
-  - Verify the comparison logic works correctly for boolean vectors
-  - Ensure return type is correct (bvec2 when comparing bvec2)
-  - Test nested calls: `equal(equal(a, b), equal(b, c))`
+    - Check how bvec2 arguments are passed and compared
+    - Verify the comparison logic works correctly for boolean vectors
+    - Ensure return type is correct (bvec2 when comparing bvec2)
+    - Test nested calls: `equal(equal(a, b), equal(b, c))`
 
 ## Investigation Steps
 

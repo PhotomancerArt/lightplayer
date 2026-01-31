@@ -10,7 +10,7 @@ algorithm correctness independent of hash function behavior.
 
 ### 1. Add Feature Flag
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/Cargo.toml`
+**File**: `lp-glsl/lp-glsl-builtins/Cargo.toml`
 
 Add feature:
 
@@ -21,7 +21,7 @@ test_hash_fixed = []
 
 ### 2. Create Test Hash Function Module
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/test_hash.rs` (new file)
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/shared/test_hash.rs` (new file)
 
 Create deterministic hash functions for testing:
 
@@ -51,7 +51,7 @@ pub mod test_hash {
 
 ### 3. Update Hash Module to Use Test Hash When Enabled
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/shared/lpfx_hash.rs`
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/shared/lpfx_hash.rs`
 
 Add conditional compilation:
 
@@ -73,7 +73,7 @@ pub extern "C" fn __lpfx_hash_1(x: u32, seed: u32) -> u32 {
 
 ### 4. Add Reference Value Tests
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add test with fixed hash:
 
@@ -137,7 +137,7 @@ mod fixed_hash_tests {
 
 ### 5. Add Similar Tests for 3D
 
-**File**: `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
+**File**: `lp-glsl/lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`
 
 Add similar test module with fixed hash tests.
 

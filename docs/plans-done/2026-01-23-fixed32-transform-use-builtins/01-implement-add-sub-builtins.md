@@ -9,7 +9,7 @@ Create `__lp_q32_add` and `__lp_q32_sub` builtin functions following the pattern
 
 ### 1.1 Create add.rs
 
-Create `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/add.rs`:
+Create `lp-glsl/lp-glsl-builtins/src/builtins/q32/add.rs`:
 
 - Implement `__lp_q32_add(a: i32, b: i32) -> i32`
 - Use i64 for intermediate calculation to avoid overflow
@@ -19,7 +19,7 @@ Create `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/add.rs`:
 
 ### 1.2 Create sub.rs
 
-Create `lp-glsl/crates/lp-glsl-builtins/src/builtins/q32/sub.rs`:
+Create `lp-glsl/lp-glsl-builtins/src/builtins/q32/sub.rs`:
 
 - Implement `__lp_q32_sub(a: i32, b: i32) -> i32`
 - Use i64 for intermediate calculation to avoid overflow

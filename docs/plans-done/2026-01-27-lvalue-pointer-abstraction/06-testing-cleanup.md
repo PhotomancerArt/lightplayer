@@ -2,7 +2,8 @@
 
 ## Description
 
-Run comprehensive tests, add new tests for `PointerBased` variant, verify no regressions, and perform final cleanup. This phase ensures the refactoring is complete and correct.
+Run comprehensive tests, add new tests for `PointerBased` variant, verify no regressions, and
+perform final cleanup. This phase ensures the refactoring is complete and correct.
 
 ## Success Criteria
 
@@ -19,58 +20,58 @@ Run comprehensive tests, add new tests for `PointerBased` variant, verify no reg
 ### Testing Strategy
 
 1. **Run Existing Tests**:
-   - Run all unit tests: `cargo test`
-   - Run all filetests: `just lp-glsl-filetests`
-   - Verify no regressions
+    - Run all unit tests: `cargo test`
+    - Run all filetests: `just lp-glsl-filetests`
+    - Verify no regressions
 
 2. **Add New Tests**:
-   - Test `PointerBased` with `Direct` pattern (out/inout scalar/vector/matrix)
-   - Test `PointerBased` with `Component` pattern (out/inout component access)
-   - Test `PointerBased` with `ArrayElement` pattern (if implemented)
-   - Test edge cases: nested access, component swizzling, etc.
+    - Test `PointerBased` with `Direct` pattern (out/inout scalar/vector/matrix)
+    - Test `PointerBased` with `Component` pattern (out/inout component access)
+    - Test `PointerBased` with `ArrayElement` pattern (if implemented)
+    - Test edge cases: nested access, component swizzling, etc.
 
 3. **Review Filetests**:
-   - Review existing out/inout parameter filetests
-   - Ensure they cover various scenarios:
-     - Scalar out/inout params
-     - Vector out/inout params
-     - Matrix out/inout params
-     - Array out/inout params (if supported)
-     - Component access on out/inout params
-     - Nested component access
+    - Review existing out/inout parameter filetests
+    - Ensure they cover various scenarios:
+        - Scalar out/inout params
+        - Vector out/inout params
+        - Matrix out/inout params
+        - Array out/inout params (if supported)
+        - Component access on out/inout params
+        - Nested component access
 
 4. **Performance Verification**:
-   - Verify that runtime lookups are eliminated
-   - Check that pointer access is direct (no HashMap lookups)
-   - Benchmark if possible (though improvement may be small)
+    - Verify that runtime lookups are eliminated
+    - Check that pointer access is direct (no HashMap lookups)
+    - Benchmark if possible (though improvement may be small)
 
 ### Files to Review/Modify
 
-- Test files in `lp-glsl/crates/lp-glsl-compiler/tests/`
-- Filetests in `lp-glsl/crates/lp-glsl-filetests/filetests/function/`
+- Test files in `lp-glsl/lp-glsl-compiler/tests/`
+- Filetests in `lp-glsl/lp-glsl-filetests/filetests/function/`
 - Specifically review:
-  - `param-out.glsl`
-  - `param-inout.glsl`
-  - `param-out-array.glsl`
-  - Any other out/inout related tests
+    - `param-out.glsl`
+    - `param-inout.glsl`
+    - `param-out-array.glsl`
+    - Any other out/inout related tests
 
 ### Cleanup Tasks
 
 1. **Code Cleanup**:
-   - Remove any TODOs or temporary comments
-   - Remove debug prints if any
-   - Ensure consistent code style
-   - Fix any warnings
+    - Remove any TODOs or temporary comments
+    - Remove debug prints if any
+    - Ensure consistent code style
+    - Fix any warnings
 
 2. **Documentation**:
-   - Update code comments if needed
-   - Ensure `PointerBased` variant is well-documented
-   - Document `PointerAccessPattern` enum variants
+    - Update code comments if needed
+    - Ensure `PointerBased` variant is well-documented
+    - Document `PointerAccessPattern` enum variants
 
 3. **Final Verification**:
-   - Run `cargo +nightly fmt` on entire workspace
-   - Run `cargo clippy` and fix any issues
-   - Ensure all linter errors are resolved
+    - Run `cargo +nightly fmt` on entire workspace
+    - Run `cargo clippy` and fix any issues
+    - Ensure all linter errors are resolved
 
 ### Code Organization
 
