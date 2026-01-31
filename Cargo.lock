@@ -3281,6 +3281,7 @@ dependencies = [
  "eframe",
  "egui",
  "futures-util",
+ "lp-client",
  "lp-engine-client",
  "lp-model",
  "lp-server",
@@ -3292,6 +3293,21 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tungstenite",
+]
+
+[[package]]
+name = "lp-client"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "lp-model",
+ "lp-shared",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

@@ -16,7 +16,7 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 /// # Examples
 ///
 /// ```rust,no_run
-/// use lp_cli::client::transport::ClientTransport;
+/// use lp_client::ClientTransport;
 /// use lp_model::{ClientMessage, ServerMessage, TransportError};
 ///
 /// struct MyTransport;

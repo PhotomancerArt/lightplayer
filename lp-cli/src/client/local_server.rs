@@ -3,14 +3,13 @@
 //! Encapsulates an in-memory server running on a separate thread and provides
 //! a client transport interface for communicating with it.
 
-use crate::client::transport::ClientTransport;
 use anyhow::Result;
+use lp_client::{AsyncLocalClientTransport, ClientTransport, create_local_transport_pair};
 use lp_model::TransportError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 
-use crate::client::local::{AsyncLocalClientTransport, create_local_transport_pair};
 use crate::server::{create_server, run_server_loop_async};
 
 /// Local server transport that manages an in-memory server thread

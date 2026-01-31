@@ -10,9 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 
-use crate::client::{LpClient, client_connect, specifier::HostSpecifier};
+use crate::client::{LpClient, client_connect};
 use crate::commands::dev::{fs_loop, push_project_async};
 use crate::debug_ui::DebugUiState;
+use lp_client::HostSpecifier;
 
 use super::args::DevArgs;
 

@@ -6,67 +6,67 @@ Implement the firmware architecture separation to enable testing firmware code w
 This involves:
 
 1. **Create `fw-core` crate** (`lp-app/crates/fw-core`)
-    - Generic `no_std` server loop logic
-    - Serial transport implementation using `SerialIo` trait
-    - Time/timing abstractions
-    - Shared utilities for firmware
+   - Generic `no_std` server loop logic
+   - Serial transport implementation using `SerialIo` trait
+   - Time/timing abstractions
+   - Shared utilities for firmware
 
 2. **Create `fw-esp32` app** (`lp-app/apps/fw-esp32`)
-    - ESP32-specific hardware initialization
-    - ESP32 UART implementation of `SerialIo`
-    - ESP32 filesystem implementation (or use `LpFsMemory` initially)
-    - ESP32 output provider implementation
-    - Main entry point using Embassy async runtime
+   - ESP32-specific hardware initialization
+   - ESP32 UART implementation of `SerialIo`
+   - ESP32 filesystem implementation (or use `LpFsMemory` initially)
+   - ESP32 output provider implementation
+   - Main entry point using Embassy async runtime
 
 3. **Create `fw-emu` app** (`lp-app/apps/fw-emu`)
-    - RISC-V32 emulator integration
-    - Mock `SerialIo` implementation (stdin/stdout or in-memory)
-    - Mock filesystem (`LpFsMemory`)
-    - Mock output provider
-    - Simulated time provider
-    - Main entry point for emulator execution
+   - RISC-V32 emulator integration
+   - Mock `SerialIo` implementation (stdin/stdout or in-memory)
+   - Mock filesystem (`LpFsMemory`)
+   - Mock output provider
+   - Simulated time provider
+   - Main entry point for emulator execution
 
 ## Current State
 
 ### Existing Code
 
 1. **ESP32 Prototype** (`lp-glsl/esp32-glsl-jit`)
-    - Working GLSL compilation and execution on ESP32-C6
-    - Uses Embassy async runtime
-    - Direct shader execution with q32 math
-    - This is a prototype, not the final firmware structure
+   - Working GLSL compilation and execution on ESP32-C6
+   - Uses Embassy async runtime
+   - Direct shader execution with q32 math
+   - This is a prototype, not the final firmware structure
 
 2. **lp-server crate** (`lp-app/crates/lp-server`)
-    - Already `no_std` compatible
-    - Tick-based API: `server.tick(delta_ms, incoming_messages)`
-    - Uses `LpFs`, `OutputProvider`, `ServerTransport` traits
-    - Project management and message handling
+   - Already `no_std` compatible
+   - Tick-based API: `server.tick(delta_ms, incoming_messages)`
+   - Uses `LpFs`, `OutputProvider`, `ServerTransport` traits
+   - Project management and message handling
 
 3. **Transport layer** (`lp-app/crates/lp-shared/src/transport`)
-    - `ServerTransport` trait exists (synchronous, non-blocking)
-    - Only websocket implementation exists currently
-    - Need serial transport implementation
+   - `ServerTransport` trait exists (synchronous, non-blocking)
+   - Only websocket implementation exists currently
+   - Need serial transport implementation
 
 4. **RISC-V Emulator** (`lp-glsl/lp-riscv-tools`)
-    - Can execute RISC-V32 machine code
-    - Supports function calls with proper ABI
-    - Runs in `no_std` environment
+   - Can execute RISC-V32 machine code
+   - Supports function calls with proper ABI
+   - Runs in `no_std` environment
 
 ### Key Design Decisions from Study
 
 1. **SerialIo Trait**: Simple synchronous interface for raw byte I/O
-    - `write(data)` - blocking write
-    - `read_available(buf)` - non-blocking read
-    - `has_data()` - optional optimization hint
+   - `write(data)` - blocking write
+   - `read_available(buf)` - non-blocking read
+   - `has_data()` - optional optimization hint
 
 2. **Transport Layer**: Handles message framing, buffering, JSON parsing
-    - Buffers partial reads until complete message (`\n` terminated)
-    - Returns `Option<ClientMessage>` to server loop
+   - Buffers partial reads until complete message (`\n` terminated)
+   - Returns `Option<ClientMessage>` to server loop
 
 3. **Async Strategy**: Start synchronous, add async later if needed
-    - `ServerTransport` trait is synchronous
-    - Server loop can be synchronous initially
-    - Can add async version later for Embassy integration
+   - `ServerTransport` trait is synchronous
+   - Server loop can be synchronous initially
+   - Can add async version later for Embassy integration
 
 ## Questions
 
@@ -204,3 +204,19 @@ more realistic and allows the host to interact with firmware behavior.
 emulator doesn't currently support user-provided syscalls. For initial work, we can leave syscall
 implementations as `todo!()` and focus on getting the basic structure laid down first. Syscall
 implementation can be a later phase.
+
+## Progress Update
+
+**Serial and Time Support Added**: Serial and time syscalls have been added to the emulator. The
+emulator now supports:
+- `SYSCALL_SERIAL_WRITE` (5): Write bytes to serial output buffer
+- `SYSCALL_SERIAL_READ` (6): Read bytes from serial input buffer
+- `SYSCALL_SERIAL_HAS_DATA` (7): Check if serial input has data
+- `SYSCALL_TIME_MS` (8): Get elapsed milliseconds since emulator start
+- `SYSCALL_YIELD` (4): Yield control back to host
+
+**Next Steps**: Complete fw-emu implementation:
+1. Implement syscall wrappers using `lp-riscv-emu-guest` syscall functions
+2. Implement server loop that processes messages and yields after each tick
+3. Complete main entry point to initialize server and run loop
+4. Create integration test that loads a scene and renders frames (similar to `scene_render.rs`)

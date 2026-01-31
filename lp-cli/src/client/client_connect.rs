@@ -3,12 +3,10 @@
 //! Provides `client_connect()` function that creates appropriate `ClientTransport`
 //! based on a `HostSpecifier`.
 
-use crate::client::transport::ClientTransport;
 use anyhow::{Result, bail};
+use lp_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 
 use crate::client::local_server::LocalServerTransport;
-use crate::client::specifier::HostSpecifier;
-use crate::client::transport_ws::WebSocketClientTransport;
 
 /// Connect to a server using the specified host specifier
 ///
@@ -27,7 +25,8 @@ use crate::client::transport_ws::WebSocketClientTransport;
 /// # Examples
 ///
 /// ```
-/// use lp_cli::client::{client_connect, specifier::HostSpecifier};
+/// use lp_cli::client::client_connect;
+/// use lp_client::HostSpecifier;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Connect to local in-memory server

@@ -114,8 +114,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_server_loop_async_compiles() {
-        use crate::client::local::create_local_transport_pair;
         use crate::server::{create_server, run_server_loop_async};
+        use lp_client::create_local_transport_pair;
 
         // Create server and transport pair
         let (server, _fs) = create_server::create_server(None, true, None).unwrap();
