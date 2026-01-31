@@ -12,10 +12,21 @@ lp-shared = { path = "../lp-shared" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 serde_json = "1"
-tokio-tungstenite = "0.21"
+tokio-tungstenite = { version = "0.21", optional = true }
 futures-util = "0.3"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
+
+[features]
+default = []
+serial = ["lp-riscv-emu", "lp-riscv-emu/std"]
+ws = ["tokio-tungstenite"]
+
+[dev-dependencies]
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-engine-client = { path = "../lp-engine-client" }
 
 [lints]
 workspace = true

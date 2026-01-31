@@ -7,6 +7,9 @@ pub mod client;
 pub mod local;
 pub mod specifier;
 pub mod transport;
+#[cfg(feature = "serial")]
+pub mod transport_serial;
+#[cfg(feature = "ws")]
 pub mod transport_ws;
 
 // Re-export main types
@@ -16,4 +19,7 @@ pub use local::{
 };
 pub use specifier::HostSpecifier;
 pub use transport::ClientTransport;
+#[cfg(feature = "serial")]
+pub use transport_serial::SerialClientTransport;
+#[cfg(feature = "ws")]
 pub use transport_ws::WebSocketClientTransport;

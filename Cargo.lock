@@ -2455,13 +2455,17 @@ version = "40.0.0"
 dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
+ "lp-client",
+ "lp-engine-client",
  "lp-glsl-builtins",
  "lp-model",
+ "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
  "lp-server",
  "lp-shared",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2564,7 +2568,7 @@ dependencies = [
 [[package]]
 name = "glsl"
 version = "7.0.0"
-source = "git+https://github.com/Yona-Appletree/glsl-parser.git?branch=feature%2Fspans#0c5505aadd2ceee3dc62f290a03991f8d6466b63"
+source = "git+https://github.com/light-player/glsl-parser.git?branch=feature%2Fspans#0c5505aadd2ceee3dc62f290a03991f8d6466b63"
 dependencies = [
  "nom",
  "nom_locate",
@@ -3302,7 +3306,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "lp-engine-client",
  "lp-model",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
  "lp-shared",
  "serde",
  "serde_json",

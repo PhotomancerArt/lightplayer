@@ -24,6 +24,11 @@ pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
     if error != 0 { error } else { value }
 }
 
+pub fn sys_yield() {
+    let args = [0i32; SYSCALL_ARGS];
+    syscall(SYSCALL_YIELD, &args);
+}
+
 /// Write bytes to serial output buffer
 ///
 /// # Arguments

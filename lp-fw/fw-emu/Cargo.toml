@@ -19,5 +19,13 @@ serde_json = { workspace = true, default-features = false, features = ["alloc"] 
 
 [build-dependencies]
 
+[dev-dependencies]
+lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
+lp-engine-client = { path = "../../lp-core/lp-engine-client" }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-shared = { path = "../../lp-core/lp-shared" }
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [lints]
 workspace = true

@@ -37,9 +37,17 @@ macro_rules! debug {
 // Emulator modules
 pub mod emu;
 pub mod serial;
+pub mod time;
+
+#[cfg(feature = "std")]
+pub mod test_util;
 
 // Re-exports for convenience
 pub use emu::{
     EmulatorError, InstLog, LogLevel, MemoryAccessKind, PanicInfo, Riscv32Emulator, StepResult,
     SyscallInfo, trap_code_to_string,
 };
+pub use time::TimeMode;
+
+#[cfg(feature = "std")]
+pub use test_util::{BinaryBuildConfig, ensure_binary_built, find_workspace_root};

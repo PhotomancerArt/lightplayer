@@ -4,13 +4,12 @@ fn main() {
     // We need to go up to fw-emu/, then to lp-fw/, then to root/, then to lp-glsl/, then to crates/, then to lp-riscv-emu-guest
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
-    // Go from lp-fw/fw-emu to lp-glsl/lp-riscv-emu-guest
+    // Go from lp-fw/fw-emu to lp-riscv/lp-riscv-emu-guest
     let emu_guest_path = std::path::Path::new(&manifest_dir)
         .parent() // lp-fw/
         .and_then(|p| p.parent()) // root/
         .and_then(|p| {
-            p.join("lp-glsl")
-                .join("crates")
+            p.join("lp-riscv")
                 .join("lp-riscv-emu-guest")
                 .canonicalize()
                 .ok()

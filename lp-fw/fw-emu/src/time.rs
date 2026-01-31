@@ -2,7 +2,7 @@
 //!
 //! Uses emulator syscalls to get time from the host.
 
-use lp_riscv_emu_guest::syscall::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
+use lp_riscv_emu_guest::{SYSCALL_ARGS, SYSCALL_TIME_MS, syscall};
 use lp_shared::time::TimeProvider;
 
 /// Syscall-based TimeProvider implementation
@@ -19,7 +19,7 @@ impl SyscallTimeProvider {
 
 impl TimeProvider for SyscallTimeProvider {
     fn now_ms(&self) -> u64 {
-        let mut args = [0i32; SYSCALL_ARGS];
+        let args = [0i32; SYSCALL_ARGS];
         let result = syscall(SYSCALL_TIME_MS, &args);
         // Result is u32 milliseconds, cast to u64
         result as u64

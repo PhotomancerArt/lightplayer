@@ -8,7 +8,7 @@
 
 mod tests {
     use lp_riscv_elf::load_elf;
-    use lp_riscv_emu::{LogLevel, Riscv32Emulator, test_util::BinaryBuildConfig};
+    use lp_riscv_emu::{LogLevel, Riscv32Emulator};
 
     use std::sync::Mutex;
 
@@ -145,12 +145,87 @@ mod tests {
         }
     }
 
+    static TEST_APP_PATH: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
     /// Ensure test app is built and return its path
     /// Rebuilds the app once per test execution (cached)
     fn ensure_test_app_bin() -> Result<std::path::PathBuf, String> {
-        use lp_riscv_emu::test_util::ensure_binary_built;
-        let config = BinaryBuildConfig::new("lp-riscv-emu-guest-test-app");
-        ensure_binary_built(config)
+        // Check cache first
+        {
+            let cached = TEST_APP_PATH.lock().unwrap();
+            if let Some(ref path) = *cached {
+                if path.exists() {
+                    return Ok(path.clone());
+                }
+            }
+        }
+
+        // Find workspace root
+        let workspace_root =
+            find_workspace_root().ok_or_else(|| "Failed to find workspace root".to_string())?;
+
+        let target = "riscv32imac-unknown-none-elf";
+        let profile = "release";
+        let exe_path = workspace_root
+            .join("target")
+            .join(target)
+            .join(profile)
+            .join("lp-emu-guest-test-app");
+
+        // Always rebuild
+        println!("Building lp-emu-guest-test-app...");
+        let output = std::process::Command::new("cargo")
+            .current_dir(&workspace_root)
+            .env("RUSTFLAGS", "-C target-feature=-c") // Disable compressed instructions
+            .args([
+                "build",
+                "--package",
+                "lp-emu-guest-test-app",
+                "--target",
+                target,
+                "--release",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to build: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("lp-emu-guest-test-app build failed");
+            println!("{}", stderr);
+            return Err(format!("Build failed"));
+        }
+
+        if !exe_path.exists() {
+            return Err(format!("Binary not found at: {}", exe_path.display()));
+        }
+
+        // Cache the path
+        {
+            let mut cached = TEST_APP_PATH.lock().unwrap();
+            *cached = Some(exe_path.clone());
+        }
+
+        Ok(exe_path)
+    }
+
+    /// Find workspace root by looking for Cargo.toml with [workspace]
+    fn find_workspace_root() -> Option<std::path::PathBuf> {
+        let mut current_dir = std::env::current_dir().ok()?;
+        loop {
+            let cargo_toml = current_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
+                    if contents.contains("[workspace]") {
+                        return Some(current_dir);
+                    }
+                }
+            }
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                return None;
+            }
+        }
     }
 
     /// Set up emulator with test app loaded

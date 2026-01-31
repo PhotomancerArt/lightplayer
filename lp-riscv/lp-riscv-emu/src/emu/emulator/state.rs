@@ -4,6 +4,7 @@ extern crate alloc;
 
 use super::super::{logging::LogLevel, memory::Memory};
 use crate::serial::host_serial::HostSerial;
+use crate::time::TimeMode;
 use alloc::vec::Vec;
 use cranelift_codegen::ir::TrapCode;
 
@@ -28,6 +29,8 @@ pub struct Riscv32Emulator {
     /// Start time for elapsed time calculation (only when std feature enabled)
     #[cfg(feature = "std")]
     pub(super) start_time: Option<Instant>,
+    /// Time mode for controlling time advancement
+    pub(super) time_mode: TimeMode,
 }
 
 impl Riscv32Emulator {
@@ -55,6 +58,7 @@ impl Riscv32Emulator {
             serial_host: None,
             #[cfg(feature = "std")]
             start_time: None,
+            time_mode: TimeMode::RealTime,
         }
     }
 
@@ -192,15 +196,101 @@ impl Riscv32Emulator {
         }
     }
 
-    /// Get elapsed milliseconds since start
+    /// Set the time mode
+    pub fn with_time_mode(mut self, mode: TimeMode) -> Self {
+        self.time_mode = mode;
+        self
+    }
+
+    /// Set the time mode (mutating)
+    pub fn set_time_mode(&mut self, mode: TimeMode) {
+        self.time_mode = mode;
+    }
+
+    /// Advance simulated time (only works in Simulated mode)
     ///
-    /// Returns 0 if start time not initialized or std feature disabled.
+    /// # Arguments
+    /// * `ms` - Milliseconds to advance
+    pub fn advance_time(&mut self, ms: u32) {
+        if let TimeMode::Simulated(ref mut current) = self.time_mode {
+            *current = current.saturating_add(ms);
+        }
+        // Ignore if in RealTime mode
+    }
+
+    /// Get elapsed milliseconds based on current time mode
+    ///
+    /// Returns 0 if start time not initialized (RealTime mode) or std feature disabled.
     #[cfg(feature = "std")]
     pub(super) fn elapsed_ms(&self) -> u32 {
-        if let Some(start) = self.start_time {
-            start.elapsed().as_millis() as u32
-        } else {
-            0
+        match self.time_mode {
+            TimeMode::RealTime => {
+                if let Some(start) = self.start_time {
+                    start.elapsed().as_millis() as u32
+                } else {
+                    0
+                }
+            }
+            TimeMode::Simulated(current) => current,
         }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub(super) fn elapsed_ms(&self) -> u32 {
+        match self.time_mode {
+            TimeMode::RealTime => 0,
+            TimeMode::Simulated(current) => current,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::TimeMode;
+    use alloc::vec;
+
+    #[test]
+    fn test_simulated_time_mode() {
+        let mut emu = Riscv32Emulator::new(vec![], vec![]).with_time_mode(TimeMode::Simulated(0));
+
+        assert_eq!(emu.elapsed_ms(), 0);
+
+        emu.advance_time(100);
+        assert_eq!(emu.elapsed_ms(), 100);
+
+        emu.advance_time(50);
+        assert_eq!(emu.elapsed_ms(), 150);
+    }
+
+    #[test]
+    fn test_realtime_mode_ignores_advance() {
+        let mut emu = Riscv32Emulator::new(vec![], vec![]).with_time_mode(TimeMode::RealTime);
+
+        // advance_time should be ignored in RealTime mode
+        let initial = emu.elapsed_ms();
+        emu.advance_time(100);
+        // In RealTime mode, elapsed_ms should not jump by 100 immediately
+        // (it might increase slightly due to real time passing, but not by 100)
+        let after = emu.elapsed_ms();
+        assert!(
+            after < initial + 100,
+            "RealTime mode should ignore advance_time"
+        );
+    }
+
+    #[test]
+    fn test_set_time_mode() {
+        let mut emu = Riscv32Emulator::new(vec![], vec![]);
+        // Default should be RealTime (can't check time_mode directly, but can check behavior)
+
+        emu.set_time_mode(TimeMode::Simulated(42));
+        assert_eq!(emu.elapsed_ms(), 42);
+
+        emu.set_time_mode(TimeMode::RealTime);
+        // Can't assert exact value in RealTime, but should not be 42
+        let elapsed = emu.elapsed_ms();
+        // In RealTime mode without initialization, should be 0
+        assert_eq!(elapsed, 0);
     }
 }
