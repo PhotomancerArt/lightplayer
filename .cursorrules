@@ -2,31 +2,56 @@
 
 # Warnings: Fix warnings before committing. Don't just ignore them. If you can't fix them easily, ask for help.
 
-# Commits: Commit frequently with small incremental changes
-
 # Commits: Use Conventional Commits format: `<type>(<scope>): <description>`
-#   - Types: feat, fix, chore, docs, etc.
-#   - Scope: sbs, osmt, wrappers, etc. (or component name)
-#   - Description: short description of the commit
-#   - Body: optional, include only if changes are not obvious from description
-#   - Body format: bulleted list of changes made, each item a single line
+
+# - Types: feat, fix, chore, docs, refactor, etc.
+
+# - Scope: sbs, osmt, wrappers, etc. (or component name)
+
+# - Description: short description of the commit
+
+# - Body: optional, include only if changes are not obvious from description
+
+# - Body format: bulleted list of changes made, each item a single line
 
 # Commits: Keep code compiling and tests passing between commits (when possible)
 
 # Formatting: Run `cargo +nightly fmt` on all changes before committing
 
 # Code Organization: Place helper utility functions at the bottom of files
+
 # Code Organization: Place more abstract things, entry points, and tests first
+
 # Code Organization: Keep related functionality grouped together
 
 # Tests: Tests should be in `mod tests` at the top of the module
+
 # Tests: Tests should be short and concise, use utility functions to avoid duplication
+
 # Tests: Utility functions should be at the bottom of the test module
+
 # Tests: Use builder pattern to create test data
 
+# Tests: Tests should be concise and readable, ideally under 20 lines
+
+# Tests: Use helper functions liberally - if test logic is repeated, extract it
+
+# Tests: Test helpers should be at the bottom of test files
+
+# Tests: Prefer clear test names over inline comments explaining what the test does
+
+# Tests: Avoid debug println! in tests unless debugging a specific failure
+
+# Tests: Use unwrap_or_else/expect with helpful error messages rather than match statements
+
+# Tests: Each test should test one thing clearly
+
 # Language: Keep language professional and restrained
+
 # Language: Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"
+
 # Language: Avoid emoticons
+
 # Language: Use measured, factual descriptions of what was implemented
 
 # Style: Follow existing cranelift code style

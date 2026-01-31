@@ -1,0 +1,21 @@
+[package]
+name = "lp-riscv-emu-guest-test-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lp-riscv-emu-guest-test-app"
+path = "src/main.rs"
+test = false
+
+# Note: panic = "abort" must be set here (not in workspace) because Cargo doesn't allow
+# panic to be overridden in package-specific profiles. The warning about profiles being
+# ignored is informational - the panic setting still works.
+[profile.release]
+panic = "abort"
+
+[build-dependencies]
+
+[dependencies]
+lp-riscv-emu-guest = { path = "../lp-riscv-emu-guest" }

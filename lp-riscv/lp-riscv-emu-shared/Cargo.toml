@@ -1,0 +1,14 @@
+[package]
+name = "lp-riscv-emu-shared"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared code for RISC-V JIT testing using Cranelift"
+
+[lib]
+
+[dependencies]
+
+[features]
+std = []
+

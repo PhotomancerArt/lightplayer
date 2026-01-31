@@ -1,0 +1,31 @@
+[package]
+name = "lp-glsl-filetests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-glsl-compiler = { path = "../lp-glsl-compiler", features = ["std", "emulator"] }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-glsl-jit-util = { path = "../lp-glsl-jit-util" }
+anyhow = { workspace = true }
+cranelift-codegen = { workspace = true, features = ["host-arch"] }
+cranelift-module = { workspace = true }
+cranelift-object = { workspace = true }
+cranelift-frontend = { workspace = true }
+cranelift-native = { workspace = true }
+target-lexicon = { workspace = true }
+regex = { workspace = true }
+walkdir = "2"
+glob = { workspace = true }
+num_cpus = "1.17.0"
+glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false, features = ["std"] }
+
+[[test]]
+name = "filetests"
+harness = true

@@ -2,42 +2,54 @@
 <module type="EMPTY_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/apps/lp-cli/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/apps/lp-cli/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-engine-client/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-engine-client/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-engine/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-engine/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-model/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-server/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-server/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-app/crates/lp-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/embive-program/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/esp32-glsl-jit/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/lp-builtin-gen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/lp-builtins-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/lp-test/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/test-structreturn/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-builtins/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-filetests-gen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-glsl-compiler/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-glsl-compiler/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-glsl-compiler/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-glsl-filetests/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-glsl-filetests/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-jit-util/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-jit-util/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-riscv-shared/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-riscv-tools/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-riscv-tools/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lp-riscv-tools/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/runtime-embive/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/embassy_hello_world_hashbrown/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/lp-builtin-gen/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/lpfx-impl-macro/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/q32-metrics/src" isTestSource="false" />
-      <excludeFolder url="file://$MODULE_DIR$/lp-glsl/apps/esp32-glsl-jit/target" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-cli/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-cli/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-esp32/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine-client/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-engine/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-model/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-server/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-elf/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-guest-test-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-guest/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-emu/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-inst/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-inst/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-emu-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-jit-util/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-jit-util/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-q32-metrics-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpfx-impl-macro/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
+      <excludeFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

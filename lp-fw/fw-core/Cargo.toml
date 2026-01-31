@@ -1,0 +1,24 @@
+[package]
+name = "fw-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+std = []
+
+[dependencies]
+lp-model = { path = "../../lp-core/lp-model", default-features = false }
+lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
+lp-server = { path = "../../lp-core/lp-server", default-features = false }
+serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+lp-shared = { path = "../../lp-core/lp-shared", default-features = false, features = ["std"] }
+lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

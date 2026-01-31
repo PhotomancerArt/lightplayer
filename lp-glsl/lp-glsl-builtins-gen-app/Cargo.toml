@@ -1,0 +1,22 @@
+[package]
+name = "lp-glsl-builtins-gen-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lp-glsl-builtins-gen-app"
+path = "src/main.rs"
+
+[lib]
+name = "lp_builtin_gen"
+path = "src/lib.rs"
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "parsing"] }
+quote = "1.0"
+walkdir = "2.5"
+proc-macro2 = "1.0"
+glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false }
+lp-glsl-compiler = { path = "../lp-glsl-compiler" }
+

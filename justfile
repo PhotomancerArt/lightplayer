@@ -1,9 +1,10 @@
 # LightPlayer justfile
 # Common development tasks
-
 # Variables
+
 rv32_target := "riscv32imac-unknown-none-elf"
-rv32_packages := "esp32-glsl-jit lp-builtins-app"
+rv32_packages := "esp32-glsl-jit lp-glsl-builtins-emu-app"
+rv32_firmware_packages := "fw-esp32"
 lp_glsl_dir := "lp-glsl"
 
 # Default recipe - show available commands
@@ -16,16 +17,16 @@ default:
 
 # Ensure RISC-V target is installed
 install-rv32-target:
-    @if ! rustup target list --installed | grep -q "^{{rv32_target}}$"; then \
-        echo "Installing target {{rv32_target}}..."; \
-        rustup target add {{rv32_target}}; \
+    @if ! rustup target list --installed | grep -q "^{{ rv32_target }}$"; then \
+        echo "Installing target {{ rv32_target }}..."; \
+        rustup target add {{ rv32_target }}; \
     else \
-        echo "Target {{rv32_target}} already installed"; \
+        echo "Target {{ rv32_target }} already installed"; \
     fi
 
 # Generate builtin boilerplate code
 generate-builtins:
-    cargo run --bin lp-builtin-gen -p lp-builtin-gen
+    cargo run --bin lp-glsl-builtins-gen-app -p lp-glsl-builtins-gen-app
 
 # ============================================================================
 # Build commands - Workspace-wide
@@ -37,15 +38,22 @@ build-host:
 build-host-release:
     cargo build --release
 
-build-rv32: install-rv32-target
-    @echo "Building RISC-V packages ({{rv32_target}})..."
-    cargo build --target {{rv32_target}} -p lp-builtins-app
-    cd lp-glsl/apps/esp32-glsl-jit && cargo build --target {{rv32_target}} --release --features esp32c6
+build-rv32: install-rv32-target build-rv32-jit-test build-fw-esp32 build-rv32-emu-guest-test-app
 
-build-rv32-release: install-rv32-target
-    @echo "Building RISC-V packages in release mode ({{rv32_target}})..."
-    cargo build --target {{rv32_target}} -p lp-builtins-app --release
-    cd lp-glsl/apps/esp32-glsl-jit && cargo build --target {{rv32_target}} --release --features esp32c6
+build-rv32-release: build-rv32
+
+# riscv32: jit-test
+build-rv32-jit-test: install-rv32-target
+    cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
+    cd lp-glsl/esp32-glsl-jit && cargo build --target {{ rv32_target }} --release --features esp32c6
+
+# riscv32: fw-esp32
+build-fw-esp32: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
+
+# riscv32: emu-guest-test-app
+build-rv32-emu-guest-test-app: install-rv32-target
+    cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
 [parallel]
 build: build-host build-rv32
@@ -68,11 +76,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 build-glsl-release:
-    cargo build --release --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
-
+    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 # ============================================================================
 # Formatting
@@ -91,11 +98,21 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-builtins-app --exclude esp32-glsl-jit -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lp-glsl-builtins-emu-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target
-    @echo "Running clippy on RISC-V packages ({{rv32_target}})..."
-    cd lp-glsl/apps/esp32-glsl-jit && cargo clippy --target {{rv32_target}} --release --features esp32c6 -- --no-deps -D warnings
+clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32 clippy-rv32-emu-guest-test-app
+
+# riscv32: jit-test clippy
+clippy-rv32-jit-test: install-rv32-target
+    cd lp-glsl/esp32-glsl-jit && cargo clippy --target {{ rv32_target }} --release --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: fw-esp32 clippy
+clippy-fw-esp32: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --release --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: emu-guest-test-app clippy
+clippy-rv32-emu-guest-test-app: install-rv32-target
+    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -119,10 +136,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics -- --no-deps -D warnings
+    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -149,7 +166,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-builtins --package lp-filetests-gen --package lp-glsl-compiler --package lp-glsl-filetests --package lp-jit-util --package lp-riscv-shared --package lp-riscv-tools --package lp-builtin-gen --package lp-test --package q32-metrics
+    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh
@@ -173,16 +190,16 @@ ci-app: fmt-check clippy-app build-app test-app
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
 # Fix code issues then run CI (sequential, not parallel)
-fixci: fix ci
+fci: fix ci
 
 # Fix code issues then run CI for lp-app (sequential, not parallel)
-fixci-app:
+fci-app:
     @just fmt
     @just clippy-app-fix
     @just ci-app
 
 # Fix code issues then run CI for lp-glsl (sequential, not parallel)
-fixci-glsl:
+fci-glsl:
     @just fmt
     @just clippy-glsl-fix
     @just ci-glsl
@@ -197,7 +214,7 @@ clean:
 
 # Clean everything including target directories
 clean-all: clean
-    rm -rf {{lp_glsl_dir}}/target
+    rm -rf {{ lp_glsl_dir }}/target
 
 # ============================================================================
 # Git workflows
@@ -214,10 +231,9 @@ merge: check
 # ============================================================================
 # Demo projects
 # ============================================================================
-
 # Run lp-cli dev server with an example project
 # Usage: just demo [example-name]
+
 # Example: just demo basic
 demo example="basic":
-    cd lp-app/apps/lp-cli && cargo run -- dev ../../../examples/{{example}}
-
+    cd lp-cli && cargo run -- dev ../examples/{{ example }}

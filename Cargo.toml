@@ -1,50 +1,60 @@
 [workspace]
 members = [
     # lp-app workspace members
-    "lp-app/crates/lp-engine",
-    "lp-app/crates/lp-engine-client",
-    "lp-app/crates/lp-shared",
-    "lp-app/crates/lp-server",
-    "lp-app/apps/lp-cli",
-    "lp-app/crates/lp-model",
+    "lp-core/lp-engine",
+    "lp-core/lp-engine-client",
+    "lp-core/lp-shared",
+    "lp-core/lp-server",
+    "lp-fw/fw-core",
+    "lp-cli",
+    "lp-fw/fw-esp32",
+    "lp-fw/fw-emu",
+    "lp-core/lp-model",
     # lp-glsl workspace members
-    "lp-glsl/crates/lp-builtins",
-    "lp-glsl/crates/lp-filetests-gen",
-    "lp-glsl/crates/lp-glsl-compiler",
-    "lp-glsl/crates/lp-glsl-filetests",
-    "lp-glsl/crates/lp-jit-util",
-    "lp-glsl/crates/lp-riscv-shared",
-    "lp-glsl/crates/lp-riscv-tools",
-    "lp-glsl/apps/lp-builtin-gen",
-    "lp-glsl/apps/lp-builtins-app",
-    "lp-glsl/apps/lp-test",
-    "lp-glsl/apps/esp32-glsl-jit",
-    "lp-glsl/apps/q32-metrics",
+    "lp-glsl/lp-glsl-builtins",
+    "lp-glsl/lp-glsl-filetests-gen-app",
+    "lp-glsl/lp-glsl-compiler",
+    "lp-glsl/lp-glsl-filetests",
+    "lp-glsl/lp-glsl-jit-util",
+    "lp-riscv/lp-riscv-emu-shared",
+    "lp-riscv/lp-riscv-inst",
+    "lp-riscv/lp-riscv-emu",
+    "lp-riscv/lp-riscv-elf",
+    "lp-riscv/lp-riscv-emu-guest",
+    "lp-riscv/lp-riscv-emu-guest-test-app",
+    "lp-glsl/lp-glsl-builtins-gen-app",
+    "lp-glsl/lp-glsl-builtins-emu-app",
+    "lp-glsl/lp-glsl-filetests-app",
+    "lp-glsl/esp32-glsl-jit",
+    "lp-glsl/lp-glsl-q32-metrics-app",
 ]
 resolver = "2"
 
-# Exclude lp-builtins-app and esp32-glsl-jit from default workspace builds (they're no_std, only build for RISC-V)
+# Exclude lp-glsl-builtins-emu-app, esp32-glsl-jit, and fw-esp32 from default workspace builds (they're no_std, only build for RISC-V)
 # They're still in workspace members so they can use workspace dependencies
-# Build them explicitly with: just build-builtins or just esp32-build
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
     # lp-app workspace members
-    "lp-app/crates/lp-engine",
-    "lp-app/crates/lp-engine-client",
-    "lp-app/crates/lp-shared",
-    "lp-app/crates/lp-server",
-    "lp-app/apps/lp-cli",
-    "lp-app/crates/lp-model",
-    # lp-glsl workspace members (excluding lp-builtins-app)
-    "lp-glsl/crates/lp-builtins",
-    "lp-glsl/crates/lp-filetests-gen",
-    "lp-glsl/crates/lp-glsl-compiler",
-    "lp-glsl/crates/lp-glsl-filetests",
-    "lp-glsl/crates/lp-jit-util",
-    "lp-glsl/crates/lp-riscv-shared",
-    "lp-glsl/crates/lp-riscv-tools",
-    "lp-glsl/apps/lp-builtin-gen",
-    "lp-glsl/apps/lp-test",
-    "lp-glsl/apps/q32-metrics",
+    "lp-core/lp-engine",
+    "lp-core/lp-engine-client",
+    "lp-core/lp-shared",
+    "lp-core/lp-server",
+    "lp-fw/fw-core",
+    "lp-cli",
+    "lp-core/lp-model",
+    # lp-glsl workspace members (excluding lp-glsl-builtins-emu-app)
+    "lp-glsl/lp-glsl-builtins",
+    "lp-glsl/lp-glsl-filetests-gen-app",
+    "lp-glsl/lp-glsl-compiler",
+    "lp-glsl/lp-glsl-filetests",
+    "lp-glsl/lp-glsl-jit-util",
+    "lp-riscv/lp-riscv-emu-shared",
+    "lp-riscv/lp-riscv-inst",
+    "lp-riscv/lp-riscv-emu",
+    "lp-riscv/lp-riscv-elf",
+    "lp-glsl/lp-glsl-builtins-gen-app",
+    "lp-glsl/lp-glsl-filetests-app",
+    "lp-glsl/lp-glsl-q32-metrics-app",
 ]
 
 [workspace.package]

@@ -1,0 +1,30 @@
+[package]
+name = "lp-riscv-elf"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+description = "RISC-V 32-bit ELF loading and linking utilities"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-riscv-inst = { path = "../lp-riscv-inst" }
+lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
+object = { version = "0.37.3", features = ["write"] }
+hashbrown = { workspace = true }
+
+[features]
+std = []  # This crate always requires std, but feature flag for consistency
+
+[dev-dependencies]
+cranelift-codegen = { workspace = true, features = ["riscv32"] }
+cranelift-frontend = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-object = { workspace = true }
+target-lexicon = "0.13"
+
+[[example]]
+name = "simple_codegen"
+required-features = []
