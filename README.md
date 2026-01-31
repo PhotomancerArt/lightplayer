@@ -75,7 +75,6 @@ The repository is organized into several main areas:
 - **`lp-model`** - Data models and API definitions for projects, nodes, and server communication
 - **`lp-shared`** - Shared utilities for filesystem, logging, time, and transport
 - **`lp-engine-client`** - Client library for interacting with the engine
-- **`lp-client`** - Low-level client transport implementation
 
 ## GLSL Compiler (`lp-glsl/`)
 

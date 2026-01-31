@@ -2,7 +2,8 @@
 
 ## Overview
 
-Delete the `lp-client` crate entirely and rebuild `LpClient` as a standalone client in `lp-cli`. Create a new async `ClientTransport` trait in `lp-cli` built for our needs.
+Delete the `lp-client` crate entirely and rebuild `LpClient` as a standalone client in `lp-cli`.
+Create a new async `ClientTransport` trait in `lp-cli` built for our needs.
 
 ## Goals
 
@@ -50,13 +51,13 @@ pub struct LpClient {
 
 impl LpClient {
     pub fn new(transport: Arc<dyn ClientTransport>) -> Self;
-    
+
     // Filesystem operations
     pub async fn fs_read(&self, path: &str) -> Result<Vec<u8>>;
     pub async fn fs_write(&self, path: &str, data: Vec<u8>) -> Result<()>;
     pub async fn fs_delete_file(&self, path: &str) -> Result<()>;
     pub async fn fs_list_dir(&self, path: &str, recursive: bool) -> Result<Vec<String>>;
-    
+
     // Project operations
     pub async fn project_load(&self, path: &str) -> Result<ProjectHandle>;
     pub async fn project_unload(&self, handle: ProjectHandle) -> Result<()>;
@@ -80,7 +81,8 @@ pub fn serializable_response_to_project_response(
 
 1. **Request ID generation**: Use `Arc<AtomicU64>` for thread-safe request ID counter
 2. **Message creation**: Create `ClientMessage` directly in each method
-3. **Response extraction**: Extract responses directly from `ServerMessage` - no need for separate extract functions
+3. **Response extraction**: Extract responses directly from `ServerMessage` - no need for separate
+   extract functions
 4. **Error handling**: Use `anyhow::Result` for simplicity
 5. **Transport**: The `ClientTransport` trait is async and designed for tokio
 

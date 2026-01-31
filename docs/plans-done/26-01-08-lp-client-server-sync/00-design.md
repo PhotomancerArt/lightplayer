@@ -2,7 +2,9 @@
 
 ## Overview
 
-This plan implements client-server synchronization for LightPlayer, enabling `lp-client` to sync with `lp-server` instances. The design uses frame-based incremental updates, handle-based runtime identification, and a transport-agnostic client library.
+This plan implements client-server synchronization for LightPlayer, enabling `lp-client` to sync
+with `lp-server` instances. The design uses frame-based incremental updates, handle-based runtime
+identification, and a transport-agnostic client library.
 
 ## Architecture Decisions
 
@@ -18,9 +20,9 @@ This plan implements client-server synchronization for LightPlayer, enabling `lp
 
 - Frame ID increments every `ProjectRuntime::update()` call
 - Per-node tracking:
-  - `created_frame: FrameId` - when node was created
-  - `last_config_frame: FrameId` - when config last changed
-  - `last_state_frame: FrameId` - when state last changed
+    - `created_frame: FrameId` - when node was created
+    - `last_config_frame: FrameId` - when config last changed
+    - `last_state_frame: FrameId` - when state last changed
 - Frame IDs reset to 0 on project reload
 
 ### Message Protocol
@@ -263,7 +265,8 @@ impl ProjectManager {
 **New Functions:**
 
 - `ProjectRuntime::get_current_frame()` - Get current frame ID
-- `ProjectRuntime::get_changed_nodes_since()` - Get nodes changed since frame (uses min of config/state frame)
+- `ProjectRuntime::get_changed_nodes_since()` - Get nodes changed since frame (uses min of
+  config/state frame)
 - `ProjectRuntime::get_node_detail()` - Get full node detail by handle
 - `ProjectRuntime::get_engine_stats()` - Get engine statistics
 - `ProjectRuntime::get_all_node_handles()` - Get all current node handles
@@ -295,7 +298,8 @@ impl ProjectManager {
 
 ### Change Detection
 
-- `get_changed_nodes_since()` uses `min(last_config_frame, last_state_frame)` to determine if node changed
+- `get_changed_nodes_since()` uses `min(last_config_frame, last_state_frame)` to determine if node
+  changed
 - If either config or state changed since `since_frame`, node is included
 
 ### Client Sync Flow
@@ -304,9 +308,9 @@ impl ProjectManager {
 2. Client sends `GetChanges` request with `since_frame = last_frame_id`
 3. Server responds with changes
 4. Client updates `RemoteProject` state:
-   - Updates `last_frame_id` to `current_frame`
-   - Updates/inserts nodes in `nodes` map
-   - Removes nodes not in `node_handles` list
+    - Updates `last_frame_id` to `current_frame`
+    - Updates/inserts nodes in `nodes` map
+    - Removes nodes not in `node_handles` list
 5. Returns reference to updated `RemoteProject`
 
 ### Message Handling
