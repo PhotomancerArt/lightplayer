@@ -8,7 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false }
+glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false }
 cranelift-frontend = { workspace = true }
 cranelift-codegen = { workspace = true }
 cranelift-control = { workspace = true }

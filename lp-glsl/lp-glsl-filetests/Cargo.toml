@@ -24,7 +24,7 @@ regex = { workspace = true }
 walkdir = "2"
 glob = { workspace = true }
 num_cpus = "1.17.0"
-glsl = { git = "https://github.com/Yona-Appletree/glsl-parser.git", branch = "feature/spans", default-features = false, features = ["std"] }
+glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, features = ["std"] }
 
 [[test]]
 name = "filetests"
