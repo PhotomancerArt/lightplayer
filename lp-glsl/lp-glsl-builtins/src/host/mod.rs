@@ -14,8 +14,8 @@ pub use logger::init as init_logger;
 pub use registry::HostFn;
 
 // Macros are exported at crate root via #[macro_export]
-// Users should use: lp_glsl_builtins::host_debug! and lp_glsl_builtins::host_println!
-// Or we can re-export them here if needed
+// Users should use: lp_glsl_builtins::host_debug!
+// Note: host_println! has been removed - use log::info! instead
 
 // Function declarations are provided by:
 // - Emulator: `lp-glsl-builtins-emu-app` (syscall-based)

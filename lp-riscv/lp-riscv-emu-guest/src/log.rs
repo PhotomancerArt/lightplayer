@@ -36,15 +36,13 @@ impl Log for SyscallLogger {
         let msg_bytes = msg.as_bytes();
 
         // Call syscall
-        unsafe {
-            __host_log(
-                level,
-                module_path_bytes.as_ptr(),
-                module_path_bytes.len(),
-                msg_bytes.as_ptr(),
-                msg_bytes.len(),
-            );
-        }
+        __host_log(
+            level,
+            module_path_bytes.as_ptr(),
+            module_path_bytes.len(),
+            msg_bytes.as_ptr(),
+            msg_bytes.len(),
+        );
     }
 
     fn flush(&self) {

@@ -1,8 +1,5 @@
 use crate::syscall::{SYSCALL_ARGS, SYSCALL_LOG, syscall};
 
-/// Syscall number for write (always prints)
-const SYSCALL_WRITE: i32 = 2;
-
 /// Log function implementation for emulator.
 ///
 /// This function is called by the logger implementation.

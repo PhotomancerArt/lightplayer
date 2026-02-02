@@ -11,10 +11,6 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-// Debug macro
-#[macro_use]
-mod debug;
-
 // Instruction utilities
 pub mod auipc_imm;
 pub mod decode;
