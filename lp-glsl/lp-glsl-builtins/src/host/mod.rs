@@ -6,9 +6,11 @@
 //! - Tests: Functions defined here using `std` (gated by feature flag)
 //! - JIT: Functions registered by `GlJitModule` (delegate to `lp-glsl-compiler` macros)
 
+mod logger;
 mod macros;
 mod registry;
 
+pub use logger::init as init_logger;
 pub use registry::HostFn;
 
 // Macros are exported at crate root via #[macro_export]
@@ -26,13 +28,13 @@ pub use registry::HostFn;
 mod no_std_format;
 
 #[cfg(not(feature = "std"))]
-pub use no_std_format::{_debug_format, _println_format};
+pub use no_std_format::_debug_format;
 
 #[cfg(feature = "test")]
 mod test;
 
 #[cfg(feature = "test")]
-pub use test::{__host_debug, __host_println};
+pub use test::__host_log;
 
 #[cfg(test)]
 #[cfg(feature = "test")]

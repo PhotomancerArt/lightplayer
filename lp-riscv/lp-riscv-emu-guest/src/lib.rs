@@ -13,6 +13,7 @@
 pub mod allocator;
 pub mod entry;
 pub mod host;
+pub mod log;
 pub mod panic;
 pub mod print;
 
@@ -20,7 +21,7 @@ mod syscall;
 
 // Re-export syscall constants and function
 pub use syscall::{
-    SYSCALL_ARGS, SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
+    SYSCALL_ARGS, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
     SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD, sys_serial_has_data,
     sys_serial_read, sys_serial_write, sys_yield, syscall,
 };
@@ -33,6 +34,9 @@ pub use print::_print;
 
 // Re-export guest serial types from shared crate
 pub use lp_riscv_emu_shared::{GuestSerial, SerialSyscall};
+
+// Re-export logger initialization
+pub use log::init as init_logger;
 
 /// Implementation for actual guest syscalls
 /// This is guest-specific, so it stays in lp-riscv-emu-guest

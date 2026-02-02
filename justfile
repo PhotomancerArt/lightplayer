@@ -98,7 +98,7 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-glsl-builtins-emu-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lp-glsl-builtins-emu-app --exclude esp32-glsl-jit --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
 
 clippy-rv32: install-rv32-target clippy-rv32-jit-test clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
@@ -126,10 +126,26 @@ fix: fmt clippy-fix
 # ============================================================================
 
 clippy-app:
-    cargo clippy --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model -- --no-deps -D warnings
+    cargo clippy --package lp-engine \
+                 --package lp-engine-client \
+                 --package lp-shared \
+                 --package lp-server \
+                 --package lp-cli \
+                 --package lp-model \
+                 -- \
+                 --no-deps \
+                 -D warnings
 
 clippy-app-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
+    cargo clippy --fix\
+                 --allow-dirty\
+                 --allow-staged \
+                 --package lp-engine \
+                 --package lp-engine-client \
+                 --package lp-shared \
+                 --package lp-server \
+                 --package lp-cli \
+                 --package lp-model
 
 # ============================================================================
 # Linting - lp-glsl only

@@ -14,9 +14,11 @@ lp-riscv-inst = { path = "../lp-riscv-inst" }
 lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 hashbrown = { workspace = true }
+log = { workspace = true, default-features = false }
+env_logger = { workspace = true, optional = true }
 
 [features]
-std = []  # For time tracking (std::time::Instant) and debug output (std::io::Write)
+std = ["env_logger", "log/std"]  # For time tracking (std::time::Instant) and debug output (std::io::Write)
 
 [dev-dependencies]
 cranelift-codegen = { workspace = true, features = ["riscv32"] }

@@ -12,6 +12,9 @@ use crate::serial::SerialIo;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 
+#[cfg(any(feature = "emu", feature = "esp32"))]
+use log::debug;
+
 /// Serial transport implementation
 ///
 /// Uses `SerialIo` for raw byte I/O and handles message framing, buffering,
@@ -35,6 +38,9 @@ impl<Io: SerialIo> SerialTransport<Io> {
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+        #[cfg(any(feature = "emu", feature = "esp32"))]
+        debug!("SerialTransport: Sending message");
+
         // Serialize to JSON
         let json = serde_json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
@@ -49,6 +55,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         self.io
             .write(b"\n")
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
+
+        #[cfg(any(feature = "emu", feature = "esp32"))]
+        debug!("SerialTransport: Sent {} bytes", json_bytes.len() + 1);
 
         Ok(())
     }
@@ -71,13 +80,20 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         // Look for complete message (ends with \n)
         if let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
+            #[cfg(any(feature = "emu", feature = "esp32"))]
+            debug!(
+                "SerialTransport: Received complete message ({} bytes)",
+                newline_pos + 1
+            );
+
             // Extract message (without \n)
             let message_bytes: Vec<u8> = self.read_buffer.drain(..=newline_pos).collect();
             let message_str = match str::from_utf8(&message_bytes[..message_bytes.len() - 1]) {
                 Ok(s) => s,
                 Err(_) => {
                     // Invalid UTF-8, ignore with warning
-                    // In no_std, we can't easily log, so just return None
+                    #[cfg(any(feature = "emu", feature = "esp32"))]
+                    log::warn!("SerialTransport: Invalid UTF-8 in message");
                     return Ok(None);
                 }
             };
@@ -87,12 +103,18 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 Ok(msg) => Ok(Some(msg)),
                 Err(_) => {
                     // Parse error - ignore with warning (as specified)
-                    // In no_std, we can't easily log, so just return None
+                    #[cfg(any(feature = "emu", feature = "esp32"))]
+                    log::warn!("SerialTransport: Failed to parse JSON message");
                     Ok(None)
                 }
             }
         } else {
             // No complete message yet
+            #[cfg(any(feature = "emu", feature = "esp32"))]
+            debug!(
+                "SerialTransport: No complete message yet ({} bytes buffered)",
+                self.read_buffer.len()
+            );
             Ok(None)
         }
     }

@@ -1,55 +1,31 @@
-use crate::syscall::{SYSCALL_ARGS, syscall};
+use crate::syscall::{SYSCALL_ARGS, SYSCALL_LOG, syscall};
 
 /// Syscall number for write (always prints)
 const SYSCALL_WRITE: i32 = 2;
 
-/// Syscall number for debug (only prints if DEBUG=1)
-const SYSCALL_DEBUG: i32 = 3;
-
-/// Debug function implementation for emulator.
+/// Log function implementation for emulator.
 ///
-/// This function is called by the `host_debug!` macro.
-/// Uses a separate syscall so the emulator can check DEBUG=1 env var.
+/// This function is called by the logger implementation.
+/// Uses SYSCALL_LOG syscall with level, module_path, and message.
 #[unsafe(no_mangle)]
-pub extern "C" fn __host_debug(ptr: *const u8, len: usize) {
-    let ptr = ptr as usize as i32;
-    let len = len as i32;
+pub extern "C" fn __host_log(
+    level: u8,
+    module_path_ptr: *const u8,
+    module_path_len: usize,
+    msg_ptr: *const u8,
+    msg_len: usize,
+) {
+    let level_i32 = level as i32;
+    let module_path_ptr_i32 = module_path_ptr as usize as i32;
+    let module_path_len_i32 = module_path_len as i32;
+    let msg_ptr_i32 = msg_ptr as usize as i32;
+    let msg_len_i32 = msg_len as i32;
 
     let mut args = [0i32; SYSCALL_ARGS];
-    args[0] = ptr;
-    args[1] = len;
-    let _ = syscall(SYSCALL_DEBUG, &args);
-
-    // Add trailing newline
-    let newline = "\n";
-    let ptr = newline.as_ptr() as usize as i32;
-    let len = newline.len() as i32;
-    let mut args = [0i32; SYSCALL_ARGS];
-    args[0] = ptr;
-    args[1] = len;
-    let _ = syscall(SYSCALL_DEBUG, &args);
-}
-
-/// Println function implementation for emulator.
-///
-/// This function is called by the `host_println!` macro.
-#[unsafe(no_mangle)]
-pub extern "C" fn __host_println(ptr: *const u8, len: usize) {
-    // Print the message
-    let ptr = ptr as usize as i32;
-    let len = len as i32;
-
-    let mut args = [0i32; SYSCALL_ARGS];
-    args[0] = ptr;
-    args[1] = len;
-    let _ = syscall(SYSCALL_WRITE, &args);
-
-    // Print newline
-    let newline = "\n";
-    let ptr = newline.as_ptr() as usize as i32;
-    let len = newline.len() as i32;
-    let mut args = [0i32; SYSCALL_ARGS];
-    args[0] = ptr;
-    args[1] = len;
-    let _ = syscall(SYSCALL_WRITE, &args);
+    args[0] = level_i32;
+    args[1] = module_path_ptr_i32;
+    args[2] = module_path_len_i32;
+    args[3] = msg_ptr_i32;
+    args[4] = msg_len_i32;
+    let _ = syscall(SYSCALL_LOG, &args);
 }

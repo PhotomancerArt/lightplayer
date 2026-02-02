@@ -5,30 +5,33 @@
 #[cfg(feature = "test")]
 extern crate std;
 
-/// Debug function implementation for tests.
+/// Log function implementation for tests.
 ///
-/// Checks `DEBUG=1` environment variable and only prints if set.
+/// Uses log crate directly.
 #[cfg(feature = "test")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __host_debug(ptr: *const u8, len: usize) {
-    if std::env::var("DEBUG").as_deref() == Ok("1") {
-        unsafe {
-            let slice = core::slice::from_raw_parts(ptr, len);
-            let msg = core::str::from_utf8_unchecked(slice);
-            std::println!("{}", msg);
-        }
-    }
-}
-
-/// Println function implementation for tests.
-///
-/// Always prints to stdout.
-#[cfg(feature = "test")]
-#[unsafe(no_mangle)]
-pub extern "C" fn __host_println(ptr: *const u8, len: usize) {
+pub extern "C" fn __host_log(
+    level: u8,
+    module_path_ptr: *const u8,
+    module_path_len: usize,
+    msg_ptr: *const u8,
+    msg_len: usize,
+) {
     unsafe {
-        let slice = core::slice::from_raw_parts(ptr, len);
-        let msg = core::str::from_utf8_unchecked(slice);
-        std::println!("{}", msg);
+        let module_path_slice = core::slice::from_raw_parts(module_path_ptr, module_path_len);
+        let msg_slice = core::slice::from_raw_parts(msg_ptr, msg_len);
+
+        let module_path = core::str::from_utf8_unchecked(module_path_slice);
+        let msg = core::str::from_utf8_unchecked(msg_slice);
+
+        let level = match level {
+            0 => log::Level::Error,
+            1 => log::Level::Warn,
+            2 => log::Level::Info,
+            3 => log::Level::Debug,
+            _ => log::Level::Debug,
+        };
+
+        log::log!(target: module_path, level, "{}", msg);
     }
 }

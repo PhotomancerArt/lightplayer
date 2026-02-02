@@ -26,6 +26,7 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst", optional = true }
 lp-glsl-builtins = { path = "../lp-glsl-builtins" }
 anyhow = { workspace = true, optional = true }
+log = { workspace = true, default-features = false }
 
 [features]
 default = ["std"]
@@ -40,7 +41,8 @@ std = [
     "cranelift-native",
     "cranelift-reader",
     "anyhow",
-    "lp-glsl-builtins/std"
+    "lp-glsl-builtins/std",
+    "log/std"
 ]
 # cranelift-jit is always included (non-optional), JITModule supports no_std
 core = [

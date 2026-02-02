@@ -207,23 +207,35 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_DEBUG {
-                // SYSCALL_DEBUG: Debug output (delegates to debug! macro)
-                // args[0] = pointer to string (as i32, cast to u32)
-                // args[1] = length of string
-                let msg_ptr = syscall_info.args[0] as u32;
-                let msg_len = syscall_info.args[1] as usize;
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_LOG {
+                // SYSCALL_LOG: Log message with level (filtered by RUST_LOG)
+                // args[0] = level (u8 as i32: 0=error, 1=warn, 2=info, 3=debug)
+                // args[1] = module_path pointer (as i32, cast to u32)
+                // args[2] = module_path length (as i32)
+                // args[3] = message pointer (as i32, cast to u32)
+                // args[4] = message length (as i32)
+                let level_val = syscall_info.args[0];
+                let module_path_ptr = syscall_info.args[1] as u32;
+                let module_path_len = syscall_info.args[2] as usize;
+                let msg_ptr = syscall_info.args[3] as u32;
+                let msg_len = syscall_info.args[4] as usize;
 
-                // Read string from memory and delegate to debug! macro
-                match read_memory_string(&self.memory, msg_ptr, msg_len) {
-                    Ok(_s) => {
-                        debug!("{}", _s);
+                // Read module path and message from memory
+                match (
+                    read_memory_string(&self.memory, module_path_ptr, module_path_len),
+                    read_memory_string(&self.memory, msg_ptr, msg_len),
+                ) {
+                    (Ok(module_path), Ok(msg)) => {
+                        // Convert syscall level to log::Level
+                        if let Some(level) = lp_riscv_emu_shared::syscall_to_level(level_val) {
+                            // Create a log record and call log::log!()
+                            // This will respect RUST_LOG filtering via env_logger
+                            log::log!(target: &module_path, level, "{msg}");
+                        }
                     }
-                    Err(_e) => {
-                        debug!(
-                            "Failed to read debug syscall string from 0x{:x}: {}",
-                            msg_ptr, _e
-                        );
+                    _ => {
+                        // Failed to read strings - log error
+                        log::warn!("Failed to read log syscall strings");
                     }
                 }
 

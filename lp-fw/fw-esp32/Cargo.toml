@@ -25,7 +25,7 @@ esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
 esp-println = { version = "0.16.1", features = ["log-04"] }
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
-fw-core = { path = "../fw-core", default-features = false }
+fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }

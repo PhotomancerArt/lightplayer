@@ -15,6 +15,7 @@ mod server_loop;
 use board::{init_board, start_runtime};
 use esp_backtrace as _;
 use esp_println::println;
+use fw_core::log::init_esp32_logger;
 
 // #[cfg(feature = "esp32c6")]
 // use serial::Esp32UsbSerialIo;
@@ -23,7 +24,10 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
 async fn main(_spawner: embassy_executor::Spawner) {
-    esp_println::logger::init_logger_from_env();
+    // Initialize logger with esp_println
+    init_esp32_logger(|s| {
+        esp_println::println!("{}", s);
+    });
 
     println!("fw-esp32 starting...");
 

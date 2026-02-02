@@ -51,3 +51,12 @@ pub use time::TimeMode;
 
 #[cfg(feature = "std")]
 pub use test_util::{BinaryBuildConfig, ensure_binary_built, find_workspace_root};
+
+/// Initialize logging for emulator host
+///
+/// Should be called before running guest code.
+/// Reads RUST_LOG environment variable for filtering.
+#[cfg(feature = "std")]
+pub fn init_logging() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+}

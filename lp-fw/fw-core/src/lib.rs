@@ -5,5 +5,8 @@
 
 #![no_std]
 
+#[cfg(any(feature = "emu", feature = "esp32"))]
+pub mod log;
+
 pub mod serial;
 pub mod transport;

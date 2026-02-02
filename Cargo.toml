@@ -92,6 +92,10 @@ multiple_bound_locations = 'warn'
 extra_unused_type_parameters = 'warn'
 
 [workspace.dependencies]
+# Logging dependencies
+test-log = "0.2"
+env_logger = "0.11"
+
 # Cranelift crates - git dependencies
 cranelift-codegen = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
 cranelift-frontend = { git = "https://github.com/Yona-Appletree/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }

@@ -17,6 +17,7 @@ mod time;
 use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
 
+use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
 use lp_glsl_builtins::host_debug;
 use lp_model::AsLpPath;
@@ -40,6 +41,9 @@ pub extern "C" fn _lp_main() -> ! {
     unsafe {
         allocator::init_heap();
     }
+
+    // Initialize logger first
+    init_emu_logger();
 
     host_debug!("[fw-emu] Starting firmware emulator...");
 
