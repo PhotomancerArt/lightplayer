@@ -1,0 +1,20 @@
+[package]
+name = "fw-tests"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
+lp-engine-client = { path = "../../lp-core/lp-engine-client" }
+lp-model = { path = "../../lp-core/lp-model" }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-shared = { path = "../../lp-core/lp-shared" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+[lints]
+workspace = true
