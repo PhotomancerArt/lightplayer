@@ -10,13 +10,11 @@ mod tests {
     use lp_riscv_elf::load_elf;
     use lp_riscv_emu::{LogLevel, Riscv32Emulator, test_util::BinaryBuildConfig};
 
-    use std::sync::Mutex;
-
     #[test]
     fn test_serial_echo() {
         let mut emu = setup_emulator();
         emu.serial_write(b"echo hello\n");
-        emu.step_until_yield(1_000_000).unwrap_or_else(|e| {
+        emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
             println!("\n=== Instruction Log ===");
             println!("{}", emu.format_logs());
@@ -31,7 +29,7 @@ mod tests {
     fn test_time_initial() {
         let mut emu = setup_emulator();
         emu.serial_write(b"time\n");
-        emu.step_until_yield(1_000_000).unwrap_or_else(|e| {
+        emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
             println!("\n=== Instruction Log ===");
             println!("{}", emu.format_logs());
@@ -64,7 +62,7 @@ mod tests {
 
         // Get first time reading
         emu.serial_write(b"time\n");
-        emu.step_until_yield(1_000_000).unwrap_or_else(|e| {
+        emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
             panic!("Emulator error: {:?}", e);
         });
@@ -81,7 +79,7 @@ mod tests {
 
         // Get second time reading
         emu.serial_write(b"time\n");
-        emu.step_until_yield(1_000_000).unwrap_or_else(|e| {
+        emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
             panic!("Emulator error: {:?}", e);
         });
@@ -120,7 +118,7 @@ mod tests {
         let mut times = Vec::new();
         for _ in 0..5 {
             emu.serial_write(b"time\n");
-            emu.step_until_yield(1_000_000).unwrap_or_else(|e| {
+            emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
                 println!("{}", emu.dump_state());
                 panic!("Emulator error: {:?}", e);
             });

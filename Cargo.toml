@@ -10,6 +10,7 @@ members = [
     "lp-cli",
     "lp-fw/fw-esp32",
     "lp-fw/fw-emu",
+    "lp-fw/fw-tests",
     "lp-core/lp-model",
     # lp-glsl workspace members
     "lp-glsl/lp-glsl-builtins",

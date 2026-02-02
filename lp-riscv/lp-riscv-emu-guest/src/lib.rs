@@ -20,9 +20,9 @@ mod syscall;
 
 // Re-export syscall constants and function
 pub use syscall::{
-    sys_serial_has_data, sys_serial_read, sys_serial_write, sys_yield, syscall,
     SYSCALL_ARGS, SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
-    SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
+    SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD, sys_serial_has_data,
+    sys_serial_read, sys_serial_write, sys_yield, syscall,
 };
 
 // Re-export ebreak function for convenience

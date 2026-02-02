@@ -86,7 +86,7 @@ impl Riscv32Emulator {
         }
     }
 
-    /// Step until a yield syscall is encountered, with a maximum step limit
+    /// Run until a yield syscall is encountered, with a maximum step limit
     ///
     /// Steps the emulator until a yield syscall (SYSCALL_YIELD) is encountered,
     /// or until the maximum number of steps is reached.
@@ -97,7 +97,7 @@ impl Riscv32Emulator {
     /// # Returns
     /// * `Ok(SyscallInfo)` - Yield syscall was encountered
     /// * `Err(EmulatorError)` - Error occurred (trap, panic, instruction limit, or max steps exceeded)
-    pub fn step_until_yield(&mut self, max_steps: u64) -> Result<SyscallInfo, EmulatorError> {
+    pub fn run_until_yield(&mut self, max_steps: u64) -> Result<SyscallInfo, EmulatorError> {
         let initial_instruction_count = self.instruction_count;
         let max_instructions = initial_instruction_count + max_steps;
 

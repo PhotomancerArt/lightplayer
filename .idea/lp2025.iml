@@ -51,6 +51,8 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/target" />
     </content>

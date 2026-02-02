@@ -113,18 +113,18 @@ mod std_impl {
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            
+
             // Print errors directly to stderr for better visibility
             std::eprintln!("=== Build failed for {} ===", config.package);
             if !stdout.is_empty() {
                 std::eprintln!("--- stdout ---");
-                std::eprintln!("{}", stdout);
+                std::eprintln!("{stdout}");
             }
             if !stderr.is_empty() {
                 std::eprintln!("--- stderr ---");
-                std::eprintln!("{}", stderr);
+                std::eprintln!("{stderr}");
             }
-            
+
             return Err(std::format!(
                 "Build failed for {} (exit code: {})\nSee stderr above for details.",
                 config.package,
