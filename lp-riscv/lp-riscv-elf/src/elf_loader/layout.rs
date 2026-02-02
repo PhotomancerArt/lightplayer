@@ -20,7 +20,7 @@ pub fn calculate_memory_layout(
     obj: &object::File,
     entry_point: u32,
 ) -> Result<MemoryLayout, String> {
-    debug!("=== Calculating memory layout ===");
+    log::debug!("=== Calculating memory layout ===");
 
     let mut max_rom_addr: u64 = 0;
     let mut max_ram_addr: u64 = 0;
@@ -41,10 +41,7 @@ pub fn calculate_memory_layout(
             continue;
         }
 
-        debug!(
-            "  Section '{}': addr=0x{:x}, size={}",
-            section_name, section_addr, section_size
-        );
+        log::debug!("  Section '{section_name}': addr=0x{section_addr:x}, size={section_size}");
 
         if is_rom_address(section_addr) {
             let end_addr = section_addr + section_size;
@@ -62,9 +59,8 @@ pub fn calculate_memory_layout(
     // RAM: at least 512KB for heap/stack
     let ram_size = (max_ram_addr.max(512 * 1024)) as usize;
 
-    debug!(
-        "Calculated layout: ROM={} bytes (max addr: 0x{:x}), RAM={} bytes (max offset: 0x{:x})",
-        rom_size, max_rom_addr, ram_size, max_ram_addr
+    log::debug!(
+        "Calculated layout: ROM={rom_size} bytes (max addr: 0x{max_rom_addr:x}), RAM={ram_size} bytes (max offset: 0x{max_ram_addr:x})"
     );
 
     Ok(MemoryLayout {

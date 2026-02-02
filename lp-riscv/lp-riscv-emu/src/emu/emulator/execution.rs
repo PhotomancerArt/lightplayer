@@ -142,9 +142,8 @@ impl Riscv32Emulator {
                 let line = syscall_info.args[4] as u32;
 
                 // Debug: print syscall args
-                debug!(
-                    "Panic syscall detected: msg_ptr=0x{:x}, msg_len={}, file_ptr=0x{:x}, file_len={}, line={}",
-                    msg_ptr, msg_len, file_ptr, file_len, line
+                log::debug!(
+                    "Panic syscall detected: msg_ptr=0x{msg_ptr:x}, msg_len={msg_len}, file_ptr=0x{file_ptr:x}, file_len={file_len}, line={line}"
                 );
 
                 // Read panic message from memory
@@ -157,16 +156,16 @@ impl Riscv32Emulator {
                 let file = if file_ptr != 0 && file_len > 0 {
                     match read_memory_string(&self.memory, file_ptr, file_len) {
                         Ok(f) => {
-                            debug!("Read file name from memory: '{}'", f);
+                            log::debug!("Read file name from memory: '{f}'");
                             Some(f)
                         }
                         Err(_e) => {
-                            debug!("Failed to read file name from 0x{:x}: {}", file_ptr, _e);
+                            log::debug!("Failed to read file name from 0x{file_ptr:x}: {_e}");
                             None
                         }
                     }
                 } else {
-                    debug!("File pointer is null or file_len is 0, skipping file read");
+                    log::debug!("File pointer is null or file_len is 0, skipping file read");
                     None
                 };
 
@@ -197,10 +196,7 @@ impl Riscv32Emulator {
                         }
                     }
                     Err(_e) => {
-                        debug!(
-                            "Failed to read write syscall string from 0x{:x}: {}",
-                            msg_ptr, _e
-                        );
+                        log::debug!("Failed to read write syscall string from 0x{msg_ptr:x}: {_e}");
                     }
                 }
 

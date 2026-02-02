@@ -9,11 +9,9 @@ use alloc::{format, vec::Vec};
 use core::str;
 
 use crate::serial::SerialIo;
+use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
-
-#[cfg(any(feature = "emu", feature = "esp32"))]
-use log::debug;
 
 /// Serial transport implementation
 ///
@@ -38,8 +36,7 @@ impl<Io: SerialIo> SerialTransport<Io> {
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        #[cfg(any(feature = "emu", feature = "esp32"))]
-        debug!("SerialTransport: Sending message");
+        log::trace!("SerialTransport: Sending message");
 
         // Serialize to JSON
         let json = serde_json::to_string(&msg).map_err(|e| {
@@ -56,8 +53,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             .write(b"\n")
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
 
-        #[cfg(any(feature = "emu", feature = "esp32"))]
-        debug!("SerialTransport: Sent {} bytes", json_bytes.len() + 1);
+        log::trace!("SerialTransport: Sent {} bytes", json_bytes.len() + 1);
 
         Ok(())
     }
@@ -80,8 +76,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         // Look for complete message (ends with \n)
         if let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
-            #[cfg(any(feature = "emu", feature = "esp32"))]
-            debug!(
+            log::trace!(
                 "SerialTransport: Received complete message ({} bytes)",
                 newline_pos + 1
             );
@@ -103,15 +98,13 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 Ok(msg) => Ok(Some(msg)),
                 Err(_) => {
                     // Parse error - ignore with warning (as specified)
-                    #[cfg(any(feature = "emu", feature = "esp32"))]
                     log::warn!("SerialTransport: Failed to parse JSON message");
                     Ok(None)
                 }
             }
         } else {
             // No complete message yet
-            #[cfg(any(feature = "emu", feature = "esp32"))]
-            debug!(
+            log::trace!(
                 "SerialTransport: No complete message yet ({} bytes buffered)",
                 self.read_buffer.len()
             );

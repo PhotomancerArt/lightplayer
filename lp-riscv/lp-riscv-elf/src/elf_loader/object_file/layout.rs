@@ -40,11 +40,8 @@ pub fn calculate_object_layout(
     base_code_end: u32,
     base_ram_end: u32,
 ) -> Result<ObjectLayout, String> {
-    debug!("=== Calculating object file layout ===");
-    debug!(
-        "Base code end: 0x{:x}, Base RAM end offset: 0x{:x}",
-        base_code_end, base_ram_end
-    );
+    log::debug!("=== Calculating object file layout ===");
+    log::debug!("Base code end: 0x{base_code_end:x}, Base RAM end offset: 0x{base_ram_end:x}");
 
     // Find .text and .data sections
     let mut text_size: u64 = 0;
@@ -79,9 +76,8 @@ pub fn calculate_object_layout(
     // data_placement: Start after base ram_end, aligned to 4 bytes (relative to RAM_START)
     let data_placement = align_4_bytes(base_ram_end);
 
-    debug!(
-        "Object layout: .text at 0x{:x} (size={}), .data at offset 0x{:x} (size={})",
-        text_placement, text_size, data_placement, data_size
+    log::debug!(
+        "Object layout: .text at 0x{text_placement:x} (size={text_size}), .data at offset 0x{data_placement:x} (size={data_size})"
     );
 
     Ok(ObjectLayout {

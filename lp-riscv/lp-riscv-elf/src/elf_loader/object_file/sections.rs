@@ -41,7 +41,7 @@ pub fn load_object_sections(
     ram: &mut Vec<u8>,
     layout: &ObjectLayout,
 ) -> Result<ObjectSectionPlacement, String> {
-    debug!("=== Loading object file sections ===");
+    log::debug!("=== Loading object file sections ===");
 
     let text_start = layout.text_placement;
     let mut text_size = 0usize;
@@ -145,7 +145,7 @@ pub fn load_object_sections(
         // Copy section data
         code[current_text_offset..current_text_offset + data.len()].copy_from_slice(data);
 
-        debug!(
+        log::debug!(
             "Loaded section '{}' at offset 0x{:x} ({} bytes)",
             section_name,
             current_text_offset,
@@ -171,7 +171,7 @@ pub fn load_object_sections(
         // Copy section data
         ram[current_data_offset..current_data_offset + data.len()].copy_from_slice(data);
 
-        debug!(
+        log::debug!(
             "Loaded section '{}' at RAM offset 0x{:x} ({} bytes)",
             section_name,
             current_data_offset,
@@ -198,7 +198,7 @@ pub fn load_object_sections(
         code[rodata_start_aligned as usize..rodata_start_aligned as usize + data.len()]
             .copy_from_slice(data);
 
-        debug!(
+        log::debug!(
             "Loaded section '{}' at offset 0x{:x} ({} bytes)",
             section_name,
             rodata_start_aligned,
@@ -221,15 +221,13 @@ pub fn load_object_sections(
             ram[bss_start_aligned as usize..bss_start_aligned as usize + section_size].fill(0);
         }
 
-        debug!(
-            "Initialized section '{}' at RAM offset 0x{:x} ({} bytes)",
-            section_name, bss_start_aligned, section_size
+        log::debug!(
+            "Initialized section '{section_name}' at RAM offset 0x{bss_start_aligned:x} ({section_size} bytes)"
         );
     }
 
-    debug!(
-        "Object section loading complete: .text at 0x{:x} ({} bytes), .data at offset 0x{:x} ({} bytes)",
-        text_start, text_size, data_start, data_size
+    log::debug!(
+        "Object section loading complete: .text at 0x{text_start:x} ({text_size} bytes), .data at offset 0x{data_start:x} ({data_size} bytes)"
     );
 
     Ok(ObjectSectionPlacement {

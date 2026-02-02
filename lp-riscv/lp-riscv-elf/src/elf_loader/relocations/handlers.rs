@@ -25,7 +25,7 @@ pub struct RelocationContext<'a> {
 
 /// Handle R_RISCV_CALL_PLT (17): Function call via PLT (auipc+jalr pair).
 pub fn handle_call_plt(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> Result<(), String> {
-    debug!("  Applying R_RISCV_CALL_PLT at 0x{:x}", reloc.address);
+    log::debug!("  Applying R_RISCV_CALL_PLT at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 8 > ctx.buffer.len() {
@@ -67,13 +67,14 @@ pub fn handle_call_plt(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
     let new_jalr = (jalr_word & 0xFFFFF) | (new_lo12 << 20);
     ctx.buffer[offset + 4..offset + 8].copy_from_slice(&new_jalr.to_le_bytes());
 
-    debug!(
+    log::debug!(
         "    PC=0x{:x}, target=0x{:x}, offset=0x{:x}",
-        ctx.pc, ctx.target_addr, pcrel
+        ctx.pc,
+        ctx.target_addr,
+        pcrel
     );
-    debug!(
-        "    Patched auipc: 0x{:08x} → 0x{:08x}, jalr: 0x{:08x} → 0x{:08x}",
-        auipc_word, new_auipc, jalr_word, new_jalr
+    log::debug!(
+        "    Patched auipc: 0x{auipc_word:08x} → 0x{new_auipc:08x}, jalr: 0x{jalr_word:08x} → 0x{new_jalr:08x}"
     );
 
     Ok(())
@@ -82,7 +83,7 @@ pub fn handle_call_plt(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
 /// Handle R_RISCV_GOT_HI20 (19): GOT high 20 bits (for auipc instruction).
 /// Falls back to direct PC-relative addressing if no GOT entry exists (for object files).
 pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> Result<(), String> {
-    debug!("  Applying R_RISCV_GOT_HI20 at 0x{:x}", reloc.address);
+    log::debug!("  Applying R_RISCV_GOT_HI20 at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -106,10 +107,7 @@ pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        debug!(
-            "    Patched auipc: 0x{:08x} → 0x{:08x} (hi20=0x{:x})",
-            inst_word, patched, hi20
-        );
+        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     } else {
         // No GOT entry: fall back to direct PC-relative addressing (for object files)
         // This happens when symbols are resolved directly without GOT indirection
@@ -151,9 +149,8 @@ pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
                 let jalr_bytes_mut = &mut ctx.buffer[jalr_offset..jalr_offset + 4];
                 jalr_bytes_mut.copy_from_slice(&patched_jalr.to_le_bytes());
 
-                debug!(
-                    "    Patched auipc+jalr call: auipc 0x{:08x} → 0x{:08x} (hi20=0x{:x}), jalr 0x{:08x} → 0x{:08x} (lo12=0x{:x})",
-                    inst_word, patched_auipc, hi20, jalr_word, patched_jalr, lo12
+                log::debug!(
+                    "    Patched auipc+jalr call: auipc 0x{inst_word:08x} → 0x{patched_auipc:08x} (hi20=0x{hi20:x}), jalr 0x{jalr_word:08x} → 0x{patched_jalr:08x} (lo12=0x{lo12:x})"
                 );
                 return Ok(());
             }
@@ -169,10 +166,7 @@ pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        debug!(
-            "    Patched auipc: 0x{:08x} → 0x{:08x} (hi20=0x{:x})",
-            inst_word, patched, hi20
-        );
+        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     }
 
     Ok(())
@@ -183,7 +177,7 @@ pub fn handle_pcrel_hi20(
     ctx: &mut RelocationContext,
     reloc: &RelocationInfo,
 ) -> Result<(), String> {
-    debug!("  Applying R_RISCV_PCREL_HI20 at 0x{:x}", reloc.address);
+    log::debug!("  Applying R_RISCV_PCREL_HI20 at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -216,10 +210,7 @@ pub fn handle_pcrel_hi20(
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        debug!(
-            "    Patched auipc: 0x{:08x} → 0x{:08x} (hi20=0x{:x})",
-            inst_word, patched, hi20
-        );
+        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     } else {
         // Regular PCREL_HI20 relocation
         let pcrel = ctx
@@ -236,10 +227,7 @@ pub fn handle_pcrel_hi20(
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        debug!(
-            "    Patched auipc: 0x{:08x} → 0x{:08x} (hi20=0x{:x})",
-            inst_word, patched, hi20
-        );
+        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     }
 
     Ok(())
@@ -250,7 +238,7 @@ pub fn handle_pcrel_lo12_i(
     ctx: &mut RelocationContext,
     reloc: &RelocationInfo,
 ) -> Result<(), String> {
-    debug!("  Applying R_RISCV_PCREL_LO12_I at 0x{:x}", reloc.address);
+    log::debug!("  Applying R_RISCV_PCREL_LO12_I at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -269,10 +257,7 @@ pub fn handle_pcrel_lo12_i(
 
     // Extract the immediate field (bits [31:20])
     let current_imm = (inst_word >> 20) & 0xFFF;
-    debug!(
-        "    Instruction=0x{:08x}, current_imm=0x{:x} ({})",
-        inst_word, current_imm, current_imm
-    );
+    log::debug!("    Instruction=0x{inst_word:08x}, current_imm=0x{current_imm:x} ({current_imm})");
 
     // Check if this is a GOT access (immediate is 12, which is typical for GOT)
     if current_imm == 12 && ctx.got_tracker.has_entry(&reloc.symbol_name) {
@@ -290,9 +275,13 @@ pub fn handle_pcrel_lo12_i(
         // Compute offset from lw to GOT entry
         let offset_to_got = got_entry.address.wrapping_sub(lw_pc);
 
-        debug!(
+        log::debug!(
             "    PCREL_LO12_I (GOT): lw PC=0x{:x}, auipc label=0x{:x}, GOT entry=0x{:x}, offset=0x{:x} (signed: {})",
-            lw_pc, auipc_addr, got_entry.address, offset_to_got, offset_to_got as i32
+            lw_pc,
+            auipc_addr,
+            got_entry.address,
+            offset_to_got,
+            offset_to_got as i32
         );
 
         // Extract low 12 bits of the offset
@@ -301,9 +290,8 @@ pub fn handle_pcrel_lo12_i(
         let inst_bytes = &mut ctx.buffer[offset..offset + 4];
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        debug!(
-            "    Patched lw instruction for GOT: 0x{:08x} → 0x{:08x} (lo12=0x{:x}, imm was 12)",
-            inst_word, patched, lo12
+        log::debug!(
+            "    Patched lw instruction for GOT: 0x{inst_word:08x} → 0x{patched:08x} (lo12=0x{lo12:x}, imm was 12)"
         );
     } else {
         // Regular PCREL_LO12_I relocation
@@ -407,9 +395,8 @@ pub fn handle_pcrel_lo12_i(
             let inst_bytes = &mut ctx.buffer[offset..offset + 4];
             inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-            debug!(
-                "    Converted instruction: 0x{:08x} → 0x{:08x} (lw → addi, lo12=0x{:x})",
-                inst_word, patched, lo12
+            log::debug!(
+                "    Converted instruction: 0x{inst_word:08x} → 0x{patched:08x} (lw → addi, lo12=0x{lo12:x})"
             );
         } else {
             // Regular PCREL_LO12_I: patch the lw instruction
@@ -417,9 +404,8 @@ pub fn handle_pcrel_lo12_i(
             let inst_bytes = &mut ctx.buffer[offset..offset + 4];
             inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-            debug!(
-                "    Patched lw instruction: 0x{:08x} → 0x{:08x} (lo12=0x{:x})",
-                inst_word, patched, lo12
+            log::debug!(
+                "    Patched lw instruction: 0x{inst_word:08x} → 0x{patched:08x} (lo12=0x{lo12:x})"
             );
         }
     }
@@ -434,7 +420,7 @@ pub fn handle_abs32(
     reloc: &RelocationInfo,
     got_tracker: &mut GotTracker,
 ) -> Result<(), String> {
-    debug!("  Applying R_RISCV_32 at 0x{:x}", reloc.address);
+    log::debug!("  Applying R_RISCV_32 at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -450,14 +436,17 @@ pub fn handle_abs32(
     // If this is a GOT entry, mark it as initialized
     if got_tracker.has_entry(&reloc.symbol_name) {
         got_tracker.mark_initialized(&reloc.symbol_name);
-        debug!(
+        log::debug!(
             "    ✓ GOT entry initialized: '{}' = 0x{:x}",
-            reloc.symbol_name, ctx.target_addr
+            reloc.symbol_name,
+            ctx.target_addr
         );
     } else {
-        debug!(
+        log::debug!(
             "    Wrote 0x{:x} to offset 0x{:x} for '{}'",
-            ctx.target_addr, offset, reloc.symbol_name
+            ctx.target_addr,
+            offset,
+            reloc.symbol_name
         );
     }
 

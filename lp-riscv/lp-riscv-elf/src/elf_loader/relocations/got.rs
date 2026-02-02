@@ -31,7 +31,7 @@ impl GotTracker {
 
     /// Add a GOT entry.
     pub fn add_entry(&mut self, symbol_name: String, address: u32) {
-        debug!("  GOT entry: '{}' at 0x{:x}", symbol_name, address);
+        log::debug!("  GOT entry: '{symbol_name}' at 0x{address:x}");
         self.entries.insert(
             symbol_name.clone(),
             GotEntry {
@@ -68,7 +68,7 @@ impl GotTracker {
 /// Identify GOT entries from R_RISCV_32 relocations.
 /// GOT entries are initialized with R_RISCV_32 relocations that write symbol addresses.
 pub fn identify_got_entries(relocations: &[super::phase1::RelocationInfo]) -> GotTracker {
-    debug!("=== Identifying GOT entries ===");
+    log::debug!("=== Identifying GOT entries ===");
 
     let mut tracker = GotTracker::new();
 
@@ -88,6 +88,6 @@ pub fn identify_got_entries(relocations: &[super::phase1::RelocationInfo]) -> Go
         }
     }
 
-    debug!("Identified {} GOT entries", tracker.entries().len());
+    log::debug!("Identified {} GOT entries", tracker.entries().len());
     tracker
 }

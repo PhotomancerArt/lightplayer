@@ -206,7 +206,9 @@ ci-app: fmt-check clippy-app build-app test-app
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
 # Fix code issues then run CI (sequential, not parallel)
-fci: fix ci
+fci: 
+    @just fix
+    @just ci
 
 # Fix code issues then run CI for lp-app (sequential, not parallel)
 fci-app:

@@ -45,7 +45,7 @@ pub struct ElfLoadInfo {
 /// - Applies relocations to all sections (code and data)
 /// - Returns the entry point address
 pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
-    debug!("=== Loading ELF file ===");
+    log::debug!("=== Loading ELF file ===");
 
     // Step 1: Parse ELF
     let obj = parse::parse_elf(elf_data)?;
@@ -120,17 +120,14 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
         }
     }
 
-    debug!("=== ELF loading complete ===");
-    debug!(
+    log::debug!("=== ELF loading complete ===");
+    log::debug!(
         "Code size: {} bytes, RAM size: {} bytes, Entry point: 0x{:x}",
         code.len(),
         ram.len(),
         entry_point
     );
-    debug!(
-        "Code end: 0x{:x}, RAM end offset: 0x{:x}",
-        code_end, ram_end
-    );
+    log::debug!("Code end: 0x{code_end:x}, RAM end offset: 0x{ram_end:x}");
 
     Ok(ElfLoadInfo {
         code,

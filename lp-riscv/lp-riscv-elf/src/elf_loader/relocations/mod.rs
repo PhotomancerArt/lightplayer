@@ -24,7 +24,7 @@ pub fn apply_relocations(
     ram: &mut [u8],
     symbol_map: &HashMap<String, u32>,
 ) -> Result<(), String> {
-    debug!("=== Applying relocations ===");
+    log::debug!("=== Applying relocations ===");
 
     // Phase 1: Analyze relocations and identify GOT entries
     let (relocations, got_tracker, section_addrs) =
@@ -40,6 +40,6 @@ pub fn apply_relocations(
         symbol_map,
     )?;
 
-    debug!("=== Relocations applied successfully ===");
+    log::debug!("=== Relocations applied successfully ===");
     Ok(())
 }
