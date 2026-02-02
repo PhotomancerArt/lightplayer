@@ -59,16 +59,17 @@ impl SerialClientTransport {
             loop {
                 // Run emulator until yield
                 let result = {
-                    let mut emu = emulator.lock().map_err(|_| {
-                        EmulatorError::InvalidInstruction {
-                            pc: 0,
-                            instruction: 0,
-                            reason: "Failed to lock emulator".to_string(),
-                            regs: [0; 32],
-                        }
-                    })?;
+                    let mut emu =
+                        emulator
+                            .lock()
+                            .map_err(|_| EmulatorError::InvalidInstruction {
+                                pc: 0,
+                                instruction: 0,
+                                reason: "Failed to lock emulator".to_string(),
+                                regs: [0; 32],
+                            })?;
 
-                    emu.step_until_yield(MAX_STEPS_PER_ITERATION)
+                    emu.run_until_yield(MAX_STEPS_PER_ITERATION)
                 };
 
                 match result {

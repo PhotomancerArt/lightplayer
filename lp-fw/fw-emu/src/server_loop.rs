@@ -7,7 +7,7 @@ use crate::time::SyscallTimeProvider;
 use alloc::vec::Vec;
 use fw_core::transport::SerialTransport;
 use lp_model::Message;
-use lp_riscv_emu_guest::sys_yield;
+use lp_riscv_emu_guest::{println, sys_yield};
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
@@ -47,6 +47,10 @@ pub fn run_server_loop(
                 }
             }
         }
+        println!(
+            "[run_server_loop] loop. messages: {}",
+            incoming_messages.len()
+        );
 
         // Calculate delta time since last tick
         let delta_time = time_provider.elapsed_ms(last_tick);
@@ -55,6 +59,7 @@ pub fn run_server_loop(
         // Tick server (synchronous)
         match server.tick(delta_ms.max(1), incoming_messages) {
             Ok(responses) => {
+                println!("[run_server_loop] responses: {}", responses.len());
                 // Send responses
                 for response in responses {
                     if let Message::Server(server_msg) = response {

@@ -40,9 +40,11 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
 
+        let json_bytes = json.as_bytes();
+
         // Write JSON + newline (blocking)
         self.io
-            .write(json.as_bytes())
+            .write(json_bytes)
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
         self.io
             .write(b"\n")
