@@ -277,18 +277,18 @@ pub fn build_emu_executable(
         .map_err(|e| GlslError::new(ErrorCode::E0400, format!("Failed to emit ELF: {e}")))?;
 
     // Debug: Check symbols BEFORE linking
-    crate::debug!("=== Symbols BEFORE linking ===");
+    log::debug!("=== Symbols BEFORE linking ===");
     if let Ok(obj) = object::File::parse(&elf_bytes[..]) {
         use crate::backend::builtins::registry::BuiltinId;
         for builtin in BuiltinId::all() {
             let symbol_name = builtin.name();
-            crate::debug!("Looking for builtin: {}", symbol_name);
+            log::debug!("Looking for builtin: {symbol_name}");
             let mut found = false;
             for symbol in obj.symbols() {
                 if let Ok(name) = symbol.name() {
                     if name == symbol_name {
                         found = true;
-                        crate::debug!(
+                        log::debug!(
                             "  Found {}: kind={:?} section={:?} address=0x{:x}",
                             name,
                             symbol.kind(),
@@ -299,7 +299,7 @@ pub fn build_emu_executable(
                 }
             }
             if !found {
-                crate::debug!("  NOT FOUND: {}", symbol_name);
+                log::debug!("  NOT FOUND: {symbol_name}");
             }
         }
     }
@@ -412,7 +412,7 @@ pub fn build_emu_executable(
     let max_init_steps = 10000;
     let init_address = load_info.symbol_map.get("_init").copied();
 
-    crate::debug!(
+    log::debug!(
         "Running bootstrap init (entry_point=0x{:x}, _init={:?})",
         load_info.entry_point,
         init_address
@@ -448,19 +448,13 @@ pub fn build_emu_executable(
 
                 // Handle halt result - bootstrap init completed
                 if let StepResult::Halted = step_result {
-                    crate::debug!(
-                        "Bootstrap init completed (halted) after {} steps",
-                        init_steps
-                    );
+                    log::debug!("Bootstrap init completed (halted) after {init_steps} steps");
                     break;
                 }
 
                 // Check if PC is at halt address (bootstrap code returned)
                 if pc_after == halt_address {
-                    crate::debug!(
-                        "Bootstrap init completed (returned) after {} steps",
-                        init_steps
-                    );
+                    log::debug!("Bootstrap init completed (returned) after {init_steps} steps");
                     break;
                 }
             }
@@ -481,7 +475,7 @@ pub fn build_emu_executable(
     // Restore original instruction limit for normal function execution
     emulator.set_max_instructions(original_max_instructions);
 
-    crate::debug!("Bootstrap init completed successfully");
+    log::debug!("Bootstrap init completed successfully");
 
     // 8. Create GlslEmulatorModule
     // Preserve metadata from GlModule

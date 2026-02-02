@@ -228,10 +228,8 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let pointer_type = self.gl_module.module_internal().isa().pointer_type();
 
         // Debug: Log pointer type to help diagnose architecture-specific issues
-        crate::debug!(
-            "get_lpfx_testcase_call: function={}, pointer_type={:?}",
-            testcase_name,
-            pointer_type
+        log::debug!(
+            "get_lpfx_testcase_call: function={testcase_name}, pointer_type={pointer_type:?}"
         );
 
         // Build signature with Float format (f32 args, f32 return)
@@ -242,7 +240,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                 .params
                 .first()
                 .expect("Result pointer param should exist");
-            crate::debug!(
+            log::trace!(
                 "get_lpfx_testcase_call: Result pointer param type={:?}, purpose={:?} (should be Normal, not StructReturn)",
                 _result_ptr_param.value_type,
                 _result_ptr_param.purpose

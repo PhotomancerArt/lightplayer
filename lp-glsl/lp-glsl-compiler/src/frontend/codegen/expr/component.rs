@@ -340,11 +340,8 @@ pub fn emit_indexing<M: cranelift_module::Module>(
 
             if let Some(index) = is_constant {
                 // Compile-time constant index
-                crate::debug!(
-                    "vector indexing: current_ty={:?}, index={}, component_count={}",
-                    current_ty,
-                    index,
-                    component_count
+                log::trace!(
+                    "vector indexing: current_ty={current_ty:?}, index={index}, component_count={component_count}"
                 );
 
                 if index >= component_count {
@@ -360,14 +357,10 @@ pub fn emit_indexing<M: cranelift_module::Module>(
                 }
 
                 let base_type = current_ty.vector_base_type().unwrap();
-                crate::debug!(
-                    "  extracted component: base_type={:?}, val index={}",
-                    base_type,
-                    index
-                );
+                log::trace!("  extracted component: base_type={base_type:?}, val index={index}");
                 current_vals = vec![current_vals[index]];
                 current_ty = base_type;
-                crate::debug!(
+                log::trace!(
                     "  after extraction: current_ty={:?}, current_vals.len()={}",
                     current_ty,
                     current_vals.len()
@@ -400,7 +393,7 @@ pub fn emit_indexing<M: cranelift_module::Module>(
         }
     }
 
-    crate::debug!(
+    log::trace!(
         "translate_matrix_indexing result: current_ty={:?}, current_vals.len()={}",
         current_ty,
         current_vals.len()

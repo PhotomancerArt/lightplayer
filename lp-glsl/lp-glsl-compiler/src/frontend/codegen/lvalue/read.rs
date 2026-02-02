@@ -71,11 +71,8 @@ pub fn read_lvalue<M: cranelift_module::Module>(
         } => {
             let val = ctx.builder.use_var(base_vars[*index]);
             let base_type = base_ty.vector_base_type().unwrap();
-            crate::debug!(
-                "read_lvalue VectorElement: base_ty={:?}, base_type={:?}, index={}",
-                base_ty,
-                base_type,
-                index
+            log::trace!(
+                "read_lvalue VectorElement: base_ty={base_ty:?}, base_type={base_type:?}, index={index}"
             );
             Ok((vec![val], base_type))
         }
@@ -366,31 +363,22 @@ pub fn read_lvalue<M: cranelift_module::Module>(
                     ));
                 }
 
-                crate::debug!(
-                    "read_lvalue ArrayElement with component access: element_ty={:?}, component_indices={:?}, base_offset={}, component_size_bytes={}, final_ptr={:?}",
-                    element_ty,
-                    component_indices,
-                    base_offset,
-                    component_size_bytes,
-                    final_ptr
+                log::trace!(
+                    "read_lvalue ArrayElement with component access: element_ty={element_ty:?}, component_indices={component_indices:?}, base_offset={base_offset}, component_size_bytes={component_size_bytes}, final_ptr={final_ptr:?}"
                 );
 
                 let mut vals = Vec::new();
                 for &comp_idx in component_indices {
                     let component_offset = (comp_idx * component_size_bytes) as i32;
                     let total_offset = base_offset + component_offset;
-                    crate::debug!(
-                        "  Loading component {}: comp_idx={}, component_offset={}, total_offset={}",
-                        comp_idx,
-                        comp_idx,
-                        component_offset,
-                        total_offset
+                    log::trace!(
+                        "  Loading component {comp_idx}: comp_idx={comp_idx}, component_offset={component_offset}, total_offset={total_offset}"
                     );
                     let val =
                         ctx.builder
                             .ins()
                             .load(base_cranelift_ty, flags, final_ptr, total_offset);
-                    crate::debug!("  Loaded value: {:?}", val);
+                    log::trace!("  Loaded value: {val:?}");
                     vals.push(val);
                 }
 

@@ -762,31 +762,23 @@ fn execute_function_call<M: cranelift_module::Module>(
             )
         })?;
 
-        crate::debug!(
-            "execute_function_call: loading {} elements of type {:?} (cranelift_ty={:?})",
-            element_count,
-            base_type,
-            cranelift_ty
+        log::trace!(
+            "execute_function_call: loading {element_count} elements of type {base_type:?} (cranelift_ty={cranelift_ty:?})"
         );
         let mut loaded_vals = Vec::new();
         for i in 0..element_count {
             let offset = (i * crate::frontend::codegen::constants::F32_SIZE_BYTES) as i32;
-            crate::debug!(
-                "  loading element {} at offset {}, cranelift_ty={:?}",
-                i,
-                offset,
-                cranelift_ty
-            );
+            log::trace!("  loading element {i} at offset {offset}, cranelift_ty={cranelift_ty:?}");
             let val = ctx.builder.ins().load(
                 cranelift_ty,
                 cranelift_codegen::ir::MemFlags::trusted(),
                 buffer_ptr,
                 offset,
             );
-            crate::debug!("    loaded val = {:?} (should be {:?})", val, cranelift_ty);
+            log::trace!("    loaded val = {val:?} (should be {cranelift_ty:?})");
             loaded_vals.push(val);
         }
-        crate::debug!(
+        log::trace!(
             "  execute_function_call: returning {} loaded values",
             loaded_vals.len()
         );
@@ -852,24 +844,24 @@ fn emit_user_function_call<M: cranelift_module::Module>(
 
     // Step 7: Copy back out/inout parameters
     copy_back_out_parameters(ctx, &out_inout_args)?;
-    crate::debug!(
+    log::trace!(
         "translate_user_function_call: loaded {} return values, func_sig.return_type={:?}",
         return_vals.len(),
         func_sig.return_type
     );
     for (_i, _val) in return_vals.iter().enumerate() {
-        crate::debug!("  return_vals[{}] = {:?}", _i, _val);
+        log::trace!("  return_vals[{_i}] = {_val:?}");
     }
 
     // Step 8: Package return values
     let (packaged_vals, packaged_ty) = package_return_values(return_vals, &func_sig.return_type)?;
-    crate::debug!(
+    log::trace!(
         "translate_user_function_call: packaged to {} values, type={:?}",
         packaged_vals.len(),
         packaged_ty
     );
     for (_i, _val) in packaged_vals.iter().enumerate() {
-        crate::debug!("  packaged_vals[{}] = {:?}", _i, _val);
+        log::trace!("  packaged_vals[{_i}] = {_val:?}");
     }
     Ok((packaged_vals, packaged_ty))
 }

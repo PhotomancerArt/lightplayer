@@ -427,23 +427,15 @@ pub fn write_lvalue<M: cranelift_module::Module>(
                     ));
                 }
 
-                crate::debug!(
-                    "write_lvalue ArrayElement with component access: element_ty={:?}, component_indices={:?}, base_offset={}, component_size_bytes={}",
-                    element_ty,
-                    component_indices,
-                    base_offset,
-                    component_size_bytes
+                log::trace!(
+                    "write_lvalue ArrayElement with component access: element_ty={element_ty:?}, component_indices={component_indices:?}, base_offset={base_offset}, component_size_bytes={component_size_bytes}"
                 );
 
                 for (&comp_idx, &val) in component_indices.iter().zip(values.iter()) {
                     let component_offset = (comp_idx * component_size_bytes) as i32;
                     let total_offset = base_offset + component_offset;
-                    crate::debug!(
-                        "  Storing component {}: comp_idx={}, component_offset={}, total_offset={}",
-                        comp_idx,
-                        comp_idx,
-                        component_offset,
-                        total_offset
+                    log::trace!(
+                        "  Storing component {comp_idx}: comp_idx={comp_idx}, component_offset={component_offset}, total_offset={total_offset}"
                     );
                     ctx.builder.ins().store(flags, val, final_ptr, total_offset);
                 }

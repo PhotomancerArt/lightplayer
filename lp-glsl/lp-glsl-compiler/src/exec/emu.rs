@@ -1071,7 +1071,7 @@ impl GlslExecutable for GlslEmulatorModule {
             .call_function(func_address, &data_args, &sig)
             .map_err(|e| match e {
                 EmulatorError::Trap { code, pc, regs } => {
-                    crate::debug!(
+                    log::debug!(
                         "Emulator trap calling '{}':\n{}",
                         name,
                         self.emulator.dump_state()
@@ -1079,7 +1079,7 @@ impl GlslExecutable for GlslEmulatorModule {
                     self.format_trap_error_from_emulator_error(code, pc, &regs, name)
                 }
                 other => {
-                    crate::debug!(
+                    log::debug!(
                         "Emulator error calling '{}': {}\n{}",
                         name,
                         other,
