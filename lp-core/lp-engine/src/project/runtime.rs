@@ -448,12 +448,14 @@ impl ProjectRuntime {
     /// `delta_ms` is the time elapsed since the last frame in milliseconds.
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), Error> {
         // Update frame ID and time
+        let old_frame_id = self.frame_id;
         self.frame_id = self.frame_id.next();
         self.frame_time.total_ms += delta_ms;
         self.frame_time.delta_ms = delta_ms;
 
         log::debug!(
-            "ProjectRuntime::tick: Frame {} (time: {}ms total, {}ms delta)",
+            "ProjectRuntime::tick: Frame {} -> {} (time: {}ms total, {}ms delta)",
+            old_frame_id.as_i64(),
             self.frame_id.as_i64(),
             self.frame_time.total_ms,
             delta_ms

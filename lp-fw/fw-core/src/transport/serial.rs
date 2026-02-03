@@ -36,14 +36,21 @@ impl<Io: SerialIo> SerialTransport<Io> {
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        log::debug!("SerialTransport: Sending message id={}", msg.id);
-
         // Serialize to JSON
         let json = serde_json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
 
         let json_bytes = json.as_bytes();
+        let total_bytes = json_bytes.len() + 1;
+        
+        log::debug!(
+            "SerialTransport: Sending message id={} ({} bytes): {}",
+            msg.id,
+            total_bytes,
+            json
+        );
+
         log::trace!(
             "SerialTransport: Serialized message to {} bytes JSON",
             json_bytes.len()
@@ -59,7 +66,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         log::trace!(
             "SerialTransport: Wrote {} bytes to serial",
-            json_bytes.len() + 1
+            total_bytes
         );
 
         Ok(())
@@ -120,9 +127,10 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             match serde_json::from_str::<ClientMessage>(message_str) {
                 Ok(msg) => {
                     log::debug!(
-                        "SerialTransport: Parsed message id={}, size={} bytes",
+                        "SerialTransport: Received message id={} ({} bytes): {}",
                         msg.id,
-                        message_bytes.len()
+                        message_bytes.len(),
+                        message_str
                     );
                     Ok(Some(msg))
                 }

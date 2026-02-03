@@ -64,14 +64,15 @@ impl SerialEmuClientTransport {
                 "SerialEmuClientTransport: Parsing message ({} bytes)",
                 message_bytes.len()
             );
-            log::debug!("SerialEmuClientTransport: Parsing message: {}", message_str);
 
             let message: ServerMessage = serde_json::from_str(message_str)
                 .map_err(|e| TransportError::Serialization(format!("JSON parse error: {e}")))?;
 
             log::debug!(
-                "SerialEmuClientTransport: Received message id={}",
-                message.id
+                "SerialEmuClientTransport: Received message id={} ({} bytes): {}",
+                message.id,
+                message_bytes.len(),
+                message_str
             );
             log::trace!(
                 "SerialEmuClientTransport: Message size={} bytes",
@@ -132,25 +133,30 @@ impl SerialEmuClientTransport {
 #[async_trait]
 impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
-        log::debug!("SerialEmuClientTransport: Sending message id={}", msg.id);
-
         // Serialize message to JSON
         let json = serde_json::to_string(&msg)
             .map_err(|e| TransportError::Serialization(format!("JSON serialize error: {e}")))?;
 
-        log::trace!(
-            "SerialEmuClientTransport: Serialized message ({} bytes): {}",
-            json.len(),
+        // Add newline terminator
+        let mut data = json.clone().into_bytes();
+        data.push(b'\n');
+        let total_bytes = data.len();
+
+        log::debug!(
+            "SerialEmuClientTransport: Sending message id={} ({} bytes): {}",
+            msg.id,
+            total_bytes,
             json
         );
 
-        // Add newline terminator
-        let mut data = json.into_bytes();
-        data.push(b'\n');
+        log::trace!(
+            "SerialEmuClientTransport: Serialized message ({} bytes)",
+            json.len()
+        );
 
         log::trace!(
             "SerialEmuClientTransport: Writing {} bytes to emulator serial input",
-            data.len()
+            total_bytes
         );
 
         // Add to emulator's serial input buffer

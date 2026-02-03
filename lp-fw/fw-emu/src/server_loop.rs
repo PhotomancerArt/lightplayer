@@ -30,6 +30,11 @@ pub fn run_server_loop(
 
     loop {
         let frame_start = time_provider.now_ms();
+        
+        log::debug!(
+            "run_server_loop: Starting server loop iteration (time: {}ms)",
+            frame_start
+        );
 
         // Collect incoming messages (non-blocking)
         let mut incoming_messages = Vec::new();

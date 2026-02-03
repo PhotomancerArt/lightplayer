@@ -134,10 +134,24 @@ fn handle_project_request(
             since_frame,
             detail_specifier,
         } => {
+            let current_frame_before = project.runtime_mut().frame_id;
+            log::debug!(
+                "handle_project_request: GetChanges request (since_frame: {}, current_frame: {})",
+                since_frame.as_i64(),
+                current_frame_before.as_i64()
+            );
             let response = project
                 .runtime_mut()
                 .get_changes(since_frame, &detail_specifier, theoretical_fps)
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
+
+            let response_frame = match &response {
+                lp_model::project::api::ProjectResponse::GetChanges { current_frame, .. } => *current_frame,
+            };
+            log::debug!(
+                "handle_project_request: GetChanges response (current_frame: {})",
+                response_frame.as_i64()
+            );
 
             let serializable_response = response
                 .to_serializable()

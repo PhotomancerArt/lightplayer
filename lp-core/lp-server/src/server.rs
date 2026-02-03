@@ -104,45 +104,6 @@ impl LpServer {
         delta_ms: u32,
         incoming: Vec<Message>,
     ) -> Result<Vec<Message>, ServerError> {
-        let mut responses = Vec::new();
-
-        for message in incoming {
-            match message {
-                Message::Client(client_msg) => {
-                    // Process client message and generate response
-                    let theoretical_fps = self.theoretical_fps();
-                    let msg_id = client_msg.id;
-                    match handlers::handle_client_message(
-                        &mut self.project_manager,
-                        &mut *self.base_fs,
-                        &self.output_provider,
-                        client_msg,
-                        theoretical_fps,
-                    ) {
-                        Ok(response) => {
-                            responses.push(Message::Server(response));
-                        }
-                        Err(e) => {
-                            // Send error response for this message
-                            responses.push(Message::Server(lp_model::ServerMessage {
-                                id: msg_id,
-                                msg: lp_model::server::ServerMsgBody::Error {
-                                    error: format!("{}", e),
-                                },
-                            }));
-                        }
-                    }
-                }
-                Message::Server(_) => {
-                    // Server messages shouldn't be sent to the server
-                    // Log or ignore
-                    return Err(ServerError::Core(
-                        "Received server message on server side".to_string(),
-                    ));
-                }
-            }
-        }
-
         // Process filesystem changes for all loaded projects
         // Collect project info first to avoid borrowing issues
         let project_info: Vec<_> = self
@@ -215,9 +176,10 @@ impl LpServer {
         }
 
         // Tick all loaded projects
-        // Tick each project's runtime
-        for (handle, _) in project_info {
-            if let Some(project) = self.project_manager.get_project_mut(handle) {
+        // Tick each project's runtime BEFORE processing incoming messages
+        // This ensures GetChanges requests see the current frame's data
+        for (handle, _) in &project_info {
+            if let Some(project) = self.project_manager.get_project_mut(*handle) {
                 log::trace!(
                     "LpServer::tick: Ticking project {} (delta_ms: {})",
                     project.name(),
@@ -226,6 +188,57 @@ impl LpServer {
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
                 let _ = project.runtime_mut().tick(delta_ms);
+            }
+        }
+
+        // Log frame IDs after ticking (for debugging frame synchronization)
+        for (handle, _) in &project_info {
+            if let Some(project) = self.project_manager.get_project(*handle) {
+                log::debug!(
+                    "LpServer::tick: Project {} frame_id: {}",
+                    project.name(),
+                    project.runtime().frame_id.as_i64()
+                );
+            }
+        }
+
+        // Process incoming messages AFTER ticking projects
+        // This ensures GetChanges requests see the current frame's data
+        let mut responses = Vec::new();
+        for message in incoming {
+            match message {
+                Message::Client(client_msg) => {
+                    // Process client message and generate response
+                    let theoretical_fps = self.theoretical_fps();
+                    let msg_id = client_msg.id;
+                    match handlers::handle_client_message(
+                        &mut self.project_manager,
+                        &mut *self.base_fs,
+                        &self.output_provider,
+                        client_msg,
+                        theoretical_fps,
+                    ) {
+                        Ok(response) => {
+                            responses.push(Message::Server(response));
+                        }
+                        Err(e) => {
+                            // Send error response for this message
+                            responses.push(Message::Server(lp_model::ServerMessage {
+                                id: msg_id,
+                                msg: lp_model::server::ServerMsgBody::Error {
+                                    error: format!("{}", e),
+                                },
+                            }));
+                        }
+                    }
+                }
+                Message::Server(_) => {
+                    // Server messages shouldn't be sent to the server
+                    // Log or ignore
+                    return Err(ServerError::Core(
+                        "Received server message on server side".to_string(),
+                    ));
+                }
             }
         }
 
