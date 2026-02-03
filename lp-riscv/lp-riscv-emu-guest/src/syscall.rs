@@ -6,14 +6,13 @@ pub use lp_riscv_emu_shared::{
 
 /// System call implementation
 pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
-    let error: i32;
-    let value: i32;
+    let result: i32;
     unsafe {
         core::arch::asm!(
             "ecall",
             in("x17") nr,
-            inlateout("x10") args[0] => error,
-            inlateout("x11") args[1] => value,
+            inlateout("x10") args[0] => result,
+            in("x11") args[1],
             in("x12") args[2],
             in("x13") args[3],
             in("x14") args[4],
@@ -21,7 +20,8 @@ pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
             in("x16") args[6],
         );
     }
-    if error != 0 { error } else { value }
+    // Return value is in a0 (x10). Negative values are error codes, non-negative are success values.
+    result
 }
 
 pub fn sys_yield() {

@@ -15,6 +15,13 @@ lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
 lp-shared = { path = "../../lp-core/lp-shared" }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
+async-trait = "0.1"
+log = { workspace = true, features = ["std"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true }
+env_logger = { workspace = true }
 
 [lints]
 workspace = true

@@ -58,17 +58,17 @@ pub fn build_symbol_map(obj: &object::File, text_base: u64) -> HashMap<String, u
         if let Some(&existing_offset) = symbol_map.get(&name) {
             if offset > existing_offset {
                 symbol_map.insert(name.clone(), offset);
-                log::debug!(
+                log::trace!(
                     "  Symbol '{name}': replacing offset 0x{existing_offset:x} with 0x{offset:x} (higher address), section={section:?}"
                 );
             } else {
-                log::debug!(
+                log::trace!(
                     "  Symbol '{name}': keeping existing offset 0x{existing_offset:x} (new: 0x{offset:x}), section={section:?}"
                 );
             }
         } else {
             symbol_map.insert(name.clone(), offset);
-            log::debug!("  Symbol '{name}': offset=0x{offset:x}, section={section:?} (defined)");
+            log::trace!("  Symbol '{name}': offset=0x{offset:x}, section={section:?} (defined)");
         }
     }
 
@@ -76,9 +76,9 @@ pub fn build_symbol_map(obj: &object::File, text_base: u64) -> HashMap<String, u
     for (name, offset) in undefined_symbols {
         if !symbol_map.contains_key(&name) {
             symbol_map.insert(name.clone(), offset);
-            log::debug!("  Symbol '{name}': offset=0x{offset:x} (undefined)");
+            log::trace!("  Symbol '{name}': offset=0x{offset:x} (undefined)");
         } else {
-            log::debug!("  Symbol '{name}': skipping undefined (already have defined)");
+            log::trace!("  Symbol '{name}': skipping undefined (already have defined)");
         }
     }
 

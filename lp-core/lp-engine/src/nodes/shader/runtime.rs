@@ -6,6 +6,7 @@ use alloc::{
     format,
     string::{String, ToString},
 };
+use log;
 use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode, glsl_jit};
 use lp_model::{
     LpPathBuf, NodeHandle,
@@ -98,6 +99,10 @@ impl NodeRuntime for ShaderRuntime {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
+        log::trace!(
+            "ShaderRuntime::render: Starting render for shader {}",
+            self.node_handle.as_i32()
+        );
         let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
             message: String::from("Texture handle not resolved"),
         })?;
@@ -161,6 +166,10 @@ impl NodeRuntime for ShaderRuntime {
             }
         }
 
+        log::trace!(
+            "ShaderRuntime::render: Completed render for shader {}",
+            self.node_handle.as_i32()
+        );
         Ok(())
     }
 
@@ -310,6 +319,13 @@ impl ShaderRuntime {
 
     /// Compile GLSL source into executable
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
+        log::debug!(
+            "ShaderRuntime::compile_shader: Compiling shader {} ({} bytes)",
+            self.node_handle.as_i32(),
+            glsl_source.len()
+        );
+        log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{}", glsl_source);
+
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
@@ -323,11 +339,20 @@ impl ShaderRuntime {
                     unsafe { core::mem::transmute(executable) };
                 self.executable = Some(executable_with_bounds);
                 self.compilation_error = None;
+                log::debug!(
+                    "ShaderRuntime::compile_shader: Shader {} compiled successfully",
+                    self.node_handle.as_i32()
+                );
                 Ok(())
             }
             Err(e) => {
                 self.compilation_error = Some(format!("{e}"));
                 self.executable = None;
+                log::warn!(
+                    "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
+                    self.node_handle.as_i32(),
+                    e
+                );
                 Err(Error::InvalidConfig {
                     node_path: format!("shader-{}", self.node_handle.as_i32()),
                     reason: format!("GLSL compilation failed: {e}"),

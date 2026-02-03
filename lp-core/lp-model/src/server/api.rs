@@ -56,6 +56,10 @@ pub enum ServerMsgBody {
         level: LogLevel,
         message: String,
     },
+    /// Error response for any request type
+    Error {
+        error: String,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

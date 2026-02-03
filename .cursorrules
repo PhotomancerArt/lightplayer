@@ -46,6 +46,8 @@
 
 # Tests: Each test should test one thing clearly
 
+# Tests: NEVER change a test to make it pass when it fails due to a bug. If a test fails, FIX THE BUG, not the test. Tests exist to catch bugs - changing tests to hide bugs is unacceptable and defeats the purpose of testing.
+
 # Language: Keep language professional and restrained
 
 # Language: Avoid overly optimistic language like "comprehensive", "fully production ready", "complete solution"

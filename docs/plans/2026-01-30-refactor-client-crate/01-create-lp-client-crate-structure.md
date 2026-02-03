@@ -15,6 +15,7 @@ Create the basic structure for the new `lp-client` crate, including directory st
 ## Implementation Details
 
 1. Create directory structure:
+
    ```
    lp-core/lp-client/
    ├── Cargo.toml
@@ -36,6 +37,7 @@ Create the basic structure for the new `lp-client` crate, including directory st
      - `serde` (with "derive" feature)
 
 3. Create placeholder `src/lib.rs`:
+
    ```rust
    //! LightPlayer client library.
    //!

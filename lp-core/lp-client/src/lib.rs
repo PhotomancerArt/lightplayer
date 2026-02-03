@@ -7,19 +7,15 @@ pub mod client;
 pub mod local;
 pub mod specifier;
 pub mod transport;
-#[cfg(feature = "serial")]
-pub mod transport_serial;
 #[cfg(feature = "ws")]
 pub mod transport_ws;
 
 // Re-export main types
-pub use client::{LpClient, serializable_response_to_project_response};
+pub use client::{serializable_response_to_project_response, LpClient};
 pub use local::{
-    AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
+    create_local_transport_pair, AsyncLocalClientTransport, AsyncLocalServerTransport,
 };
 pub use specifier::HostSpecifier;
 pub use transport::ClientTransport;
-#[cfg(feature = "serial")]
-pub use transport_serial::SerialClientTransport;
 #[cfg(feature = "ws")]
 pub use transport_ws::WebSocketClientTransport;

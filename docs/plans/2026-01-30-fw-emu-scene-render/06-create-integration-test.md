@@ -42,106 +42,106 @@ async fn test_scene_render_fw_emu() {
     // ---------------------------------------------------------------------------------------------
     // Arrange
     //
-    
+
     // Build fw-emu binary
     let fw_emu_path = lp_riscv_emu::test_util::ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
     ).expect("Failed to build fw-emu");
-    
+
     // Load ELF
     let elf_data = std::fs::read(&fw_emu_path).expect("Failed to read fw-emu ELF");
     let load_info = load_elf(&elf_data).expect("Failed to load ELF");
-    
+
     // Create emulator with simulated time mode
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
         .with_log_level(LogLevel::None)
         .with_max_instructions(10_000_000)
         .with_time_mode(TimeMode::Simulated(0));
-    
+
     // Set up stack pointer
     let sp_value = 0x80000000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
     emulator.set_register(Gpr::Sp, sp_value as i32);
-    
+
     // Set PC to entry point
     emulator.set_pc(load_info.entry_point);
-    
+
     // Create shared emulator reference
     let emulator_arc = Arc::new(Mutex::new(emulator));
-    
+
     // Create serial client transport
     let transport = SerialClientTransport::new(emulator_arc.clone());
     let client = LpClient::new(Box::new(transport));
-    
+
     // Create project using ProjectBuilder
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
-    
+
     // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
-    
+
     // ---------------------------------------------------------------------------------------------
     // Act: Send project files to firmware
     //
-    
+
     // Write project files to firmware filesystem via client
     // Get all files from the project filesystem
     let project_files = collect_project_files(&fs.borrow());
-    
+
     for (path, content) in project_files {
         let full_path = format!("projects/{}", path);
         client.fs_write(full_path.as_str(), &content).await
             .expect("Failed to write project file");
     }
-    
+
     // Load project
     let project_handle = client.project_load("projects/project.json").await
         .expect("Failed to load project");
-    
+
     // Create client view for syncing
     let mut client_view = ClientProjectView::new();
-    
+
     // ---------------------------------------------------------------------------------------------
     // Act & Assert: Render frames
     //
-    
+
     // Shader: vec4(mod(time, 1.0), 0.0, 0.0, 1.0) -> RGBA bytes [R, G, B, A]
     // Advancing time by 4ms gives an increment of (4/1000 * 255) = 1.02 ≈ 1
-    
+
     // Frame 1
     {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-    
+
     // Run emulator until yield (processes tick)
     run_until_yield(&emulator_arc);
-    
+
     // Sync client view
     sync_client_view(&client, project_handle, &mut client_view).await;
-    
+
     // Frame 2
     {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-    
+
     run_until_yield(&emulator_arc);
     sync_client_view(&client, project_handle, &mut client_view).await;
-    
+
     // Frame 3
     {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-    
+
     run_until_yield(&emulator_arc);
     sync_client_view(&client, project_handle, &mut client_view).await;
-    
+
     // Verify we got through 3 frames
     // (Output verification deferred - just verify frames progressed)
     assert!(client_view.frame_id >= 3, "Should have processed at least 3 frames");
@@ -172,7 +172,7 @@ async fn sync_client_view(
         Some(view.frame_id),
         detail_spec,
     ).await.expect("Failed to sync project");
-    
+
     view.apply_changes(&response.to_serializable().expect("Failed to convert response"))
         .expect("Failed to apply changes");
 }
@@ -209,6 +209,7 @@ cargo test --test scene_render
 ```
 
 Ensure:
+
 - Test compiles
 - Test runs (may need adjustments based on actual APIs)
 - No warnings (except for TODO comments)

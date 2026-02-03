@@ -55,7 +55,7 @@ impl SerialClientTransport {
     /// Returns true if yield was encountered, false if max steps reached.
     fn run_until_yield(&self, max_steps: u64) -> Result<bool, TransportError> {
         let mut emu = self.emulator.lock().map_err(|_| TransportError::ConnectionLost)?;
-        
+
         match emu.step_until_yield(max_steps) {
             Ok(_) => Ok(true),
             Err(e) => {
@@ -74,7 +74,7 @@ impl SerialClientTransport {
     /// Messages are newline-terminated JSON.
     fn read_message(&mut self) -> Result<Option<ServerMessage>, TransportError> {
         let mut emu = self.emulator.lock().map_err(|_| TransportError::ConnectionLost)?;
-        
+
         // Drain serial output and append to buffer
         let output = emu.drain_serial_output();
         self.read_buffer.extend_from_slice(&output);
@@ -84,10 +84,10 @@ impl SerialClientTransport {
             let message_bytes = self.read_buffer.drain(..=newline_pos).collect::<Vec<_>>();
             let message_str = core::str::from_utf8(&message_bytes[..message_bytes.len() - 1])
                 .map_err(|_| TransportError::ParseError)?;
-            
+
             let message: ServerMessage = serde_json::from_str(message_str)
                 .map_err(|_| TransportError::ParseError)?;
-            
+
             Ok(Some(message))
         } else {
             Ok(None)
@@ -101,16 +101,16 @@ impl crate::transport::ClientTransport for SerialClientTransport {
         // Serialize message to JSON
         let json = serde_json::to_string(&msg)
             .map_err(|_| TransportError::ParseError)?;
-        
+
         // Add newline terminator
         let mut data = json.into_bytes();
         data.push(b'\n');
-        
+
         // Add to emulator's serial input buffer
         let mut emu = self.emulator.lock().map_err(|_| TransportError::ConnectionLost)?;
         emu.add_serial_input(&data)
             .map_err(|_| TransportError::ConnectionLost)?;
-        
+
         Ok(())
     }
 
@@ -129,7 +129,7 @@ impl crate::transport::ClientTransport for SerialClientTransport {
             // Run until yield
             let yielded = self.run_until_yield(MAX_STEPS_PER_RECEIVE)?;
             total_steps += MAX_STEPS_PER_RECEIVE;
-            
+
             if !yielded {
                 // Hit instruction limit, check for message anyway
             }
@@ -202,7 +202,7 @@ mod tests {
         let ram = vec![0u8; 1024];
         let emu = Arc::new(Mutex::new(Riscv32Emulator::new(code, ram)));
         let transport = SerialClientTransport::new(emu);
-        
+
         // Transport should be created successfully
         assert!(true);
     }
@@ -220,6 +220,7 @@ cargo test --features serial
 ```
 
 Ensure:
+
 - SerialClientTransport compiles
 - Implements ClientTransport trait correctly
 - No warnings (except for TODO comments if any)

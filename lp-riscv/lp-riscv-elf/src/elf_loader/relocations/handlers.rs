@@ -25,7 +25,7 @@ pub struct RelocationContext<'a> {
 
 /// Handle R_RISCV_CALL_PLT (17): Function call via PLT (auipc+jalr pair).
 pub fn handle_call_plt(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> Result<(), String> {
-    log::debug!("  Applying R_RISCV_CALL_PLT at 0x{:x}", reloc.address);
+    log::trace!("  Applying R_RISCV_CALL_PLT at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 8 > ctx.buffer.len() {
@@ -83,7 +83,7 @@ pub fn handle_call_plt(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
 /// Handle R_RISCV_GOT_HI20 (19): GOT high 20 bits (for auipc instruction).
 /// Falls back to direct PC-relative addressing if no GOT entry exists (for object files).
 pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> Result<(), String> {
-    log::debug!("  Applying R_RISCV_GOT_HI20 at 0x{:x}", reloc.address);
+    log::trace!("  Applying R_RISCV_GOT_HI20 at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -107,7 +107,7 @@ pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
+        log::trace!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     } else {
         // No GOT entry: fall back to direct PC-relative addressing (for object files)
         // This happens when symbols are resolved directly without GOT indirection
@@ -166,7 +166,7 @@ pub fn handle_got_hi20(ctx: &mut RelocationContext, reloc: &RelocationInfo) -> R
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
+        log::trace!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     }
 
     Ok(())
@@ -210,7 +210,7 @@ pub fn handle_pcrel_hi20(
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
+        log::trace!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     } else {
         // Regular PCREL_HI20 relocation
         let pcrel = ctx
@@ -227,7 +227,7 @@ pub fn handle_pcrel_hi20(
         let patched = (inst_word & 0xFFF) | (hi20 << 12);
         inst_bytes.copy_from_slice(&patched.to_le_bytes());
 
-        log::debug!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
+        log::trace!("    Patched auipc: 0x{inst_word:08x} → 0x{patched:08x} (hi20=0x{hi20:x})");
     }
 
     Ok(())
@@ -238,7 +238,7 @@ pub fn handle_pcrel_lo12_i(
     ctx: &mut RelocationContext,
     reloc: &RelocationInfo,
 ) -> Result<(), String> {
-    log::debug!("  Applying R_RISCV_PCREL_LO12_I at 0x{:x}", reloc.address);
+    log::trace!("  Applying R_RISCV_PCREL_LO12_I at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {
@@ -420,7 +420,7 @@ pub fn handle_abs32(
     reloc: &RelocationInfo,
     got_tracker: &mut GotTracker,
 ) -> Result<(), String> {
-    log::debug!("  Applying R_RISCV_32 at 0x{:x}", reloc.address);
+    log::trace!("  Applying R_RISCV_32 at 0x{:x}", reloc.address);
 
     let offset = reloc.offset as usize;
     if offset + 4 > ctx.buffer.len() {

@@ -153,12 +153,12 @@ impl OutputProvider for SyscallOutputProvider {
         let handle = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
         self.handles.borrow_mut().push(handle);
-        
+
         println!(
             "[output] open: pin={}, bytes={}, format={:?}, handle={}",
             pin, byte_count, format, handle
         );
-        
+
         Ok(handle)
     }
 
@@ -209,6 +209,7 @@ RUSTFLAGS="-C target-feature=-c" cargo build --target riscv32imac-unknown-none-e
 ```
 
 Ensure:
+
 - All syscall implementations compile
 - No `todo!()` calls (except in output provider where noted)
 - No warnings (except for TODO comments)

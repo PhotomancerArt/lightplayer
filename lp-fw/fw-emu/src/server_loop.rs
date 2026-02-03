@@ -7,10 +7,11 @@ use crate::time::SyscallTimeProvider;
 use alloc::vec::Vec;
 use fw_core::transport::SerialTransport;
 use lp_model::Message;
-use lp_riscv_emu_guest::{println, sys_yield};
+use lp_riscv_emu_guest::sys_yield;
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
+use log;
 
 /// Target frame time for 60 FPS (16.67ms per frame)
 const TARGET_FRAME_TIME_MS: u32 = 16;
@@ -32,23 +33,37 @@ pub fn run_server_loop(
 
         // Collect incoming messages (non-blocking)
         let mut incoming_messages = Vec::new();
+        let mut receive_calls = 0;
         loop {
+            receive_calls += 1;
             match transport.receive() {
                 Ok(Some(msg)) => {
+                    log::debug!(
+                        "run_server_loop: Received message id={} on receive call #{}",
+                        msg.id,
+                        receive_calls
+                    );
                     incoming_messages.push(Message::Client(msg));
                 }
                 Ok(None) => {
+                    if receive_calls > 1 {
+                        log::trace!(
+                            "run_server_loop: No more messages after {} receive calls",
+                            receive_calls
+                        );
+                    }
                     // No more messages available
                     break;
                 }
-                Err(_) => {
+                Err(e) => {
+                    log::warn!("run_server_loop: Transport error: {:?}", e);
                     // Transport error - break and continue
                     break;
                 }
             }
         }
-        println!(
-            "[run_server_loop] loop. messages: {}",
+        log::trace!(
+            "run_server_loop: Collected {} messages this loop iteration",
             incoming_messages.len()
         );
 
@@ -59,17 +74,26 @@ pub fn run_server_loop(
         // Tick server (synchronous)
         match server.tick(delta_ms.max(1), incoming_messages) {
             Ok(responses) => {
-                println!("[run_server_loop] responses: {}", responses.len());
+                log::trace!(
+                    "run_server_loop: Server tick produced {} responses",
+                    responses.len()
+                );
                 // Send responses
                 for response in responses {
                     if let Message::Server(server_msg) = response {
-                        if let Err(_) = transport.send(server_msg) {
+                        log::debug!(
+                            "run_server_loop: Sending response message id={}",
+                            server_msg.id
+                        );
+                        if let Err(e) = transport.send(server_msg) {
+                            log::warn!("run_server_loop: Failed to send response: {:?}", e);
                             // Transport error - continue with next message
                         }
                     }
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                log::warn!("run_server_loop: Server tick error: {:?}", e);
                 // Server error - continue
             }
         }

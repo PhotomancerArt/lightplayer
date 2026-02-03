@@ -5,9 +5,10 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::handlers;
 use crate::project_manager::ProjectManager;
-use alloc::{boxed::Box, rc::Rc, string::ToString, vec::Vec};
+use alloc::{boxed::Box, format, rc::Rc, string::ToString, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
+use log;
 use lp_model::{LpPath, LpPathBuf, Message};
 use lp_shared::fs::{FsChange, LpFs};
 use lp_shared::output::OutputProvider;
@@ -110,14 +111,27 @@ impl LpServer {
                 Message::Client(client_msg) => {
                     // Process client message and generate response
                     let theoretical_fps = self.theoretical_fps();
-                    let response = handlers::handle_client_message(
+                    let msg_id = client_msg.id;
+                    match handlers::handle_client_message(
                         &mut self.project_manager,
                         &mut *self.base_fs,
                         &self.output_provider,
                         client_msg,
                         theoretical_fps,
-                    )?;
-                    responses.push(Message::Server(response));
+                    ) {
+                        Ok(response) => {
+                            responses.push(Message::Server(response));
+                        }
+                        Err(e) => {
+                            // Send error response for this message
+                            responses.push(Message::Server(lp_model::ServerMessage {
+                                id: msg_id,
+                                msg: lp_model::server::ServerMsgBody::Error {
+                                    error: format!("{}", e),
+                                },
+                            }));
+                        }
+                    }
                 }
                 Message::Server(_) => {
                     // Server messages shouldn't be sent to the server
@@ -204,6 +218,11 @@ impl LpServer {
         // Tick each project's runtime
         for (handle, _) in project_info {
             if let Some(project) = self.project_manager.get_project_mut(handle) {
+                log::trace!(
+                    "LpServer::tick: Ticking project {} (delta_ms: {})",
+                    project.name(),
+                    delta_ms
+                );
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
                 let _ = project.runtime_mut().tick(delta_ms);

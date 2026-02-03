@@ -3,6 +3,7 @@
 ## Scope of Work
 
 Get fw-emu working end-to-end by implementing a test that:
+
 1. Builds the fw-emu firmware binary for RISC-V32
 2. Loads a simple scene (similar to `lp-core/lp-engine/tests/scene_render.rs`)
 3. Runs the firmware in the emulator

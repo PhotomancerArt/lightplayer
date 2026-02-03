@@ -3,6 +3,7 @@
 ## Scope of phase
 
 Add time mode support to the emulator to allow deterministic time control for testing. This includes:
+
 - Creating a `TimeMode` enum (RealTime vs Simulated)
 - Adding time mode field to `Riscv32Emulator`
 - Updating time syscall handler to use time mode
@@ -143,12 +144,12 @@ mod tests {
     fn test_simulated_time_mode() {
         let mut emu = Riscv32Emulator::new(vec![], vec![])
             .with_time_mode(TimeMode::Simulated(0));
-        
+
         assert_eq!(emu.elapsed_ms(), 0);
-        
+
         emu.advance_time(100);
         assert_eq!(emu.elapsed_ms(), 100);
-        
+
         emu.advance_time(50);
         assert_eq!(emu.elapsed_ms(), 150);
     }
@@ -157,7 +158,7 @@ mod tests {
     fn test_realtime_mode_ignores_advance() {
         let mut emu = Riscv32Emulator::new(vec![], vec![])
             .with_time_mode(TimeMode::RealTime);
-        
+
         // advance_time should be ignored in RealTime mode
         emu.advance_time(100);
         // Time should still be based on real time (or 0 if not started)
@@ -183,6 +184,7 @@ cargo check
 ```
 
 Ensure:
+
 - Time mode enum compiles
 - `Riscv32Emulator` has time mode field and methods
 - Time syscall handler uses time mode correctly

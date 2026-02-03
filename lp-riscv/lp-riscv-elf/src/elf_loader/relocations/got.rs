@@ -31,7 +31,7 @@ impl GotTracker {
 
     /// Add a GOT entry.
     pub fn add_entry(&mut self, symbol_name: String, address: u32) {
-        log::debug!("  GOT entry: '{symbol_name}' at 0x{address:x}");
+        log::trace!("  GOT entry: '{symbol_name}' at 0x{address:x}");
         self.entries.insert(
             symbol_name.clone(),
             GotEntry {

@@ -10,7 +10,8 @@ rust-version.workspace = true
 default = ["std"]
 std = [
 	"lp-shared/std",
-	"lp-engine/std"
+	"lp-engine/std",
+	"log/std"
 ]
 
 [dependencies]
@@ -19,6 +20,7 @@ lp-model = { path = "../lp-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 hashbrown = { workspace = true }
+log = { workspace = true, default-features = false }
 
 [dev-dependencies]
 lp-engine = { path = "../lp-engine", default-features = false, features = ["std"] }

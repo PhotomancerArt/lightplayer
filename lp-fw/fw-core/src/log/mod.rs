@@ -12,7 +12,7 @@ pub mod esp32;
 
 // Re-export initialization functions
 #[cfg(feature = "emu")]
-pub use emu::init as init_emu_logger;
+pub use emu::{init as init_emu_logger, lp_jit_host_log};
 
 #[cfg(feature = "esp32")]
 pub use esp32::{PrintFn, init as init_esp32_logger};

@@ -65,6 +65,7 @@ impl LpClient {
     /// Send a request and wait for the response
     ///
     /// Helper method that generates a request ID, sends the request, and waits for the response.
+    /// If the server returns an Error response, converts it to an Err.
     async fn send_request(&self, request: ClientRequest) -> Result<ServerMessage> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let msg = ClientMessage { id, msg: request };
@@ -77,10 +78,17 @@ impl LpClient {
             .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
 
         // Wait for response
-        transport
+        let response = transport
             .receive()
             .await
-            .map_err(|e| Error::msg(format!("Transport error: {e}")))
+            .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
+
+        // Check if server returned an error response
+        if let ServerMsgBody::Error { error } = &response.msg {
+            return Err(Error::msg(error.clone()));
+        }
+
+        Ok(response)
     }
 
     /// Read a file from the server filesystem

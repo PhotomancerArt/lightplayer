@@ -104,14 +104,36 @@ impl Riscv32Emulator {
             let mut buf = [0u8; 1024];
             loop {
                 match serial.host_read(&mut buf) {
-                    Ok(n) if n > 0 => {
-                        result.extend_from_slice(&buf[..n]);
+                    Ok(n) => {
+                        if n > 0 {
+                            log::trace!(
+                                "Riscv32Emulator::drain_serial_output: Read {} bytes from host_read",
+                                n
+                            );
+                            result.extend_from_slice(&buf[..n]);
+                        } else {
+                            log::trace!(
+                                "Riscv32Emulator::drain_serial_output: host_read returned 0, breaking"
+                            );
+                            break;
+                        }
                     }
-                    _ => break,
+                    Err(e) => {
+                        log::warn!(
+                            "Riscv32Emulator::drain_serial_output: host_read error: {:?}",
+                            e
+                        );
+                        break;
+                    }
                 }
             }
+            log::trace!(
+                "Riscv32Emulator::drain_serial_output: Total drained {} bytes",
+                result.len()
+            );
             result
         } else {
+            log::trace!("Riscv32Emulator::drain_serial_output: No serial_host, returning empty");
             Vec::new()
         }
     }

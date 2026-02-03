@@ -42,7 +42,7 @@ pub fn apply_relocations_phase2(
         }
     }
 
-    log::debug!(
+    log::trace!(
         "Applying {} GOT entry relocations first, then {} other relocations",
         got_relocs.len(),
         other_relocs.len()
@@ -167,14 +167,14 @@ fn apply_single_relocation(
             // If this is a GOT entry, mark it as initialized
             if got_tracker.has_entry(&reloc.symbol_name) {
                 got_tracker.mark_initialized(&reloc.symbol_name);
-                log::debug!(
+                log::trace!(
                     "  Applied R_RISCV_32 at 0x{:x}: ✓ GOT entry initialized: '{}' = 0x{:x}",
                     reloc.address,
                     reloc.symbol_name,
                     target_addr
                 );
             } else {
-                log::debug!(
+                log::trace!(
                     "  Applied R_RISCV_32 at 0x{:x}: Wrote 0x{:x} to offset 0x{:x} for '{}'",
                     reloc.address,
                     target_addr,

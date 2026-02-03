@@ -7,6 +7,8 @@ extern crate alloc;
 use alloc::collections::VecDeque;
 use lp_riscv_emu_shared::SERIAL_ERROR_BUFFER_FULL;
 
+use log;
+
 /// Serial host for managing bidirectional serial communication
 pub struct HostSerial {
     to_guest_buf: VecDeque<u8>,   // Host → Guest (guest reads from this)
@@ -67,6 +69,11 @@ impl HostSerial {
         // Write bytes (drop excess if buffer would exceed limit)
         if to_write > 0 {
             self.from_guest_buf.extend(&buffer[..to_write]);
+            log::trace!(
+                "HostSerial::guest_write: Wrote {} bytes, from_guest_buf now has {} bytes",
+                to_write,
+                self.from_guest_buf.len()
+            );
         }
 
         to_write as i32
@@ -87,18 +94,40 @@ impl HostSerial {
         }
 
         if self.to_guest_buf.is_empty() {
+            log::trace!("HostSerial::guest_read: Buffer empty, returning 0");
             return 0;
         }
 
         // Read available bytes (up to buffer length)
         let to_read = buffer.len().min(self.to_guest_buf.len());
+        log::trace!(
+            "HostSerial::guest_read: Reading {} bytes from buffer (buffer has {} bytes)",
+            to_read,
+            self.to_guest_buf.len()
+        );
         for i in 0..to_read {
             if let Some(byte) = self.to_guest_buf.pop_front() {
                 buffer[i] = byte;
             } else {
+                log::warn!(
+                    "HostSerial::guest_read: Unexpected empty buffer at index {}",
+                    i
+                );
                 return i as i32;
             }
         }
+
+        // Log first 50 bytes of what we're reading
+        let preview_len = to_read.min(50);
+        let hex_preview: alloc::vec::Vec<alloc::string::String> = buffer[..preview_len]
+            .iter()
+            .map(|b| alloc::format!("{:02x}", b))
+            .collect();
+        log::trace!(
+            "HostSerial::guest_read: Read {} bytes (first 50 hex): {}",
+            to_read,
+            hex_preview.join(" ")
+        );
 
         to_read as i32
     }
@@ -127,11 +156,17 @@ impl HostSerial {
         }
 
         if self.from_guest_buf.is_empty() {
+            log::trace!("HostSerial::host_read: from_guest_buf is empty, returning 0");
             return Ok(0);
         }
 
         // Read available bytes (up to buffer length)
         let to_read = buffer.len().min(self.from_guest_buf.len());
+        log::trace!(
+            "HostSerial::host_read: Reading {} bytes from from_guest_buf (buffer has {} bytes)",
+            to_read,
+            self.from_guest_buf.len()
+        );
         for i in 0..to_read {
             if let Some(byte) = self.from_guest_buf.pop_front() {
                 buffer[i] = byte;
@@ -139,6 +174,12 @@ impl HostSerial {
                 return Ok(i);
             }
         }
+
+        log::trace!(
+            "HostSerial::host_read: Read {} bytes, from_guest_buf now has {} bytes",
+            to_read,
+            self.from_guest_buf.len()
+        );
 
         Ok(to_read)
     }
@@ -165,7 +206,22 @@ impl HostSerial {
 
         // Write bytes (drop excess if buffer would exceed limit)
         if to_write > 0 {
+            // Log first 50 bytes of what we're writing
+            let preview_len = to_write.min(50);
+            let hex_preview: alloc::vec::Vec<alloc::string::String> = buffer[..preview_len]
+                .iter()
+                .map(|b| alloc::format!("{:02x}", b))
+                .collect();
+            log::trace!(
+                "HostSerial::host_write: Writing {} bytes (first 50 hex): {}",
+                to_write,
+                hex_preview.join(" ")
+            );
             self.to_guest_buf.extend(&buffer[..to_write]);
+            log::trace!(
+                "HostSerial::host_write: to_guest_buf now has {} bytes",
+                self.to_guest_buf.len()
+            );
         }
 
         Ok(to_write)

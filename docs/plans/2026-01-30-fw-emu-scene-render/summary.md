@@ -7,6 +7,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 ## Completed Work
 
 ### Phase 1: Add Time Mode to Emulator
+
 - Added `TimeMode` enum with `RealTime` and `Simulated(u32)` variants
 - Updated `Riscv32Emulator` to support time mode configuration
 - Added `with_time_mode()`, `set_time_mode()`, and `advance_time()` methods
@@ -14,6 +15,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - Added tests for time mode functionality
 
 ### Phase 2: Create Binary Building Helper Utility
+
 - Created `test_util` module in `lp-riscv-emu` with:
   - `BinaryBuildConfig` struct for build configuration
   - `ensure_binary_built()` function for building and caching binaries
@@ -22,6 +24,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - Added tests for the utility functions
 
 ### Phase 3: Implement fw-emu Syscall Wrappers
+
 - Updated `fw-emu/Cargo.toml` to use `lp-riscv-emu-guest` dependency
 - Implemented `SyscallSerialIo` using `sys_serial_write`, `sys_serial_read`, `sys_serial_has_data`
 - Implemented `SyscallTimeProvider` using `SYSCALL_TIME_MS`
@@ -29,6 +32,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - Updated `main.rs` to use `lp_riscv_emu_guest` imports
 
 ### Phase 4: Implement fw-emu Server Loop
+
 - Created `server_loop.rs` with `run_server_loop()` function
 - Implemented main loop that:
   - Collects incoming messages from serial transport
@@ -39,6 +43,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - Updated `main.rs` to initialize server, transport, and time provider, then call `run_server_loop()`
 
 ### Phase 5: Create Serial Client Transport
+
 - Created `transport_serial.rs` in `lp-client` with `SerialClientTransport`
 - Implemented `ClientTransport` trait to bridge async `lp-client` with synchronous emulator
 - Added `serial` feature flag to `lp-client` Cargo.toml
@@ -46,6 +51,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - Handles message framing (JSON + newline)
 
 ### Phase 6: Create Integration Test
+
 - Created `lp-fw/fw-emu/tests/scene_render.rs` integration test
 - Test builds `fw-emu` binary, loads ELF into emulator
 - Sets up `SerialClientTransport` and `LpClient`
@@ -58,6 +64,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 ## Key Components
 
 ### New Files
+
 - `lp-riscv/lp-riscv-emu/src/time.rs` - Time mode enum
 - `lp-riscv/lp-riscv-emu/src/test_util.rs` - Binary building utilities
 - `lp-fw/fw-emu/src/server_loop.rs` - Server loop implementation
@@ -65,6 +72,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 - `lp-fw/fw-emu/tests/scene_render.rs` - Integration test
 
 ### Modified Files
+
 - `lp-riscv/lp-riscv-emu/src/emu/emulator/state.rs` - Added time mode support
 - `lp-riscv/lp-riscv-emu/src/lib.rs` - Exported new modules
 - `lp-riscv/lp-riscv-emu/tests/guest_app_tests.rs` - Updated to use test utility

@@ -71,17 +71,20 @@ lp-cli/
 ### lp-client crate
 
 **Core Types:**
+
 - `LpClient`: Main client struct with async methods for filesystem and project operations
 - `ClientTransport`: Trait for transport implementations
 - `HostSpecifier`: Enum for parsing connection strings
 
 **Transport Implementations:**
+
 - `WebSocketClientTransport`: WebSocket-based transport
 - `AsyncLocalClientTransport`: Local in-memory client transport
 - `AsyncLocalServerTransport`: Local in-memory server transport (for testing)
 - `create_local_transport_pair()`: Helper to create connected local transports
 
 **Dependencies:**
+
 - `lp-model`: Message types
 - `lp-shared`: ServerTransport trait (for AsyncLocalServerTransport)
 - `tokio`: Async runtime
@@ -93,10 +96,12 @@ lp-cli/
 ### lp-cli crate (updated)
 
 **CLI-Specific Client Code:**
+
 - `LocalServerTransport`: Wraps server creation and provides ClientTransport interface
 - `client_connect()`: Factory function that creates transports based on HostSpecifier
 
 **Changes:**
+
 - Import `lp-client` crate as dependency
 - Re-export `lp-client` types through `lp-cli::client` module for backward compatibility
 - Keep `LocalServerTransport` and `client_connect` in lp-cli
@@ -119,7 +124,7 @@ pub use transport_ws::WebSocketClientTransport;
 pub mod client {
     // Re-export everything from lp-client
     pub use lp_client::*;
-    
+
     // Add CLI-specific types
     pub use local_server::LocalServerTransport;
     pub use client_connect::client_connect;

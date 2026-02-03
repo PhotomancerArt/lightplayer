@@ -1,33 +1,34 @@
 //! Integration test for fw-emu that loads a scene and renders frames
 //!
-//! This test is similar to `lp-core/lp-engine/tests/scene_render.rs` but uses
+//! This test is similar to `lp-core/lp-engine/tests/scene_render_emu` but uses
 //! the emulator firmware instead of direct runtime execution.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use lp_client::{LpClient, SerialClientTransport, serializable_response_to_project_response};
+use log;
+use lp_client::{serializable_response_to_project_response, LpClient};
 use lp_engine_client::ClientProjectView;
+use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use lp_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    LogLevel, Riscv32Emulator, TimeMode,
-    test_util::{BinaryBuildConfig, ensure_binary_built},
+    test_util::{ensure_binary_built, BinaryBuildConfig}, LogLevel, Riscv32Emulator,
+    TimeMode,
 };
 use lp_riscv_inst::Gpr;
-use lp_shared::ProjectBuilder;
 use lp_shared::fs::LpFsMemory;
+use lp_shared::ProjectBuilder;
 
 #[tokio::test]
-#[ignore] // TODO emu: Message handling not working correctly yet
+#[test_log::test]
 async fn test_scene_render_fw_emu() {
     // ---------------------------------------------------------------------------------------------
     // Arrange
     //
-
     // Build fw-emu binary
-    println!("Building fw-emu...");
+    log::info!("Building fw-emu...");
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
@@ -35,7 +36,7 @@ async fn test_scene_render_fw_emu() {
     )
     .expect("Failed to build fw-emu");
 
-    println!("Starting emulator...");
+    log::info!("Starting emulator...");
 
     // Load ELF
     let elf_data = std::fs::read(&fw_emu_path).expect("Failed to read fw-emu ELF");
@@ -59,13 +60,9 @@ async fn test_scene_render_fw_emu() {
     let emulator_arc = Arc::new(Mutex::new(emulator));
 
     // Create serial client transport
-    let (transport, yield_notify) = SerialClientTransport::new(emulator_arc.clone());
+    let transport = SerialEmuClientTransport::new(emulator_arc.clone());
 
-    // Spawn emulator task to run the emulator in a loop
-    let _emulator_handle =
-        SerialClientTransport::spawn_emulator_task(emulator_arc.clone(), yield_notify);
-
-    println!("Starting client...");
+    log::info!("Starting client...");
     let client = LpClient::new(Box::new(transport));
 
     // Create project using ProjectBuilder
@@ -73,7 +70,7 @@ async fn test_scene_render_fw_emu() {
     let mut builder = ProjectBuilder::new(fs.clone());
 
     // Add nodes
-    let texture_path = builder.texture_basic();
+    let texture_path = builder.texture().width(2).height(2).add(&mut builder);
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
@@ -87,32 +84,51 @@ async fn test_scene_render_fw_emu() {
     // Get all files from the project filesystem
     let project_files = collect_project_files(&fs.borrow());
 
-    println!("Syncing project...");
+    log::info!("Syncing project...");
+    // Write files to /projects/project/ directory structure
+    let project_dir = "project";
     for (path, content) in project_files {
-        let full_path = format!("/projects/{}", path);
+        let full_path = format!("/projects/{}/{}", project_dir, path);
 
-        println!("   {}", full_path);
+        log::info!("   {}", full_path);
         client
             .fs_write(full_path.as_path(), content)
             .await
             .expect("Failed to write project file");
     }
 
-    println!("Loading project...");
+    log::info!("Loading project...");
 
-    // Load project
+    // Load project (pass directory name, not file path)
     let project_handle = client
-        .project_load("projects/project.json")
+        .project_load(project_dir)
         .await
         .expect("Failed to load project");
 
     // Create client view for syncing
     let mut client_view = ClientProjectView::new();
 
+    // Initial sync to get all nodes (they may not be initialized yet)
+    sync_client_view(&client, project_handle, &mut client_view).await;
+
+    // Initial sync to get all nodes (using All to populate the view)
+    sync_client_view(&client, project_handle, &mut client_view).await;
+
+    // Find output node handle by path
+    let output_handle = client_view
+        .nodes
+        .iter()
+        .find(|(_, entry)| entry.path.as_str() == output_path.as_str())
+        .map(|(handle, _)| *handle)
+        .expect("Output node not found in client view");
+
+    // Watch output for detail changes
+    client_view.watch_detail(output_handle);
+
     // ---------------------------------------------------------------------------------------------
     // Act & Assert: Render frames
     //
-
+    
     // Shader: vec4(mod(time, 1.0), 0.0, 0.0, 1.0) -> RGBA bytes [R, G, B, A]
     // Advancing time by 4ms gives an increment of (4/1000 * 255) = 1.02 ≈ 1
 
@@ -121,33 +137,26 @@ async fn test_scene_render_fw_emu() {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-
-    // Run emulator until yield (processes tick)
-    run_until_yield(&emulator_arc);
-
-    // Sync client view
     sync_client_view(&client, project_handle, &mut client_view).await;
+    assert_output_red(&client_view, output_handle, 1);
 
     // Frame 2
     {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-
-    run_until_yield(&emulator_arc);
     sync_client_view(&client, project_handle, &mut client_view).await;
+    assert_output_red(&client_view, output_handle, 2);
 
     // Frame 3
     {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(4);
     }
-
-    run_until_yield(&emulator_arc);
     sync_client_view(&client, project_handle, &mut client_view).await;
+    assert_output_red(&client_view, output_handle, 3);
 
     // Verify we got through 3 frames
-    // (Output verification deferred - just verify frames progressed)
     assert!(
         client_view.frame_id >= FrameId(3),
         "Should have processed at least 3 frames"
@@ -193,24 +202,21 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
     files
 }
 
-/// Run emulator until yield syscall
-///
-/// Note: With the new architecture, the emulator runs in a separate task.
-/// This function is kept for compatibility but may not be needed.
-/// The emulator task will automatically yield and notify.
-fn run_until_yield(emulator: &Arc<Mutex<Riscv32Emulator>>) {
-    let mut emu = emulator.lock().unwrap();
-    emu.run_until_yield(1_000_000)
-        .expect("Failed to run until yield");
-}
-
 /// Sync client view with server
 async fn sync_client_view(
     client: &LpClient,
     handle: lp_model::project::handle::ProjectHandle,
     view: &mut ClientProjectView,
 ) {
-    let detail_spec = view.detail_specifier();
+    // For initial sync (empty view), request all nodes to populate the list
+    // Otherwise use normal detail_specifier
+    let is_initial_sync = view.nodes.is_empty();
+    let detail_spec = if is_initial_sync {
+        lp_model::project::api::ApiNodeSpecifier::All
+    } else {
+        view.detail_specifier()
+    };
+    
     let response = client
         .project_sync_internal(handle, Some(view.frame_id), detail_spec)
         .await
@@ -220,4 +226,29 @@ async fn sync_client_view(
         serializable_response_to_project_response(response).expect("Failed to convert response");
     view.apply_changes(&project_response)
         .expect("Failed to apply changes");
+}
+
+/// Assert that the output channel has the expected red value
+fn assert_output_red(view: &ClientProjectView, handle: lp_model::NodeHandle, expected_r: u8) {
+    let data = view
+        .get_output_data(handle)
+        .expect("Failed to get output data");
+
+    assert!(
+        data.len() >= 3,
+        "Output data should have at least 3 bytes (RGB) for first channel, got {}",
+        data.len()
+    );
+
+    let r = data[0];
+    let g = data[1];
+    let b = data[2];
+
+    assert_eq!(
+        r, expected_r,
+        "Output channel 0 R: expected {expected_r}, got {r} (data: {:?})",
+        data
+    );
+    assert_eq!(g, 0, "Output channel 0 G: expected 0, got {g}");
+    assert_eq!(b, 0, "Output channel 0 B: expected 0, got {b}");
 }

@@ -9,6 +9,7 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
+use log;
 use lp_model::{
     AsLpPath, FrameId, LpPath, LpPathBuf, NodeConfig, NodeHandle, NodeKind,
     project::api::{
@@ -451,6 +452,13 @@ impl ProjectRuntime {
         self.frame_time.total_ms += delta_ms;
         self.frame_time.delta_ms = delta_ms;
 
+        log::debug!(
+            "ProjectRuntime::tick: Frame {} (time: {}ms total, {}ms delta)",
+            self.frame_id.as_i64(),
+            self.frame_time.total_ms,
+            delta_ms
+        );
+
         // Render the frame
         // Render all fixtures
         let fixture_handles: Vec<NodeHandle> = self
@@ -464,7 +472,22 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
+        if !fixture_handles.is_empty() {
+            log::debug!(
+                "ProjectRuntime::tick: Rendering {} fixture(s)",
+                fixture_handles.len()
+            );
+        }
+
         for handle in fixture_handles {
+            if let Some(entry) = self.nodes.get(&handle) {
+                log::trace!(
+                    "ProjectRuntime::tick: Rendering fixture {} ({})",
+                    handle.as_i32(),
+                    entry.path.as_str()
+                );
+            }
+
             // Render fixture - need to handle borrowing carefully
             // The issue: runtime.render() needs &mut runtime and &mut ctx
             // But runtime is inside ctx.nodes, so we can't have both borrows
@@ -526,7 +549,22 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
+        if !output_handles.is_empty() {
+            log::debug!(
+                "ProjectRuntime::tick: Flushing {} output(s) (state_ver == frame {})",
+                output_handles.len(),
+                self.frame_id.as_i64()
+            );
+        }
+
         for handle in output_handles {
+            if let Some(entry) = self.nodes.get(&handle) {
+                log::trace!(
+                    "ProjectRuntime::tick: Flushing output {} ({})",
+                    handle.as_i32(),
+                    entry.path.as_str()
+                );
+            }
             let render_result = {
                 let mut ctx = RenderContextImpl {
                     nodes: &mut self.nodes,
@@ -1428,7 +1466,19 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
             })?;
 
         // Update output state_ver to current frame (state changed when accessed)
+        let old_state_ver = entry.state_ver;
         entry.state_ver = self.frame_id;
+        if old_state_ver != self.frame_id {
+            log::debug!(
+                "RenderContext::get_output: Output {} ({}) state_ver updated: {} -> {} (channels {}-{})",
+                node_handle.as_i32(),
+                entry.path.as_str(),
+                old_state_ver.as_i64(),
+                self.frame_id.as_i64(),
+                start_ch,
+                start_ch + ch_count - 1
+            );
+        }
 
         // Get output buffer from runtime
         if let Some(runtime) = &mut entry.runtime {
@@ -1473,9 +1523,19 @@ impl<'a> RenderContextImpl<'a> {
     ) -> Result<(), Error> {
         let node_handle = handle.as_node_handle();
 
+        log::trace!(
+            "RenderContextImpl::ensure_texture_rendered: Ensuring texture {} is rendered (frame {})",
+            node_handle.as_i32(),
+            frame_id.as_i64()
+        );
+
         // Check if already rendered
         if let Some(entry) = nodes.get(&node_handle) {
             if entry.state_ver >= frame_id {
+                log::trace!(
+                    "RenderContextImpl::ensure_texture_rendered: Texture {} already rendered",
+                    node_handle.as_i32()
+                );
                 return Ok(());
             }
         }
@@ -1508,6 +1568,12 @@ impl<'a> RenderContextImpl<'a> {
         // Sort by render_order (lowest first)
         shader_handles.sort_by_key(|(_, order)| *order);
 
+        log::trace!(
+            "RenderContextImpl::ensure_texture_rendered: Found {} shader(s) targeting texture {}",
+            shader_handles.len(),
+            node_handle.as_i32()
+        );
+
         // Mark texture as rendering BEFORE calling shader.render() to prevent infinite recursion
         // When shader.render() calls get_texture_mut(), it will see state_ver >= frame_id
         // and skip re-rendering
@@ -1517,6 +1583,11 @@ impl<'a> RenderContextImpl<'a> {
 
         // Render each shader that targets this texture
         for (shader_handle, _) in shader_handles {
+            log::trace!(
+                "RenderContextImpl::ensure_texture_rendered: Rendering shader {} for texture {}",
+                shader_handle.as_i32(),
+                node_handle.as_i32()
+            );
             // Create RenderContext for each shader render
             let mut ctx = RenderContextImpl {
                 nodes,

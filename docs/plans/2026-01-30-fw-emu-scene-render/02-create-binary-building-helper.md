@@ -81,7 +81,7 @@ static BINARY_CACHE: Mutex<std::collections::HashMap<String, Option<PathBuf>>> =
 /// * `Err(String)` - Error message if build failed
 pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String> {
     let cache_key = format!("{}-{}-{}", config.package, config.target, config.profile);
-    
+
     // Check cache first
     {
         let cache = BINARY_CACHE.lock().unwrap();
@@ -100,11 +100,11 @@ pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String>
     println!("Building {} for {}...", config.package, config.target);
     let mut cmd = std::process::Command::new("cargo");
     cmd.current_dir(&workspace_root);
-    
+
     if let Some(ref rustflags) = config.rustflags {
         cmd.env("RUSTFLAGS", rustflags);
     }
-    
+
     cmd.args([
         "build",
         "--package",
@@ -112,11 +112,11 @@ pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String>
         "--target",
         &config.target,
     ]);
-    
+
     if config.profile == "release" {
         cmd.arg("--release");
     }
-    
+
     let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute cargo build: {e}"))?;
@@ -237,6 +237,7 @@ cargo check
 ```
 
 Ensure:
+
 - Helper functions compile
 - `guest_app_tests.rs` can use the helper
 - Tests pass

@@ -3,6 +3,7 @@
 ## Scope of phase
 
 Complete the fw-emu implementation by:
+
 1. Implementing syscall wrappers using `lp-riscv-emu-guest` syscall functions
 2. Implementing server loop that processes messages and yields after each tick
 3. Completing main entry point to initialize server and run loop
@@ -372,42 +373,42 @@ fn test_scene_render_fw_emu() {
     //
     // Build the fw-emu binary
     let fw_emu_path = build_fw_emu();
-    
+
     // Load ELF
     let elf_data = std::fs::read(&fw_emu_path).expect("Failed to read fw-emu ELF");
     let load_info = load_elf(&elf_data).expect("Failed to load ELF");
-    
+
     // Create emulator
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
         .with_log_level(LogLevel::None)
         .with_max_instructions(10_000_000);
-    
+
     // Set up stack pointer
     let sp_value = 0x80000000u32.wrapping_add((ram_size as u32).wrapping_sub(16));
     emulator.set_register(Gpr::Sp, sp_value as i32);
-    
+
     // Set PC to entry point
     emulator.set_pc(load_info.entry_point);
-    
+
     // Create filesystem with project
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
-    
+
     // Add nodes
     let texture_path = builder.texture_basic();
     builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
-    
+
     // TODO: Load project into emulator filesystem
     // TODO: Send project load message via serial
     // TODO: Run emulator until yield
     // TODO: Process serial output and send responses
     // TODO: Run for multiple frames
     // TODO: Verify output data
-    
+
     // For now, just verify the emulator starts
     // Run a few steps to ensure it doesn't panic immediately
     for _ in 0..100 {
@@ -429,6 +430,7 @@ fn build_fw_emu() -> std::path::PathBuf {
 ```
 
 Note: The test structure is outlined, but full implementation will require:
+
 - Building the fw-emu binary
 - Loading project into emulator filesystem (or sending via serial)
 - Running emulator with yield loop
@@ -461,6 +463,7 @@ RUSTFLAGS="-C target-feature=-c" cargo build --target riscv32imac-unknown-none-e
 ```
 
 Ensure:
+
 - All syscall implementations compile
 - Server loop compiles
 - Main entry point compiles

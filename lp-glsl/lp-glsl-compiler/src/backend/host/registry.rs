@@ -68,7 +68,12 @@ pub fn get_host_function_pointer(host: HostId) -> Option<*const u8> {
     use crate::backend::host::lp_jit_host_log;
 
     match host {
-        HostId::Log => Some(lp_jit_host_log as *const u8),
+        HostId::Log => {
+            let ptr = lp_jit_host_log as *const u8;
+            // Safety: We're just getting the address, not calling it
+            // The function must be defined by the user in their binary
+            Some(ptr)
+        }
     }
 }
 

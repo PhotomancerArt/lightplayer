@@ -330,21 +330,37 @@ impl Memory {
             });
         }
 
-        let offset = (address - self.code_start) as usize;
-
-        // First, read at least 2 bytes to check if it's compressed
-        if offset + 2 > self.code.len() {
-            return Err(EmulatorError::InvalidMemoryAccess {
-                address,
-                size: 2,
-                kind: MemoryAccessKind::InstructionFetch,
-                pc: 0, // Will be filled in by caller
-                regs: [0; 32],
-            });
-        }
+        // Determine which region: code or RAM (both are executable)
+        let (data, offset) = if address >= self.ram_start {
+            // RAM region - allow execution from RAM for JIT code
+            let offset = (address - self.ram_start) as usize;
+            if offset + 2 > self.ram.len() {
+                return Err(EmulatorError::InvalidMemoryAccess {
+                    address,
+                    size: 2,
+                    kind: MemoryAccessKind::InstructionFetch,
+                    pc: 0, // Will be filled in by caller
+                    regs: [0; 32],
+                });
+            }
+            (&self.ram, offset)
+        } else {
+            // Code region
+            let offset = (address - self.code_start) as usize;
+            if offset + 2 > self.code.len() {
+                return Err(EmulatorError::InvalidMemoryAccess {
+                    address,
+                    size: 2,
+                    kind: MemoryAccessKind::InstructionFetch,
+                    pc: 0, // Will be filled in by caller
+                    regs: [0; 32],
+                });
+            }
+            (&self.code, offset)
+        };
 
         // Read first 2 bytes
-        let first_half = u16::from_le_bytes([self.code[offset], self.code[offset + 1]]);
+        let first_half = u16::from_le_bytes([data[offset], data[offset + 1]]);
 
         // Check if it's a compressed instruction (bits [1:0] != 0b11)
         if (first_half & 0x3) != 0x3 {
@@ -352,7 +368,7 @@ impl Memory {
             Ok(first_half as u32)
         } else {
             // It's a 32-bit instruction, read all 4 bytes
-            if offset + 4 > self.code.len() {
+            if offset + 4 > data.len() {
                 return Err(EmulatorError::InvalidMemoryAccess {
                     address,
                     size: 4,
@@ -363,10 +379,10 @@ impl Memory {
             }
 
             let bytes = [
-                self.code[offset],
-                self.code[offset + 1],
-                self.code[offset + 2],
-                self.code[offset + 3],
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
             ];
             Ok(u32::from_le_bytes(bytes))
         }

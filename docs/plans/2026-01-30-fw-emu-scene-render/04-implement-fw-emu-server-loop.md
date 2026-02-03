@@ -195,6 +195,7 @@ RUSTFLAGS="-C target-feature=-c" cargo build --target riscv32imac-unknown-none-e
 ```
 
 Ensure:
+
 - Server loop compiles
 - Main entry point compiles
 - No warnings (except for TODO comments)

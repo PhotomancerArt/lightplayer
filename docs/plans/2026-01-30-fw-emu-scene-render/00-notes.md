@@ -3,6 +3,7 @@
 ## Scope of Work
 
 Get fw-emu working end-to-end by implementing a test that:
+
 1. Builds the fw-emu firmware binary for RISC-V32
 2. Loads a simple scene (similar to `lp-core/lp-engine/tests/scene_render.rs`)
 3. Runs the firmware in the emulator
@@ -15,6 +16,7 @@ The test should duplicate the functionality of `scene_render.rs` but using the e
 ### fw-emu Application (`lp-app/apps/fw-emu`)
 
 **Structure exists but incomplete:**
+
 - `src/main.rs` - Has stub `_lp_main()` entry point, initializes allocator, then halts
 - `src/serial/syscall.rs` - Stub `SyscallSerialIo` with `todo!()` implementations
 - `src/time/syscall.rs` - Stub `SyscallTimeProvider` with `todo!()` implementation
@@ -22,12 +24,14 @@ The test should duplicate the functionality of `scene_render.rs` but using the e
 - `src/server_loop.rs` - Empty file with TODO comment
 
 **Dependencies:**
+
 - Uses `lp-emu-guest` (path to `lp-glsl/crates/lp-emu-guest`) but that crate doesn't export syscall functions
 - Needs `lp-riscv-emu-guest` (in `lp-riscv/`) which has the actual syscall wrappers
 
 ### Emulator Syscalls Available
 
 The emulator now supports:
+
 - `SYSCALL_SERIAL_WRITE` (5) - Write bytes to serial output buffer
 - `SYSCALL_SERIAL_READ` (6) - Read bytes from serial input buffer
 - `SYSCALL_SERIAL_HAS_DATA` (7) - Check if serial input has data
@@ -35,6 +39,7 @@ The emulator now supports:
 - `SYSCALL_YIELD` (4) - Yield control back to host
 
 These are available via `lp-riscv-emu-guest` crate:
+
 - `sys_serial_write(data: &[u8]) -> i32`
 - `sys_serial_read(buf: &mut [u8]) -> i32`
 - `sys_serial_has_data() -> bool`
@@ -44,6 +49,7 @@ These are available via `lp-riscv-emu-guest` crate:
 ### Reference Test (`lp-core/lp-engine/tests/scene_render.rs`)
 
 The test:
+
 1. Creates an in-memory filesystem (`LpFsMemory`)
 2. Uses `ProjectBuilder` to create a simple scene:
    - Texture node
@@ -58,6 +64,7 @@ The test:
 ### Emulator Execution Model
 
 From `lp-riscv-emu/tests/guest_app_tests.rs`:
+
 - Build binary for `riscv32imac-unknown-none-elf` target
 - Load ELF using `load_elf()` from `lp-riscv-elf`
 - Create `Riscv32Emulator` with code and RAM
@@ -81,6 +88,7 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 **Question**: Should fw-emu use `lp-riscv-emu-guest` (from `lp-riscv/`) for syscalls, or should we consolidate/update `lp-emu-guest` (from `lp-glsl/crates/`)?
 
 **Context**:
+
 - `lp-app/apps/fw-emu/Cargo.toml` currently references `lp-emu-guest` from `lp-glsl/crates/lp-emu-guest`
 - That crate doesn't export syscall functions (only allocator, entry, panic, print)
 - `lp-riscv-emu-guest` in `lp-riscv/` has all the syscall wrappers we need
@@ -95,6 +103,7 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 **Question**: How should we implement `SyscallOutputProvider`? Should we add output syscalls to the emulator, or use an in-memory provider for now?
 
 **Context**:
+
 - The test needs to verify output data (like `MemoryOutputProvider` does)
 - Output syscalls don't exist yet in the emulator
 - We could use an in-memory provider that the test can inspect
@@ -109,6 +118,7 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 **Question**: How should the test load the project into the firmware? Via filesystem or via serial messages?
 
 **Context**:
+
 - The firmware uses `LpFsMemory` for filesystem
 - Projects could be loaded by:
   1. Pre-populating the filesystem before creating the emulator
@@ -117,6 +127,7 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 - The firmware's `LpServer` expects projects in `"projects/"` directory
 
 **Answer**: Use `lp-client` crate to interact with the firmware. The test should:
+
 1. Create the project using `ProjectBuilder` (like reference test) to get the project files
 2. Use `lp-client` to send filesystem write messages to populate the firmware's filesystem
 3. Use `lp-client` to send `LoadProject` message to load the project
@@ -131,6 +142,7 @@ This exercises the full message protocol using the proper client API. However, w
 **Question**: How should the test run the firmware and bridge async `lp-client` with synchronous emulator?
 
 **Context**:
+
 - `lp-client` uses async `ClientTransport` trait
 - The emulator runs synchronously and yields via syscall
 - We need to bridge async client calls with synchronous emulator execution
@@ -142,6 +154,7 @@ This exercises the full message protocol using the proper client API. However, w
   - Repeat for multiple frames
 
 **Answer**: Create a serial `ClientTransport` implementation that bridges async client calls to the emulator's serial I/O. The transport will:
+
 - Buffer messages to send to firmware (add to emulator's serial input buffer)
 - Read serial output from emulator (drain emulator's serial output buffer)
 - Run emulator in a loop until yield when waiting for responses
@@ -156,12 +169,14 @@ This transport will be created as part of this plan.
 **Question**: How should we manage time in the test? Should we advance time between frames or let the firmware request it?
 
 **Context**:
+
 - The firmware calls `time_provider.now_ms()` which uses `SYSCALL_TIME_MS`
 - The emulator tracks elapsed time internally
 - The test needs to advance time by 4ms between frames (like reference test)
 - Time is managed by the emulator, not the test
 
 **Answer**: Update the emulator to support a time mode that allows overriding time advancement. This way we can control time deterministically for testing. The emulator should support:
+
 - Real-time mode (current behavior - uses wall-clock time)
 - Simulated time mode (allows explicit time advancement for testing)
 
@@ -174,12 +189,14 @@ This will be implemented as part of this plan.
 **Question**: Where should the test build the fw-emu binary, and how should it find the built ELF?
 
 **Context**:
+
 - Need to build `fw-emu` for `riscv32imac-unknown-none-elf` target
 - Need `RUSTFLAGS="-C target-feature=-c"` to disable compressed instructions
 - Built binary will be in `target/riscv32imac-unknown-none-elf/release/fw-emu`
 - Test needs to find and load this binary
 
 **Answer**: Use the approach from `lp-riscv-emu/tests/guest_app_tests.rs`:
+
 - Use `ensure_test_app_bin()` pattern with static cache
 - Find workspace root by looking for `Cargo.toml` with `[workspace]`
 - Build using `cargo build` with `RUSTFLAGS="-C target-feature=-c"`

@@ -48,15 +48,21 @@ impl GlModule<JITModule> {
                                     // Check builtins first
                                     for builtin in BuiltinId::all() {
                                         if builtin.name() == name {
-                                            return Some(get_function_pointer(*builtin));
+                                            let ptr = get_function_pointer(*builtin);
+                                            log::debug!("symbol_lookup_fn: Found builtin '{}' -> {:p}", name, ptr);
+                                            return Some(ptr);
                                         }
                                     }
                                     // Check host functions (works in both std and no_std)
                                     for host in HostId::all() {
                                         if host.name() == name {
-                                            return get_host_function_pointer(*host);
+                                            if let Some(ptr) = get_host_function_pointer(*host) {
+                                                log::debug!("symbol_lookup_fn: Found host function '{}' -> {:p}", name, ptr);
+                                                return Some(ptr);
+                                            }
                                         }
                                     }
+                                    log::warn!("symbol_lookup_fn: Symbol '{}' not found", name);
                                     None
                                 },
                             ));

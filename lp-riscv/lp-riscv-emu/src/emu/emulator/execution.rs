@@ -11,6 +11,7 @@ use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 use lp_riscv_inst::{Gpr, Inst};
+use log;
 
 impl Riscv32Emulator {
     /// Execute a single instruction.
@@ -274,7 +275,15 @@ impl Riscv32Emulator {
                     Ok(StepResult::Continue)
                 } else {
                     let serial = self.get_or_create_serial_host();
+                    log::trace!(
+                        "SYSCALL_SERIAL_WRITE: Writing {} bytes to serial",
+                        data.len()
+                    );
                     let result = serial.guest_write(&data);
+                    log::trace!(
+                        "SYSCALL_SERIAL_WRITE: guest_write returned {}",
+                        result
+                    );
                     self.regs[Gpr::A0.num() as usize] = result;
                     Ok(StepResult::Continue)
                 }
@@ -295,12 +304,20 @@ impl Riscv32Emulator {
                 let serial = self.get_or_create_serial_host();
                 let bytes_read = serial.guest_read(&mut buffer);
 
+                log::trace!(
+                    "SYSCALL_SERIAL_READ: max_len={}, bytes_read={}, buffer[0..10]={:?}",
+                    max_len,
+                    bytes_read,
+                    &buffer[..buffer.len().min(10)]
+                );
+
                 if bytes_read < 0 {
                     // Error
                     self.regs[Gpr::A0.num() as usize] = bytes_read;
                     Ok(StepResult::Continue)
                 } else if bytes_read == 0 {
                     // No data
+                    log::trace!("SYSCALL_SERIAL_READ: No data available, returning 0");
                     self.regs[Gpr::A0.num() as usize] = 0;
                     Ok(StepResult::Continue)
                 } else {
