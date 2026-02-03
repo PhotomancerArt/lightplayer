@@ -31,7 +31,7 @@ pub fn resolve_section_addresses(
     _ram: &[u8],
     symbol_map: &HashMap<String, u32>,
 ) -> Result<HashMap<String, SectionAddressInfo>, String> {
-    debug!("=== Resolving section addresses ===");
+    log::debug!("=== Resolving section addresses ===");
 
     let mut section_addrs: HashMap<String, SectionAddressInfo> = HashMap::new();
 
@@ -183,7 +183,7 @@ pub fn resolve_section_addresses(
             continue; // Skip sections not in ROM or RAM
         };
 
-        debug!(
+        log::debug!(
             "  Section '{}': VMA=0x{:x}, LMA=0x{:x}, size={}",
             section_name,
             vma,
@@ -197,6 +197,6 @@ pub fn resolve_section_addresses(
         );
     }
 
-    debug!("Resolved {} sections", section_addrs.len());
+    log::debug!("Resolved {} sections", section_addrs.len());
     Ok(section_addrs)
 }

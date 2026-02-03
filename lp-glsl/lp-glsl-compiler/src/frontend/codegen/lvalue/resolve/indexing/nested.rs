@@ -73,14 +73,14 @@ pub fn resolve_nested_array_indexing<M: cranelift_module::Module>(
     let current_vars = base_vars;
     let mut col: Option<usize> = None;
 
-    crate::debug!(
+    log::trace!(
         "Processing nested dimensions: base_ty={:?}, remaining_dims={}",
         base_ty,
         array_spec.dimensions.0.len() - 1
     );
 
     for (_dim_idx, dimension) in array_spec.dimensions.0.iter().skip(1).enumerate() {
-        crate::debug!(
+        log::trace!(
             "  Processing dimension {}: current_ty={:?}, col={:?}",
             _dim_idx + 1,
             current_ty,
@@ -116,7 +116,7 @@ pub fn resolve_nested_array_indexing<M: cranelift_module::Module>(
             // If we already have a column, this is a matrix element access
             if col.is_some() {
                 let row = index;
-                crate::debug!(
+                log::trace!(
                     "  Matrix element access: col={}, row={}, base_ty={:?}",
                     col.unwrap(),
                     row,
@@ -130,7 +130,7 @@ pub fn resolve_nested_array_indexing<M: cranelift_module::Module>(
                     col: col.unwrap(),
                 });
             } else {
-                crate::debug!("  Vector element access: index={}", index);
+                log::trace!("  Vector element access: index={index}");
                 // This is vector element access: v[0] -> scalar
                 return Ok(LValue::VectorElement {
                     base_vars: current_vars,

@@ -1,11 +1,15 @@
 # LightPlayer
 
-LightPlayer is a tool for controlling visual effects on microcontrollers (and larger computers).
+LightPlayer is a tool for controlling visual effects on 32-bit RISC-V microcontrollers
+(such as esp32c6) and various linux and desktop platforms.
 
-GLSL shaders are used to define the visual effects, which are JIT-compiled to native RISC-V
-code on the target device.
+GLSL shaders are used to define the visual effects, which are just-in-time (JIT) compiled to native
+RISC-V code on the target device.
 
-## Quick Start
+The architecture is client-server, designed for headless operation on unattended devices,
+controlled from a web UI, native app, or by api.
+
+# Quick Start
 
 To run the demo project:
 
@@ -24,7 +28,7 @@ just demo
 just demo -- <example-name>
 ```
 
-## Development
+# Development
 
 To get started with development:
 
@@ -53,66 +57,69 @@ See `just --list` for all available commands.
 
 # Repository Structure
 
-The repository is organized into several main areas:
-
 ## CLI (`lp-cli/`)
 
-- Command-line interface for creating projects, running dev server, and managing LightPlayer
-  projects
-- Includes debug UI and file watching capabilities
+Command-line interface for creating projects, running dev server, and managing LightPlayer
+projects. Includes debug UI and file watching capabilities.
 
 ## Firmware (`lp-fw/`)
 
-- **`fw-core`** - Core firmware abstractions (serial I/O, transport)
-- **`fw-emu`** - Firmware that runs in the RISC-V32 emulator for host testing
-- **`fw-esp32`** - ESP32 firmware
+- **`fw-core`** Core firmware abstractions (serial I/O, transport, logging infrastructure)
+- **`fw-emu`** Firmware that runs in the RISC-V32 emulator for testing without hardware
+- **`fw-tests`** Integration tests for firmware (emulator-based testing)
+- **`fw-esp32`** ESP32 firmware
 
 ## Application Core (`lp-core/`)
 
-- **`lp-engine`** - Core rendering engine that executes shaders and manages nodes (fixtures,
+- **`lp-engine`** Core rendering engine that executes shaders and manages nodes (fixtures,
   textures, outputs)
-- **`lp-server`** - Server that manages projects and handles client connections
-- **`lp-model`** - Data models and API definitions for projects, nodes, and server communication
-- **`lp-shared`** - Shared utilities for filesystem, logging, time, and transport
-- **`lp-engine-client`** - Client library for interacting with the engine
+- **`lp-engine-client`** Client for `lp-engine`, handling state sync and local project view
+- **`lp-server`** Server that manages projects and handles client connections
+- **`lp-client`** Async client library for communicating with `lp-server`. Manages filesystem sync
+  and project management.
+- **`lp-model`** Data models and API definitions for projects, nodes, and server communication
+- **`lp-shared`** Shared utilities for filesystem, logging, time, and transport
 
 ## GLSL Compiler (`lp-glsl/`)
 
-- **`lp-glsl-compiler`** - Main GLSL compiler that parses, transforms, and codegens to RISC-V
-- **`lp-glsl-builtins`** - Built-in GLSL functions (math, noise, color space conversions)
-- **`lp-glsl-builtins-emu-app`** - RISC-V executable containing builtin functions for emulator
-- **`lp-glsl-builtins-gen-app`** - Code generator for builtin function boilerplate
-- **`lp-glsl-filetests`** - Test framework for GLSL spec compliance
-- **`lp-glsl-filetests-gen-app`** - Generator for some repetative filetests (vector, matries)
-- **`lp-glsl-filetests-app`** - Filetest runner binary
-- **`lp-glsl-jit-util`** - Utilities for JIT compilation
-- **`esp32-glsl-jit`** - ESP32 proof-of-concept JIT compiler
-- **`lp-glsl-q32-metrics-app`** - Metrics tool for fixed-point math (q32)
-- **`lpfx-impl-macro`** - Macros for builtin function implementations
+- **`lp-glsl-compiler`** Main GLSL compiler that parses, transforms, and codegens to various ISAs,
+  handles JIT and ELF linking
+- **`lp-glsl-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
+  lygia-inspired libary of native glsl functions
+- **`lp-glsl-builtins-emu-app`** RISC-V guest for running tests linked against builtins
+- **`lp-glsl-builtins-gen-app`** Code generator for builtin function boilerplate
+- **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctnees
+- **`lp-glsl-filetests-gen-app`** Generator for repetative filetests (vector, matries)
+- **`lp-glsl-filetests-app`** Filetest runner binary
+- **`lp-glsl-jit-util`** Utilities for JIT compilation
+- **`esp32-glsl-jit`** ESP32 proof-of-concept JIT compiler
+- **`lp-glsl-q32-metrics-app`** Metrics tool for fixed-point math (q32)
+- **`lpfx-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)
 
-- **`lp-riscv-inst`** - RISC-V instruction encoding/decoding utilities (no_std)
-- **`lp-riscv-emu`** - RISC-V 32-bit emulator runtime (no_std + optional std)
-- **`lp-riscv-elf`** - ELF file loading and linking utilities (std required)
-- **`lp-riscv-emu-shared`** - Shared types between emulator host and guest
-- **`lp-riscv-emu-guest`** - Guest-side runtime for emulated environment
-- **`lp-riscv-emu-guest-test-app`** - Test application for emulator guest
+- **`lp-riscv-emu`** RISC-V 32-bit emulator used for testing and development
+- **`lp-riscv-emu-shared`** Shared types between emulator host and guest
+- **`lp-riscv-emu-guest`** Guest-side runtime for emulated environment
+- **`lp-riscv-emu-guest-test-app`** Test application for emulator guest
+- **`lp-riscv-inst`** RISC-V instruction encoding/decoding utilities (no_std)
+- **`lp-riscv-elf`** ELF file loading and linking utilities (std required)
 
 ## Other Directories
 
-- **`examples/`** - Example LightPlayer projects
-- **`docs/`** - Documentation, plans, and design notes
-- **`scripts/`** - Build scripts and development utilities
+- **`examples/`** Example LightPlayer projects
+- **`docs/`** Documentation, plans, and design notes
+- **`scripts/`** Build scripts and development utilities
 
-## Acknowledgments
+# Acknowledgments
 
 LightPlayer would not be possible without the amazing work of these projects:
 
 - **[Cranelift](https://cranelift.dev/)** - Fast, secure compiler
-  backend ([homepage](https://cranelift.dev/), [GitHub](https://github.com/bytecodealliance/cranelift)) - [lightplayer's RISC-V 32 fork](https://github.com/Yona-Appletree/lp-cranelift)
+  backend ([forked](https://github.com/Yona-Appletree/lp-cranelift) to support 32-bit RISC-V and
+  `no_std`)
 - **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL
-  parser - [lightplayer's fork](https://github.com/Yona-Appletree/glsl-parser) (enhanced to support
+  parser - ([forked](https://github.com/Yona-Appletree/glsl-parser) to support
   spans)
 - **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfx
   built-in functions)
@@ -127,3 +134,6 @@ LightPlayer would not be possible without the amazing work of these projects:
   RISC-V ABI documentation
 
 ... and many more not listed. Thank you to everyone in the open source community for your work.
+
+Special thanks to @SeanConnell for his support and guidance throughout the development of
+LightPlayer.

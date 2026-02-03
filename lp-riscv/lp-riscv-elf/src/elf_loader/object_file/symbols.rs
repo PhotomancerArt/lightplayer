@@ -29,10 +29,9 @@ pub fn build_object_symbol_map(
     text_placement: u32,
     data_placement: u32,
 ) -> HashMap<String, u32> {
-    debug!("=== Building object file symbol map ===");
-    debug!(
-        "Text placement: 0x{:x}, Data placement offset: 0x{:x}",
-        text_placement, data_placement
+    log::debug!("=== Building object file symbol map ===");
+    log::debug!(
+        "Text placement: 0x{text_placement:x}, Data placement offset: 0x{data_placement:x}"
     );
 
     let mut symbol_map: HashMap<String, u32> = HashMap::new();
@@ -187,7 +186,7 @@ pub fn build_object_symbol_map(
         }
     }
 
-    debug!("Object symbol map contains {} entries", symbol_map.len());
+    log::debug!("Object symbol map contains {} entries", symbol_map.len());
     symbol_map
 }
 

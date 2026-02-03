@@ -1,0 +1,29 @@
+[package]
+name = "lp-riscv-tools"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+description = "RISC-V 32-bit emulator and instruction utilities for Light Player (DEPRECATED - use lp-riscv-inst, lp-riscv-emu, lp-riscv-elf)"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-riscv-inst = { path = "../lp-riscv-inst" }
+lp-riscv-emu = { path = "../lp-riscv-emu", default-features = false }
+lp-riscv-elf = { path = "../lp-riscv-elf", optional = true }
+
+[features]
+std = ["lp-riscv-emu/std", "dep:lp-riscv-elf"]
+
+[dev-dependencies]
+cranelift-object = { workspace = true }
+cranelift-frontend = { workspace = true }
+cranelift-module = { workspace = true }
+target-lexicon = "0.13"
+
+[[example]]
+name = "simple_codegen"
+required-features = ["std"]
+

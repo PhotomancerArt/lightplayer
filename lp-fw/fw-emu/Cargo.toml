@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fw-core = { path = "../fw-core", default-features = false }
+fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
@@ -16,8 +16,17 @@ lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+log = { workspace = true, default-features = false }
 
 [build-dependencies]
+
+[dev-dependencies]
+lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
+lp-engine-client = { path = "../../lp-core/lp-engine-client" }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-shared = { path = "../../lp-core/lp-shared" }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [lints]
 workspace = true

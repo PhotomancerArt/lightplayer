@@ -1,29 +1,36 @@
 //! Host function implementations for JIT mode.
 //!
-//! These functions delegate to `lp-glsl-compiler` macros for output.
+//! These functions delegate to the log crate for output.
 
-/// Debug function implementation for JIT mode.
+/// Log function implementation for JIT mode.
 ///
-/// Delegates to `lp-glsl-compiler::debug!` macro.
+/// Creates a log::Record and calls log::log!() directly.
 #[unsafe(no_mangle)]
-pub extern "C" fn __host_debug(ptr: *const u8, len: usize) {
+pub extern "C" fn __host_log(
+    level: u8,
+    module_path_ptr: *const u8,
+    module_path_len: usize,
+    msg_ptr: *const u8,
+    msg_len: usize,
+) {
     unsafe {
-        let slice = core::slice::from_raw_parts(ptr, len);
-        let msg = core::str::from_utf8_unchecked(slice);
-        // Delegate to lp-glsl-compiler debug macro
-        crate::debug!("{}", msg);
-    }
-}
+        // Read strings from pointers
+        let module_path_slice = core::slice::from_raw_parts(module_path_ptr, module_path_len);
+        let msg_slice = core::slice::from_raw_parts(msg_ptr, msg_len);
 
-/// Println function implementation for JIT mode.
-///
-/// Delegates to `std::println!`.
-#[unsafe(no_mangle)]
-pub extern "C" fn __host_println(ptr: *const u8, len: usize) {
-    unsafe {
-        let slice = core::slice::from_raw_parts(ptr, len);
-        let msg = core::str::from_utf8_unchecked(slice);
-        // Delegate to std::println!
-        std::println!("{msg}");
+        let module_path = core::str::from_utf8_unchecked(module_path_slice);
+        let msg = core::str::from_utf8_unchecked(msg_slice);
+
+        // Convert level
+        let level = match level {
+            0 => log::Level::Error,
+            1 => log::Level::Warn,
+            2 => log::Level::Info,
+            3 => log::Level::Debug,
+            _ => log::Level::Debug,
+        };
+
+        // Create log record and call log::log!()
+        log::log!(target: module_path, level, "{msg}");
     }
 }

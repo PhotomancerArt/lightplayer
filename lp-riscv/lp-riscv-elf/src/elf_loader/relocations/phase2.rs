@@ -22,7 +22,7 @@ pub fn apply_relocations_phase2(
     ram: &mut [u8],
     symbol_map: &HashMap<String, u32>,
 ) -> Result<(), String> {
-    debug!("=== Phase 2: Applying Relocations ===");
+    log::debug!("=== Phase 2: Applying Relocations ===");
 
     // We need a mutable reference to got_tracker for marking entries as initialized
     // So we'll create a mutable copy
@@ -42,7 +42,7 @@ pub fn apply_relocations_phase2(
         }
     }
 
-    debug!(
+    log::trace!(
         "Applying {} GOT entry relocations first, then {} other relocations",
         got_relocs.len(),
         other_relocs.len()
@@ -74,7 +74,7 @@ pub fn apply_relocations_phase2(
         )?;
     }
 
-    debug!("=== All relocations applied ===");
+    log::debug!("=== All relocations applied ===");
     Ok(())
 }
 
@@ -167,14 +167,19 @@ fn apply_single_relocation(
             // If this is a GOT entry, mark it as initialized
             if got_tracker.has_entry(&reloc.symbol_name) {
                 got_tracker.mark_initialized(&reloc.symbol_name);
-                debug!(
+                log::trace!(
                     "  Applied R_RISCV_32 at 0x{:x}: ✓ GOT entry initialized: '{}' = 0x{:x}",
-                    reloc.address, reloc.symbol_name, target_addr
+                    reloc.address,
+                    reloc.symbol_name,
+                    target_addr
                 );
             } else {
-                debug!(
+                log::trace!(
                     "  Applied R_RISCV_32 at 0x{:x}: Wrote 0x{:x} to offset 0x{:x} for '{}'",
-                    reloc.address, target_addr, offset, reloc.symbol_name
+                    reloc.address,
+                    target_addr,
+                    offset,
+                    reloc.symbol_name
                 );
             }
         }

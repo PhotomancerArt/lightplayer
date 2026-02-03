@@ -6,8 +6,8 @@ use object::Object;
 
 /// Parse an ELF file using the object crate.
 pub fn parse_elf(elf_data: &[u8]) -> Result<object::File<'_>, String> {
-    debug!("=== Parsing ELF file ===");
-    debug!("ELF size: {} bytes", elf_data.len());
+    log::debug!("=== Parsing ELF file ===");
+    log::debug!("ELF size: {} bytes", elf_data.len());
 
     let obj = object::File::parse(elf_data).map_err(|e| format!("Failed to parse ELF: {e}"))?;
 
@@ -16,12 +16,12 @@ pub fn parse_elf(elf_data: &[u8]) -> Result<object::File<'_>, String> {
 
 /// Validate that the ELF is RISC-V 32-bit.
 pub fn validate_elf(obj: &object::File) -> Result<(), String> {
-    debug!("=== Validating ELF ===");
+    log::debug!("=== Validating ELF ===");
 
     // Check architecture
     match obj.architecture() {
         object::Architecture::Riscv32 => {
-            debug!("Architecture: RISC-V 32-bit");
+            log::debug!("Architecture: RISC-V 32-bit");
         }
         arch => {
             return Err(format!(
@@ -33,7 +33,7 @@ pub fn validate_elf(obj: &object::File) -> Result<(), String> {
     // Check endianness (should be little-endian for RISC-V)
     match obj.endianness() {
         object::Endianness::Little => {
-            debug!("Endianness: Little-endian");
+            log::debug!("Endianness: Little-endian");
         }
         endian => {
             return Err(format!(
@@ -48,6 +48,6 @@ pub fn validate_elf(obj: &object::File) -> Result<(), String> {
 /// Extract the entry point address from the ELF.
 pub fn extract_entry_point(obj: &object::File) -> u32 {
     let entry = obj.entry();
-    debug!("Entry point: 0x{:x}", entry);
+    log::debug!("Entry point: 0x{entry:x}");
     entry as u32
 }

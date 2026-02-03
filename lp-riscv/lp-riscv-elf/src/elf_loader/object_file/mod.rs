@@ -65,7 +65,7 @@ pub fn load_object_file(
     ram: &mut Vec<u8>,
     symbol_map: &mut HashMap<String, u32>,
 ) -> Result<ObjectLoadInfo, String> {
-    debug!("=== Loading object file ===");
+    log::debug!("=== Loading object file ===");
 
     // Step 1: Parse object file
     let obj = parse::parse_elf(obj_file_bytes)?;
@@ -78,10 +78,7 @@ pub fn load_object_file(
     let base_code_end = code.len() as u32;
     let base_ram_end = ram.len() as u32;
 
-    debug!(
-        "Base executable: code_end=0x{:x}, ram_end=0x{:x}",
-        base_code_end, base_ram_end
-    );
+    log::debug!("Base executable: code_end=0x{base_code_end:x}, ram_end=0x{base_ram_end:x}");
 
     // Step 4: Calculate layout for object file sections
     let layout = calculate_object_layout(&obj, base_code_end, base_ram_end)?;
@@ -150,10 +147,11 @@ pub fn load_object_file(
         }
     }
 
-    debug!("=== Object file loading complete ===");
-    debug!(
+    log::debug!("=== Object file loading complete ===");
+    log::debug!(
         "Object file: .text at 0x{:x}, .data at offset 0x{:x}",
-        section_placement.text_start, section_placement.data_start
+        section_placement.text_start,
+        section_placement.data_start
     );
 
     Ok(ObjectLoadInfo {

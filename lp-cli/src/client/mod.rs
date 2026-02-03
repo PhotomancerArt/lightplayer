@@ -7,4 +7,3 @@ pub mod local_server;
 
 // Re-export CLI-specific types
 pub use client_connect::client_connect;
-pub use local_server::LocalServerTransport;

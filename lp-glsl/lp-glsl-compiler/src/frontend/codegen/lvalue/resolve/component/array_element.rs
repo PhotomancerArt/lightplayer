@@ -18,12 +18,8 @@ pub fn resolve_component_on_array_element(
 ) -> LValue {
     // Component access on array element: arr[i].x
     // Store component indices in the ArrayElement
-    crate::debug!(
-        "resolve_lvalue: Component access on ArrayElement: element_ty={:?}, indices={:?}, index={:?}, index_val={:?}",
-        element_ty,
-        indices,
-        index,
-        index_val
+    log::trace!(
+        "resolve_lvalue: Component access on ArrayElement: element_ty={element_ty:?}, indices={indices:?}, index={index:?}, index_val={index_val:?}"
     );
     LValue::ArrayElement {
         array_ptr,

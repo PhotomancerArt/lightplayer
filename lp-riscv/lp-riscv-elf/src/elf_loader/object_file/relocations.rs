@@ -51,7 +51,7 @@ pub fn apply_object_relocations(
     merged_symbol_map: &HashMap<String, u32>,
     section_placement: &ObjectSectionPlacement,
 ) -> Result<(), String> {
-    debug!("=== Applying object file relocations ===");
+    log::debug!("=== Applying object file relocations ===");
 
     // Phase 1: Analyze relocations (this works with section-relative addresses)
     let (relocations, got_tracker, _section_addrs) =
@@ -101,9 +101,11 @@ pub fn apply_object_relocations(
                         },
                     },
                 );
-                debug!(
+                log::debug!(
                     "  Section '.text': VMA=0x{:x}, LMA=0x{:x}, offset={}",
-                    vma, lma, section_placement.text_start
+                    vma,
+                    lma,
+                    section_placement.text_start
                 );
             }
             ".data" => {
@@ -120,9 +122,11 @@ pub fn apply_object_relocations(
                         },
                     },
                 );
-                debug!(
+                log::debug!(
                     "  Section '.data': VMA=0x{:x}, LMA=0x{:x}, offset={}",
-                    vma, lma, section_placement.data_start
+                    vma,
+                    lma,
+                    section_placement.data_start
                 );
             }
             ".rodata" => {
@@ -143,9 +147,8 @@ pub fn apply_object_relocations(
                         },
                     },
                 );
-                debug!(
-                    "  Section '.rodata': VMA=0x{:x}, LMA=0x{:x}, offset={}",
-                    vma, lma, rodata_start_aligned
+                log::debug!(
+                    "  Section '.rodata': VMA=0x{vma:x}, LMA=0x{lma:x}, offset={rodata_start_aligned}"
                 );
             }
             ".bss" => {
@@ -164,14 +167,13 @@ pub fn apply_object_relocations(
                         },
                     },
                 );
-                debug!(
-                    "  Section '.bss': VMA=0x{:x}, LMA=0x{:x}, offset={}",
-                    vma, lma, bss_start_aligned
+                log::debug!(
+                    "  Section '.bss': VMA=0x{vma:x}, LMA=0x{lma:x}, offset={bss_start_aligned}"
                 );
             }
             _ => {
                 // Other sections: skip for now
-                debug!("  Skipping section '{}' for relocation", section_name);
+                log::debug!("  Skipping section '{section_name}' for relocation");
             }
         }
     }
@@ -200,9 +202,10 @@ pub fn apply_object_relocations(
             // Update section name to normalized version for phase 2 lookup
             adjusted_reloc.section_name = normalized_section_name;
         } else {
-            debug!(
+            log::debug!(
                 "Warning: Section '{}' (normalized: '{}') not found in section address map",
-                reloc.section_name, normalized_section_name
+                reloc.section_name,
+                normalized_section_name
             );
         }
 
@@ -219,6 +222,6 @@ pub fn apply_object_relocations(
         merged_symbol_map,
     )?;
 
-    debug!("=== Object file relocations applied successfully ===");
+    log::debug!("=== Object file relocations applied successfully ===");
     Ok(())
 }

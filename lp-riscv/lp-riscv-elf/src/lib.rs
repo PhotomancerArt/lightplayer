@@ -8,16 +8,6 @@
 
 extern crate alloc;
 
-// Debug macro (this crate requires std)
-#[macro_export]
-macro_rules! debug {
-    ($($arg:tt)*) => {
-        if std::env::var("DEBUG").as_deref() == Ok("1") {
-            std::eprintln!("[{}:{}] {}", file!(), line!(), format_args!($($arg)*));
-        }
-    };
-}
-
 mod elf_linker;
 mod elf_loader;
 

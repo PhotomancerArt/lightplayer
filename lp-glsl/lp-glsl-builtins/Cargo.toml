@@ -11,10 +11,11 @@ crate-type = ["lib"]
 
 [features]
 default = []
-std = []
+std = ["log/std"]
 test = ["std"]
 
 [dependencies]
 lpfx-impl-macro = { path = "../lpfx-impl-macro" }
+log = { workspace = true, default-features = false }
 
 [dev-dependencies]

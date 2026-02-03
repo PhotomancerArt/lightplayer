@@ -8,6 +8,7 @@ description = "Shared code for RISC-V JIT testing using Cranelift"
 [lib]
 
 [dependencies]
+log = { workspace = true, default-features = false }
 
 [features]
 std = []

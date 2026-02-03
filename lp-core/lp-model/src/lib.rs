@@ -15,6 +15,7 @@ pub mod message;
 pub mod nodes;
 pub mod path;
 pub mod project;
+pub mod serde_base64;
 pub mod server;
 pub mod transport_error;
 

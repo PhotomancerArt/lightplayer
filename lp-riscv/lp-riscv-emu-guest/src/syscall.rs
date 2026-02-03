@@ -1,19 +1,18 @@
 // Re-export syscall constants from shared crate
 pub use lp_riscv_emu_shared::{
-    SYSCALL_ARGS, SYSCALL_DEBUG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
+    SYSCALL_ARGS, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ,
     SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
 };
 
 /// System call implementation
 pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
-    let error: i32;
-    let value: i32;
+    let result: i32;
     unsafe {
         core::arch::asm!(
             "ecall",
             in("x17") nr,
-            inlateout("x10") args[0] => error,
-            inlateout("x11") args[1] => value,
+            inlateout("x10") args[0] => result,
+            in("x11") args[1],
             in("x12") args[2],
             in("x13") args[3],
             in("x14") args[4],
@@ -21,7 +20,13 @@ pub fn syscall(nr: i32, args: &[i32; SYSCALL_ARGS]) -> i32 {
             in("x16") args[6],
         );
     }
-    if error != 0 { error } else { value }
+    // Return value is in a0 (x10). Negative values are error codes, non-negative are success values.
+    result
+}
+
+pub fn sys_yield() {
+    let args = [0i32; SYSCALL_ARGS];
+    syscall(SYSCALL_YIELD, &args);
 }
 
 /// Write bytes to serial output buffer

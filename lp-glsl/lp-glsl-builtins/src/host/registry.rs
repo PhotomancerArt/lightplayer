@@ -6,21 +6,19 @@
 /// Enum identifying host functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostFn {
-    Debug,
-    Println,
+    Log,
 }
 
 impl HostFn {
     /// Get the symbol name for this host function.
     pub fn name(&self) -> &'static str {
         match self {
-            HostFn::Debug => "__host_debug",
-            HostFn::Println => "__host_println",
+            HostFn::Log => "__host_log",
         }
     }
 
     /// Get all host IDs.
     pub fn all() -> &'static [HostFn] {
-        &[HostFn::Debug, HostFn::Println]
+        &[HostFn::Log]
     }
 }

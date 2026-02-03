@@ -29,7 +29,7 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
         return Ok(val);
     }
 
-    crate::debug!("coerce_to_type: {:?} -> {:?}", from_ty, to_ty);
+    log::trace!("coerce_to_type: {from_ty:?} -> {to_ty:?}");
     match (from_ty, to_ty) {
         (GlslType::Int, GlslType::Float) => {
             // int → float: fcvt_from_sint

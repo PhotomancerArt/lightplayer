@@ -69,29 +69,29 @@ After you move the files, these code files will need import path updates.
 ### `lp-riscv-emu/tests/*.rs`
 
 - Change `use lp_riscv_tools::*` to appropriate imports:
-    - `use lp_riscv_emu::*` for emulator types
-    - `use lp_riscv_inst::*` for instruction utilities
+  - `use lp_riscv_emu::*` for emulator types
+  - `use lp_riscv_inst::*` for instruction utilities
 
 ### `lp-riscv-elf/tests/elf_loader_test.rs`
 
 - Change `use lp_riscv_tools::*` to:
-    - `use lp_riscv_elf::*` for ELF loading
-    - `use lp_riscv_emu::*` for emulator types
-    - `use lp_riscv_inst::*` for instruction utilities
+  - `use lp_riscv_elf::*` for ELF loading
+  - `use lp_riscv_emu::*` for emulator types
+  - `use lp_riscv_inst::*` for instruction utilities
 
 ### `lp-riscv-elf/tests/guest_app_tests.rs`
 
 - Change `use lp_riscv_tools::{LogLevel, emu::Riscv32Emulator, load_elf}` to:
-    - `use lp_riscv_emu::{LogLevel, Riscv32Emulator}`
-    - `use lp_riscv_elf::load_elf`
+  - `use lp_riscv_emu::{LogLevel, Riscv32Emulator}`
+  - `use lp_riscv_elf::load_elf`
 
 ## Example files that need updates
 
 ### `lp-riscv-elf/examples/simple_codegen.rs`
 
 - Change `use lp_riscv_tools::{Gpr, Riscv32Emulator}` to:
-    - `use lp_riscv_inst::Gpr`
-    - `use lp_riscv_emu::Riscv32Emulator`
+  - `use lp_riscv_inst::Gpr`
+  - `use lp_riscv_emu::Riscv32Emulator`
 
 ## Consumer code that needs updates
 
@@ -119,7 +119,7 @@ After you move the files, these code files will need import path updates.
 ## Summary of import changes
 
 | Old Import                           | New Import                          |
-|--------------------------------------|-------------------------------------|
+| ------------------------------------ | ----------------------------------- |
 | `lp_riscv_tools::Gpr`                | `lp_riscv_inst::Gpr`                |
 | `lp_riscv_tools::Inst`               | `lp_riscv_inst::Inst`               |
 | `lp_riscv_tools::decode_instruction` | `lp_riscv_inst::decode_instruction` |

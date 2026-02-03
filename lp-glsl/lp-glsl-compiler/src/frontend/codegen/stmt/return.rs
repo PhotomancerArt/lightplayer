@@ -16,7 +16,7 @@ pub fn emit_return_stmt<M: cranelift_module::Module>(
     if let Some(ret_expr) = expr {
         let span = extract_span_from_expr(ret_expr);
         let (ret_vals, ret_ty) = ctx.emit_expr_typed(ret_expr)?;
-        crate::debug!(
+        log::trace!(
             "return statement: ret_ty={:?}, ret_vals.len()={}",
             ret_ty,
             ret_vals.len()
@@ -24,7 +24,7 @@ pub fn emit_return_stmt<M: cranelift_module::Module>(
 
         // Validate return type matches function signature
         if let Some(expected_ty) = &ctx.return_type {
-            crate::debug!("  expected_ty={:?}", expected_ty);
+            log::trace!("  expected_ty={expected_ty:?}");
             // Check if function uses StructReturn
             let uses_struct_return = ctx
                 .builder
@@ -60,29 +60,22 @@ pub fn emit_return_stmt<M: cranelift_module::Module>(
                     ret_ty.clone()
                 };
 
-                crate::debug!(
+                log::trace!(
                     "  StructReturn: coercing {} values from {:?} to {:?}",
                     ret_vals.len(),
                     ret_base,
                     expected_base
                 );
                 for (i, val) in ret_vals.iter().enumerate() {
-                    crate::debug!(
-                        "    processing element {}: val={:?}, val type should match ret_base={:?}",
-                        i,
-                        val,
-                        ret_base
+                    log::trace!(
+                        "    processing element {i}: val={val:?}, val type should match ret_base={ret_base:?}"
                     );
                     let coerced = if ret_base == expected_base {
-                        crate::debug!("      no coercion needed for element {}", i);
+                        log::trace!("      no coercion needed for element {i}");
                         *val
                     } else {
-                        crate::debug!(
-                            "      coercing element {}: {:?} -> {:?}, val={:?}",
-                            i,
-                            ret_base,
-                            expected_base,
-                            val
+                        log::trace!(
+                            "      coercing element {i}: {ret_base:?} -> {expected_base:?}, val={val:?}"
                         );
                         ctx.coerce_to_type_with_location(
                             *val,
@@ -91,9 +84,9 @@ pub fn emit_return_stmt<M: cranelift_module::Module>(
                             Some(span.clone()),
                         )?
                     };
-                    crate::debug!("      coerced value for element {}: {:?}", i, coerced);
+                    log::trace!("      coerced value for element {i}: {coerced:?}");
                     let offset = (i * crate::frontend::codegen::constants::F32_SIZE_BYTES) as i32;
-                    crate::debug!("      storing coerced value at offset {}", offset);
+                    log::trace!("      storing coerced value at offset {offset}");
                     ctx.builder
                         .ins()
                         .store(MemFlags::trusted(), coerced, struct_ret_ptr, offset);
@@ -136,21 +129,15 @@ pub fn emit_return_stmt<M: cranelift_module::Module>(
                 // For scalars, return single value with coercion if needed
                 let expected_base = expected_ty.clone();
                 let ret_base = ret_ty.clone();
-                crate::debug!(
-                    "  scalar return: ret_base={:?}, expected_base={:?}",
-                    ret_base,
-                    expected_base
+                log::trace!(
+                    "  scalar return: ret_base={ret_base:?}, expected_base={expected_base:?}"
                 );
 
                 let return_val = if ret_base == expected_base {
-                    crate::debug!("  types match, no coercion");
+                    log::trace!("  types match, no coercion");
                     ret_vals[0]
                 } else {
-                    crate::debug!(
-                        "  coercing return value: {:?} -> {:?}",
-                        ret_base,
-                        expected_base
-                    );
+                    log::trace!("  coercing return value: {ret_base:?} -> {expected_base:?}");
                     ctx.coerce_to_type_with_location(
                         ret_vals[0],
                         &ret_base,

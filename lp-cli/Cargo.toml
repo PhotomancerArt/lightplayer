@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+env_logger = { workspace = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,7 +24,7 @@ lp-model = { path = "../lp-core/lp-model" }
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lp-engine-client = { path = "../lp-core/lp-engine-client" }
-lp-client = { path = "../lp-core/lp-client" }
+lp-client = { path = "../lp-core/lp-client", features = ["ws"] }
 
 [dev-dependencies]
 tempfile = "3"

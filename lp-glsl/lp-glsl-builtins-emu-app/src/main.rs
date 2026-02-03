@@ -27,10 +27,9 @@ pub extern "C" fn _lp_main() {
 
     // Reference host functions to prevent dead code elimination
     unsafe {
-        let _debug_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_debug;
-        let _println_fn: extern "C" fn(*const u8, usize) = lp_riscv_emu_guest::host::__host_println;
-        let _ = core::ptr::read_volatile(&_debug_fn as *const _);
-        let _ = core::ptr::read_volatile(&_println_fn as *const _);
+        let _log_fn: extern "C" fn(u8, *const u8, usize, *const u8, usize) =
+            lp_riscv_emu_guest::host::__host_log;
+        let _ = core::ptr::read_volatile(&_log_fn as *const _);
     }
 
     // Read user _init pointer

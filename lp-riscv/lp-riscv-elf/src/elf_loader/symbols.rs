@@ -11,8 +11,8 @@ use object::{Object, ObjectSymbol, SymbolSection};
 ///
 /// Returns a map from symbol name to address (offset for ROM symbols, absolute for RAM symbols).
 pub fn build_symbol_map(obj: &object::File, text_base: u64) -> HashMap<String, u32> {
-    debug!("=== Building symbol map for relocations ===");
-    debug!("text_section_base: 0x{:x}", text_base);
+    log::debug!("=== Building symbol map for relocations ===");
+    log::debug!("text_section_base: 0x{text_base:x}");
 
     let mut symbol_map: HashMap<String, u32> = HashMap::new();
 
@@ -58,22 +58,17 @@ pub fn build_symbol_map(obj: &object::File, text_base: u64) -> HashMap<String, u
         if let Some(&existing_offset) = symbol_map.get(&name) {
             if offset > existing_offset {
                 symbol_map.insert(name.clone(), offset);
-                debug!(
-                    "  Symbol '{}': replacing offset 0x{:x} with 0x{:x} (higher address), section={:?}",
-                    name, existing_offset, offset, section
+                log::trace!(
+                    "  Symbol '{name}': replacing offset 0x{existing_offset:x} with 0x{offset:x} (higher address), section={section:?}"
                 );
             } else {
-                debug!(
-                    "  Symbol '{}': keeping existing offset 0x{:x} (new: 0x{:x}), section={:?}",
-                    name, existing_offset, offset, section
+                log::trace!(
+                    "  Symbol '{name}': keeping existing offset 0x{existing_offset:x} (new: 0x{offset:x}), section={section:?}"
                 );
             }
         } else {
             symbol_map.insert(name.clone(), offset);
-            debug!(
-                "  Symbol '{}': offset=0x{:x}, section={:?} (defined)",
-                name, offset, section
-            );
+            log::trace!("  Symbol '{name}': offset=0x{offset:x}, section={section:?} (defined)");
         }
     }
 
@@ -81,16 +76,13 @@ pub fn build_symbol_map(obj: &object::File, text_base: u64) -> HashMap<String, u
     for (name, offset) in undefined_symbols {
         if !symbol_map.contains_key(&name) {
             symbol_map.insert(name.clone(), offset);
-            debug!("  Symbol '{}': offset=0x{:x} (undefined)", name, offset);
+            log::trace!("  Symbol '{name}': offset=0x{offset:x} (undefined)");
         } else {
-            debug!(
-                "  Symbol '{}': skipping undefined (already have defined)",
-                name
-            );
+            log::trace!("  Symbol '{name}': skipping undefined (already have defined)");
         }
     }
 
-    debug!("Symbol map contains {} entries", symbol_map.len());
+    log::debug!("Symbol map contains {} entries", symbol_map.len());
     symbol_map
 }
 

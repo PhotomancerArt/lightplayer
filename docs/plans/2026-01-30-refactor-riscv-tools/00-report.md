@@ -237,8 +237,8 @@ These have different use cases and dependencies.
 - `emu/` module (emulator core)
 - `serial/` module (serial communication)
 - Optional `std` feature for:
-    - Time tracking (`std::time::Instant`)
-    - Debug output (`std::io::Write`)
+  - Time tracking (`std::time::Instant`)
+  - Debug output (`std::io::Write`)
 
 **Dependencies:**
 
@@ -332,46 +332,46 @@ These have different use cases and dependencies.
 ### Benefits
 
 1. **Clear separation of concerns**
-    - Runtime emulator vs development tooling
-    - Instruction utilities can be used independently
+   - Runtime emulator vs development tooling
+   - Instruction utilities can be used independently
 
 2. **Better dependency management**
-    - Consumers only pull what they need
-    - `fw-emu` doesn't need ELF loading dependencies
+   - Consumers only pull what they need
+   - `fw-emu` doesn't need ELF loading dependencies
 
 3. **Cleaner feature gating**
-    - `lp-riscv-emu` can have optional `std` for time/debug
-    - `lp-riscv-elf` requires `std` (no feature flag needed)
+   - `lp-riscv-emu` can have optional `std` for time/debug
+   - `lp-riscv-elf` requires `std` (no feature flag needed)
 
 4. **Better naming**
-    - `lp-riscv-emu` clearly indicates emulator
-    - `lp-riscv-inst` clearly indicates instruction utilities
-    - `lp-riscv-elf` clearly indicates ELF tooling
+   - `lp-riscv-emu` clearly indicates emulator
+   - `lp-riscv-inst` clearly indicates instruction utilities
+   - `lp-riscv-elf` clearly indicates ELF tooling
 
 ### Migration Path
 
 1. **Create new crates:**
-    - `lp-riscv/lp-riscv-emu/`
-    - `lp-riscv/lp-riscv-inst/`
-    - `lp-riscv/lp-riscv-elf/`
+   - `lp-riscv/lp-riscv-emu/`
+   - `lp-riscv/lp-riscv-inst/`
+   - `lp-riscv/lp-riscv-elf/`
 
 2. **Move code:**
-    - Move emulator code to `lp-riscv-emu`
-    - Move instruction utilities to `lp-riscv-inst`
-    - Move ELF loading to `lp-riscv-elf`
+   - Move emulator code to `lp-riscv-emu`
+   - Move instruction utilities to `lp-riscv-inst`
+   - Move ELF loading to `lp-riscv-elf`
 
 3. **Update dependencies:**
-    - `lp-riscv-emu` depends on `lp-riscv-inst`
-    - `lp-riscv-elf` depends on `lp-riscv-inst` and `lp-riscv-emu`
+   - `lp-riscv-emu` depends on `lp-riscv-inst`
+   - `lp-riscv-elf` depends on `lp-riscv-inst` and `lp-riscv-emu`
 
 4. **Update consumers:**
-    - `fw-emu`: Use `lp-riscv-emu` only
-    - `lp-glsl-compiler`: Use `lp-riscv-emu` and `lp-riscv-elf`
+   - `fw-emu`: Use `lp-riscv-emu` only
+   - `lp-glsl-compiler`: Use `lp-riscv-emu` and `lp-riscv-elf`
 
 5. **Deprecate `lp-riscv-tools`:**
-    - Keep as thin wrapper re-exporting from new crates
-    - Add deprecation notice
-    - Remove after migration period
+   - Keep as thin wrapper re-exporting from new crates
+   - Add deprecation notice
+   - Remove after migration period
 
 ## File-by-File Analysis
 
@@ -449,37 +449,37 @@ hashbrown = { workspace = true }
 ### Tests to Move:
 
 - **`lp-riscv-emu`:**
-    - `abi_tests.rs`
-    - `stack_args_tests.rs`
-    - `multi_return_test.rs`
-    - `trap_tests.rs`
-    - `riscv_nostd_test.rs` (verify no_std works)
+  - `abi_tests.rs`
+  - `stack_args_tests.rs`
+  - `multi_return_test.rs`
+  - `trap_tests.rs`
+  - `riscv_nostd_test.rs` (verify no_std works)
 
 - **`lp-riscv-inst`:**
-    - `instruction_tests.rs`
+  - `instruction_tests.rs`
 
 - **`lp-riscv-elf`:**
-    - `elf_loader_test.rs`
-    - `guest_app_tests.rs` (uses ELF loading)
+  - `elf_loader_test.rs`
+  - `guest_app_tests.rs` (uses ELF loading)
 
 ## Open Questions
 
 1. **Should `lp-riscv-inst` depend on `cranelift-codegen`?**
-    - Currently instruction utilities don't use it
-    - But might be needed for some utilities
-    - **Answer:** No, keep it independent
+   - Currently instruction utilities don't use it
+   - But might be needed for some utilities
+   - **Answer:** No, keep it independent
 
 2. **Should `lp-riscv-elf` depend on `lp-riscv-emu`?**
-    - ELF loader returns code/ram that goes into emulator
-    - But ELF loader itself doesn't need emulator
-    - **Answer:** Only if needed for testing, otherwise no
+   - ELF loader returns code/ram that goes into emulator
+   - But ELF loader itself doesn't need emulator
+   - **Answer:** Only if needed for testing, otherwise no
 
 3. **What about `nom` dependency?**
-    - Currently used in `lp-riscv-tools` but not clear where
-    - **Answer:** Check usage, likely can be removed
+   - Currently used in `lp-riscv-tools` but not clear where
+   - **Answer:** Check usage, likely can be removed
 
 4. **Should we keep `lp-riscv-tools` as wrapper?**
-    - **Answer:** Yes, temporarily for migration, then remove
+   - **Answer:** Yes, temporarily for migration, then remove
 
 ## Next Steps
 

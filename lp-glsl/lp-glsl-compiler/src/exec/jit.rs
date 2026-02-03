@@ -11,6 +11,7 @@ use hashbrown::HashMap;
 use lp_glsl_jit_util::{call_structreturn, call_structreturn_with_args};
 
 use alloc::{format, string::String, vec, vec::Vec};
+use log;
 
 /// JIT-compiled GLSL module (executes on host or embedded)
 /// Works in both std and no_std (JITModule supports no_std)
@@ -1267,6 +1268,11 @@ impl GlslExecutable for GlslJitModule {
                 }
             } else {
                 // Has arguments - use call_structreturn_with_args
+                log::trace!(
+                    "GlslJitModule::call_vec: Calling with {} arguments: {:?}",
+                    jit_args.len(),
+                    jit_args
+                );
                 unsafe {
                     call_structreturn_with_args(
                         *func_ptr,

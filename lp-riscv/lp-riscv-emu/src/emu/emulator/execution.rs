@@ -9,6 +9,7 @@ use super::super::{
 use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
+use log;
 use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 use lp_riscv_inst::{Gpr, Inst};
 
@@ -142,9 +143,8 @@ impl Riscv32Emulator {
                 let line = syscall_info.args[4] as u32;
 
                 // Debug: print syscall args
-                debug!(
-                    "Panic syscall detected: msg_ptr=0x{:x}, msg_len={}, file_ptr=0x{:x}, file_len={}, line={}",
-                    msg_ptr, msg_len, file_ptr, file_len, line
+                log::debug!(
+                    "Panic syscall detected: msg_ptr=0x{msg_ptr:x}, msg_len={msg_len}, file_ptr=0x{file_ptr:x}, file_len={file_len}, line={line}"
                 );
 
                 // Read panic message from memory
@@ -157,16 +157,16 @@ impl Riscv32Emulator {
                 let file = if file_ptr != 0 && file_len > 0 {
                     match read_memory_string(&self.memory, file_ptr, file_len) {
                         Ok(f) => {
-                            debug!("Read file name from memory: '{}'", f);
+                            log::debug!("Read file name from memory: '{f}'");
                             Some(f)
                         }
                         Err(_e) => {
-                            debug!("Failed to read file name from 0x{:x}: {}", file_ptr, _e);
+                            log::debug!("Failed to read file name from 0x{file_ptr:x}: {_e}");
                             None
                         }
                     }
                 } else {
-                    debug!("File pointer is null or file_len is 0, skipping file read");
+                    log::debug!("File pointer is null or file_len is 0, skipping file read");
                     None
                 };
 
@@ -197,33 +197,42 @@ impl Riscv32Emulator {
                         }
                     }
                     Err(_e) => {
-                        debug!(
-                            "Failed to read write syscall string from 0x{:x}: {}",
-                            msg_ptr, _e
-                        );
+                        log::debug!("Failed to read write syscall string from 0x{msg_ptr:x}: {_e}");
                     }
                 }
 
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_DEBUG {
-                // SYSCALL_DEBUG: Debug output (delegates to debug! macro)
-                // args[0] = pointer to string (as i32, cast to u32)
-                // args[1] = length of string
-                let msg_ptr = syscall_info.args[0] as u32;
-                let msg_len = syscall_info.args[1] as usize;
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_LOG {
+                // SYSCALL_LOG: Log message with level (filtered by RUST_LOG)
+                // args[0] = level (u8 as i32: 0=error, 1=warn, 2=info, 3=debug)
+                // args[1] = module_path pointer (as i32, cast to u32)
+                // args[2] = module_path length (as i32)
+                // args[3] = message pointer (as i32, cast to u32)
+                // args[4] = message length (as i32)
+                let level_val = syscall_info.args[0];
+                let module_path_ptr = syscall_info.args[1] as u32;
+                let module_path_len = syscall_info.args[2] as usize;
+                let msg_ptr = syscall_info.args[3] as u32;
+                let msg_len = syscall_info.args[4] as usize;
 
-                // Read string from memory and delegate to debug! macro
-                match read_memory_string(&self.memory, msg_ptr, msg_len) {
-                    Ok(_s) => {
-                        debug!("{}", _s);
+                // Read module path and message from memory
+                match (
+                    read_memory_string(&self.memory, module_path_ptr, module_path_len),
+                    read_memory_string(&self.memory, msg_ptr, msg_len),
+                ) {
+                    (Ok(module_path), Ok(msg)) => {
+                        // Convert syscall level to log::Level
+                        if let Some(level) = lp_riscv_emu_shared::syscall_to_level(level_val) {
+                            // Create a log record and call log::log!()
+                            // This will respect RUST_LOG filtering via env_logger
+                            log::log!(target: &module_path, level, "{msg}");
+                        }
                     }
-                    Err(_e) => {
-                        debug!(
-                            "Failed to read debug syscall string from 0x{:x}: {}",
-                            msg_ptr, _e
-                        );
+                    _ => {
+                        // Failed to read strings - log error
+                        log::warn!("Failed to read log syscall strings");
                     }
                 }
 
@@ -266,7 +275,12 @@ impl Riscv32Emulator {
                     Ok(StepResult::Continue)
                 } else {
                     let serial = self.get_or_create_serial_host();
+                    log::trace!(
+                        "SYSCALL_SERIAL_WRITE: Writing {} bytes to serial",
+                        data.len()
+                    );
                     let result = serial.guest_write(&data);
+                    log::trace!("SYSCALL_SERIAL_WRITE: guest_write returned {result}");
                     self.regs[Gpr::A0.num() as usize] = result;
                     Ok(StepResult::Continue)
                 }
@@ -287,12 +301,20 @@ impl Riscv32Emulator {
                 let serial = self.get_or_create_serial_host();
                 let bytes_read = serial.guest_read(&mut buffer);
 
+                log::trace!(
+                    "SYSCALL_SERIAL_READ: max_len={}, bytes_read={}, buffer[0..10]={:?}",
+                    max_len,
+                    bytes_read,
+                    &buffer[..buffer.len().min(10)]
+                );
+
                 if bytes_read < 0 {
                     // Error
                     self.regs[Gpr::A0.num() as usize] = bytes_read;
                     Ok(StepResult::Continue)
                 } else if bytes_read == 0 {
                     // No data
+                    log::trace!("SYSCALL_SERIAL_READ: No data available, returning 0");
                     self.regs[Gpr::A0.num() as usize] = 0;
                     Ok(StepResult::Continue)
                 } else {

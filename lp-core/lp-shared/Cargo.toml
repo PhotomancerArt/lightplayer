@@ -11,7 +11,7 @@ default = ["std"]
 std = []
 
 [dependencies]
-log = { version = "0.4", default-features = false }
+log = { workspace = true, default-features = false }
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

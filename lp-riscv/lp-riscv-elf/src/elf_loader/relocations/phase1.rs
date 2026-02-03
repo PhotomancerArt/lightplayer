@@ -46,7 +46,7 @@ pub fn analyze_relocations(
     ),
     String,
 > {
-    debug!("=== Phase 1: Relocation Analysis ===");
+    log::debug!("=== Phase 1: Relocation Analysis ===");
 
     // Resolve section addresses
     let section_addrs = resolve_section_addresses(obj, _rom, _ram, symbol_map)?;
@@ -97,9 +97,8 @@ pub fn analyze_relocations(
             let r_type = match reloc.flags() {
                 RelocationFlags::Elf { r_type } => r_type,
                 _ => {
-                    debug!(
-                        "  Warning: Unsupported relocation format in section '{}' at offset 0x{:x}",
-                        section_name, reloc_offset
+                    log::trace!(
+                        "  Warning: Unsupported relocation format in section '{section_name}' at offset 0x{reloc_offset:x}"
                     );
                     continue;
                 }
@@ -130,7 +129,7 @@ pub fn analyze_relocations(
         }
 
         if !section_relocs.is_empty() {
-            debug!(
+            log::trace!(
                 "Section '{}' (VMA: 0x{:x}, LMA: 0x{:x}): {} relocations",
                 section_name,
                 section_info.vma,
@@ -147,23 +146,27 @@ pub fn analyze_relocations(
                     24 => "R_RISCV_PCREL_LO12_I",
                     _ => "R_RISCV_UNKNOWN",
                 };
-                debug!(
+                log::trace!(
                     "  Relocation at 0x{:x} (address 0x{:x}): {} → '{}' (addend: {})",
-                    reloc.offset, reloc.address, r_type_str, reloc.symbol_name, reloc.addend
+                    reloc.offset,
+                    reloc.address,
+                    r_type_str,
+                    reloc.symbol_name,
+                    reloc.addend
                 );
             }
             relocations.extend(section_relocs);
         }
     }
 
-    debug!("Total relocations found: {}", relocations.len());
+    log::debug!("Total relocations found: {}", relocations.len());
 
     // Identify GOT entries
     let got_tracker = identify_got_entries(&relocations);
 
-    debug!("=== GOT Entries Identified ===");
+    log::trace!("=== GOT Entries Identified ===");
     for (name, entry) in got_tracker.entries() {
-        debug!(
+        log::trace!(
             "  '{}': R_RISCV_32 at 0x{:x} in '{}'",
             name,
             entry.address,

@@ -10,7 +10,7 @@ use object::{Object, ObjectSection, ObjectSymbol};
 /// For executable ELF files, sections may have LMA (load address) different from VMA (virtual address).
 /// We use symbol addresses to determine the actual VMA where sections should be loaded.
 pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Result<(), String> {
-    debug!("=== Loading sections ===");
+    log::debug!("=== Loading sections ===");
 
     // Build a map of section names to their actual VMA addresses from symbols
     // Only for data sections that need RAM placement (sections with address 0 but symbols in RAM)
@@ -24,7 +24,7 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
         if let Ok(name) = symbol.name() {
             if name == "__data_source_start" {
                 data_source_start = Some(symbol.address());
-                debug!(
+                log::trace!(
                     "Found __data_source_start symbol at 0x{:x}",
                     symbol.address()
                 );
@@ -98,7 +98,7 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
             }
             _ => {
                 // Skip metadata sections like .symtab, .strtab, .comment, .rela.*, etc.
-                debug!("    -> Skipping non-loadable section '{}' (kind: {:?})", section_name, section_kind);
+                log::trace!("    -> Skipping non-loadable section '{section_name}' (kind: {section_kind:?})");
                 continue;
             }
         }
@@ -149,7 +149,7 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
             section_addr
         };
 
-        debug!(
+        log::trace!(
             "  Section '{}': LMA=0x{:x}, VMA=0x{:x}, size={}, kind={:?}",
             section_name,
             section_addr,
@@ -170,19 +170,19 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
                     rom.len()
                 ));
             }
-            debug!(
+            log::trace!(
                 "    -> Copying {} bytes to code[0x{:x}..0x{:x}]",
                 data.len(),
                 offset,
                 offset + data.len()
             );
             rom[offset..offset + data.len()].copy_from_slice(data);
-            debug!("    -> Copied successfully");
+            log::trace!("    -> Copied successfully");
 
             // Track .rodata end for .data LMA calculation
             if section_name == ".rodata" {
                 rodata_end = Some((offset + data.len()) as u64);
-                debug!(
+                log::trace!(
                     "Tracked .rodata end at 0x{:x} for .data LMA calculation",
                     rodata_end.unwrap()
                 );
@@ -207,9 +207,8 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
             };
 
             if section_name == ".data" {
-                debug!(
-                    "    -> .data section LMA: 0x{:x} (from __data_source_start: {:?}, from .rodata end: {:?})",
-                    rom_offset, data_source_start, rodata_end
+                log::trace!(
+                    "    -> .data section LMA: 0x{rom_offset:x} (from __data_source_start: {data_source_start:?}, from .rodata end: {rodata_end:?})"
                 );
             }
             if rom_offset + data.len() > rom.len() {
@@ -221,7 +220,7 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
                     rom.len()
                 ));
             }
-            debug!(
+            log::trace!(
                 "    -> Copying {} bytes to ROM[0x{:x}..0x{:x}] (LMA) - will be copied to RAM[0x{:x}..0x{:x}] (VMA) by init code",
                 data.len(),
                 rom_offset,
@@ -231,17 +230,14 @@ pub fn load_sections(obj: &object::File, rom: &mut [u8], _ram: &mut [u8]) -> Res
             );
             rom[rom_offset..rom_offset + data.len()].copy_from_slice(data);
             next_rom_offset = (next_rom_offset + data.len() as u64 + 3) & !3; // Align to 4 bytes
-            debug!("    -> Copied successfully to ROM");
+            log::trace!("    -> Copied successfully to ROM");
         } else {
-            debug!(
-                "    -> Skipping section (VMA 0x{:x} not in ROM or RAM range)",
-                vma
-            );
+            log::trace!("    -> Skipping section (VMA 0x{vma:x} not in ROM or RAM range)");
         }
 
         section_count += 1;
     }
 
-    debug!("Loaded {} sections", section_count);
+    log::debug!("Loaded {section_count} sections");
     Ok(())
 }

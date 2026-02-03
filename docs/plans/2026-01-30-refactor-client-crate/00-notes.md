@@ -19,6 +19,7 @@ The client module (`lp-cli/src/client`) contains:
 ### Dependencies
 
 The client module depends on:
+
 - `lp-model`: For message types (`ClientMessage`, `ServerMessage`, etc.)
 - `lp-shared`: For `ServerTransport` trait (used in `local.rs`)
 - `tokio`: For async runtime
@@ -30,7 +31,8 @@ The client module depends on:
 ### Problem: LocalServerTransport Dependency
 
 `LocalServerTransport` (in `local_server.rs`) has a dependency on lp-cli-specific code:
-- It imports `crate::server::{create_server, run_server_loop_async}` 
+
+- It imports `crate::server::{create_server, run_server_loop_async}`
 - `create_server` depends on `crate::commands::serve::init` which is lp-cli specific
 - This creates a circular dependency if we want `lp-client` to be usable without lp-cli
 

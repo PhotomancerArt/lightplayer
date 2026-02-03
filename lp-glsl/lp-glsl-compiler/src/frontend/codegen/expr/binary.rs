@@ -103,21 +103,17 @@ fn emit_scalar_binary<M: cranelift_module::Module>(
     let (lhs_val, rhs_val, operand_ty) = if is_logical {
         // Logical operators: both operands must be Bool (validated above)
         // Coerce both operands to Bool type
-        crate::debug!("binary op: logical, coercing both to Bool");
+        log::trace!("binary op: logical, coercing both to Bool");
         let lhs_bool = coercion::coerce_to_type(ctx, lhs_val, lhs_ty, &GlslType::Bool)?;
         let rhs_bool = coercion::coerce_to_type(ctx, rhs_val, rhs_ty, &GlslType::Bool)?;
         (lhs_bool, rhs_bool, GlslType::Bool)
     } else if is_comparison {
         // Comparison operators: handle boolean and numeric separately
-        crate::debug!(
-            "binary op: comparison, lhs_ty={:?}, rhs_ty={:?}",
-            lhs_ty,
-            rhs_ty
-        );
+        log::trace!("binary op: comparison, lhs_ty={lhs_ty:?}, rhs_ty={rhs_ty:?}");
         if matches!(op, Equal | NonEqual) && lhs_ty == &GlslType::Bool && rhs_ty == &GlslType::Bool
         {
             // Boolean equality: no promotion needed
-            crate::debug!("  both operands are Bool, no promotion");
+            log::trace!("  both operands are Bool, no promotion");
             (lhs_val, rhs_val, GlslType::Bool)
         } else {
             // Numeric comparison: may need promotion
@@ -132,20 +128,16 @@ fn emit_scalar_binary<M: cranelift_module::Module>(
             } else {
                 promote_numeric(lhs_ty, rhs_ty)
             };
-            crate::debug!("  promoting to common_ty={:?}", common_ty);
+            log::trace!("  promoting to common_ty={common_ty:?}");
             let lhs_val = coercion::coerce_to_type(ctx, lhs_val, lhs_ty, &common_ty)?;
             let rhs_val = coercion::coerce_to_type(ctx, rhs_val, rhs_ty, &common_ty)?;
             (lhs_val, rhs_val, common_ty)
         }
     } else {
         // Arithmetic operators: promote to common type
-        crate::debug!(
-            "binary op: arithmetic, promoting lhs_ty={:?}, rhs_ty={:?}",
-            lhs_ty,
-            rhs_ty
-        );
+        log::trace!("binary op: arithmetic, promoting lhs_ty={lhs_ty:?}, rhs_ty={rhs_ty:?}");
         let common_ty = promote_numeric(lhs_ty, rhs_ty);
-        crate::debug!("  common_ty={:?}", common_ty);
+        log::trace!("  common_ty={common_ty:?}");
         let lhs_val = coercion::coerce_to_type(ctx, lhs_val, lhs_ty, &common_ty)?;
         let rhs_val = coercion::coerce_to_type(ctx, rhs_val, rhs_ty, &common_ty)?;
         (lhs_val, rhs_val, common_ty)

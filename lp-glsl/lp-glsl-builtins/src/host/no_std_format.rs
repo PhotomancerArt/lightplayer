@@ -4,10 +4,15 @@
 
 use core::fmt::{self, Write};
 
-// Declare extern functions that will be linked from lp-glsl-builtins-emu-app
+// Declare extern function that will be linked from lp-glsl-builtins-emu-app
 unsafe extern "C" {
-    fn __host_debug(ptr: *const u8, len: usize);
-    fn __host_println(ptr: *const u8, len: usize);
+    fn __host_log(
+        level: u8,
+        module_path_ptr: *const u8,
+        module_path_len: usize,
+        msg_ptr: *const u8,
+        msg_len: usize,
+    );
 }
 
 /// Static buffer for formatting (256 bytes should be enough for most debug messages)
@@ -37,7 +42,7 @@ impl Write for BufferWriter {
     }
 }
 
-/// Format arguments and call __host_debug with the formatted string.
+/// Format arguments and call __host_log with the formatted string.
 ///
 /// This function uses a static buffer to format the string without allocation.
 /// The buffer is shared, so this is not thread-safe, but that's fine for
@@ -52,27 +57,16 @@ pub fn _debug_format(args: fmt::Arguments) {
         let _ = writer.write_fmt(args);
 
         // Call host function with buffer contents
+        // Use debug level (3) and empty module path for host_debug! compatibility
         let len = *core::ptr::addr_of!(BUFFER_LEN);
-        __host_debug(core::ptr::addr_of!(FORMAT_BUFFER).cast(), len);
-    }
-}
-
-/// Format arguments and call __host_println with the formatted string.
-///
-/// This function uses a static buffer to format the string without allocation.
-/// The buffer is shared, so this is not thread-safe, but that's fine for
-/// single-threaded emulator execution.
-pub fn _println_format(args: fmt::Arguments) {
-    unsafe {
-        // Reset buffer
-        *core::ptr::addr_of_mut!(BUFFER_LEN) = 0;
-
-        // Format into buffer
-        let mut writer = BufferWriter;
-        let _ = writer.write_fmt(args);
-
-        // Call host function with buffer contents
-        let len = *core::ptr::addr_of!(BUFFER_LEN);
-        __host_println(core::ptr::addr_of!(FORMAT_BUFFER).cast(), len);
+        let level = 3u8; // debug level
+        let module_path = b"";
+        __host_log(
+            level,
+            module_path.as_ptr(),
+            module_path.len(),
+            core::ptr::addr_of!(FORMAT_BUFFER).cast(),
+            len,
+        );
     }
 }

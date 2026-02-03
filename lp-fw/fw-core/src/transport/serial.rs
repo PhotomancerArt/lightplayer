@@ -9,6 +9,7 @@ use alloc::{format, vec::Vec};
 use core::str;
 
 use crate::serial::SerialIo;
+use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 
@@ -40,57 +41,152 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
 
+        let json_bytes = json.as_bytes();
+        let total_bytes = json_bytes.len() + 1;
+
+        log::debug!(
+            "SerialTransport: Sending message id={} ({} bytes): {}",
+            msg.id,
+            total_bytes,
+            json
+        );
+
+        log::trace!(
+            "SerialTransport: Serialized message to {} bytes JSON",
+            json_bytes.len()
+        );
+
         // Write JSON + newline (blocking)
         self.io
-            .write(json.as_bytes())
+            .write(json_bytes)
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
         self.io
             .write(b"\n")
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
 
+        log::trace!("SerialTransport: Wrote {total_bytes} bytes to serial");
+
         Ok(())
     }
 
     fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-        // Read available bytes (non-blocking)
+        // Read available bytes in a loop until we have a complete message or no more data
         let mut temp_buf = [0u8; 256];
-        match self.io.read_available(&mut temp_buf) {
-            Ok(n) if n > 0 => {
-                // Append to read buffer
-                self.read_buffer.extend_from_slice(&temp_buf[..n]);
+        loop {
+            match self.io.read_available(&mut temp_buf) {
+                Ok(n) => {
+                    if n > 0 {
+                        log::trace!("SerialTransport: Read {n} bytes from serial");
+                        // Append to read buffer
+                        self.read_buffer.extend_from_slice(&temp_buf[..n]);
+                        log::trace!(
+                            "SerialTransport: Read buffer now has {} bytes",
+                            self.read_buffer.len()
+                        );
+                    } else {
+                        // No data available - break and check for complete message
+                        log::trace!("SerialTransport: read_available returned 0, no more data");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("SerialTransport: Serial read error: {e}");
+                    return Err(TransportError::Other(format!("Serial read error: {e}")));
+                }
             }
-            Ok(_) => {
-                // No data available
-            }
-            Err(e) => {
-                return Err(TransportError::Other(format!("Serial read error: {e}")));
+
+            // Check if we have a complete message after reading
+            if self.read_buffer.iter().any(|&b| b == b'\n') {
+                break;
             }
         }
 
         // Look for complete message (ends with \n)
         if let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
+            log::trace!(
+                "SerialTransport: Received complete message ({} bytes)",
+                newline_pos + 1
+            );
+
             // Extract message (without \n)
             let message_bytes: Vec<u8> = self.read_buffer.drain(..=newline_pos).collect();
             let message_str = match str::from_utf8(&message_bytes[..message_bytes.len() - 1]) {
                 Ok(s) => s,
                 Err(_) => {
                     // Invalid UTF-8, ignore with warning
-                    // In no_std, we can't easily log, so just return None
+                    #[cfg(any(feature = "emu", feature = "esp32"))]
+                    log::warn!("SerialTransport: Invalid UTF-8 in message");
                     return Ok(None);
                 }
             };
 
             // Parse JSON
             match serde_json::from_str::<ClientMessage>(message_str) {
-                Ok(msg) => Ok(Some(msg)),
-                Err(_) => {
+                Ok(msg) => {
+                    log::debug!(
+                        "SerialTransport: Received message id={} ({} bytes): {}",
+                        msg.id,
+                        message_bytes.len(),
+                        message_str
+                    );
+                    Ok(Some(msg))
+                }
+                Err(e) => {
                     // Parse error - ignore with warning (as specified)
-                    // In no_std, we can't easily log, so just return None
+                    log::warn!("SerialTransport: Failed to parse JSON message: {e}");
                     Ok(None)
                 }
             }
         } else {
             // No complete message yet
+            // Log buffer contents (first 100 bytes as hex, first 50 bytes as string if valid UTF-8)
+            let preview_len = self.read_buffer.len().min(100);
+            let hex_preview = if preview_len > 0 {
+                self.read_buffer[..preview_len]
+                    .iter()
+                    .take(50) // Limit hex output to first 50 bytes
+                    .map(|b| alloc::format!("{b:02x}"))
+                    .collect::<alloc::vec::Vec<_>>()
+                    .join(" ")
+            } else {
+                alloc::string::String::from("(empty)")
+            };
+
+            let string_preview = if preview_len > 0 {
+                match core::str::from_utf8(&self.read_buffer[..preview_len.min(50)]) {
+                    Ok(s) => {
+                        // Convert &str to String in no_std, escape control chars
+                        let mut result = alloc::string::String::new();
+                        for ch in s.chars() {
+                            if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' {
+                                result.push_str(&alloc::format!("\\x{:02x}", ch as u8));
+                            } else {
+                                result.push(ch);
+                            }
+                        }
+                        result
+                    }
+                    Err(_) => alloc::string::String::from("(invalid UTF-8)"),
+                }
+            } else {
+                alloc::string::String::from("(empty)")
+            };
+
+            if self.read_buffer.len() > 100 {
+                log::trace!(
+                    "SerialTransport: No complete message yet ({} bytes buffered) hex[0..50]: {}, str[0..50]: '{}'... (truncated)",
+                    self.read_buffer.len(),
+                    hex_preview,
+                    string_preview
+                );
+            } else {
+                log::trace!(
+                    "SerialTransport: No complete message yet ({} bytes buffered) hex: {}, str: '{}'",
+                    self.read_buffer.len(),
+                    hex_preview,
+                    string_preview
+                );
+            }
             Ok(None)
         }
     }
