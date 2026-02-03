@@ -32,19 +32,33 @@ just demo -- <example-name>
 
 LightPlayer follows a client-server architecture designed for headless operation on embedded devices and desktop platforms. The system is built around a portable core that can run on various platforms, with platform-specific implementations for different deployment scenarios.
 
+## Fixed-Point Math for Performance
+
+LightPlayer uses **Q32 (Q16.16) fixed-point arithmetic** for shader execution on embedded devices. This provides significant performance benefits:
+
+- **No Floating-Point Unit Required** - Many embedded microcontrollers (like ESP32-C6) lack hardware floating-point units. Fixed-point math uses only integer operations, which are fast and power-efficient.
+
+- **Deterministic Performance** - Fixed-point operations have predictable execution times, making them ideal for real-time applications like LED control where frame timing is critical.
+
+- **Precision** - The Q16.16 format provides 16 integer bits and 16 fractional bits (stored in a 32-bit integer), giving a range of -32768.0 to +32767.9999847412109375 with precision of approximately 0.00001526. This is sufficient for most visual effects while maintaining performance.
+
+- **Code Size** - Fixed-point operations compile to fewer instructions than software floating-point emulation, reducing code size and improving cache efficiency.
+
+The GLSL compiler automatically transforms floating-point operations in shaders to fixed-point equivalents, and provides optimized builtin functions (sin, cos, sqrt, etc.) implemented using efficient fixed-point algorithms.
+
 ## Core Application Architecture
 
 The core application (`lp-core/`) provides the foundation for all LightPlayer implementations:
 
 - **`lp-engine`** - The rendering engine executes GLSL shaders and manages the node graph (textures, shaders, fixtures, outputs). It handles frame-based rendering, texture sampling, shader compilation, and output data generation.
 
-- **`lp-server`** - The server manages projects, handles client connections, and processes filesystem changes. It uses a tick-based API (`server.tick(delta_ms, incoming_messages)`) that's ideal for both async and synchronous environments, making it portable across platforms.
+- **`lp-server`** - The server manages projects, handles client connections, and processes filesystem changes. It uses a tick-based API that works in both async and synchronous environments.
 
-- **`lp-model`** - Defines the data models and message protocol for client-server communication. Includes project configurations, node definitions, and API types. Uses smart binary serialization (text as JSON strings, binary as base64) for efficient message encoding.
+- **`lp-model`** - Defines the data models and message protocol for client-server communication. Includes project configurations, node definitions, and API types.
 
 - **`lp-client`** - Async client library for communicating with `lp-server`. Provides transport abstraction (WebSocket, serial, local) and handles filesystem synchronization and project management operations.
 
-- **`lp-engine-client`** - Higher-level client library that maintains a synchronized project view (`ClientProjectView`) with the server state. Handles incremental updates, node watching, and output data retrieval.
+- **`lp-engine-client`** - Higher-level client library that maintains a synchronized project view (`ClientProjectView`) with the server state. Handles incremental updates, node watching, and data retrieval for realtime visualization and control.
 
 - **`lp-shared`** - Shared utilities including filesystem abstractions (`LpFs` trait), output providers, time providers, and transport traits. These abstractions enable platform-specific implementations while keeping core logic portable.
 
@@ -81,8 +95,6 @@ Firmware implementation that runs in the RISC-V32 emulator for testing:
 - **Emulator Integration** - Runs in `lp-riscv-emu` with simulated time and syscalls
 - **Serial Emulation** - Emulates serial I/O through emulator syscalls
 - **Integration Tests** - Enables comprehensive testing of the full firmware stack
-
-This implementation shares the same `fw-core` abstractions as ESP32 firmware, ensuring that code tested in the emulator works on real hardware.
 
 ### Firmware Core (`lp-fw/fw-core/`)
 
