@@ -7,19 +7,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use log;
-use lp_client::{serializable_response_to_project_response, LpClient};
-use lp_engine_client::ClientProjectView;
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
+use log;
+use lp_client::{LpClient, serializable_response_to_project_response};
+use lp_engine_client::ClientProjectView;
 use lp_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    test_util::{ensure_binary_built, BinaryBuildConfig}, LogLevel, Riscv32Emulator,
-    TimeMode,
+    LogLevel, Riscv32Emulator, TimeMode,
+    test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lp_shared::fs::LpFsMemory;
 use lp_shared::ProjectBuilder;
+use lp_shared::fs::LpFsMemory;
 
 #[tokio::test]
 #[test_log::test]
@@ -128,7 +128,7 @@ async fn test_scene_render_fw_emu() {
     // ---------------------------------------------------------------------------------------------
     // Act & Assert: Render frames
     //
-    
+
     // Shader: vec4(mod(time, 1.0), 0.0, 0.0, 1.0) -> RGBA bytes [R, G, B, A]
     // Advancing time by 4ms gives an increment of (4/1000 * 255) = 1.02 ≈ 1
 
@@ -216,7 +216,7 @@ async fn sync_client_view(
     } else {
         view.detail_specifier()
     };
-    
+
     let response = client
         .project_sync_internal(handle, Some(view.frame_id), detail_spec)
         .await

@@ -100,7 +100,7 @@ fn emit_builtin_call_expr<M: cranelift_module::Module>(
     }
 
     // Delegate to built-in implementation and add span to any errors
-    log::debug!("emit_builtin_call_expr: Calling builtin function '{}'", name);
+    log::debug!("emit_builtin_call_expr: Calling builtin function '{name}'");
     match ctx.emit_builtin_call(name, translated_args) {
         Ok(result) => Ok(result),
         Err(mut error) => {

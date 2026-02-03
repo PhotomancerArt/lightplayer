@@ -43,7 +43,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         let json_bytes = json.as_bytes();
         let total_bytes = json_bytes.len() + 1;
-        
+
         log::debug!(
             "SerialTransport: Sending message id={} ({} bytes): {}",
             msg.id,
@@ -64,10 +64,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             .write(b"\n")
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
 
-        log::trace!(
-            "SerialTransport: Wrote {} bytes to serial",
-            total_bytes
-        );
+        log::trace!("SerialTransport: Wrote {total_bytes} bytes to serial");
 
         Ok(())
     }
@@ -79,7 +76,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             match self.io.read_available(&mut temp_buf) {
                 Ok(n) => {
                     if n > 0 {
-                        log::trace!("SerialTransport: Read {} bytes from serial", n);
+                        log::trace!("SerialTransport: Read {n} bytes from serial");
                         // Append to read buffer
                         self.read_buffer.extend_from_slice(&temp_buf[..n]);
                         log::trace!(
@@ -93,7 +90,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                     }
                 }
                 Err(e) => {
-                    log::warn!("SerialTransport: Serial read error: {}", e);
+                    log::warn!("SerialTransport: Serial read error: {e}");
                     return Err(TransportError::Other(format!("Serial read error: {e}")));
                 }
             }
@@ -136,7 +133,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
-                    log::warn!("SerialTransport: Failed to parse JSON message: {}", e);
+                    log::warn!("SerialTransport: Failed to parse JSON message: {e}");
                     Ok(None)
                 }
             }
@@ -148,13 +145,13 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 self.read_buffer[..preview_len]
                     .iter()
                     .take(50) // Limit hex output to first 50 bytes
-                    .map(|b| alloc::format!("{:02x}", b))
+                    .map(|b| alloc::format!("{b:02x}"))
                     .collect::<alloc::vec::Vec<_>>()
                     .join(" ")
             } else {
                 alloc::string::String::from("(empty)")
             };
-            
+
             let string_preview = if preview_len > 0 {
                 match core::str::from_utf8(&self.read_buffer[..preview_len.min(50)]) {
                     Ok(s) => {
@@ -169,12 +166,12 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                         }
                         result
                     }
-                    Err(_) => alloc::string::String::from("(invalid UTF-8)")
+                    Err(_) => alloc::string::String::from("(invalid UTF-8)"),
                 }
             } else {
                 alloc::string::String::from("(empty)")
             };
-            
+
             if self.read_buffer.len() > 100 {
                 log::trace!(
                     "SerialTransport: No complete message yet ({} bytes buffered) hex[0..50]: {}, str[0..50]: '{}'... (truncated)",

@@ -78,12 +78,6 @@ pub extern "C" fn lp_jit_host_log(
     msg_len: usize,
 ) {
     unsafe {
-        __host_log(
-            level,
-            module_path_ptr,
-            module_path_len,
-            msg_ptr,
-            msg_len,
-        );
+        __host_log(level, module_path_ptr, module_path_len, msg_ptr, msg_len);
     }
 }

@@ -6,12 +6,12 @@ use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
 use alloc::vec::Vec;
 use fw_core::transport::SerialTransport;
+use log;
 use lp_model::Message;
 use lp_riscv_emu_guest::sys_yield;
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
-use log;
 
 /// Target frame time for 60 FPS (16.67ms per frame)
 const TARGET_FRAME_TIME_MS: u32 = 16;
@@ -30,7 +30,7 @@ pub fn run_server_loop(
 
     loop {
         let frame_start = time_provider.now_ms();
-        
+
         log::debug!(
             "run_server_loop: Starting server loop iteration (time: {}ms)",
             frame_start

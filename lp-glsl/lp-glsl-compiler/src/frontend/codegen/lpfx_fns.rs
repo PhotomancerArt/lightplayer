@@ -154,7 +154,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             }
             crate::frontend::semantic::lpfx::lpfx_fn::LpfxFnImpl::NonDecimal(builtin_id) => {
                 // Direct builtin call (hash functions don't need conversion)
-                log::debug!("emit_lpfx_fn_call: Calling builtin {:?} for LPFX function '{}'", builtin_id, name);
+                log::debug!(
+                    "emit_lpfx_fn_call: Calling builtin {builtin_id:?} for LPFX function '{name}'"
+                );
                 let func_ref = self
                     .gl_module
                     .get_builtin_func_ref(*builtin_id, self.builder.func)?;

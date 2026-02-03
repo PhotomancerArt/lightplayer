@@ -324,7 +324,7 @@ impl ShaderRuntime {
             self.node_handle.as_i32(),
             glsl_source.len()
         );
-        log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{}", glsl_source);
+        log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,

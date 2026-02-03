@@ -49,7 +49,7 @@ impl GlModule<JITModule> {
                                     for builtin in BuiltinId::all() {
                                         if builtin.name() == name {
                                             let ptr = get_function_pointer(*builtin);
-                                            log::debug!("symbol_lookup_fn: Found builtin '{}' -> {:p}", name, ptr);
+                                            log::debug!("symbol_lookup_fn: Found builtin '{name}' -> {ptr:p}");
                                             return Some(ptr);
                                         }
                                     }
@@ -57,12 +57,12 @@ impl GlModule<JITModule> {
                                     for host in HostId::all() {
                                         if host.name() == name {
                                             if let Some(ptr) = get_host_function_pointer(*host) {
-                                                log::debug!("symbol_lookup_fn: Found host function '{}' -> {:p}", name, ptr);
+                                                log::debug!("symbol_lookup_fn: Found host function '{name}' -> {ptr:p}");
                                                 return Some(ptr);
                                             }
                                         }
                                     }
-                                    log::warn!("symbol_lookup_fn: Symbol '{}' not found", name);
+                                    log::warn!("symbol_lookup_fn: Symbol '{name}' not found");
                                     None
                                 },
                             ));

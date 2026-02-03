@@ -107,8 +107,7 @@ impl Riscv32Emulator {
                     Ok(n) => {
                         if n > 0 {
                             log::trace!(
-                                "Riscv32Emulator::drain_serial_output: Read {} bytes from host_read",
-                                n
+                                "Riscv32Emulator::drain_serial_output: Read {n} bytes from host_read"
                             );
                             result.extend_from_slice(&buf[..n]);
                         } else {
@@ -119,10 +118,7 @@ impl Riscv32Emulator {
                         }
                     }
                     Err(e) => {
-                        log::warn!(
-                            "Riscv32Emulator::drain_serial_output: host_read error: {:?}",
-                            e
-                        );
+                        log::warn!("Riscv32Emulator::drain_serial_output: host_read error: {e:?}");
                         break;
                     }
                 }

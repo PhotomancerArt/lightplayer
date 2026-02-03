@@ -7,7 +7,6 @@ use alloc::{format, string::String, vec::Vec};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use hashbrown::HashMap;
-use log;
 
 /// Build JIT executable from GlModule<JITModule>
 /// Called by GlModule<JITModule>::build_executable()

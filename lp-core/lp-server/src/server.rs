@@ -226,7 +226,7 @@ impl LpServer {
                             responses.push(Message::Server(lp_model::ServerMessage {
                                 id: msg_id,
                                 msg: lp_model::server::ServerMsgBody::Error {
-                                    error: format!("{}", e),
+                                    error: format!("{e}"),
                                 },
                             }));
                         }

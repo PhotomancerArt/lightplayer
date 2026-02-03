@@ -146,7 +146,9 @@ fn handle_project_request(
                 .map_err(|e| ServerError::Core(format!("Failed to get changes: {e}")))?;
 
             let response_frame = match &response {
-                lp_model::project::api::ProjectResponse::GetChanges { current_frame, .. } => *current_frame,
+                lp_model::project::api::ProjectResponse::GetChanges { current_frame, .. } => {
+                    *current_frame
+                }
             };
             log::debug!(
                 "handle_project_request: GetChanges response (current_frame: {})",

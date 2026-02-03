@@ -109,10 +109,7 @@ impl HostSerial {
             if let Some(byte) = self.to_guest_buf.pop_front() {
                 buffer[i] = byte;
             } else {
-                log::warn!(
-                    "HostSerial::guest_read: Unexpected empty buffer at index {}",
-                    i
-                );
+                log::warn!("HostSerial::guest_read: Unexpected empty buffer at index {i}");
                 return i as i32;
             }
         }
@@ -121,7 +118,7 @@ impl HostSerial {
         let preview_len = to_read.min(50);
         let hex_preview: alloc::vec::Vec<alloc::string::String> = buffer[..preview_len]
             .iter()
-            .map(|b| alloc::format!("{:02x}", b))
+            .map(|b| alloc::format!("{b:02x}"))
             .collect();
         log::trace!(
             "HostSerial::guest_read: Read {} bytes (first 50 hex): {}",
@@ -210,7 +207,7 @@ impl HostSerial {
             let preview_len = to_write.min(50);
             let hex_preview: alloc::vec::Vec<alloc::string::String> = buffer[..preview_len]
                 .iter()
-                .map(|b| alloc::format!("{:02x}", b))
+                .map(|b| alloc::format!("{b:02x}"))
                 .collect();
             log::trace!(
                 "HostSerial::host_write: Writing {} bytes (first 50 hex): {}",

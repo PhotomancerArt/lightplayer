@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextureState {
     /// Texture pixel data
-    #[serde(serialize_with = "serde_base64::serialize", deserialize_with = "serde_base64::deserialize")]
+    #[serde(
+        serialize_with = "serde_base64::serialize",
+        deserialize_with = "serde_base64::deserialize"
+    )]
     pub texture_data: Vec<u8>,
     /// Texture width in pixels
     pub width: u32,

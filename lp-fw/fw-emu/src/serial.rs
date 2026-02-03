@@ -4,8 +4,8 @@
 
 use alloc::format;
 use fw_core::serial::{SerialError, SerialIo};
-use lp_riscv_emu_guest::{sys_serial_has_data, sys_serial_read, sys_serial_write};
 use log;
+use lp_riscv_emu_guest::{sys_serial_has_data, sys_serial_read, sys_serial_write};
 
 /// Syscall-based SerialIo implementation
 ///

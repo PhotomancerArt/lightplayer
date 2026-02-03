@@ -9,9 +9,9 @@ use super::super::{
 use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
+use log;
 use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 use lp_riscv_inst::{Gpr, Inst};
-use log;
 
 impl Riscv32Emulator {
     /// Execute a single instruction.
@@ -280,10 +280,7 @@ impl Riscv32Emulator {
                         data.len()
                     );
                     let result = serial.guest_write(&data);
-                    log::trace!(
-                        "SYSCALL_SERIAL_WRITE: guest_write returned {}",
-                        result
-                    );
+                    log::trace!("SYSCALL_SERIAL_WRITE: guest_write returned {result}");
                     self.regs[Gpr::A0.num() as usize] = result;
                     Ok(StepResult::Continue)
                 }

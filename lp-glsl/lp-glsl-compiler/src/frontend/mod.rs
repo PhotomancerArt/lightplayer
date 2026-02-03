@@ -50,7 +50,7 @@ pub fn compile_glsl_to_gl_module_jit(
     use crate::exec::executable::DecimalFormat;
 
     #[cfg(feature = "std")]
-    let mut compiler = GlslCompiler::new();
+    let compiler = GlslCompiler::new();
 
     // Determine target based on run mode
     #[cfg(feature = "std")]
@@ -70,9 +70,12 @@ pub fn compile_glsl_to_gl_module_jit(
             // In no_std mode, manually create HostJit target (riscv32 only)
             // Use the same approach as esp32-glsl-jit: create flags manually
             let mut flag_builder = settings::builder();
-            flag_builder
-                .set("is_pic", "false")
-                .map_err(|e| GlslError::new(ErrorCode::E0400, alloc::format!("failed to set is_pic: {e}")))?;
+            flag_builder.set("is_pic", "false").map_err(|e| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("failed to set is_pic: {e}"),
+                )
+            })?;
             flag_builder
                 .set("use_colocated_libcalls", "false")
                 .map_err(|e| {
