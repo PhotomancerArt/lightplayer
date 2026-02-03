@@ -113,7 +113,7 @@ impl SerialEmuClientTransport {
             Err(e) => {
                 // Print emulator state on error for debugging
                 if let Ok(emu) = self.emulator.lock() {
-                    log::error!("Emulator error in run_until_yield: {:?}", e);
+                    log::error!("Emulator error in run_until_yield: {e:?}");
                     log::error!("Emulator state:\n{}", emu.dump_state());
                     log::error!(
                         "Last {} instructions:\n{}",
@@ -121,10 +121,10 @@ impl SerialEmuClientTransport {
                         emu.format_logs()
                     );
                     if let Some(regs) = e.regs() {
-                        log::error!("Registers at error: {:?}", regs);
+                        log::error!("Registers at error: {regs:?}");
                     }
                 }
-                Err(TransportError::Other(format!("Emulator error: {:?}", e)))
+                Err(TransportError::Other(format!("Emulator error: {e:?}")))
             }
         }
     }
@@ -155,8 +155,7 @@ impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
         );
 
         log::trace!(
-            "SerialEmuClientTransport: Writing {} bytes to emulator serial input",
-            total_bytes
+            "SerialEmuClientTransport: Writing {total_bytes} bytes to emulator serial input"
         );
 
         // Add to emulator's serial input buffer

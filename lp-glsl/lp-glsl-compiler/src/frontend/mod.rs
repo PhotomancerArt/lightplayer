@@ -49,9 +49,6 @@ pub fn compile_glsl_to_gl_module_jit(
     options.validate()?;
     use crate::exec::executable::DecimalFormat;
 
-    #[cfg(feature = "std")]
-    let compiler = GlslCompiler::new();
-
     // Determine target based on run mode
     #[cfg(feature = "std")]
     let target = match &options.run_mode {
