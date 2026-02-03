@@ -24,7 +24,10 @@ lp-model = { path = "../lp-core/lp-model" }
 lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lp-engine-client = { path = "../lp-core/lp-engine-client" }
-lp-client = { path = "../lp-core/lp-client", features = ["ws"] }
+lp-client = { path = "../lp-core/lp-client", features = ["ws", "serial"] }
+lp-riscv-emu = { path = "../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
+lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 
 [dev-dependencies]
 tempfile = "3"
@@ -32,6 +35,10 @@ lp-server = { path = "../lp-core/lp-server" }
 lp-shared = { path = "../lp-core/lp-shared" }
 lp-model = { path = "../lp-core/lp-model" }
 serde_json = "1"
+
+[features]
+default = ["serial"]
+serial = []
 
 [lints]
 workspace = true

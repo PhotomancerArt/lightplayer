@@ -7,6 +7,7 @@ pub mod client;
 pub mod local;
 pub mod specifier;
 pub mod transport;
+pub mod transport_serial;
 #[cfg(feature = "ws")]
 pub mod transport_ws;
 

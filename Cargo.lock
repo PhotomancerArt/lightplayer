@@ -3345,6 +3345,9 @@ dependencies = [
  "lp-client",
  "lp-engine-client",
  "lp-model",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
  "lp-server",
  "lp-shared",
  "notify",
@@ -3372,6 +3375,7 @@ dependencies = [
  "lp-shared",
  "serde",
  "serde_json",
+ "test-log",
  "tokio",
  "tokio-tungstenite",
 ]

@@ -28,6 +28,7 @@ ws = ["tokio-tungstenite"]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
 lp-engine-client = { path = "../lp-engine-client" }
+test-log = { workspace = true }
 
 [lints]
 workspace = true
