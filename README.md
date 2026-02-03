@@ -63,18 +63,22 @@ The repository is organized into several main areas:
 
 ## Firmware (`lp-fw/`)
 
-- **`fw-core`** - Core firmware abstractions (serial I/O, transport)
+- **`fw-core`** - Core firmware abstractions (serial I/O, transport, logging infrastructure)
 - **`fw-emu`** - Firmware that runs in the RISC-V32 emulator for host testing
 - **`fw-esp32`** - ESP32 firmware
+- **`fw-tests`** - Integration tests for firmware (emulator-based testing)
 
 ## Application Core (`lp-core/`)
 
 - **`lp-engine`** - Core rendering engine that executes shaders and manages nodes (fixtures,
   textures, outputs)
 - **`lp-server`** - Server that manages projects and handles client connections
+- **`lp-client`** - Standalone client library for communicating with LpServer (transport layer,
+  async client API)
+- **`lp-engine-client`** - Higher-level client library for interacting with the engine (project
+  view, state management)
 - **`lp-model`** - Data models and API definitions for projects, nodes, and server communication
 - **`lp-shared`** - Shared utilities for filesystem, logging, time, and transport
-- **`lp-engine-client`** - Client library for interacting with the engine
 
 ## GLSL Compiler (`lp-glsl/`)
 
