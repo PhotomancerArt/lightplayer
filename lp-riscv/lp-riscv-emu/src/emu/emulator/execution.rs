@@ -14,18 +14,12 @@ use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
 use lp_riscv_inst::{Gpr, Inst};
 
 impl Riscv32Emulator {
-    /// Execute a single instruction.
-    pub fn step(&mut self) -> Result<StepResult, EmulatorError> {
-        // Check instruction limit
-        if self.instruction_count >= self.max_instructions {
-            return Err(EmulatorError::InstructionLimitExceeded {
-                limit: self.max_instructions,
-                executed: self.instruction_count,
-                pc: self.pc,
-                regs: self.regs,
-            });
-        }
-
+    /// Execute a single instruction (internal, no fuel check).
+    ///
+    /// This is the hot path function used by run() loops.
+    /// Fuel checking happens in the calling loop, not here.
+    #[inline(always)]
+    pub(super) fn step_inner(&mut self) -> Result<StepResult, EmulatorError> {
         // Fetch instruction
         let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
             match &mut e {
@@ -375,6 +369,15 @@ impl Riscv32Emulator {
         } else {
             Ok(StepResult::Continue)
         }
+    }
+
+    /// Execute a single instruction.
+    ///
+    /// This is the public API for single-step debugging.
+    /// For running multiple instructions efficiently, use `run()` or `run_fuel()`.
+    pub fn step(&mut self) -> Result<StepResult, EmulatorError> {
+        // No fuel check - fuel is per-run, not global
+        self.step_inner()
     }
 }
 

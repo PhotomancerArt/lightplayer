@@ -20,7 +20,6 @@ pub struct Riscv32Emulator {
     pub(super) pc: u32,
     pub(super) memory: Memory,
     pub(super) instruction_count: u64,
-    pub(super) max_instructions: u64,
     pub(super) log_level: LogLevel,
     pub(super) log_buffer: Vec<super::super::logging::InstLog>,
     pub(super) traps: Vec<(u32, TrapCode)>, // sorted by offset (offset, trap_code) pairs
@@ -51,7 +50,6 @@ impl Riscv32Emulator {
             pc: 0,
             memory: Memory::with_default_addresses(code, ram),
             instruction_count: 0,
-            max_instructions: 100_000,
             log_level: LogLevel::None,
             log_buffer: Vec::new(),
             traps: trap_list,
@@ -70,17 +68,6 @@ impl Riscv32Emulator {
     /// * `ram` - RAM region (data)
     pub fn new(code: Vec<u8>, ram: Vec<u8>) -> Self {
         Self::with_traps(code, ram, &[])
-    }
-
-    /// Set the maximum number of instructions to execute.
-    pub fn with_max_instructions(mut self, limit: u64) -> Self {
-        self.max_instructions = limit;
-        self
-    }
-
-    /// Set the maximum number of instructions to execute (mutating method).
-    pub fn set_max_instructions(&mut self, limit: u64) {
-        self.max_instructions = limit;
     }
 
     /// Set the logging level.

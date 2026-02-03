@@ -102,10 +102,7 @@ fn emulator_thread_loop(
         };
         let steps_executed = final_instruction_count.saturating_sub(initial_instruction_count);
         if steps_executed > 1_000_000 {
-            log::debug!(
-                "Emulator thread: Executed {} instructions before yield",
-                steps_executed
-            );
+            log::debug!("Emulator thread: Executed {steps_executed} instructions before yield");
         }
 
         match run_result {
@@ -122,10 +119,7 @@ fn emulator_thread_loop(
                         ..
                     } => {
                         log::error!(
-                            "Emulator thread: Instruction limit exceeded! limit={}, executed={}, pc=0x{:x}",
-                            limit,
-                            executed,
-                            pc
+                            "Emulator thread: Instruction limit exceeded! limit={limit}, executed={executed}, pc=0x{pc:x}"
                         );
                         log::error!(
                             "This usually means the firmware is stuck in a loop or taking too long. \
@@ -140,7 +134,7 @@ fn emulator_thread_loop(
                         );
                     }
                     lp_riscv_emu::EmulatorError::Trap { code, pc, .. } => {
-                        log::error!("Emulator thread: Trap at pc=0x{:x}: {:?}", pc, code);
+                        log::error!("Emulator thread: Trap at pc=0x{pc:x}: {code:?}");
                     }
                     _ => {
                         log::error!("Emulator thread: Emulator error: {e:?}");
@@ -256,9 +250,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_transport() {
         // Create a dummy emulator for testing
-        let emulator = Arc::new(Mutex::new(
-            TestRiscv32Emulator::new(vec![], vec![]).with_max_instructions(1000),
-        ));
+        let emulator = Arc::new(Mutex::new(TestRiscv32Emulator::new(vec![], vec![])));
 
         let result = create_emulator_serial_transport_pair(emulator);
         assert!(result.is_ok());

@@ -104,8 +104,8 @@ fn run_nostd_test() -> Result<(), String> {
 
     // Create emulator
     println!("[3/4] Running in RISC-V emulator...");
-    let mut emu =
-        Riscv32Emulator::new(elf_info.code, elf_info.ram).with_max_instructions(10_000_000_000); // 10 billion - Cranelift JIT needs lots of instructions
+    // Fuel is now per-run, not global
+    let mut emu = Riscv32Emulator::new(elf_info.code, elf_info.ram);
 
     let mut output_lines = Vec::new();
     let mut result_value = None;
@@ -113,6 +113,9 @@ fn run_nostd_test() -> Result<(), String> {
     // Run until halt
     loop {
         match emu.step() {
+            Ok(StepResult::FuelExhausted(_)) => {
+                unreachable!("step() should never return FuelExhausted");
+            }
             Ok(StepResult::Continue) => continue,
             Ok(StepResult::Panic(panic_info)) => {
                 let msg = if let Some(ref file) = panic_info.file {

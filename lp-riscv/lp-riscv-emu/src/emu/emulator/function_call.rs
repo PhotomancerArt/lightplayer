@@ -152,6 +152,10 @@ impl Riscv32Emulator {
                         regs: self.regs,
                     });
                 }
+                StepResult::FuelExhausted(_) => {
+                    // step() never returns FuelExhausted
+                    unreachable!("step() should never return FuelExhausted");
+                }
             }
         }
 
@@ -297,6 +301,10 @@ impl Riscv32Emulator {
                         reason: String::from("Unexpected ECALL in function call"),
                         regs: self.regs,
                     });
+                }
+                StepResult::FuelExhausted(_) => {
+                    // step() never returns FuelExhausted
+                    unreachable!("step() should never return FuelExhausted");
                 }
             }
         }

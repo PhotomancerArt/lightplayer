@@ -35,7 +35,7 @@ fn test_fence_i_execution() {
     ];
     let ram = vec![0u8; 1024];
 
-    let mut emu = Riscv32Emulator::new(code, ram).with_max_instructions(10);
+    let mut emu = Riscv32Emulator::new(code, ram);
 
     // Execute FENCE.I - should be a no-op and continue
     let result = emu.step();
@@ -124,7 +124,7 @@ fn test_division_by_zero() {
     ];
     let ram = vec![0u8; 1024];
 
-    let mut emu = Riscv32Emulator::new(code, ram).with_max_instructions(10);
+    let mut emu = Riscv32Emulator::new(code, ram);
 
     // Execute until halt
     loop {
@@ -152,7 +152,7 @@ fn test_unaligned_access() {
     ];
     let ram = vec![0u8; 1024];
 
-    let mut emu = Riscv32Emulator::new(code, ram).with_max_instructions(10);
+    let mut emu = Riscv32Emulator::new(code, ram);
 
     // First instruction should succeed
     let result = emu.step();
