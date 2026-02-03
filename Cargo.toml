@@ -129,6 +129,7 @@ object = { version = "0.37.3", default-features = false, features = ['read_core'
 critical-section = { version = "1.2.0", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
 [profile.release]
 # Link-time optimization for all release builds - saves ~100-300 KB

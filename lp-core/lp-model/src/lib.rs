@@ -16,6 +16,7 @@ pub mod nodes;
 pub mod path;
 pub mod project;
 pub mod server;
+pub mod serde_base64;
 pub mod transport_error;
 
 pub use message::{ClientMessage, ClientRequest, Message, ServerMessage};

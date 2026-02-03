@@ -1,3 +1,4 @@
+use crate::serde_base64;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 
@@ -5,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextureState {
     /// Texture pixel data
+    #[serde(serialize_with = "serde_base64::serialize", deserialize_with = "serde_base64::deserialize")]
     pub texture_data: Vec<u8>,
     /// Texture width in pixels
     pub width: u32,
