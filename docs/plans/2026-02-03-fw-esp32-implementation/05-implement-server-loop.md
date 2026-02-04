@@ -1,3 +1,24 @@
+# Phase 5: Implement Server Loop
+
+## Scope of phase
+
+Create the async server loop that processes messages and calls `server.tick()`. Similar to fw-emu but adapted for async runtime.
+
+## Code Organization Reminders
+
+- Prefer a granular file structure, one concept per file
+- Place more abstract things, entry points, and tests **first**
+- Place helper utility functions **at the bottom** of files
+- Keep related functionality grouped together
+- Any temporary code should have a TODO comment so we can find it later
+
+## Implementation Details
+
+### 1. Create server_loop.rs
+
+Implement async server loop:
+
+```rust
 //! Server loop for ESP32 firmware
 //!
 //! Main async loop that handles hardware I/O and calls lp-server::tick().
@@ -13,6 +34,9 @@ use lp_shared::transport::ServerTransport;
 
 use crate::serial::Esp32UsbSerialIo;
 use crate::time::Esp32TimeProvider;
+
+/// Target frame time for 60 FPS (16.67ms per frame)
+const TARGET_FRAME_TIME_MS: u32 = 16;
 
 /// Run the server loop
 ///
@@ -74,7 +98,35 @@ pub async fn run_server_loop(
         last_tick = frame_start;
 
         // Yield to Embassy runtime (allows other tasks to run)
-        // Use embassy_time::Timer to delay slightly
+        // Use embassy_time::Timer to delay slightly, or just yield
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
     }
 }
+```
+
+### 2. Update main.rs (stub for now)
+
+Add server_loop module:
+
+```rust
+mod server_loop;
+
+use server_loop::run_server_loop;
+```
+
+## Notes
+
+- The server loop is async and yields to Embassy between iterations
+- We use a small delay (1ms) to yield to other tasks
+- Similar structure to fw-emu, but async
+- `server.tick()` is synchronous, so we call it from async context (this is fine)
+
+## Validate
+
+Run:
+```bash
+cd lp-fw/fw-esp32
+cargo check --features esp32c6
+```
+
+Expected: Code compiles without errors.

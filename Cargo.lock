@@ -2504,7 +2504,9 @@ name = "fw-esp32"
 version = "40.0.0"
 dependencies = [
  "embassy-executor",
+ "embassy-futures",
  "embassy-time",
+ "embedded-io-async 0.6.1",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -2513,9 +2515,11 @@ dependencies = [
  "esp-rtos",
  "fw-core",
  "hashbrown 0.15.5",
+ "log",
  "lp-model",
  "lp-server",
  "lp-shared",
+ "smart-leds",
 ]
 
 [[package]]
@@ -4527,6 +4531,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "rgb"
+version = "0.8.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "riscv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4885,6 +4898,24 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "smart-leds"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38dd45fa275f70b4110eac5f5182611ad384f88bb22b68b9a9c3cafd7015290b"
+dependencies = [
+ "smart-leds-trait",
+]
+
+[[package]]
+name = "smart-leds-trait"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebf6d833fa93f16a1c1874e62c2aebe8567e5bdd436d59bf543ed258b6f7a8e3"
+dependencies = [
+ "rgb",
+]
 
 [[package]]
 name = "smithay-client-toolkit"

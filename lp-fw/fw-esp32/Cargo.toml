@@ -14,6 +14,8 @@ esp32c6 = [
     "esp-rtos/esp32c6",
     "esp-hal/esp32c6",
 ]
+test_rmt = []  # Test RMT driver with simple patterns
+test_gpio = []  # Test GPIO pin toggle
 
 [dependencies]
 embassy-executor = "0.9.1"
@@ -30,6 +32,10 @@ lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
 hashbrown = { workspace = true }
+smart-leds = "0.3"
+embassy-futures = "0.1"
+embedded-io-async = "0.6"
+log = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

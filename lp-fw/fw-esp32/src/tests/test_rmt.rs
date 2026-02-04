@@ -1,0 +1,142 @@
+//! RMT driver test mode
+//!
+//! When `test_rmt` feature is enabled, this runs simple LED patterns
+//! to verify the RMT driver works correctly.
+
+use esp_hal::clock::CpuClock;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::rmt::Rmt;
+use esp_hal::time::Rate;
+use esp_hal::timer::timg::TimerGroup;
+use esp_println::println;
+
+use crate::output::{rmt_ws2811_init, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
+
+/// Run RMT test mode
+///
+/// Displays simple patterns on LEDs to verify RMT driver works.
+pub async fn run_rmt_test() -> ! {
+    println!("RMT test mode starting...");
+
+    // Initialize hardware (similar to init_board but we need peripherals)
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+
+    // Allocate heap
+    esp_alloc::heap_allocator!(size: 300_000);
+
+    // Start Embassy runtime (needed for embassy_time::Timer)
+    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+
+    // Configure RMT
+    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+
+    // Use GPIO18 (pin 10 on board) for LED output (hardcoded for testing)
+    // GPIO pins implement PeripheralOutput trait, so we can pass directly
+    let pin = peripherals.GPIO18;
+
+    // Initialize RMT driver for 8 LEDs
+    const NUM_LEDS: usize = 64;
+    let _trans = rmt_ws2811_init(rmt, pin, NUM_LEDS).expect("Failed to initialize RMT driver");
+
+    println!("RMT driver initialized, starting test patterns...");
+
+    loop {
+        // Test 1: Solid red
+        println!("Test: Solid red");
+        let mut data = [0u8; NUM_LEDS * 3];
+        for i in 0..NUM_LEDS {
+            data[i * 3] = 255; // R
+            data[i * 3 + 1] = 0; // G
+            data[i * 3 + 2] = 0; // B
+        }
+        println!("Test: Solid red (writing)");
+        rmt_ws2811_write_bytes(&data);
+        println!("Test: Solid red (waiting)");
+        rmt_ws2811_wait_complete();
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+
+        // Test 2: Solid green
+        println!("Test: Solid green");
+        for i in 0..NUM_LEDS {
+            data[i * 3] = 0; // R
+            data[i * 3 + 1] = 255; // G
+            data[i * 3 + 2] = 0; // B
+        }
+        rmt_ws2811_write_bytes(&data);
+        rmt_ws2811_wait_complete();
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+
+        // Test 3: Solid blue
+        println!("Test: Solid blue");
+        for i in 0..NUM_LEDS {
+            data[i * 3] = 0; // R
+            data[i * 3 + 1] = 0; // G
+            data[i * 3 + 2] = 255; // B
+        }
+        rmt_ws2811_write_bytes(&data);
+        rmt_ws2811_wait_complete();
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+
+        // Test 4: Rainbow pattern
+        println!("Test: Rainbow pattern");
+        for i in 0..NUM_LEDS {
+            let hue = (i * 360 / NUM_LEDS) as f32;
+            let rgb = hsv_to_rgb(hue, 1.0, 1.0);
+            data[i * 3] = rgb.0;
+            data[i * 3 + 1] = rgb.1;
+            data[i * 3 + 2] = rgb.2;
+        }
+        rmt_ws2811_write_bytes(&data);
+        rmt_ws2811_wait_complete();
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+
+        // Test 5: Chase pattern
+        println!("Test: Chase pattern");
+        for offset in 0..NUM_LEDS {
+            for i in 0..NUM_LEDS {
+                if i == offset {
+                    data[i * 3] = 255;
+                    data[i * 3 + 1] = 255;
+                    data[i * 3 + 2] = 255;
+                } else {
+                    data[i * 3] = 0;
+                    data[i * 3 + 1] = 0;
+                    data[i * 3 + 2] = 0;
+                }
+            }
+            rmt_ws2811_write_bytes(&data);
+            rmt_ws2811_wait_complete();
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        }
+    }
+}
+
+/// Convert HSV to RGB
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    (
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    )
+}

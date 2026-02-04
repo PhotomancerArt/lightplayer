@@ -2,63 +2,93 @@
 //!
 //! Uses ESP32's native USB-serial for communication with the host.
 //! This is not a hardware UART, but the USB-serial interface.
-//!
-//! Note: This implementation uses the Async driver mode. The SerialIo trait
-//! methods will need to be called from async context or wrapped appropriately.
 
-use esp_hal::{Async, usb_serial_jtag::UsbSerialJtag};
+extern crate alloc;
+
+use alloc::format;
+use esp_hal::{
+    Async,
+    usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx, UsbSerialJtagTx},
+};
 use fw_core::serial::{SerialError, SerialIo};
 
 /// ESP32 USB-serial SerialIo implementation
 ///
-/// Uses Async driver mode. The SerialIo methods should be called from
-/// async context or wrapped to handle async operations.
+/// Bridges async USB serial to synchronous SerialIo trait.
 pub struct Esp32UsbSerialIo {
-    // Store the USB serial in a way that allows both read and write
-    // For now, we'll use a split approach when needed
-    _marker: core::marker::PhantomData<UsbSerialJtag<'static, Async>>,
+    rx: UsbSerialJtagRx<'static, Async>,
+    tx: UsbSerialJtagTx<'static, Async>,
 }
 
 impl Esp32UsbSerialIo {
     /// Create a new USB-serial SerialIo instance
     ///
     /// # Arguments
-    /// * `usb_serial` - Initialized USB-serial interface
-    ///
-    /// Note: The USB serial will need to be split into rx/tx for async operations.
-    /// This is a placeholder implementation - actual usage will be determined
-    /// when integrating with the server loop.
-    #[allow(
-        dead_code,
-        reason = "Placeholder function for future async integration"
-    )]
-    pub fn new(_usb_serial: UsbSerialJtag<'static, Async>) -> Self {
-        Self {
-            _marker: core::marker::PhantomData,
-        }
+    /// * `usb_serial` - Initialized USB-serial interface (will be split into rx/tx)
+    pub fn new(usb_serial: UsbSerialJtag<'static, Async>) -> Self {
+        // Split USB serial into rx/tx halves for async operations
+        let (rx, tx) = usb_serial.split();
+        Self { rx, tx }
     }
 }
 
 impl SerialIo for Esp32UsbSerialIo {
-    fn write(&mut self, _data: &[u8]) -> Result<(), SerialError> {
-        // TODO: Implement blocking write using async USB serial
-        // This will need to be integrated with the async runtime
-        // For now, return an error to indicate it's not yet implemented
-        Err(SerialError::WriteFailed(
-            "USB-serial write not yet implemented - needs async integration".into(),
-        ))
+    fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
+        // Blocking write using async USB serial
+        // Use embassy_futures::block_on to bridge async to sync
+        embassy_futures::block_on(async {
+            use embedded_io_async::Write as _;
+            embedded_io_async::Write::write(&mut self.tx, data)
+                .await
+                .map_err(|e| {
+                    SerialError::WriteFailed(format!("USB-serial write error: {:?}", e))
+                })?;
+            embedded_io_async::Write::flush(&mut self.tx)
+                .await
+                .map_err(|e| {
+                    SerialError::WriteFailed(format!("USB-serial flush error: {:?}", e))
+                })?;
+            Ok(())
+        })
     }
 
-    fn read_available(&mut self, _buf: &mut [u8]) -> Result<usize, SerialError> {
-        // TODO: Implement non-blocking read using async USB serial
-        // This will need to be integrated with the async runtime
-        // For now, return 0 to indicate no data available
-        Ok(0)
+    fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, SerialError> {
+        // Non-blocking read - check available data and read what's there
+        // Use async read with timeout to make it non-blocking
+
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        // Try to read with a zero timeout to make it non-blocking
+        embassy_futures::block_on(async {
+            use embassy_time::{Duration, Timer};
+            use embedded_io_async::Read as _;
+
+            // Use a very short timeout to make it non-blocking
+            // If data is available, it should read immediately
+            match embassy_futures::select::select(
+                Timer::after(Duration::from_millis(0)),
+                embedded_io_async::Read::read(&mut self.rx, buf),
+            )
+            .await
+            {
+                embassy_futures::select::Either::First(_) => {
+                    // Timeout - no data available
+                    Ok(0)
+                }
+                embassy_futures::select::Either::Second(result) => result.map_err(|e| {
+                    SerialError::ReadFailed(format!("USB-serial read error: {:?}", e))
+                }),
+            }
+        })
     }
 
     fn has_data(&self) -> bool {
-        // TODO: Check if USB-serial has data available
-        // This will need async integration
-        false
+        // Check if USB-serial has data available
+        // For now, we can't easily check without mutable access
+        // The default implementation returns true, and read_available will return 0 if no data
+        // This is acceptable - SerialIo trait allows this optimization hint
+        true
     }
 }
