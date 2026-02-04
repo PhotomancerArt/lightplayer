@@ -133,11 +133,11 @@ fn validate_signature_consistency(
             if let Some(variant) = func.attribute.variant {
                 match variant {
                     Variant::F32 => {
-                        if f32_func.is_some() {
+                        if let Some(f32_func_ref) = f32_func {
                             return Err(LpfxCodegenError::DuplicateFunctionName {
                                 function_name: func.glsl_sig.name.clone(),
                                 conflicting_files: vec![
-                                    f32_func.unwrap().info.file_path.display().to_string(),
+                                    f32_func_ref.info.file_path.display().to_string(),
                                     func.info.file_path.display().to_string(),
                                 ],
                             });
@@ -145,11 +145,11 @@ fn validate_signature_consistency(
                         f32_func = Some(func);
                     }
                     Variant::Q32 => {
-                        if q32_func.is_some() {
+                        if let Some(q32_func_ref) = q32_func {
                             return Err(LpfxCodegenError::DuplicateFunctionName {
                                 function_name: func.glsl_sig.name.clone(),
                                 conflicting_files: vec![
-                                    q32_func.unwrap().info.file_path.display().to_string(),
+                                    q32_func_ref.info.file_path.display().to_string(),
                                     func.info.file_path.display().to_string(),
                                 ],
                             });
