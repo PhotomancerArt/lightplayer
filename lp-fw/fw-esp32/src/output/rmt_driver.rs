@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use esp_hal::Blocking;
 use esp_hal::gpio::Level;
@@ -20,13 +20,38 @@ const BITS_PER_LED: usize = 3 * 8;
 const HALF_BUFFER_SIZE: usize = (BUFFER_LEDS * BITS_PER_LED) / 2;
 const BUFFER_SIZE: usize = BUFFER_LEDS * BITS_PER_LED;
 
-// Global state for interrupt handling
-static mut FRAME_COUNTER: usize = 0;
-static mut LED_COUNTER: usize = 0; // Track current LED position in the strip
+// Channel index constant (easy to find and change later for multi-channel support)
+const RMT_CH_IDX: usize = 0;
 
-static mut RMT_STATS_COUNT: i32 = 0;
-static mut RMT_STATS_SUM: i32 = 0;
-static FRAME_COMPLETE: AtomicBool = AtomicBool::new(true); // Signal when frame transmission is complete
+/// Per-channel state for interrupt handler coordination
+#[derive(Debug)]
+struct ChannelState {
+    frame_complete: AtomicBool,
+    led_counter: AtomicUsize,
+    frame_counter: AtomicUsize,
+    stats_count: AtomicI32,
+    stats_sum: AtomicI32,
+}
+
+impl ChannelState {
+    const fn new() -> Self {
+        Self {
+            frame_complete: AtomicBool::new(true),
+            led_counter: AtomicUsize::new(0),
+            frame_counter: AtomicUsize::new(0),
+            stats_count: AtomicI32::new(0),
+            stats_sum: AtomicI32::new(0),
+        }
+    }
+}
+
+// Helper function to create array of ChannelState (can't use [ChannelState::new(); 2] because atomics aren't Copy)
+const fn make_channel_state_array() -> [ChannelState; 2] {
+    [ChannelState::new(), ChannelState::new()]
+}
+
+// Global state for interrupt handling (one per channel, currently only [0] used)
+static CHANNEL_STATE: [ChannelState; 2] = make_channel_state_array();
 
 const SRC_CLOCK_MHZ: u32 = 80;
 const PULSE_ZERO: u32 = // Zero
@@ -98,39 +123,15 @@ unsafe fn write_ws2811_byte(base_ptr: *mut u32, byte_value: u8, byte_offset: usi
 unsafe fn start_transmission() {
     let rmt = esp_hal::peripherals::RMT::regs();
 
-    // Stop current transmission properly (like esp-hal does)
-    // Only stop if there's an active transmission (FRAME_COMPLETE is false)
-    if !FRAME_COMPLETE.load(Ordering::Acquire) {
-        rmt.ch_tx_conf0(0).modify(|_, w| w.tx_stop().set_bit());
-        rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
+    rmt.ch_tx_conf0(0).modify(|_, w| w.tx_stop().set_bit());
+    rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
 
-        // Wait for transmission to stop by checking the status register
-        // The read address will reach BUFFER_SIZE when transmission completes
-        // We check with a timeout to avoid infinite loops
-        let mut timeout = 10000; // ~1ms at 100ns per iteration
-        loop {
-            let status = rmt.ch_tx_status(0).read();
-            let read_addr = status.mem_raddr_ex().bits() as usize;
-
-            // Transmission has stopped if read address has reached the end
-            // or if it's not advancing (stuck)
-            if read_addr >= BUFFER_SIZE {
-                break;
-            }
-
-            timeout -= 1;
-            if timeout == 0 {
-                // Timeout - assume stopped even if status unclear
-                break;
-            }
-
-            // Small delay to avoid busy-waiting
-            esp_hal::delay::Delay::new().delay_nanos(100);
-        }
-    }
-
-    FRAME_COMPLETE.store(false, Ordering::Release);
-    LED_COUNTER = 0;
+    CHANNEL_STATE[RMT_CH_IDX]
+        .frame_complete
+        .store(false, Ordering::Release);
+    CHANNEL_STATE[RMT_CH_IDX]
+        .led_counter
+        .store(0, Ordering::Relaxed);
 
     // Clear the buffer
     let rmt_base = (esp_hal::peripherals::RMT::ptr() as usize + 0x400) as *mut u32;
@@ -138,7 +139,7 @@ unsafe fn start_transmission() {
         rmt_base.add(j).write_volatile(0);
     }
 
-    //println!("start_transmission: buffer cleared");
+    println!("start_transmission: buffer cleared");
     // Init the buffer
     write_half_buffer(true);
     write_half_buffer(false);
@@ -177,7 +178,7 @@ unsafe fn start_transmission() {
     // Update configuration (like esp-hal does BEFORE start_tx)
     rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
 
-    //println!("start_transmission: configuration updated");
+    println!("start_transmission: configuration updated");
 
     // Start transmission (like esp-hal start_tx)
     rmt.ch_tx_conf0(0).modify(|_, w| {
@@ -186,7 +187,7 @@ unsafe fn start_transmission() {
         w.tx_start().set_bit()
     });
 
-    //println!("start_transmission: transmission started");
+    println!("start_transmission: transmission started");
 
     // Update again after starting (like esp-hal does)
     rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
@@ -194,12 +195,14 @@ unsafe fn start_transmission() {
     // Write the guard. With any luck we are past the first byte at this point.
     write_buffer_guard(false);
 
-    //println!("transmission started");
+    println!("transmission started");
 }
 
 // Check if current frame transmission is complete
 fn is_frame_complete() -> bool {
-    FRAME_COMPLETE.load(Ordering::Acquire)
+    CHANNEL_STATE[RMT_CH_IDX]
+        .frame_complete
+        .load(Ordering::Acquire)
 }
 
 // LED timing constants for WS2812/SK6812
@@ -254,8 +257,12 @@ extern "C" fn rmt_interrupt_handler() {
 
             // Signal that we've reached the end of the frame
             // On the next interrupt, this will stop the transmission
-            FRAME_COMPLETE.store(true, Ordering::Release);
-            FRAME_COUNTER += 1;
+            CHANNEL_STATE[RMT_CH_IDX]
+                .frame_complete
+                .store(true, Ordering::Release);
+            CHANNEL_STATE[RMT_CH_IDX]
+                .frame_counter
+                .fetch_add(1, Ordering::Relaxed);
         } else if is_thresh_int {
             // info!("loop: {}, threshold: {}", is_loop_int, is_thresh_int);
 
@@ -283,8 +290,12 @@ extern "C" fn rmt_interrupt_handler() {
             let hw_pos_end = rmt.ch_tx_status(0).read().mem_raddr_ex().bits();
 
             let bytes_elapsed = (hw_pos_end as i32) - (hw_pos_start as i32);
-            RMT_STATS_SUM += bytes_elapsed;
-            RMT_STATS_COUNT += 1;
+            CHANNEL_STATE[RMT_CH_IDX]
+                .stats_sum
+                .fetch_add(bytes_elapsed, Ordering::Relaxed);
+            CHANNEL_STATE[RMT_CH_IDX]
+                .stats_count
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 }
@@ -321,7 +332,12 @@ unsafe fn write_half_buffer(is_first_half: bool) -> bool {
     for i in 0..HALF_BUFFER_LEDS {
         let led_ptr = half_ptr.add(i * BITS_PER_LED);
 
-        if LED_COUNTER >= ACTUAL_NUM_LEDS {
+        // Load current LED counter atomically
+        let led_counter = CHANNEL_STATE[RMT_CH_IDX]
+            .led_counter
+            .load(Ordering::Acquire);
+
+        if led_counter >= ACTUAL_NUM_LEDS {
             // Fill the rest of the buffer segment with zero
             for j in 0..BITS_PER_LED * (HALF_BUFFER_LEDS - i) {
                 led_ptr
@@ -333,14 +349,17 @@ unsafe fn write_half_buffer(is_first_half: bool) -> bool {
         } else {
             // Get RGB color from LED data buffer and write directly to RMT buffer
             // Use volatile read to ensure we get the latest data
-            let color = LED_DATA_BUFFER_PTR.add(LED_COUNTER).read_volatile();
+            let color = LED_DATA_BUFFER_PTR.add(led_counter).read_volatile();
 
             // WS2812 uses GRB order
             write_ws2811_byte(led_ptr, color.g, 0); // Green first
             write_ws2811_byte(led_ptr, color.r, 1); // Red second
             write_ws2811_byte(led_ptr, color.b, 2); // Blue third
 
-            LED_COUNTER += 1;
+            // Increment LED counter atomically
+            CHANNEL_STATE[RMT_CH_IDX]
+                .led_counter
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -419,8 +438,12 @@ where
 
     // Configure the RMT channel
     let config = create_rmt_config();
-    #[allow(unused_variables)]
     let channel = rmt.channel0.configure_tx(pin, config)?;
+
+    // CRITICAL: Keep the channel alive by leaking it
+    // If the channel is dropped, it will deconfigure the RMT hardware
+    // We use Box::leak to keep it alive for the lifetime of the program
+    let _channel_leak = Box::leak(Box::new(channel));
 
     Ok(())
 }

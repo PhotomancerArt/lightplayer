@@ -10,7 +10,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 
-use crate::output::{rmt_ws2811_init, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
+use crate::output::{rmt_ws2811_init2, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
 
 /// Run RMT test mode
 ///
@@ -39,7 +39,7 @@ pub async fn run_rmt_test() -> ! {
 
     // Initialize RMT driver for 8 LEDs
     const NUM_LEDS: usize = 64;
-    let _trans = rmt_ws2811_init(rmt, pin, NUM_LEDS).expect("Failed to initialize RMT driver");
+    rmt_ws2811_init2(rmt, pin, NUM_LEDS).expect("Failed to initialize RMT driver");
 
     println!("RMT driver initialized, starting test patterns...");
 
