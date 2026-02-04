@@ -784,7 +784,8 @@ fn execute_sra<M: LoggingMode>(
     let val2 = read_reg(regs, rs2);
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     let shift_amount = (val2 & 0x1f) as u32; // Only use bottom 5 bits
-    let result = val1.wrapping_shr(shift_amount);
+    // Use regular >> for arithmetic right shift (sign-extending)
+    let result = val1 >> shift_amount;
     if rd.num() != 0 {
         regs[rd.num() as usize] = result;
     }
@@ -1441,6 +1442,7 @@ mod tests {
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
     use crate::emu::memory::Memory;
+    use lp_riscv_inst::{Gpr, encode};
 
     #[test]
     fn test_add_fast_path() {
@@ -1511,6 +1513,45 @@ mod tests {
             decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 42);
+        assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn test_sra_arithmetic_shift_sign_extension() {
+        let mut regs = [0i32; 32];
+        // Test case: -111412 >> 16 should be -2
+        regs[1] = -111412;
+        regs[2] = 16; // shift amount
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+
+        // Test SRA instruction: sra x3, x1, x2
+        // Expected: -111412 >> 16 = -2 (arithmetic shift with sign extension)
+        let inst_word = encode::sra(Gpr::new(3), Gpr::new(1), Gpr::new(2));
+        let result =
+            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+
+        // Should be -2, not 65534 (which would be logical shift)
+        assert_eq!(
+            regs[3], -2,
+            "SRA should sign-extend: -111412 >> 16 = -2, got {}",
+            regs[3]
+        );
+        assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn test_sra_negative_value_small_shift() {
+        let mut regs = [0i32; 32];
+        regs[1] = -1;
+        regs[2] = 1;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+
+        // Test SRA: -1 >> 1 should be -1 (sign extension)
+        let inst_word = encode::sra(Gpr::new(3), Gpr::new(1), Gpr::new(2));
+        let result =
+            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+
+        assert_eq!(regs[3], -1, "SRA should sign-extend: -1 >> 1 = -1");
         assert!(result.log.is_none());
     }
 }

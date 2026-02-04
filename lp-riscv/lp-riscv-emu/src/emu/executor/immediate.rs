@@ -19,8 +19,9 @@ pub(super) fn decode_execute_itype<M: LoggingMode>(
     let funct3 = i.func;
     let imm = i.imm;
 
-    // For shift instructions, check bit 30 (funct7 bit 5) to distinguish SRLI from SRAI
-    let funct7_bit5 = ((inst_word >> 25) & 0x40) != 0;
+    // For shift instructions, check bit 5 of funct7 (imm[11:5] bit 5) to distinguish SRLI from SRAI
+    // SRAI has imm[11:5] = 0x20 (bit 5 set), SRLI has imm[11:5] = 0x00 (bit 5 clear)
+    let funct7_bit5 = ((inst_word >> 25) & 0x20) != 0;
 
     match funct3 {
         0x0 => execute_addi::<M>(rd, rs1, imm, inst_word, pc, regs),
@@ -229,7 +230,12 @@ fn execute_srai<M: LoggingMode>(
 ) -> Result<ExecutionResult, EmulatorError> {
     let val1 = read_reg(regs, rs1);
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let shift_amount = (imm & 0x1f) as u32; // Only use bottom 5 bits
+    // For SRAI on RV32, shift amount is only in imm[4:0] (bottom 5 bits)
+    // imm[11:5] = 0x20 distinguishes SRAI from SRLI, but is not part of shift amount
+    // Use imm from TypeI and mask to get only the shift amount (same as old executor)
+    let shift_amount = (imm & 0x1f) as u32;
+    // Use wrapping_shr for arithmetic right shift (sign-extending) - matches old executor
+    // wrapping_shr on i32 performs arithmetic shift (sign-extending)
     let result = val1.wrapping_shr(shift_amount);
     if rd.num() != 0 {
         regs[rd.num() as usize] = result;
@@ -1034,6 +1040,8 @@ fn execute_slliuw<M: LoggingMode>(
 #[cfg(test)]
 mod tests {
     extern crate alloc;
+    #[cfg(test)]
+    extern crate std;
     use alloc::vec;
 
     use super::*;
@@ -1115,6 +1123,61 @@ mod tests {
             decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 0b1010); // 0b1111 & 0b1010 = 0b1010
+        assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn test_srai_arithmetic_shift_sign_extension() {
+        let mut regs = [0i32; 32];
+        // Test case from failing GLSL test: -111412 >> 16 should be -2
+        regs[27] = -111412; // s11 register
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+
+        // Test SRAI instruction: srai a0, s11, 16
+        // Expected: -111412 >> 16 = -2 (arithmetic shift with sign extension)
+        let inst_word = encode::srai(Gpr::new(10), Gpr::new(27), 16);
+        let result =
+            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+
+        // Should be -2, not 65534 (which would be logical shift)
+        assert_eq!(
+            regs[10], -2,
+            "SRAI should sign-extend: -111412 >> 16 = -2, got {} (0x{:08x})",
+            regs[10], regs[10] as u32
+        );
+        assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn test_srai_negative_value_small_shift() {
+        let mut regs = [0i32; 32];
+        regs[1] = -1;
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+
+        // Test SRAI: -1 >> 1 should be -1 (sign extension)
+        let inst_word = encode::srai(Gpr::new(3), Gpr::new(1), 1);
+        let result =
+            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+
+        assert_eq!(regs[3], -1, "SRAI should sign-extend: -1 >> 1 = -1");
+        assert!(result.log.is_none());
+    }
+
+    #[test]
+    fn test_srai_positive_value() {
+        let mut regs = [0i32; 32];
+        regs[1] = 0x7FFFFFFF; // Large positive value (max i32)
+        let mut memory = Memory::with_default_addresses(vec![], vec![]);
+
+        // Test SRAI: 0x7FFFFFFF >> 16 = 0x00007FFF (arithmetic shift for positive)
+        let inst_word = encode::srai(Gpr::new(3), Gpr::new(1), 16);
+        let result =
+            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+
+        assert_eq!(
+            regs[3], 0x7FFF,
+            "SRAI on positive: 0x7FFFFFFF >> 16 = 0x7FFF"
+        );
         assert!(result.log.is_none());
     }
 }
