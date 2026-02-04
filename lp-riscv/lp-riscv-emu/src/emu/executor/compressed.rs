@@ -101,7 +101,7 @@ fn decode_execute_c1<M: LoggingMode>(
     funct3: u8,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    _memory: &mut Memory,
 ) -> Result<ExecutionResult, EmulatorError> {
     match funct3 {
         0b000 => {

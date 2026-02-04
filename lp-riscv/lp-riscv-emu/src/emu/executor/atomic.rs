@@ -161,7 +161,6 @@ fn execute_sc_w<M: LoggingMode>(
     })?;
 
     // Return 0 in rd to indicate success
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = 0;
     }
@@ -252,7 +251,6 @@ fn execute_amoswap_w<M: LoggingMode>(
     })?;
 
     // Return old value in rd
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = old_value;
     }
@@ -344,7 +342,6 @@ fn execute_amoadd_w<M: LoggingMode>(
     })?;
 
     // Return old value in rd
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = old_value;
     }
@@ -436,7 +433,6 @@ fn execute_amoxor_w<M: LoggingMode>(
     })?;
 
     // Return old value in rd
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = old_value;
     }
@@ -528,7 +524,6 @@ fn execute_amoand_w<M: LoggingMode>(
     })?;
 
     // Return old value in rd
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = old_value;
     }
@@ -620,7 +615,6 @@ fn execute_amoor_w<M: LoggingMode>(
     })?;
 
     // Return old value in rd
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
         regs[rd.num() as usize] = old_value;
     }

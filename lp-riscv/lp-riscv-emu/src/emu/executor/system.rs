@@ -131,7 +131,7 @@ fn execute_ebreak<M: LoggingMode>(
 pub(super) fn decode_execute_fence<M: LoggingMode>(
     inst_word: u32,
     pc: u32,
-    regs: &mut [i32; 32],
+    _regs: &mut [i32; 32],
     _memory: &mut Memory,
 ) -> Result<ExecutionResult, EmulatorError> {
     let funct3 = ((inst_word >> 12) & 0x7) as u8;
@@ -199,7 +199,7 @@ fn execute_fence_i<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrw<M: LoggingMode>(
     rd: Gpr,
-    rs1: Gpr,
+    _rs1: Gpr,
     _csr: u16,
     instruction_word: u32,
     pc: u32,
@@ -233,7 +233,7 @@ fn execute_csrrw<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrs<M: LoggingMode>(
     rd: Gpr,
-    rs1: Gpr,
+    _rs1: Gpr,
     _csr: u16,
     instruction_word: u32,
     pc: u32,
@@ -266,7 +266,7 @@ fn execute_csrrs<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrc<M: LoggingMode>(
     rd: Gpr,
-    rs1: Gpr,
+    _rs1: Gpr,
     _csr: u16,
     instruction_word: u32,
     pc: u32,
@@ -299,7 +299,7 @@ fn execute_csrrc<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrwi<M: LoggingMode>(
     rd: Gpr,
-    imm: i32,
+    _imm: i32,
     _csr: u16,
     instruction_word: u32,
     pc: u32,
@@ -332,7 +332,7 @@ fn execute_csrrwi<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrsi<M: LoggingMode>(
     rd: Gpr,
-    imm: i32,
+    _imm: i32,
     _csr: u16,
     instruction_word: u32,
     pc: u32,
@@ -365,7 +365,7 @@ fn execute_csrrsi<M: LoggingMode>(
 #[inline(always)]
 fn execute_csrrci<M: LoggingMode>(
     rd: Gpr,
-    imm: i32,
+    _imm: i32,
     _csr: u16,
     instruction_word: u32,
     pc: u32,

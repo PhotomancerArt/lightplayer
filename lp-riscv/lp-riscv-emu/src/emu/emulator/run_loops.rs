@@ -36,7 +36,7 @@ impl Riscv32Emulator {
     /// * `Ok(StepResult::Panic(info))` - Panic occurred
     /// * `Ok(StepResult::FuelExhausted(count))` - Fuel exhausted (instructions executed)
     /// * `Err(EmulatorError)` - Error occurred (memory access violation, etc.)
-    pub(super) fn run_inner(&mut self, mut fuel: u64) -> Result<StepResult, EmulatorError> {
+    pub(super) fn run_inner(&mut self, fuel: u64) -> Result<StepResult, EmulatorError> {
         match self.log_level {
             LogLevel::None => self.run_inner_fast(fuel),
             _ => self.run_inner_logging(fuel),
@@ -284,6 +284,7 @@ impl Riscv32Emulator {
             let msg_ptr = syscall_info.args[0] as u32;
             let msg_len = syscall_info.args[1] as usize;
 
+            #[allow(unused_variables)]
             if let Ok(s) = read_memory_string(&self.memory, msg_ptr, msg_len) {
                 #[cfg(feature = "std")]
                 {
