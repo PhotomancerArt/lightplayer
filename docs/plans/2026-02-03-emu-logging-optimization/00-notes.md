@@ -41,7 +41,7 @@ Problems:
 - Option allocation overhead
 - Pattern matching overhead
 
-Solution: Compile-time conditional compilation using macros or const generics.
+Solution: Dual implementations - separate fast and logging versions of each instruction function, with runtime dispatch at top level.
 
 ### Decode-Execute Fusion
 
@@ -69,25 +69,40 @@ Benefits of splitting:
 
 ## Design Decisions
 
-### 1. Compile-Time vs Runtime Logging Control
+### 1. Runtime Logging Control with Zero Overhead
 
-**Decision**: Hybrid approach
-- Compile-time feature flag: `logging` feature controls whether logging code is compiled
-- Runtime log level: When logging IS compiled, use runtime `LogLevel` to control verbosity
-
-**Rationale**:
-- Zero overhead when disabled (compile-time removal)
-- Flexible control when enabled (runtime selection)
-- Best of both worlds
-
-### 2. Macro vs Const Generics
-
-**Decision**: Start with macros, consider const generics if needed
+**Decision**: Dual implementation approach
+- Two complete implementations: `execute_instruction_fast()` and `execute_instruction_logging()`
+- Two run loops: `run_inner_fast()` and `run_inner_logging()`
+- Runtime dispatch based on `log_level` at top level
+- Fast and logging versions live side-by-side in same files
 
 **Rationale**:
-- Macros are simpler to implement
-- Can migrate to const generics later if needed
-- Easier to understand and maintain
+- **Zero overhead when disabled**: Fast path has no log_level checks, no register reads for logging, no InstLog allocations
+- **Runtime control**: Full logging support when enabled, with runtime verbosity control (filetests need this)
+- **Clear separation**: Fast and logging implementations are next to each other, easy to maintain
+- **Compiler optimization**: Each path can be optimized independently by the compiler
+- **No abstraction overhead**: Direct function calls, no trait objects or dynamic dispatch
+
+**Trade-offs**:
+- Code duplication (two implementations of each instruction)
+- Maintenance burden (changes need to be made in both places)
+- Larger file sizes
+
+**Mitigation**:
+- Keep fast and logging versions side-by-side for easy comparison
+- Use clear comments to mark sections
+- Consider helper functions for shared logic (but avoid in hot path)
+
+### 2. File Organization
+
+**Decision**: Split by instruction category, with both fast and logging versions in each file
+
+**Rationale**:
+- Matches RISC-V instruction grouping
+- Natural extension point for floating point
+- Easier to find and modify specific instructions
+- Fast and logging versions together for easy comparison
 
 ### 3. Decode-Execute Fusion Strategy
 
@@ -109,20 +124,41 @@ Benefits of splitting:
 
 ## Questions
 
-1. **Should we use feature flags or const generics for logging?**
-   - Answer: Start with feature flags (simpler), can upgrade to const generics if needed
+1. **Should we use dual implementations or const generics for logging?**
+   - Answer: Dual implementations - simpler, clearer, better optimization potential. Const generics may not optimize as well.
 
 2. **How to handle runtime log level changes?**
-   - Answer: When logging feature is enabled, runtime LogLevel controls verbosity. When disabled, no logging possible.
+   - Answer: Runtime dispatch at top level (`run_inner()` checks `log_level` once and calls appropriate loop). Fast path has zero overhead, logging path has full runtime control.
 
 3. **Should we keep old decode/execute API?**
-   - Answer: Yes, during migration. Remove once all call sites migrated.
+   - Answer: Yes, during migration. Remove once all call sites migrated to decode-execute fusion.
 
 4. **How to organize floating point instructions?**
-   - Answer: Separate `floating_point.rs` file, similar structure to integer instructions.
+   - Answer: Separate `floating_point.rs` file with fast and logging versions side-by-side, same structure as integer instructions.
 
 5. **Performance measurement strategy?**
-   - Answer: Benchmark before/after each phase, measure with logging disabled and enabled.
+   - Answer: Benchmark before/after each phase, measure with `LogLevel::None` (fast path) and `LogLevel::Instructions` (logging path). Target: 15-25% improvement in fast path.
+
+6. **How to minimize code duplication?**
+   - Answer: Keep fast and logging versions next to each other for easy comparison. Use helper functions for shared logic, but avoid in hot path. Clear comments mark sections.
+
+7. **Does `step()` and `step_inner()` need fast/logging versions?**
+   - Answer: No - they call `execute_instruction()` which dispatches based on `log_level`. The dispatch happens at the `execute_instruction()` level, so `step_inner()` can remain as-is and will automatically use the appropriate path.
+
+8. **How do we handle compressed instructions?**
+   - Answer: Compressed instructions also need fast and logging versions. They'll be in `compressed.rs` with the same dual-implementation structure.
+
+9. **How do we ensure the two implementations stay synchronized?**
+   - Answer: Keep them side-by-side in the same file for easy comparison. Use clear comments marking corresponding implementations. Consider adding tests that verify both paths produce identical results (except for logging).
+
+10. **What about the migration period - do we keep old API?**
+    - Answer: Yes, during migration we'll keep the old `execute_instruction()` API that dispatches. Once decode-execute fusion is complete and all call sites migrated, we can remove the old decode-then-execute pattern.
+
+11. **How do we handle error cases - are they the same?**
+    - Answer: Yes, error handling should be identical in both paths. Errors are rare (not in hot path), so we can share error handling logic via helper functions without performance impact.
+
+12. **Does ExecutionResult need changes?**
+    - Answer: No - `ExecutionResult` already has `log: Option<InstLog>`. Fast path always sets it to `None`, logging path sets it based on log_level. The struct works for both paths.
 
 ## Implementation Order
 
