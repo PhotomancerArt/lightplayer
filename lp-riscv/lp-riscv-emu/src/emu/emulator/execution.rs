@@ -3,7 +3,9 @@
 extern crate alloc;
 
 use super::super::{
-    decoder::decode_instruction, error::EmulatorError, executor::execute_instruction,
+    error::EmulatorError,
+    executor::{LoggingDisabled, LoggingEnabled, decode_execute},
+    logging::LogLevel,
     memory::Memory,
 };
 use super::state::Riscv32Emulator;
@@ -11,7 +13,7 @@ use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
 use lp_riscv_emu_shared::SERIAL_ERROR_INVALID_POINTER;
-use lp_riscv_inst::{Gpr, Inst};
+use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {
     /// Execute a single instruction (internal, no fuel check).
@@ -47,21 +49,30 @@ impl Riscv32Emulator {
         // Check if compressed instruction (bits [1:0] != 0b11)
         let is_compressed = (inst_word & 0x3) != 0x3;
 
-        // Decode instruction
-        let decoded =
-            decode_instruction(inst_word).map_err(|reason| EmulatorError::InvalidInstruction {
-                pc: self.pc,
-                instruction: inst_word,
-                reason,
-                regs: self.regs,
-            })?;
-
         // Increment instruction count before execution (for cycle counting)
         self.instruction_count += 1;
 
         // Check if this is a trap BEFORE executing the instruction
         // For EBREAK instructions, we need to check if the current PC is a trap location
-        let is_trap_before_execution = if let Inst::Ebreak = decoded {
+        // EBREAK: opcode=0x73, funct3=0x0, funct12=0x001
+        // C.EBREAK: compressed instruction with specific encoding (funct4=0x9, rs2=0, rd_rs1=0)
+        let is_ebreak = if !is_compressed {
+            // Standard EBREAK: opcode=0x73, funct3=0x0, funct12=0x001
+            let opcode = inst_word & 0x7f;
+            let funct3 = (inst_word >> 12) & 0x7;
+            let funct12 = (inst_word >> 20) & 0xfff;
+            opcode == 0x73 && funct3 == 0x0 && funct12 == 0x001
+        } else {
+            // C.EBREAK: funct4=0x9, rs2=0, rd_rs1=0 (quadrant 2, opcode=0b10)
+            let inst_16 = inst_word as u16;
+            let opcode = inst_16 & 0x3;
+            let funct4 = (inst_16 >> 12) & 0xf;
+            let rs2 = (inst_16 >> 2) & 0x1f;
+            let rd_rs1 = (inst_16 >> 7) & 0x1f;
+            opcode == 0b10 && funct4 == 0x9 && rs2 == 0 && rd_rs1 == 0
+        };
+
+        let is_trap = if is_ebreak {
             // Traps are stored as absolute addresses, compare directly with PC
             self.traps
                 .binary_search_by_key(&self.pc, |(addr, _)| *addr)
@@ -70,15 +81,21 @@ impl Riscv32Emulator {
             false
         };
 
-        // Execute instruction
-        let exec_result = execute_instruction(
-            decoded,
-            inst_word,
-            self.pc,
-            &mut self.regs,
-            &mut self.memory,
-            self.log_level,
-        )?;
+        // Execute instruction using new executor
+        let exec_result = match self.log_level {
+            LogLevel::None => decode_execute::<LoggingDisabled>(
+                inst_word,
+                self.pc,
+                &mut self.regs,
+                &mut self.memory,
+            )?,
+            _ => decode_execute::<LoggingEnabled>(
+                inst_word,
+                self.pc,
+                &mut self.regs,
+                &mut self.memory,
+            )?,
+        };
 
         // Update PC (2 bytes for compressed, 4 for standard)
         let pc_increment = if is_compressed { 2 } else { 4 };
@@ -94,13 +111,13 @@ impl Riscv32Emulator {
 
         // Handle special cases
         if exec_result.should_halt {
-            if is_trap_before_execution {
+            if is_trap {
                 // This was a trap - find the trap code using the original PC (before PC update)
                 let original_pc = self.pc.saturating_sub(pc_increment);
                 let index = self
                     .traps
                     .binary_search_by_key(&original_pc, |(addr, _)| *addr)
-                    .expect("Trap should be found since is_trap_before_execution was true");
+                    .expect("Trap should be found since is_trap was true");
                 let trap_code = self.traps[index].1;
                 Ok(StepResult::Trap(trap_code))
             } else {

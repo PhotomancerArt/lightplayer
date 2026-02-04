@@ -38,7 +38,7 @@ impl Riscv32Emulator {
             LogLevel::Errors => {
                 // Only log on errors (handled elsewhere)
             }
-            LogLevel::Instructions | LogLevel::Verbose => {
+            LogLevel::Instructions => {
                 // Implement rolling buffer: if buffer reaches 100, remove oldest
                 if self.log_buffer.len() >= 100 {
                     self.log_buffer.remove(0);
