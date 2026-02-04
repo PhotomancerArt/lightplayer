@@ -31,7 +31,7 @@ pub(super) fn decode_execute_compressed<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Invalid compressed instruction opcode: 0x{:x}", opcode),
+            reason: alloc::format!("Invalid compressed instruction opcode: 0x{opcode:x}"),
             regs: *regs,
         }),
     }

@@ -29,7 +29,7 @@ pub(super) fn decode_execute_branch<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown branch instruction: funct3=0x{:x}", funct3),
+            reason: alloc::format!("Unknown branch instruction: funct3=0x{funct3:x}"),
             regs: *regs,
         }),
     }
@@ -283,7 +283,7 @@ mod tests {
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
     use crate::emu::memory::Memory;
-    use lp_riscv_inst::{encode, Gpr};
+    use lp_riscv_inst::{Gpr, encode};
 
     #[test]
     fn test_beq_taken_fast_path() {

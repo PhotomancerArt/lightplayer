@@ -116,7 +116,7 @@ pub fn decode_execute<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown opcode: 0x{:02x}", opcode),
+            reason: alloc::format!("Unknown opcode: 0x{opcode:02x}"),
             regs: *regs,
         }),
     }

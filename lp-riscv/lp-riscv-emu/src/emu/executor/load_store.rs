@@ -32,8 +32,7 @@ pub(super) fn decode_execute_load<M: LoggingMode>(
             pc,
             instruction: inst_word,
             reason: alloc::format!(
-                "Invalid load instruction: funct3=0x{:x} (reserved on RV32)",
-                funct3
+                "Invalid load instruction: funct3=0x{funct3:x} (reserved on RV32)"
             ),
             regs: *regs,
         }),
@@ -60,7 +59,7 @@ pub(super) fn decode_execute_store<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown store instruction: funct3=0x{:x}", funct3),
+            reason: alloc::format!("Unknown store instruction: funct3=0x{funct3:x}"),
             regs: *regs,
         }),
     }

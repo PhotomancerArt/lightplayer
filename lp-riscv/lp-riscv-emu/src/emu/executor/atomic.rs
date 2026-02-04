@@ -28,7 +28,7 @@ pub(super) fn decode_execute_atomic<M: LoggingMode>(
         return Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unsupported atomic width: funct3=0x{:x}", funct3),
+            reason: alloc::format!("Unsupported atomic width: funct3=0x{funct3:x}"),
             regs: *regs,
         });
     }
@@ -44,7 +44,7 @@ pub(super) fn decode_execute_atomic<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown atomic instruction: funct5=0x{:x}", funct5),
+            reason: alloc::format!("Unknown atomic instruction: funct5=0x{funct5:x}"),
             regs: *regs,
         }),
     }

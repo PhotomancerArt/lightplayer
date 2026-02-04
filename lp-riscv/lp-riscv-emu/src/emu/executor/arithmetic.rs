@@ -69,9 +69,7 @@ pub(super) fn decode_execute_rtype<M: LoggingMode>(
             pc,
             instruction: inst_word,
             reason: alloc::format!(
-                "Unknown R-type instruction: funct3=0x{:x}, funct7=0x{:x}",
-                funct3,
-                funct7
+                "Unknown R-type instruction: funct3=0x{funct3:x}, funct7=0x{funct7:x}"
             ),
             regs: *regs,
         }),

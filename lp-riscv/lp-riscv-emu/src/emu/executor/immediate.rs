@@ -49,10 +49,7 @@ pub(super) fn decode_execute_itype<M: LoggingMode>(
                             pc,
                             instruction: inst_word,
                             reason: alloc::format!(
-                                "Unknown I-type instruction: funct3=0x{:x}, funct6=0x{:x}, funct12=0x{:x}",
-                                funct3,
-                                funct6,
-                                funct12
+                                "Unknown I-type instruction: funct3=0x{funct3:x}, funct6=0x{funct6:x}, funct12=0x{funct12:x}"
                             ),
                             regs: *regs,
                         }),
@@ -100,7 +97,7 @@ pub(super) fn decode_execute_itype<M: LoggingMode>(
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown I-type instruction: funct3=0x{:x}", funct3),
+            reason: alloc::format!("Unknown I-type instruction: funct3=0x{funct3:x}"),
             regs: *regs,
         }),
     }
