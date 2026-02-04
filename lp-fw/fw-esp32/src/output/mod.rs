@@ -1,5 +1,5 @@
 mod provider;
-mod rmt_driver;
+mod rmt;
 
 pub use provider::Esp32OutputProvider;
-pub use rmt_driver::{LedChannel, LedTransaction};
+pub use rmt::{LedChannel, LedTransaction};
