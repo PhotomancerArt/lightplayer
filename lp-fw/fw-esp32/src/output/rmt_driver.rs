@@ -1,10 +1,15 @@
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
+extern crate alloc;
+use alloc::boxed::Box;
+
 use esp_hal::Blocking;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::interrupt::{InterruptHandler, Priority};
-use esp_hal::rmt::{Error as RmtError, LoopMode, TxChannelConfig, TxChannelCreator};
+use esp_hal::rmt::{
+    Channel, Error as RmtError, LoopMode, Rmt, Tx, TxChannelConfig, TxChannelCreator,
+};
 use esp_println::println;
 use smart_leds::RGB8;
 
@@ -52,6 +57,96 @@ const fn make_channel_state_array() -> [ChannelState; 2] {
 
 // Global state for interrupt handling (one per channel, currently only [0] used)
 static CHANNEL_STATE: [ChannelState; 2] = make_channel_state_array();
+
+/// LED channel for WS2811/WS2812 LEDs using RMT
+pub struct LedChannel<'ch> {
+    channel: Channel<'ch, Blocking, Tx>,
+    channel_idx: u8,
+    num_leds: usize,
+    led_buffer: Box<[RGB8]>,
+}
+
+impl<'ch> LedChannel<'ch> {
+    /// Create a new LED channel
+    ///
+    /// # Arguments
+    /// * `rmt` - RMT peripheral (takes ownership, will set interrupt handler if first channel)
+    /// * `pin` - GPIO pin for LED data output
+    /// * `num_leds` - Number of LEDs in the strip
+    ///
+    /// # Returns
+    /// `LedChannel` instance that owns the RMT channel
+    pub fn new<O>(mut rmt: Rmt<'ch, Blocking>, pin: O, num_leds: usize) -> Result<Self, RmtError>
+    where
+        O: PeripheralOutput<'ch>,
+    {
+        use alloc::vec;
+
+        // Set up interrupt handler (only needs to be done once, but safe to call multiple times)
+        // TODO: Use a static flag to only set up once
+        let handler = InterruptHandler::new(rmt_interrupt_handler, Priority::max());
+        rmt.set_interrupt_handler(handler);
+
+        // Configure the RMT channel (takes ownership of channel0)
+        let config = create_rmt_config();
+        let channel = rmt.channel0.configure_tx(pin, config)?;
+
+        // Allocate LED buffer
+        let led_buffer = vec![RGB8 { r: 0, g: 0, b: 0 }; num_leds].into_boxed_slice();
+
+        // Initialize RMT memory with zeros
+        let rmt_base = (esp_hal::peripherals::RMT::ptr() as usize + 0x400) as *mut u32;
+        unsafe {
+            for j in 0..BUFFER_SIZE {
+                rmt_base.add(j).write_volatile(0);
+            }
+        }
+
+        // Enable interrupts
+        let rmt_regs = esp_hal::peripherals::RMT::regs();
+        rmt_regs.int_ena().modify(|_, w| {
+            w.ch_tx_thr_event(RMT_CH_IDX as u8).set_bit();
+            w.ch_tx_end(RMT_CH_IDX as u8).set_bit();
+            w.ch_tx_err(RMT_CH_IDX as u8).set_bit();
+            w.ch_tx_loop(RMT_CH_IDX as u8).clear_bit()
+        });
+
+        // Set initial threshold configuration
+        rmt_regs.ch_tx_lim(RMT_CH_IDX).modify(|_, w| {
+            w.loop_count_reset().set_bit();
+            w.tx_loop_cnt_en().set_bit();
+            unsafe {
+                w.tx_loop_num().bits(0);
+                w.tx_lim().bits(HALF_BUFFER_SIZE as u16)
+            }
+        });
+
+        // Configure initial channel settings (single-shot, wrap enabled)
+        rmt_regs.ch_tx_conf0(RMT_CH_IDX).modify(|_, w| {
+            w.tx_conti_mode().clear_bit(); // single-shot
+            w.mem_tx_wrap_en().set_bit() // wrap enabled
+        });
+
+        // Update configuration
+        rmt_regs
+            .ch_tx_conf0(RMT_CH_IDX)
+            .modify(|_, w| w.conf_update().set_bit());
+
+        // Set up globals for backward compatibility with old API
+        // TODO: Remove this when old API is removed
+        unsafe {
+            ACTUAL_NUM_LEDS = num_leds;
+            LED_DATA_BUFFER_PTR = led_buffer.as_ptr() as *mut RGB8;
+        }
+
+        Ok(Self {
+            channel,
+            channel_idx: RMT_CH_IDX as u8,
+            num_leds,
+            led_buffer,
+        })
+    }
+}
 
 const SRC_CLOCK_MHZ: u32 = 80;
 const PULSE_ZERO: u32 = // Zero
@@ -420,30 +515,24 @@ pub fn rmt_ws2811_init2<'d, O>(
 where
     O: PeripheralOutput<'d>,
 {
-    extern crate alloc;
-    use alloc::boxed::Box;
-    use alloc::vec;
-
+    // Update globals for old API compatibility
     unsafe {
         ACTUAL_NUM_LEDS = num_leds;
-
-        // Allocate LED buffer dynamically
-        let buffer = vec![RGB8 { r: 0, g: 0, b: 0 }; num_leds].into_boxed_slice();
-        LED_DATA_BUFFER_PTR = Box::into_raw(buffer) as *mut RGB8;
     }
 
-    // Set up the interrupt handler with max priority
-    let handler = InterruptHandler::new(rmt_interrupt_handler, Priority::max());
-    rmt.set_interrupt_handler(handler);
+    // Create LedChannel (takes ownership of rmt)
+    let channel = LedChannel::new(rmt, pin, num_leds)?;
 
-    // Configure the RMT channel
-    let config = create_rmt_config();
-    let channel = rmt.channel0.configure_tx(pin, config)?;
-
-    // CRITICAL: Keep the channel alive by leaking it
-    // If the channel is dropped, it will deconfigure the RMT hardware
-    // We use Box::leak to keep it alive for the lifetime of the program
-    let _channel_leak = Box::leak(Box::new(channel));
+    // Store channel in static to keep it alive (for backward compatibility with old API)
+    // TODO: Remove this when old API is removed
+    unsafe {
+        // Update LED_DATA_BUFFER_PTR for old API
+        LED_DATA_BUFFER_PTR = channel.led_buffer.as_ptr() as *mut RGB8;
+        // Leak the channel to keep it alive
+        // CRITICAL: Keep the channel alive by leaking it
+        // If the channel is dropped, it will deconfigure the RMT hardware
+        Box::leak(Box::new(channel));
+    }
 
     Ok(())
 }
@@ -485,11 +574,9 @@ pub fn rmt_ws2811_write_bytes(rgb_bytes: &[u8]) {
 
 /// Wait for the current frame transmission to complete
 pub fn rmt_ws2811_wait_complete() {
-    unsafe {
-        //println!("rmt_ws2811_wait_complete: waiting for frame complete");
-        while !is_frame_complete() {
-            // Small delay to avoid busy waiting
-            esp_hal::delay::Delay::new().delay_micros(10);
-        }
+    //println!("rmt_ws2811_wait_complete: waiting for frame complete");
+    while !is_frame_complete() {
+        // Small delay to avoid busy waiting
+        esp_hal::delay::Delay::new().delay_micros(10);
     }
 }

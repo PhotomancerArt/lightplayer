@@ -10,7 +10,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 
-use crate::output::{rmt_ws2811_init2, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
+use crate::output::{LedChannel, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
 
 /// Run RMT test mode
 ///
@@ -39,9 +39,11 @@ pub async fn run_rmt_test() -> ! {
 
     // Initialize RMT driver for 8 LEDs
     const NUM_LEDS: usize = 64;
-    rmt_ws2811_init2(rmt, pin, NUM_LEDS).expect("Failed to initialize RMT driver");
+    let _channel = LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
 
-    println!("RMT driver initialized, starting test patterns...");
+    println!("RMT driver initialized (LedChannel created), starting test patterns...");
+    // Note: We still use old API functions (rmt_ws2811_write_bytes, rmt_ws2811_wait_complete)
+    // for now. The channel is stored but not yet used for transmission.
 
     loop {
         // Test 1: Solid red
