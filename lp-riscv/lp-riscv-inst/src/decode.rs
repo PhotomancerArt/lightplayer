@@ -287,15 +287,9 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs1,
                     imm: i.imm,
                 }),
-                0x3 => {
-                    // funct3=0x3 is reserved in RISC-V spec, but Cranelift sometimes generates it
-                    // Treat it as LW (load word) as a workaround
-                    Ok(Inst::Lw {
-                        rd,
-                        rs1,
-                        imm: i.imm,
-                    })
-                }
+                0x3 => Err(format!(
+                    "Invalid load instruction: funct3=0x3 (reserved on RV32, LD is RV64-only)"
+                )),
                 0x4 => Ok(Inst::Lbu {
                     rd,
                     rs1,

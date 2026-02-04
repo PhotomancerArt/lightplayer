@@ -4,7 +4,10 @@ extern crate alloc;
 
 use super::{ExecutionResult, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
-use lp_riscv_inst::{Gpr, format::{TypeI, TypeS}};
+use lp_riscv_inst::{
+    Gpr,
+    format::{TypeI, TypeS},
+};
 
 /// Decode and execute load instructions (I-type, opcode 0x03).
 pub(super) fn decode_execute_load<M: LoggingMode>(
@@ -23,17 +26,15 @@ pub(super) fn decode_execute_load<M: LoggingMode>(
         0x0 => execute_lb::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
         0x1 => execute_lh::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
         0x2 => execute_lw::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
-        0x3 => {
-            // funct3=0x3 is reserved in RISC-V spec, but Cranelift sometimes generates it
-            // Treat it as LW (load word) as a workaround
-            execute_lw::<M>(rd, rs1, imm, inst_word, pc, regs, memory)
-        }
         0x4 => execute_lbu::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
         0x5 => execute_lhu::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
-            reason: alloc::format!("Unknown load instruction: funct3=0x{:x}", funct3),
+            reason: alloc::format!(
+                "Invalid load instruction: funct3=0x{:x} (reserved on RV32)",
+                funct3
+            ),
             regs: *regs,
         }),
     }
@@ -459,28 +460,30 @@ fn execute_sh<M: LoggingMode>(
     let old_value = old_half as i32;
 
     let error_regs = *regs;
-    memory.write_halfword(address, value as i16).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
+    memory
+        .write_halfword(address, value as i16)
+        .map_err(|mut e| {
+            match &mut e {
+                EmulatorError::InvalidMemoryAccess {
+                    regs: err_regs,
+                    pc: err_pc,
+                    ..
+                } => {
+                    *err_regs = error_regs;
+                    *err_pc = pc;
+                }
+                EmulatorError::UnalignedAccess {
+                    regs: err_regs,
+                    pc: err_pc,
+                    ..
+                } => {
+                    *err_regs = error_regs;
+                    *err_pc = pc;
+                }
+                _ => {}
             }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+            e
+        })?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -578,7 +581,7 @@ mod tests {
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
     use crate::emu::memory::Memory;
-    use lp_riscv_inst::{encode, Gpr};
+    use lp_riscv_inst::{Gpr, encode};
 
     #[test]
     fn test_lw_fast_path() {
