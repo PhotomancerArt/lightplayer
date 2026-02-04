@@ -10,7 +10,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 
-use crate::output::{LedChannel, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
+use crate::output::{LedChannel, LedTransaction, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
 
 /// Run RMT test mode
 ///
@@ -38,80 +38,32 @@ pub async fn run_rmt_test() -> ! {
     let pin = peripherals.GPIO18;
 
     // Initialize RMT driver for 8 LEDs
-    const NUM_LEDS: usize = 64;
-    let _channel = LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
+    const NUM_LEDS: usize = 256;
+    let channel = LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
 
-    println!("RMT driver initialized (LedChannel created), starting test patterns...");
-    // Note: We still use old API functions (rmt_ws2811_write_bytes, rmt_ws2811_wait_complete)
-    // for now. The channel is stored but not yet used for transmission.
+    println!("RMT driver initialized (LedChannel created), starting chase pattern...");
+    // Note: LedChannel is created to exercise Phase 2/3, but using old API for now
+    // TODO: In Phase 4, we'll use channel.start_transmission() and tx.wait_complete()
 
     loop {
-        // Test 1: Solid red
-        println!("Test: Solid red");
+        // Chase pattern - white dot moving down the strip
+        println!("Chase pattern");
         let mut data = [0u8; NUM_LEDS * 3];
-        for i in 0..NUM_LEDS {
-            data[i * 3] = 255; // R
-            data[i * 3 + 1] = 0; // G
-            data[i * 3 + 2] = 0; // B
-        }
-        println!("Test: Solid red (writing)");
-        rmt_ws2811_write_bytes(&data);
-        println!("Test: Solid red (waiting)");
-        rmt_ws2811_wait_complete();
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-
-        // Test 2: Solid green
-        println!("Test: Solid green");
-        for i in 0..NUM_LEDS {
-            data[i * 3] = 0; // R
-            data[i * 3 + 1] = 255; // G
-            data[i * 3 + 2] = 0; // B
-        }
-        rmt_ws2811_write_bytes(&data);
-        rmt_ws2811_wait_complete();
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-
-        // Test 3: Solid blue
-        println!("Test: Solid blue");
-        for i in 0..NUM_LEDS {
-            data[i * 3] = 0; // R
-            data[i * 3 + 1] = 0; // G
-            data[i * 3 + 2] = 255; // B
-        }
-        rmt_ws2811_write_bytes(&data);
-        rmt_ws2811_wait_complete();
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-
-        // Test 4: Rainbow pattern
-        println!("Test: Rainbow pattern");
-        for i in 0..NUM_LEDS {
-            let hue = (i * 360 / NUM_LEDS) as f32;
-            let rgb = hsv_to_rgb(hue, 1.0, 1.0);
-            data[i * 3] = rgb.0;
-            data[i * 3 + 1] = rgb.1;
-            data[i * 3 + 2] = rgb.2;
-        }
-        rmt_ws2811_write_bytes(&data);
-        rmt_ws2811_wait_complete();
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
-
-        // Test 5: Chase pattern
-        println!("Test: Chase pattern");
         for offset in 0..NUM_LEDS {
             for i in 0..NUM_LEDS {
                 if i == offset {
-                    data[i * 3] = 255;
-                    data[i * 3 + 1] = 255;
-                    data[i * 3 + 2] = 255;
+                    data[i * 3] = 10; // R
+                    data[i * 3 + 1] = 10; // G
+                    data[i * 3 + 2] = 10; // B
                 } else {
-                    data[i * 3] = 0;
-                    data[i * 3 + 1] = 0;
-                    data[i * 3 + 2] = 0;
+                    data[i * 3] = 0; // R
+                    data[i * 3 + 1] = 0; // G
+                    data[i * 3 + 2] = 0; // B
                 }
             }
             rmt_ws2811_write_bytes(&data);
             rmt_ws2811_wait_complete();
-            embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
         }
     }
 }

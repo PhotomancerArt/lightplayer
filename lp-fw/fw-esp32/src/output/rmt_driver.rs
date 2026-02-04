@@ -66,6 +66,12 @@ pub struct LedChannel<'ch> {
     led_buffer: Box<[RGB8]>,
 }
 
+/// Represents an in-progress LED transmission
+#[must_use = "transactions must be waited on to get the channel back"]
+pub struct LedTransaction<'ch> {
+    channel: LedChannel<'ch>,
+}
+
 impl<'ch> LedChannel<'ch> {
     /// Create a new LED channel
     ///
@@ -146,6 +152,57 @@ impl<'ch> LedChannel<'ch> {
             led_buffer,
         })
     }
+
+    /// Start a transmission with RGB byte data
+    ///
+    /// # Arguments
+    /// * `rgb_bytes` - Raw RGB bytes (R,G,B,R,G,B,...) must be at least num_leds * 3 bytes
+    ///
+    /// # Returns
+    /// `LedTransaction` that must be waited on to get the channel back
+    pub fn start_transmission(mut self, rgb_bytes: &[u8]) -> LedTransaction<'ch> {
+        // Wait for any previous transmission to complete
+        while !CHANNEL_STATE[self.channel_idx as usize]
+            .frame_complete
+            .load(Ordering::Acquire)
+        {
+            esp_hal::delay::Delay::new().delay_micros(10);
+        }
+
+        // Clear buffer
+        for led in self.led_buffer.iter_mut() {
+            *led = RGB8 { r: 0, g: 0, b: 0 };
+        }
+
+        // Convert from bytes to RGB8 as we copy
+        let num_leds = (rgb_bytes.len() / 3).min(self.num_leds);
+        for i in 0..num_leds {
+            let idx = i * 3;
+            self.led_buffer[i] = RGB8 {
+                r: rgb_bytes[idx],
+                g: rgb_bytes[idx + 1],
+                b: rgb_bytes[idx + 2],
+            };
+        }
+
+        // Update global buffer pointer for interrupt handler (temporary)
+        // TODO: Remove when interrupt handler accesses LedChannel state directly
+        unsafe {
+            LED_DATA_BUFFER_PTR = self.led_buffer.as_ptr() as *mut RGB8;
+            ACTUAL_NUM_LEDS = self.num_leds;
+        }
+
+        // Start transmission using internal function
+        unsafe {
+            start_transmission_with_state(
+                self.channel_idx,
+                self.led_buffer.as_ptr() as *mut RGB8,
+                self.num_leds,
+            );
+        }
+
+        LedTransaction { channel: self }
+    }
 }
 
 const SRC_CLOCK_MHZ: u32 = 80;
@@ -213,18 +270,24 @@ unsafe fn write_ws2811_byte(base_ptr: *mut u32, byte_value: u8, byte_offset: usi
     ptr.add(7).write_volatile(bit_pulse(0x01));
 }
 
-// Start transmission of current LED buffer
+// Internal function that takes explicit parameters (for use by LedChannel)
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn start_transmission() {
+unsafe fn start_transmission_with_state(
+    channel_idx: u8,
+    _led_buffer_ptr: *mut RGB8,
+    _num_leds: usize,
+) {
     let rmt = esp_hal::peripherals::RMT::regs();
+    let ch_idx = channel_idx as usize;
 
-    rmt.ch_tx_conf0(0).modify(|_, w| w.tx_stop().set_bit());
-    rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
+    rmt.ch_tx_conf0(ch_idx).modify(|_, w| w.tx_stop().set_bit());
+    rmt.ch_tx_conf0(ch_idx)
+        .modify(|_, w| w.conf_update().set_bit());
 
-    CHANNEL_STATE[RMT_CH_IDX]
+    CHANNEL_STATE[ch_idx]
         .frame_complete
         .store(false, Ordering::Release);
-    CHANNEL_STATE[RMT_CH_IDX]
+    CHANNEL_STATE[ch_idx]
         .led_counter
         .store(0, Ordering::Relaxed);
 
@@ -241,42 +304,44 @@ unsafe fn start_transmission() {
 
     // Clear interrupts
     rmt.int_clr().write(|w| {
-        w.ch_tx_end(0).set_bit();
-        w.ch_tx_err(0).set_bit();
-        w.ch_tx_loop(0).set_bit();
-        w.ch_tx_thr_event(0).set_bit()
+        w.ch_tx_end(channel_idx).set_bit();
+        w.ch_tx_err(channel_idx).set_bit();
+        w.ch_tx_loop(channel_idx).set_bit();
+        w.ch_tx_thr_event(channel_idx).set_bit()
     });
 
     // Enable interrupts
     rmt.int_ena().modify(|_, w| {
-        w.ch_tx_thr_event(0).set_bit();
-        w.ch_tx_end(0).set_bit();
-        w.ch_tx_err(0).set_bit();
-        w.ch_tx_loop(0).clear_bit()
+        w.ch_tx_thr_event(channel_idx).set_bit();
+        w.ch_tx_end(channel_idx).set_bit();
+        w.ch_tx_err(channel_idx).set_bit();
+        w.ch_tx_loop(channel_idx).clear_bit()
     });
 
     // Set the threshold for halfway (like esp-hal start_send does)
-    rmt.ch_tx_lim(0).modify(|_, w| {
+    rmt.ch_tx_lim(ch_idx).modify(|_, w| {
         w.loop_count_reset().set_bit();
         w.tx_loop_cnt_en().set_bit();
-        w.tx_loop_num().bits(0);
-
-        w.tx_lim().bits(HALF_BUFFER_SIZE as u16)
+        unsafe {
+            w.tx_loop_num().bits(0);
+            w.tx_lim().bits(HALF_BUFFER_SIZE as u16)
+        }
     });
 
     // Configure (like esp-hal start_send - set continuous mode, wrap mode)
-    rmt.ch_tx_conf0(0).modify(|_, w| {
+    rmt.ch_tx_conf0(ch_idx).modify(|_, w| {
         w.tx_conti_mode().clear_bit(); // single-shot (not continuous)
         w.mem_tx_wrap_en().set_bit() // wrap enabled for single-shot
     });
 
     // Update configuration (like esp-hal does BEFORE start_tx)
-    rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
+    rmt.ch_tx_conf0(ch_idx)
+        .modify(|_, w| w.conf_update().set_bit());
 
     println!("start_transmission: configuration updated");
 
     // Start transmission (like esp-hal start_tx)
-    rmt.ch_tx_conf0(0).modify(|_, w| {
+    rmt.ch_tx_conf0(ch_idx).modify(|_, w| {
         w.mem_rd_rst().set_bit();
         w.apb_mem_rst().set_bit();
         w.tx_start().set_bit()
@@ -285,12 +350,21 @@ unsafe fn start_transmission() {
     println!("start_transmission: transmission started");
 
     // Update again after starting (like esp-hal does)
-    rmt.ch_tx_conf0(0).modify(|_, w| w.conf_update().set_bit());
+    rmt.ch_tx_conf0(ch_idx)
+        .modify(|_, w| w.conf_update().set_bit());
 
     // Write the guard. With any luck we are past the first byte at this point.
     write_buffer_guard(false);
 
     println!("transmission started");
+}
+
+// Old function for backward compatibility
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn start_transmission() {
+    unsafe {
+        start_transmission_with_state(RMT_CH_IDX as u8, LED_DATA_BUFFER_PTR, ACTUAL_NUM_LEDS);
+    }
 }
 
 // Check if current frame transmission is complete
