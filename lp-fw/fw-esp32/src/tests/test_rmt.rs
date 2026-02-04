@@ -10,7 +10,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 
-use crate::output::{LedChannel, LedTransaction, rmt_ws2811_wait_complete, rmt_ws2811_write_bytes};
+use crate::output::{LedChannel, LedTransaction};
 
 /// Run RMT test mode
 ///
@@ -39,11 +39,11 @@ pub async fn run_rmt_test() -> ! {
 
     // Initialize RMT driver for 8 LEDs
     const NUM_LEDS: usize = 256;
-    let channel = LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
+    let mut channel =
+        LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
 
     println!("RMT driver initialized (LedChannel created), starting chase pattern...");
-    // Note: LedChannel is created to exercise Phase 2/3, but using old API for now
-    // TODO: In Phase 4, we'll use channel.start_transmission() and tx.wait_complete()
+    // Using full new API: channel.start_transmission().wait_complete()
 
     loop {
         // Chase pattern - white dot moving down the strip
@@ -61,8 +61,8 @@ pub async fn run_rmt_test() -> ! {
                     data[i * 3 + 2] = 0; // B
                 }
             }
-            rmt_ws2811_write_bytes(&data);
-            rmt_ws2811_wait_complete();
+            let tx = channel.start_transmission(&data);
+            channel = tx.wait_complete();
             embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
         }
     }

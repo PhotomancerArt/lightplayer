@@ -72,6 +72,28 @@ pub struct LedTransaction<'ch> {
     channel: LedChannel<'ch>,
 }
 
+impl<'ch> LedTransaction<'ch> {
+    /// Wait for transmission to complete
+    ///
+    /// # Returns
+    /// The `LedChannel` instance, ready for the next transmission
+    pub fn wait_complete(self) -> LedChannel<'ch> {
+        let channel_idx = self.channel.channel_idx as usize;
+
+        // Poll ChannelState until frame is complete
+        while !CHANNEL_STATE[channel_idx]
+            .frame_complete
+            .load(Ordering::Acquire)
+        {
+            // Small delay to avoid busy waiting
+            esp_hal::delay::Delay::new().delay_micros(10);
+        }
+
+        // Return the channel for reuse
+        self.channel
+    }
+}
+
 impl<'ch> LedChannel<'ch> {
     /// Create a new LED channel
     ///
