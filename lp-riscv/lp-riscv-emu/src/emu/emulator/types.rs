@@ -18,6 +18,9 @@ pub enum StepResult {
     Trap(TrapCode),
     /// Panic occurred, panic information available
     Panic(PanicInfo),
+    /// Fuel exhausted during run (instructions executed in this run)
+    /// Only returned by run() functions, never by step()
+    FuelExhausted(u64),
 }
 
 /// Information about a syscall (ECALL).

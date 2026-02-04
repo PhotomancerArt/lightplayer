@@ -185,7 +185,7 @@ mod tests {
         // Create emulator with fuel limit and logging enabled
         let mut emu =
             Riscv32Emulator::new(elf_info.code, elf_info.ram).with_log_level(LogLevel::None);
-        emu.set_max_instructions(1_000_000); // 1M instructions max
+        // Fuel is now per-run, passed to run_until_yield()
 
         // Set PC to entry point
         emu.set_pc(elf_info.entry_point);

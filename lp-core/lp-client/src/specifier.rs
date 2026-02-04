@@ -15,6 +15,8 @@ pub enum HostSpecifier {
     Serial { port: Option<String> }, // None = auto-detect
     /// Local in-memory server
     Local,
+    /// Emulator-based serial transport
+    Emulator,
 }
 
 impl HostSpecifier {
@@ -48,6 +50,11 @@ impl HostSpecifier {
             return Ok(HostSpecifier::Local);
         }
 
+        // Check for emulator specifier
+        if s == "emu" || s == "emulator" {
+            return Ok(HostSpecifier::Emulator);
+        }
+
         // Check for websocket URLs
         if s.starts_with("ws://") || s.starts_with("wss://") {
             return Ok(HostSpecifier::WebSocket { url: s.to_string() });
@@ -65,7 +72,7 @@ impl HostSpecifier {
         }
 
         bail!(
-            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, local"
+            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, local, emu"
         )
     }
 
@@ -86,6 +93,12 @@ impl HostSpecifier {
     pub fn is_local(&self) -> bool {
         matches!(self, HostSpecifier::Local)
     }
+
+    /// Check if this is an emulator specifier
+    #[allow(dead_code, reason = "Useful helper method for future use")]
+    pub fn is_emulator(&self) -> bool {
+        matches!(self, HostSpecifier::Emulator)
+    }
 }
 
 impl fmt::Display for HostSpecifier {
@@ -95,6 +108,7 @@ impl fmt::Display for HostSpecifier {
             HostSpecifier::Serial { port: None } => write!(f, "serial:auto"),
             HostSpecifier::Serial { port: Some(port) } => write!(f, "serial:{port}"),
             HostSpecifier::Local => write!(f, "local"),
+            HostSpecifier::Emulator => write!(f, "emu"),
         }
     }
 }
@@ -222,6 +236,7 @@ mod tests {
         assert!(spec.is_local());
         assert!(!spec.is_websocket());
         assert!(!spec.is_serial());
+        assert!(!spec.is_emulator());
     }
 
     #[test]
@@ -234,5 +249,29 @@ mod tests {
     fn test_display_local() {
         let spec = HostSpecifier::Local;
         assert_eq!(spec.to_string(), "local");
+    }
+
+    #[test]
+    fn test_parse_emu() {
+        let spec = HostSpecifier::parse("emu").unwrap();
+        assert!(spec.is_emulator());
+        assert!(!spec.is_websocket());
+        assert!(!spec.is_serial());
+        assert!(!spec.is_local());
+    }
+
+    #[test]
+    fn test_parse_emulator() {
+        let spec = HostSpecifier::parse("emulator").unwrap();
+        assert!(spec.is_emulator());
+        assert!(!spec.is_websocket());
+        assert!(!spec.is_serial());
+        assert!(!spec.is_local());
+    }
+
+    #[test]
+    fn test_display_emulator() {
+        let spec = HostSpecifier::Emulator;
+        assert_eq!(spec.to_string(), "emu");
     }
 }

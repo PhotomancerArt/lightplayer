@@ -30,7 +30,7 @@ enum Cli {
     Dev {
         /// Project directory
         dir: std::path::PathBuf,
-        /// Push local project to server. Optionally specify remote host (e.g., ws://localhost:2812/ or serial:auto).
+        /// Push local project to server. Optionally specify remote host (e.g., ws://localhost:2812/, serial:auto, or emu).
         /// If --push is specified without a host, uses in-memory server.
         #[arg(long, value_name = "HOST")]
         push: Option<Option<String>>,
