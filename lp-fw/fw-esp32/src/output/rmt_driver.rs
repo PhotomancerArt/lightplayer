@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -14,8 +14,6 @@ use esp_println::println;
 use smart_leds::RGB8;
 
 // Configuration constants
-static mut ACTUAL_NUM_LEDS: usize = 0; // Actual number of LEDs (set at init)
-static mut LED_DATA_BUFFER_PTR: *mut RGB8 = core::ptr::null_mut(); // Dynamically allocatedar
 
 // Buffer size for 8 LEDs worth of data (double buffered)
 // Using memsize(4) = 192 words. 8 LEDs = 192 words exactly, 4 LEDs per half
@@ -36,6 +34,9 @@ struct ChannelState {
     frame_counter: AtomicUsize,
     stats_count: AtomicI32,
     stats_sum: AtomicI32,
+    // Buffer info for interrupt handler
+    led_buffer_ptr: AtomicPtr<RGB8>,
+    num_leds: AtomicUsize,
 }
 
 impl ChannelState {
@@ -46,6 +47,8 @@ impl ChannelState {
             frame_counter: AtomicUsize::new(0),
             stats_count: AtomicI32::new(0),
             stats_sum: AtomicI32::new(0),
+            led_buffer_ptr: AtomicPtr::new(core::ptr::null_mut()),
+            num_leds: AtomicUsize::new(0),
         }
     }
 }
@@ -160,13 +163,6 @@ impl<'ch> LedChannel<'ch> {
             .ch_tx_conf0(RMT_CH_IDX)
             .modify(|_, w| w.conf_update().set_bit());
 
-        // Set up globals for backward compatibility with old API
-        // TODO: Remove this when old API is removed
-        unsafe {
-            ACTUAL_NUM_LEDS = num_leds;
-            LED_DATA_BUFFER_PTR = led_buffer.as_ptr() as *mut RGB8;
-        }
-
         Ok(Self {
             channel,
             channel_idx: RMT_CH_IDX as u8,
@@ -207,14 +203,8 @@ impl<'ch> LedChannel<'ch> {
             };
         }
 
-        // Update global buffer pointer for interrupt handler (temporary)
-        // TODO: Remove when interrupt handler accesses LedChannel state directly
-        unsafe {
-            LED_DATA_BUFFER_PTR = self.led_buffer.as_ptr() as *mut RGB8;
-            ACTUAL_NUM_LEDS = self.num_leds;
-        }
-
         // Start transmission using internal function
+        // Buffer info will be stored in ChannelState by start_transmission_with_state
         unsafe {
             start_transmission_with_state(
                 self.channel_idx,
@@ -296,11 +286,19 @@ unsafe fn write_ws2811_byte(base_ptr: *mut u32, byte_value: u8, byte_offset: usi
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn start_transmission_with_state(
     channel_idx: u8,
-    _led_buffer_ptr: *mut RGB8,
-    _num_leds: usize,
+    led_buffer_ptr: *mut RGB8,
+    num_leds: usize,
 ) {
     let rmt = esp_hal::peripherals::RMT::regs();
     let ch_idx = channel_idx as usize;
+
+    // Store buffer info in ChannelState for interrupt handler
+    CHANNEL_STATE[ch_idx]
+        .led_buffer_ptr
+        .store(led_buffer_ptr, Ordering::Release);
+    CHANNEL_STATE[ch_idx]
+        .num_leds
+        .store(num_leds, Ordering::Release);
 
     rmt.ch_tx_conf0(ch_idx).modify(|_, w| w.tx_stop().set_bit());
     rmt.ch_tx_conf0(ch_idx)
@@ -321,8 +319,8 @@ unsafe fn start_transmission_with_state(
 
     println!("start_transmission: buffer cleared");
     // Init the buffer
-    write_half_buffer(true);
-    write_half_buffer(false);
+    write_half_buffer(true, channel_idx);
+    write_half_buffer(false, channel_idx);
 
     // Clear interrupts
     rmt.int_clr().write(|w| {
@@ -379,21 +377,6 @@ unsafe fn start_transmission_with_state(
     write_buffer_guard(false);
 
     println!("transmission started");
-}
-
-// Old function for backward compatibility
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn start_transmission() {
-    unsafe {
-        start_transmission_with_state(RMT_CH_IDX as u8, LED_DATA_BUFFER_PTR, ACTUAL_NUM_LEDS);
-    }
-}
-
-// Check if current frame transmission is complete
-fn is_frame_complete() -> bool {
-    CHANNEL_STATE[RMT_CH_IDX]
-        .frame_complete
-        .load(Ordering::Acquire)
 }
 
 // LED timing constants for WS2812/SK6812
@@ -474,7 +457,7 @@ extern "C" fn rmt_interrupt_handler() {
             }
 
             write_buffer_guard(is_halfway);
-            if write_half_buffer(is_halfway) {
+            if write_half_buffer(is_halfway, RMT_CH_IDX as u8) {
                 // info!("end reached");
             }
 
@@ -515,20 +498,23 @@ unsafe fn write_buffer_guard(into_second_half: bool) {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn write_half_buffer(is_first_half: bool) -> bool {
+unsafe fn write_half_buffer(is_first_half: bool, channel_idx: u8) -> bool {
     let base_ptr = (esp_hal::peripherals::RMT::ptr() as usize + 0x400) as *mut u32;
+    let ch_idx = channel_idx as usize;
 
     let half_ptr = base_ptr.add(if is_first_half { 0 } else { HALF_BUFFER_SIZE });
+
+    // Load buffer info from ChannelState
+    let num_leds = CHANNEL_STATE[ch_idx].num_leds.load(Ordering::Acquire);
+    let buffer_ptr = CHANNEL_STATE[ch_idx].led_buffer_ptr.load(Ordering::Acquire);
 
     for i in 0..HALF_BUFFER_LEDS {
         let led_ptr = half_ptr.add(i * BITS_PER_LED);
 
         // Load current LED counter atomically
-        let led_counter = CHANNEL_STATE[RMT_CH_IDX]
-            .led_counter
-            .load(Ordering::Acquire);
+        let led_counter = CHANNEL_STATE[ch_idx].led_counter.load(Ordering::Acquire);
 
-        if led_counter >= ACTUAL_NUM_LEDS {
+        if led_counter >= num_leds {
             // Fill the rest of the buffer segment with zero
             for j in 0..BITS_PER_LED * (HALF_BUFFER_LEDS - i) {
                 led_ptr
@@ -540,7 +526,7 @@ unsafe fn write_half_buffer(is_first_half: bool) -> bool {
         } else {
             // Get RGB color from LED data buffer and write directly to RMT buffer
             // Use volatile read to ensure we get the latest data
-            let color = LED_DATA_BUFFER_PTR.add(led_counter).read_volatile();
+            let color = buffer_ptr.add(led_counter).read_volatile();
 
             // WS2812 uses GRB order
             write_ws2811_byte(led_ptr, color.g, 0); // Green first
@@ -548,131 +534,11 @@ unsafe fn write_half_buffer(is_first_half: bool) -> bool {
             write_ws2811_byte(led_ptr, color.b, 2); // Blue third
 
             // Increment LED counter atomically
-            CHANNEL_STATE[RMT_CH_IDX]
+            CHANNEL_STATE[ch_idx]
                 .led_counter
                 .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     false
-}
-
-/// Initialize the WS2811/WS2812 LED driver
-///
-/// # Arguments
-/// * `rmt` - RMT peripheral
-/// * `pin` - GPIO pin for LED data output
-/// * `num_leds` - Number of LEDs in the strip
-///
-/// # Returns
-/// Transaction handle that must be kept alive
-pub fn rmt_ws2811_init<'d, O>(
-    mut rmt: esp_hal::rmt::Rmt<'d, Blocking>,
-    pin: O,
-    num_leds: usize,
-) -> Result<impl core::marker::Sized + 'd, RmtError>
-where
-    O: PeripheralOutput<'d>,
-{
-    extern crate alloc;
-    use alloc::boxed::Box;
-    use alloc::vec;
-
-    unsafe {
-        ACTUAL_NUM_LEDS = num_leds;
-
-        // Allocate LED buffer dynamically
-        let buffer = vec![RGB8 { r: 0, g: 0, b: 0 }; num_leds].into_boxed_slice();
-        LED_DATA_BUFFER_PTR = Box::into_raw(buffer) as *mut RGB8;
-    }
-
-    // Set up the interrupt handler with max priority
-    let handler = InterruptHandler::new(rmt_interrupt_handler, Priority::max());
-    rmt.set_interrupt_handler(handler);
-
-    // Configure the RMT channel
-    let config = create_rmt_config();
-    let channel = rmt.channel0.configure_tx(pin, config)?;
-
-    // HACK: If we don't call transmit_continuously, things work, but the debug output stops
-    //       working.
-    //
-    let dummy_buffer = [pulse_code(Level::Low, 1, Level::High, 1)];
-    let transaction = channel.transmit_continuously(&dummy_buffer, LoopMode::Infinite)?;
-
-    Ok(transaction)
-}
-
-pub fn rmt_ws2811_init2<'d, O>(
-    mut rmt: esp_hal::rmt::Rmt<'d, Blocking>,
-    pin: O,
-    num_leds: usize,
-) -> Result<(), RmtError>
-where
-    O: PeripheralOutput<'d>,
-{
-    // Update globals for old API compatibility
-    unsafe {
-        ACTUAL_NUM_LEDS = num_leds;
-    }
-
-    // Create LedChannel (takes ownership of rmt)
-    let channel = LedChannel::new(rmt, pin, num_leds)?;
-
-    // Store channel in static to keep it alive (for backward compatibility with old API)
-    // TODO: Remove this when old API is removed
-    unsafe {
-        // Update LED_DATA_BUFFER_PTR for old API
-        LED_DATA_BUFFER_PTR = channel.led_buffer.as_ptr() as *mut RGB8;
-        // Leak the channel to keep it alive
-        // CRITICAL: Keep the channel alive by leaking it
-        // If the channel is dropped, it will deconfigure the RMT hardware
-        Box::leak(Box::new(channel));
-    }
-
-    Ok(())
-}
-
-/// Write LED data and start transmission from raw RGB bytes
-///
-/// # Arguments
-/// * `rgb_bytes` - Raw RGB bytes (R,G,B,R,G,B,...) must be at least num_leds * 3 bytes
-pub fn rmt_ws2811_write_bytes(rgb_bytes: &[u8]) {
-    rmt_ws2811_wait_complete();
-
-    unsafe {
-        let buffer = core::slice::from_raw_parts_mut(LED_DATA_BUFFER_PTR, ACTUAL_NUM_LEDS);
-
-        // Clear first
-        for led in buffer.iter_mut() {
-            *led = RGB8 { r: 0, g: 0, b: 0 };
-        }
-
-        // Convert from bytes to RGB8 as we copy
-        let num_leds = (rgb_bytes.len() / 3).min(ACTUAL_NUM_LEDS);
-        for i in 0..num_leds {
-            let idx = i * 3;
-            buffer[i] = RGB8 {
-                r: rgb_bytes[idx],
-                g: rgb_bytes[idx + 1],
-                b: rgb_bytes[idx + 2],
-            };
-        }
-
-        // Memory fence to ensure buffer writes complete before starting transmission
-        // This prevents RTT or other interrupts from causing partial reads
-        // core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
-
-        // Start transmission
-        start_transmission();
-    }
-}
-
-/// Wait for the current frame transmission to complete
-pub fn rmt_ws2811_wait_complete() {
-    //println!("rmt_ws2811_wait_complete: waiting for frame complete");
-    while !is_frame_complete() {
-        // Small delay to avoid busy waiting
-        esp_hal::delay::Delay::new().delay_micros(10);
-    }
 }

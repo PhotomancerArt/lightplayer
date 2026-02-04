@@ -10,7 +10,8 @@ use core::cell::RefCell;
 use lp_shared::OutputError;
 use lp_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 
-use crate::output::rmt_driver::rmt_ws2811_write_bytes;
+// TODO: Update provider.rs to use new LedChannel API
+// use crate::output::{LedChannel, LedTransaction};
 
 /// Channel state for an opened output channel
 struct ChannelState {
@@ -114,8 +115,12 @@ impl OutputProvider for Esp32OutputProvider {
             });
         }
 
-        // Write to RMT driver
-        rmt_ws2811_write_bytes(data);
+        // TODO: Update to use new LedChannel API
+        // For now, this is a placeholder - provider needs to be refactored to use LedChannel
+        // rmt_ws2811_write_bytes(data);
+        return Err(OutputError::InvalidConfig {
+            reason: "OutputProvider not yet updated to use new LedChannel API".into(),
+        });
 
         Ok(())
     }
