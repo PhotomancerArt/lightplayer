@@ -284,7 +284,10 @@ impl Riscv32Emulator {
             let msg_ptr = syscall_info.args[0] as u32;
             let msg_len = syscall_info.args[1] as usize;
 
-            #[allow(unused_variables)]
+            #[allow(
+                unused_variables,
+                reason = "s is only used when std feature is enabled"
+            )]
             if let Ok(s) = read_memory_string(&self.memory, msg_ptr, msg_len) {
                 #[cfg(feature = "std")]
                 {
