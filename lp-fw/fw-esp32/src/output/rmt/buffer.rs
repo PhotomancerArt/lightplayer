@@ -6,7 +6,6 @@
 use crate::output::rmt::config::{BITS_PER_LED, HALF_BUFFER_LEDS, HALF_BUFFER_SIZE, PULSE_LATCH, PULSE_ONE, PULSE_ZERO};
 use crate::output::rmt::state::CHANNEL_STATE;
 use core::sync::atomic::Ordering;
-use smart_leds::RGB8;
 
 /// Write a byte as RMT pulse-codes for a WS2812/SK6812 LED
 ///

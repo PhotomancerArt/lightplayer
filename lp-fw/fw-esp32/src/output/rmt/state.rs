@@ -3,7 +3,7 @@
 //! This module manages the shared state between the main thread and the interrupt handler.
 //! All state is stored atomically to ensure thread-safe access.
 
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize};
 use smart_leds::RGB8;
 
 /// Per-channel state for interrupt handler coordination

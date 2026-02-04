@@ -11,7 +11,6 @@ use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::interrupt::{InterruptHandler, Priority};
 use esp_hal::rmt::{Channel, Error as RmtError, Rmt, Tx, TxChannelCreator};
-use esp_println::println;
 use smart_leds::RGB8;
 
 use crate::output::rmt::config::{BUFFER_SIZE, RMT_CH_IDX, create_rmt_config};

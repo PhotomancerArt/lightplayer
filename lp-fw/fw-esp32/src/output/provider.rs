@@ -118,11 +118,9 @@ impl OutputProvider for Esp32OutputProvider {
         // TODO: Update to use new LedChannel API
         // For now, this is a placeholder - provider needs to be refactored to use LedChannel
         // rmt_ws2811_write_bytes(data);
-        return Err(OutputError::InvalidConfig {
+        Err(OutputError::InvalidConfig {
             reason: "OutputProvider not yet updated to use new LedChannel API".into(),
-        });
-
-        Ok(())
+        })
     }
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
