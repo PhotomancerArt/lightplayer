@@ -5,6 +5,7 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "test_app"))]
 use crate::logger::write_log;
 
 /// Host function implementation for log output (no_std mode).
@@ -33,11 +34,25 @@ pub extern "C" fn lp_jit_host_log(
             core::str::from_utf8(module_path_slice),
             core::str::from_utf8(msg_slice),
         ) {
-            let log_msg = alloc::format!("[{}] {}: {}\r\n", level_str, module_path, msg);
-            write_log(&log_msg);
+            #[cfg(not(feature = "test_app"))]
+            {
+                let log_msg = alloc::format!("[{}] {}: {}\r\n", level_str, module_path, msg);
+                write_log(&log_msg);
+            }
+            #[cfg(feature = "test_app")]
+            {
+                esp_println::println!("[{}] {}: {}", level_str, module_path, msg);
+            }
         } else {
-            let log_msg = alloc::format!("[{}] [invalid UTF-8 log message]\r\n", level_str);
-            write_log(&log_msg);
+            #[cfg(not(feature = "test_app"))]
+            {
+                let log_msg = alloc::format!("[{}] [invalid UTF-8 log message]\r\n", level_str);
+                write_log(&log_msg);
+            }
+            #[cfg(feature = "test_app")]
+            {
+                esp_println::println!("[{}] [invalid UTF-8 log message]", level_str);
+            }
         }
     }
 }

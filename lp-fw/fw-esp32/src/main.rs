@@ -9,31 +9,51 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "test_app"))]
 mod board;
 mod jit_fns;
+#[cfg(not(feature = "test_app"))]
 mod logger;
+#[cfg(not(feature = "test_app"))]
 mod output;
+#[cfg(not(feature = "test_app"))]
 mod serial;
+#[cfg(not(feature = "test_app"))]
 mod server_loop;
+#[cfg(not(feature = "test_app"))]
 mod time;
 
+#[cfg(not(feature = "test_app"))]
 use alloc::{boxed::Box, rc::Rc};
+#[cfg(not(feature = "test_app"))]
 use core::cell::RefCell;
 
+#[cfg(not(feature = "test_app"))]
 use board::{init_board, start_runtime};
 use esp_backtrace as _;
+#[cfg(not(feature = "test_app"))]
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
+#[cfg(not(feature = "test_app"))]
 use fw_core::transport::SerialTransport;
+#[cfg(not(feature = "test_app"))]
 #[macro_use]
 extern crate log;
+#[cfg(not(feature = "test_app"))]
 use lp_model::AsLpPath;
+#[cfg(not(feature = "test_app"))]
 use lp_server::LpServer;
+#[cfg(not(feature = "test_app"))]
 use lp_shared::fs::LpFsMemory;
+#[cfg(not(feature = "test_app"))]
 use lp_shared::output::OutputProvider;
 
+#[cfg(not(feature = "test_app"))]
 use output::Esp32OutputProvider;
+#[cfg(not(feature = "test_app"))]
 use serial::{Esp32UsbSerialIo, SharedSerialIo};
+#[cfg(not(feature = "test_app"))]
 use server_loop::run_server_loop;
+#[cfg(not(feature = "test_app"))]
 use time::Esp32TimeProvider;
 
 #[cfg(feature = "test_rmt")]
@@ -51,7 +71,24 @@ mod tests {
     pub mod test_usb;
 }
 
+#[cfg(feature = "test_app")]
+mod tests {
+    pub mod test_app;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
+
+// Force 8-byte alignment for .rodata section to prevent bootloader from
+// splitting .rodata_desc and .rodata into separate MAP segments.
+// The ESP32 bootloader expects at most 2 MAP segments (DROM/IROM), but with
+// 4-byte alignment, the conversion tool creates 3 segments.
+// By placing an 8-byte aligned constant in .rodata, we ensure the section
+// has 8-byte alignment, allowing .rodata_desc and .rodata to merge.
+#[repr(align(8))]
+struct Align8(u64);
+
+#[used]
+static _RODATA_ALIGN_FORCE: Align8 = Align8(0);
 
 #[esp_rtos::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -73,7 +110,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
         run_usb_test().await;
     }
 
-    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb")))]
+    #[cfg(feature = "test_app")]
+    {
+        use tests::test_app::run_test_app;
+        run_test_app().await;
+    }
+
+    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb", feature = "test_app")))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18) = init_board();

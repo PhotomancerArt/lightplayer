@@ -2023,7 +2023,6 @@ checksum = "9a93e39c8ad8d390d248dc7b9f4b59a873f313bf535218b8e2351356972399e3"
 name = "esp-println"
 version = "0.16.1"
 dependencies = [
- "critical-section",
  "log",
  "portable-atomic",
 ]
@@ -2483,6 +2482,10 @@ dependencies = [
 name = "fw-esp32"
 version = "40.0.0"
 dependencies = [
+ "cranelift-codegen",
+ "cranelift-control",
+ "cranelift-frontend",
+ "cranelift-module",
  "embassy-executor",
  "embassy-futures",
  "embassy-time",
@@ -2496,10 +2499,14 @@ dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
  "log",
+ "lp-glsl-builtins",
+ "lp-glsl-compiler",
+ "lp-glsl-jit-util",
  "lp-model",
  "lp-server",
  "lp-shared",
  "smart-leds",
+ "target-lexicon",
 ]
 
 [[package]]

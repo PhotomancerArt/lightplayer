@@ -17,6 +17,16 @@ esp32c6 = [
 test_rmt = []  # Test RMT driver with simple patterns
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
+test_app = [
+    "lp-glsl-compiler",
+    "lp-glsl-jit-util",
+    "lp-glsl-builtins",
+    "cranelift-codegen",
+    "cranelift-frontend",
+    "cranelift-module",
+    "cranelift-control",
+    "target-lexicon",
+]  # Minimal test app to isolate alignment issues
 
 [dependencies]
 embassy-executor = "0.9.1"
@@ -35,6 +45,16 @@ lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
 hashbrown = { workspace = true }
+
+# Dependencies for test_app feature (minimal GLSL compilation test)
+lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false, features = ["core"], optional = true }
+lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
+lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }
+cranelift-codegen = { workspace = true, features = ["riscv32"], optional = true }
+cranelift-frontend = { workspace = true, features = ["core"], optional = true }
+cranelift-module = { workspace = true, features = ["core"], optional = true }
+cranelift-control = { workspace = true, optional = true }
+target-lexicon = { workspace = true, optional = true }
 smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"
