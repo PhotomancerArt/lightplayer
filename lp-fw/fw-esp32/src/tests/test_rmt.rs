@@ -9,8 +9,6 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
-#[macro_use]
-extern crate log;
 
 use crate::board::{init_board, start_runtime};
 use crate::logger;

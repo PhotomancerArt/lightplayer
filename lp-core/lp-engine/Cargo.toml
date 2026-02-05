@@ -8,7 +8,11 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "cranelift-optimizer", "cranelift-verifier"]
+# Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
+cranelift-optimizer = ["lp-glsl-compiler/cranelift-optimizer"]
+# Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
+cranelift-verifier = ["lp-glsl-compiler/cranelift-verifier"]
 std = [
     "lp-shared/std",
     "lp-glsl-compiler/std"

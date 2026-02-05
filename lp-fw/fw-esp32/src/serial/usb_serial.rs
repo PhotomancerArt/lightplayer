@@ -33,6 +33,7 @@ impl Esp32UsbSerialIo {
 
     /// Get mutable references to rx/tx for direct async operations
     /// This allows bypassing the SerialIo trait's block_on when already in async context
+    #[allow(dead_code)]
     pub fn get_async_parts(
         &mut self,
     ) -> (

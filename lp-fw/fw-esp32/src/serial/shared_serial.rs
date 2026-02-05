@@ -24,6 +24,7 @@ impl<Io: SerialIo> SharedSerialIo<Io> {
     }
 
     /// Get a reference to the inner Rc<RefCell<Io>>
+    #[allow(dead_code)]
     pub fn inner(&self) -> &Rc<RefCell<Io>> {
         &self.inner
     }

@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false }
 cranelift-frontend = { workspace = true }
-cranelift-codegen = { workspace = true }
+cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-control = { workspace = true }
 cranelift-jit = { workspace = true }
 cranelift-module = { workspace = true }
@@ -29,7 +29,11 @@ anyhow = { workspace = true, optional = true }
 log = { workspace = true, default-features = false }
 
 [features]
-default = ["std"]
+default = ["std", "cranelift-optimizer", "cranelift-verifier"]
+# Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
+cranelift-optimizer = ["cranelift-codegen/optimizer"]
+# Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
+cranelift-verifier = ["cranelift-codegen/verifier"]
 emulator = ["lp-riscv-emu", "lp-riscv-elf", "lp-riscv-inst", "cranelift-object", "object", "cranelift-codegen/disas"]  # Enable RISC-V 32-bit emulator support and disassembly
 std = [
     "glsl/std",
@@ -45,6 +49,7 @@ std = [
     "log/std"
 ]
 # cranelift-jit is always included (non-optional), JITModule supports no_std
+# Note: core feature does NOT include cranelift-optimizer/cranelift-verifier by default to save space for embedded targets
 core = [
     "cranelift-codegen/core",
     "cranelift-frontend/core",

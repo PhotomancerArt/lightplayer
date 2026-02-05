@@ -23,11 +23,9 @@ use core::cell::RefCell;
 use board::{init_board, start_runtime};
 use esp_backtrace as _;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use fw_core::serial::SerialIo;
 use fw_core::transport::SerialTransport;
 #[macro_use]
 extern crate log;
-use esp_println::println;
 use lp_model::AsLpPath;
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;

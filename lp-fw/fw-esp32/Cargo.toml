@@ -29,6 +29,8 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
+# Note: cranelift-optimizer and cranelift-verifier features are intentionally NOT enabled to reduce binary size
+# This saves ~166-219 KB by disabling unused Cranelift optimizer and verifier code
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }

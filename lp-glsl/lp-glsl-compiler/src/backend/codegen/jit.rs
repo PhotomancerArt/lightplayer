@@ -44,30 +44,37 @@ pub fn build_jit_executable(
                 let error_str = format!("{e}");
                 let error_msg = if error_str.contains("Verifier errors") {
                     // It's a verifier error - verify the function again to get detailed errors
-                    use cranelift_codegen::verifier::verify_function;
-                    let module_ref = gl_module.module_internal();
-                    let isa = module_ref.isa();
-
-                    if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
-                        // Format verifier errors with the function IR for context
-                        #[cfg(feature = "std")]
-                        {
-                            use cranelift_codegen::print_errors::pretty_verifier_error;
-                            format!(
-                                "Failed to define function '{}': Verifier errors\n\n{}",
-                                name,
-                                pretty_verifier_error(&ctx.func, None, verifier_errors)
-                            )
+                    #[cfg(feature = "cranelift-verifier")]
+                    {
+                        let module_ref = gl_module.module_internal();
+                        let isa = module_ref.isa();
+                        use cranelift_codegen::verify_function;
+                        if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
+                            // Format verifier errors with the function IR for context
+                            #[cfg(feature = "std")]
+                            {
+                                use cranelift_codegen::print_errors::pretty_verifier_error;
+                                format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    name,
+                                    pretty_verifier_error(&ctx.func, None, verifier_errors)
+                                )
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    name, verifier_errors
+                                )
+                            }
+                        } else {
+                            // Fallback if verification somehow succeeds
+                            format!("Failed to define function '{name}': {e}")
                         }
-                        #[cfg(not(feature = "std"))]
-                        {
-                            format!(
-                                "Failed to define function '{}': Verifier errors\n\n{}",
-                                name, verifier_errors
-                            )
-                        }
-                    } else {
-                        // Fallback if verification somehow succeeds
+                    }
+                    #[cfg(not(feature = "cranelift-verifier"))]
+                    {
+                        // Verifier is disabled - just return the original error
                         format!("Failed to define function '{name}': {e}")
                     }
                 } else {
@@ -198,30 +205,37 @@ pub fn build_jit_executable_memory_optimized(
                 let error_str = format!("{e}");
                 let error_msg = if error_str.contains("Verifier errors") {
                     // It's a verifier error - verify the function again to get detailed errors
-                    use cranelift_codegen::verifier::verify_function;
-                    let module_ref = gl_module.module_internal();
-                    let isa = module_ref.isa();
-
-                    if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
-                        // Format verifier errors with the function IR for context
-                        #[cfg(feature = "std")]
-                        {
-                            use cranelift_codegen::print_errors::pretty_verifier_error;
-                            format!(
-                                "Failed to define function '{}': Verifier errors\n\n{}",
-                                name,
-                                pretty_verifier_error(&ctx.func, None, verifier_errors)
-                            )
+                    #[cfg(feature = "cranelift-verifier")]
+                    {
+                        let module_ref = gl_module.module_internal();
+                        let isa = module_ref.isa();
+                        use cranelift_codegen::verify_function;
+                        if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
+                            // Format verifier errors with the function IR for context
+                            #[cfg(feature = "std")]
+                            {
+                                use cranelift_codegen::print_errors::pretty_verifier_error;
+                                format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    name,
+                                    pretty_verifier_error(&ctx.func, None, verifier_errors)
+                                )
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    name, verifier_errors
+                                )
+                            }
+                        } else {
+                            // Fallback if verification somehow succeeds
+                            format!("Failed to define function '{name}': {e}")
                         }
-                        #[cfg(not(feature = "std"))]
-                        {
-                            format!(
-                                "Failed to define function '{}': Verifier errors\n\n{}",
-                                name, verifier_errors
-                            )
-                        }
-                    } else {
-                        // Fallback if verification somehow succeeds
+                    }
+                    #[cfg(not(feature = "cranelift-verifier"))]
+                    {
+                        // Verifier is disabled - just return the original error
                         format!("Failed to define function '{name}': {e}")
                     }
                 } else {
