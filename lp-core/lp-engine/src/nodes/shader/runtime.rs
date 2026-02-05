@@ -7,8 +7,8 @@ use alloc::{
     string::{String, ToString},
 };
 use log;
-use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_compiler::glsl_jit;
+use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
     LpPathBuf, NodeHandle,
@@ -321,10 +321,7 @@ impl ShaderRuntime {
         let time_q32 = (time * 65536.0) as i32;
 
         // Convert output_size to Q32 format once (reused for all pixels)
-        let output_size_q32 = [
-            (width as i32) * Q32_SCALE,
-            (height as i32) * Q32_SCALE,
-        ];
+        let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
 
         // Result buffer for vec4 return (4 i32s = 16 bytes)
         let mut result_buffer = [0u8; 16];
@@ -333,19 +330,16 @@ impl ShaderRuntime {
         for y in 0..height {
             for x in 0..width {
                 // Convert frag_coord to Q32 format
-                let frag_coord_q32 = [
-                    (x as i32) * Q32_SCALE,
-                    (y as i32) * Q32_SCALE,
-                ];
+                let frag_coord_q32 = [(x as i32) * Q32_SCALE, (y as i32) * Q32_SCALE];
 
                 // Prepare JIT call arguments (i32 values as u64)
                 // vec2 expands to 2 i32s each, so we have 5 i32 parameters total
                 let jit_args = [
                     frag_coord_q32[0] as u64,  // fragCoord.x
                     frag_coord_q32[1] as u64,  // fragCoord.y
-                    output_size_q32[0] as u64,  // outputSize.x
-                    output_size_q32[1] as u64,  // outputSize.y
-                    time_q32 as u64,            // time
+                    output_size_q32[0] as u64, // outputSize.x
+                    output_size_q32[1] as u64, // outputSize.y
+                    time_q32 as u64,           // time
                 ];
 
                 // Call the shader function with StructReturn
