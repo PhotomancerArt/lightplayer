@@ -168,6 +168,22 @@ opt-level = "z"
 codegen-units = 1
 # Note: lto is inherited from workspace [profile.release]
 
+# Hot-path crates: optimize for speed instead of size
+# These crates are in the critical rendering path and benefit from speed optimizations
+[profile.release.package.lp-engine]
+# Optimize for speed (hot path in rendering loop)
+opt-level = 3
+# Keep multiple codegen units for faster compilation and better parallelization
+codegen-units = 4
+# Note: lto is inherited from workspace [profile.release]
+
+[profile.release.package.lp-glsl-builtins]
+# Optimize for speed (hot path in shader execution)
+opt-level = 3
+# Keep multiple codegen units for faster compilation and better parallelization
+codegen-units = 4
+# Note: lto is inherited from workspace [profile.release]
+
 # Patch esp-println to use our fork with custom writer support
 [patch.crates-io]
 esp-println = { path = "lp-fw/esp-println-fork" }
