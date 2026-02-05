@@ -14,6 +14,9 @@ use lp_shared::transport::ServerTransport;
 use crate::serial::SharedSerialIo;
 use crate::time::Esp32TimeProvider;
 
+/// FPS logging interval (log every N frames)
+const FPS_LOG_INTERVAL: u32 = 60;
+
 /// Run the server loop
 ///
 /// This is the main async loop that processes incoming messages and sends responses.
@@ -25,6 +28,8 @@ pub async fn run_server_loop(
     time_provider: Esp32TimeProvider,
 ) -> ! {
     let mut last_tick = time_provider.now_ms();
+    let mut frame_count = 0u32;
+    let mut fps_last_log_time = time_provider.now_ms();
 
     loop {
         let frame_start = time_provider.now_ms();
@@ -72,6 +77,23 @@ pub async fn run_server_loop(
         }
 
         last_tick = frame_start;
+        frame_count += 1;
+
+        // Log FPS periodically
+        if frame_count % FPS_LOG_INTERVAL == 0 {
+            let current_time = time_provider.now_ms();
+            let elapsed_ms = current_time.saturating_sub(fps_last_log_time);
+            if elapsed_ms > 0 {
+                let fps = (FPS_LOG_INTERVAL as u64 * 1000) / elapsed_ms;
+                log::info!(
+                    "FPS: {} (frame_count: {}, elapsed: {}ms)",
+                    fps,
+                    frame_count,
+                    elapsed_ms
+                );
+                fps_last_log_time = current_time;
+            }
+        }
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
