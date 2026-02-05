@@ -2471,7 +2471,6 @@ dependencies = [
  "lp-model",
  "lp-server",
  "lp-shared",
- "serde_json",
 ]
 
 [[package]]

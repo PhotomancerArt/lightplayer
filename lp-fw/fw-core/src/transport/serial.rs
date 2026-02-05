@@ -10,7 +10,7 @@ use core::str;
 
 use crate::serial::SerialIo;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{json, ClientMessage, ServerMessage, TransportError};
 use lp_shared::transport::ServerTransport;
 
 /// Serial transport implementation
@@ -37,7 +37,7 @@ impl<Io: SerialIo> SerialTransport<Io> {
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         // Serialize to JSON
-        let json = serde_json::to_string(&msg).map_err(|e| {
+        let json = json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
 
@@ -121,7 +121,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             };
 
             // Parse JSON
-            match serde_json::from_str::<ClientMessage>(message_str) {
+            match json::from_str::<ClientMessage>(message_str) {
                 Ok(msg) => {
                     log::debug!(
                         "SerialTransport: Received message id={} ({} bytes): {}",
@@ -278,7 +278,7 @@ mod tests {
             id: 1,
             msg: ClientRequest::ListLoadedProjects,
         };
-        let json = serde_json::to_string(&client_msg).unwrap();
+        let json = json::to_string(&client_msg).unwrap();
         let mut msg_bytes = json.as_bytes().to_vec();
         msg_bytes.push(b'\n');
 
@@ -303,7 +303,7 @@ mod tests {
             id: 1,
             msg: ClientRequest::ListLoadedProjects,
         };
-        let json = serde_json::to_string(&client_msg).unwrap();
+        let json = json::to_string(&client_msg).unwrap();
         let partial = &json.as_bytes()[..json.len() / 2];
 
         transport.io.push_read(partial);
@@ -325,8 +325,8 @@ mod tests {
             id: 2,
             msg: ClientRequest::ListAvailableProjects,
         };
-        let json1 = serde_json::to_string(&msg1).unwrap();
-        let json2 = serde_json::to_string(&msg2).unwrap();
+        let json1 = json::to_string(&msg1).unwrap();
+        let json2 = json::to_string(&msg2).unwrap();
         let mut combined = json1.as_bytes().to_vec();
         combined.push(b'\n');
         combined.extend_from_slice(json2.as_bytes());

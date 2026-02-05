@@ -22,9 +22,6 @@ server = [
 test_rmt = []  # Test RMT driver with simple patterns
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
-test_app = [
-    "lp-model",
-]  # Minimal test app (uses lp_model::json wrapper)
 
 [dependencies]
 embassy-executor = "0.9.1"
@@ -46,7 +43,7 @@ lp-engine = { path = "../../lp-core/lp-engine", default-features = false, option
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
-# Dependencies for test_app feature (minimal GLSL compilation test)
+# Dependencies for optional GLSL compilation features
 lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false, features = ["core"], optional = true }
 lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }

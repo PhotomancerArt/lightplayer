@@ -7,54 +7,33 @@
 #![no_std]
 #![no_main]
 
-#[cfg(not(feature = "test_app"))]
 extern crate alloc;
 
-#[cfg(not(feature = "test_app"))]
 mod board;
 mod jit_fns;
-#[cfg(not(feature = "test_app"))]
 mod logger;
-#[cfg(not(feature = "test_app"))]
 mod output;
-#[cfg(not(feature = "test_app"))]
 mod serial;
-#[cfg(not(feature = "test_app"))]
 mod server_loop;
-#[cfg(not(feature = "test_app"))]
 mod time;
 
-#[cfg(not(feature = "test_app"))]
 use alloc::{boxed::Box, rc::Rc};
-#[cfg(not(feature = "test_app"))]
 use core::cell::RefCell;
 
-#[cfg(not(feature = "test_app"))]
 use board::{init_board, start_runtime};
 use esp_backtrace as _;
-#[cfg(not(feature = "test_app"))]
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-#[cfg(not(feature = "test_app"))]
 use fw_core::transport::SerialTransport;
-#[cfg(not(feature = "test_app"))]
 #[macro_use]
 extern crate log;
-#[cfg(not(feature = "test_app"))]
 use lp_model::path::AsLpPath;
-#[cfg(not(feature = "test_app"))]
 use lp_server::LpServer;
-#[cfg(not(feature = "test_app"))]
 use lp_shared::fs::LpFsMemory;
-#[cfg(not(feature = "test_app"))]
 use lp_shared::output::OutputProvider;
 
-#[cfg(not(feature = "test_app"))]
 use output::Esp32OutputProvider;
-#[cfg(not(feature = "test_app"))]
 use serial::{Esp32UsbSerialIo, SharedSerialIo};
-#[cfg(not(feature = "test_app"))]
 use server_loop::run_server_loop;
-#[cfg(not(feature = "test_app"))]
 use time::Esp32TimeProvider;
 
 #[cfg(feature = "test_rmt")]
@@ -72,10 +51,6 @@ mod tests {
     pub mod test_usb;
 }
 
-#[cfg(feature = "test_app")]
-mod tests {
-    pub mod test_app;
-}
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -99,17 +74,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
         run_usb_test().await;
     }
 
-    #[cfg(feature = "test_app")]
-    {
-        use tests::test_app::run_test_app;
-        run_test_app().await;
-    }
-
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_gpio",
-        feature = "test_usb",
-        feature = "test_app"
+        feature = "test_usb"
     )))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
