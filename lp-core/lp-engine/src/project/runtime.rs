@@ -166,6 +166,8 @@ impl ProjectRuntime {
                             },
                             color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                             transform: [[0.0; 4]; 4],
+                            brightness: None,
+                            gamma_correction: None,
                         }),
                     };
 
@@ -1169,6 +1171,8 @@ impl ProjectRuntime {
                                             },
                                         color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
+                                        brightness: None,
+                                        gamma_correction: None,
                                     })
                                 }
                             } else {
@@ -1181,6 +1185,8 @@ impl ProjectRuntime {
                                     },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
+                                    brightness: None,
+                                    gamma_correction: None,
                                 })
                             }
                         } else {
@@ -1193,6 +1199,8 @@ impl ProjectRuntime {
                                 },
                                 color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                 transform: [[0.0; 4]; 4],
+                                brightness: None,
+                                gamma_correction: None,
                             })
                         }
                     }

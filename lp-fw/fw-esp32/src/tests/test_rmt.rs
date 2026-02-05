@@ -24,10 +24,9 @@ pub async fn run_rmt_test() -> ! {
     let (sw_int, timg0, rmt_peripheral, usb_device, gpio18) = init_board();
     start_runtime(timg0, sw_int);
 
-    // Initialize USB-serial for logging
+    // Initialize USB-serial for logging (synchronous mode)
     let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);
-    let usb_serial_async = usb_serial.into_async();
-    let serial_io = Esp32UsbSerialIo::new(usb_serial_async);
+    let serial_io = Esp32UsbSerialIo::new(usb_serial);
     let serial_io_shared = Rc::new(RefCell::new(serial_io));
 
     // Initialize logger using static function approach (like main.rs)

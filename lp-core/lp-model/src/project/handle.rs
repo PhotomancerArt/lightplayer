@@ -20,4 +20,9 @@ impl ProjectHandle {
     pub fn id(&self) -> u32 {
         self.0
     }
+
+    /// Get the underlying ID as i32
+    pub fn as_i32(&self) -> i32 {
+        self.0 as i32
+    }
 }

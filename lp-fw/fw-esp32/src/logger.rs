@@ -7,8 +7,25 @@ extern crate alloc;
 
 use alloc::format;
 use core::sync::atomic::{AtomicPtr, Ordering};
-use embedded_io_async::Write;
+use fw_core::serial::SerialIo;
 use log::{Level, LevelFilter, Log, Metadata, Record};
+
+const LOG_LEVEL: LevelFilter = LevelFilter::Info;
+
+/// Initialize the ESP32 logger with a write function
+///
+/// Call this once at startup after USB serial is initialized.
+/// The write function should write to your USB serial instance.
+pub fn init(write_fn: LogWriteFn) {
+    unsafe {
+        set_log_write_fn(write_fn);
+    }
+
+    let logger = alloc::boxed::Box::new(Esp32Logger::new(LevelFilter::Debug));
+    log::set_logger(alloc::boxed::Box::leak(logger))
+        .map(|()| log::set_max_level(LOG_LEVEL))
+        .expect("Failed to set ESP32 logger");
+}
 
 /// Function type for writing log messages to USB serial
 pub type LogWriteFn = fn(&str);
@@ -58,6 +75,13 @@ impl Log for Esp32Logger {
             return;
         }
 
+        // Filter out verbose esp_rtos debug logs
+        if let Some(module_path) = record.module_path() {
+            if module_path.starts_with("esp_rtos") {
+                return;
+            }
+        }
+
         let module_path = record.module_path().unwrap_or("unknown");
         let level_str = match record.level() {
             Level::Error => "ERROR",
@@ -94,10 +118,8 @@ pub fn set_log_serial(
 
 /// Write function for our logger to use
 ///
-/// This function is called synchronously from the log crate, but needs to write
-/// to async USB serial. We use `embassy_futures::block_on` which should work
-/// even when called from async contexts in Embassy, as it uses the current executor.
-/// However, to avoid potential issues, we use a very short timeout and handle errors gracefully.
+/// This function is called synchronously from the log crate and writes
+/// synchronously to USB serial.
 pub fn log_write_bytes(msg: &str) {
     let serial_ptr = LOG_SERIAL.load(Ordering::Acquire);
     if !serial_ptr.is_null() {
@@ -106,42 +128,10 @@ pub fn log_write_bytes(msg: &str) {
                 as *const alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>)
         };
         if let Ok(mut io) = serial_io.try_borrow_mut() {
-            // Use direct async operations with block_on
-            // In Embassy, block_on should work even from async contexts as it uses the current executor
-            let (_, tx) = io.get_async_parts();
-            let _ = embassy_futures::block_on(async {
-                // Use select with timeout to avoid hanging if USB serial is not ready
-                use embassy_futures::select;
-                use embassy_time::{Duration, Timer};
-                
-                let write_fut = async {
-                    let _ = Write::write(tx, msg.as_bytes()).await;
-                    let _ = Write::flush(tx).await;
-                };
-                
-                // Use a short timeout to avoid hanging
-                let _ = select::select(
-                    Timer::after(Duration::from_millis(10)),
-                    write_fut,
-                ).await;
-            });
+            // Use synchronous write directly
+            let _ = io.write(msg.as_bytes());
         }
     }
-}
-
-/// Initialize the ESP32 logger with a write function
-///
-/// Call this once at startup after USB serial is initialized.
-/// The write function should write to your USB serial instance.
-pub fn init(write_fn: LogWriteFn) {
-    unsafe {
-        set_log_write_fn(write_fn);
-    }
-
-    let logger = alloc::boxed::Box::new(Esp32Logger::new(LevelFilter::Debug));
-    log::set_logger(alloc::boxed::Box::leak(logger))
-        .map(|()| log::set_max_level(LevelFilter::Debug))
-        .expect("Failed to set ESP32 logger");
 }
 
 /// Write a log message directly (for use from C code, e.g., JIT host functions)

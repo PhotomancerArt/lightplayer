@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
     MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
     generate_mapping_points,
@@ -24,6 +25,10 @@ pub struct FixtureRuntime {
     precomputed_mapping: Option<PrecomputedMapping>,
     /// Last sampled lamp colors (RGB per lamp, ordered by channel index)
     lamp_colors: Vec<u8>,
+    /// Brightness level (0-255), defaults to 64
+    brightness: u8,
+    /// Enable gamma correction, defaults to true
+    gamma_correction: bool,
 }
 
 impl FixtureRuntime {
@@ -44,6 +49,8 @@ impl FixtureRuntime {
             texture_height: None,
             precomputed_mapping: None,
             lamp_colors: Vec::new(),
+            brightness: 64,
+            gamma_correction: true,
         }
     }
 
@@ -155,6 +162,8 @@ impl NodeRuntime for FixtureRuntime {
         // Store config values
         self.color_order = config.color_order;
         self.transform = config.transform;
+        self.brightness = config.brightness.unwrap_or(64);
+        self.gamma_correction = config.gamma_correction.unwrap_or(true);
 
         // Mapping will be generated in render() when texture is available
         // Texture dimensions are not available in init() (texture is lazy-loaded)
@@ -226,9 +235,21 @@ impl NodeRuntime for FixtureRuntime {
         let universe = 0u32;
         let channel_offset = 0u32;
         for channel in 0..=max_channel as usize {
-            let r = ch_values_r[channel].to_u8_clamped();
-            let g = ch_values_g[channel].to_u8_clamped();
-            let b = ch_values_b[channel].to_u8_clamped();
+            let mut r = ch_values_r[channel].to_u8_clamped();
+            let mut g = ch_values_g[channel].to_u8_clamped();
+            let mut b = ch_values_b[channel].to_u8_clamped();
+
+            // Apply brightness correction first
+            r = ((r as u16 * self.brightness as u16) / 255) as u8;
+            g = ((g as u16 * self.brightness as u16) / 255) as u8;
+            b = ((b as u16 * self.brightness as u16) / 255) as u8;
+
+            // Apply gamma correction if enabled
+            if self.gamma_correction {
+                r = apply_gamma(r);
+                g = apply_gamma(g);
+                b = apply_gamma(b);
+            }
 
             let idx = channel * 3;
             self.lamp_colors[idx] = r;

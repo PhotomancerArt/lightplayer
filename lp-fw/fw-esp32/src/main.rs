@@ -11,6 +11,8 @@ extern crate alloc;
 #[macro_use]
 extern crate log;
 
+use esp_backtrace as _; // Import to activate panic handler
+
 mod board;
 mod demo_project;
 mod jit_fns;
@@ -20,19 +22,19 @@ mod serial;
 mod server_loop;
 mod time;
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc, string::String};
 use core::cell::RefCell;
 
 use board::{init_board, start_runtime};
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use fw_core::transport::SerialTransport;
-use lp_model::path::AsLpPath;
+use fw_core::transport::FakeTransport;
+use lp_model::{path::AsLpPath, ClientMessage, ClientRequest};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
 use output::Esp32OutputProvider;
-use serial::{Esp32UsbSerialIo, SharedSerialIo};
+use serial::Esp32UsbSerialIo;
 use server_loop::run_server_loop;
 use time::Esp32TimeProvider;
 
@@ -77,19 +79,19 @@ async fn main(_spawner: embassy_executor::Spawner) {
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18) = init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
 
-        // Initialize USB-serial - this will be shared between logging and transport
-        esp_println::println!("[INIT] Creating USB serial...");
+        // Initialize USB-serial for logging (not used for transport)
+        // Use synchronous mode for simplicity
+        esp_println::println!("[INIT] Creating USB serial for logging...");
         let usb_serial = UsbSerialJtag::new(usb_device);
-        let usb_serial_async = usb_serial.into_async();
-        let serial_io = Esp32UsbSerialIo::new(usb_serial_async);
+        let serial_io = Esp32UsbSerialIo::new(usb_serial);
         esp_println::println!("[INIT] USB serial created");
 
-        // Share serial_io between logging and transport using Rc<RefCell<>>
+        // Share serial_io for logging using Rc<RefCell<>>
         let serial_io_shared = Rc::new(RefCell::new(serial_io));
 
         // Store serial_io in logger module for write function
@@ -111,34 +113,44 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
         debug!("esp-println configured");
 
-        // Give USB serial a moment to initialize before we start logging
-        // Note: Reduced delay as USB serial should be ready immediately
-        debug!("USB serial should be ready now");
-
         info!("fw-esp32 starting...");
-        debug!("Board initialized, USB serial ready");
+        debug!("Board initialized, USB serial ready for logging");
 
-        // Create transport using a SharedSerialIo wrapper that uses the shared instance
-        debug!("Creating serial transport...");
-        let shared_serial_io = SharedSerialIo::new(serial_io_shared);
-        let transport = SerialTransport::new(shared_serial_io);
-        debug!("Serial transport created");
+        // Create fake transport and queue LoadProject message
+        debug!("Creating fake transport...");
+        let mut transport = FakeTransport::new();
+        
+        // Queue a LoadProject message to auto-load the demo project
+        let load_msg = ClientMessage {
+            id: 1,
+            msg: ClientRequest::LoadProject {
+                path: String::from("test-project"),
+            },
+        };
+        transport.queue_message(load_msg);
+        debug!("Fake transport created with LoadProject message queued");
 
         // Initialize RMT peripheral for output
         // Use 80MHz clock rate (standard for ESP32-C6)
-        // Note: RMT is initialized but not yet stored in OutputProvider
-        // TODO: Store RMT in OutputProvider for channel initialization in open()
-        // For now, OutputProvider::open() will work but RMT channels won't be initialized
-        // This will be fixed when we implement GPIO pin conversion from u32 to GPIO pin type
         debug!("Initializing RMT peripheral at 80MHz...");
-        let _rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
+        let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
             .expect("Failed to initialize RMT");
         debug!("RMT peripheral initialized");
 
         // Initialize output provider
         debug!("Creating output provider...");
+        let output_provider = Esp32OutputProvider::new();
+        
+        // Initialize RMT channel with GPIO18 (hardcoded for now)
+        // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
+        const NUM_LEDS: usize = 256;
+        debug!("Initializing RMT channel with GPIO18, {} LEDs...", NUM_LEDS);
+        Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
+            .expect("Failed to initialize RMT channel");
+        debug!("RMT channel initialized");
+        
         let output_provider: Rc<RefCell<dyn OutputProvider>> =
-            Rc::new(RefCell::new(Esp32OutputProvider::new()));
+            Rc::new(RefCell::new(output_provider));
         debug!("Output provider created");
 
         // Create filesystem (in-memory for now)

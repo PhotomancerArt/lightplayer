@@ -306,6 +306,8 @@ impl FixtureBuilder {
             mapping: self.mapping,
             color_order: self.color_order,
             transform: self.transform,
+            brightness: None,
+            gamma_correction: None,
         };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize fixture config");

@@ -15,6 +15,20 @@ pub struct FixtureConfig {
     pub color_order: ColorOrder,
     /// Transform matrix (4x4)
     pub transform: [[f32; 4]; 4], // todo!() - will be proper matrix type later
+    /// Brightness level (0-255), defaults to 64 if not specified
+    #[serde(default = "default_brightness")]
+    pub brightness: Option<u8>,
+    /// Enable gamma correction, defaults to true if not specified
+    #[serde(default = "default_gamma_correction")]
+    pub gamma_correction: Option<bool>,
+}
+
+fn default_brightness() -> Option<u8> {
+    Some(64)
+}
+
+fn default_gamma_correction() -> Option<bool> {
+    Some(true)
 }
 
 impl NodeConfig for FixtureConfig {
@@ -127,6 +141,8 @@ mod tests {
             },
             color_order: ColorOrder::Rgb,
             transform: [[1.0; 4]; 4],
+            brightness: None,
+            gamma_correction: None,
         };
         assert_eq!(config.kind(), NodeKind::Fixture);
     }

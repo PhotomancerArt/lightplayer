@@ -5,13 +5,11 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use fw_core::transport::SerialTransport;
 use lp_model::Message;
 use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
 
-use crate::serial::SharedSerialIo;
 use crate::time::Esp32TimeProvider;
 
 /// FPS logging interval (log every N frames)
@@ -22,9 +20,9 @@ const FPS_LOG_INTERVAL: u32 = 60;
 /// This is the main async loop that processes incoming messages and sends responses.
 /// Runs at ~60 FPS to maintain consistent frame timing.
 /// Yields control back to Embassy runtime between iterations.
-pub async fn run_server_loop(
+pub async fn run_server_loop<T: ServerTransport>(
     mut server: LpServer,
-    mut transport: SerialTransport<SharedSerialIo<crate::serial::Esp32UsbSerialIo>>,
+    mut transport: T,
     time_provider: Esp32TimeProvider,
 ) -> ! {
     let mut last_tick = time_provider.now_ms();

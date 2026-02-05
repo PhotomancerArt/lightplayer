@@ -53,6 +53,7 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     }
   },
   "color_order": "Rgb",
+  "brightness": 255,
   "transform": [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -66,8 +67,8 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     fs.write_file_mut(
         "/projects/test-project/src/main.texture/node.json".as_path(),
         br#"{
-  "width": 32,
-  "height": 32
+  "width": 12,
+  "height": 12
 }"#,
     )?;
 
@@ -166,9 +167,10 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
     )?;
 
     // Output node
+    // Note: Using pin 18 (GPIO18) which is hardcoded in Esp32OutputProvider
     fs.write_file_mut(
         "/projects/test-project/src/strip.output/node.json".as_path(),
-        br#"{"GpioStrip": {"pin": 4}}"#,
+        br#"{"GpioStrip": {"pin": 18}}"#,
     )?;
 
     Ok(())
