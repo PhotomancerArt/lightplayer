@@ -4,8 +4,8 @@
 //! populating the memory filesystem with example projects.
 
 use lp_model::AsLpPath;
-use lp_shared::FsError;
 use lp_shared::fs::LpFsMemory;
+use lp_shared::FsError;
 
 /// Populate the memory filesystem with the basic example project
 ///
@@ -53,7 +53,7 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     }
   },
   "color_order": "Rgb",
-  "brightness": 255,
+  "brightness": 128,
   "transform": [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -92,7 +92,7 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     vec2 scaledCoord = center + dir * scale;
 
     return prsd_demo(scaledCoord, time);
-    // return fbm_demo(scaledCoord, time);
+    //return fbm_demo(scaledCoord, time);
     //return worley_demo(scaledCoord, time);
 }
 
