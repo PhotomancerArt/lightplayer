@@ -55,9 +55,26 @@ pub fn load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error> {
         details: format!("Failed to read: {e:?}"),
     })?;
 
+    // Try to get a string representation of the data for error messages
+    let data_str = core::str::from_utf8(&data)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| format!("<invalid UTF-8, {} bytes>", data.len()));
+
+    // Show hex dump of first 100 bytes for debugging
+    let hex_preview = if data.len() > 100 {
+        format!("{:02x?}", &data[..100])
+    } else {
+        format!("{:02x?}", data)
+    };
+
     let config: ProjectConfig = lp_model::json::from_slice(&data).map_err(|e| Error::Parse {
         file: path.to_string(),
-        error: format!("{e}"),
+        error: format!(
+            "{e}\n\nActual project.json content ({} bytes):\n{}\n\nHex dump (first 100 bytes):\n{}",
+            data.len(),
+            data_str,
+            hex_preview
+        ),
     })?;
 
     Ok(config)
