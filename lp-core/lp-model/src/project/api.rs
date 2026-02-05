@@ -469,8 +469,8 @@ mod tests {
                 format: "RGBA8".to_string(),
             }),
         };
-        let json = serde_json::to_string(&detail).unwrap();
-        let deserialized: SerializableNodeDetail = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&detail).unwrap();
+        let deserialized: SerializableNodeDetail = crate::json::from_str(&json).unwrap();
         match deserialized {
             SerializableNodeDetail::Texture {
                 path,
@@ -514,8 +514,8 @@ mod tests {
             theoretical_fps: None,
         };
 
-        let json = serde_json::to_string(&response).unwrap();
-        let deserialized: SerializableProjectResponse = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&response).unwrap();
+        let deserialized: SerializableProjectResponse = crate::json::from_str(&json).unwrap();
         match deserialized {
             SerializableProjectResponse::GetChanges {
                 current_frame,

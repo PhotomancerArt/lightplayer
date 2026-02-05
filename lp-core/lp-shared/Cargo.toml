@@ -14,7 +14,6 @@ std = []
 log = { workspace = true, default-features = false }
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 lp-model = { path = "../lp-model", default-features = false }
 
 [dev-dependencies]

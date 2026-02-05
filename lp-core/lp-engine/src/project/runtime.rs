@@ -18,8 +18,6 @@ use lp_model::{
     },
 };
 use lp_shared::fs::{LpFs, fs_event::FsChange};
-#[cfg(feature = "std")]
-use serde_json;
 
 /// Project runtime - manages nodes and rendering
 pub struct ProjectRuntime {
@@ -234,11 +232,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::texture::TextureConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse texture config: {e}"),
-                            })?,
+                        lp_model::json::from_slice::<lp_model::nodes::texture::TextureConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse texture config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -259,11 +259,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::fixture::FixtureConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse fixture config: {e}"),
-                            })?,
+                        lp_model::json::from_slice::<lp_model::nodes::fixture::FixtureConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse fixture config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -284,7 +286,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::shader::ShaderConfig>(&data)
+                        lp_model::json::from_slice::<lp_model::nodes::shader::ShaderConfig>(&data)
                             .map_err(|e| Error::Parse {
                                 file: node_json_path.as_str().to_string(),
                                 error: format!("Failed to parse shader config: {e}"),
@@ -309,7 +311,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::output::OutputConfig>(&data)
+                        lp_model::json::from_slice::<lp_model::nodes::output::OutputConfig>(&data)
                             .map_err(|e| Error::Parse {
                                 file: node_json_path.as_str().to_string(),
                                 error: format!("Failed to parse output config: {e}"),

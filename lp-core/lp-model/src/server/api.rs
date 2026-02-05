@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "requestType", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum ClientMsgBody {
     /// Filesystem operation request
     Filesystem(FsRequest),
@@ -26,7 +26,7 @@ pub enum ClientMsgBody {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "responseType", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum ServerMsgBody {
     /// Filesystem operation response
     Filesystem(FsResponse),

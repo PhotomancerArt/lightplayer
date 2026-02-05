@@ -7,6 +7,7 @@
 #![no_std]
 #![no_main]
 
+#[cfg(not(feature = "test_app"))]
 extern crate alloc;
 
 #[cfg(not(feature = "test_app"))]
@@ -39,7 +40,7 @@ use fw_core::transport::SerialTransport;
 #[macro_use]
 extern crate log;
 #[cfg(not(feature = "test_app"))]
-use lp_model::AsLpPath;
+use lp_model::path::AsLpPath;
 #[cfg(not(feature = "test_app"))]
 use lp_server::LpServer;
 #[cfg(not(feature = "test_app"))]
@@ -78,18 +79,6 @@ mod tests {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// Force 8-byte alignment for .rodata section to prevent bootloader from
-// splitting .rodata_desc and .rodata into separate MAP segments.
-// The ESP32 bootloader expects at most 2 MAP segments (DROM/IROM), but with
-// 4-byte alignment, the conversion tool creates 3 segments.
-// By placing an 8-byte aligned constant in .rodata, we ensure the section
-// has 8-byte alignment, allowing .rodata_desc and .rodata to merge.
-#[repr(align(8))]
-struct Align8(u64);
-
-#[used]
-static _RODATA_ALIGN_FORCE: Align8 = Align8(0);
-
 #[esp_rtos::main]
 async fn main(_spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_gpio")]
@@ -116,7 +105,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
         run_test_app().await;
     }
 
-    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb", feature = "test_app")))]
+    #[cfg(not(any(
+        feature = "test_rmt",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_app"
+    )))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18) = init_board();

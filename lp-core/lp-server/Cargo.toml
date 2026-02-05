@@ -22,7 +22,6 @@ std = [
 lp-engine = { path = "../lp-engine", default-features = false }
 lp-model = { path = "../lp-model", default-features = false }
 lp-shared = { path = "../lp-shared", default-features = false }
-serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 

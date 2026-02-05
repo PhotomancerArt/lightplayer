@@ -11,7 +11,6 @@ use lp_model::nodes::{
 };
 use lp_model::path::LpPathBuf;
 use lp_model::{AsLpPath, AsLpPathBuf};
-use serde_json;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -195,7 +194,7 @@ impl TextureBuilder {
             height: self.height,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize texture config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize texture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -233,7 +232,7 @@ impl ShaderBuilder {
             render_order: self.render_order,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize shader config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize shader config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -264,7 +263,7 @@ impl OutputBuilder {
 
         let config = OutputConfig::GpioStrip { pin: self.pin };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize output config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -309,7 +308,7 @@ impl FixtureBuilder {
             transform: self.transform,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize fixture config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize fixture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())

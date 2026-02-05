@@ -3,7 +3,9 @@
 //! This module contains low-level functions for writing LED data to the RMT buffer
 //! in the format required by WS2811/WS2812 LEDs.
 
-use crate::output::rmt::config::{BITS_PER_LED, HALF_BUFFER_LEDS, HALF_BUFFER_SIZE, PULSE_LATCH, PULSE_ONE, PULSE_ZERO};
+use crate::output::rmt::config::{
+    BITS_PER_LED, HALF_BUFFER_LEDS, HALF_BUFFER_SIZE, PULSE_LATCH, PULSE_ONE, PULSE_ZERO,
+};
 use crate::output::rmt::state::CHANNEL_STATE;
 use core::sync::atomic::Ordering;
 

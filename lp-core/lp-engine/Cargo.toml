@@ -20,7 +20,6 @@ std = [
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 hashbrown = { workspace = true }
 lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }

@@ -3,6 +3,7 @@
 //! These functions are called by JIT-compiled GLSL code when using host functions
 //! like __host_log. They must be provided by the firmware binary.
 
+#[cfg(not(feature = "test_app"))]
 extern crate alloc;
 
 #[cfg(not(feature = "test_app"))]

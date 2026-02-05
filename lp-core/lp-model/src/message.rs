@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Messages are wrapped in this enum to distinguish between client and server messages.
 /// Note: Cannot derive Clone because ServerMessage contains non-cloneable types.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "direction", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Message {
     /// Message from client to server
     Client(ClientMessage),
@@ -47,7 +47,7 @@ pub struct ServerMessage {
 
 /// Client request types
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "requestType", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum ClientRequest {
     /// Filesystem operation request
     Filesystem(FsRequest),
@@ -82,9 +82,9 @@ mod tests {
             }),
         };
         let message = Message::Client(client_msg);
-        let json = serde_json::to_string(&message).unwrap();
+        let json = crate::json::to_string(&message).unwrap();
         // Verify round-trip serialization
-        let deserialized: Message = serde_json::from_str(&json).unwrap();
+        let deserialized: Message = crate::json::from_str(&json).unwrap();
         match deserialized {
             Message::Client(ClientMessage { id, msg }) => {
                 assert_eq!(id, 1);
@@ -111,9 +111,9 @@ mod tests {
             }),
         };
         let message = Message::Server(server_msg);
-        let json = serde_json::to_string(&message).unwrap();
+        let json = crate::json::to_string(&message).unwrap();
         // Verify round-trip serialization
-        let deserialized: Message = serde_json::from_str(&json).unwrap();
+        let deserialized: Message = crate::json::from_str(&json).unwrap();
         match deserialized {
             Message::Server(ServerMessage { id, msg }) => {
                 assert_eq!(id, 1);
@@ -136,9 +136,9 @@ mod tests {
             path: "/test.txt".as_path_buf(),
             data: b"hello".to_vec(),
         });
-        let json = serde_json::to_string(&req).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
         // Verify round-trip serialization
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::Filesystem(FsRequest::Write { path, data }) => {
                 assert_eq!(path.as_str(), "/test.txt");
@@ -153,8 +153,8 @@ mod tests {
         let req = ClientRequest::LoadProject {
             path: "projects/my-project".to_string(),
         };
-        let json = serde_json::to_string(&req).unwrap();
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::LoadProject { path } => {
                 assert_eq!(path, "projects/my-project");
@@ -168,8 +168,8 @@ mod tests {
         let req = ClientRequest::UnloadProject {
             handle: ProjectHandle::new(1),
         };
-        let json = serde_json::to_string(&req).unwrap();
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::UnloadProject { handle } => {
                 assert_eq!(handle.id(), 1);
@@ -189,8 +189,8 @@ mod tests {
                 detail_specifier: ApiNodeSpecifier::All,
             },
         };
-        let json = serde_json::to_string(&req).unwrap();
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ProjectRequest { handle, request } => {
                 assert_eq!(handle.id(), 1);
@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn test_list_available_projects_request() {
         let req = ClientRequest::ListAvailableProjects;
-        let json = serde_json::to_string(&req).unwrap();
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ListAvailableProjects => {}
             _ => panic!("Wrong request type"),
@@ -222,8 +222,8 @@ mod tests {
     #[test]
     fn test_list_loaded_projects_request() {
         let req = ClientRequest::ListLoadedProjects;
-        let json = serde_json::to_string(&req).unwrap();
-        let deserialized: ClientRequest = serde_json::from_str(&json).unwrap();
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ListLoadedProjects => {}
             _ => panic!("Wrong request type"),

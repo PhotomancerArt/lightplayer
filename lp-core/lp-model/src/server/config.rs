@@ -34,14 +34,14 @@ mod tests {
     #[test]
     fn test_server_config_serialization() {
         let config = ServerConfig::default();
-        let json = serde_json::to_string(&config).unwrap();
+        let json = crate::json::to_string(&config).unwrap();
         assert_eq!(json, "{}");
     }
 
     #[test]
     fn test_server_config_deserialization() {
         let json = "{}";
-        let config: ServerConfig = serde_json::from_str(json).unwrap();
+        let config: ServerConfig = crate::json::from_str(json).unwrap();
         assert_eq!(config, ServerConfig::default());
     }
 
