@@ -38,6 +38,8 @@ use core::sync::atomic::Ordering;
 /// let tx = channel.start_transmission(&rgb_data);
 /// let channel = tx.wait_complete(); // Reuse channel for next transmission
 /// ```
+// Public API - will be used when provider is updated
+#[allow(dead_code)]
 pub struct LedChannel<'ch> {
     channel: Channel<'ch, Blocking, Tx>,
     channel_idx: u8,
@@ -52,6 +54,8 @@ pub struct LedChannel<'ch> {
 ///
 /// This type is marked `#[must_use]` to ensure transmissions are properly waited on.
 #[must_use = "transactions must be waited on to get the channel back"]
+// Public API - will be used when provider is updated
+#[allow(dead_code)]
 pub struct LedTransaction<'ch> {
     channel: LedChannel<'ch>,
 }
@@ -75,6 +79,8 @@ impl<'ch> LedChannel<'ch> {
     /// ```no_run
     /// let channel = LedChannel::new(rmt, peripherals.GPIO18, 64)?;
     /// ```
+    // Public API - will be used when provider is updated
+    #[allow(dead_code)]
     pub fn new<O>(mut rmt: Rmt<'ch, Blocking>, pin: O, num_leds: usize) -> Result<Self, RmtError>
     where
         O: PeripheralOutput<'ch>,
@@ -156,6 +162,8 @@ impl<'ch> LedChannel<'ch> {
     /// let rgb_data = [255, 0, 0, 0, 255, 0, 0, 0, 255]; // Red, Green, Blue
     /// let tx = channel.start_transmission(&rgb_data);
     /// ```
+    // Public API - will be used when provider is updated
+    #[allow(dead_code)]
     pub fn start_transmission(mut self, rgb_bytes: &[u8]) -> LedTransaction<'ch> {
         // Wait for any previous transmission to complete
         while !CHANNEL_STATE[self.channel_idx as usize]
@@ -210,6 +218,8 @@ impl<'ch> LedTransaction<'ch> {
     /// let tx = channel.start_transmission(&rgb_data);
     /// let channel = tx.wait_complete(); // Channel is ready for next transmission
     /// ```
+    // Public API - will be used when provider is updated
+    #[allow(dead_code)]
     pub fn wait_complete(self) -> LedChannel<'ch> {
         let channel_idx = self.channel.channel_idx as usize;
 

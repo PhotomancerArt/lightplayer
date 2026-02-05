@@ -17,6 +17,8 @@ use lp_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 struct ChannelState {
     pin: u32,
     byte_count: u32,
+    // Will be used when format validation is needed
+    #[allow(dead_code)]
     format: OutputFormat,
     // Note: Transaction handle would be stored here, but RMT initialization
     // is deferred until integration phase

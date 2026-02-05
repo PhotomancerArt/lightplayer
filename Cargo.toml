@@ -145,3 +145,17 @@ opt-level = "z"
 # Single codegen unit for better dead code elimination - saves ~50-100 KB
 codegen-units = 1
 # Note: lto is inherited from workspace [profile.release]
+
+# ESP32 firmware release profile optimizations (embedded target)
+[profile.release.package.fw-esp32]
+# Strip debuginfo - saves ~1-1.5 MB and prevents segment splitting issues
+strip = true
+# Optimize for size instead of speed - saves ~200-500 KB
+opt-level = "z"
+# Single codegen unit for better dead code elimination - saves ~50-100 KB
+codegen-units = 1
+# Note: lto is inherited from workspace [profile.release]
+
+# Patch esp-println to use our fork with custom writer support
+[patch.crates-io]
+esp-println = { path = "lp-fw/esp-println-fork" }

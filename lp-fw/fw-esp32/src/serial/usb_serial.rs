@@ -30,6 +30,17 @@ impl Esp32UsbSerialIo {
         let (rx, tx) = usb_serial.split();
         Self { rx, tx }
     }
+
+    /// Get mutable references to rx/tx for direct async operations
+    /// This allows bypassing the SerialIo trait's block_on when already in async context
+    pub fn get_async_parts(
+        &mut self,
+    ) -> (
+        &mut UsbSerialJtagRx<'static, Async>,
+        &mut UsbSerialJtagTx<'static, Async>,
+    ) {
+        (&mut self.rx, &mut self.tx)
+    }
 }
 
 impl SerialIo for Esp32UsbSerialIo {
@@ -37,7 +48,6 @@ impl SerialIo for Esp32UsbSerialIo {
         // Blocking write using async USB serial
         // Use embassy_futures::block_on to bridge async to sync
         embassy_futures::block_on(async {
-            use embedded_io_async::Write as _;
             embedded_io_async::Write::write(&mut self.tx, data)
                 .await
                 .map_err(|e| {
@@ -63,7 +73,6 @@ impl SerialIo for Esp32UsbSerialIo {
         // Try to read with a zero timeout to make it non-blocking
         embassy_futures::block_on(async {
             use embassy_time::{Duration, Timer};
-            use embedded_io_async::Read as _;
 
             // Use a very short timeout to make it non-blocking
             // If data is available, it should read immediately

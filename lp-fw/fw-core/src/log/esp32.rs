@@ -1,6 +1,6 @@
 //! ESP32 logger implementation.
 //!
-//! Routes log calls to a provided print function (typically esp_println).
+//! Routes log calls to a provided print function (typically USB serial).
 
 extern crate alloc;
 

@@ -3,7 +3,9 @@
 //! These functions are called by JIT-compiled GLSL code when using host functions
 //! like __host_log. They must be provided by the firmware binary.
 
-use esp_println::println;
+extern crate alloc;
+
+use crate::logger::write_log;
 
 /// Host function implementation for log output (no_std mode).
 /// Called by JIT-compiled GLSL code when using __host_log.
@@ -31,9 +33,11 @@ pub extern "C" fn lp_jit_host_log(
             core::str::from_utf8(module_path_slice),
             core::str::from_utf8(msg_slice),
         ) {
-            println!("[{}] {}: {}", level_str, module_path, msg);
+            let log_msg = alloc::format!("[{}] {}: {}\r\n", level_str, module_path, msg);
+            write_log(&log_msg);
         } else {
-            println!("[{}] [invalid UTF-8 log message]", level_str);
+            let log_msg = alloc::format!("[{}] [invalid UTF-8 log message]\r\n", level_str);
+            write_log(&log_msg);
         }
     }
 }

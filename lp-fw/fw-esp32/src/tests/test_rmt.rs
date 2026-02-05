@@ -3,51 +3,61 @@
 //! When `test_rmt` feature is enabled, this runs simple LED patterns
 //! to verify the RMT driver works correctly.
 
-use esp_hal::clock::CpuClock;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
+extern crate alloc;
+
+use alloc::rc::Rc;
+use core::cell::RefCell;
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
-use esp_hal::timer::timg::TimerGroup;
-use esp_println::println;
+#[macro_use]
+extern crate log;
 
+use crate::board::{init_board, start_runtime};
+use crate::logger;
 use crate::output::{LedChannel, LedTransaction};
+use crate::serial::Esp32UsbSerialIo;
+use fw_core::serial::SerialIo;
 
 /// Run RMT test mode
 ///
 /// Displays simple patterns on LEDs to verify RMT driver works.
 pub async fn run_rmt_test() -> ! {
-    println!("RMT test mode starting...");
+    // Initialize board (clock, heap, runtime) and get hardware peripherals
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18) = init_board();
+    start_runtime(timg0, sw_int);
 
-    // Initialize hardware (similar to init_board but we need peripherals)
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
+    // Initialize USB-serial for logging
+    let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);
+    let usb_serial_async = usb_serial.into_async();
+    let serial_io = Esp32UsbSerialIo::new(usb_serial_async);
+    let serial_io_shared = Rc::new(RefCell::new(serial_io));
 
-    // Allocate heap
-    esp_alloc::heap_allocator!(size: 300_000);
+    // Initialize logger using static function approach (like main.rs)
+    logger::set_log_serial(serial_io_shared.clone());
+    logger::init(logger::log_write_bytes);
 
-    // Start Embassy runtime (needed for embassy_time::Timer)
-    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    // Give USB serial a moment to initialize
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
 
-    // Configure RMT
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+    info!("RMT test mode starting...");
+
+    // Configure RMT (we already have rmt_peripheral from init_board)
+    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).expect("Failed to initialize RMT");
 
     // Use GPIO18 (pin 10 on board) for LED output (hardcoded for testing)
-    // GPIO pins implement PeripheralOutput trait, so we can pass directly
-    let pin = peripherals.GPIO18;
+    let pin = gpio18;
 
     // Initialize RMT driver for 8 LEDs
     const NUM_LEDS: usize = 256;
     let mut channel =
         LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
 
-    println!("RMT driver initialized (LedChannel created), starting chase pattern...");
+    info!("RMT driver initialized (LedChannel created), starting chase pattern...");
     // Using full new API: channel.start_transmission().wait_complete()
 
     loop {
         // Chase pattern - white dot moving down the strip
-        println!("Chase pattern");
+        info!("Chase pattern");
         let mut data = [0u8; NUM_LEDS * 3];
         for offset in 0..NUM_LEDS {
             for i in 0..NUM_LEDS {

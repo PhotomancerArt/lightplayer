@@ -11,6 +11,7 @@ extern crate alloc;
 
 mod board;
 mod jit_fns;
+mod logger;
 mod output;
 mod serial;
 mod server_loop;
@@ -22,16 +23,18 @@ use core::cell::RefCell;
 use board::{init_board, start_runtime};
 use esp_backtrace as _;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use esp_println::println;
-use fw_core::log::init_esp32_logger;
+use fw_core::serial::SerialIo;
 use fw_core::transport::SerialTransport;
+#[macro_use]
+extern crate log;
+use esp_println::println;
 use lp_model::AsLpPath;
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
 use output::Esp32OutputProvider;
-use serial::Esp32UsbSerialIo;
+use serial::{Esp32UsbSerialIo, SharedSerialIo};
 use server_loop::run_server_loop;
 use time::Esp32TimeProvider;
 
@@ -43,6 +46,11 @@ mod tests {
 #[cfg(feature = "test_gpio")]
 mod tests {
     pub mod test_gpio;
+}
+
+#[cfg(feature = "test_usb")]
+mod tests {
+    pub mod test_usb;
 }
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -61,24 +69,48 @@ async fn main(_spawner: embassy_executor::Spawner) {
         run_rmt_test().await;
     }
 
-    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio")))]
+    #[cfg(feature = "test_usb")]
     {
-        // Initialize logger with esp_println
-        init_esp32_logger(|s| {
-            esp_println::println!("{}", s);
-        });
+        use tests::test_usb::run_usb_test;
+        run_usb_test().await;
+    }
 
-        println!("fw-esp32 starting...");
-
+    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb")))]
+    {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
-        let (sw_int, timg0, rmt_peripheral, usb_device) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18) = init_board();
         start_runtime(timg0, sw_int);
 
-        // Initialize USB-serial
+        // Initialize USB-serial - this will be shared between logging and transport
         let usb_serial = UsbSerialJtag::new(usb_device);
         let usb_serial_async = usb_serial.into_async();
         let serial_io = Esp32UsbSerialIo::new(usb_serial_async);
-        let transport = SerialTransport::new(serial_io);
+
+        // Share serial_io between logging and transport using Rc<RefCell<>>
+        let serial_io_shared = Rc::new(RefCell::new(serial_io));
+
+        // Store serial_io in logger module for write function
+        crate::logger::set_log_serial(serial_io_shared.clone());
+
+        // Initialize logger with our USB serial write function
+        crate::logger::init(crate::logger::log_write_bytes);
+
+        // Configure esp-println to use our USB serial instance
+        // This allows esp-backtrace to use esp-println for panic output
+        // while routing through our shared USB serial instance
+        crate::logger::set_esp_println_serial(serial_io_shared.clone());
+        unsafe {
+            esp_println::set_custom_writer(crate::logger::esp_println_write_bytes);
+        }
+
+        // Give USB serial a moment to initialize before we start logging
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(500)).await;
+
+        info!("fw-esp32 starting...");
+
+        // Create transport using a SharedSerialIo wrapper that uses the shared instance
+        let shared_serial_io = SharedSerialIo::new(serial_io_shared);
+        let transport = SerialTransport::new(shared_serial_io);
 
         // Initialize RMT peripheral for output
         // Use 80MHz clock rate (standard for ESP32-C6)
@@ -102,7 +134,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // Create time provider
         let time_provider = Esp32TimeProvider::new();
 
-        println!("fw-esp32 initialized, starting server loop...");
+        info!("fw-esp32 initialized, starting server loop...");
 
         // Run server loop (never returns)
         run_server_loop(server, transport, time_provider).await;

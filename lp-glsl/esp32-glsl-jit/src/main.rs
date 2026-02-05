@@ -86,7 +86,7 @@ async fn main(spawner: Spawner) {
 // Use LP library function for Simplex noise
 // lpfx_snoise2 returns values in approximately [-1, 1] range
 float noise(vec2 p, uint seed) {
-    float n = lpfx_snoise2(p, seed);
+    float n = lpfx_snoise(p, seed);
     // Normalize from [-1, 1] to [0, 1] for compatibility with existing code
     return n * 0.5 + 0.5;
 }

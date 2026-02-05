@@ -7,7 +7,6 @@ use crate::output::rmt::buffer::{write_buffer_guard, write_half_buffer};
 use crate::output::rmt::config::{BUFFER_LEDS, BUFFER_SIZE, HALF_BUFFER_SIZE, RMT_CH_IDX};
 use crate::output::rmt::state::CHANNEL_STATE;
 use core::sync::atomic::Ordering;
-use esp_println::println;
 use smart_leds::RGB8;
 
 /// Start a transmission with the given buffer
@@ -18,6 +17,8 @@ use smart_leds::RGB8;
 /// # Safety
 /// This function is unsafe because it performs raw pointer operations and direct register access.
 #[allow(unsafe_op_in_unsafe_fn)]
+// Used internally by LedChannel::start_transmission
+#[allow(dead_code)]
 pub(crate) unsafe fn start_transmission_with_state(
     channel_idx: u8,
     led_buffer_ptr: *mut RGB8,
@@ -51,7 +52,7 @@ pub(crate) unsafe fn start_transmission_with_state(
         rmt_base.add(j).write_volatile(0);
     }
 
-    println!("start_transmission: buffer cleared");
+    log::debug!("start_transmission: buffer cleared");
     // Init the buffer
     write_half_buffer(true, channel_idx);
     write_half_buffer(false, channel_idx);
@@ -92,7 +93,7 @@ pub(crate) unsafe fn start_transmission_with_state(
     rmt.ch_tx_conf0(ch_idx)
         .modify(|_, w| w.conf_update().set_bit());
 
-    println!("start_transmission: configuration updated");
+    log::debug!("start_transmission: configuration updated");
 
     // Start transmission (like esp-hal start_tx)
     rmt.ch_tx_conf0(ch_idx).modify(|_, w| {
@@ -101,7 +102,7 @@ pub(crate) unsafe fn start_transmission_with_state(
         w.tx_start().set_bit()
     });
 
-    println!("start_transmission: transmission started");
+    log::debug!("start_transmission: transmission started");
 
     // Update again after starting (like esp-hal does)
     rmt.ch_tx_conf0(ch_idx)
@@ -110,7 +111,7 @@ pub(crate) unsafe fn start_transmission_with_state(
     // Write the guard. With any luck we are past the first byte at this point.
     write_buffer_guard(false);
 
-    println!("transmission started");
+    log::debug!("transmission started");
 }
 
 /// RMT interrupt handler - this is where the magic happens

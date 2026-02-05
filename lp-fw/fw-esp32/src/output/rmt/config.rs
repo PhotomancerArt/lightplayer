@@ -69,6 +69,8 @@ const fn level_bit(level: Level) -> u32 {
 }
 
 /// Create RMT channel configuration for WS2811/WS2812 LEDs
+// Used internally by LedChannel::new
+#[allow(dead_code)]
 pub(crate) fn create_rmt_config() -> TxChannelConfig {
     TxChannelConfig::default()
         .with_clk_divider(1)

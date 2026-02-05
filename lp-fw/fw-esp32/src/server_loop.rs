@@ -11,7 +11,7 @@ use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
 
-use crate::serial::Esp32UsbSerialIo;
+use crate::serial::SharedSerialIo;
 use crate::time::Esp32TimeProvider;
 
 /// Run the server loop
@@ -21,7 +21,7 @@ use crate::time::Esp32TimeProvider;
 /// Yields control back to Embassy runtime between iterations.
 pub async fn run_server_loop(
     mut server: LpServer,
-    mut transport: SerialTransport<Esp32UsbSerialIo>,
+    mut transport: SerialTransport<SharedSerialIo<crate::serial::Esp32UsbSerialIo>>,
     time_provider: Esp32TimeProvider,
 ) -> ! {
     let mut last_tick = time_provider.now_ms();
