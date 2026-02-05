@@ -63,11 +63,7 @@ impl Esp32OutputProvider {
     ///
     /// This function takes ownership of RMT and GPIO pin and creates a LedChannel.
     /// For now, hardcoded to GPIO18.
-    pub fn init_rmt<O>(
-        rmt: Rmt<'static, Blocking>,
-        pin: O,
-        num_leds: usize,
-    ) -> Result<(), RmtError>
+    pub fn init_rmt<O>(rmt: Rmt<'static, Blocking>, pin: O, num_leds: usize) -> Result<(), RmtError>
     where
         O: PeripheralOutput<'static>,
     {
@@ -93,8 +89,13 @@ impl OutputProvider for Esp32OutputProvider {
         byte_count: u32,
         format: OutputFormat,
     ) -> Result<OutputChannelHandle, OutputError> {
-        log::debug!("Esp32OutputProvider::open: pin={}, byte_count={}, format={:?}", pin, byte_count, format);
-        
+        log::debug!(
+            "Esp32OutputProvider::open: pin={}, byte_count={}, format={:?}",
+            pin,
+            byte_count,
+            format
+        );
+
         // Check if pin is already open
         if self.open_pins.borrow().contains(&pin) {
             log::warn!("Esp32OutputProvider::open: Pin {} already open", pin);
@@ -103,7 +104,10 @@ impl OutputProvider for Esp32OutputProvider {
 
         // Validate format
         if format != OutputFormat::Ws2811 {
-            log::warn!("Esp32OutputProvider::open: Unsupported format: {:?}", format);
+            log::warn!(
+                "Esp32OutputProvider::open: Unsupported format: {:?}",
+                format
+            );
             return Err(OutputError::InvalidConfig {
                 reason: format!("Unsupported format: {:?}", format),
             });
@@ -114,7 +118,10 @@ impl OutputProvider for Esp32OutputProvider {
         let num_leds = byte_count / BYTES_PER_LED;
 
         if num_leds == 0 {
-            log::warn!("Esp32OutputProvider::open: byte_count {} too small", byte_count);
+            log::warn!(
+                "Esp32OutputProvider::open: byte_count {} too small",
+                byte_count
+            );
             return Err(OutputError::InvalidConfig {
                 reason: "byte_count must be at least 3 (one LED)".into(),
             });
@@ -124,7 +131,11 @@ impl OutputProvider for Esp32OutputProvider {
         // TODO: Support multiple pins and convert u32 pin numbers to GPIO pin types
         const HARDCODED_PIN: u32 = 18;
         if pin != HARDCODED_PIN {
-            log::warn!("Esp32OutputProvider::open: Pin {} requested, but only pin {} (GPIO18) is supported", pin, HARDCODED_PIN);
+            log::warn!(
+                "Esp32OutputProvider::open: Pin {} requested, but only pin {} (GPIO18) is supported",
+                pin,
+                HARDCODED_PIN
+            );
             return Err(OutputError::InvalidConfig {
                 reason: format!("Only pin {} (GPIO18) is supported for now", HARDCODED_PIN),
             });
@@ -146,8 +157,13 @@ impl OutputProvider for Esp32OutputProvider {
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id);
 
-        log::info!("Esp32OutputProvider::open: Opened channel handle={}, pin={}, byte_count={}, num_leds={}", 
-                   handle_id, pin, byte_count, num_leds);
+        log::info!(
+            "Esp32OutputProvider::open: Opened channel handle={}, pin={}, byte_count={}, num_leds={}",
+            handle_id,
+            pin,
+            byte_count,
+            num_leds
+        );
 
         // Store channel state (without transaction for now)
         self.channels.borrow_mut().insert(
@@ -165,28 +181,36 @@ impl OutputProvider for Esp32OutputProvider {
 
     fn write(&self, handle: OutputChannelHandle, data: &[u8]) -> Result<(), OutputError> {
         let handle_id = handle.as_i32();
-        log::debug!("Esp32OutputProvider::write: handle={}, data_len={}", handle_id, data.len());
+        log::debug!(
+            "Esp32OutputProvider::write: handle={}, data_len={}",
+            handle_id,
+            data.len()
+        );
 
         // Find channel and update byte_count if needed (simple resize support)
         let mut channels = self.channels.borrow_mut();
-        let channel = channels
-            .get_mut(&handle_id)
-            .ok_or_else(|| {
-                log::warn!("Esp32OutputProvider::write: Invalid handle {}", handle_id);
-                OutputError::InvalidHandle { handle: handle_id }
-            })?;
+        let channel = channels.get_mut(&handle_id).ok_or_else(|| {
+            log::warn!("Esp32OutputProvider::write: Invalid handle {}", handle_id);
+            OutputError::InvalidHandle { handle: handle_id }
+        })?;
 
         // Update byte_count if data is larger (simple resize)
         if data.len() > channel.byte_count as usize {
-            log::info!("Esp32OutputProvider::write: Resizing channel from {} to {} bytes", 
-                       channel.byte_count, data.len());
+            log::info!(
+                "Esp32OutputProvider::write: Resizing channel from {} to {} bytes",
+                channel.byte_count,
+                data.len()
+            );
             channel.byte_count = data.len() as u32;
         }
 
         // Validate data length (must not exceed what was opened, but can be less)
         if data.len() > channel.byte_count as usize {
-            log::warn!("Esp32OutputProvider::write: Data length exceeds channel capacity: {} > {}", 
-                       data.len(), channel.byte_count);
+            log::warn!(
+                "Esp32OutputProvider::write: Data length exceeds channel capacity: {} > {}",
+                data.len(),
+                channel.byte_count
+            );
             return Err(OutputError::DataLengthMismatch {
                 expected: channel.byte_count,
                 actual: data.len(),
@@ -197,7 +221,7 @@ impl OutputProvider for Esp32OutputProvider {
         unsafe {
             let tx_ptr = core::ptr::addr_of_mut!(CURRENT_TRANSACTION);
             let channel_ptr = core::ptr::addr_of_mut!(LED_CHANNEL);
-            
+
             // Wait for any previous transaction to complete
             if let Some(tx) = (*tx_ptr).take() {
                 log::debug!("Esp32OutputProvider::write: Waiting for previous transaction");
@@ -207,7 +231,10 @@ impl OutputProvider for Esp32OutputProvider {
 
             // Get the channel and start transmission
             if let Some(channel) = (*channel_ptr).take() {
-                log::debug!("Esp32OutputProvider::write: Starting transmission, {} bytes", data.len());
+                log::debug!(
+                    "Esp32OutputProvider::write: Starting transmission, {} bytes",
+                    data.len()
+                );
                 let tx = channel.start_transmission(data);
                 // Wait for transmission to complete (write() is synchronous)
                 log::debug!("Esp32OutputProvider::write: Waiting for transmission to complete");

@@ -10,7 +10,7 @@ use core::str;
 
 use crate::serial::SerialIo;
 use log;
-use lp_model::{json, ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, ServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;
 
 /// Serial transport implementation

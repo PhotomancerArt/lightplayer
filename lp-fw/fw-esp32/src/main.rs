@@ -28,7 +28,7 @@ use core::cell::RefCell;
 use board::{init_board, start_runtime};
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use fw_core::transport::FakeTransport;
-use lp_model::{path::AsLpPath, ClientMessage, ClientRequest};
+use lp_model::{ClientMessage, ClientRequest, path::AsLpPath};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
@@ -119,7 +119,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // Create fake transport and queue LoadProject message
         debug!("Creating fake transport...");
         let mut transport = FakeTransport::new();
-        
+
         // Queue a LoadProject message to auto-load the demo project
         let load_msg = ClientMessage {
             id: 1,
@@ -140,7 +140,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         // Initialize output provider
         debug!("Creating output provider...");
         let output_provider = Esp32OutputProvider::new();
-        
+
         // Initialize RMT channel with GPIO18 (hardcoded for now)
         // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
         const NUM_LEDS: usize = 256;
@@ -148,7 +148,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
             .expect("Failed to initialize RMT channel");
         debug!("RMT channel initialized");
-        
+
         let output_provider: Rc<RefCell<dyn OutputProvider>> =
             Rc::new(RefCell::new(output_provider));
         debug!("Output provider created");

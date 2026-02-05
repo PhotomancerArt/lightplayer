@@ -165,8 +165,12 @@ impl<'ch> LedChannel<'ch> {
     // Public API - will be used when provider is updated
     #[allow(dead_code)]
     pub fn start_transmission(mut self, rgb_bytes: &[u8]) -> LedTransaction<'ch> {
-        log::debug!("LedChannel::start_transmission: {} bytes ({} LEDs)", rgb_bytes.len(), rgb_bytes.len() / 3);
-        
+        log::debug!(
+            "LedChannel::start_transmission: {} bytes ({} LEDs)",
+            rgb_bytes.len(),
+            rgb_bytes.len() / 3
+        );
+
         // Wait for any previous transmission to complete
         while !CHANNEL_STATE[self.channel_idx as usize]
             .frame_complete
@@ -194,12 +198,15 @@ impl<'ch> LedChannel<'ch> {
         // Start transmission using internal function
         // Buffer info will be stored in ChannelState by start_transmission_with_state
         // Use the actual num_leds from data, not the channel capacity
-        log::debug!("LedChannel::start_transmission: Starting transmission for {} LEDs", num_leds);
+        log::debug!(
+            "LedChannel::start_transmission: Starting transmission for {} LEDs",
+            num_leds
+        );
         unsafe {
             start_transmission_with_state(
                 self.channel_idx,
                 self.led_buffer.as_ptr() as *mut RGB8,
-                num_leds,  // Use actual num_leds from data, not self.num_leds
+                num_leds, // Use actual num_leds from data, not self.num_leds
             );
         }
         log::debug!("LedChannel::start_transmission: Transmission started");
@@ -239,11 +246,17 @@ impl<'ch> LedTransaction<'ch> {
             esp_hal::delay::Delay::new().delay_micros(10);
             wait_count += 1;
             if wait_count % 1000 == 0 {
-                log::debug!("LedTransaction::wait_complete: Still waiting... ({} iterations)", wait_count);
+                log::debug!(
+                    "LedTransaction::wait_complete: Still waiting... ({} iterations)",
+                    wait_count
+                );
             }
         }
 
-        log::debug!("LedTransaction::wait_complete: Transmission complete after {} iterations", wait_count);
+        log::debug!(
+            "LedTransaction::wait_complete: Transmission complete after {} iterations",
+            wait_count
+        );
         // Return the channel for reuse
         self.channel
     }

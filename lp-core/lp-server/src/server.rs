@@ -112,8 +112,11 @@ impl LpServer {
             .iter()
             .map(|p| (p.handle, p.path.clone()))
             .collect();
-        
-        log::debug!("LpServer::tick: Found {} loaded projects", project_info.len());
+
+        log::debug!(
+            "LpServer::tick: Found {} loaded projects",
+            project_info.len()
+        );
 
         // Collect changes per project
         let mut project_changes_map: HashMap<_, Vec<FsChange>> = HashMap::new();
@@ -196,11 +199,18 @@ impl LpServer {
                         log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
                     }
                     Err(e) => {
-                        log::warn!("LpServer::tick: Project {} tick error: {:?}", project.name(), e);
+                        log::warn!(
+                            "LpServer::tick: Project {} tick error: {:?}",
+                            project.name(),
+                            e
+                        );
                     }
                 }
             } else {
-                log::warn!("LpServer::tick: Project handle {} not found", handle.as_i32());
+                log::warn!(
+                    "LpServer::tick: Project handle {} not found",
+                    handle.as_i32()
+                );
             }
         }
 

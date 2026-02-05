@@ -40,7 +40,7 @@ impl ServerTransport for FakeTransport {
         // Log the message (if logging is available)
         #[cfg(any(feature = "emu", feature = "esp32"))]
         log::debug!("FakeTransport: Would send message id={}", msg.id);
-        
+
         Ok(())
     }
 
