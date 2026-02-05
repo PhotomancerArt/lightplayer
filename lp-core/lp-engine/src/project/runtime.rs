@@ -478,22 +478,7 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
-        if !fixture_handles.is_empty() {
-            log::debug!(
-                "ProjectRuntime::tick: Rendering {} fixture(s)",
-                fixture_handles.len()
-            );
-        }
-
         for handle in fixture_handles {
-            if let Some(entry) = self.nodes.get(&handle) {
-                log::trace!(
-                    "ProjectRuntime::tick: Rendering fixture {} ({})",
-                    handle.as_i32(),
-                    entry.path.as_str()
-                );
-            }
-
             // Render fixture - need to handle borrowing carefully
             // The issue: runtime.render() needs &mut runtime and &mut ctx
             // But runtime is inside ctx.nodes, so we can't have both borrows
@@ -555,22 +540,7 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
-        if !output_handles.is_empty() {
-            log::debug!(
-                "ProjectRuntime::tick: Flushing {} output(s) (state_ver == frame {})",
-                output_handles.len(),
-                self.frame_id.as_i64()
-            );
-        }
-
         for handle in output_handles {
-            if let Some(entry) = self.nodes.get(&handle) {
-                log::trace!(
-                    "ProjectRuntime::tick: Flushing output {} ({})",
-                    handle.as_i32(),
-                    entry.path.as_str()
-                );
-            }
             let render_result = {
                 let mut ctx = RenderContextImpl {
                     nodes: &mut self.nodes,
