@@ -292,10 +292,15 @@ impl NodeRuntime for FixtureRuntime {
         let output_changed = old_config
             .map(|old| old.output_spec != fixture_config.output_spec)
             .unwrap_or(true);
+        let mapping_changed = old_config
+            .map(|old| old.mapping != fixture_config.mapping)
+            .unwrap_or(true);
 
         self.config = Some(fixture_config.clone());
         self.color_order = fixture_config.color_order;
         self.transform = fixture_config.transform;
+        self.brightness = fixture_config.brightness.unwrap_or(64);
+        self.gamma_correction = fixture_config.gamma_correction.unwrap_or(true);
 
         // Re-resolve handles if they changed
         if texture_changed {
@@ -308,7 +313,13 @@ impl NodeRuntime for FixtureRuntime {
             self.output_handle = Some(output_handle);
         }
 
-        // Regenerate mapping if we have texture dimensions
+        // If mapping config changed, invalidate precomputed mapping
+        // It will be regenerated in the next render() call
+        if mapping_changed {
+            self.precomputed_mapping = None;
+        }
+
+        // Regenerate mapping points if we have texture dimensions
         // If texture dimensions not available, mapping will be regenerated in render()
         if let (Some(width), Some(height)) = (self.texture_width, self.texture_height) {
             self.mapping = generate_mapping_points(&fixture_config.mapping, width, height);
