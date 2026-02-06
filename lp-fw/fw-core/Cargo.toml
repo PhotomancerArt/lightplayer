@@ -21,10 +21,13 @@ lp-model = { path = "../../lp-core/lp-model", default-features = false }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 log = { workspace = true, default-features = false }
+embassy-sync = "0.7.2"
+serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, features = ["std"] }
 lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["std"] }
+critical-section = { version = "1.2", features = ["std"] }
 
 [lints]
 workspace = true

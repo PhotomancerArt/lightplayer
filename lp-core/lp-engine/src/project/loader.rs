@@ -64,7 +64,7 @@ pub fn load_from_filesystem(fs: &dyn LpFs) -> Result<ProjectConfig, Error> {
     let hex_preview = if data.len() > 100 {
         format!("{:02x?}", &data[..100])
     } else {
-        format!("{:02x?}", data)
+        format!("{data:02x?}")
     };
 
     let config: ProjectConfig = lp_model::json::from_slice(&data).map_err(|e| Error::Parse {

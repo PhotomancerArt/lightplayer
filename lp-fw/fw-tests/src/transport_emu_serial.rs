@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use log;
-use lp_model::{json, ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, ServerMessage, TransportError, json};
 use lp_riscv_emu::Riscv32Emulator;
 use std::sync::{Arc, Mutex};
 

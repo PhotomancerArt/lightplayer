@@ -26,6 +26,7 @@ test_usb = []  # Test USB serial communication
 [dependencies]
 embassy-executor = "0.9.1"
 embassy-time = "0.4.0"
+embassy-sync = "0.7.2"
 esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
 esp-bootloader-esp-idf = { version = "0.2.0" }
 esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }

@@ -4,8 +4,8 @@
 //! populating the memory filesystem with example projects.
 
 use lp_model::AsLpPath;
-use lp_shared::fs::LpFsMemory;
 use lp_shared::FsError;
+use lp_shared::fs::LpFsMemory;
 
 /// Populate the memory filesystem with the basic example project
 ///

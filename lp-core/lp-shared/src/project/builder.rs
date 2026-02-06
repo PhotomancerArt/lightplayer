@@ -177,8 +177,8 @@ impl ProjectBuilder {
             uid: self.uid.clone(),
             name: self.name.clone(),
         };
-        let project_json = lp_model::json::to_string(&config)
-            .expect("Failed to serialize project config");
+        let project_json =
+            lp_model::json::to_string(&config).expect("Failed to serialize project config");
         self.write_file_helper("/project.json", project_json.as_bytes())
             .expect("Failed to write project.json");
         // Node files are already written by their respective add() methods
@@ -341,7 +341,7 @@ mod tests {
         // Read and verify project.json
         let project_json_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
         let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
-        
+
         // Verify it can be parsed
         let config: lp_model::ProjectConfig = json::from_str(project_json_str).unwrap();
         assert_eq!(config.uid, "test");

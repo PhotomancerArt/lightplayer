@@ -41,6 +41,10 @@ impl ServerTransport for FakeTransport {
         #[cfg(any(feature = "emu", feature = "esp32"))]
         log::debug!("FakeTransport: Would send message id={}", msg.id);
 
+        // Suppress unused variable warning when logging features are disabled
+        #[cfg(not(any(feature = "emu", feature = "esp32")))]
+        let _ = msg;
+
         Ok(())
     }
 

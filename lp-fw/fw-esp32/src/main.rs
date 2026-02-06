@@ -56,7 +56,7 @@ mod tests {
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
-async fn main(_spawner: embassy_executor::Spawner) {
+async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_gpio")]
     {
         use tests::test_gpio::run_gpio_test;
@@ -72,7 +72,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_usb")]
     {
         use tests::test_usb::run_usb_test;
-        run_usb_test().await;
+        run_usb_test(spawner).await;
     }
 
     #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb")))]
