@@ -9,7 +9,7 @@
 //!
 //! When using `serde_json` on ESP32 targets, the bootloader fails with:
 //!
-//! ```
+//! ```text
 //! Assert failed in unpack_load_app, bootloader_utility.c:836 (rom_index < 2)
 //! ```
 //!

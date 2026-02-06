@@ -146,7 +146,7 @@ fn prompt_port_selection(ports: &[String]) -> Result<String> {
              Please specify a port explicitly (e.g., serial:/dev/cu.usbmodem2101)",
             ports
                 .iter()
-                .map(|p| format!("  - {}", p))
+                .map(|p| format!("  - {p}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         );

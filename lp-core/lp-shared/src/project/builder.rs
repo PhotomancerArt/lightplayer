@@ -62,6 +62,8 @@ pub struct FixtureBuilder {
     mapping: MappingConfig,
     color_order: ColorOrder,
     transform: [[f32; 4]; 4],
+    brightness: Option<u8>,
+    gamma_correction: Option<bool>,
 }
 
 impl ProjectBuilder {
@@ -143,6 +145,8 @@ impl ProjectBuilder {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            brightness: Some(255),
+            gamma_correction: Some(false),
         }
     }
 
@@ -297,6 +301,18 @@ impl FixtureBuilder {
         self
     }
 
+    /// Set the brightness level (0-255)
+    pub fn brightness(mut self, brightness: u8) -> Self {
+        self.brightness = Some(brightness);
+        self
+    }
+
+    /// Set gamma correction (defaults to false)
+    pub fn gamma_correction(mut self, enabled: bool) -> Self {
+        self.gamma_correction = Some(enabled);
+        self
+    }
+
     /// Add the fixture node to the project
     pub fn add(self, builder: &mut ProjectBuilder) -> LpPathBuf {
         let id = builder.fixture_id;
@@ -311,8 +327,8 @@ impl FixtureBuilder {
             mapping: self.mapping,
             color_order: self.color_order,
             transform: self.transform,
-            brightness: None,
-            gamma_correction: None,
+            brightness: self.brightness,
+            gamma_correction: self.gamma_correction,
         };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize fixture config");

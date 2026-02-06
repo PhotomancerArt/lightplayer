@@ -134,34 +134,37 @@ mod tests {
     extern crate alloc;
 
     use super::*;
-    use alloc::{format, string::ToString};
+    use alloc::{boxed::Box, format, string::ToString};
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::Channel;
 
-    static TEST_INCOMING: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
-    static TEST_OUTGOING: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
+    /// Helper to create a router with fresh channels for each test
+    fn create_test_router() -> (
+        MessageRouter,
+        &'static Channel<CriticalSectionRawMutex, String, 32>,
+        &'static Channel<CriticalSectionRawMutex, String, 32>,
+    ) {
+        let incoming = Box::leak(Box::new(Channel::new()));
+        let outgoing = Box::leak(Box::new(Channel::new()));
+        let router = MessageRouter::new(incoming, outgoing);
+        (router, incoming, outgoing)
+    }
 
     #[test]
     fn test_receive_all_empty() {
-        // Clear incoming channel first (in case previous test left data)
-        while TEST_INCOMING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, ..) = create_test_router();
         let messages = router.receive_all();
         assert!(messages.is_empty());
     }
 
     #[test]
     fn test_receive_all_multiple() {
-        // Clear incoming channel first (in case previous test left data)
-        while TEST_INCOMING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, incoming, _outgoing) = create_test_router();
 
         // Push messages
-        TEST_INCOMING.sender().try_send("msg1".to_string()).unwrap();
-        TEST_INCOMING.sender().try_send("msg2".to_string()).unwrap();
-        TEST_INCOMING.sender().try_send("msg3".to_string()).unwrap();
+        incoming.sender().try_send("msg1".to_string()).unwrap();
+        incoming.sender().try_send("msg2".to_string()).unwrap();
+        incoming.sender().try_send("msg3".to_string()).unwrap();
 
         // Receive all
         let messages = router.receive_all();
@@ -177,37 +180,31 @@ mod tests {
 
     #[test]
     fn test_send_receive() {
-        // Clear outgoing channel first (in case previous test left data)
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
+        let (router, _, outgoing) = create_test_router();
 
         // Verify channel is actually empty
         assert!(
-            TEST_OUTGOING.receiver().try_receive().is_err(),
+            outgoing.receiver().try_receive().is_err(),
             "Channel should be empty before test"
         );
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
 
         // Send message
         router.send("test".to_string()).unwrap();
 
         // Receive from outgoing channel - should get "test" we just sent
-        let msg = TEST_OUTGOING.receiver().try_receive().unwrap();
+        let msg = outgoing.receiver().try_receive().unwrap();
         assert_eq!(msg, "test", "Should receive the message we just sent");
 
         // Verify channel is empty now
         assert!(
-            TEST_OUTGOING.receiver().try_receive().is_err(),
+            outgoing.receiver().try_receive().is_err(),
             "Channel should be empty after receiving"
         );
     }
 
     #[test]
     fn test_send_full_channel() {
-        // Clear outgoing channel first
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, _incoming, _outgoing) = create_test_router();
 
         // Fill channel to capacity (32 messages)
         for i in 0..32 {
@@ -226,8 +223,5 @@ mod tests {
         } else {
             panic!("Expected Full error when channel is full");
         }
-
-        // Clean up: clear channel for next test
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
     }
 }

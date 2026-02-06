@@ -1,15 +1,15 @@
 use crate::error::Error;
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
-    accumulate_from_mapping, compute_mapping, generate_mapping_points, MappingPoint,
-    PrecomputedMapping,
+    MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
+    generate_mapping_points,
 };
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
-use lp_model::nodes::fixture::{ColorOrder, FixtureConfig};
 use lp_model::FrameId;
+use lp_model::nodes::fixture::{ColorOrder, FixtureConfig};
 use lp_shared::fs::fs_event::FsChange;
 
 /// Fixture node runtime

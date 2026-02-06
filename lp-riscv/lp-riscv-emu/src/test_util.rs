@@ -144,6 +144,11 @@ mod std_impl {
             return Err(std::format!("Binary not found at: {}", exe_path.display()));
         }
 
+        // Canonicalize the path to ensure it's absolute and resolve any symlinks
+        let exe_path = exe_path
+            .canonicalize()
+            .map_err(|e| std::format!("Failed to canonicalize binary path: {e}"))?;
+
         // Cache the path
         {
             let mut cache = get_cache().lock().unwrap();

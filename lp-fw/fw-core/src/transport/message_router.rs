@@ -100,21 +100,29 @@ mod tests {
 
     use super::*;
     use crate::message_router::MessageRouter;
-    use alloc::string::{String, ToString};
+    use alloc::{
+        boxed::Box,
+        string::{String, ToString},
+    };
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::Channel;
     use lp_model::ClientRequest;
 
-    static TEST_INCOMING: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
-    static TEST_OUTGOING: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
+    /// Helper to create a router with fresh channels for each test
+    fn create_test_router() -> (
+        MessageRouter,
+        &'static Channel<CriticalSectionRawMutex, String, 32>,
+        &'static Channel<CriticalSectionRawMutex, String, 32>,
+    ) {
+        let incoming = Box::leak(Box::new(Channel::new()));
+        let outgoing = Box::leak(Box::new(Channel::new()));
+        let router = MessageRouter::new(incoming, outgoing);
+        (router, incoming, outgoing)
+    }
 
     #[test]
     fn test_send_message() {
-        // Clear channels
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
-        while TEST_INCOMING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, _, outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
         let msg = ServerMessage {
@@ -124,7 +132,7 @@ mod tests {
         transport.send(msg).unwrap();
 
         // Check message was sent to router
-        let router_msg = TEST_OUTGOING.receiver().try_receive().unwrap();
+        let router_msg = outgoing.receiver().try_receive().unwrap();
         assert!(
             router_msg.starts_with("M!"),
             "Message should start with M! prefix"
@@ -135,15 +143,11 @@ mod tests {
 
     #[test]
     fn test_receive_message() {
-        // Clear channels
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
-        while TEST_INCOMING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, incoming, _outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
         // Push message to router
-        TEST_INCOMING
+        incoming
             .sender()
             .try_send("M!{\"id\":1,\"msg\":{\"loadProject\":{\"path\":\"test\"}}}\n".to_string())
             .unwrap();
@@ -159,15 +163,11 @@ mod tests {
 
     #[test]
     fn test_receive_filters_non_message_lines() {
-        // Clear channels
-        while TEST_OUTGOING.receiver().try_receive().is_ok() {}
-        while TEST_INCOMING.receiver().try_receive().is_ok() {}
-
-        let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
+        let (router, incoming, _outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
         // Push non-message line
-        TEST_INCOMING
+        incoming
             .sender()
             .try_send("debug: some log output\n".to_string())
             .unwrap();

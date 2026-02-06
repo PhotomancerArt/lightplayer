@@ -91,8 +91,7 @@ impl HostSpecifier {
         }
 
         bail!(
-            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={}, local, emu",
-            DEFAULT_SERIAL_BAUD_RATE
+            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={DEFAULT_SERIAL_BAUD_RATE}, local, emu"
         )
     }
 
@@ -125,7 +124,9 @@ impl HostSpecifier {
     /// Returns the configured baud rate, or DEFAULT_SERIAL_BAUD_RATE if not specified.
     pub fn baud_rate(&self) -> u32 {
         match self {
-            HostSpecifier::Serial { baud_rate, .. } => baud_rate.unwrap_or(DEFAULT_SERIAL_BAUD_RATE),
+            HostSpecifier::Serial { baud_rate, .. } => {
+                baud_rate.unwrap_or(DEFAULT_SERIAL_BAUD_RATE)
+            }
             _ => DEFAULT_SERIAL_BAUD_RATE, // Default for non-serial (shouldn't be called)
         }
     }
