@@ -22,19 +22,19 @@ mod serial;
 mod server_loop;
 mod time;
 
-use alloc::{boxed::Box, rc::Rc, string::String};
+use alloc::{boxed::Box, format, rc::Rc, string::String};
 use core::cell::RefCell;
 
 use board::{init_board, start_runtime};
-use esp_hal::usb_serial_jtag::UsbSerialJtag;
-use fw_core::transport::FakeTransport;
-use lp_model::{ClientMessage, ClientRequest, path::AsLpPath};
+use fw_core::message_router::MessageRouter;
+use fw_core::transport::MessageRouterTransport;
+use lp_model::{ClientMessage, ClientRequest, json, path::AsLpPath};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
 use output::Esp32OutputProvider;
-use serial::Esp32UsbSerialIo;
+use serial::{get_message_channels, io_task};
 use server_loop::run_server_loop;
 use time::Esp32TimeProvider;
 
@@ -84,101 +84,89 @@ async fn main(spawner: embassy_executor::Spawner) {
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
 
-        // Initialize USB-serial for logging (not used for transport)
-        // Use synchronous mode for simplicity
-        esp_println::println!("[INIT] Creating USB serial for logging...");
-        let usb_serial = UsbSerialJtag::new(usb_device);
-        let serial_io = Esp32UsbSerialIo::new(usb_serial);
-        esp_println::println!("[INIT] USB serial created");
+        // Note: USB serial is handled by I/O task for transport
+        // Logging will go through the transport serial (non-M! messages)
+        // or can be disabled if USB host is not connected
+        esp_println::println!("[INIT] fw-esp32 starting...");
 
-        // Share serial_io for logging using Rc<RefCell<>>
-        let serial_io_shared = Rc::new(RefCell::new(serial_io));
+        // Create message router with static channels
+        esp_println::println!("[INIT] Creating message router...");
+        let (incoming_channel, outgoing_channel) = get_message_channels();
+        let router = MessageRouter::new(incoming_channel, outgoing_channel);
+        esp_println::println!("[INIT] Message router created");
 
-        // Store serial_io in logger module for write function
-        esp_println::println!("[INIT] Setting up logger serial...");
-        crate::logger::set_log_serial(serial_io_shared.clone());
+        // Spawn I/O task (handles serial communication)
+        esp_println::println!("[INIT] Spawning I/O task...");
+        spawner.spawn(io_task(usb_device)).ok();
+        esp_println::println!("[INIT] I/O task spawned");
 
-        // Initialize logger with our USB serial write function
-        esp_println::println!("[INIT] Initializing logger...");
-        crate::logger::init(crate::logger::log_write_bytes);
-        esp_println::println!("[INIT] Logger initialized");
-
-        // Configure esp-println to use our USB serial instance
-        // This allows esp-backtrace to use esp-println for panic output
-        // while routing through our shared USB serial instance
-        debug!("Setting up esp-println serial...");
-        crate::logger::set_esp_println_serial(serial_io_shared.clone());
-        unsafe {
-            esp_println::set_custom_writer(crate::logger::esp_println_write_bytes);
-        }
-        debug!("esp-println configured");
-
-        info!("fw-esp32 starting...");
-        debug!("Board initialized, USB serial ready for logging");
-
-        // Create fake transport and queue LoadProject message
-        debug!("Creating fake transport...");
-        let mut transport = FakeTransport::new();
-
-        // Queue a LoadProject message to auto-load the demo project
+        // Queue LoadProject message to auto-load the demo project
+        // This simulates what FakeTransport used to do
+        // Send to incoming channel so server loop can receive it
+        esp_println::println!("[INIT] Queueing LoadProject message...");
         let load_msg = ClientMessage {
             id: 1,
             msg: ClientRequest::LoadProject {
                 path: String::from("test-project"),
             },
         };
-        transport.queue_message(load_msg);
-        debug!("Fake transport created with LoadProject message queued");
+        let json = json::to_string(&load_msg).unwrap();
+        let message = format!("M!{json}\n");
+        router.send_incoming(message).ok(); // Non-blocking, ignore if queue full
+        esp_println::println!("[INIT] LoadProject message queued");
+
+        // Create transport wrapper
+        esp_println::println!("[INIT] Creating MessageRouterTransport...");
+        let mut transport = MessageRouterTransport::new(router);
+        esp_println::println!("[INIT] MessageRouterTransport created");
 
         // Initialize RMT peripheral for output
         // Use 80MHz clock rate (standard for ESP32-C6)
-        debug!("Initializing RMT peripheral at 80MHz...");
+        esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
         let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
             .expect("Failed to initialize RMT");
-        debug!("RMT peripheral initialized");
+        esp_println::println!("[INIT] RMT peripheral initialized");
 
         // Initialize output provider
-        debug!("Creating output provider...");
+        esp_println::println!("[INIT] Creating output provider...");
         let output_provider = Esp32OutputProvider::new();
 
         // Initialize RMT channel with GPIO18 (hardcoded for now)
         // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
         const NUM_LEDS: usize = 256;
-        debug!("Initializing RMT channel with GPIO18, {} LEDs...", NUM_LEDS);
+        esp_println::println!("[INIT] Initializing RMT channel with GPIO18, {} LEDs...", NUM_LEDS);
         Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
             .expect("Failed to initialize RMT channel");
-        debug!("RMT channel initialized");
+        esp_println::println!("[INIT] RMT channel initialized");
 
         let output_provider: Rc<RefCell<dyn OutputProvider>> =
             Rc::new(RefCell::new(output_provider));
-        debug!("Output provider created");
+        esp_println::println!("[INIT] Output provider created");
 
         // Create filesystem (in-memory for now)
-        debug!("Creating in-memory filesystem...");
+        esp_println::println!("[INIT] Creating in-memory filesystem...");
         let mut base_fs = Box::new(LpFsMemory::new());
-        debug!("In-memory filesystem created");
+        esp_println::println!("[INIT] In-memory filesystem created");
 
         // Populate filesystem with basic test project
-        debug!("Populating filesystem with basic test project...");
+        esp_println::println!("[INIT] Populating filesystem with basic test project...");
         if let Err(e) = demo_project::write_basic_project(&mut base_fs) {
-            warn!("Failed to populate test project: {:?}", e);
+            esp_println::println!("[WARN] Failed to populate test project: {:?}", e);
         } else {
-            info!("Populated filesystem with basic test project");
-            debug!("Test project files written to filesystem");
+            esp_println::println!("[INIT] Populated filesystem with basic test project");
         }
 
         // Create server
-        debug!("Creating LpServer instance...");
+        esp_println::println!("[INIT] Creating LpServer instance...");
         let server = LpServer::new(output_provider, base_fs, "projects/".as_path());
-        debug!("LpServer created");
+        esp_println::println!("[INIT] LpServer created");
 
         // Create time provider
-        debug!("Creating time provider...");
+        esp_println::println!("[INIT] Creating time provider...");
         let time_provider = Esp32TimeProvider::new();
-        debug!("Time provider created");
+        esp_println::println!("[INIT] Time provider created");
 
-        info!("fw-esp32 initialized, starting server loop...");
-        debug!("Entering main server loop");
+        esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
 
         // Run server loop (never returns)
         run_server_loop(server, transport, time_provider).await;

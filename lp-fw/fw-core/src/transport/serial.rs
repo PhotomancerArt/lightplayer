@@ -41,30 +41,31 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
 
-        let json_bytes = json.as_bytes();
-        let total_bytes = json_bytes.len() + 1;
+        // Add M! prefix and newline
+        let message = format!("M!{json}\n");
+        let message_bytes = message.as_bytes();
 
         log::debug!(
-            "SerialTransport: Sending message id={} ({} bytes): {}",
+            "SerialTransport: Sending message id={} ({} bytes): M!{}",
             msg.id,
-            total_bytes,
+            message_bytes.len(),
             json
         );
 
         log::trace!(
             "SerialTransport: Serialized message to {} bytes JSON",
-            json_bytes.len()
+            json.as_bytes().len()
         );
 
-        // Write JSON + newline (blocking)
+        // Write message with M! prefix (blocking)
         self.io
-            .write(json_bytes)
-            .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
-        self.io
-            .write(b"\n")
+            .write(message_bytes)
             .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
 
-        log::trace!("SerialTransport: Wrote {total_bytes} bytes to serial");
+        log::trace!(
+            "SerialTransport: Wrote {} bytes to serial",
+            message_bytes.len()
+        );
 
         Ok(())
     }
@@ -120,14 +121,24 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 }
             };
 
+            // Check for M! prefix
+            if !message_str.starts_with("M!") {
+                // Not a message - skip (likely debug output or log)
+                log::trace!("SerialTransport: Skipping non-message line (no M! prefix)");
+                return Ok(None);
+            }
+
+            // Extract JSON (skip M! prefix)
+            let json_str = &message_str[2..];
+
             // Parse JSON
-            match json::from_str::<ClientMessage>(message_str) {
+            match json::from_str::<ClientMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "SerialTransport: Received message id={} ({} bytes): {}",
                         msg.id,
                         message_bytes.len(),
-                        message_str
+                        json_str
                     );
                     Ok(Some(msg))
                 }
@@ -265,6 +276,10 @@ mod tests {
 
         let written = transport.io.take_written();
         let written_str = str::from_utf8(&written).unwrap();
+        assert!(
+            written_str.starts_with("M!"),
+            "Message should start with M! prefix"
+        );
         assert!(written_str.contains("\"unloadProject\""));
         assert!(written_str.ends_with('\n'));
     }
@@ -279,8 +294,7 @@ mod tests {
             msg: ClientRequest::ListLoadedProjects,
         };
         let json = json::to_string(&client_msg).unwrap();
-        let mut msg_bytes = json.as_bytes().to_vec();
-        msg_bytes.push(b'\n');
+        let msg_bytes = format!("M!{json}\n").into_bytes();
 
         transport.io.push_read(&msg_bytes);
 
@@ -327,10 +341,8 @@ mod tests {
         };
         let json1 = json::to_string(&msg1).unwrap();
         let json2 = json::to_string(&msg2).unwrap();
-        let mut combined = json1.as_bytes().to_vec();
-        combined.push(b'\n');
-        combined.extend_from_slice(json2.as_bytes());
-        combined.push(b'\n');
+        let mut combined = format!("M!{json1}\n").into_bytes();
+        combined.extend_from_slice(format!("M!{json2}\n").as_bytes());
 
         transport.io.push_read(&combined);
 
@@ -348,11 +360,41 @@ mod tests {
         let mock_io = MockSerialIo::new();
         let mut transport = SerialTransport::new(mock_io);
 
-        let invalid_json = b"invalid json\n";
+        let invalid_json = b"M!invalid json\n";
         transport.io.push_read(invalid_json);
 
         // Should return None (parse error ignored)
         let received = transport.receive().unwrap();
         assert!(received.is_none());
+    }
+
+    #[test]
+    fn test_receive_filters_non_message_lines() {
+        let mock_io = MockSerialIo::new();
+        let mut transport = SerialTransport::new(mock_io);
+
+        // Push a non-message line (no M! prefix)
+        transport.io.push_read(b"debug: some log output\n");
+
+        // Should return None (filtered out)
+        let received = transport.receive().unwrap();
+        assert!(
+            received.is_none(),
+            "Non-message lines should be filtered out"
+        );
+
+        // Push a valid message
+        let client_msg = ClientMessage {
+            id: 1,
+            msg: ClientRequest::ListLoadedProjects,
+        };
+        let json = json::to_string(&client_msg).unwrap();
+        let msg_bytes = format!("M!{json}\n").into_bytes();
+        transport.io.push_read(&msg_bytes);
+
+        // Should parse successfully
+        let received = transport.receive().unwrap();
+        assert!(received.is_some());
+        assert_eq!(received.unwrap().id, 1);
     }
 }

@@ -108,6 +108,25 @@ impl MessageRouter {
     pub fn outgoing(&self) -> &'static Channel<CriticalSectionRawMutex, String, 32> {
         self.outgoing
     }
+
+    /// Send a message to the incoming channel (for internal messages)
+    ///
+    /// This is useful for sending messages from the main loop to itself,
+    /// such as auto-loading a project on startup. The message will be
+    /// received by the main loop via `receive_all()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - Message to send to incoming channel
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if message was sent
+    /// * `Err(TrySendError<String>)` if channel is full (contains the message)
+    pub fn send_incoming(&self, msg: String) -> Result<(), TrySendError<String>> {
+        let sender = self.incoming.sender();
+        sender.try_send(msg)
+    }
 }
 
 #[cfg(test)]
@@ -161,17 +180,26 @@ mod tests {
         // Clear outgoing channel first (in case previous test left data)
         while TEST_OUTGOING.receiver().try_receive().is_ok() {}
 
+        // Verify channel is actually empty
+        assert!(
+            TEST_OUTGOING.receiver().try_receive().is_err(),
+            "Channel should be empty before test"
+        );
+
         let router = MessageRouter::new(&TEST_INCOMING, &TEST_OUTGOING);
 
         // Send message
         router.send("test".to_string()).unwrap();
 
-        // Receive from outgoing channel
+        // Receive from outgoing channel - should get "test" we just sent
         let msg = TEST_OUTGOING.receiver().try_receive().unwrap();
-        assert_eq!(msg, "test");
+        assert_eq!(msg, "test", "Should receive the message we just sent");
 
         // Verify channel is empty now
-        assert!(TEST_OUTGOING.receiver().try_receive().is_err());
+        assert!(
+            TEST_OUTGOING.receiver().try_receive().is_err(),
+            "Channel should be empty after receiving"
+        );
     }
 
     #[test]
@@ -187,15 +215,17 @@ mod tests {
             assert!(result.is_ok(), "Should be able to send message {}", i);
         }
 
-        // Verify channel is full
-        assert!(
-            TEST_OUTGOING.is_full(),
-            "Channel should be full after 32 messages"
-        );
-
-        // Next send should fail
+        // Verify channel is full by trying to send one more message
+        // (More reliable than is_full() which might have race conditions)
         let result = router.send("overflow".to_string());
         assert!(result.is_err(), "Should fail when channel is full");
+
+        // Verify we got the expected error (Full variant)
+        if let Err(embassy_sync::channel::TrySendError::Full(_)) = result {
+            // Expected - channel is full
+        } else {
+            panic!("Expected Full error when channel is full");
+        }
 
         // Clean up: clear channel for next test
         while TEST_OUTGOING.receiver().try_receive().is_ok() {}

@@ -648,7 +648,7 @@ mod tests {
     use super::*;
     use crate::emu::memory::{DEFAULT_RAM_START, Memory};
     use alloc::vec;
-    use lp_riscv_inst::{Gpr, format::TypeR};
+    use lp_riscv_inst::Gpr;
 
     // Helper to encode atomic instructions manually
     // Format: opcode=0x2f, funct3=0x2, funct5 in bits [31:27]
@@ -792,7 +792,7 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_amoxor_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
+        let _result =
             decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
@@ -812,7 +812,7 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_amoand_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
+        let _result =
             decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 
@@ -832,7 +832,7 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12340000).unwrap();
 
         let inst_word = encode_amoor_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
+        let _result =
             decode_execute_atomic::<LoggingEnabled>(inst_word, 0x1000, &mut regs, &mut memory)
                 .unwrap();
 

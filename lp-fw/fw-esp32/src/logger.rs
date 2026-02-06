@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use fw_core::serial::SerialIo;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
-const LOG_LEVEL: LevelFilter = LevelFilter::Info;
+const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 
 /// Initialize the ESP32 logger with a write function
 ///
