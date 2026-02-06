@@ -1,14 +1,15 @@
 use crate::error::Error;
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
-    MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
-    generate_mapping_points,
+    accumulate_from_mapping, compute_mapping, generate_mapping_points, MappingPoint,
+    PrecomputedMapping,
 };
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
-use lp_model::FrameId;
+use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig};
+use lp_model::FrameId;
 use lp_shared::fs::fs_event::FsChange;
 
 /// Fixture node runtime
@@ -229,32 +230,30 @@ impl NodeRuntime for FixtureRuntime {
         self.lamp_colors.clear();
         self.lamp_colors.resize((max_channel as usize + 1) * 3, 0);
 
+        let brightness = self.brightness.to_q32() / 255.to_q32();
+
         // Write sampled values to output buffer
         // For now, use universe 0 and channel_offset 0 (sequential writing)
         // TODO: Add universe and channel_offset fields to FixtureConfig when needed
         let universe = 0u32;
         let channel_offset = 0u32;
         for channel in 0..=max_channel as usize {
-            let mut r = ch_values_r[channel].to_u8_clamped();
-            let mut g = ch_values_g[channel].to_u8_clamped();
-            let mut b = ch_values_b[channel].to_u8_clamped();
-
-            // Apply brightness correction first
-            r = ((r as u16 * self.brightness as u16) / 255) as u8;
-            g = ((g as u16 * self.brightness as u16) / 255) as u8;
-            b = ((b as u16 * self.brightness as u16) / 255) as u8;
-
-            // Apply gamma correction if enabled
-            if self.gamma_correction {
-                r = apply_gamma(r);
-                g = apply_gamma(g);
-                b = apply_gamma(b);
-            }
+            let mut r = (ch_values_r[channel] * brightness).to_u8_clamped();
+            let mut g = (ch_values_g[channel] * brightness).to_u8_clamped();
+            let mut b = (ch_values_b[channel] * brightness).to_u8_clamped();
 
             let idx = channel * 3;
             self.lamp_colors[idx] = r;
             self.lamp_colors[idx + 1] = g;
             self.lamp_colors[idx + 2] = b;
+
+            // Apply gamma correction if enabled, _after_ writing to lamp_colors, which should
+            // not be gamma corrected
+            if self.gamma_correction {
+                r = apply_gamma(r);
+                g = apply_gamma(g);
+                b = apply_gamma(b);
+            }
 
             let start_ch = channel_offset + (channel as u32) * 3; // 3 bytes per RGB
             let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
