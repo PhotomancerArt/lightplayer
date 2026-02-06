@@ -51,6 +51,8 @@ pub enum ServerMsgBody {
     ListLoadedProjects {
         projects: Vec<LoadedProject>,
     },
+    /// Response to StopAllProjects
+    StopAllProjects,
 
     Log {
         level: LogLevel,

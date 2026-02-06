@@ -17,10 +17,11 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
 log = { workspace = true, features = ["std"] }
+serialport = { version = "4.8", optional = true }
 
 [features]
 default = []
-serial = ["lp-riscv-emu", "lp-riscv-emu/std"]
+serial = ["lp-riscv-emu", "lp-riscv-emu/std", "serialport"]
 ws = ["tokio-tungstenite"]
 
 [dev-dependencies]

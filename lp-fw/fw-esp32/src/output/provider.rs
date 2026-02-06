@@ -129,17 +129,17 @@ impl OutputProvider for Esp32OutputProvider {
 
         // For now, hardcode to GPIO18 (pin 18)
         // TODO: Support multiple pins and convert u32 pin numbers to GPIO pin types
-        const HARDCODED_PIN: u32 = 18;
-        if pin != HARDCODED_PIN {
-            log::warn!(
-                "Esp32OutputProvider::open: Pin {} requested, but only pin {} (GPIO18) is supported",
-                pin,
-                HARDCODED_PIN
-            );
-            return Err(OutputError::InvalidConfig {
-                reason: format!("Only pin {} (GPIO18) is supported for now", HARDCODED_PIN),
-            });
-        }
+        // const HARDCODED_PIN: u32 = 18;
+        // if pin != HARDCODED_PIN {
+        //     log::warn!(
+        //         "Esp32OutputProvider::open: Pin {} requested, but only pin {} (GPIO18) is supported",
+        //         pin,
+        //         HARDCODED_PIN
+        //     );
+        //     return Err(OutputError::InvalidConfig {
+        //         reason: format!("Only pin {} (GPIO18) is supported for now", HARDCODED_PIN),
+        //     });
+        // }
 
         // Check if LedChannel is already initialized
         unsafe {

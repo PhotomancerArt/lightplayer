@@ -64,6 +64,8 @@ pub enum ClientRequest {
     ListAvailableProjects,
     /// List loaded projects
     ListLoadedProjects,
+    /// Stop all loaded projects
+    StopAllProjects,
 }
 
 #[cfg(test)]
@@ -226,6 +228,17 @@ mod tests {
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ListLoadedProjects => {}
+            _ => panic!("Wrong request type"),
+        }
+    }
+
+    #[test]
+    fn test_stop_all_projects_request() {
+        let req = ClientRequest::StopAllProjects;
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
+        match deserialized {
+            ClientRequest::StopAllProjects => {}
             _ => panic!("Wrong request type"),
         }
     }

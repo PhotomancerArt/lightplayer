@@ -166,6 +166,16 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Unload all loaded projects
+    ///
+    /// Removes all projects from memory but doesn't delete them from the filesystem.
+    /// Note: next_handle_id is not reset - handles continue incrementing.
+    pub fn unload_all_projects(&mut self) {
+        self.projects.clear();
+        self.name_to_handle.clear();
+        // Note: next_handle_id is not reset - handles continue incrementing
+    }
+
     /// Get a project by handle
     pub fn get_project(&self, handle: ProjectHandle) -> Option<&Project> {
         self.projects.get(&handle)

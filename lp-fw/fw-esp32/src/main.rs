@@ -134,7 +134,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         // Initialize RMT channel with GPIO18 (hardcoded for now)
         // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
         const NUM_LEDS: usize = 256;
-        esp_println::println!("[INIT] Initializing RMT channel with GPIO18, {} LEDs...", NUM_LEDS);
+        esp_println::println!(
+            "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
+            NUM_LEDS
+        );
         Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
             .expect("Failed to initialize RMT channel");
         esp_println::println!("[INIT] RMT channel initialized");

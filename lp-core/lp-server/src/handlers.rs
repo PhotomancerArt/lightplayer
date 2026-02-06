@@ -42,6 +42,7 @@ pub fn handle_client_message(
         lp_model::ClientRequest::ListLoadedProjects => {
             handle_list_loaded_projects(project_manager)?
         }
+        lp_model::ClientRequest::StopAllProjects => handle_stop_all_projects(project_manager)?,
     };
 
     Ok(ServerMessage { id, msg: response })
@@ -190,4 +191,12 @@ fn handle_list_loaded_projects(
 ) -> Result<ServerMessagePayload, ServerError> {
     let projects = project_manager.list_loaded_projects();
     Ok(ServerMessagePayload::ListLoadedProjects { projects })
+}
+
+/// Handle a StopAllProjects request
+fn handle_stop_all_projects(
+    project_manager: &mut ProjectManager,
+) -> Result<ServerMessagePayload, ServerError> {
+    project_manager.unload_all_projects();
+    Ok(ServerMessagePayload::StopAllProjects)
 }
