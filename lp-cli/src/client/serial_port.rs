@@ -135,6 +135,22 @@ fn list_cu_ports() -> Result<Vec<String>> {
 /// Prompt user to select a port from multiple options
 fn prompt_port_selection(ports: &[String]) -> Result<String> {
     use dialoguer::Select;
+    use std::io::{IsTerminal, stdin};
+
+    // Check if we're in an interactive terminal (check stdin since dialoguer uses it)
+    // Also check if we're in a test environment - tests should not prompt
+    if cfg!(test) || !stdin().is_terminal() {
+        bail!(
+            "Multiple serial ports found but not in an interactive terminal.\n\
+             Available ports:\n{}\n\
+             Please specify a port explicitly (e.g., serial:/dev/cu.usbmodem2101)",
+            ports
+                .iter()
+                .map(|p| format!("  - {}", p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 
     println!("Multiple serial ports found:");
     for (i, port) in ports.iter().enumerate() {
