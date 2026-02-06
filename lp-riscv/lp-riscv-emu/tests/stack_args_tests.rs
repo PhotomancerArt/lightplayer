@@ -12,12 +12,14 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use lp_riscv_emu::Riscv32Emulator;
 
 /// Helper to create flags with enable_multi_ret_implicit_sret enabled
+/// Uses fastalloc (single_pass) like the actual compiler does
 fn create_flags() -> Flags {
     let mut builder = settings::builder();
     builder
         .set("enable_multi_ret_implicit_sret", "true")
         .unwrap();
     builder.set("opt_level", "none").unwrap();
+    builder.set("regalloc_algorithm", "single_pass").unwrap();
     Flags::new(builder)
 }
 

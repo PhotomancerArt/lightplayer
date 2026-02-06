@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+test_usb = []
+
 [dependencies]
 lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
 lp-engine-client = { path = "../../lp-core/lp-engine-client" }
@@ -18,10 +21,12 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 async-trait = "0.1"
 log = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
+serialport = "4.8"
 
 [dev-dependencies]
 test-log = { workspace = true }
 env_logger = { workspace = true }
+serial_test = "3.0"
 
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
     MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
     generate_mapping_points,
@@ -6,6 +7,7 @@ use crate::nodes::fixture::mapping::{
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
+use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
 use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig};
 use lp_shared::fs::fs_event::FsChange;
@@ -24,6 +26,10 @@ pub struct FixtureRuntime {
     precomputed_mapping: Option<PrecomputedMapping>,
     /// Last sampled lamp colors (RGB per lamp, ordered by channel index)
     lamp_colors: Vec<u8>,
+    /// Brightness level (0-255), defaults to 64
+    brightness: u8,
+    /// Enable gamma correction, defaults to true
+    gamma_correction: bool,
 }
 
 impl FixtureRuntime {
@@ -44,6 +50,8 @@ impl FixtureRuntime {
             texture_height: None,
             precomputed_mapping: None,
             lamp_colors: Vec::new(),
+            brightness: 64,
+            gamma_correction: true,
         }
     }
 
@@ -155,6 +163,8 @@ impl NodeRuntime for FixtureRuntime {
         // Store config values
         self.color_order = config.color_order;
         self.transform = config.transform;
+        self.brightness = config.brightness.unwrap_or(64);
+        self.gamma_correction = config.gamma_correction.unwrap_or(true);
 
         // Mapping will be generated in render() when texture is available
         // Texture dimensions are not available in init() (texture is lazy-loaded)
@@ -220,20 +230,30 @@ impl NodeRuntime for FixtureRuntime {
         self.lamp_colors.clear();
         self.lamp_colors.resize((max_channel as usize + 1) * 3, 0);
 
+        let brightness = self.brightness.to_q32() / 255.to_q32();
+
         // Write sampled values to output buffer
         // For now, use universe 0 and channel_offset 0 (sequential writing)
         // TODO: Add universe and channel_offset fields to FixtureConfig when needed
         let universe = 0u32;
         let channel_offset = 0u32;
         for channel in 0..=max_channel as usize {
-            let r = ch_values_r[channel].to_u8_clamped();
-            let g = ch_values_g[channel].to_u8_clamped();
-            let b = ch_values_b[channel].to_u8_clamped();
+            let mut r = (ch_values_r[channel] * brightness).to_u8_clamped();
+            let mut g = (ch_values_g[channel] * brightness).to_u8_clamped();
+            let mut b = (ch_values_b[channel] * brightness).to_u8_clamped();
 
             let idx = channel * 3;
             self.lamp_colors[idx] = r;
             self.lamp_colors[idx + 1] = g;
             self.lamp_colors[idx + 2] = b;
+
+            // Apply gamma correction if enabled, _after_ writing to lamp_colors, which should
+            // not be gamma corrected
+            if self.gamma_correction {
+                r = apply_gamma(r);
+                g = apply_gamma(g);
+                b = apply_gamma(b);
+            }
 
             let start_ch = channel_offset + (channel as u32) * 3; // 3 bytes per RGB
             let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
@@ -272,10 +292,15 @@ impl NodeRuntime for FixtureRuntime {
         let output_changed = old_config
             .map(|old| old.output_spec != fixture_config.output_spec)
             .unwrap_or(true);
+        let mapping_changed = old_config
+            .map(|old| old.mapping != fixture_config.mapping)
+            .unwrap_or(true);
 
         self.config = Some(fixture_config.clone());
         self.color_order = fixture_config.color_order;
         self.transform = fixture_config.transform;
+        self.brightness = fixture_config.brightness.unwrap_or(64);
+        self.gamma_correction = fixture_config.gamma_correction.unwrap_or(true);
 
         // Re-resolve handles if they changed
         if texture_changed {
@@ -288,7 +313,13 @@ impl NodeRuntime for FixtureRuntime {
             self.output_handle = Some(output_handle);
         }
 
-        // Regenerate mapping if we have texture dimensions
+        // If mapping config changed, invalidate precomputed mapping
+        // It will be regenerated in the next render() call
+        if mapping_changed {
+            self.precomputed_mapping = None;
+        }
+
+        // Regenerate mapping points if we have texture dimensions
         // If texture dimensions not available, mapping will be regenerated in render()
         if let (Some(width), Some(height)) = (self.texture_width, self.texture_height) {
             self.mapping = generate_mapping_points(&fixture_config.mapping, width, height);

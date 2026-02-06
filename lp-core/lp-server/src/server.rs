@@ -113,6 +113,11 @@ impl LpServer {
             .map(|p| (p.handle, p.path.clone()))
             .collect();
 
+        log::debug!(
+            "LpServer::tick: Found {} loaded projects",
+            project_info.len()
+        );
+
         // Collect changes per project
         let mut project_changes_map: HashMap<_, Vec<FsChange>> = HashMap::new();
 
@@ -178,16 +183,34 @@ impl LpServer {
         // Tick all loaded projects
         // Tick each project's runtime BEFORE processing incoming messages
         // This ensures GetChanges requests see the current frame's data
-        for (handle, _) in &project_info {
+        log::debug!("LpServer::tick: Ticking {} projects", project_info.len());
+        for (handle, path) in &project_info {
             if let Some(project) = self.project_manager.get_project_mut(*handle) {
-                log::trace!(
-                    "LpServer::tick: Ticking project {} (delta_ms: {})",
+                log::debug!(
+                    "LpServer::tick: Ticking project {} (path: {}, delta_ms: {})",
                     project.name(),
+                    path,
                     delta_ms
                 );
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
-                let _ = project.runtime_mut().tick(delta_ms);
+                match project.runtime_mut().tick(delta_ms) {
+                    Ok(()) => {
+                        log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "LpServer::tick: Project {} tick error: {:?}",
+                            project.name(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                log::warn!(
+                    "LpServer::tick: Project handle {} not found",
+                    handle.as_i32()
+                );
             }
         }
 

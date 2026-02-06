@@ -66,8 +66,22 @@ projects. Includes debug UI and file watching capabilities.
 
 - **`fw-core`** Core firmware abstractions (serial I/O, transport, logging infrastructure)
 - **`fw-emu`** Firmware that runs in the RISC-V32 emulator for testing without hardware
-- **`fw-tests`** Integration tests for firmware (emulator-based testing)
+- **`fw-tests`** Integration tests for firmware (emulator-based testing and USB serial tests)
 - **`fw-esp32`** ESP32 firmware
+
+### Running Firmware Tests
+
+USB serial integration tests verify firmware behavior with real hardware:
+
+```bash
+# Run USB serial tests (requires connected ESP32)
+cargo test --package fw-tests --features test_usb -- --ignored
+
+# Run with debug output
+DEBUG=1 cargo test --package fw-tests --features test_usb -- --ignored
+```
+
+See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 
 ## Application Core (`lp-core/`)
 

@@ -5,7 +5,6 @@ use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use log;
 use lp_model::nodes::output::OutputConfig;
 use lp_shared::fs::fs_event::FsChange;
 
@@ -89,18 +88,7 @@ impl NodeRuntime for OutputRuntime {
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
         // Flush buffer to provider if handle exists
         if let Some(handle) = self.channel_handle {
-            log::trace!(
-                "OutputRuntime::render: Flushing {} bytes to output provider (handle: {:?})",
-                self.channel_data.len(),
-                handle
-            );
             ctx.output_provider().write(handle, &self.channel_data)?;
-            log::debug!(
-                "OutputRuntime::render: Flushed output data: {:?}",
-                self.channel_data
-            );
-        } else {
-            log::trace!("OutputRuntime::render: No channel handle, skipping flush");
         }
         Ok(())
     }

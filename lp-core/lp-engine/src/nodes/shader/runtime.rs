@@ -7,12 +7,23 @@ use alloc::{
     string::{String, ToString},
 };
 use log;
-use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode, glsl_jit};
+use lp_glsl_compiler::glsl_jit;
+use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
+use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
     LpPathBuf, NodeHandle,
     nodes::shader::{ShaderConfig, ShaderState},
 };
 use lp_shared::fs::fs_event::FsChange;
+
+/// Wrapper for function pointer that implements Send + Sync
+/// Function pointers are safe to share between threads (they're just addresses)
+/// The compiled code is immutable and stable after compilation
+#[derive(Clone, Copy)]
+struct FunctionPtr(*const u8);
+
+unsafe impl Send for FunctionPtr {}
+unsafe impl Sync for FunctionPtr {}
 
 /// Shader node runtime
 pub struct ShaderRuntime {
@@ -23,6 +34,10 @@ pub struct ShaderRuntime {
     compilation_error: Option<String>,                         // Compilation error if any
     node_handle: NodeHandle,
     render_order: i32, // Render order (from config)
+    // Direct call optimization: cached function pointer and calling convention
+    direct_func_ptr: Option<FunctionPtr>,
+    direct_call_conv: Option<cranelift_codegen::isa::CallConv>,
+    direct_pointer_type: Option<cranelift_codegen::ir::Type>,
 }
 
 impl ShaderRuntime {
@@ -35,6 +50,9 @@ impl ShaderRuntime {
             compilation_error: None,
             node_handle,
             render_order: 0,
+            direct_func_ptr: None,
+            direct_call_conv: None,
+            direct_pointer_type: None,
         }
     }
 
@@ -99,10 +117,6 @@ impl NodeRuntime for ShaderRuntime {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
-        log::trace!(
-            "ShaderRuntime::render: Starting render for shader {}",
-            self.node_handle.as_i32()
-        );
         let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
             message: String::from("Texture handle not resolved"),
         })?;
@@ -122,54 +136,69 @@ impl NodeRuntime for ShaderRuntime {
         let output_size = [width as f32, height as f32];
 
         // Execute shader for each pixel
-        for y in 0..height {
-            for x in 0..width {
-                let frag_coord = [x as f32, y as f32];
+        // Use direct function pointer call if available (faster), otherwise fall back to trait method
+        if let (Some(func_ptr), Some(call_conv), Some(pointer_type)) = (
+            self.direct_func_ptr,
+            self.direct_call_conv.as_ref(),
+            self.direct_pointer_type.as_ref(),
+        ) {
+            // Direct call path: bypass GlslValue conversion overhead
+            Self::render_direct_call(
+                func_ptr.0,
+                call_conv,
+                pointer_type,
+                width,
+                height,
+                time,
+                texture,
+            )?;
+        } else {
+            // Fallback to trait method (slower but always works)
+            for y in 0..height {
+                for x in 0..width {
+                    let frag_coord = [x as f32, y as f32];
 
-                // Call shader main function
-                // Signature: vec4 main(vec2 fragCoord, vec2 outputSize, float time)
-                let result = executable
-                    .call_vec(
-                        "main",
-                        &[
-                            lp_glsl_compiler::GlslValue::Vec2(frag_coord),
-                            lp_glsl_compiler::GlslValue::Vec2(output_size),
-                            lp_glsl_compiler::GlslValue::F32(time),
-                        ],
-                        4,
-                    )
-                    .map_err(|e| Error::Other {
-                        message: format!("Shader execution failed: {e}"),
-                    })?;
+                    // Call shader main function
+                    // Signature: vec4 main(vec2 fragCoord, vec2 outputSize, float time)
+                    let result = executable
+                        .call_vec(
+                            "main",
+                            &[
+                                lp_glsl_compiler::GlslValue::Vec2(frag_coord),
+                                lp_glsl_compiler::GlslValue::Vec2(output_size),
+                                lp_glsl_compiler::GlslValue::F32(time),
+                            ],
+                            4,
+                        )
+                        .map_err(|e| Error::Other {
+                            message: format!("Shader execution failed: {e}"),
+                        })?;
 
-                // Extract RGBA from vec4 result
-                // Result is Vec<f32> with 4 elements [r, g, b, a] in [0, 1] range
-                if result.len() != 4 {
-                    return Err(Error::Other {
-                        message: format!(
-                            "Shader main() must return vec4, got {} components",
-                            result.len()
-                        ),
-                    });
+                    // Extract RGBA from vec4 result
+                    // Result is Vec<f32> with 4 elements [r, g, b, a] in [0, 1] range
+                    if result.len() != 4 {
+                        return Err(Error::Other {
+                            message: format!(
+                                "Shader main() must return vec4, got {} components",
+                                result.len()
+                            ),
+                        });
+                    }
+
+                    // Convert from [0, 1] to [0, 255] and clamp
+                    let rgba = [
+                        (result[0].clamp(0.0, 1.0) * 255.0) as u8,
+                        (result[1].clamp(0.0, 1.0) * 255.0) as u8,
+                        (result[2].clamp(0.0, 1.0) * 255.0) as u8,
+                        (result[3].clamp(0.0, 1.0) * 255.0) as u8,
+                    ];
+
+                    // Write to texture
+                    texture.set_pixel(x, y, rgba);
                 }
-
-                // Convert from [0, 1] to [0, 255] and clamp
-                let rgba = [
-                    (result[0].clamp(0.0, 1.0) * 255.0) as u8,
-                    (result[1].clamp(0.0, 1.0) * 255.0) as u8,
-                    (result[2].clamp(0.0, 1.0) * 255.0) as u8,
-                    (result[3].clamp(0.0, 1.0) * 255.0) as u8,
-                ];
-
-                // Write to texture
-                texture.set_pixel(x, y, rgba);
             }
         }
 
-        log::trace!(
-            "ShaderRuntime::render: Completed render for shader {}",
-            self.node_handle.as_i32()
-        );
         Ok(())
     }
 
@@ -260,6 +289,9 @@ impl NodeRuntime for ShaderRuntime {
                     // Clear shader executable
                     self.executable = None;
                     self.glsl_source = None;
+                    self.direct_func_ptr = None;
+                    self.direct_call_conv = None;
+                    self.direct_pointer_type = None;
                     self.compilation_error = Some("GLSL file deleted".to_string());
                 }
             }
@@ -270,6 +302,116 @@ impl NodeRuntime for ShaderRuntime {
 }
 
 impl ShaderRuntime {
+    /// Direct call path: bypass GlslValue conversion overhead
+    /// Calls the shader function pointer directly with raw arguments
+    /// All conversions are done in Q32 fixed-point format (i32) to avoid floating-point overhead
+    fn render_direct_call(
+        func_ptr: *const u8,
+        call_conv: &cranelift_codegen::isa::CallConv,
+        pointer_type: &cranelift_codegen::ir::Type,
+        width: u32,
+        height: u32,
+        time: f32,
+        texture: &mut lp_shared::Texture,
+    ) -> Result<(), Error> {
+        // Q32 fixed-point scale factor (2^16 = 65536)
+        const Q32_SCALE: i32 = 65536;
+
+        // Convert time from f32 to Q32 format once (reused for all pixels)
+        let time_q32 = (time * 65536.0) as i32;
+
+        // Convert output_size to Q32 format once (reused for all pixels)
+        let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
+
+        // Result buffer for vec4 return (4 i32s = 16 bytes)
+        let mut result_buffer = [0u8; 16];
+
+        // Execute shader for each pixel
+        for y in 0..height {
+            for x in 0..width {
+                // Convert frag_coord to Q32 format
+                let frag_coord_q32 = [(x as i32) * Q32_SCALE, (y as i32) * Q32_SCALE];
+
+                // Prepare JIT call arguments (i32 values as u64)
+                // vec2 expands to 2 i32s each, so we have 5 i32 parameters total
+                let jit_args = [
+                    frag_coord_q32[0] as u64,  // fragCoord.x
+                    frag_coord_q32[1] as u64,  // fragCoord.y
+                    output_size_q32[0] as u64, // outputSize.x
+                    output_size_q32[1] as u64, // outputSize.y
+                    time_q32 as u64,           // time
+                ];
+
+                // Call the shader function with StructReturn
+                unsafe {
+                    call_structreturn_with_args(
+                        func_ptr,
+                        result_buffer.as_mut_ptr(),
+                        16, // 4 i32s = 16 bytes
+                        &jit_args,
+                        *call_conv,
+                        *pointer_type,
+                    )
+                    .map_err(|e| Error::Other {
+                        message: format!("Direct shader call failed: {e:?}"),
+                    })?;
+                }
+
+                // Extract vec4 result (r, g, b, a) as i32 q32 values from buffer
+                let r_q32 = i32::from_le_bytes([
+                    result_buffer[0],
+                    result_buffer[1],
+                    result_buffer[2],
+                    result_buffer[3],
+                ]);
+                let g_q32 = i32::from_le_bytes([
+                    result_buffer[4],
+                    result_buffer[5],
+                    result_buffer[6],
+                    result_buffer[7],
+                ]);
+                let b_q32 = i32::from_le_bytes([
+                    result_buffer[8],
+                    result_buffer[9],
+                    result_buffer[10],
+                    result_buffer[11],
+                ]);
+                let a_q32 = i32::from_le_bytes([
+                    result_buffer[12],
+                    result_buffer[13],
+                    result_buffer[14],
+                    result_buffer[15],
+                ]);
+
+                // Convert from Q32 fixed-point directly to u8 [0, 255] using integer math
+                // Formula: (q32_value * 255) / 65536
+                // Clamp to [0, 65536] range first, then scale
+                let clamp_q32 = |v: i32| -> i32 {
+                    if v < 0 {
+                        0
+                    } else if v > Q32_SCALE {
+                        Q32_SCALE
+                    } else {
+                        v
+                    }
+                };
+
+                // Convert Q32 to u8: (clamped_q32 * 255) / 65536
+                // Use i64 intermediate to avoid overflow
+                let r = ((clamp_q32(r_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+                let g = ((clamp_q32(g_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+                let b = ((clamp_q32(b_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+                let a = ((clamp_q32(a_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+
+                let rgba = [r, g, b, a];
+
+                // Write to texture
+                texture.set_pixel(x, y, rgba);
+            }
+        }
+
+        Ok(())
+    }
     /// Resolve texture handle from config
     fn resolve_texture_handle(
         &mut self,
@@ -333,6 +475,19 @@ impl ShaderRuntime {
 
         match glsl_jit(glsl_source, options) {
             Ok(executable) => {
+                // Extract function pointer and calling convention using trait method
+                // This allows us to make direct calls without the GlslValue conversion overhead
+                let direct_call_info = executable.get_direct_call_info("main");
+                if let Some(info) = direct_call_info {
+                    self.direct_func_ptr = Some(FunctionPtr(info.func_ptr));
+                    self.direct_call_conv = Some(info.call_conv);
+                    self.direct_pointer_type = Some(info.pointer_type);
+                } else {
+                    self.direct_func_ptr = None;
+                    self.direct_call_conv = None;
+                    self.direct_pointer_type = None;
+                }
+
                 // Cast to add Send + Sync bounds (GlslJitModule is safe to send/sync)
                 // The function pointers are stable and don't change after compilation
                 let executable_with_bounds: Box<dyn GlslExecutable + Send + Sync> =
@@ -348,6 +503,9 @@ impl ShaderRuntime {
             Err(e) => {
                 self.compilation_error = Some(format!("{e}"));
                 self.executable = None;
+                self.direct_func_ptr = None;
+                self.direct_call_conv = None;
+                self.direct_pointer_type = None;
                 log::warn!(
                     "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),

@@ -9,6 +9,18 @@ use crate::frontend::semantic::functions::FunctionSignature;
 
 use alloc::{format, string::String, vec::Vec};
 
+/// Information needed for direct function pointer calls
+/// Contains the function pointer and calling convention details
+#[derive(Clone, Copy)]
+pub struct DirectCallInfo {
+    /// Raw function pointer
+    pub func_ptr: *const u8,
+    /// Calling convention
+    pub call_conv: cranelift_codegen::isa::CallConv,
+    /// Pointer type (I32 for 32-bit, I64 for 64-bit)
+    pub pointer_type: cranelift_codegen::ir::Type,
+}
+
 /// Trait for executing GLSL functions with various return types
 /// Abstracts away JIT vs Emulator implementations
 ///
@@ -110,6 +122,13 @@ pub trait GlslExecutable {
     /// Get disassembly as a formatted string, if available.
     #[cfg(feature = "std")]
     fn format_disassembly(&self) -> Option<String> {
+        None
+    }
+
+    /// Get direct call information for a function, if available.
+    /// Returns None for emulator modules or if the function is not found.
+    /// This allows bypassing the GlslValue conversion overhead for JIT-compiled functions.
+    fn get_direct_call_info(&self, _name: &str) -> Option<DirectCallInfo> {
         None
     }
 

@@ -13,8 +13,6 @@ pub enum LogLevel {
     Errors,
     /// Log each instruction execution.
     Instructions,
-    /// Full verbose logging with register and memory state.
-    Verbose,
 }
 
 /// System instruction kind for logging.

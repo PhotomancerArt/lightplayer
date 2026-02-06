@@ -256,6 +256,8 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
             [0.0, 0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 1.0],
         ],
+        brightness: None,
+        gamma_correction: None,
     };
     let fixture_json = serde_json::to_string_pretty(&fixture_config)
         .context("Failed to serialize fixture config")?;
@@ -534,6 +536,8 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            brightness: None,
+            gamma_correction: None,
         };
         let fixture_json = serde_json::to_string_pretty(&fixture_config)
             .context("Failed to serialize fixture config")?;

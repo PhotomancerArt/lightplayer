@@ -14,7 +14,7 @@ esp-backtrace = { version = "0.18.1", features = [
 esp-bootloader-esp-idf = { version = "0.2.0" }
 esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
-esp-println = { version = "0.16.1", features = ["log-04"] }
+esp-println = { version = "0.16.1", default-features = false, features = ["esp32c6", "jtag-serial", "log"] }
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 hashbrown = { workspace = true }
 

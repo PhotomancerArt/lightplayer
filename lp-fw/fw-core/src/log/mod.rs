@@ -2,7 +2,7 @@
 //!
 //! Provides logger implementations for different environments:
 //! - Emulator: Routes to syscalls
-//! - ESP32: Routes to esp_println
+//! - ESP32: Routes to a provided print function (typically USB serial)
 
 #[cfg(feature = "emu")]
 pub mod emu;

@@ -475,6 +475,12 @@ impl Deref for LpPathBuf {
     }
 }
 
+impl fmt::Display for LpPathBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Trait for ergonomic conversion to `&LpPath`
 ///
 /// Provides `.as_path()` method for common path-like types, making it easier

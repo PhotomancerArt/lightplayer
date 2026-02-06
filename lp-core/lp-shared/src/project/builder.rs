@@ -11,7 +11,6 @@ use lp_model::nodes::{
 };
 use lp_model::path::LpPathBuf;
 use lp_model::{AsLpPath, AsLpPathBuf};
-use serde_json;
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -63,6 +62,8 @@ pub struct FixtureBuilder {
     mapping: MappingConfig,
     color_order: ColorOrder,
     transform: [[f32; 4]; 4],
+    brightness: Option<u8>,
+    gamma_correction: Option<bool>,
 }
 
 impl ProjectBuilder {
@@ -144,6 +145,8 @@ impl ProjectBuilder {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            brightness: Some(255),
+            gamma_correction: Some(false),
         }
     }
 
@@ -173,8 +176,13 @@ impl ProjectBuilder {
 
     /// Build completes - writes project.json and all node files
     pub fn build(self) {
-        // Write project.json
-        let project_json = format!(r#"{{"uid": "{}", "name": "{}"}}"#, self.uid, self.name);
+        // Write project.json using proper JSON serialization
+        let config = lp_model::ProjectConfig {
+            uid: self.uid.clone(),
+            name: self.name.clone(),
+        };
+        let project_json =
+            lp_model::json::to_string(&config).expect("Failed to serialize project config");
         self.write_file_helper("/project.json", project_json.as_bytes())
             .expect("Failed to write project.json");
         // Node files are already written by their respective add() methods
@@ -195,7 +203,7 @@ impl TextureBuilder {
             height: self.height,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize texture config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize texture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -233,7 +241,7 @@ impl ShaderBuilder {
             render_order: self.render_order,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize shader config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize shader config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -264,7 +272,7 @@ impl OutputBuilder {
 
         let config = OutputConfig::GpioStrip { pin: self.pin };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize output config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
@@ -293,6 +301,18 @@ impl FixtureBuilder {
         self
     }
 
+    /// Set the brightness level (0-255)
+    pub fn brightness(mut self, brightness: u8) -> Self {
+        self.brightness = Some(brightness);
+        self
+    }
+
+    /// Set gamma correction (defaults to false)
+    pub fn gamma_correction(mut self, enabled: bool) -> Self {
+        self.gamma_correction = Some(enabled);
+        self
+    }
+
     /// Add the fixture node to the project
     pub fn add(self, builder: &mut ProjectBuilder) -> LpPathBuf {
         let id = builder.fixture_id;
@@ -307,14 +327,40 @@ impl FixtureBuilder {
             mapping: self.mapping,
             color_order: self.color_order,
             transform: self.transform,
+            brightness: self.brightness,
+            gamma_correction: self.gamma_correction,
         };
 
-        let json = serde_json::to_string(&config).expect("Failed to serialize fixture config");
+        let json = lp_model::json::to_string(&config).expect("Failed to serialize fixture config");
 
         builder
             .write_file_helper(&node_path, json.as_bytes())
             .expect("Failed to write fixture node.json");
 
         LpPathBuf::from(path_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::LpFsMemory;
+    use lp_model::json;
+
+    #[test]
+    fn test_project_builder_creates_valid_json() {
+        let fs = Rc::new(RefCell::new(LpFsMemory::new()));
+        let mut builder = ProjectBuilder::new(fs.clone());
+        builder.texture_basic();
+        builder.build();
+
+        // Read and verify project.json
+        let project_json_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
+        let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
+
+        // Verify it can be parsed
+        let config: lp_model::ProjectConfig = json::from_str(project_json_str).unwrap();
+        assert_eq!(config.uid, "test");
+        assert_eq!(config.name, "Test Project");
     }
 }

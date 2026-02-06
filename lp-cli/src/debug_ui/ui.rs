@@ -49,6 +49,8 @@ pub struct DebugUiState {
     show_texture_background: bool,
     show_texture_labels: bool,
     show_texture_strokes: bool,
+    /// Whether connection has been lost (stop syncing and exit)
+    connection_lost: bool,
 }
 
 impl DebugUiState {
@@ -77,6 +79,7 @@ impl DebugUiState {
             show_texture_background: false,
             show_texture_labels: false,
             show_texture_strokes: false,
+            connection_lost: false,
         }
     }
 
@@ -84,7 +87,8 @@ impl DebugUiState {
     ///
     /// Checks if sync is in progress, starts new sync if not, and handles completion.
     /// Uses a channel-based approach to avoid holding locks across await points.
-    fn handle_sync(&mut self) {
+    /// Returns true if connection was lost and app should exit.
+    fn handle_sync(&mut self) -> bool {
         // Check if previous sync completed
         if let Some(mut receiver) = self.pending_sync.take() {
             match receiver.try_recv() {
@@ -162,6 +166,15 @@ impl DebugUiState {
                 }
                 Ok(Err(e)) => {
                     // Sync failed
+                    let error_msg = e.to_string();
+                    // Check if this is a connection lost error
+                    // Error format is "Transport error: Connection lost" from client.rs
+                    if error_msg.contains("Connection lost") {
+                        eprintln!("Connection lost - exiting");
+                        self.connection_lost = true;
+                        self.sync_in_progress = false;
+                        return true;
+                    }
                     eprintln!("Sync error: {e}");
                     self.sync_in_progress = false;
                 }
@@ -176,9 +189,9 @@ impl DebugUiState {
             }
         }
 
-        // Start new sync if not in progress
+        // Start new sync if not in progress and connection is still alive
         // If tracked_nodes changed, we'll sync again after current sync finishes
-        if !self.sync_in_progress {
+        if !self.sync_in_progress && !self.connection_lost {
             // Update view's detail_tracking to match tracked_nodes and get sync parameters
             let (since_frame, detail_specifier) = {
                 let mut view = self.project_view.lock().unwrap();
@@ -229,6 +242,8 @@ impl DebugUiState {
                 }
             });
         }
+
+        false
     }
 }
 
@@ -238,8 +253,11 @@ impl eframe::App for DebugUiState {
         let now = Instant::now();
         self.last_frame_time = Some(now);
 
-        // Handle sync
-        self.handle_sync();
+        // Handle sync - exit if connection lost
+        if self.handle_sync() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
 
         // Request repaint to keep loop running
         ctx.request_repaint_after(std::time::Duration::from_millis(16)); // ~60 FPS

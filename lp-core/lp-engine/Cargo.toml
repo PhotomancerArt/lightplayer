@@ -8,7 +8,11 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "cranelift-optimizer", "cranelift-verifier"]
+# Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
+cranelift-optimizer = ["lp-glsl-compiler/cranelift-optimizer"]
+# Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
+cranelift-verifier = ["lp-glsl-compiler/cranelift-verifier"]
 std = [
     "lp-shared/std",
     "lp-glsl-compiler/std"
@@ -16,10 +20,11 @@ std = [
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 hashbrown = { workspace = true }
 lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }
+lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false }
+cranelift-codegen = { workspace = true, features = ["riscv32"] }
 log = { workspace = true, default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }

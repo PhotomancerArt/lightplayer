@@ -131,6 +131,8 @@ impl ClientProjectView {
                                             },
                                         color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
+                                        brightness: None,
+                                        gamma_correction: None,
                                     })
                                 }
                             };
@@ -226,6 +228,8 @@ impl ClientProjectView {
                                     },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
+                                    brightness: None,
+                                    gamma_correction: None,
                                 })
                             }
                         };
@@ -268,6 +272,8 @@ impl ClientProjectView {
                                     },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
+                                    brightness: None,
+                                    gamma_correction: None,
                                 })
                             }
                         };

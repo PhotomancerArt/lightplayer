@@ -65,6 +65,7 @@ impl LpClient {
     /// Send a request and wait for the response
     ///
     /// Helper method that generates a request ID, sends the request, and waits for the response.
+    /// Correlates messages by ID to handle heartbeats and other interstitial messages.
     /// If the server returns an Error response, converts it to an Err.
     async fn send_request(&self, request: ClientRequest) -> Result<ServerMessage> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
@@ -77,18 +78,65 @@ impl LpClient {
             .await
             .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
 
-        // Wait for response
-        let response = transport
-            .receive()
-            .await
-            .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
+        // Wait for response with matching ID
+        // Handle heartbeats and other interstitial messages
+        loop {
+            let response = transport
+                .receive()
+                .await
+                .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
 
-        // Check if server returned an error response
-        if let ServerMsgBody::Error { error } = &response.msg {
-            return Err(Error::msg(error.clone()));
+            // Check if this is the response we're waiting for
+            if response.id == id {
+                // Check if server returned an error response
+                if let ServerMsgBody::Error { error } = &response.msg {
+                    return Err(Error::msg(error.clone()));
+                }
+                return Ok(response);
+            }
+
+            // Handle heartbeats (id: 0)
+            if response.id == 0 {
+                if let ServerMsgBody::Heartbeat {
+                    fps,
+                    frame_count,
+                    loaded_projects,
+                    uptime_ms,
+                } = &response.msg
+                {
+                    // Display heartbeat information
+                    let uptime_secs = *uptime_ms as f64 / 1000.0;
+                    let projects_str = if loaded_projects.is_empty() {
+                        "none".to_string()
+                    } else {
+                        loaded_projects
+                            .iter()
+                            .map(|p| {
+                                // Extract project name from path
+                                p.path
+                                    .file_name()
+                                    .map(|n| n.to_string())
+                                    .unwrap_or_else(|| p.path.as_str().to_string())
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    eprintln!(
+                        "[server] FPS: {fps} | Frames: {frame_count} | Uptime: {uptime_secs:.1}s | Projects: {projects_str}"
+                    );
+                }
+                // Continue waiting for actual response
+                continue;
+            }
+
+            // Non-correlated message (shouldn't happen, but handle gracefully)
+            log::warn!(
+                "Received non-correlated message (id: {}, expected: {})",
+                response.id,
+                id
+            );
+            // Continue waiting for actual response
         }
-
-        Ok(response)
     }
 
     /// Read a file from the server filesystem
@@ -351,6 +399,26 @@ impl LpClient {
             ))),
         }
     }
+
+    /// Stop all loaded projects on the server
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if all projects were stopped successfully
+    /// * `Err` if the request failed or transport error occurred
+    pub async fn stop_all_projects(&self) -> Result<()> {
+        let request = ClientRequest::StopAllProjects;
+
+        let response = self.send_request(request).await?;
+
+        match response.msg {
+            ServerMsgBody::StopAllProjects => Ok(()),
+            _ => Err(Error::msg(format!(
+                "Unexpected response type for stop_all_projects: {:?}",
+                response.msg
+            ))),
+        }
+    }
 }
 
 /// Convert SerializableProjectResponse to ProjectResponse
@@ -423,5 +491,190 @@ pub fn serializable_response_to_project_response(
                 theoretical_fps,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local::create_local_transport_pair;
+    use lp_model::{
+        LpPathBuf,
+        project::handle::ProjectHandle,
+        server::{LoadedProject, ServerMsgBody},
+    };
+    use tokio::task;
+
+    #[tokio::test]
+    async fn test_send_request_with_heartbeat() {
+        // Create transport pair
+        let (client_transport, mut server_transport) = create_local_transport_pair();
+        let client = LpClient::new(Box::new(client_transport));
+
+        // Spawn a task to simulate server sending heartbeat then response
+        let server_task = task::spawn(async move {
+            // Wait a bit for client to send request
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            // Receive client request
+            let client_msg = server_transport.receive().await.unwrap();
+            assert!(client_msg.is_some());
+            let request_id = client_msg.unwrap().id;
+
+            // Send heartbeat first (id: 0)
+            let heartbeat = ServerMessage {
+                id: 0,
+                msg: ServerMsgBody::Heartbeat {
+                    fps: 60,
+                    frame_count: 100,
+                    loaded_projects: vec![],
+                    uptime_ms: 2000,
+                },
+            };
+            server_transport.send(heartbeat).unwrap();
+
+            // Send actual response
+            let response = ServerMessage {
+                id: request_id,
+                msg: ServerMsgBody::StopAllProjects,
+            };
+            server_transport.send(response).unwrap();
+        });
+
+        // Send request - should handle heartbeat and get response
+        let result = client.stop_all_projects().await;
+        assert!(result.is_ok());
+
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_send_request_multiple_heartbeats() {
+        // Create transport pair
+        let (client_transport, mut server_transport) = create_local_transport_pair();
+        let client = LpClient::new(Box::new(client_transport));
+
+        // Spawn a task to simulate server sending multiple heartbeats then response
+        let server_task = task::spawn(async move {
+            // Wait a bit for client to send request
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            // Receive client request
+            let client_msg = server_transport.receive().await.unwrap();
+            assert!(client_msg.is_some());
+            let request_id = client_msg.unwrap().id;
+
+            // Send multiple heartbeats
+            for i in 0..3 {
+                let heartbeat = ServerMessage {
+                    id: 0,
+                    msg: ServerMsgBody::Heartbeat {
+                        fps: 60 + i,
+                        frame_count: 100 + i as u64,
+                        loaded_projects: vec![],
+                        uptime_ms: 2000 + i as u64 * 1000,
+                    },
+                };
+                server_transport.send(heartbeat).unwrap();
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            }
+
+            // Send actual response
+            let response = ServerMessage {
+                id: request_id,
+                msg: ServerMsgBody::StopAllProjects,
+            };
+            server_transport.send(response).unwrap();
+        });
+
+        // Send request - should handle all heartbeats and get response
+        let result = client.stop_all_projects().await;
+        assert!(result.is_ok());
+
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_send_request_heartbeat_with_projects() {
+        // Create transport pair
+        let (client_transport, mut server_transport) = create_local_transport_pair();
+        let client = LpClient::new(Box::new(client_transport));
+
+        // Spawn a task to simulate server sending heartbeat with projects then response
+        let server_task = task::spawn(async move {
+            // Wait a bit for client to send request
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            // Receive client request
+            let client_msg = server_transport.receive().await.unwrap();
+            assert!(client_msg.is_some());
+            let request_id = client_msg.unwrap().id;
+
+            // Send heartbeat with projects
+            let heartbeat = ServerMessage {
+                id: 0,
+                msg: ServerMsgBody::Heartbeat {
+                    fps: 95,
+                    frame_count: 154,
+                    loaded_projects: vec![LoadedProject {
+                        handle: ProjectHandle::new(1),
+                        path: LpPathBuf::from("/projects/test-project"),
+                    }],
+                    uptime_ms: 4680,
+                },
+            };
+            server_transport.send(heartbeat).unwrap();
+
+            // Send actual response
+            let response = ServerMessage {
+                id: request_id,
+                msg: ServerMsgBody::StopAllProjects,
+            };
+            server_transport.send(response).unwrap();
+        });
+
+        // Send request - should handle heartbeat and get response
+        let result = client.stop_all_projects().await;
+        assert!(result.is_ok());
+
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_send_request_non_correlated_message() {
+        // Create transport pair
+        let (client_transport, mut server_transport) = create_local_transport_pair();
+        let client = LpClient::new(Box::new(client_transport));
+
+        // Spawn a task to simulate server sending wrong ID then correct response
+        let server_task = task::spawn(async move {
+            // Wait a bit for client to send request
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            // Receive client request
+            let client_msg = server_transport.receive().await.unwrap();
+            assert!(client_msg.is_some());
+            let request_id = client_msg.unwrap().id;
+
+            // Send response with wrong ID (shouldn't happen, but test handling)
+            let wrong_response = ServerMessage {
+                id: request_id + 100,
+                msg: ServerMsgBody::StopAllProjects,
+            };
+            server_transport.send(wrong_response).unwrap();
+
+            // Send correct response
+            let response = ServerMessage {
+                id: request_id,
+                msg: ServerMsgBody::StopAllProjects,
+            };
+            server_transport.send(response).unwrap();
+        });
+
+        // Send request - should skip wrong ID and get correct response
+        let result = client.stop_all_projects().await;
+        assert!(result.is_ok());
+
+        server_task.await.unwrap();
     }
 }

@@ -1449,6 +1449,15 @@ impl GlslExecutable for GlslJitModule {
     fn list_functions(&self) -> Vec<String> {
         self.signatures.keys().cloned().collect()
     }
+
+    fn get_direct_call_info(&self, name: &str) -> Option<crate::exec::executable::DirectCallInfo> {
+        let func_ptr = *self.function_ptrs.get(name)?;
+        Some(crate::exec::executable::DirectCallInfo {
+            func_ptr,
+            call_conv: self.call_conv,
+            pointer_type: self.pointer_type,
+        })
+    }
 }
 
 #[cfg(test)]

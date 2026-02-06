@@ -109,7 +109,15 @@ async fn handle_dev_async(
     // Create local filesystem
     let local_fs: Arc<dyn LpFs> = Arc::new(LpFsStd::new(args.dir.clone()));
 
-    // Always push project to server (default is local server)
+    // Stop all currently loaded projects before pushing
+    // This ensures a clean state
+    if let Err(e) = client.stop_all_projects().await {
+        // Log warning but continue - server might not have any projects loaded
+        eprintln!("Warning: Failed to stop all projects: {e}");
+        eprintln!("Continuing with project push...");
+    }
+
+    // Push project to server
     // This ensures the project exists on the server before we try to load it
     push_project_async(&client, &*local_fs, &project_uid)
         .await

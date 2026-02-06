@@ -7,29 +7,56 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6"]
+default = ["esp32c6", "server"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
     "esp-rtos/esp32c6",
     "esp-hal/esp32c6",
 ]
+server = [
+    "lp-server",
+    "lp-shared",
+    "lp-model",
+]  # Enable server dependencies (lp-server, lp-shared, lp-model)
+test_rmt = []  # Test RMT driver with simple patterns
+test_gpio = []  # Test GPIO pin toggle
+test_usb = []  # Test USB serial communication
 
 [dependencies]
 embassy-executor = "0.9.1"
 embassy-time = "0.4.0"
+embassy-sync = "0.7.2"
 esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
 esp-bootloader-esp-idf = { version = "0.2.0" }
 esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
-esp-println = { version = "0.16.1", features = ["log-04"] }
+esp-println = { version = "0.16.1", default-features = false, features = ["esp32c6", "jtag-serial", "log"] }
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
-lp-server = { path = "../../lp-core/lp-server", default-features = false }
-lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
-lp-model = { path = "../../lp-core/lp-model", default-features = false }
+# Note: cranelift-optimizer and cranelift-verifier features are intentionally NOT enabled to reduce binary size
+# This saves ~166-219 KB by disabling unused Cranelift optimizer and verifier code
+lp-server = { path = "../../lp-core/lp-server", default-features = false, optional = true }
+lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
+lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true }
+lp-engine = { path = "../../lp-core/lp-engine", default-features = false, optional = true }
+serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
+
+# Dependencies for optional GLSL compilation features
+lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false, features = ["core"], optional = true }
+lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
+lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }
+cranelift-codegen = { workspace = true, features = ["riscv32"], optional = true }
+cranelift-frontend = { workspace = true, features = ["core"], optional = true }
+cranelift-module = { workspace = true, features = ["core"], optional = true }
+cranelift-control = { workspace = true, optional = true }
+target-lexicon = { workspace = true, optional = true }
+smart-leds = "0.3"
+embassy-futures = "0.1"
+embedded-io-async = "0.6"
+log = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

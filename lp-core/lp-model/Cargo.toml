@@ -13,7 +13,7 @@ std = []
 [dependencies]
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde-json-core = { version = "0.6", default-features = false }
 base64 = { workspace = true }
 
 [dev-dependencies]

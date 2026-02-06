@@ -534,16 +534,19 @@ impl GlslCompiler {
         // Merge SourceLocManager back into shared one
         source_loc_manager.merge_from(&codegen_ctx.source_loc_manager);
 
-        // Verify function
-        cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
-            GlslError::new(
-                ErrorCode::E0400,
-                format!(
-                    "verifier error in function '{}': {}\n\nFunction IR:\n{}",
-                    func.name, e, ctx.func
-                ),
-            )
-        })?;
+        // Verify function (only if verifier feature is enabled)
+        #[cfg(feature = "cranelift-verifier")]
+        {
+            cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "verifier error in function '{}': {}\n\nFunction IR:\n{}",
+                        func.name, e, ctx.func
+                    ),
+                )
+            })?;
+        }
 
         Ok(ctx.func)
     }
@@ -707,16 +710,19 @@ impl GlslCompiler {
         // Merge SourceLocManager back into shared one
         source_loc_manager.merge_from(&codegen_ctx.source_loc_manager);
 
-        // Verify function
-        cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
-            GlslError::new(
-                ErrorCode::E0400,
-                format!(
-                    "verifier error in main function: {}\n\nFunction IR:\n{}",
-                    e, ctx.func
-                ),
-            )
-        })?;
+        // Verify function (only if verifier feature is enabled)
+        #[cfg(feature = "cranelift-verifier")]
+        {
+            cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "verifier error in main function: {}\n\nFunction IR:\n{}",
+                        e, ctx.func
+                    ),
+                )
+            })?;
+        }
 
         Ok(ctx.func)
     }

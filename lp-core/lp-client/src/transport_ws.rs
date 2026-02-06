@@ -57,7 +57,7 @@ impl ClientTransport for WebSocketClientTransport {
         };
 
         // Serialize ClientMessage to JSON
-        let json = serde_json::to_string(&msg).map_err(|e| {
+        let json = lp_model::json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ClientMessage: {e}"))
         })?;
 
@@ -85,7 +85,7 @@ impl ClientTransport for WebSocketClientTransport {
             match stream.next().await {
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
                     // Deserialize ServerMessage from JSON
-                    return serde_json::from_str(&text).map_err(|e| {
+                    return lp_model::json::from_str(&text).map_err(|e| {
                         TransportError::Deserialization(format!(
                             "Failed to deserialize ServerMessage: {e}"
                         ))
@@ -93,7 +93,7 @@ impl ClientTransport for WebSocketClientTransport {
                 }
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
                     // Deserialize ServerMessage from binary JSON
-                    return serde_json::from_slice(&data).map_err(|e| {
+                    return lp_model::json::from_slice(&data).map_err(|e| {
                         TransportError::Deserialization(format!(
                             "Failed to deserialize ServerMessage: {e}"
                         ))
@@ -162,8 +162,8 @@ mod tests {
             }),
         };
 
-        let json = serde_json::to_string(&msg).unwrap();
-        let deserialized: ClientMessage = serde_json::from_str(&json).unwrap();
+        let json = lp_model::json::to_string(&msg).unwrap();
+        let deserialized: ClientMessage = lp_model::json::from_str(&json).unwrap();
         assert_eq!(deserialized.id, msg.id);
     }
 }

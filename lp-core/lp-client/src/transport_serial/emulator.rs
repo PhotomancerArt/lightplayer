@@ -6,7 +6,6 @@
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
 use lp_riscv_emu::Riscv32Emulator;
-use serde_json;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
@@ -39,7 +38,7 @@ fn emulator_thread_loop(
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
             // Serialize message to JSON
-            let json = match serde_json::to_string(&msg) {
+            let json = match lp_model::json::to_string(&msg) {
                 Ok(j) => j,
                 Err(e) => {
                     log::warn!("Emulator thread: Failed to serialize client message: {e}");
@@ -178,7 +177,7 @@ fn emulator_thread_loop(
             };
 
             // Parse JSON message
-            match serde_json::from_str::<ServerMessage>(message_str) {
+            match lp_model::json::from_str::<ServerMessage>(message_str) {
                 Ok(msg) => {
                     log::debug!(
                         "Emulator thread: Parsed server message id={} ({} bytes)",

@@ -18,8 +18,6 @@ use lp_model::{
     },
 };
 use lp_shared::fs::{LpFs, fs_event::FsChange};
-#[cfg(feature = "std")]
-use serde_json;
 
 /// Project runtime - manages nodes and rendering
 pub struct ProjectRuntime {
@@ -168,6 +166,8 @@ impl ProjectRuntime {
                             },
                             color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                             transform: [[0.0; 4]; 4],
+                            brightness: None,
+                            gamma_correction: None,
                         }),
                     };
 
@@ -234,11 +234,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::texture::TextureConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse texture config: {e}"),
-                            })?,
+                        lp_model::json::from_slice::<lp_model::nodes::texture::TextureConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse texture config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -259,11 +261,13 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::fixture::FixtureConfig>(&data)
-                            .map_err(|e| Error::Parse {
-                                file: node_json_path.as_str().to_string(),
-                                error: format!("Failed to parse fixture config: {e}"),
-                            })?,
+                        lp_model::json::from_slice::<lp_model::nodes::fixture::FixtureConfig>(
+                            &data,
+                        )
+                        .map_err(|e| Error::Parse {
+                            file: node_json_path.as_str().to_string(),
+                            error: format!("Failed to parse fixture config: {e}"),
+                        })?,
                     )
                 } else {
                     None
@@ -284,7 +288,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::shader::ShaderConfig>(&data)
+                        lp_model::json::from_slice::<lp_model::nodes::shader::ShaderConfig>(&data)
                             .map_err(|e| Error::Parse {
                                 file: node_json_path.as_str().to_string(),
                                 error: format!("Failed to parse shader config: {e}"),
@@ -309,7 +313,7 @@ impl ProjectRuntime {
                             details: format!("Failed to read: {e:?}"),
                         })?;
                     Some(
-                        serde_json::from_slice::<lp_model::nodes::output::OutputConfig>(&data)
+                        lp_model::json::from_slice::<lp_model::nodes::output::OutputConfig>(&data)
                             .map_err(|e| Error::Parse {
                                 file: node_json_path.as_str().to_string(),
                                 error: format!("Failed to parse output config: {e}"),
@@ -474,22 +478,7 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
-        if !fixture_handles.is_empty() {
-            log::debug!(
-                "ProjectRuntime::tick: Rendering {} fixture(s)",
-                fixture_handles.len()
-            );
-        }
-
         for handle in fixture_handles {
-            if let Some(entry) = self.nodes.get(&handle) {
-                log::trace!(
-                    "ProjectRuntime::tick: Rendering fixture {} ({})",
-                    handle.as_i32(),
-                    entry.path.as_str()
-                );
-            }
-
             // Render fixture - need to handle borrowing carefully
             // The issue: runtime.render() needs &mut runtime and &mut ctx
             // But runtime is inside ctx.nodes, so we can't have both borrows
@@ -551,22 +540,7 @@ impl ProjectRuntime {
             .map(|(handle, _)| *handle)
             .collect();
 
-        if !output_handles.is_empty() {
-            log::debug!(
-                "ProjectRuntime::tick: Flushing {} output(s) (state_ver == frame {})",
-                output_handles.len(),
-                self.frame_id.as_i64()
-            );
-        }
-
         for handle in output_handles {
-            if let Some(entry) = self.nodes.get(&handle) {
-                log::trace!(
-                    "ProjectRuntime::tick: Flushing output {} ({})",
-                    handle.as_i32(),
-                    entry.path.as_str()
-                );
-            }
             let render_result = {
                 let mut ctx = RenderContextImpl {
                     nodes: &mut self.nodes,
@@ -1167,6 +1141,8 @@ impl ProjectRuntime {
                                             },
                                         color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                         transform: [[0.0; 4]; 4],
+                                        brightness: None,
+                                        gamma_correction: None,
                                     })
                                 }
                             } else {
@@ -1179,6 +1155,8 @@ impl ProjectRuntime {
                                     },
                                     color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                     transform: [[0.0; 4]; 4],
+                                    brightness: None,
+                                    gamma_correction: None,
                                 })
                             }
                         } else {
@@ -1191,6 +1169,8 @@ impl ProjectRuntime {
                                 },
                                 color_order: lp_model::nodes::fixture::ColorOrder::Rgb,
                                 transform: [[0.0; 4]; 4],
+                                brightness: None,
+                                gamma_correction: None,
                             })
                         }
                     }

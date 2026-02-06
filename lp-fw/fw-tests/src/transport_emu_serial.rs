@@ -5,9 +5,8 @@
 
 use async_trait::async_trait;
 use log;
-use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_model::{ClientMessage, ServerMessage, TransportError, json};
 use lp_riscv_emu::Riscv32Emulator;
-use serde_json;
 use std::sync::{Arc, Mutex};
 
 /// Serial ClientTransport that communicates with firmware running in emulator
@@ -65,7 +64,7 @@ impl SerialEmuClientTransport {
                 message_bytes.len()
             );
 
-            let message: ServerMessage = serde_json::from_str(message_str)
+            let message: ServerMessage = json::from_str(message_str)
                 .map_err(|e| TransportError::Serialization(format!("JSON parse error: {e}")))?;
 
             log::debug!(
@@ -134,7 +133,7 @@ impl SerialEmuClientTransport {
 impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         // Serialize message to JSON
-        let json = serde_json::to_string(&msg)
+        let json = json::to_string(&msg)
             .map_err(|e| TransportError::Serialization(format!("JSON serialize error: {e}")))?;
 
         // Add newline terminator
@@ -183,7 +182,7 @@ impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
             );
             log::trace!(
                 "SerialEmuClientTransport::receive: Message content: {}",
-                serde_json::to_string(&msg).unwrap_or_else(|_| "<failed to serialize>".to_string())
+                json::to_string(&msg).unwrap_or_else(|_| "<failed to serialize>".to_string())
             );
             return Ok(msg);
         }
@@ -200,7 +199,7 @@ impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
             );
             log::trace!(
                 "SerialEmuClientTransport::receive: Message content: {}",
-                serde_json::to_string(&msg).unwrap_or_else(|_| "<failed to serialize>".to_string())
+                json::to_string(&msg).unwrap_or_else(|_| "<failed to serialize>".to_string())
             );
             return Ok(msg);
         }

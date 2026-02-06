@@ -3,9 +3,11 @@
 //! Provides `client_connect()` function that creates appropriate `ClientTransport`
 //! based on a `HostSpecifier`.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 #[cfg(feature = "serial")]
-use lp_client::transport_serial::create_emulator_serial_transport_pair;
+use lp_client::transport_serial::{
+    create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
+};
 use lp_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 #[cfg(feature = "serial")]
 use lp_riscv_elf::load_elf;
@@ -20,6 +22,8 @@ use lp_riscv_inst::Gpr;
 use std::sync::{Arc, Mutex};
 
 use crate::client::local_server::LocalServerTransport;
+#[cfg(feature = "serial")]
+use crate::client::serial_port::detect_serial_port;
 
 /// Connect to a server using the specified host specifier
 ///
@@ -70,8 +74,22 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
                 .map_err(|e| anyhow::anyhow!("Failed to connect to {url}: {e}"))?;
             Ok(Box::new(transport))
         }
+        #[cfg(feature = "serial")]
+        HostSpecifier::Serial { port, baud_rate } => {
+            // Detect/select serial port
+            let port_config = detect_serial_port(port.as_deref(), baud_rate.as_ref().copied())
+                .context("Failed to detect serial port")?;
+
+            // Create hardware serial transport
+            let transport =
+                create_hardware_serial_transport_pair(&port_config.port, port_config.baud_rate)
+                    .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
+
+            Ok(Box::new(transport))
+        }
+        #[cfg(not(feature = "serial"))]
         HostSpecifier::Serial { .. } => {
-            bail!("Serial transport not yet implemented");
+            bail!("Serial transport requires 'serial' feature to be enabled");
         }
         #[cfg(feature = "serial")]
         HostSpecifier::Emulator => {
@@ -145,12 +163,24 @@ mod tests {
     }
 
     #[test]
-    fn test_client_connect_serial() {
+    #[cfg(feature = "serial")]
+    fn test_client_connect_serial_auto() {
+        // This test would require a serial port, so may need to be skipped
+        // or use a mock. For now, just verify it parses correctly.
         let spec = HostSpecifier::parse("serial:auto").unwrap();
-        let result = client_connect(spec);
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(format!("{e}").contains("not yet implemented"));
+        // Note: actual connection will fail without a real port, but parsing should work
+        let _ = client_connect(spec);
+    }
+
+    #[test]
+    fn test_client_connect_serial_with_baud() {
+        let spec = HostSpecifier::parse("serial:/dev/cu.usbmodem2101?baud=115200").unwrap();
+        // Verify parsing works
+        assert!(spec.is_serial());
+        #[cfg(feature = "serial")]
+        {
+            // Note: actual connection will fail without a real port
+            let _ = client_connect(spec);
         }
     }
 
