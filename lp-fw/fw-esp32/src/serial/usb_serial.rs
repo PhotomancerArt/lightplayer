@@ -14,6 +14,7 @@ use fw_core::serial::{SerialError, SerialIo};
 /// ESP32 USB-serial SerialIo implementation
 ///
 /// Uses synchronous USB serial operations directly.
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub struct Esp32UsbSerialIo {
     usb_serial: UsbSerialJtag<'static, Blocking>,
 }
@@ -23,6 +24,7 @@ impl Esp32UsbSerialIo {
     ///
     /// # Arguments
     /// * `usb_serial` - Initialized USB-serial interface (synchronous/blocking)
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn new(usb_serial: UsbSerialJtag<'static, Blocking>) -> Self {
         Self { usb_serial }
     }
@@ -32,7 +34,7 @@ impl SerialIo for Esp32UsbSerialIo {
     fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
         self.usb_serial
             .write(data)
-            .map_err(|e| SerialError::WriteFailed(format!("USB-serial write error: {:?}", e)))
+            .map_err(|e| SerialError::WriteFailed(format!("USB-serial write error: {e:?}")))
     }
 
     fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, SerialError> {

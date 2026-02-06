@@ -33,10 +33,10 @@ pub extern "C" fn lp_jit_host_log(
             core::str::from_utf8(module_path_slice),
             core::str::from_utf8(msg_slice),
         ) {
-            let log_msg = alloc::format!("[{}] {}: {}\r\n", level_str, module_path, msg);
+            let log_msg = alloc::format!("[{level_str}] {module_path}: {msg}\r\n");
             write_log(&log_msg);
         } else {
-            let log_msg = alloc::format!("[{}] [invalid UTF-8 log message]\r\n", level_str);
+            let log_msg = alloc::format!("[{level_str}] [invalid UTF-8 log message]\r\n");
             write_log(&log_msg);
         }
     }

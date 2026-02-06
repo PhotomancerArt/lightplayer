@@ -8,8 +8,6 @@
 #![no_main]
 
 extern crate alloc;
-#[macro_use]
-extern crate log;
 
 use esp_backtrace as _; // Import to activate panic handler
 
@@ -117,7 +115,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Create transport wrapper
         esp_println::println!("[INIT] Creating MessageRouterTransport...");
-        let mut transport = MessageRouterTransport::new(router);
+        let transport = MessageRouterTransport::new(router);
         esp_println::println!("[INIT] MessageRouterTransport created");
 
         // Initialize RMT peripheral for output

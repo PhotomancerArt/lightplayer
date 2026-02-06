@@ -16,9 +16,12 @@ use smart_leds::RGB8;
 ///
 /// # Safety
 /// This function is unsafe because it performs raw pointer operations and direct register access.
-#[allow(unsafe_op_in_unsafe_fn)]
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    reason = "unsafe operations required for direct RMT register access"
+)]
 // Used internally by LedChannel::start_transmission
-#[allow(dead_code)]
+#[allow(dead_code, reason = "used internally by LedChannel")]
 pub(crate) unsafe fn start_transmission_with_state(
     channel_idx: u8,
     led_buffer_ptr: *mut RGB8,

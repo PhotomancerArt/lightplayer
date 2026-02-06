@@ -39,7 +39,7 @@ use core::sync::atomic::Ordering;
 /// let channel = tx.wait_complete(); // Reuse channel for next transmission
 /// ```
 // Public API - will be used when provider is updated
-#[allow(dead_code)]
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub struct LedChannel<'ch> {
     channel: Channel<'ch, Blocking, Tx>,
     channel_idx: u8,
@@ -55,7 +55,7 @@ pub struct LedChannel<'ch> {
 /// This type is marked `#[must_use]` to ensure transmissions are properly waited on.
 #[must_use = "transactions must be waited on to get the channel back"]
 // Public API - will be used when provider is updated
-#[allow(dead_code)]
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub struct LedTransaction<'ch> {
     channel: LedChannel<'ch>,
 }
@@ -80,7 +80,7 @@ impl<'ch> LedChannel<'ch> {
     /// let channel = LedChannel::new(rmt, peripherals.GPIO18, 64)?;
     /// ```
     // Public API - will be used when provider is updated
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn new<O>(mut rmt: Rmt<'ch, Blocking>, pin: O, num_leds: usize) -> Result<Self, RmtError>
     where
         O: PeripheralOutput<'ch>,
@@ -163,7 +163,7 @@ impl<'ch> LedChannel<'ch> {
     /// let tx = channel.start_transmission(&rgb_data);
     /// ```
     // Public API - will be used when provider is updated
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn start_transmission(mut self, rgb_bytes: &[u8]) -> LedTransaction<'ch> {
         log::debug!(
             "LedChannel::start_transmission: {} bytes ({} LEDs)",
@@ -198,10 +198,7 @@ impl<'ch> LedChannel<'ch> {
         // Start transmission using internal function
         // Buffer info will be stored in ChannelState by start_transmission_with_state
         // Use the actual num_leds from data, not the channel capacity
-        log::debug!(
-            "LedChannel::start_transmission: Starting transmission for {} LEDs",
-            num_leds
-        );
+        log::debug!("LedChannel::start_transmission: Starting transmission for {num_leds} LEDs");
         unsafe {
             start_transmission_with_state(
                 self.channel_idx,
@@ -231,7 +228,7 @@ impl<'ch> LedTransaction<'ch> {
     /// let channel = tx.wait_complete(); // Channel is ready for next transmission
     /// ```
     // Public API - will be used when provider is updated
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn wait_complete(self) -> LedChannel<'ch> {
         let channel_idx = self.channel.channel_idx as usize;
         log::debug!("LedTransaction::wait_complete: Waiting for transmission to complete");
@@ -247,15 +244,13 @@ impl<'ch> LedTransaction<'ch> {
             wait_count += 1;
             if wait_count % 1000 == 0 {
                 log::debug!(
-                    "LedTransaction::wait_complete: Still waiting... ({} iterations)",
-                    wait_count
+                    "LedTransaction::wait_complete: Still waiting... ({wait_count} iterations)"
                 );
             }
         }
 
         log::debug!(
-            "LedTransaction::wait_complete: Transmission complete after {} iterations",
-            wait_count
+            "LedTransaction::wait_complete: Transmission complete after {wait_count} iterations"
         );
         // Return the channel for reuse
         self.channel

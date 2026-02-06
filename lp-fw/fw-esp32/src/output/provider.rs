@@ -20,7 +20,7 @@ struct ChannelState {
     pin: u32,
     byte_count: u32,
     // Will be used when format validation is needed
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "format field reserved for future validation")]
     format: OutputFormat,
 }
 
@@ -90,26 +90,20 @@ impl OutputProvider for Esp32OutputProvider {
         format: OutputFormat,
     ) -> Result<OutputChannelHandle, OutputError> {
         log::debug!(
-            "Esp32OutputProvider::open: pin={}, byte_count={}, format={:?}",
-            pin,
-            byte_count,
-            format
+            "Esp32OutputProvider::open: pin={pin}, byte_count={byte_count}, format={format:?}"
         );
 
         // Check if pin is already open
         if self.open_pins.borrow().contains(&pin) {
-            log::warn!("Esp32OutputProvider::open: Pin {} already open", pin);
+            log::warn!("Esp32OutputProvider::open: Pin {pin} already open");
             return Err(OutputError::PinAlreadyOpen { pin });
         }
 
         // Validate format
         if format != OutputFormat::Ws2811 {
-            log::warn!(
-                "Esp32OutputProvider::open: Unsupported format: {:?}",
-                format
-            );
+            log::warn!("Esp32OutputProvider::open: Unsupported format: {format:?}");
             return Err(OutputError::InvalidConfig {
-                reason: format!("Unsupported format: {:?}", format),
+                reason: format!("Unsupported format: {format:?}"),
             });
         }
 
@@ -118,10 +112,7 @@ impl OutputProvider for Esp32OutputProvider {
         let num_leds = byte_count / BYTES_PER_LED;
 
         if num_leds == 0 {
-            log::warn!(
-                "Esp32OutputProvider::open: byte_count {} too small",
-                byte_count
-            );
+            log::warn!("Esp32OutputProvider::open: byte_count {byte_count} too small");
             return Err(OutputError::InvalidConfig {
                 reason: "byte_count must be at least 3 (one LED)".into(),
             });
@@ -158,11 +149,7 @@ impl OutputProvider for Esp32OutputProvider {
         let handle = OutputChannelHandle::new(handle_id);
 
         log::info!(
-            "Esp32OutputProvider::open: Opened channel handle={}, pin={}, byte_count={}, num_leds={}",
-            handle_id,
-            pin,
-            byte_count,
-            num_leds
+            "Esp32OutputProvider::open: Opened channel handle={handle_id}, pin={pin}, byte_count={byte_count}, num_leds={num_leds}"
         );
 
         // Store channel state (without transaction for now)
@@ -190,16 +177,16 @@ impl OutputProvider for Esp32OutputProvider {
         // Find channel and update byte_count if needed (simple resize support)
         let mut channels = self.channels.borrow_mut();
         let channel = channels.get_mut(&handle_id).ok_or_else(|| {
-            log::warn!("Esp32OutputProvider::write: Invalid handle {}", handle_id);
+            log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
             OutputError::InvalidHandle { handle: handle_id }
         })?;
 
         // Update byte_count if data is larger (simple resize)
         if data.len() > channel.byte_count as usize {
+            let old_count = channel.byte_count;
+            let new_count = data.len();
             log::info!(
-                "Esp32OutputProvider::write: Resizing channel from {} to {} bytes",
-                channel.byte_count,
-                data.len()
+                "Esp32OutputProvider::write: Resizing channel from {old_count} to {new_count} bytes"
             );
             channel.byte_count = data.len() as u32;
         }

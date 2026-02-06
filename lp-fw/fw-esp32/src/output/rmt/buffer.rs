@@ -19,7 +19,10 @@ use core::sync::atomic::Ordering;
 /// * `byte_value` - The byte value to encode
 /// * `byte_offset` - Offset in bytes (0, 1, or 2 for RGB)
 #[inline(always)]
-#[allow(unsafe_op_in_unsafe_fn)]
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    reason = "unsafe operations required for direct RMT memory access"
+)]
 pub(crate) unsafe fn write_ws2811_byte(base_ptr: *mut u32, byte_value: u8, byte_offset: usize) {
     let ptr = base_ptr.add(byte_offset * 8);
 
@@ -53,7 +56,10 @@ pub(crate) unsafe fn write_ws2811_byte(base_ptr: *mut u32, byte_value: u8, byte_
 ///
 /// While this is not ideal, it is necessary, especially in debug mode, where the RTT driver
 /// seems to interfere with the RMT interrupts.
-#[allow(unsafe_op_in_unsafe_fn)]
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    reason = "unsafe operations required for direct RMT memory access"
+)]
 pub(crate) unsafe fn write_buffer_guard(into_second_half: bool) {
     // Write a zero after our half buffer to guard against interrupt loss
     let base_ptr = (esp_hal::peripherals::RMT::ptr() as usize + 0x400) as *mut u32;
@@ -75,7 +81,10 @@ pub(crate) unsafe fn write_buffer_guard(into_second_half: bool) {
 ///
 /// # Returns
 /// `true` if the end of the LED strip was reached, `false` otherwise
-#[allow(unsafe_op_in_unsafe_fn)]
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    reason = "unsafe operations required for direct RMT memory access"
+)]
 pub(crate) unsafe fn write_half_buffer(is_first_half: bool, channel_idx: u8) -> bool {
     let base_ptr = (esp_hal::peripherals::RMT::ptr() as usize + 0x400) as *mut u32;
     let ch_idx = channel_idx as usize;

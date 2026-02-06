@@ -100,7 +100,7 @@ mod tests {
 
     use super::*;
     use crate::message_router::MessageRouter;
-    use alloc::string::ToString;
+    use alloc::string::{String, ToString};
     use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
     use embassy_sync::channel::Channel;
     use lp_model::ClientRequest;

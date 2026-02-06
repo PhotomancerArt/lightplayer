@@ -499,7 +499,7 @@ mod tests {
     use super::*;
     use crate::local::create_local_transport_pair;
     use lp_model::{
-        AsLpPathBuf, LpPathBuf,
+        LpPathBuf,
         project::handle::ProjectHandle,
         server::{LoadedProject, ServerMsgBody},
     };

@@ -10,12 +10,14 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use fw_core::serial::SerialIo;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
+#[allow(dead_code, reason = "used in init function")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 
 /// Initialize the ESP32 logger with a write function
 ///
 /// Call this once at startup after USB serial is initialized.
 /// The write function should write to your USB serial instance.
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub fn init(write_fn: LogWriteFn) {
     unsafe {
         set_log_write_fn(write_fn);
@@ -35,31 +37,37 @@ pub type LogWriteFn = fn(&str);
 static LOG_WRITE_FN: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 /// USB serial instance for our logger
+#[allow(dead_code, reason = "reserved for future use")]
 static LOG_SERIAL: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 /// USB serial instance for esp-println (used by esp-backtrace for panic output)
+#[allow(dead_code, reason = "reserved for future use")]
 static ESP_PRINTLN_SERIAL: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Set the log write function
 ///
 /// # Safety
 /// The function pointer must remain valid for the lifetime of the program
+#[allow(dead_code, reason = "used internally by init function")]
 pub unsafe fn set_log_write_fn(write_fn: LogWriteFn) {
     LOG_WRITE_FN.store(write_fn as *mut (), Ordering::Release);
 }
 
 /// ESP32 logger that uses USB serial directly
+#[allow(dead_code, reason = "used internally by init function")]
 pub struct Esp32Logger {
     max_level: LevelFilter,
 }
 
 impl Esp32Logger {
     /// Create a new ESP32 logger with the given max level
+    #[allow(dead_code, reason = "used internally by init function")]
     pub fn new(max_level: LevelFilter) -> Self {
         Self { max_level }
     }
 
     /// Create a new ESP32 logger with default info level
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn default() -> Self {
         Self::new(LevelFilter::Info)
     }
@@ -108,6 +116,7 @@ impl Log for Esp32Logger {
 }
 
 /// Set the USB serial instance for our logger to use
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub fn set_log_serial(
     serial_io: alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>,
 ) {
@@ -120,6 +129,7 @@ pub fn set_log_serial(
 ///
 /// This function is called synchronously from the log crate and writes
 /// synchronously to USB serial.
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub fn log_write_bytes(msg: &str) {
     let serial_ptr = LOG_SERIAL.load(Ordering::Acquire);
     if !serial_ptr.is_null() {
@@ -150,6 +160,7 @@ pub fn write_log(msg: &str) {
 ///
 /// This allows esp-println (used by esp-backtrace) to route output through
 /// our shared USB serial instance.
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub fn set_esp_println_serial(
     serial_io: alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>,
 ) {
@@ -162,6 +173,7 @@ pub fn set_esp_println_serial(
 ///
 /// This is called by esp-println when a custom writer is set.
 /// It writes bytes to our shared USB serial instance.
+#[allow(dead_code, reason = "public API reserved for future use")]
 pub fn esp_println_write_bytes(bytes: &[u8]) {
     let serial_ptr = ESP_PRINTLN_SERIAL.load(Ordering::Acquire);
     if !serial_ptr.is_null() {

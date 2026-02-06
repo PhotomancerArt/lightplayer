@@ -19,12 +19,13 @@ pub struct SharedSerialIo<Io: SerialIo> {
 
 impl<Io: SerialIo> SharedSerialIo<Io> {
     /// Create a new SharedSerialIo wrapper
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn new(inner: Rc<RefCell<Io>>) -> Self {
         Self { inner }
     }
 
     /// Get a reference to the inner Rc<RefCell<Io>>
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API reserved for future use")]
     pub fn inner(&self) -> &Rc<RefCell<Io>> {
         &self.inner
     }

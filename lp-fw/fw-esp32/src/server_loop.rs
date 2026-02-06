@@ -76,7 +76,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                 }
                 Err(e) => {
                     // Transport error - log and continue
-                    log::warn!("run_server_loop: Transport error: {:?}", e);
+                    log::warn!("run_server_loop: Transport error: {e:?}");
                     break;
                 }
             }
@@ -93,14 +93,14 @@ pub async fn run_server_loop<T: ServerTransport>(
                 for response in responses {
                     if let Message::Server(server_msg) = response {
                         if let Err(e) = transport.send(server_msg) {
-                            log::warn!("run_server_loop: Failed to send response: {:?}", e);
+                            log::warn!("run_server_loop: Failed to send response: {e:?}");
                             // Transport error - continue with next message
                         }
                     }
                 }
             }
             Err(e) => {
-                log::warn!("run_server_loop: Server tick error: {:?}", e);
+                log::warn!("run_server_loop: Server tick error: {e:?}");
                 // Server error - continue
             }
         }
@@ -114,12 +114,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             let elapsed_ms = current_time.saturating_sub(fps_last_log_time);
             if elapsed_ms > 0 {
                 let fps = (FPS_LOG_INTERVAL as u64 * 1000) / elapsed_ms;
-                log::info!(
-                    "FPS: {} (frame_count: {}, elapsed: {}ms)",
-                    fps,
-                    frame_count,
-                    elapsed_ms
-                );
+                log::info!("FPS: {fps} (frame_count: {frame_count}, elapsed: {elapsed_ms}ms)");
                 fps_last_log_time = current_time;
             }
         }
@@ -162,7 +157,7 @@ pub async fn run_server_loop<T: ServerTransport>(
 
             // Send heartbeat (non-blocking, ignore errors)
             if let Err(e) = transport.send(heartbeat_msg) {
-                log::warn!("run_server_loop: Failed to send heartbeat: {:?}", e);
+                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
             }
 
             heartbeat_last_sent = current_time;
