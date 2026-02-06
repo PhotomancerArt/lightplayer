@@ -17,6 +17,7 @@ pub mod nodes;
 pub mod path;
 pub mod project;
 pub mod serde_base64;
+pub mod serial;
 pub mod server;
 pub mod transport_error;
 
@@ -24,5 +25,6 @@ pub use message::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use nodes::{NodeConfig, NodeHandle, NodeKind, NodeSpecifier};
 pub use path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use project::{FrameId, ProjectConfig};
+pub use serial::DEFAULT_SERIAL_BAUD_RATE;
 pub use server::{AvailableProject, FsRequest, FsResponse, LoadedProject};
 pub use transport_error::TransportError;

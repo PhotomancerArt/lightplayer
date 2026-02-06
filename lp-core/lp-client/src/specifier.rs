@@ -4,6 +4,7 @@
 //! Supports websocket (`ws://`, `wss://`) and serial (`serial:`) formats.
 
 use anyhow::{Result, bail};
+use lp_model::DEFAULT_SERIAL_BAUD_RATE;
 use std::fmt;
 
 /// Host specifier indicating transport type and connection details
@@ -14,7 +15,7 @@ pub enum HostSpecifier {
     /// Serial connection
     Serial {
         port: Option<String>,   // None = auto-detect
-        baud_rate: Option<u32>, // None = default to 115200
+        baud_rate: Option<u32>, // None = default to DEFAULT_SERIAL_BAUD_RATE
     },
     /// Local in-memory server
     Local,
@@ -90,7 +91,8 @@ impl HostSpecifier {
         }
 
         bail!(
-            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud=115200, local, emu"
+            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={}, local, emu",
+            DEFAULT_SERIAL_BAUD_RATE
         )
     }
 
@@ -118,13 +120,13 @@ impl HostSpecifier {
         matches!(self, HostSpecifier::Emulator)
     }
 
-    /// Get baud rate for serial connection, defaulting to 115200
+    /// Get baud rate for serial connection, defaulting to DEFAULT_SERIAL_BAUD_RATE
     ///
-    /// Returns the configured baud rate, or 115200 if not specified.
+    /// Returns the configured baud rate, or DEFAULT_SERIAL_BAUD_RATE if not specified.
     pub fn baud_rate(&self) -> u32 {
         match self {
-            HostSpecifier::Serial { baud_rate, .. } => baud_rate.unwrap_or(115200),
-            _ => 115200, // Default for non-serial (shouldn't be called)
+            HostSpecifier::Serial { baud_rate, .. } => baud_rate.unwrap_or(DEFAULT_SERIAL_BAUD_RATE),
+            _ => DEFAULT_SERIAL_BAUD_RATE, // Default for non-serial (shouldn't be called)
         }
     }
 }
@@ -221,7 +223,7 @@ mod tests {
             } => {}
             _ => panic!("Expected Serial with None port and None baud_rate"),
         }
-        assert_eq!(spec.baud_rate(), 115200); // Should default to 115200
+        assert_eq!(spec.baud_rate(), DEFAULT_SERIAL_BAUD_RATE); // Should default to DEFAULT_SERIAL_BAUD_RATE
     }
 
     #[test]
@@ -250,7 +252,7 @@ mod tests {
             }
             _ => panic!("Expected Serial with port and None baud_rate"),
         }
-        assert_eq!(spec.baud_rate(), 115200); // Should default to 115200
+        assert_eq!(spec.baud_rate(), DEFAULT_SERIAL_BAUD_RATE); // Should default to DEFAULT_SERIAL_BAUD_RATE
     }
 
     #[test]
@@ -309,7 +311,7 @@ mod tests {
             } => {}
             _ => panic!("Expected Serial with port and None baud_rate"),
         }
-        assert_eq!(spec.baud_rate(), 115200); // Should default to 115200
+        assert_eq!(spec.baud_rate(), DEFAULT_SERIAL_BAUD_RATE); // Should default to DEFAULT_SERIAL_BAUD_RATE
     }
 
     #[test]

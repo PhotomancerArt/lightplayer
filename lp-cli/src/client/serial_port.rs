@@ -4,6 +4,7 @@
 //! the appropriate port for ESP32 communication.
 
 use anyhow::{Context, Result, bail};
+use lp_model::DEFAULT_SERIAL_BAUD_RATE;
 
 /// Serial port configuration
 #[derive(Debug, Clone)]
@@ -18,19 +19,19 @@ pub struct SerialPortConfig {
 ///
 /// If `port` is Some, uses that port directly.
 /// If `port` is None, auto-detects and prompts user if multiple found.
-/// Parses `baud_rate` from query string or defaults to 115200.
+/// Parses `baud_rate` from query string or defaults to DEFAULT_SERIAL_BAUD_RATE.
 ///
 /// # Arguments
 ///
 /// * `port` - Optional port specification (e.g., "/dev/cu.usbmodem2101" or "auto")
-/// * `baud_rate` - Optional baud rate (defaults to 115200)
+/// * `baud_rate` - Optional baud rate (defaults to DEFAULT_SERIAL_BAUD_RATE)
 ///
 /// # Returns
 ///
 /// * `Ok(SerialPortConfig)` if port was selected successfully
 /// * `Err` if detection failed or no ports found
 pub fn detect_serial_port(port: Option<&str>, baud_rate: Option<u32>) -> Result<SerialPortConfig> {
-    let baud_rate = baud_rate.unwrap_or(115200);
+    let baud_rate = baud_rate.unwrap_or(DEFAULT_SERIAL_BAUD_RATE);
 
     if let Some(port_str) = port {
         // Manual port specification
@@ -164,6 +165,6 @@ mod tests {
     #[test]
     fn test_detect_serial_port_default_baud() {
         let config = detect_serial_port(Some("/dev/cu.usbmodem2101"), None).unwrap();
-        assert_eq!(config.baud_rate, 115200);
+        assert_eq!(config.baud_rate, DEFAULT_SERIAL_BAUD_RATE);
     }
 }

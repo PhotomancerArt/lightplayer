@@ -2,6 +2,7 @@
 
 use fw_tests::test_output::{print_step, print_test_header};
 use fw_tests::test_usb_helpers::*;
+use lp_model::DEFAULT_SERIAL_BAUD_RATE;
 use serial_test::serial;
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ async fn test_scenario_1_start_without_serial() {
     wait_for_firmware(Duration::from_secs(2));
 
     // Connect serial
-    let mut port = open_serial_port(&port_name, 115200).expect("Failed to open serial port");
+    let mut port = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to open serial port");
 
     // Query frame count
     let count1 = query_frame_count(&mut *port).expect("Failed to query frame count");
@@ -37,7 +38,7 @@ async fn test_scenario_1_start_without_serial() {
     wait_for_firmware(Duration::from_secs(2));
 
     // Reconnect serial
-    let mut port2 = open_serial_port(&port_name, 115200).expect("Failed to reopen serial port");
+    let mut port2 = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to reopen serial port");
 
     // Query frame count again
     let count2 = query_frame_count(&mut *port2).expect("Failed to query frame count");
@@ -69,7 +70,7 @@ async fn test_scenario_2_start_with_serial() {
     flash_firmware().expect("Failed to flash firmware");
 
     // Connect serial immediately
-    let mut port = open_serial_port(&port_name, 115200).expect("Failed to open serial port");
+    let mut port = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to open serial port");
 
     // Wait a bit for firmware to initialize
     wait_for_firmware(Duration::from_secs(1));
@@ -88,7 +89,7 @@ async fn test_scenario_2_start_with_serial() {
     wait_for_firmware(Duration::from_secs(2));
 
     // Reconnect
-    let mut port2 = open_serial_port(&port_name, 115200).expect("Failed to reopen serial port");
+    let mut port2 = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to reopen serial port");
 
     // Query again
     let count2 = query_frame_count(&mut *port2).expect("Failed to query frame count");
@@ -120,7 +121,7 @@ async fn test_scenario_3_echo_and_reconnect() {
     flash_firmware().expect("Failed to flash firmware");
 
     // Connect serial
-    let mut port = open_serial_port(&port_name, 115200).expect("Failed to open serial port");
+    let mut port = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to open serial port");
 
     wait_for_firmware(Duration::from_secs(1));
 
@@ -144,7 +145,7 @@ async fn test_scenario_3_echo_and_reconnect() {
     wait_for_firmware(Duration::from_secs(2));
 
     // Reconnect
-    let mut port2 = open_serial_port(&port_name, 115200).expect("Failed to reopen serial port");
+    let mut port2 = open_serial_port(&port_name, DEFAULT_SERIAL_BAUD_RATE).expect("Failed to reopen serial port");
 
     // Send echo again
     print_step("-", "Sending echo command", Some("test2"));
