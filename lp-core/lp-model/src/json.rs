@@ -147,11 +147,24 @@ pub fn to_string<T: Serialize>(value: &T) -> Result<String, Error> {
 ///
 /// This function deserializes directly from the input string.
 /// The deserialized type must be owned (e.g., String, Vec, etc.).
+///
+/// Uses `from_slice_escaped` instead of `from_slice` to properly handle escaped
+/// characters in JSON strings (e.g., `\"`, `\\`, etc.). This is required because
+/// `serde_json_core::from_slice` does not unescape strings when deserializing
+/// into owned types.
 pub fn from_str<T>(s: &str) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let (result, _) = serde_json_core::from_slice(s.as_bytes())?;
+    // Copy to Vec<u8> to satisfy 'static lifetime requirement
+    let bytes = s.as_bytes().to_vec();
+
+    // Allocate buffer for unescaping strings (2x input size should be sufficient)
+    let mut unescape_buffer = Vec::with_capacity(bytes.len() * 2);
+    unescape_buffer.resize(bytes.len() * 2, 0);
+
+    let (result, _) = serde_json_core::from_slice_escaped(&bytes, &mut unescape_buffer)
+        .map_err(|e| Error::Deserialization(e))?;
     Ok(result)
 }
 
@@ -159,11 +172,24 @@ where
 ///
 /// This function deserializes directly from the input slice.
 /// The deserialized type must be owned (e.g., String, Vec, etc.).
+///
+/// Uses `from_slice_escaped` instead of `from_slice` to properly handle escaped
+/// characters in JSON strings (e.g., `\"`, `\\`, etc.). This is required because
+/// `serde_json_core::from_slice` does not unescape strings when deserializing
+/// into owned types.
 pub fn from_slice<T>(bytes: &[u8]) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let (result, _) = serde_json_core::from_slice(bytes)?;
+    // Copy to Vec<u8> to satisfy 'static lifetime requirement
+    let owned = bytes.to_vec();
+
+    // Allocate buffer for unescaping strings (2x input size should be sufficient)
+    let mut unescape_buffer = Vec::with_capacity(owned.len() * 2);
+    unescape_buffer.resize(owned.len() * 2, 0);
+
+    let (result, _) = serde_json_core::from_slice_escaped(&owned, &mut unescape_buffer)
+        .map_err(|e| Error::Deserialization(e))?;
     Ok(result)
 }
 
@@ -206,5 +232,49 @@ mod tests {
         let json = to_string(&original).unwrap();
         let deserialized: TestStruct = from_str(&json).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_project_config_round_trip() {
+        use crate::project::ProjectConfig;
+        use alloc::string::ToString;
+
+        let original = ProjectConfig {
+            uid: "test".to_string(),
+            name: "Test Project".to_string(),
+        };
+        let json = to_string(&original).unwrap();
+
+        // Verify JSON format is correct (not double-escaped)
+        assert!(json.contains("\"uid\":\"test\""));
+        assert!(json.contains("\"name\":\"Test Project\""));
+        assert!(
+            !json.contains("\\\\\""),
+            "JSON should not be double-escaped: {}",
+            json
+        );
+
+        // Verify round-trip deserialization
+        let deserialized: ProjectConfig = from_str(&json).unwrap();
+        assert_eq!(original.uid, deserialized.uid);
+        assert_eq!(original.name, deserialized.name);
+    }
+
+    #[test]
+    fn test_project_config_from_slice() {
+        use crate::project::ProjectConfig;
+        use alloc::string::ToString;
+
+        let original = ProjectConfig {
+            uid: "test".to_string(),
+            name: "Test Project".to_string(),
+        };
+        let json = to_string(&original).unwrap();
+        let json_bytes = json.as_bytes();
+
+        // Test from_slice (used by loader)
+        let deserialized: ProjectConfig = from_slice(json_bytes).unwrap();
+        assert_eq!(original.uid, deserialized.uid);
+        assert_eq!(original.name, deserialized.name);
     }
 }

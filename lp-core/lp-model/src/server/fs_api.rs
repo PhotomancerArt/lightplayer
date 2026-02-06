@@ -266,4 +266,176 @@ mod tests {
             _ => panic!("Wrong variant"),
         }
     }
+
+    #[test]
+    fn test_fs_request_write_project_json() {
+        // Test the specific case: writing project.json content
+        // This simulates what happens when ProjectBuilder writes project.json
+        use crate::project::ProjectConfig;
+        use alloc::string::ToString;
+
+        let config = ProjectConfig {
+            uid: "test".to_string(),
+            name: "Test Project".to_string(),
+        };
+        let project_json =
+            crate::json::to_string(&config).expect("Failed to serialize project config");
+        let project_json_bytes = project_json.as_bytes().to_vec();
+
+        // Create FsRequest::Write with the JSON bytes
+        let req = FsRequest::Write {
+            path: "/project.json".as_path_buf(),
+            data: project_json_bytes.clone(),
+        };
+
+        // Serialize the request
+        let request_json = crate::json::to_string(&req).expect("Failed to serialize FsRequest");
+
+        // The issue: when serialize_smart serializes the bytes as a JSON string,
+        // JSON escapes the quotes. So {"uid":"test"} becomes "{\"uid\":\"test\"}" in JSON.
+        // When deserializing, JSON should unescape it back to {"uid":"test"}.
+        // But if serde_json_core doesn't unescape properly, we get {\"uid\":\"test\"} with literal backslashes.
+
+        // Verify round-trip: deserialize the request
+        let deserialized: FsRequest =
+            crate::json::from_str(&request_json).expect("Failed to deserialize FsRequest");
+
+        match deserialized {
+            FsRequest::Write { path, data } => {
+                assert_eq!(path.as_str(), "/project.json");
+                // The data should match exactly
+                assert_eq!(
+                    data,
+                    project_json_bytes,
+                    "Data should round-trip correctly. Original: {:?}, Deserialized: {:?}. Original string: {}, Deserialized string: {}",
+                    project_json_bytes,
+                    data,
+                    core::str::from_utf8(&project_json_bytes).unwrap_or("<invalid>"),
+                    core::str::from_utf8(&data).unwrap_or("<invalid>")
+                );
+
+                // Verify we can deserialize the project.json content
+                let deserialized_config: ProjectConfig = crate::json::from_slice(&data)
+                    .expect("Failed to deserialize ProjectConfig from round-trip data");
+                assert_eq!(deserialized_config.uid, "test");
+                assert_eq!(deserialized_config.name, "Test Project");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn investigate_json_string_serialization_output() {
+        // Investigate: What does the actual JSON output look like?
+        // This test helps understand if the escaping will cause problems with other systems.
+        use crate::project::ProjectConfig;
+        use alloc::string::ToString;
+
+        let config = ProjectConfig {
+            uid: "test".to_string(),
+            name: "Test Project".to_string(),
+        };
+        let project_json =
+            crate::json::to_string(&config).expect("Failed to serialize project config");
+
+        // project_json is: {"uid":"test","name":"Test Project"}
+        assert_eq!(project_json, r#"{"uid":"test","name":"Test Project"}"#);
+
+        // Convert to bytes and serialize in FsRequest
+        let project_json_bytes = project_json.as_bytes().to_vec();
+        let req = FsRequest::Write {
+            path: "/project.json".as_path_buf(),
+            data: project_json_bytes.clone(),
+        };
+
+        let request_json = crate::json::to_string(&req).expect("Failed to serialize FsRequest");
+
+        // Analysis of what happens:
+        // 1. serialize_smart sees valid UTF-8 bytes: {"uid":"test","name":"Test Project"}
+        // 2. It calls serializer.serialize_str() with that string
+        // 3. The JSON serializer MUST escape quotes in string values (JSON spec requirement)
+        // 4. So it produces: "{\"uid\":\"test\",\"name\":\"Test Project\"}"
+        //    (the outer quotes are JSON string delimiters, inner \" are escaped quotes)
+        //
+        // The request_json will look like:
+        // {"Write":{"path":"/project.json","data":"{\"uid\":\"test\",\"name\":\"Test Project\"}"}}
+        //
+        // This is VALID JSON. Any JSON parser will:
+        // - Parse the outer structure correctly
+        // - Unescape the "data" field to get: {"uid":"test","name":"Test Project"}
+        //
+        // The escaping is NOT a problem - it's required by the JSON specification.
+        // When you put a string containing quotes into JSON, those quotes MUST be escaped.
+
+        // Verify the JSON contains escaped quotes (this is correct JSON!)
+        assert!(
+            request_json.contains(r#""data":"{\"uid\""#),
+            "JSON should contain escaped quotes in the data field. Actual JSON: {}",
+            request_json
+        );
+
+        // Verify round-trip works
+        let deserialized: FsRequest =
+            crate::json::from_str(&request_json).expect("Failed to deserialize FsRequest");
+
+        match deserialized {
+            FsRequest::Write { path: _, data } => {
+                // The data should be the original bytes (unescaped by JSON parser)
+                assert_eq!(
+                    data, project_json_bytes,
+                    "Data should round-trip correctly. This confirms JSON unescaping works."
+                );
+
+                // And we should be able to parse it as ProjectConfig
+                let parsed_config: ProjectConfig =
+                    crate::json::from_slice(&data).expect("Should parse as ProjectConfig");
+                assert_eq!(parsed_config.uid, "test");
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        // Conclusion:
+        // - The escaping is CORRECT and REQUIRED by JSON specification
+        // - Any compliant JSON parser will unescape it correctly
+        // - The previous issue was that serde_json_core::from_slice doesn't unescape,
+        //   but from_slice_escaped does (which we're now using)
+        // - This should work fine with other systems that use standard JSON parsers
+    }
+
+    #[test]
+    fn test_serialize_smart_round_trip() {
+        // Test serialize_smart/deserialize_smart directly
+        use crate::serde_base64;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        struct Test {
+            #[serde(
+                serialize_with = "serde_base64::serialize_smart",
+                deserialize_with = "serde_base64::deserialize_smart"
+            )]
+            data: Vec<u8>,
+        }
+
+        // Test with JSON-like content
+        let original_bytes = b"{\"uid\":\"test\"}".to_vec();
+        let test = Test {
+            data: original_bytes.clone(),
+        };
+
+        let json = crate::json::to_string(&test).expect("Failed to serialize");
+        // json should be: {"data":"{\"uid\":\"test\"}"}
+
+        let deserialized: Test = crate::json::from_str(&json).expect("Failed to deserialize");
+
+        assert_eq!(
+            deserialized.data,
+            original_bytes,
+            "Bytes should round-trip. Original: {:?}, Deserialized: {:?}. Original str: {}, Deserialized str: {}",
+            original_bytes,
+            deserialized.data,
+            core::str::from_utf8(&original_bytes).unwrap(),
+            core::str::from_utf8(&deserialized.data).unwrap()
+        );
+    }
 }
