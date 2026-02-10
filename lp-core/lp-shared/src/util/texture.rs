@@ -92,9 +92,38 @@ impl Texture {
                 result[2] = self.data[offset];
                 result[3] = 255; // Alpha defaults to 255
             }
+            TextureFormat::Rgba16 => {
+                let r = u16::from_le_bytes([self.data[offset], self.data[offset + 1]]);
+                let g = u16::from_le_bytes([self.data[offset + 2], self.data[offset + 3]]);
+                let b = u16::from_le_bytes([self.data[offset + 4], self.data[offset + 5]]);
+                result[0] = (r >> 8) as u8;
+                result[1] = (g >> 8) as u8;
+                result[2] = (b >> 8) as u8;
+                result[3] = 255;
+            }
         }
 
         Some(result)
+    }
+
+    /// Get a pixel value as u16 RGBA (for Rgba16 format)
+    pub fn get_pixel_u16(&self, x: u32, y: u32) -> Option<[u16; 4]> {
+        if self.format != TextureFormat::Rgba16 {
+            return None;
+        }
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let offset = ((y * self.width + x) as usize) * 8;
+        if offset + 8 > self.data.len() {
+            return None;
+        }
+        Some([
+            u16::from_le_bytes([self.data[offset], self.data[offset + 1]]),
+            u16::from_le_bytes([self.data[offset + 2], self.data[offset + 3]]),
+            u16::from_le_bytes([self.data[offset + 4], self.data[offset + 5]]),
+            u16::from_le_bytes([self.data[offset + 6], self.data[offset + 7]]),
+        ])
     }
 
     /// Set a pixel value at the given coordinates
@@ -130,7 +159,35 @@ impl Texture {
             TextureFormat::R8 => {
                 self.data[offset] = color[0];
             }
+            TextureFormat::Rgba16 => {
+                let r = (color[0] as u16) * 257;
+                let g = (color[1] as u16) * 257;
+                let b = (color[2] as u16) * 257;
+                let a = (color[3] as u16) * 257;
+                self.data[offset..offset + 2].copy_from_slice(&r.to_le_bytes());
+                self.data[offset + 2..offset + 4].copy_from_slice(&g.to_le_bytes());
+                self.data[offset + 4..offset + 6].copy_from_slice(&b.to_le_bytes());
+                self.data[offset + 6..offset + 8].copy_from_slice(&a.to_le_bytes());
+            }
         }
+    }
+
+    /// Set a pixel value as u16 RGBA (for Rgba16 format)
+    pub fn set_pixel_u16(&mut self, x: u32, y: u32, color: [u16; 4]) {
+        if self.format != TextureFormat::Rgba16 {
+            return;
+        }
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let offset = ((y * self.width + x) as usize) * 8;
+        if offset + 8 > self.data.len() {
+            return;
+        }
+        self.data[offset..offset + 2].copy_from_slice(&color[0].to_le_bytes());
+        self.data[offset + 2..offset + 4].copy_from_slice(&color[1].to_le_bytes());
+        self.data[offset + 4..offset + 6].copy_from_slice(&color[2].to_le_bytes());
+        self.data[offset + 6..offset + 8].copy_from_slice(&color[3].to_le_bytes());
     }
 
     /// Sample the texture at normalized coordinates (u, v) in [0, 1]
@@ -261,6 +318,19 @@ mod tests {
         assert_eq!(pixel[1], 128); // Grayscale: R=G=B
         assert_eq!(pixel[2], 128);
         assert_eq!(pixel[3], 255); // Alpha defaults to 255
+    }
+
+    #[test]
+    fn test_get_set_pixel_rgba16() {
+        let mut texture = Texture::new(10, 10, TextureFormat::Rgba16).unwrap();
+        texture.set_pixel_u16(5, 5, [0x0100, 0x0200, 0xFFFF, 0x8000]);
+        let pixel = texture.get_pixel_u16(5, 5).unwrap();
+        assert_eq!(pixel, [0x0100, 0x0200, 0xFFFF, 0x8000]);
+        // get_pixel returns high byte (alpha is always 255 for Rgba16 in get_pixel)
+        let pixel_u8 = texture.get_pixel(5, 5).unwrap();
+        assert_eq!(pixel_u8[0], 1);
+        assert_eq!(pixel_u8[1], 2);
+        assert_eq!(pixel_u8[2], 255);
     }
 
     #[test]

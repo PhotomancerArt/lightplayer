@@ -186,16 +186,15 @@ impl NodeRuntime for ShaderRuntime {
                         });
                     }
 
-                    // Convert from [0, 1] to [0, 255] and clamp
+                    // Convert from [0, 1] to [0, 65535] u16 for Rgba16 texture
                     let rgba = [
-                        (result[0].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[1].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[2].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[3].clamp(0.0, 1.0) * 255.0) as u8,
+                        (result[0].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[1].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[2].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[3].clamp(0.0, 1.0) * 65535.0) as u16,
                     ];
 
-                    // Write to texture
-                    texture.set_pixel(x, y, rgba);
+                    texture.set_pixel_u16(x, y, rgba);
                 }
             }
         }
@@ -409,17 +408,15 @@ impl ShaderRuntime {
                     }
                 };
 
-                // Convert Q32 to u8: (clamped_q32 * 255) / 65536
-                // Use i64 intermediate to avoid overflow
-                let r = ((clamp_q32(r_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let g = ((clamp_q32(g_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let b = ((clamp_q32(b_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let a = ((clamp_q32(a_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+                // Convert Q32 to u16: (clamped_q32 * 65535) / 65536
+                let r = ((clamp_q32(r_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let g = ((clamp_q32(g_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let b = ((clamp_q32(b_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let a = ((clamp_q32(a_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
 
                 let rgba = [r, g, b, a];
 
-                // Write to texture
-                texture.set_pixel(x, y, rgba);
+                texture.set_pixel_u16(x, y, rgba);
             }
         }
 

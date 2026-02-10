@@ -8,7 +8,7 @@ use crate::impl_state_serialization;
 /// Output node state - runtime values
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputState {
-    /// Channel data buffer
+    /// Channel data: high byte per channel, 3 bytes per LED (RGB). Serialized as base64.
     pub channel_data: StateField<Vec<u8>>,
 }
 

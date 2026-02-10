@@ -77,7 +77,9 @@ impl ServerTransport for MessageRouterTransport {
                     return Ok(Some(msg));
                 }
                 Err(e) => {
-                    log::warn!("MessageRouterTransport: Failed to parse JSON message: {e}");
+                    log::warn!(
+                        "MessageRouterTransport: Failed to parse JSON message: {e} | json: {json_str}"
+                    );
                     continue;
                 }
             }

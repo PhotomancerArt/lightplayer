@@ -14,8 +14,8 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     vec2 dir = fragCoord - center;
     vec2 scaledCoord = center + dir * scale;
 
-    //return prsd_demo(scaledCoord, time);
-    return fbm_demo(scaledCoord, time);
+    return prsd_demo(scaledCoord, time);
+    //return fbm_demo(scaledCoord, time);
     //return worley_demo(scaledCoord, time);
 }
 

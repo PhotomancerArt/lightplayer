@@ -144,7 +144,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
-                    log::warn!("SerialTransport: Failed to parse JSON message: {e}");
+                    log::warn!(
+                        "SerialTransport: Failed to parse JSON message: {e} | json: {json_str}"
+                    );
                     Ok(None)
                 }
             }

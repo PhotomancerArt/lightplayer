@@ -292,32 +292,31 @@ impl NodeRuntime for FixtureRuntime {
         let brightness = self.brightness.to_q32() / 255.to_q32();
         let frame_id = ctx.frame_id(); // Get frame_id before mutable borrows
 
-        // Write sampled values to output buffer
-        // For now, use universe 0 and channel_offset 0 (sequential writing)
-        // TODO: Add universe and channel_offset fields to FixtureConfig when needed
+        // Write sampled values to output buffer (16-bit)
         let universe = 0u32;
         let channel_offset = 0u32;
         for channel in 0..=max_channel as usize {
-            let mut r = (ch_values_r[channel] * brightness).to_u8_clamped();
-            let mut g = (ch_values_g[channel] * brightness).to_u8_clamped();
-            let mut b = (ch_values_b[channel] * brightness).to_u8_clamped();
+            let r_q = ch_values_r[channel] * brightness;
+            let g_q = ch_values_g[channel] * brightness;
+            let b_q = ch_values_b[channel] * brightness;
 
-            let idx = channel * 3;
-            lamp_colors[idx] = r;
-            lamp_colors[idx + 1] = g;
-            lamp_colors[idx + 2] = b;
+            let mut r = r_q.to_u16_clamped();
+            let mut g = g_q.to_u16_clamped();
+            let mut b = b_q.to_u16_clamped();
 
-            // Apply gamma correction if enabled, _after_ writing to lamp_colors, which should
-            // not be gamma corrected
+            lamp_colors[channel * 3] = (r >> 8) as u8;
+            lamp_colors[channel * 3 + 1] = (g >> 8) as u8;
+            lamp_colors[channel * 3 + 2] = (b >> 8) as u8;
+
             if self.gamma_correction {
-                r = apply_gamma(r);
-                g = apply_gamma(g);
-                b = apply_gamma(b);
+                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_clamped();
+                g = apply_gamma((g >> 8) as u8).to_q32().to_u16_clamped();
+                b = apply_gamma((b >> 8) as u8).to_q32().to_u16_clamped();
             }
 
-            let start_ch = channel_offset + (channel as u32) * 3; // 3 bytes per RGB
+            let start_ch = channel_offset + (channel as u32) * 3;
             let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
-            self.color_order.write_rgb(buffer, 0, r, g, b);
+            self.color_order.write_rgb_u16(buffer, 0, r, g, b);
         }
 
         // Update state with lamp colors

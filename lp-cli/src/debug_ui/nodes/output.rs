@@ -13,7 +13,7 @@ pub fn render_output_panel(ui: &mut egui::Ui, entry: &ClientNodeEntry, state: &O
         ui.label(format!("Path: {:?}", entry.path));
         ui.label(format!("Status: {:?}", entry.status));
         ui.label(format!(
-            "Channel data: {} bytes",
+            "Channel data (high byte per channel, 3 × num_leds): {} bytes",
             state.channel_data.value().len()
         ));
     });

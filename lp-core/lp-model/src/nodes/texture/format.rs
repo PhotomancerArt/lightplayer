@@ -1,8 +1,11 @@
 //! Texture format definitions
+//!
+//! Rgba16 is the default for new textures in the 16-bit pipeline. Rgba8 is retained
+//! for backwards compatibility with legacy project state.
 
 /// Texture pixel format
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "UPPERCASE")] // Serializes as "RGB8", "RGBA8", "R8"
+#[serde(rename_all = "UPPERCASE")] // Serializes as "RGB8", "RGBA8", "R8", "RGBA16"
 pub enum TextureFormat {
     /// RGB 8-bit per channel (3 bytes per pixel)
     Rgb8,
@@ -10,6 +13,8 @@ pub enum TextureFormat {
     Rgba8,
     /// Single channel 8-bit (1 byte per pixel)
     R8,
+    /// RGBA 16-bit per channel (8 bytes per pixel), unsigned normalized
+    Rgba16,
 }
 
 impl TextureFormat {
@@ -19,6 +24,7 @@ impl TextureFormat {
             TextureFormat::Rgb8 => 3,
             TextureFormat::Rgba8 => 4,
             TextureFormat::R8 => 1,
+            TextureFormat::Rgba16 => 8,
         }
     }
 
@@ -28,6 +34,7 @@ impl TextureFormat {
             TextureFormat::Rgb8 => "RGB8",
             TextureFormat::Rgba8 => "RGBA8",
             TextureFormat::R8 => "R8",
+            TextureFormat::Rgba16 => "RGBA16",
         }
     }
 
@@ -37,6 +44,7 @@ impl TextureFormat {
             "RGB8" => Some(TextureFormat::Rgb8),
             "RGBA8" => Some(TextureFormat::Rgba8),
             "R8" => Some(TextureFormat::R8),
+            "RGBA16" => Some(TextureFormat::Rgba16),
             _ => None,
         }
     }
@@ -44,7 +52,7 @@ impl TextureFormat {
 
 impl Default for TextureFormat {
     fn default() -> Self {
-        TextureFormat::Rgba8
+        TextureFormat::Rgba16
     }
 }
 

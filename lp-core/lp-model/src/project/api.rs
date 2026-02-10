@@ -597,7 +597,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), TextureFormat::Rgba8);
+            .set(FrameId::default(), TextureFormat::Rgba16);
         let state = NodeState::Texture(tex_state);
         match state {
             NodeState::Texture(tex_state) => {
@@ -619,7 +619,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), TextureFormat::Rgba8);
+            .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
             config: Box::new(TextureConfig {
@@ -691,7 +691,7 @@ mod tests {
                     tex_state.height.set(FrameId::default(), 2);
                     tex_state
                         .format
-                        .set(FrameId::default(), TextureFormat::Rgba8);
+                        .set(FrameId::default(), TextureFormat::Rgba16);
                     NodeState::Texture(tex_state)
                 },
             },
@@ -741,7 +741,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), TextureFormat::Rgba8);
+            .set(FrameId::default(), TextureFormat::Rgba16);
         let detail = SerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
             config: TextureConfig {
@@ -790,7 +790,7 @@ mod tests {
                     tex_state.height.set(FrameId::default(), 2);
                     tex_state
                         .format
-                        .set(FrameId::default(), TextureFormat::Rgba8);
+                        .set(FrameId::default(), TextureFormat::Rgba16);
                     NodeState::Texture(tex_state)
                 },
             },

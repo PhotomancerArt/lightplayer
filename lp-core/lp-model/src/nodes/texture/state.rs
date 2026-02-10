@@ -9,7 +9,8 @@ use crate::impl_state_serialization;
 /// Texture node state - runtime values
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextureState {
-    /// Texture pixel data
+    /// Texture pixel data. Format-agnostic raw bytes; interpretation depends on `format`.
+    /// For Rgba16: 8 bytes/pixel (little-endian u16 RGBA). Serialized as base64.
     pub texture_data: StateField<Vec<u8>>,
     /// Texture width in pixels
     pub width: StateField<u32>,
@@ -26,7 +27,7 @@ impl TextureState {
             texture_data: StateField::new(frame_id, Vec::new()),
             width: StateField::new(frame_id, 0),
             height: StateField::new(frame_id, 0),
-            format: StateField::new(frame_id, TextureFormat::Rgba8),
+            format: StateField::new(frame_id, TextureFormat::Rgba16),
         }
     }
 
@@ -49,8 +50,8 @@ impl TextureState {
             self.height.set(frame_id, *other.height.value());
         }
         // Merge format if present (not the default, or matches current)
-        // Default is Rgba8, so if other has default and self has different value, preserve self
-        const DEFAULT_FORMAT: TextureFormat = TextureFormat::Rgba8;
+        // Default is Rgba16, so if other has default and self has different value, preserve self
+        const DEFAULT_FORMAT: TextureFormat = TextureFormat::Rgba16;
         if other.format.value() != &DEFAULT_FORMAT || other.format.value() == self.format.value() {
             // Field was in JSON (non-default) or matches current value, merge it
             self.format.set(frame_id, *other.format.value());

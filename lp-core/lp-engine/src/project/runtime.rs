@@ -958,7 +958,7 @@ impl ProjectRuntime {
                                 // Update channel_data from current buffer
                                 state
                                     .channel_data
-                                    .set(self.frame_id, output_runtime.get_channel_data().to_vec());
+                                    .set(self.frame_id, output_runtime.get_channel_data());
                                 NodeState::Output(state)
                             } else {
                                 NodeState::Output(lp_model::nodes::output::OutputState::new(
@@ -1373,7 +1373,7 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
         _universe: u32,
         start_ch: u32,
         ch_count: u32,
-    ) -> Result<&mut [u8], Error> {
+    ) -> Result<&mut [u16], Error> {
         // Get output runtime
         let node_handle = handle.as_node_handle();
         let entry = self

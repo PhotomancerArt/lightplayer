@@ -4,11 +4,12 @@
 
 extern crate alloc;
 
-use alloc::{collections::BTreeMap, format};
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use lp_shared::OutputError;
-use lp_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+use lp_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
+use lp_shared::{DisplayPipeline, OutputError};
 
 use crate::output::{LedChannel, LedTransaction};
 use esp_hal::Blocking;
@@ -19,9 +20,9 @@ use esp_hal::rmt::{Error as RmtError, Rmt};
 struct ChannelState {
     pin: u32,
     byte_count: u32,
-    // Will be used when format validation is needed
     #[allow(dead_code, reason = "format field reserved for future validation")]
     format: OutputFormat,
+    pipeline: DisplayPipeline,
 }
 
 // Unsafe static to store LedChannel (hardcoded to GPIO18 for now)
@@ -88,7 +89,9 @@ impl OutputProvider for Esp32OutputProvider {
         pin: u32,
         byte_count: u32,
         format: OutputFormat,
+        options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
+        let options = options.unwrap_or_default();
         log::debug!(
             "Esp32OutputProvider::open: pin={pin}, byte_count={byte_count}, format={format:?}"
         );
@@ -148,17 +151,21 @@ impl OutputProvider for Esp32OutputProvider {
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id);
 
+        let pipeline = DisplayPipeline::new(num_leds, options).map_err(|e| OutputError::Other {
+            message: alloc::format!("DisplayPipeline allocation failed: {e}"),
+        })?;
+
         log::info!(
             "Esp32OutputProvider::open: Opened channel handle={handle_id}, pin={pin}, byte_count={byte_count}, num_leds={num_leds}"
         );
 
-        // Store channel state (without transaction for now)
         self.channels.borrow_mut().insert(
             handle_id,
             ChannelState {
                 pin,
                 byte_count,
                 format,
+                pipeline,
             },
         );
         self.open_pins.borrow_mut().insert(pin);
@@ -166,7 +173,7 @@ impl OutputProvider for Esp32OutputProvider {
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u8]) -> Result<(), OutputError> {
+    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
         let handle_id = handle.as_i32();
         log::debug!(
             "Esp32OutputProvider::write: handle={}, data_len={}",
@@ -174,59 +181,49 @@ impl OutputProvider for Esp32OutputProvider {
             data.len()
         );
 
-        // Find channel and update byte_count if needed (simple resize support)
         let mut channels = self.channels.borrow_mut();
         let channel = channels.get_mut(&handle_id).ok_or_else(|| {
             log::warn!("Esp32OutputProvider::write: Invalid handle {handle_id}");
             OutputError::InvalidHandle { handle: handle_id }
         })?;
 
-        // Update byte_count if data is larger (simple resize)
-        if data.len() > channel.byte_count as usize {
-            let old_count = channel.byte_count;
-            let new_count = data.len();
-            log::info!(
-                "Esp32OutputProvider::write: Resizing channel from {old_count} to {new_count} bytes"
-            );
-            channel.byte_count = data.len() as u32;
-        }
-
-        // Validate data length (must not exceed what was opened, but can be less)
-        if data.len() > channel.byte_count as usize {
-            log::warn!(
-                "Esp32OutputProvider::write: Data length exceeds channel capacity: {} > {}",
-                data.len(),
-                channel.byte_count
-            );
+        let num_leds = (channel.byte_count / 3) as usize;
+        let expected_len = num_leds * 3;
+        if data.len() != expected_len {
             return Err(OutputError::DataLengthMismatch {
-                expected: channel.byte_count,
+                expected: expected_len as u32,
                 actual: data.len(),
             });
         }
 
-        // Use LedChannel to send data
+        let mut rmt_buffer = Vec::with_capacity(num_leds * 3);
+        rmt_buffer.resize(num_leds * 3, 0);
+
+        channel.pipeline.write_frame(0, data);
+        channel.pipeline.write_frame(16667, data);
+        channel.pipeline.tick(8333, &mut rmt_buffer);
+
+        drop(channels);
+
         unsafe {
             let tx_ptr = core::ptr::addr_of_mut!(CURRENT_TRANSACTION);
             let channel_ptr = core::ptr::addr_of_mut!(LED_CHANNEL);
 
-            // Wait for any previous transaction to complete
             if let Some(tx) = (*tx_ptr).take() {
                 log::debug!("Esp32OutputProvider::write: Waiting for previous transaction");
-                let channel = tx.wait_complete();
-                (*channel_ptr) = Some(channel);
+                let ch = tx.wait_complete();
+                (*channel_ptr) = Some(ch);
             }
 
-            // Get the channel and start transmission
-            if let Some(channel) = (*channel_ptr).take() {
+            if let Some(led_channel) = (*channel_ptr).take() {
                 log::debug!(
                     "Esp32OutputProvider::write: Starting transmission, {} bytes",
-                    data.len()
+                    rmt_buffer.len()
                 );
-                let tx = channel.start_transmission(data);
-                // Wait for transmission to complete (write() is synchronous)
+                let tx = led_channel.start_transmission(&rmt_buffer);
                 log::debug!("Esp32OutputProvider::write: Waiting for transmission to complete");
-                let channel = tx.wait_complete();
-                (*channel_ptr) = Some(channel);
+                let led_channel = tx.wait_complete();
+                (*channel_ptr) = Some(led_channel);
                 log::debug!("Esp32OutputProvider::write: Transmission complete");
                 Ok(())
             } else {

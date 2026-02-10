@@ -192,7 +192,9 @@ fn emulator_thread_loop(
                     }
                 }
                 Err(e) => {
-                    log::warn!("Emulator thread: Failed to parse JSON message: {e}");
+                    log::warn!(
+                        "Emulator thread: Failed to parse JSON message: {e} | json: {message_str}"
+                    );
                     // Continue - don't crash on parse errors
                 }
             }

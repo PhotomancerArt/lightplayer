@@ -62,14 +62,14 @@ pub trait RenderContext {
     /// Get current frame time in seconds
     fn get_time(&self) -> f32;
 
-    /// Get output buffer slice
+    /// Get output buffer slice (16-bit RGB channels)
     fn get_output(
         &mut self,
         handle: OutputHandle,
         universe: u32,
         start_ch: u32,
         ch_count: u32,
-    ) -> Result<&mut [u8], Error>;
+    ) -> Result<&mut [u16], Error>;
 
     /// Get output provider
     fn output_provider(&self) -> &dyn OutputProvider;

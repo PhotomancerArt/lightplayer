@@ -2,6 +2,7 @@
 
 pub mod r8;
 pub mod rgb8;
+pub mod rgba16;
 pub mod rgba8;
 
 use alloc::{boxed::Box, vec::Vec};
@@ -38,5 +39,6 @@ pub fn create_sampler(format: TextureFormat) -> Box<dyn TextureSampler> {
         TextureFormat::Rgb8 => Box::new(rgb8::Rgb8Sampler),
         TextureFormat::Rgba8 => Box::new(rgba8::Rgba8Sampler),
         TextureFormat::R8 => Box::new(r8::R8Sampler),
+        TextureFormat::Rgba16 => Box::new(rgba16::Rgba16Sampler),
     }
 }

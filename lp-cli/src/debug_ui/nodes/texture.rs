@@ -73,7 +73,7 @@ pub fn render_texture_panel(
 
 /// Convert texture data to egui ColorImage
 ///
-/// Handles RGB8, RGBA8, and R8 formats.
+/// Handles Rgb8, Rgba8, R8, and Rgba16 formats.
 pub fn texture_data_to_color_image(
     data: &[u8],
     width: u32,
@@ -105,6 +105,18 @@ pub fn texture_data_to_color_image(
                     TextureFormat::R8 => {
                         let gray = data[idx];
                         Color32::from_gray(gray)
+                    }
+                    TextureFormat::Rgba16 => {
+                        let r = u16::from_le_bytes([data[idx], data[idx + 1]]);
+                        let g = u16::from_le_bytes([data[idx + 2], data[idx + 3]]);
+                        let b = u16::from_le_bytes([data[idx + 4], data[idx + 5]]);
+                        let a = u16::from_le_bytes([data[idx + 6], data[idx + 7]]);
+                        Color32::from_rgba_unmultiplied(
+                            ((r + 128) >> 8).min(255) as u8,
+                            ((g + 128) >> 8).min(255) as u8,
+                            ((b + 128) >> 8).min(255) as u8,
+                            ((a + 128) >> 8).min(255) as u8,
+                        )
                     }
                 };
                 pixels.push(color);

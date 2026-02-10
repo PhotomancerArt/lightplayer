@@ -13,8 +13,8 @@ use lp_shared::fs::fs_event::FsChange;
 
 /// Output node runtime
 pub struct OutputRuntime {
-    /// Channel data buffer (DMX-style, sequential bytes)
-    channel_data: Vec<u8>,
+    /// Channel data buffer (16-bit RGB, 3 u16s per pixel)
+    channel_data: Vec<u16>,
     /// Output channel handle from provider (None until initialized)
     channel_handle: Option<OutputChannelHandle>,
     /// GPIO pin number
@@ -40,8 +40,8 @@ impl OutputRuntime {
         self.config = Some(config);
     }
 
-    /// Get mutable slice to channel data, extending if needed
-    pub fn get_buffer_mut(&mut self, start_ch: u32, ch_count: u32) -> &mut [u8] {
+    /// Get mutable slice to channel data, extending if needed (16-bit channels)
+    pub fn get_buffer_mut(&mut self, start_ch: u32, ch_count: u32) -> &mut [u16] {
         let end = (start_ch + ch_count) as usize;
         if end > self.channel_data.len() {
             self.channel_data.resize(end, 0);
@@ -49,9 +49,9 @@ impl OutputRuntime {
         &mut self.channel_data[start_ch as usize..end]
     }
 
-    /// Get channel data (for state extraction)
-    pub fn get_channel_data(&self) -> &[u8] {
-        &self.channel_data
+    /// Get channel data (for state extraction). Returns u8 (high byte per channel) for client sync.
+    pub fn get_channel_data(&self) -> Vec<u8> {
+        self.channel_data.iter().map(|v| (v >> 8) as u8).collect()
     }
 
     /// Get the output config (for state extraction)
@@ -76,16 +76,19 @@ impl NodeRuntime for OutputRuntime {
         }
 
         // For now, use a default byte_count (will be calculated properly later from fixtures)
-        // Default: 3 bytes for single RGB pixel
+        // byte_count = 8-bit output size (num_leds * 3). Default: 1 LED
         let byte_count = 3u32;
         let format = OutputFormat::Ws2811;
 
         // Open output channel with provider
-        let handle = ctx.output_provider().open(self.pin, byte_count, format)?;
+        let handle = ctx
+            .output_provider()
+            .open(self.pin, byte_count, format, None)?;
         self.channel_handle = Some(handle);
 
-        // Allocate buffer
-        self.channel_data.resize(byte_count as usize, 0);
+        // Allocate 16-bit buffer: num_leds * 3 u16s
+        let num_leds = (byte_count / 3) as usize;
+        self.channel_data.resize(num_leds * 3, 0);
 
         Ok(())
     }
@@ -95,7 +98,7 @@ impl NodeRuntime for OutputRuntime {
         let frame_id = ctx.frame_id();
         self.state
             .channel_data
-            .set(frame_id, self.channel_data.clone());
+            .set(frame_id, self.get_channel_data());
 
         // Flush buffer to provider if handle exists
         if let Some(handle) = self.channel_handle {
@@ -153,9 +156,12 @@ impl NodeRuntime for OutputRuntime {
                     // Reinitialize with new pin
                     let byte_count = 3u32; // Default for now
                     let format = OutputFormat::Ws2811;
-                    let handle = ctx.output_provider().open(self.pin, byte_count, format)?;
+                    let handle = ctx
+                        .output_provider()
+                        .open(self.pin, byte_count, format, None)?;
                     self.channel_handle = Some(handle);
-                    self.channel_data.resize(byte_count as usize, 0);
+                    let num_leds = (byte_count / 3) as usize;
+                    self.channel_data.resize(num_leds * 3, 0);
                 } else {
                     // Just update config
                     self.config = Some(output_config.clone());

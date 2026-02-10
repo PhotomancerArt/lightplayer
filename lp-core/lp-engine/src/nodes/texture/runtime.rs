@@ -59,7 +59,7 @@ impl NodeRuntime for TextureRuntime {
 
         // Create texture with RGBA8 format (default for now)
         // Format will be added to TextureConfig later
-        let format = TextureFormat::Rgba8;
+        let format = TextureFormat::Rgba16;
         let texture = Texture::new(config.width, config.height, format).map_err(|e| {
             Error::InvalidConfig {
                 node_path: format!("texture-{}", self.node_handle.as_i32()),
@@ -117,7 +117,7 @@ impl NodeRuntime for TextureRuntime {
 
         // If dimensions changed, resize texture
         if needs_resize {
-            let format = TextureFormat::Rgba8;
+            let format = TextureFormat::Rgba16;
             let texture = Texture::new(texture_config.width, texture_config.height, format)
                 .map_err(|e| Error::InvalidConfig {
                     node_path: format!("texture-{}", self.node_handle.as_i32()),
