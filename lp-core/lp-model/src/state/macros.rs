@@ -1,6 +1,3 @@
-use crate::project::FrameId;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
-
 /// Macro to generate serialization boilerplate for StateField-wrapped state structs
 ///
 /// Usage:

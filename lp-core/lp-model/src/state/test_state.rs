@@ -3,6 +3,8 @@ use crate::state::StateField;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
+use crate::impl_state_serialization;
+
 /// Test state struct for validating StateField serialization
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestState {
@@ -21,86 +23,24 @@ impl TestState {
     }
 }
 
-/// Wrapper for serializing TestState with a since_frame context
-pub struct SerializableTestState<'a> {
-    state: &'a TestState,
-    since_frame: FrameId,
-}
-
-impl<'a> SerializableTestState<'a> {
-    pub fn new(state: &'a TestState, since_frame: FrameId) -> Self {
-        Self { state, since_frame }
-    }
-}
-
-impl<'a> Serialize for SerializableTestState<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let is_initial_sync = self.since_frame == FrameId::default();
-        let mut state = serializer.serialize_struct("TestState", 3)?;
-
-        if is_initial_sync || self.state.field1.changed_frame() > self.since_frame {
-            state.serialize_field("field1", self.state.field1.value())?;
-        }
-        if is_initial_sync || self.state.field2.changed_frame() > self.since_frame {
-            state.serialize_field("field2", self.state.field2.value())?;
-        }
-        if is_initial_sync || self.state.field3.changed_frame() > self.since_frame {
-            state.serialize_field("field3", self.state.field3.value())?;
-        }
-
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for TestState {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Use a helper struct with Option fields for deserialization
-        #[derive(Deserialize)]
-        struct TestStateHelper {
-            field1: Option<String>,
-            field2: Option<u32>,
-            field3: Option<Vec<u8>>,
-        }
-
-        let helper = TestStateHelper::deserialize(deserializer)?;
-
-        // Create default state, then merge in provided fields
-        // For real implementation, we'd need to know the current frame_id
-        // For now, use default - this will be updated when merged with existing state
-        let frame_id = FrameId::default();
-
-        let mut state = TestState::new(frame_id);
-
-        if let Some(val) = helper.field1 {
-            state.field1.set(frame_id, val);
-        }
-        if let Some(val) = helper.field2 {
-            state.field2.set(frame_id, val);
-        }
-        if let Some(val) = helper.field3 {
-            state.field3.set(frame_id, val);
-        }
-
-        Ok(state)
+impl_state_serialization! {
+    TestState => SerializableTestState {
+        field1: String,
+        field2: u32,
+        field3: Vec<u8>,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
+    use crate::json;
 
     #[test]
     fn test_serialize_all_fields_initial_sync() {
         let state = TestState::new(FrameId::new(1));
         let serializable = SerializableTestState::new(&state, FrameId::default());
-        let json = serde_json::to_string(&serializable).unwrap();
+        let json = json::to_string(&serializable).unwrap();
         // Should contain all fields for initial sync
         assert!(json.contains("field1"));
         assert!(json.contains("field2"));
@@ -116,7 +56,7 @@ mod tests {
         // Serialize with since_frame = FrameId::new(2)
         // Should only include field1 (changed at frame 5 > 2)
         let serializable = SerializableTestState::new(&state, FrameId::new(2));
-        let json = serde_json::to_string(&serializable).unwrap();
+        let json = json::to_string(&serializable).unwrap();
         assert!(json.contains("field1"));
         assert!(json.contains("updated"));
         // field2 and field3 should not be present
@@ -133,7 +73,7 @@ mod tests {
         // Serialize with since_frame = FrameId::new(5)
         // No fields should be included (all changed before frame 5)
         let serializable = SerializableTestState::new(&state, FrameId::new(5));
-        let json = serde_json::to_string(&serializable).unwrap();
+        let json = json::to_string(&serializable).unwrap();
         // Should be empty object or minimal
         assert!(!json.contains("field1"));
         assert!(!json.contains("field2"));
@@ -143,7 +83,7 @@ mod tests {
     #[test]
     fn test_deserialize_partial_json() {
         let json = r#"{"field1": "test"}"#;
-        let state: TestState = serde_json::from_str(json).unwrap();
+        let state: TestState = json::from_str(json).unwrap();
         assert_eq!(state.field1.value(), "test");
         // field2 and field3 should have default values
         assert_eq!(state.field2.value(), &0);
@@ -153,16 +93,16 @@ mod tests {
     #[test]
     fn test_deserialize_full_json() {
         let json = r#"{"field1": "test", "field2": 42, "field3": [1, 2, 3]}"#;
-        let state: TestState = serde_json::from_str(json).unwrap();
+        let state: TestState = json::from_str(json).unwrap();
         assert_eq!(state.field1.value(), "test");
         assert_eq!(state.field2.value(), &42);
-        assert_eq!(state.field3.value(), &vec![1, 2, 3]);
+        assert_eq!(state.field3.value(), &alloc::vec![1, 2, 3]);
     }
 
     #[test]
     fn test_deserialize_empty_json() {
         let json = r#"{}"#;
-        let state: TestState = serde_json::from_str(json).unwrap();
+        let state: TestState = json::from_str(json).unwrap();
         // All fields should have default values
         assert_eq!(state.field1.value(), "default");
         assert_eq!(state.field2.value(), &0);

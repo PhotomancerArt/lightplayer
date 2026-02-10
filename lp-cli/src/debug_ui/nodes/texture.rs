@@ -1,7 +1,7 @@
 use eframe::epaint::{Color32, ColorImage, TextureHandle};
 use egui::Image;
 use lp_engine_client::ClientNodeEntry;
-use lp_model::nodes::texture::TextureState;
+use lp_model::nodes::texture::{TextureFormat, TextureState};
 
 /// Render texture panel
 pub fn render_texture_panel(
@@ -42,7 +42,7 @@ pub fn render_texture_panel(
             state.texture_data.value(),
             *state.width.value(),
             *state.height.value(),
-            state.format.value(),
+            *state.format.value(),
         );
 
         // Create texture handle
@@ -78,41 +78,34 @@ pub fn texture_data_to_color_image(
     data: &[u8],
     width: u32,
     height: u32,
-    format: &str,
+    format: TextureFormat,
 ) -> ColorImage {
     let mut pixels = Vec::with_capacity((width * height) as usize);
 
-    let bytes_per_pixel = match format {
-        "RGB8" => 3,
-        "RGBA8" => 4,
-        "R8" => 1,
-        _ => 3, // Default to RGB8
-    };
+    let bytes_per_pixel = format.bytes_per_pixel();
 
     for y in 0..height {
         for x in 0..width {
-            let idx = ((y * width + x) * bytes_per_pixel) as usize;
-            let bytes_per_pixel_usize = bytes_per_pixel as usize;
-            if idx + bytes_per_pixel_usize <= data.len() {
+            let idx = ((y * width + x) as usize) * bytes_per_pixel;
+            if idx + bytes_per_pixel <= data.len() {
                 let color = match format {
-                    "RGB8" => {
+                    TextureFormat::Rgb8 => {
                         let r = data[idx];
                         let g = data[idx + 1];
                         let b = data[idx + 2];
                         Color32::from_rgb(r, g, b)
                     }
-                    "RGBA8" => {
+                    TextureFormat::Rgba8 => {
                         let r = data[idx];
                         let g = data[idx + 1];
                         let b = data[idx + 2];
                         let a = data[idx + 3];
                         Color32::from_rgba_unmultiplied(r, g, b, a)
                     }
-                    "R8" => {
+                    TextureFormat::R8 => {
                         let gray = data[idx];
                         Color32::from_gray(gray)
                     }
-                    _ => Color32::BLACK,
                 };
                 pixels.push(color);
             } else {

@@ -1,10 +1,10 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
-use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+use alloc::{boxed::Box, format, string::ToString};
 use lp_model::{
     NodeHandle,
-    nodes::texture::{TextureConfig, TextureState},
+    nodes::texture::{TextureConfig, TextureFormat, TextureState},
     project::FrameId,
 };
 use lp_shared::{Texture, fs::fs_event::FsChange};
@@ -59,7 +59,7 @@ impl NodeRuntime for TextureRuntime {
 
         // Create texture with RGBA8 format (default for now)
         // Format will be added to TextureConfig later
-        let format = "RGBA8".to_string();
+        let format = TextureFormat::Rgba8;
         let texture = Texture::new(config.width, config.height, format).map_err(|e| {
             Error::InvalidConfig {
                 node_path: format!("texture-{}", self.node_handle.as_i32()),
@@ -75,7 +75,7 @@ impl NodeRuntime for TextureRuntime {
             self.state.texture_data.set(frame_id, tex.data().to_vec());
             self.state.width.set(frame_id, tex.width());
             self.state.height.set(frame_id, tex.height());
-            self.state.format.set(frame_id, tex.format().to_string());
+            self.state.format.set(frame_id, tex.format());
         }
 
         Ok(())
@@ -117,7 +117,7 @@ impl NodeRuntime for TextureRuntime {
 
         // If dimensions changed, resize texture
         if needs_resize {
-            let format = "RGBA8".to_string();
+            let format = TextureFormat::Rgba8;
             let texture = Texture::new(texture_config.width, texture_config.height, format)
                 .map_err(|e| Error::InvalidConfig {
                     node_path: format!("texture-{}", self.node_handle.as_i32()),
@@ -131,7 +131,7 @@ impl NodeRuntime for TextureRuntime {
                 self.state.texture_data.set(frame_id, tex.data().to_vec());
                 self.state.width.set(frame_id, tex.width());
                 self.state.height.set(frame_id, tex.height());
-                self.state.format.set(frame_id, tex.format().to_string());
+                self.state.format.set(frame_id, tex.format());
             }
         }
 

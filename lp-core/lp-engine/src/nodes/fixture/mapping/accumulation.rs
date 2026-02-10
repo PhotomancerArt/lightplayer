@@ -53,7 +53,7 @@ pub fn initialize_channel_accumulators(entries: &[PixelMappingEntry]) -> Channel
 /// # Arguments
 /// * `entries` - Precomputed mapping entries
 /// * `texture_data` - Raw texture pixel data
-/// * `texture_format` - Texture format string (RGB8, RGBA8, R8)
+/// * `texture_format` - Texture format
 /// * `texture_width` - Texture width in pixels
 /// * `texture_height` - Texture height in pixels
 ///
@@ -62,14 +62,14 @@ pub fn initialize_channel_accumulators(entries: &[PixelMappingEntry]) -> Channel
 pub fn accumulate_from_mapping(
     entries: &[PixelMappingEntry],
     texture_data: &[u8],
-    texture_format: &str,
+    texture_format: lp_model::nodes::texture::TextureFormat,
     texture_width: u32,
     texture_height: u32,
 ) -> ChannelAccumulators {
     let mut accumulators = initialize_channel_accumulators(entries);
 
     // Create format-specific sampler
-    let sampler = create_sampler(texture_format).expect("Unsupported texture format");
+    let sampler = create_sampler(texture_format);
 
     // Iterate through entries and accumulate
     // Entries are ordered by pixel (x, y), with consecutive entries per pixel

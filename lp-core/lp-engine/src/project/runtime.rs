@@ -70,27 +70,6 @@ pub enum NodeStatus {
     Error(String),
 }
 
-/// Apply 4x4 transform matrix to a 2D point
-///
-/// Treats the point as homogeneous coordinate [x, y, 0, 1] and applies the transform.
-/// Returns the transformed 2D point.
-fn apply_transform_2d(point: [f32; 2], transform: [[f32; 4]; 4]) -> [f32; 2] {
-    let x = point[0];
-    let y = point[1];
-
-    // Apply transform: [x', y', z', w'] = transform * [x, y, 0, 1]
-    let x_prime = transform[0][0] * x + transform[0][1] * y + transform[0][3];
-    let y_prime = transform[1][0] * x + transform[1][1] * y + transform[1][3];
-    let w_prime = transform[3][0] * x + transform[3][1] * y + transform[3][3];
-
-    // Normalize by w if not zero
-    if w_prime.abs() > 1e-6 {
-        [x_prime / w_prime, y_prime / w_prime]
-    } else {
-        [x_prime, y_prime]
-    }
-}
-
 impl ProjectRuntime {
     /// Create new project runtime
     pub fn new(
@@ -926,7 +905,16 @@ impl ProjectRuntime {
                             if let Some(tex_runtime) =
                                 runtime.as_any().downcast_ref::<TextureRuntime>()
                             {
-                                NodeState::Texture(tex_runtime.state.clone())
+                                // Clone state and update with current texture data
+                                let mut state = tex_runtime.state.clone();
+                                // Update texture_data from current texture if available
+                                if let Some(tex) = tex_runtime.texture() {
+                                    state.texture_data.set(self.frame_id, tex.data().to_vec());
+                                    state.width.set(self.frame_id, tex.width());
+                                    state.height.set(self.frame_id, tex.height());
+                                    state.format.set(self.frame_id, tex.format());
+                                }
+                                NodeState::Texture(state)
                             } else {
                                 // Fallback to empty state
                                 NodeState::Texture(lp_model::nodes::texture::TextureState::new(
@@ -965,7 +953,13 @@ impl ProjectRuntime {
                                 .as_any()
                                 .downcast_ref::<crate::nodes::OutputRuntime>(
                             ) {
-                                NodeState::Output(output_runtime.state.clone())
+                                // Clone state and update with current channel data
+                                let mut state = output_runtime.state.clone();
+                                // Update channel_data from current buffer
+                                state
+                                    .channel_data
+                                    .set(self.frame_id, output_runtime.get_channel_data().to_vec());
+                                NodeState::Output(state)
                             } else {
                                 NodeState::Output(lp_model::nodes::output::OutputState::new(
                                     self.frame_id,
@@ -1130,6 +1124,7 @@ impl ProjectRuntime {
 
         Ok(ProjectResponse::GetChanges {
             current_frame: self.frame_id,
+            since_frame,
             node_handles,
             node_changes,
             node_details,

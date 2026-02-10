@@ -27,7 +27,8 @@ impl OutputState {
     pub fn merge_from(&mut self, other: &Self, frame_id: FrameId) {
         // Merge channel_data if present (not empty)
         if !other.channel_data.value().is_empty() {
-            self.channel_data.set(frame_id, other.channel_data.value().clone());
+            self.channel_data
+                .set(frame_id, other.channel_data.value().clone());
         }
     }
 }
@@ -87,7 +88,9 @@ mod tests {
     fn test_deserialize_partial_json_preserves_missing_fields() {
         // Simulate client-side merge: existing state has channel_data, partial update is empty
         let mut existing_state = OutputState::new(FrameId::new(1));
-        existing_state.channel_data.set(FrameId::new(1), vec![100, 200, 255]);
+        existing_state
+            .channel_data
+            .set(FrameId::new(1), vec![100, 200, 255]);
 
         // Partial update JSON (empty - no fields changed)
         let _partial_json = r#"{}"#;
@@ -106,7 +109,7 @@ mod tests {
         let channel_bytes = vec![50, 100, 150, 200];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&channel_bytes);
         let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
-        
+
         let state: OutputState = json::from_str(&json).unwrap();
         assert_eq!(state.channel_data.value(), &channel_bytes);
     }
@@ -117,7 +120,7 @@ mod tests {
         let channel_bytes = vec![1, 2, 3, 4, 5];
         let encoded = base64::engine::general_purpose::STANDARD.encode(&channel_bytes);
         let json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
-        
+
         let state: OutputState = json::from_str(&json).unwrap();
         assert_eq!(state.channel_data.value(), &channel_bytes);
     }
@@ -135,7 +138,9 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(&initial_bytes);
         let initial_json = format!(r#"{{"channel_data": "{}"}}"#, encoded);
         let mut existing_state: OutputState = json::from_str(&initial_json).unwrap();
-        existing_state.channel_data.set(FrameId::new(1), initial_bytes.clone());
+        existing_state
+            .channel_data
+            .set(FrameId::new(1), initial_bytes.clone());
 
         // Step 2: Partial update - empty JSON (no fields changed)
         let _partial_json = r#"{}"#;
@@ -145,7 +150,7 @@ mod tests {
         // Only update fields that are present in partial update
         // Since partial_json is empty, existing_state should remain unchanged
         // In real client code, we'd check if fields are present before merging
-        
+
         // Verify channel_data is preserved
         assert_eq!(existing_state.channel_data.value(), &initial_bytes);
     }

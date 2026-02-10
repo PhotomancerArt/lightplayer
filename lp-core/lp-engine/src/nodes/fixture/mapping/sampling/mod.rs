@@ -5,6 +5,7 @@ pub mod rgb8;
 pub mod rgba8;
 
 use alloc::{boxed::Box, vec::Vec};
+use lp_model::nodes::texture::TextureFormat;
 
 /// Trait for format-specific texture sampling
 pub trait TextureSampler {
@@ -32,11 +33,10 @@ pub trait TextureSampler {
 }
 
 /// Create a sampler for the given texture format
-pub fn create_sampler(format: &str) -> Option<Box<dyn TextureSampler>> {
+pub fn create_sampler(format: TextureFormat) -> Box<dyn TextureSampler> {
     match format {
-        lp_shared::util::formats::RGB8 => Some(Box::new(rgb8::Rgb8Sampler)),
-        lp_shared::util::formats::RGBA8 => Some(Box::new(rgba8::Rgba8Sampler)),
-        lp_shared::util::formats::R8 => Some(Box::new(r8::R8Sampler)),
-        _ => None,
+        TextureFormat::Rgb8 => Box::new(rgb8::Rgb8Sampler),
+        TextureFormat::Rgba8 => Box::new(rgba8::Rgba8Sampler),
+        TextureFormat::R8 => Box::new(r8::R8Sampler),
     }
 }

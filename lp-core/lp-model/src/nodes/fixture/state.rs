@@ -49,19 +49,23 @@ impl FixtureState {
     pub fn merge_from(&mut self, other: &Self, frame_id: FrameId) {
         // Merge lamp_colors if present (not empty)
         if !other.lamp_colors.value().is_empty() {
-            self.lamp_colors.set(frame_id, other.lamp_colors.value().clone());
+            self.lamp_colors
+                .set(frame_id, other.lamp_colors.value().clone());
         }
         // Merge mapping_cells if present (not empty)
         if !other.mapping_cells.value().is_empty() {
-            self.mapping_cells.set(frame_id, other.mapping_cells.value().clone());
+            self.mapping_cells
+                .set(frame_id, other.mapping_cells.value().clone());
         }
         // Merge texture_handle if present (Some value)
         if other.texture_handle.value().is_some() {
-            self.texture_handle.set(frame_id, *other.texture_handle.value());
+            self.texture_handle
+                .set(frame_id, *other.texture_handle.value());
         }
         // Merge output_handle if present (Some value)
         if other.output_handle.value().is_some() {
-            self.output_handle.set(frame_id, *other.output_handle.value());
+            self.output_handle
+                .set(frame_id, *other.output_handle.value());
         }
     }
 }

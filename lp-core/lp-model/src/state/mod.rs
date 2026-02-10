@@ -1,3 +1,5 @@
+#[macro_use]
+pub mod macros;
 pub mod state_field;
 pub mod test_state;
 

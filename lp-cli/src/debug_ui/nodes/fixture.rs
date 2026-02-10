@@ -54,7 +54,7 @@ pub fn render_fixture_panel(
                     texture_state.texture_data.value(),
                     *texture_state.width.value(),
                     *texture_state.height.value(),
-                    texture_state.format.value(),
+                    *texture_state.format.value(),
                 );
 
                 // Create texture handle

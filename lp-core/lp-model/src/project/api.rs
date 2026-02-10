@@ -15,8 +15,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
-use serde::de::{self, MapAccess, Visitor};
-use alloc::fmt;
 
 /// Node specifier for API requests
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -443,7 +441,6 @@ impl Serialize for SerializableProjectResponse {
     }
 }
 
-
 impl NodeDetail {
     /// Convert NodeDetail to SerializableNodeDetail
     ///
@@ -540,6 +537,7 @@ impl ProjectResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nodes::texture::TextureFormat;
     use alloc::{string::ToString, vec};
 
     #[test]
@@ -599,7 +597,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), "RGBA8".to_string());
+            .set(FrameId::default(), TextureFormat::Rgba8);
         let state = NodeState::Texture(tex_state);
         match state {
             NodeState::Texture(tex_state) => {
@@ -621,7 +619,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), "RGBA8".to_string());
+            .set(FrameId::default(), TextureFormat::Rgba8);
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
             config: Box::new(TextureConfig {
@@ -693,7 +691,7 @@ mod tests {
                     tex_state.height.set(FrameId::default(), 2);
                     tex_state
                         .format
-                        .set(FrameId::default(), "RGBA8".to_string());
+                        .set(FrameId::default(), TextureFormat::Rgba8);
                     NodeState::Texture(tex_state)
                 },
             },
@@ -743,7 +741,7 @@ mod tests {
         tex_state.height.set(FrameId::default(), 2);
         tex_state
             .format
-            .set(FrameId::default(), "RGBA8".to_string());
+            .set(FrameId::default(), TextureFormat::Rgba8);
         let detail = SerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
             config: TextureConfig {
@@ -792,7 +790,7 @@ mod tests {
                     tex_state.height.set(FrameId::default(), 2);
                     tex_state
                         .format
-                        .set(FrameId::default(), "RGBA8".to_string());
+                        .set(FrameId::default(), TextureFormat::Rgba8);
                     NodeState::Texture(tex_state)
                 },
             },

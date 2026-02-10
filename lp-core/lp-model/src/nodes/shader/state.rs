@@ -30,7 +30,8 @@ impl ShaderState {
     pub fn merge_from(&mut self, other: &Self, frame_id: FrameId) {
         // Merge glsl_code if present (not empty)
         if !other.glsl_code.value().is_empty() {
-            self.glsl_code.set(frame_id, other.glsl_code.value().clone());
+            self.glsl_code
+                .set(frame_id, other.glsl_code.value().clone());
         }
         // Merge error if present (Some value)
         if other.error.value().is_some() {

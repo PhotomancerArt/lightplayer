@@ -431,6 +431,7 @@ pub fn serializable_response_to_project_response(
     match response {
         SerializableProjectResponse::GetChanges {
             current_frame,
+            since_frame,
             node_handles,
             node_changes,
             node_details,
@@ -485,6 +486,7 @@ pub fn serializable_response_to_project_response(
 
             Ok(ProjectResponse::GetChanges {
                 current_frame,
+                since_frame,
                 node_handles,
                 node_changes,
                 node_details: node_details_map,

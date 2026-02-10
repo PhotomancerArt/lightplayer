@@ -80,19 +80,24 @@ fn test_sync_with_changes() {
 
 #[test]
 fn test_partial_state_merge_texture() {
-    use lp_model::nodes::texture::{TextureState, TextureConfig};
-    use lp_model::project::api::NodeState;
     use alloc::boxed::Box;
+    use lp_model::nodes::texture::{TextureConfig, TextureState};
+    use lp_model::project::api::NodeState;
 
     let mut view = ClientProjectView::new();
     let handle = NodeHandle::new(1);
 
     // Initial sync: full state with texture_data, width, height, format
     let mut initial_state = TextureState::new(FrameId::new(1));
-    initial_state.texture_data.set(FrameId::new(1), vec![10, 20, 30, 40]);
+    initial_state
+        .texture_data
+        .set(FrameId::new(1), vec![10, 20, 30, 40]);
     initial_state.width.set(FrameId::new(1), 100);
     initial_state.height.set(FrameId::new(1), 200);
-    initial_state.format.set(FrameId::new(1), alloc::string::String::from("RGB8"));
+    initial_state.format.set(
+        FrameId::new(1),
+        lp_model::nodes::texture::TextureFormat::Rgb8,
+    );
 
     let initial_response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
@@ -105,11 +110,17 @@ fn test_partial_state_merge_texture() {
         }],
         node_details: {
             let mut map = BTreeMap::new();
-            map.insert(handle, lp_model::project::api::NodeDetail {
-                path: lp_model::LpPathBuf::from("/src/test.texture"),
-                config: Box::new(TextureConfig { width: 100, height: 200 }),
-                state: NodeState::Texture(initial_state),
-            });
+            map.insert(
+                handle,
+                lp_model::project::api::NodeDetail {
+                    path: lp_model::LpPathBuf::from("/src/test.texture"),
+                    config: Box::new(TextureConfig {
+                        width: 100,
+                        height: 200,
+                    }),
+                    state: NodeState::Texture(initial_state),
+                },
+            );
             map
         },
         theoretical_fps: None,
@@ -125,7 +136,10 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.texture_data.value(), &vec![10, 20, 30, 40]);
             assert_eq!(state.width.value(), &100);
             assert_eq!(state.height.value(), &200);
-            assert_eq!(state.format.value(), "RGB8");
+            assert_eq!(
+                state.format.value(),
+                &lp_model::nodes::texture::TextureFormat::Rgb8
+            );
         }
         _ => panic!("Expected Texture state"),
     }
@@ -146,11 +160,17 @@ fn test_partial_state_merge_texture() {
         }],
         node_details: {
             let mut map = BTreeMap::new();
-            map.insert(handle, lp_model::project::api::NodeDetail {
-                path: lp_model::LpPathBuf::from("/src/test.texture"),
-                config: Box::new(TextureConfig { width: 150, height: 250 }),
-                state: NodeState::Texture(partial_state),
-            });
+            map.insert(
+                handle,
+                lp_model::project::api::NodeDetail {
+                    path: lp_model::LpPathBuf::from("/src/test.texture"),
+                    config: Box::new(TextureConfig {
+                        width: 150,
+                        height: 250,
+                    }),
+                    state: NodeState::Texture(partial_state),
+                },
+            );
             map
         },
         theoretical_fps: None,
@@ -166,8 +186,16 @@ fn test_partial_state_merge_texture() {
             assert_eq!(state.width.value(), &150);
             assert_eq!(state.height.value(), &250);
             // These should be preserved from initial state
-            assert_eq!(state.texture_data.value(), &vec![10, 20, 30, 40], "texture_data should be preserved");
-            assert_eq!(state.format.value(), "RGB8", "format should be preserved");
+            assert_eq!(
+                state.texture_data.value(),
+                &vec![10, 20, 30, 40],
+                "texture_data should be preserved"
+            );
+            assert_eq!(
+                state.format.value(),
+                &lp_model::nodes::texture::TextureFormat::Rgb8,
+                "format should be preserved"
+            );
         }
         _ => panic!("Expected Texture state"),
     }
@@ -175,16 +203,18 @@ fn test_partial_state_merge_texture() {
 
 #[test]
 fn test_partial_state_merge_output() {
-    use lp_model::nodes::output::{OutputState, OutputConfig};
-    use lp_model::project::api::NodeState;
     use alloc::boxed::Box;
+    use lp_model::nodes::output::{OutputConfig, OutputState};
+    use lp_model::project::api::NodeState;
 
     let mut view = ClientProjectView::new();
     let handle = NodeHandle::new(1);
 
     // Initial sync: full state with channel_data
     let mut initial_state = OutputState::new(FrameId::new(1));
-    initial_state.channel_data.set(FrameId::new(1), vec![100, 200, 255]);
+    initial_state
+        .channel_data
+        .set(FrameId::new(1), vec![100, 200, 255]);
 
     let initial_response = ProjectResponse::GetChanges {
         current_frame: FrameId::new(1),
@@ -197,11 +227,14 @@ fn test_partial_state_merge_output() {
         }],
         node_details: {
             let mut map = BTreeMap::new();
-            map.insert(handle, lp_model::project::api::NodeDetail {
-                path: lp_model::LpPathBuf::from("/src/test.output"),
-                config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
-                state: NodeState::Output(initial_state),
-            });
+            map.insert(
+                handle,
+                lp_model::project::api::NodeDetail {
+                    path: lp_model::LpPathBuf::from("/src/test.output"),
+                    config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
+                    state: NodeState::Output(initial_state),
+                },
+            );
             map
         },
         theoretical_fps: None,
@@ -230,11 +263,14 @@ fn test_partial_state_merge_output() {
         node_changes: vec![],
         node_details: {
             let mut map = BTreeMap::new();
-            map.insert(handle, lp_model::project::api::NodeDetail {
-                path: lp_model::LpPathBuf::from("/src/test.output"),
-                config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
-                state: NodeState::Output(partial_state),
-            });
+            map.insert(
+                handle,
+                lp_model::project::api::NodeDetail {
+                    path: lp_model::LpPathBuf::from("/src/test.output"),
+                    config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
+                    state: NodeState::Output(partial_state),
+                },
+            );
             map
         },
         theoretical_fps: None,
@@ -246,7 +282,11 @@ fn test_partial_state_merge_output() {
     let entry = view.nodes.get(&handle).unwrap();
     match &entry.state {
         Some(NodeState::Output(state)) => {
-            assert_eq!(state.channel_data.value(), &vec![100, 200, 255], "channel_data should be preserved");
+            assert_eq!(
+                state.channel_data.value(),
+                &vec![100, 200, 255],
+                "channel_data should be preserved"
+            );
         }
         _ => panic!("Expected Output state"),
     }
