@@ -6,9 +6,10 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lp_model::{
-    nodes::output::{OutputConfig, OutputState},
+    nodes::output::{OutputConfig, OutputDriverOptionsConfig, OutputState},
     project::FrameId,
 };
+use lp_shared::DisplayPipelineOptions;
 use lp_shared::fs::fs_event::FsChange;
 
 /// Output node runtime
@@ -60,6 +61,27 @@ impl OutputRuntime {
     }
 }
 
+fn to_display_pipeline_options(cfg: &OutputDriverOptionsConfig) -> DisplayPipelineOptions {
+    DisplayPipelineOptions {
+        lum_power: cfg.lum_power,
+        white_point: cfg.white_point,
+        brightness: cfg.brightness.clamp(0.0, 1.0),
+        interpolation_enabled: cfg.interpolation_enabled,
+        dithering_enabled: cfg.dithering_enabled,
+        lut_enabled: cfg.lut_enabled,
+    }
+}
+
+fn options_for_open(cfg: &OutputConfig) -> Option<DisplayPipelineOptions> {
+    match cfg {
+        OutputConfig::GpioStrip {
+            options: Some(opts),
+            ..
+        } => Some(to_display_pipeline_options(opts)),
+        _ => None,
+    }
+}
+
 impl NodeRuntime for OutputRuntime {
     fn init(&mut self, ctx: &dyn NodeInitContext) -> Result<(), Error> {
         // Get config
@@ -68,9 +90,9 @@ impl NodeRuntime for OutputRuntime {
             reason: "Config not set".to_string(),
         })?;
 
-        // Extract pin from config
+        // Extract pin and options from config
         match config {
-            OutputConfig::GpioStrip { pin } => {
+            OutputConfig::GpioStrip { pin, .. } => {
                 self.pin = *pin;
             }
         }
@@ -81,9 +103,9 @@ impl NodeRuntime for OutputRuntime {
         let format = OutputFormat::Ws2811;
 
         // Open output channel with provider
-        let handle = ctx
-            .output_provider()
-            .open(self.pin, byte_count, format, None)?;
+        let handle =
+            ctx.output_provider()
+                .open(self.pin, byte_count, format, options_for_open(config))?;
         self.channel_handle = Some(handle);
 
         // Allocate 16-bit buffer: num_leds * 3 u16s
@@ -137,35 +159,32 @@ impl NodeRuntime for OutputRuntime {
                 reason: "Config is not an OutputConfig".to_string(),
             })?;
 
-        // Check if pin changed
-        let old_pin = self.pin;
         match output_config {
-            OutputConfig::GpioStrip { pin } => {
-                if *pin != old_pin {
-                    // Pin changed - need to reinitialize
-                    // Close old channel if exists
-                    if self.channel_handle.is_some() {
-                        // Note: We don't have access to provider here to close
-                        // The old channel will be cleaned up when provider is destroyed
-                        self.channel_handle = None;
-                    }
-
-                    self.pin = *pin;
-                    self.config = Some(output_config.clone());
-
-                    // Reinitialize with new pin
-                    let byte_count = 3u32; // Default for now
-                    let format = OutputFormat::Ws2811;
-                    let handle = ctx
-                        .output_provider()
-                        .open(self.pin, byte_count, format, None)?;
-                    self.channel_handle = Some(handle);
-                    let num_leds = (byte_count / 3) as usize;
-                    self.channel_data.resize(num_leds * 3, 0);
-                } else {
-                    // Just update config
-                    self.config = Some(output_config.clone());
+            OutputConfig::GpioStrip { pin, .. } => {
+                // Close existing channel before reopen (update_config is only called when config changed)
+                if let Some(handle) = self.channel_handle {
+                    ctx.output_provider()
+                        .close(handle)
+                        .map_err(|e| Error::Other {
+                            message: alloc::format!("Failed to close output channel: {e}"),
+                        })?;
+                    self.channel_handle = None;
                 }
+
+                self.pin = *pin;
+                self.config = Some(output_config.clone());
+
+                let byte_count = 3u32;
+                let format = OutputFormat::Ws2811;
+                let handle = ctx.output_provider().open(
+                    self.pin,
+                    byte_count,
+                    format,
+                    options_for_open(output_config),
+                )?;
+                self.channel_handle = Some(handle);
+                let num_leds = (byte_count / 3) as usize;
+                self.channel_data.resize(num_leds * 3, 0);
             }
         }
 

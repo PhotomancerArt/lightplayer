@@ -271,7 +271,10 @@ impl OutputBuilder {
         let path_str = format!("/src/output-{id}.output");
         let node_path = format!("{path_str}/node.json");
 
-        let config = OutputConfig::GpioStrip { pin: self.pin };
+        let config = OutputConfig::GpioStrip {
+            pin: self.pin,
+            options: None,
+        };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");
 

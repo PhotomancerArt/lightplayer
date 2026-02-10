@@ -19,7 +19,8 @@ server = [
     "lp-server",
     "lp-shared",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
-test_rmt = []  # Test RMT driver with simple patterns
+test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
+test_dithering = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
 

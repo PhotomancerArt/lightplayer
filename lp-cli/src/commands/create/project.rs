@@ -233,7 +233,10 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     .map_err(|e| anyhow::anyhow!("Failed to write shader main.glsl: {e}"))?;
 
     // Create output node
-    let output_config = OutputConfig::GpioStrip { pin: 4 };
+    let output_config = OutputConfig::GpioStrip {
+        pin: 4,
+        options: None,
+    };
     let output_json = serde_json::to_string_pretty(&output_config)
         .context("Failed to serialize output config")?;
     fs.write_file(
@@ -514,7 +517,10 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         .map_err(|e| anyhow::anyhow!("Failed to write shader main.glsl: {e}"))?;
 
         // Create output node
-        let output_config = OutputConfig::GpioStrip { pin: 4 };
+        let output_config = OutputConfig::GpioStrip {
+            pin: 4,
+            options: None,
+        };
         let output_json = serde_json::to_string_pretty(&output_config)
             .context("Failed to serialize output config")?;
         fs.write_file_mut(

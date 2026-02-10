@@ -119,6 +119,7 @@ impl ClientProjectView {
                                 NodeKind::Output => {
                                     Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                         pin: 0,
+                                        options: None,
                                     })
                                 }
                                 NodeKind::Fixture => {
@@ -217,6 +218,7 @@ impl ClientProjectView {
                             NodeKind::Output => {
                                 Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
+                                    options: None,
                                 })
                             }
                             NodeKind::Fixture => {
@@ -268,6 +270,7 @@ impl ClientProjectView {
                             NodeKind::Output => {
                                 Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
+                                    options: None,
                                 })
                             }
                             NodeKind::Fixture => {

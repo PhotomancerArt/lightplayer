@@ -53,7 +53,8 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     }
   },
   "color_order": "Rgb",
-  "brightness": 128,
+  "brightness": 255,
+  "gamma_correction": false,
   "transform": [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -175,7 +176,7 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
     // Note: Using pin 18 (GPIO18) which is hardcoded in Esp32OutputProvider
     fs.write_file_mut(
         "/projects/test-project/src/strip.output/node.json".as_path(),
-        br#"{"GpioStrip": {"pin": 18}}"#,
+        br#"{"GpioStrip": {"pin": 18, "options": {"interpolation_enabled": true, "dithering_enabled": true, "lut_enabled": true, "brightness": 0.25}}}"#,
     )?;
 
     Ok(())

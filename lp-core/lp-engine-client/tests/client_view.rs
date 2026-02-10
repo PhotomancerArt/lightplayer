@@ -231,7 +231,10 @@ fn test_partial_state_merge_output() {
                 handle,
                 lp_model::project::api::NodeDetail {
                     path: lp_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
+                    config: Box::new(OutputConfig::GpioStrip {
+                        pin: 0,
+                        options: None,
+                    }),
                     state: NodeState::Output(initial_state),
                 },
             );
@@ -267,7 +270,10 @@ fn test_partial_state_merge_output() {
                 handle,
                 lp_model::project::api::NodeDetail {
                     path: lp_model::LpPathBuf::from("/src/test.output"),
-                    config: Box::new(OutputConfig::GpioStrip { pin: 0 }),
+                    config: Box::new(OutputConfig::GpioStrip {
+                        pin: 0,
+                        options: None,
+                    }),
                     state: NodeState::Output(partial_state),
                 },
             );

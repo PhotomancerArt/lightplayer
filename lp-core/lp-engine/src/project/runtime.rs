@@ -134,7 +134,10 @@ impl ProjectRuntime {
                             Box::new(lp_model::nodes::shader::ShaderConfig::default())
                         }
                         NodeKind::Output => {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip { pin: 0 })
+                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                pin: 0,
+                                options: None,
+                            })
                         }
                         NodeKind::Fixture => Box::new(lp_model::nodes::fixture::FixtureConfig {
                             output_spec: lp_model::NodeSpecifier::from(""),
@@ -1047,15 +1050,20 @@ impl ProjectRuntime {
                                 } else {
                                     Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                         pin: 0,
+                                        options: None,
                                     })
                                 }
                             } else {
                                 Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
+                                    options: None,
                                 })
                             }
                         } else {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip { pin: 0 })
+                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                pin: 0,
+                                options: None,
+                            })
                         }
                     }
                     NodeKind::Fixture => {

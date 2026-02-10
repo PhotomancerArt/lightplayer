@@ -5,6 +5,7 @@
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 

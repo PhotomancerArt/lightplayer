@@ -25,6 +25,7 @@ pub struct DisplayPipeline {
     dither_overflow: Vec<[i8; 3]>,
     lut: [[u32; LUT_LEN]; 3],
     options: DisplayPipelineOptions,
+    brightness_u8: u8,
 }
 
 impl DisplayPipeline {
@@ -49,6 +50,7 @@ impl DisplayPipeline {
         build_lut(&mut lut[0], options.white_point[0], options.lum_power);
         build_lut(&mut lut[1], options.white_point[1], options.lum_power);
         build_lut(&mut lut[2], options.white_point[2], options.lum_power);
+        let brightness_u8 = (options.brightness.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         Ok(Self {
             num_leds,
             prev,
@@ -64,6 +66,7 @@ impl DisplayPipeline {
             dither_overflow,
             lut,
             options,
+            brightness_u8,
         })
     }
 
@@ -178,21 +181,27 @@ impl DisplayPipeline {
     }
 
     fn apply_lut_dither(&mut self, r: u32, g: u32, b: u32, pixel: usize) -> (u8, u8, u8) {
-        let ir = if self.options.lut_enabled {
+        let mut ir = if self.options.lut_enabled {
             lut_interpolate(r, &self.lut[0])
         } else {
             r
         };
-        let ig = if self.options.lut_enabled {
+        let mut ig = if self.options.lut_enabled {
             lut_interpolate(g, &self.lut[1])
         } else {
             g
         };
-        let ib = if self.options.lut_enabled {
+        let mut ib = if self.options.lut_enabled {
             lut_interpolate(b, &self.lut[2])
         } else {
             b
         };
+        let brightness = self.brightness_u8;
+        if brightness < 255 {
+            ir = (ir * brightness as u32) >> 8;
+            ig = (ig * brightness as u32) >> 8;
+            ib = (ib * brightness as u32) >> 8;
+        }
         let (or, no_r) = if self.options.dithering_enabled {
             dither_step(ir as i32, self.dither_overflow[pixel][0])
         } else {

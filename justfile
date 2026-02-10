@@ -261,3 +261,9 @@ demo example="basic":
 demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
     cargo run --package lp-cli -- dev examples/basic
+
+fwtest-rmt-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
+
+fwtest-dithering-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_dithering,esp32c6 --target {{ rv32_target }} --release

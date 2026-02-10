@@ -112,10 +112,10 @@ pub fn texture_data_to_color_image(
                         let b = u16::from_le_bytes([data[idx + 4], data[idx + 5]]);
                         let a = u16::from_le_bytes([data[idx + 6], data[idx + 7]]);
                         Color32::from_rgba_unmultiplied(
-                            ((r + 128) >> 8).min(255) as u8,
-                            ((g + 128) >> 8).min(255) as u8,
-                            ((b + 128) >> 8).min(255) as u8,
-                            ((a + 128) >> 8).min(255) as u8,
+                            ((r as u32 + 128) >> 8).min(255) as u8,
+                            ((g as u32 + 128) >> 8).min(255) as u8,
+                            ((b as u32 + 128) >> 8).min(255) as u8,
+                            ((a as u32 + 128) >> 8).min(255) as u8,
                         )
                     }
                 };
