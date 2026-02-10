@@ -5,6 +5,7 @@ use alloc::{boxed::Box, format, string::ToString, vec::Vec};
 use lp_model::{
     NodeHandle,
     nodes::texture::{TextureConfig, TextureState},
+    project::FrameId,
 };
 use lp_shared::{Texture, fs::fs_event::FsChange};
 
@@ -12,6 +13,7 @@ use lp_shared::{Texture, fs::fs_event::FsChange};
 pub struct TextureRuntime {
     config: Option<TextureConfig>,
     texture: Option<Texture>,
+    pub state: TextureState,
     node_handle: NodeHandle,
 }
 
@@ -20,6 +22,7 @@ impl TextureRuntime {
         Self {
             config: None,
             texture: None,
+            state: TextureState::new(FrameId::default()),
             node_handle,
         }
     }
@@ -37,31 +40,8 @@ impl TextureRuntime {
     }
 
     pub fn get_state(&self) -> TextureState {
-        // Extract state for sync API
-        if let Some(tex) = &self.texture {
-            TextureState {
-                texture_data: tex.data().to_vec(),
-                width: tex.width(),
-                height: tex.height(),
-                format: tex.format().to_string(),
-            }
-        } else if let Some(config) = &self.config {
-            // Fallback to config if texture not initialized
-            TextureState {
-                texture_data: Vec::new(),
-                width: config.width,
-                height: config.height,
-                format: "RGBA8".to_string(), // Default format
-            }
-        } else {
-            // No texture or config available
-            TextureState {
-                texture_data: Vec::new(),
-                width: 0,
-                height: 0,
-                format: "RGBA8".to_string(),
-            }
-        }
+        // Return cloned state
+        self.state.clone()
     }
 
     /// Get the texture config (for state extraction)
@@ -88,6 +68,16 @@ impl NodeRuntime for TextureRuntime {
         })?;
 
         self.texture = Some(texture);
+
+        // Update state with texture data
+        if let Some(tex) = &self.texture {
+            let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+            self.state.texture_data.set(frame_id, tex.data().to_vec());
+            self.state.width.set(frame_id, tex.width());
+            self.state.height.set(frame_id, tex.height());
+            self.state.format.set(frame_id, tex.format().to_string());
+        }
+
         Ok(())
     }
 
@@ -134,6 +124,15 @@ impl NodeRuntime for TextureRuntime {
                     reason: format!("Failed to resize texture: {e}"),
                 })?;
             self.texture = Some(texture);
+
+            // Update state with new texture data
+            if let Some(tex) = &self.texture {
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.texture_data.set(frame_id, tex.data().to_vec());
+                self.state.width.set(frame_id, tex.width());
+                self.state.height.set(frame_id, tex.height());
+                self.state.format.set(frame_id, tex.format().to_string());
+            }
         }
 
         Ok(())

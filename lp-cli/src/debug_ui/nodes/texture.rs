@@ -18,20 +18,31 @@ pub fn render_texture_panel(
     // Display metadata
     ui.group(|ui| {
         ui.label(format!("Path: {:?}", entry.path));
-        ui.label(format!("Size: {}x{}", state.width, state.height));
-        ui.label(format!("Format: {}", state.format));
-        ui.label(format!("Data size: {} bytes", state.texture_data.len()));
+        ui.label(format!(
+            "Size: {}x{}",
+            state.width.value(),
+            state.height.value()
+        ));
+        ui.label(format!("Format: {}", state.format.value()));
+        ui.label(format!(
+            "Data size: {} bytes",
+            state.texture_data.value().len()
+        ));
     });
 
     ui.separator();
 
     // Display texture image
-    if show_background && !state.texture_data.is_empty() && state.width > 0 && state.height > 0 {
+    if show_background
+        && !state.texture_data.value().is_empty()
+        && *state.width.value() > 0
+        && *state.height.value() > 0
+    {
         let color_image = texture_data_to_color_image(
-            &state.texture_data,
-            state.width,
-            state.height,
-            &state.format,
+            state.texture_data.value(),
+            *state.width.value(),
+            *state.height.value(),
+            state.format.value(),
         );
 
         // Create texture handle
@@ -43,11 +54,11 @@ pub fn render_texture_panel(
         // Scale to fit available width, max 8x native size, but limit height
         let available_width = ui.available_width();
         let max_height = 400.0; // Limit texture height to prevent huge images
-        let scale = (available_width / state.width as f32)
-            .min(max_height / state.height as f32)
+        let scale = (available_width / *state.width.value() as f32)
+            .min(max_height / *state.height.value() as f32)
             .min(8.0);
-        let display_width = state.width as f32 * scale;
-        let display_height = state.height as f32 * scale;
+        let display_width = *state.width.value() as f32 * scale;
+        let display_height = *state.height.value() as f32 * scale;
 
         ui.add(
             Image::new(&texture_handle)

@@ -322,7 +322,7 @@ impl ClientProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Texture(tex_state)) => Ok(tex_state.texture_data.clone()),
+            Some(NodeState::Texture(tex_state)) => Ok(tex_state.texture_data.value().clone()),
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Texture)",
                 entry.path.as_str()
@@ -355,7 +355,7 @@ impl ClientProjectView {
         }
 
         match &entry.state {
-            Some(NodeState::Output(output_state)) => Ok(output_state.channel_data.clone()),
+            Some(NodeState::Output(output_state)) => Ok(output_state.channel_data.value().clone()),
             Some(_) => Err(format!(
                 "Node {} has wrong state type (expected Output)",
                 entry.path.as_str()

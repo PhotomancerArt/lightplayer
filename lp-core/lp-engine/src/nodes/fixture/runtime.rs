@@ -9,12 +9,13 @@ use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, Tex
 use alloc::{boxed::Box, string::String, vec::Vec};
 use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
 use lp_model::FrameId;
-use lp_model::nodes::fixture::{ColorOrder, FixtureConfig};
+use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
 use lp_shared::fs::fs_event::FsChange;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
     config: Option<FixtureConfig>,
+    pub state: FixtureState, // State stored directly
     texture_handle: Option<TextureHandle>,
     output_handle: Option<OutputHandle>,
     color_order: ColorOrder,
@@ -24,8 +25,6 @@ pub struct FixtureRuntime {
     texture_height: Option<u32>,
     /// Pre-computed pixel-to-channel mapping
     precomputed_mapping: Option<PrecomputedMapping>,
-    /// Last sampled lamp colors (RGB per lamp, ordered by channel index)
-    lamp_colors: Vec<u8>,
     /// Brightness level (0-255), defaults to 64
     brightness: u8,
     /// Enable gamma correction, defaults to true
@@ -36,6 +35,7 @@ impl FixtureRuntime {
     pub fn new() -> Self {
         Self {
             config: None,
+            state: FixtureState::new(FrameId::default()),
             texture_handle: None,
             output_handle: None,
             color_order: ColorOrder::Rgb,
@@ -49,7 +49,6 @@ impl FixtureRuntime {
             texture_width: None,
             texture_height: None,
             precomputed_mapping: None,
-            lamp_colors: Vec::new(),
             brightness: 64,
             gamma_correction: true,
         }
@@ -87,7 +86,50 @@ impl FixtureRuntime {
     /// Get lamp colors (for state extraction)
     /// Returns RGB values per lamp, ordered by channel index (3 bytes per lamp)
     pub fn get_lamp_colors(&self) -> &[u8] {
-        &self.lamp_colors
+        self.state.lamp_colors.get()
+    }
+
+    /// Convert mapping points to mapping cells with post-transform coordinates
+    fn mapping_points_to_cells(&self, mapping_points: &[MappingPoint]) -> Vec<MappingCell> {
+        mapping_points
+            .iter()
+            .map(|mp| {
+                // Apply transform to convert from texture space to texture space
+                let transformed = Self::apply_transform_2d(mp.center, self.transform);
+                // Ensure coordinates are in [0, 1] range (clamp if needed)
+                let texture_coords = [
+                    transformed[0].max(0.0).min(1.0),
+                    transformed[1].max(0.0).min(1.0),
+                ];
+
+                MappingCell {
+                    channel: mp.channel,
+                    center: texture_coords,
+                    radius: mp.radius,
+                }
+            })
+            .collect()
+    }
+
+    /// Apply 4x4 transform matrix to a 2D point
+    ///
+    /// Treats the point as homogeneous coordinate [x, y, 0, 1] and applies the transform.
+    /// Returns the transformed 2D point.
+    fn apply_transform_2d(point: [f32; 2], transform: [[f32; 4]; 4]) -> [f32; 2] {
+        let x = point[0];
+        let y = point[1];
+
+        // Apply transform: [x', y', z', w'] = transform * [x, y, 0, 1]
+        let x_prime = transform[0][0] * x + transform[0][1] * y + transform[0][3];
+        let y_prime = transform[1][0] * x + transform[1][1] * y + transform[1][3];
+        let w_prime = transform[3][0] * x + transform[3][1] * y + transform[3][3];
+
+        // Normalize by w if not zero
+        if w_prime.abs() > 1e-6 {
+            [x_prime / w_prime, y_prime / w_prime]
+        } else {
+            [x_prime, y_prime]
+        }
     }
 
     /// Regenerate mapping when texture resolution changes or config versions change
@@ -97,7 +139,7 @@ impl FixtureRuntime {
         texture_height: u32,
         our_config_ver: FrameId,
         texture_config_ver: FrameId,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let needs_regeneration = self
             .texture_width
             .map(|w| w != texture_width)
@@ -140,7 +182,7 @@ impl FixtureRuntime {
             self.mapping = generate_mapping_points(&config.mapping, texture_width, texture_height);
         }
 
-        Ok(())
+        Ok(needs_regeneration)
     }
 }
 
@@ -155,10 +197,18 @@ impl NodeRuntime for FixtureRuntime {
         // Resolve texture handle
         let texture_handle = ctx.resolve_texture(&config.texture_spec)?;
         self.texture_handle = Some(texture_handle);
+        // Update state (using default frame_id since init doesn't have frame_id)
+        self.state
+            .texture_handle
+            .set(FrameId::default(), Some(texture_handle.as_node_handle()));
 
         // Resolve output handle
         let output_handle = ctx.resolve_output(&config.output_spec)?;
         self.output_handle = Some(output_handle);
+        // Update state (using default frame_id since init doesn't have frame_id)
+        self.state
+            .output_handle
+            .set(FrameId::default(), Some(output_handle.as_node_handle()));
 
         // Store config values
         self.color_order = config.color_order;
@@ -174,6 +224,9 @@ impl NodeRuntime for FixtureRuntime {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
+        // Get frame_id first before any mutable borrows
+        let frame_id = ctx.frame_id();
+
         // Get texture handle
         let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
             message: String::from("Texture handle not resolved"),
@@ -189,12 +242,18 @@ impl NodeRuntime for FixtureRuntime {
         // TODO: Get proper config versions from context
         let our_config_ver = FrameId::new(0);
         let texture_config_ver = FrameId::new(0);
-        self.regenerate_mapping_if_needed(
+        let mapping_changed = self.regenerate_mapping_if_needed(
             texture_width,
             texture_height,
             our_config_ver,
             texture_config_ver,
         )?;
+
+        // Update state.mapping_cells if mapping changed
+        if mapping_changed {
+            let mapping_cells = self.mapping_points_to_cells(&self.mapping);
+            self.state.mapping_cells.set(frame_id, mapping_cells);
+        }
 
         // Get pre-computed mapping
         let mapping = self
@@ -227,10 +286,11 @@ impl NodeRuntime for FixtureRuntime {
 
         // Store lamp colors for state extraction
         // Create dense array: each channel uses 3 bytes (RGB)
-        self.lamp_colors.clear();
-        self.lamp_colors.resize((max_channel as usize + 1) * 3, 0);
+        let mut lamp_colors = Vec::new();
+        lamp_colors.resize((max_channel as usize + 1) * 3, 0);
 
         let brightness = self.brightness.to_q32() / 255.to_q32();
+        let frame_id = ctx.frame_id(); // Get frame_id before mutable borrows
 
         // Write sampled values to output buffer
         // For now, use universe 0 and channel_offset 0 (sequential writing)
@@ -243,9 +303,9 @@ impl NodeRuntime for FixtureRuntime {
             let mut b = (ch_values_b[channel] * brightness).to_u8_clamped();
 
             let idx = channel * 3;
-            self.lamp_colors[idx] = r;
-            self.lamp_colors[idx + 1] = g;
-            self.lamp_colors[idx + 2] = b;
+            lamp_colors[idx] = r;
+            lamp_colors[idx + 1] = g;
+            lamp_colors[idx + 2] = b;
 
             // Apply gamma correction if enabled, _after_ writing to lamp_colors, which should
             // not be gamma corrected
@@ -259,6 +319,9 @@ impl NodeRuntime for FixtureRuntime {
             let buffer = ctx.get_output(output_handle, universe, start_ch, 3)?;
             self.color_order.write_rgb(buffer, 0, r, g, b);
         }
+
+        // Update state with lamp colors
+        self.state.lamp_colors.set(frame_id, lamp_colors);
 
         Ok(())
     }
@@ -306,11 +369,19 @@ impl NodeRuntime for FixtureRuntime {
         if texture_changed {
             let texture_handle = ctx.resolve_texture(&fixture_config.texture_spec)?;
             self.texture_handle = Some(texture_handle);
+            // Update state (using default frame_id since update_config doesn't have frame_id)
+            self.state
+                .texture_handle
+                .set(FrameId::default(), Some(texture_handle.as_node_handle()));
         }
 
         if output_changed {
             let output_handle = ctx.resolve_output(&fixture_config.output_spec)?;
             self.output_handle = Some(output_handle);
+            // Update state (using default frame_id since update_config doesn't have frame_id)
+            self.state
+                .output_handle
+                .set(FrameId::default(), Some(output_handle.as_node_handle()));
         }
 
         // If mapping config changed, invalidate precomputed mapping

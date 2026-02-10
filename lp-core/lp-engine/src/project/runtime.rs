@@ -926,23 +926,17 @@ impl ProjectRuntime {
                             if let Some(tex_runtime) =
                                 runtime.as_any().downcast_ref::<TextureRuntime>()
                             {
-                                NodeState::Texture(tex_runtime.get_state())
+                                NodeState::Texture(tex_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Texture(lp_model::nodes::texture::TextureState {
-                                    texture_data: Vec::new(),
-                                    width: 0,
-                                    height: 0,
-                                    format: "RGBA8".to_string(),
-                                })
+                                NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Texture(lp_model::nodes::texture::TextureState {
-                                texture_data: Vec::new(),
-                                width: 0,
-                                height: 0,
-                                format: "RGBA8".to_string(),
-                            })
+                            NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Shader => {
@@ -951,19 +945,17 @@ impl ProjectRuntime {
                             if let Some(shader_runtime) =
                                 runtime.as_any().downcast_ref::<ShaderRuntime>()
                             {
-                                NodeState::Shader(shader_runtime.get_state())
+                                NodeState::Shader(shader_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Shader(lp_model::nodes::shader::ShaderState {
-                                    glsl_code: String::new(),
-                                    error: None,
-                                })
+                                NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Shader(lp_model::nodes::shader::ShaderState {
-                                glsl_code: String::new(),
-                                error: None,
-                            })
+                            NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Output => {
@@ -973,86 +965,35 @@ impl ProjectRuntime {
                                 .as_any()
                                 .downcast_ref::<crate::nodes::OutputRuntime>(
                             ) {
-                                NodeState::Output(lp_model::nodes::output::OutputState {
-                                    channel_data: output_runtime.get_channel_data().to_vec(),
-                                })
+                                NodeState::Output(output_runtime.state.clone())
                             } else {
-                                NodeState::Output(lp_model::nodes::output::OutputState {
-                                    channel_data: Vec::new(),
-                                })
+                                NodeState::Output(lp_model::nodes::output::OutputState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Output(lp_model::nodes::output::OutputState {
-                                channel_data: Vec::new(),
-                            })
+                            NodeState::Output(lp_model::nodes::output::OutputState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Fixture => {
-                        // Fixture runtime state extraction
+                        // Fixture runtime state extraction - just clone the state directly
                         if let Some(runtime) = &entry.runtime {
                             if let Some(fixture_runtime) =
                                 runtime.as_any().downcast_ref::<FixtureRuntime>()
                             {
-                                // Get mapping points and transform from runtime
-                                let mapping_points = fixture_runtime.get_mapping();
-                                let transform = fixture_runtime.get_transform();
-
-                                // Convert mapping points to MappingCells with post-transform coordinates
-                                let mapping_cells: Vec<lp_model::nodes::fixture::MappingCell> =
-                                    mapping_points
-                                        .iter()
-                                        .map(|mp| {
-                                            // Apply transform to convert from texture space to texture space
-                                            // Both input and output are in texture space [0, 1]
-                                            let transformed =
-                                                apply_transform_2d(mp.center, transform);
-                                            // Ensure coordinates are in [0, 1] range (clamp if needed)
-                                            let texture_coords = [
-                                                transformed[0].max(0.0).min(1.0),
-                                                transformed[1].max(0.0).min(1.0),
-                                            ];
-
-                                            lp_model::nodes::fixture::MappingCell {
-                                                channel: mp.channel,
-                                                center: texture_coords,
-                                                radius: mp.radius,
-                                            }
-                                        })
-                                        .collect();
-
-                                // Extract handles from runtime
-                                let texture_handle = fixture_runtime
-                                    .get_texture_handle()
-                                    .map(|h| h.as_node_handle());
-                                let output_handle = fixture_runtime
-                                    .get_output_handle()
-                                    .map(|h| h.as_node_handle());
-
-                                // Extract lamp colors from runtime
-                                let lamp_colors = fixture_runtime.get_lamp_colors().to_vec();
-
-                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                    lamp_colors,
-                                    mapping_cells,
-                                    texture_handle,
-                                    output_handle,
-                                })
+                                NodeState::Fixture(fixture_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                    lamp_colors: Vec::new(),
-                                    mapping_cells: Vec::new(),
-                                    texture_handle: None,
-                                    output_handle: None,
-                                })
+                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                lamp_colors: Vec::new(),
-                                mapping_cells: Vec::new(),
-                                texture_handle: None,
-                                output_handle: None,
-                            })
+                            NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                 };
@@ -1486,6 +1427,10 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
         // SAFETY: This is safe because the trait only allows immutable access
         // and we're not holding the borrow across any potential panics
         unsafe { &*self.output_provider.as_ptr() }
+    }
+
+    fn frame_id(&self) -> FrameId {
+        self.frame_id
     }
 }
 

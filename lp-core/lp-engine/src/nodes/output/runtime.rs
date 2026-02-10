@@ -5,7 +5,10 @@ use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use lp_model::nodes::output::OutputConfig;
+use lp_model::{
+    nodes::output::{OutputConfig, OutputState},
+    project::FrameId,
+};
 use lp_shared::fs::fs_event::FsChange;
 
 /// Output node runtime
@@ -18,6 +21,7 @@ pub struct OutputRuntime {
     pin: u32,
     /// Output config (None until set)
     config: Option<OutputConfig>,
+    pub state: OutputState,
 }
 
 impl OutputRuntime {
@@ -27,6 +31,7 @@ impl OutputRuntime {
             channel_handle: None,
             pin: 0,
             config: None,
+            state: OutputState::new(FrameId::default()),
         }
     }
 
@@ -86,6 +91,12 @@ impl NodeRuntime for OutputRuntime {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
+        // Update state with current channel data
+        let frame_id = ctx.frame_id();
+        self.state
+            .channel_data
+            .set(frame_id, self.channel_data.clone());
+
         // Flush buffer to provider if handle exists
         if let Some(handle) = self.channel_handle {
             ctx.output_provider().write(handle, &self.channel_data)?;

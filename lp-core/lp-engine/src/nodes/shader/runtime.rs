@@ -13,6 +13,7 @@ use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
     LpPathBuf, NodeHandle,
     nodes::shader::{ShaderConfig, ShaderState},
+    project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
 
@@ -32,6 +33,7 @@ pub struct ShaderRuntime {
     executable: Option<Box<dyn GlslExecutable + Send + Sync>>, // Compiled shader (must be Send + Sync for NodeRuntime)
     texture_handle: Option<TextureHandle>,                     // Resolved texture handle
     compilation_error: Option<String>,                         // Compilation error if any
+    pub state: ShaderState,
     node_handle: NodeHandle,
     render_order: i32, // Render order (from config)
     // Direct call optimization: cached function pointer and calling convention
@@ -48,6 +50,7 @@ impl ShaderRuntime {
             executable: None,
             texture_handle: None,
             compilation_error: None,
+            state: ShaderState::new(FrameId::default()),
             node_handle,
             render_order: 0,
             direct_func_ptr: None,
@@ -66,10 +69,8 @@ impl ShaderRuntime {
     }
 
     pub fn get_state(&self) -> ShaderState {
-        ShaderState {
-            glsl_code: self.glsl_source.clone().unwrap_or_default(),
-            error: self.compilation_error.clone(),
-        }
+        // Return cloned state
+        self.state.clone()
     }
 
     /// Check if this shader targets the given texture handle
@@ -239,7 +240,13 @@ impl NodeRuntime for ShaderRuntime {
             let texture_handle = ctx
                 .resolve_texture(&shader_config.texture_spec)
                 .map_err(|e| {
-                    self.compilation_error = Some(format!("Failed to resolve texture: {e}"));
+                    let error_msg = format!("Failed to resolve texture: {e}");
+                    self.compilation_error = Some(error_msg.clone());
+
+                    // Update state
+                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    self.state.error.set(frame_id, Some(error_msg));
+
                     e
                 })?;
             self.texture_handle = Some(texture_handle);
@@ -292,7 +299,13 @@ impl NodeRuntime for ShaderRuntime {
                     self.direct_func_ptr = None;
                     self.direct_call_conv = None;
                     self.direct_pointer_type = None;
-                    self.compilation_error = Some("GLSL file deleted".to_string());
+                    let error_msg = "GLSL file deleted".to_string();
+                    self.compilation_error = Some(error_msg.clone());
+
+                    // Update state
+                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    self.state.glsl_code.set(frame_id, String::new());
+                    self.state.error.set(frame_id, Some(error_msg));
                 }
             }
         }
@@ -419,7 +432,13 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let texture_handle = ctx.resolve_texture(&config.texture_spec).map_err(|e| {
-            self.compilation_error = Some(format!("Failed to resolve texture: {e}"));
+            let error_msg = format!("Failed to resolve texture: {e}");
+            self.compilation_error = Some(error_msg.clone());
+
+            // Update state
+            let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+            self.state.error.set(frame_id, Some(error_msg));
+
             e
         })?;
         self.texture_handle = Some(texture_handle);
@@ -455,6 +474,10 @@ impl ShaderRuntime {
 
         // Store source for state extraction
         self.glsl_source = Some(glsl_source.clone());
+
+        // Update state
+        let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+        self.state.glsl_code.set(frame_id, glsl_source.clone());
 
         Ok(glsl_source)
     }
@@ -494,6 +517,11 @@ impl ShaderRuntime {
                     unsafe { core::mem::transmute(executable) };
                 self.executable = Some(executable_with_bounds);
                 self.compilation_error = None;
+
+                // Update state
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.error.set(frame_id, None);
+
                 log::debug!(
                     "ShaderRuntime::compile_shader: Shader {} compiled successfully",
                     self.node_handle.as_i32()
@@ -501,11 +529,17 @@ impl ShaderRuntime {
                 Ok(())
             }
             Err(e) => {
-                self.compilation_error = Some(format!("{e}"));
+                let error_msg = format!("{e}");
+                self.compilation_error = Some(error_msg.clone());
                 self.executable = None;
                 self.direct_func_ptr = None;
                 self.direct_call_conv = None;
                 self.direct_pointer_type = None;
+
+                // Update state
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.error.set(frame_id, Some(error_msg.clone()));
+
                 log::warn!(
                     "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),

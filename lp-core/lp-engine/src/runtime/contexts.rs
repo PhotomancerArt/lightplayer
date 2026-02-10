@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::output::OutputProvider;
-use lp_model::{NodeHandle, NodeSpecifier};
+use lp_model::{FrameId, NodeHandle, NodeSpecifier};
 use lp_shared::fs::LpFs;
 
 /// Handle for resolved texture nodes
@@ -73,4 +73,7 @@ pub trait RenderContext {
 
     /// Get output provider
     fn output_provider(&self) -> &dyn OutputProvider;
+
+    /// Get current frame ID
+    fn frame_id(&self) -> FrameId;
 }

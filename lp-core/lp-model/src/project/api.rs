@@ -331,15 +331,20 @@ mod tests {
 
     #[test]
     fn test_node_state() {
-        let state = NodeState::Texture(crate::nodes::texture::TextureState {
-            texture_data: vec![0, 1, 2, 3],
-            width: 2,
-            height: 2,
-            format: "RGBA8".to_string(),
-        });
+        use crate::project::FrameId;
+        let mut tex_state = crate::nodes::texture::TextureState::new(FrameId::default());
+        tex_state
+            .texture_data
+            .set(FrameId::default(), vec![0, 1, 2, 3]);
+        tex_state.width.set(FrameId::default(), 2);
+        tex_state.height.set(FrameId::default(), 2);
+        tex_state
+            .format
+            .set(FrameId::default(), "RGBA8".to_string());
+        let state = NodeState::Texture(tex_state);
         match state {
             NodeState::Texture(tex_state) => {
-                assert_eq!(tex_state.texture_data.len(), 4);
+                assert_eq!(tex_state.texture_data.value().len(), 4);
             }
             _ => panic!("Expected Texture state"),
         }
@@ -348,18 +353,23 @@ mod tests {
     #[test]
     fn test_node_detail_to_serializable_texture() {
         use crate::nodes::texture::TextureConfig;
+        use crate::project::FrameId;
+        let mut tex_state = crate::nodes::texture::TextureState::new(FrameId::default());
+        tex_state
+            .texture_data
+            .set(FrameId::default(), vec![0, 1, 2, 3]);
+        tex_state.width.set(FrameId::default(), 2);
+        tex_state.height.set(FrameId::default(), 2);
+        tex_state
+            .format
+            .set(FrameId::default(), "RGBA8".to_string());
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/texture.texture"),
             config: Box::new(TextureConfig {
                 width: 100,
                 height: 200,
             }),
-            state: NodeState::Texture(crate::nodes::texture::TextureState {
-                texture_data: vec![0, 1, 2, 3],
-                width: 2,
-                height: 2,
-                format: "RGBA8".to_string(),
-            }),
+            state: NodeState::Texture(tex_state),
         };
         let serializable = detail.to_serializable().unwrap();
         match serializable {
@@ -380,13 +390,12 @@ mod tests {
     #[test]
     fn test_node_detail_to_serializable_shader() {
         use crate::nodes::shader::ShaderConfig;
+        use crate::project::FrameId;
+        let shader_state = crate::nodes::shader::ShaderState::new(FrameId::default());
         let detail = NodeDetail {
             path: LpPathBuf::from("/src/shader.shader"),
             config: Box::new(ShaderConfig::default()),
-            state: NodeState::Shader(crate::nodes::shader::ShaderState {
-                glsl_code: String::new(),
-                error: None,
-            }),
+            state: NodeState::Shader(shader_state),
         };
         let serializable = detail.to_serializable().unwrap();
         match serializable {
@@ -414,12 +423,20 @@ mod tests {
                     width: 100,
                     height: 200,
                 }),
-                state: NodeState::Texture(crate::nodes::texture::TextureState {
-                    texture_data: vec![0, 1, 2, 3],
-                    width: 2,
-                    height: 2,
-                    format: "RGBA8".to_string(),
-                }),
+                state: {
+                    use crate::project::FrameId;
+                    let mut tex_state =
+                        crate::nodes::texture::TextureState::new(FrameId::default());
+                    tex_state
+                        .texture_data
+                        .set(FrameId::default(), vec![0, 1, 2, 3]);
+                    tex_state.width.set(FrameId::default(), 2);
+                    tex_state.height.set(FrameId::default(), 2);
+                    tex_state
+                        .format
+                        .set(FrameId::default(), "RGBA8".to_string());
+                    NodeState::Texture(tex_state)
+                },
             },
         );
 
@@ -456,18 +473,23 @@ mod tests {
     #[test]
     fn test_serializable_node_detail_serialization() {
         use crate::nodes::texture::TextureConfig;
+        use crate::project::FrameId;
+        let mut tex_state = crate::nodes::texture::TextureState::new(FrameId::default());
+        tex_state
+            .texture_data
+            .set(FrameId::default(), vec![0, 1, 2, 3]);
+        tex_state.width.set(FrameId::default(), 2);
+        tex_state.height.set(FrameId::default(), 2);
+        tex_state
+            .format
+            .set(FrameId::default(), "RGBA8".to_string());
         let detail = SerializableNodeDetail::Texture {
             path: LpPathBuf::from("/src/texture.texture"),
             config: TextureConfig {
                 width: 100,
                 height: 200,
             },
-            state: NodeState::Texture(crate::nodes::texture::TextureState {
-                texture_data: vec![0, 1, 2, 3],
-                width: 2,
-                height: 2,
-                format: "RGBA8".to_string(),
-            }),
+            state: NodeState::Texture(tex_state),
         };
         let json = crate::json::to_string(&detail).unwrap();
         let deserialized: SerializableNodeDetail = crate::json::from_str(&json).unwrap();
@@ -497,12 +519,20 @@ mod tests {
                     width: 100,
                     height: 200,
                 },
-                state: NodeState::Texture(crate::nodes::texture::TextureState {
-                    texture_data: vec![0, 1, 2, 3],
-                    width: 2,
-                    height: 2,
-                    format: "RGBA8".to_string(),
-                }),
+                state: {
+                    use crate::project::FrameId;
+                    let mut tex_state =
+                        crate::nodes::texture::TextureState::new(FrameId::default());
+                    tex_state
+                        .texture_data
+                        .set(FrameId::default(), vec![0, 1, 2, 3]);
+                    tex_state.width.set(FrameId::default(), 2);
+                    tex_state.height.set(FrameId::default(), 2);
+                    tex_state
+                        .format
+                        .set(FrameId::default(), "RGBA8".to_string());
+                    NodeState::Texture(tex_state)
+                },
             },
         ));
 

@@ -22,8 +22,14 @@ pub fn render_fixture_panel(
     ui.group(|ui| {
         ui.label(format!("Path: {:?}", entry.path));
         ui.label(format!("Status: {:?}", entry.status));
-        ui.label(format!("Mapping cells: {}", state.mapping_cells.len()));
-        ui.label(format!("Lamp colors: {} bytes", state.lamp_colors.len()));
+        ui.label(format!(
+            "Mapping cells: {}",
+            state.mapping_cells.value().len()
+        ));
+        ui.label(format!(
+            "Lamp colors: {} bytes",
+            state.lamp_colors.value().len()
+        ));
     });
 
     ui.separator();
@@ -31,6 +37,7 @@ pub fn render_fixture_panel(
     // Find referenced texture node using resolved handle from state
     let texture_entry = state
         .texture_handle
+        .value()
         .and_then(|handle| view.nodes.get(&handle))
         .filter(|e| matches!(e.kind, NodeKind::Texture));
 
@@ -39,15 +46,15 @@ pub fn render_fixture_panel(
             &texture_entry.state
         {
             // Display texture with mapping overlay
-            if !texture_state.texture_data.is_empty()
-                && texture_state.width > 0
-                && texture_state.height > 0
+            if !texture_state.texture_data.value().is_empty()
+                && *texture_state.width.value() > 0
+                && *texture_state.height.value() > 0
             {
                 let color_image = texture::texture_data_to_color_image(
-                    &texture_state.texture_data,
-                    texture_state.width,
-                    texture_state.height,
-                    &texture_state.format,
+                    texture_state.texture_data.value(),
+                    *texture_state.width.value(),
+                    *texture_state.height.value(),
+                    texture_state.format.value(),
                 );
 
                 // Create texture handle
@@ -59,11 +66,11 @@ pub fn render_fixture_panel(
                 // Scale to fit available width, but limit height
                 let available_width = ui.available_width();
                 let max_height = 400.0; // Limit texture height
-                let scale = (available_width / texture_state.width as f32)
-                    .min(max_height / texture_state.height as f32)
+                let scale = (available_width / *texture_state.width.value() as f32)
+                    .min(max_height / *texture_state.height.value() as f32)
                     .min(8.0);
-                let display_width = texture_state.width as f32 * scale;
-                let display_height = texture_state.height as f32 * scale;
+                let display_width = *texture_state.width.value() as f32 * scale;
+                let display_height = *texture_state.height.value() as f32 * scale;
 
                 // Display texture image first (using Image widget like texture.rs) if enabled
                 let image_rect = if show_background {
@@ -86,10 +93,10 @@ pub fn render_fixture_panel(
                 draw_mapping_overlay(
                     ui.painter(),
                     image_rect,
-                    texture_state.width,
-                    texture_state.height,
-                    &state.mapping_cells,
-                    &state.lamp_colors,
+                    *texture_state.width.value(),
+                    *texture_state.height.value(),
+                    state.mapping_cells.value(),
+                    state.lamp_colors.value(),
                     show_labels,
                     show_strokes,
                 );
@@ -100,7 +107,7 @@ pub fn render_fixture_panel(
             ui.label("Texture node does not have state (not tracked for detail)");
         }
     } else {
-        if state.texture_handle.is_none() {
+        if state.texture_handle.value().is_none() {
             ui.label("Fixture not initialized - no texture handle available");
         } else {
             ui.label("Texture node not found in view (may not be tracked for detail)");
