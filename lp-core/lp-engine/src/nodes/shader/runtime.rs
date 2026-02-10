@@ -491,16 +491,22 @@ impl ShaderRuntime {
         );
         log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
 
-        let fast_math = self
+        use lp_glsl_compiler::Q32Options;
+
+        let q32_opts = self
             .config
             .as_ref()
-            .map(|c| c.glsl_opts.fast_math)
-            .unwrap_or(false);
+            .map(|c| Q32Options {
+                add_sub: c.glsl_opts.add_sub,
+                mul: c.glsl_opts.mul,
+                div: c.glsl_opts.div,
+            })
+            .unwrap_or_else(Q32Options::default);
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
-            fast_math,
+            q32_opts,
         };
 
         match glsl_jit(glsl_source, options) {

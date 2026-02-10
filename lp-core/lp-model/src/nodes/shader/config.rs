@@ -41,6 +41,7 @@ impl NodeConfig for ShaderConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::glsl_opts::{AddSubMode, DivMode, MulMode};
 
     #[test]
     fn test_shader_config_kind() {
@@ -58,6 +59,8 @@ mod tests {
         let config = ShaderConfig::default();
         assert_eq!(config.glsl_path.as_str(), "main.glsl");
         assert_eq!(config.render_order, 0);
-        assert!(!config.glsl_opts.fast_math);
+        assert_eq!(config.glsl_opts.add_sub, AddSubMode::Saturating);
+        assert_eq!(config.glsl_opts.mul, MulMode::Saturating);
+        assert_eq!(config.glsl_opts.div, DivMode::Saturating);
     }
 }

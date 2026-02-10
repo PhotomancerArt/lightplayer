@@ -175,8 +175,7 @@ pub enum DecimalFormat {
 pub struct GlslOptions {
     pub run_mode: RunMode,
     pub decimal_format: DecimalFormat,
-    /// Use inline iadd/isub for q32 add/sub (wrapping) instead of saturating builtins
-    pub fast_math: bool,
+    pub q32_opts: crate::backend::transform::q32::Q32Options,
 }
 
 impl GlslOptions {
@@ -215,7 +214,7 @@ impl GlslOptions {
         Self {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Float,
-            fast_math: false,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
         }
     }
 
@@ -230,7 +229,7 @@ impl GlslOptions {
                 log_level: None,
             },
             decimal_format: DecimalFormat::Q32,
-            fast_math: false,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
         }
     }
 
@@ -246,7 +245,7 @@ impl GlslOptions {
                 max_instructions: 10_000,
             },
             decimal_format: DecimalFormat::Q32,
-            fast_math: false,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
         }
     }
 }

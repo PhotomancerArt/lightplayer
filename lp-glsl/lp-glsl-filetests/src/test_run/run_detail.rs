@@ -60,7 +60,7 @@ pub fn run(
     let options = GlslOptions {
         run_mode,
         decimal_format,
-        fast_math: false,
+        q32_opts: lp_glsl_compiler::Q32Options::default(),
     };
 
     // TODO: Implement bless mode when needed

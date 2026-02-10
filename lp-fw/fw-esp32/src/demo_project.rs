@@ -164,7 +164,9 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
   "texture_spec": "/src/main.texture",
   "render_order": 0,
   "glsl_opts": {
-    "fast_math": true
+    "add_sub": "wrapping",
+    "mul": "saturating",
+    "div": "saturating"
   }
 }"#,
     )?;

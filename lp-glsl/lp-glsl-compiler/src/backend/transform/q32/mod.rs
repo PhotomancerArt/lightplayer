@@ -6,6 +6,7 @@
 
 mod converters;
 mod instructions;
+mod options;
 mod signature;
 mod transform;
 mod types;
@@ -13,5 +14,6 @@ mod types;
 #[cfg(test)]
 mod q32_test_util;
 
+pub use options::Q32Options;
 pub use transform::Q32Transform;
 pub use types::FixedPointFormat;

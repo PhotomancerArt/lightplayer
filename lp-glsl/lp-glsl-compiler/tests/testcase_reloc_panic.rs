@@ -4,7 +4,7 @@
 //! that causes a panic when compiling on macOS due to unimplemented
 //! TestCase relocation handling.
 
-use lp_glsl_compiler::{DecimalFormat, GlslOptions, RunMode, glsl_jit};
+use lp_glsl_compiler::{DecimalFormat, GlslOptions, Q32Options, RunMode, glsl_jit};
 
 #[test]
 fn test_default_project_shader_compilation() {
@@ -58,7 +58,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
-        fast_math: false,
+        q32_opts: Q32Options::default(),
     };
 
     // This should not panic - Q32 format goes through transform that converts TestCase names
@@ -84,7 +84,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_float = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Float,
-        fast_math: false,
+        q32_opts: Q32Options::default(),
     };
 
     match glsl_jit(glsl, options_float) {

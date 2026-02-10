@@ -19,6 +19,7 @@ pub mod backend;
 mod exec;
 
 // Re-exports
+pub use backend::transform::q32::Q32Options;
 #[cfg(feature = "emulator")]
 pub use exec::GlslEmulatorModule;
 pub use exec::GlslJitModule;
