@@ -9,6 +9,10 @@ use core::cmp;
 
 use super::dither::dither_step;
 
+/// Below this value (post-LUT, post-brightness), use shared luminance dithering
+/// to avoid R/G/B divergence and color flicker. ~5% of 16-bit max.
+const LOW_GRAY_THRESHOLD: u32 = 65535 / 20;
+
 /// Triple-buffered display pipeline. 16-bit in, 8-bit out.
 pub struct DisplayPipeline {
     num_leds: u32,
@@ -202,28 +206,28 @@ impl DisplayPipeline {
             ig = (ig * brightness as u32) >> 8;
             ib = (ib * brightness as u32) >> 8;
         }
-        let (or, no_r) = if self.options.dithering_enabled {
-            dither_step(ir as i32, self.dither_overflow[pixel][0])
-        } else {
-            let o = ((ir + 0x80) >> 8).min(255) as u8;
-            (o, 0i8)
-        };
-        let (og, no_g) = if self.options.dithering_enabled {
-            dither_step(ig as i32, self.dither_overflow[pixel][1])
-        } else {
-            let o = ((ig + 0x80) >> 8).min(255) as u8;
-            (o, 0i8)
-        };
-        let (ob, no_b) = if self.options.dithering_enabled {
-            dither_step(ib as i32, self.dither_overflow[pixel][2])
-        } else {
-            let o = ((ib + 0x80) >> 8).min(255) as u8;
-            (o, 0i8)
-        };
-        if self.options.dithering_enabled {
+
+        let max_val = ir.max(ig).max(ib);
+        let use_shared_luma = self.options.dithering_enabled
+            && max_val < LOW_GRAY_THRESHOLD;
+
+        if use_shared_luma {
+            let lum = (ir + ig + ib) / 3;
+            let (out, no) = dither_step(lum as i32, self.dither_overflow[pixel][0]);
+            self.dither_overflow[pixel] = [no, no, no];
+            (out, out, out)
+        } else if self.options.dithering_enabled {
+            let (or, no_r) = dither_step(ir as i32, self.dither_overflow[pixel][0]);
+            let (og, no_g) = dither_step(ig as i32, self.dither_overflow[pixel][1]);
+            let (ob, no_b) = dither_step(ib as i32, self.dither_overflow[pixel][2]);
             self.dither_overflow[pixel] = [no_r, no_g, no_b];
+            (or, og, ob)
+        } else {
+            let or = ((ir + 0x80) >> 8).min(255) as u8;
+            let og = ((ig + 0x80) >> 8).min(255) as u8;
+            let ob = ((ib + 0x80) >> 8).min(255) as u8;
+            (or, og, ob)
         }
-        (or, og, ob)
     }
 }
 
@@ -266,5 +270,22 @@ mod tests {
         let mut out = [0xFFu8; 3];
         pipeline.tick(0, &mut out);
         assert_eq!(out, [0, 0, 0]);
+    }
+
+    #[test]
+    fn low_gray_shared_dither_keeps_rgb_equal() {
+        let mut opts = DisplayPipelineOptions::default();
+        opts.lut_enabled = true;
+        opts.dithering_enabled = true;
+        let mut pipeline = DisplayPipeline::new(1, opts).unwrap();
+        // Low value grayscale: 2% of 16-bit max, should use shared luminance path
+        let val: u16 = 65535 / 50;
+        let data: [u16; 3] = [val, val, val];
+        pipeline.write_frame(0, &data);
+        pipeline.write_frame(1000, &data);
+        let mut out = [0u8; 3];
+        pipeline.tick(500, &mut out);
+        assert_eq!(out[0], out[1], "R and G should match for low gray");
+        assert_eq!(out[1], out[2], "G and B should match for low gray");
     }
 }
