@@ -14,7 +14,9 @@ extern crate alloc;
 extern crate std;
 
 pub mod error;
+pub mod fps;
 pub mod fs;
+pub mod stats;
 pub mod util; // Temporarily enabled for Texture
 
 pub mod output;

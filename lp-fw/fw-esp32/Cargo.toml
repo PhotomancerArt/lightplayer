@@ -15,9 +15,9 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "lp-model",
     "lp-server",
     "lp-shared",
-    "lp-model",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
 test_rmt = []  # Test RMT driver with simple patterns
 test_gpio = []  # Test GPIO pin toggle

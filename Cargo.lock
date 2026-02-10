@@ -3713,6 +3713,7 @@ name = "lp-shared"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "libm",
  "log",
  "lp-model",
  "serde",

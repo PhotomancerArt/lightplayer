@@ -75,13 +75,13 @@ pub enum ServerMsgBody {
     ///
     /// # Fields
     ///
-    /// * `fps` - Current frames per second (calculated over recent frames)
+    /// * `fps` - FPS statistics (avg, sdev, min, max) over a recent window (e.g. 5s)
     /// * `frame_count` - Total frame count since server startup
     /// * `loaded_projects` - List of currently loaded projects with handles and paths
     /// * `uptime_ms` - Server uptime in milliseconds since startup
     Heartbeat {
-        /// Current FPS (frames per second)
-        fps: u32,
+        /// FPS statistics over the configured window (e.g. 5 seconds)
+        fps: SampleStats,
         /// Total frame count since startup
         frame_count: u64,
         /// List of loaded projects
@@ -106,6 +106,18 @@ pub enum LogLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvailableProject {
     pub path: LpPathBuf,
+}
+
+/// Sample statistics over a time window (e.g. FPS over 5s).
+///
+/// Reusable for any scalar metric: avg, population standard deviation, min, max.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleStats {
+    pub avg: f32,
+    pub sdev: f32,
+    pub min: f32,
+    pub max: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
