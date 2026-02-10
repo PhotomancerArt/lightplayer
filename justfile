@@ -206,7 +206,7 @@ ci-app: fmt-check clippy-app build-app test-app
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
 # Fix code issues then run CI (sequential, not parallel)
-fci: 
+fci:
     @just fix
     @just ci
 
@@ -257,6 +257,7 @@ demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
 
 # Run firmware on ESP32-C6 device
+
 # Requires: ESP32-C6 device connected via USB
 demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
@@ -266,4 +267,4 @@ fwtest-rmt-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
 
 fwtest-dithering-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_dithering,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --release

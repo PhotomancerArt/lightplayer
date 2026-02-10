@@ -26,7 +26,7 @@ use core::cell::RefCell;
 use board::{init_board, start_runtime};
 use fw_core::message_router::MessageRouter;
 use fw_core::transport::MessageRouterTransport;
-use lp_model::{ClientMessage, ClientRequest, json, path::AsLpPath};
+use lp_model::{json, path::AsLpPath, ClientMessage, ClientRequest};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
@@ -41,9 +41,9 @@ mod tests {
     pub mod test_rmt;
 }
 
-#[cfg(feature = "test_dithering")]
+#[cfg(feature = "test_dither")]
 mod tests {
-    pub mod test_dithering;
+    pub mod test_dither;
 }
 
 #[cfg(feature = "test_gpio")]
@@ -72,9 +72,9 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_rmt_test().await;
     }
 
-    #[cfg(feature = "test_dithering")]
+    #[cfg(feature = "test_dither")]
     {
-        use tests::test_dithering::run_dithering_test;
+        use tests::test_dither::run_dithering_test;
         run_dithering_test().await;
     }
 
@@ -84,7 +84,12 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_usb_test(spawner).await;
     }
 
-    #[cfg(not(any(feature = "test_rmt", feature = "test_dithering", feature = "test_gpio", feature = "test_usb")))]
+    #[cfg(not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb"
+    )))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
