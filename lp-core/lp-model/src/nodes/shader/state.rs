@@ -33,9 +33,18 @@ impl ShaderState {
             self.glsl_code
                 .set(frame_id, other.glsl_code.value().clone());
         }
-        // Merge error if present (Some value)
-        if other.error.value().is_some() {
-            self.error.set(frame_id, other.error.value().clone());
+        // Merge error when present in update.
+        // None = field omitted (preserve existing). Some("") = explicitly cleared (sentinel).
+        // Some(s) = error message.
+        if let Some(err) = other.error.value() {
+            self.error.set(
+                frame_id,
+                if err.is_empty() {
+                    None // Empty string is sentinel for "error cleared"
+                } else {
+                    Some(err.clone())
+                },
+            );
         }
     }
 }
@@ -44,5 +53,38 @@ impl_state_serialization! {
     ShaderState => SerializableShaderState {
         glsl_code: String,
         error: Option<String>,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_error_cleared() {
+        let frame = FrameId::new(1);
+        let mut existing = ShaderState::new(frame);
+        existing.error.set(frame, Some("compilation failed".into()));
+
+        let mut update = ShaderState::new(frame);
+        update.error.set(frame, Some(String::new())); // Sentinel for "cleared"
+
+        existing.merge_from(&update, frame);
+        assert_eq!(existing.error.value(), &None);
+    }
+
+    #[test]
+    fn test_merge_error_omitted_preserved() {
+        let frame = FrameId::new(1);
+        let mut existing = ShaderState::new(frame);
+        existing.error.set(frame, Some("old error".into()));
+        existing.glsl_code.set(frame, "void main() {}".into());
+
+        let mut update = ShaderState::new(frame);
+        update.glsl_code.set(frame, "void main() { }".into());
+        // error not set - omitted from partial update
+
+        existing.merge_from(&update, frame);
+        assert_eq!(existing.error.value(), &Some("old error".into()));
     }
 }

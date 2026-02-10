@@ -177,6 +177,14 @@ macro_rules! impl_state_serialization {
             $state.serialize_field(stringify!($field), &encoded)?;
         }
     };
+    // Serialize field in wrapper - Option<String> where None means "cleared"
+    // Use "" as sentinel so client can distinguish "cleared" from "omitted"
+    (@serialize_wrapper_field $self:expr, $state:ident, $is_initial_sync:expr, ($field:ident: Option<String>)) => {
+        if $is_initial_sync || $self.state.$field.changed_frame() > $self.since_frame {
+            let s: &str = $self.state.$field.value().as_deref().unwrap_or("");
+            $state.serialize_field(stringify!($field), s)?;
+        }
+    };
     // Serialize field in wrapper - normal case
     (@serialize_wrapper_field $self:expr, $state:ident, $is_initial_sync:expr, ($field:ident: $field_type:ty)) => {
         if $is_initial_sync || $self.state.$field.changed_frame() > $self.since_frame {
