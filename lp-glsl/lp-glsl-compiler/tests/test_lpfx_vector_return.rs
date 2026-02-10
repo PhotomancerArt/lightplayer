@@ -23,6 +23,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     // Compile and execute
@@ -109,6 +110,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
             log_level: None,
         },
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     // Compile and execute
@@ -187,6 +189,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     // Compile and execute

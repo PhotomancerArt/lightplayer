@@ -34,6 +34,7 @@ pub(crate) fn convert_all_instructions(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<Value, Value>,
     format: FixedPointFormat,
+    fast_math: bool,
     block_map: &HashMap<Block, Block>,
     stack_slot_map: Option<&HashMap<StackSlot, StackSlot>>,
     call_state: &mut CallConversionState,
@@ -47,6 +48,7 @@ pub(crate) fn convert_all_instructions(
         builder,
         value_map,
         format,
+        fast_math,
         block_map,
         stack_slot_map,
         call_state,
@@ -63,6 +65,7 @@ fn convert_instruction(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<Value, Value>,
     format: FixedPointFormat,
+    fast_math: bool,
     block_map: &HashMap<Block, Block>,
     stack_slot_map: Option<&HashMap<StackSlot, StackSlot>>,
     call_state: &mut CallConversionState,
@@ -92,6 +95,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                fast_math,
                 func_id_map,
             )?;
         }
@@ -102,6 +106,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                fast_math,
                 func_id_map,
             )?;
         }

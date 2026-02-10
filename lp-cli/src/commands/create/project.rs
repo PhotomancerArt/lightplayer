@@ -157,6 +157,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         glsl_path: "main.glsl".as_path_buf(),
         texture_spec: NodeSpecifier::from("/src/main.texture"),
         render_order: 0,
+        glsl_opts: lp_model::glsl_opts::GlslOpts::default(),
     };
     let shader_json = serde_json::to_string_pretty(&shader_config)
         .context("Failed to serialize shader config")?;
@@ -437,6 +438,7 @@ mod tests {
             glsl_path: "main.glsl".as_path_buf(),
             texture_spec: NodeSpecifier::from("/src/main.texture"),
             render_order: 0,
+            glsl_opts: lp_model::glsl_opts::GlslOpts::default(),
         };
         let shader_json = serde_json::to_string_pretty(&shader_config)
             .context("Failed to serialize shader config")?;

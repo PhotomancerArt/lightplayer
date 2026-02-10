@@ -491,9 +491,16 @@ impl ShaderRuntime {
         );
         log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
 
+        let fast_math = self
+            .config
+            .as_ref()
+            .map(|c| c.glsl_opts.fast_math)
+            .unwrap_or(false);
+
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            fast_math,
         };
 
         match glsl_jit(glsl_source, options) {

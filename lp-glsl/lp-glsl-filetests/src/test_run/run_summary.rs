@@ -44,6 +44,7 @@ pub fn run(
     let options = GlslOptions {
         run_mode,
         decimal_format,
+        fast_math: false,
     };
 
     // Count total test cases before compilation (so we can show counts even if compilation fails)

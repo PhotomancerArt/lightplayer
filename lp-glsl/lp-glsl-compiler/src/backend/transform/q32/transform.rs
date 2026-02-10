@@ -12,17 +12,27 @@ use cranelift_module::Module;
 /// Q32 transform - converts F32 to fixed-point representation
 pub struct Q32Transform {
     format: FixedPointFormat,
+    fast_math: bool,
 }
 
 impl Q32Transform {
     /// Create a new Q32 transform with the specified format
     pub fn new(format: FixedPointFormat) -> Self {
-        Self { format }
+        Self {
+            format,
+            fast_math: false,
+        }
     }
 
     /// Create a Q32 transform with default format (Fixed16x16)
     pub fn default() -> Self {
         Self::new(FixedPointFormat::Fixed16x16)
+    }
+
+    /// Use inline iadd/isub for add/sub (wrapping) instead of saturating builtins
+    pub fn with_fast_math(mut self, fast_math: bool) -> Self {
+        self.fast_math = fast_math;
+        self
     }
 }
 
@@ -39,6 +49,7 @@ impl Transform for Q32Transform {
         // 1. Convert signature (happens before transform_function_body)
         let new_sig = convert_signature(&old_func.signature, self.format);
         let format = self.format;
+        let fast_math = self.fast_math;
 
         // 2. Get pointer type from module ISA (needed for builtin signatures)
         let pointer_type = ctx.module.module_internal().isa().pointer_type();
@@ -67,6 +78,7 @@ impl Transform for Q32Transform {
                     builder,
                     value_map,
                     format,
+                    fast_math,
                     block_map,
                     stack_slot_map,
                     &mut *call_state.borrow_mut(),

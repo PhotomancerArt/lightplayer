@@ -6,6 +6,7 @@ fn main() {
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Float,
+        fast_math: false,
     };
 
     // Example 1: Integer arithmetic

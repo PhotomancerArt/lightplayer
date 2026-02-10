@@ -58,6 +58,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     // This should not panic - Q32 format goes through transform that converts TestCase names
@@ -83,6 +84,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_float = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Float,
+        fast_math: false,
     };
 
     match glsl_jit(glsl, options_float) {

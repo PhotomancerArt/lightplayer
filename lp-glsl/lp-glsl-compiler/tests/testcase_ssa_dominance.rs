@@ -51,6 +51,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -91,6 +92,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -125,6 +127,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -178,6 +181,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -218,6 +222,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -263,6 +268,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -318,6 +324,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -390,6 +397,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        fast_math: false,
     };
 
     let result = glsl_jit(glsl, options_q32);

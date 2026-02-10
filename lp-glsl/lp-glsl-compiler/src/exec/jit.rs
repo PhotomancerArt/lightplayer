@@ -1476,6 +1476,7 @@ mod tests {
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            fast_math: false,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1496,6 +1497,7 @@ mod tests {
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            fast_math: false,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1514,6 +1516,7 @@ mod tests {
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            fast_math: false,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1533,6 +1536,7 @@ mod tests {
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            fast_math: false,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");

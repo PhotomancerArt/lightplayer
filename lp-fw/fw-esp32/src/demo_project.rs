@@ -67,8 +67,8 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     fs.write_file_mut(
         "/projects/test-project/src/main.texture/node.json".as_path(),
         br#"{
-  "width": 12,
-  "height": 12
+  "width": 16,
+  "height": 16
 }"#,
     )?;
 
@@ -162,7 +162,10 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
         br#"{
   "glsl_path": "main.glsl",
   "texture_spec": "/src/main.texture",
-  "render_order": 0
+  "render_order": 0,
+  "glsl_opts": {
+    "fast_math": true
+  }
 }"#,
     )?;
 

@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+pub mod glsl_opts;
 pub mod json;
 pub mod message;
 pub mod nodes;

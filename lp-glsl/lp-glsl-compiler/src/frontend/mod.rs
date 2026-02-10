@@ -120,7 +120,8 @@ pub fn compile_glsl_to_gl_module_jit(
     match options.decimal_format {
         DecimalFormat::Q32 => {
             use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+            let transform =
+                Q32Transform::new(FixedPointFormat::Fixed16x16).with_fast_math(options.fast_math);
             module = module.apply_transform(transform)?;
         }
         DecimalFormat::Float => {
@@ -175,7 +176,8 @@ pub fn compile_glsl_to_gl_module_object(
     let transformed_clif = match options.decimal_format {
         DecimalFormat::Q32 => {
             use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+            let transform =
+                Q32Transform::new(FixedPointFormat::Fixed16x16).with_fast_math(options.fast_math);
             module = module.apply_transform(transform)?;
             // Capture transformed CLIF IR after transformation (only in std builds)
             #[cfg(feature = "std")]

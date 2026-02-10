@@ -1,3 +1,4 @@
+use crate::builtins::q32::__lp_q32_sqrt;
 /// Fixed-point arithmetic (16.16 format)
 ///
 /// Core type and conversion utilities for fixed-point fixed.
@@ -123,6 +124,10 @@ impl Q32 {
     #[inline]
     pub fn mix(self, other: Q32, t: Q32) -> Q32 {
         crate::glsl::q32::fns::mix_q32(self, other, t)
+    }
+
+    pub fn sqrt(self) -> Q32 {
+        Q32(__lp_q32_sqrt(self.0))
     }
 }
 

@@ -12,21 +12,30 @@ use hashbrown::HashMap;
 
 use alloc::format;
 
-/// Convert Fadd to fixed-point addition by calling __lp_q32_add builtin.
+/// Convert Fadd to fixed-point addition.
+/// When fast_math: inline iadd (wrapping). Otherwise: call __lp_q32_add (saturating).
 pub(crate) fn convert_fadd(
     old_func: &Function,
     old_inst: Inst,
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<cranelift_codegen::ir::Value, cranelift_codegen::ir::Value>,
     _format: FixedPointFormat,
+    fast_math: bool,
     func_id_map: &HashMap<alloc::string::String, cranelift_module::FuncId>,
 ) -> Result<(), GlslError> {
-    use cranelift_codegen::ir::{AbiParam, ExtFuncData, ExternalName, Signature, UserExternalName};
-    use cranelift_codegen::isa::CallConv;
-
     let (arg1_old, arg2_old) = extract_binary_operands(old_func, old_inst)?;
     let arg1 = map_operand(old_func, value_map, arg1_old)?;
     let arg2 = map_operand(old_func, value_map, arg2_old)?;
+
+    if fast_math {
+        let result = builder.ins().iadd(arg1, arg2);
+        let old_result = get_first_result(old_func, old_inst);
+        value_map.insert(old_result, result);
+        return Ok(());
+    }
+
+    use cranelift_codegen::ir::{AbiParam, ExtFuncData, ExternalName, Signature, UserExternalName};
+    use cranelift_codegen::isa::CallConv;
 
     // Get FuncId for __lp_q32_add from func_id_map
     let builtin_name = "__lp_q32_add";
@@ -73,21 +82,30 @@ pub(crate) fn convert_fadd(
     Ok(())
 }
 
-/// Convert Fsub to fixed-point subtraction by calling __lp_q32_sub builtin.
+/// Convert Fsub to fixed-point subtraction.
+/// When fast_math: inline isub (wrapping). Otherwise: call __lp_q32_sub (saturating).
 pub(crate) fn convert_fsub(
     old_func: &Function,
     old_inst: Inst,
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<cranelift_codegen::ir::Value, cranelift_codegen::ir::Value>,
     _format: FixedPointFormat,
+    fast_math: bool,
     func_id_map: &HashMap<alloc::string::String, cranelift_module::FuncId>,
 ) -> Result<(), GlslError> {
-    use cranelift_codegen::ir::{AbiParam, ExtFuncData, ExternalName, Signature, UserExternalName};
-    use cranelift_codegen::isa::CallConv;
-
     let (arg1_old, arg2_old) = extract_binary_operands(old_func, old_inst)?;
     let arg1 = map_operand(old_func, value_map, arg1_old)?;
     let arg2 = map_operand(old_func, value_map, arg2_old)?;
+
+    if fast_math {
+        let result = builder.ins().isub(arg1, arg2);
+        let old_result = get_first_result(old_func, old_inst);
+        value_map.insert(old_result, result);
+        return Ok(());
+    }
+
+    use cranelift_codegen::ir::{AbiParam, ExtFuncData, ExternalName, Signature, UserExternalName};
+    use cranelift_codegen::isa::CallConv;
 
     // Get FuncId for __lp_q32_sub from func_id_map
     let builtin_name = "__lp_q32_sub";
