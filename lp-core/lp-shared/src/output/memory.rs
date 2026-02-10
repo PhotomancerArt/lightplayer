@@ -142,16 +142,23 @@ impl OutputProvider for MemoryOutputProvider {
                     handle: handle.as_i32(),
                 })?;
 
-        // Validate data length (num_leds * 3 u16 elements)
-        if data.len() != channel_state.data.len() {
+        let expected_len = channel_state.data.len();
+
+        // Resize channel if data is larger (matches ESP32 provider behavior)
+        if data.len() > expected_len {
+            let new_len = (data.len() / 3) * 3; // round down to full LEDs
+            channel_state.data.resize(new_len, 0);
+            channel_state.byte_count = new_len as u32;
+        } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
-                expected: channel_state.data.len() as u32,
+                expected: expected_len as u32,
                 actual: data.len(),
             });
         }
 
         // Store data
-        channel_state.data.copy_from_slice(data);
+        let len = channel_state.data.len();
+        channel_state.data.copy_from_slice(&data[..len]);
 
         Ok(())
     }

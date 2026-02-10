@@ -11,6 +11,8 @@ use super::dither::dither_step;
 
 /// Below this value (post-LUT, post-brightness), use shared luminance dithering
 /// to avoid R/G/B divergence and color flicker. ~5% of 16-bit max.
+/// Disabled for now—was making colored light monochrome.
+#[allow(dead_code)]
 const LOW_GRAY_THRESHOLD: u32 = 65535 / 20;
 
 /// Triple-buffered display pipeline. 16-bit in, 8-bit out.
@@ -174,9 +176,9 @@ impl DisplayPipeline {
             let cr = self.current[i * 3] as u32;
             let cg = self.current[i * 3 + 1] as u32;
             let cb = self.current[i * 3 + 2] as u32;
-            let ir = ((pr * inv_progress16 as u32) + (cr * frame_progress16 as u32)) >> 8;
-            let ig = ((pg * inv_progress16 as u32) + (cg * frame_progress16 as u32)) >> 8;
-            let ib = ((pb * inv_progress16 as u32) + (cb * frame_progress16 as u32)) >> 8;
+            let ir = ((pr * inv_progress16 as u32) + (cr * frame_progress16 as u32)) >> 16;
+            let ig = ((pg * inv_progress16 as u32) + (cg * frame_progress16 as u32)) >> 16;
+            let ib = ((pb * inv_progress16 as u32) + (cb * frame_progress16 as u32)) >> 16;
             let (or, og, ob) = self.apply_lut_dither(ir, ig, ib, i);
             out[i * 3] = or;
             out[i * 3 + 1] = og;
@@ -207,9 +209,9 @@ impl DisplayPipeline {
             ib = (ib * brightness as u32) >> 8;
         }
 
-        let max_val = ir.max(ig).max(ib);
-        let use_shared_luma = self.options.dithering_enabled
-            && max_val < LOW_GRAY_THRESHOLD;
+        // Shared luminance dithering for low-gray grayscale disabled for now:
+        // was causing colored light to appear monochrome; grayscale check was insufficient
+        let use_shared_luma = false;
 
         if use_shared_luma {
             let lum = (ir + ig + ib) / 3;

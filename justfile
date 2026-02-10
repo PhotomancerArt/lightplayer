@@ -261,7 +261,7 @@ demo example="basic":
 # Requires: ESP32-C6 device connected via USB
 demo-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
-    cargo run --package lp-cli -- dev examples/basic
+    cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
 fwtest-rmt-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release

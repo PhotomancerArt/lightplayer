@@ -24,6 +24,8 @@ struct ChannelState {
     #[allow(dead_code, reason = "format field reserved for future validation")]
     format: OutputFormat,
     pipeline: DisplayPipeline,
+    /// Stored for resize: create new pipeline with same options when data grows
+    options: OutputDriverOptions,
 }
 
 // Unsafe static to store LedChannel (hardcoded to GPIO18 for now)
@@ -152,9 +154,10 @@ impl OutputProvider for Esp32OutputProvider {
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id);
 
-        let pipeline = DisplayPipeline::new(num_leds, options).map_err(|e| OutputError::Other {
-            message: alloc::format!("DisplayPipeline allocation failed: {e}"),
-        })?;
+        let pipeline =
+            DisplayPipeline::new(num_leds, options.clone()).map_err(|e| OutputError::Other {
+                message: alloc::format!("DisplayPipeline allocation failed: {e}"),
+            })?;
 
         log::info!(
             "Esp32OutputProvider::open: Opened channel handle={handle_id}, pin={pin}, byte_count={byte_count}, num_leds={num_leds}"
@@ -167,6 +170,7 @@ impl OutputProvider for Esp32OutputProvider {
                 byte_count,
                 format,
                 pipeline,
+                options,
             },
         );
         self.open_pins.borrow_mut().insert(pin);
@@ -188,9 +192,30 @@ impl OutputProvider for Esp32OutputProvider {
             OutputError::InvalidHandle { handle: handle_id }
         })?;
 
-        let num_leds = (channel.byte_count / 3) as usize;
+        let mut num_leds = (channel.byte_count / 3) as usize;
         let expected_len = num_leds * 3;
-        if data.len() != expected_len {
+
+        if data.len() > expected_len {
+            const MAX_LEDS: usize = 256;
+            let new_byte_count = (data.len() / 3) * 3;
+            let mut new_num_leds = new_byte_count / 3;
+            if new_num_leds > MAX_LEDS {
+                new_num_leds = MAX_LEDS;
+                log::warn!("Esp32OutputProvider::write: Capping resize at {MAX_LEDS} LEDs");
+            }
+            let new_byte_count = new_num_leds * 3;
+            channel.pipeline = DisplayPipeline::new(new_num_leds as u32, channel.options.clone())
+                .map_err(|e| OutputError::Other {
+                message: alloc::format!("DisplayPipeline resize failed: {e}"),
+            })?;
+            channel.byte_count = new_byte_count as u32;
+            num_leds = new_num_leds;
+            log::info!(
+                "Esp32OutputProvider::write: Resized channel to {} bytes ({} LEDs)",
+                channel.byte_count,
+                num_leds
+            );
+        } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
                 actual: data.len(),

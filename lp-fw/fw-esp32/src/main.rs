@@ -26,7 +26,7 @@ use core::cell::RefCell;
 use board::{init_board, start_runtime};
 use fw_core::message_router::MessageRouter;
 use fw_core::transport::MessageRouterTransport;
-use lp_model::{json, path::AsLpPath, ClientMessage, ClientRequest};
+use lp_model::{ClientMessage, ClientRequest, json, path::AsLpPath};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;

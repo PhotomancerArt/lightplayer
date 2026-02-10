@@ -21,6 +21,7 @@ pub fn build_lut(lut: &mut [u32; LUT_LEN], white_point: f32, lum_power: f32) {
 /// value is 16-bit (0..65535). index = value >> 8, alpha = value & 0xFF
 /// Result: (lut[index] * (0x100 - alpha) + lut[index + 1] * alpha) >> 8
 pub fn lut_interpolate(value: u32, lut: &[u32; LUT_LEN]) -> u32 {
+    let value = value.min(65535);
     let index = (value >> 8) as usize;
     let alpha = value & 0xFF;
     let inv_alpha = 0x100 - alpha;
