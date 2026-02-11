@@ -102,6 +102,7 @@ impl LpClient {
                     frame_count,
                     loaded_projects,
                     uptime_ms,
+                    memory,
                 } = &response.msg
                 {
                     // Display heartbeat information
@@ -121,10 +122,17 @@ impl LpClient {
                             .collect::<Vec<_>>()
                             .join(", ")
                     };
-                    eprintln!(
+                    let mut line = format!(
                         "[server] FPS avg={:.0} sdev={:.1} min={:.0} max={:.0} | Frames: {frame_count} | Uptime: {uptime_secs:.1}s ({uptime_ms}ms) | Projects: {projects_str}",
                         fps.avg, fps.sdev, fps.min, fps.max
                     );
+                    if let Some(mem) = memory {
+                        line.push_str(&format!(
+                            " | Memory: {} free / {} used / {} total bytes",
+                            mem.free_bytes, mem.used_bytes, mem.total_bytes
+                        ));
+                    }
+                    eprintln!("{line}");
                 }
                 // Continue waiting for actual response
                 continue;
@@ -537,6 +545,7 @@ mod tests {
                     frame_count: 100,
                     loaded_projects: vec![],
                     uptime_ms: 2000,
+                    memory: None,
                 },
             };
             server_transport.send(heartbeat).unwrap();
@@ -587,6 +596,7 @@ mod tests {
                         frame_count: 100 + i as u64,
                         loaded_projects: vec![],
                         uptime_ms: 2000 + i as u64 * 1000,
+                        memory: None,
                     },
                 };
                 server_transport.send(heartbeat).unwrap();
@@ -640,6 +650,7 @@ mod tests {
                         path: LpPathBuf::from("/projects/test-project"),
                     }],
                     uptime_ms: 4680,
+                    memory: None,
                 },
             };
             server_transport.send(heartbeat).unwrap();

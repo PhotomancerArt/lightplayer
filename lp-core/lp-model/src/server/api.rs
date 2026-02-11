@@ -79,6 +79,7 @@ pub enum ServerMsgBody {
     /// * `frame_count` - Total frame count since server startup
     /// * `loaded_projects` - List of currently loaded projects with handles and paths
     /// * `uptime_ms` - Server uptime in milliseconds since startup
+    /// * `memory` - Optional memory statistics (platform-dependent; ESP32 reports heap)
     Heartbeat {
         /// FPS statistics over the configured window (e.g. 5 seconds)
         fps: SampleStats,
@@ -88,6 +89,9 @@ pub enum ServerMsgBody {
         loaded_projects: Vec<LoadedProject>,
         /// Uptime in milliseconds since server startup
         uptime_ms: u64,
+        /// Optional memory statistics (ESP32 reports heap; absent on other platforms)
+        #[serde(default)]
+        memory: Option<MemoryStats>,
     },
     /// Error response for any request type
     Error {
@@ -124,4 +128,13 @@ pub struct SampleStats {
 pub struct LoadedProject {
     pub handle: ProjectHandle,
     pub path: LpPathBuf,
+}
+
+/// Optional memory statistics (platform-dependent; ESP32 reports heap).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStats {
+    pub free_bytes: u32,
+    pub used_bytes: u32,
+    pub total_bytes: u32,
 }

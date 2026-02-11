@@ -9,6 +9,7 @@
 //! - Total frame count since startup
 //! - List of loaded projects
 //! - Server uptime in milliseconds
+//! - Memory statistics (heap free/used from esp_alloc)
 //!
 //! These messages use `ServerMessage` with `id: 0` to indicate they are unsolicited
 //! status updates (not responses to client requests). Clients can subscribe to these
@@ -141,6 +142,15 @@ pub async fn run_server_loop<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
+            // Query heap memory from esp_alloc
+            let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+            let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+            let memory = Some(lp_model::server::MemoryStats {
+                free_bytes,
+                used_bytes,
+                total_bytes: used_bytes.saturating_add(free_bytes),
+            });
+
             // Create heartbeat message
             let heartbeat_msg = lp_model::ServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
@@ -149,6 +159,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                     frame_count: frame_count as u64,
                     loaded_projects,
                     uptime_ms: current_time.saturating_sub(startup_time),
+                    memory,
                 },
             };
 
