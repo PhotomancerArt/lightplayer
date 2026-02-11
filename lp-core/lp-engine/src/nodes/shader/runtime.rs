@@ -506,6 +506,13 @@ impl ShaderRuntime {
             q32_opts,
         };
 
+        // Drop old executable before compiling to free memory for recompilation.
+        // On embedded, holding both old JIT code and new compilation allocations can OOM.
+        self.executable = None;
+        self.direct_func_ptr = None;
+        self.direct_call_conv = None;
+        self.direct_pointer_type = None;
+
         match glsl_jit(glsl_source, options) {
             Ok(executable) => {
                 // Extract function pointer and calling convention using trait method
