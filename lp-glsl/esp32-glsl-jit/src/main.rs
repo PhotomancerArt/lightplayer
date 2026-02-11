@@ -53,7 +53,7 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
 
     // Allocate heap
-    esp_alloc::heap_allocator!(size: 300_000);
+    esp_alloc::heap_allocator!(size: 400_000);
 
     println!("Init!");
     print_memory_stats("After Heap Initialization");
