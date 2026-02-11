@@ -76,6 +76,22 @@ impl DisplayPipeline {
         })
     }
 
+    /// Resize pipeline to new LED count. Clears frame state; old data is lost.
+    pub fn resize(&mut self, num_leds: u32) {
+        if num_leds == 0 {
+            return;
+        }
+        let size = (num_leds as usize) * 3;
+        self.prev.resize(size, 0);
+        self.current.resize(size, 0);
+        self.next.resize(size, 0);
+        self.dither_overflow.resize(num_leds as usize, [0i8; 3]);
+        self.num_leds = num_leds;
+        self.has_prev = false;
+        self.has_current = false;
+        self.has_next = false;
+    }
+
     /// Rotate buffers: prev<-current, current<-next
     fn rotate_frames(&mut self) {
         self.has_prev = false;
@@ -289,5 +305,21 @@ mod tests {
         pipeline.tick(500, &mut out);
         assert_eq!(out[0], out[1], "R and G should match for low gray");
         assert_eq!(out[1], out[2], "G and B should match for low gray");
+    }
+
+    #[test]
+    fn resize_clears_state_and_accepts_new_data() {
+        let mut pipeline = DisplayPipeline::new(2, DisplayPipelineOptions::default()).unwrap();
+        let data2: [u16; 6] = [65535, 0, 0, 0, 65535, 0];
+        pipeline.write_frame(0, &data2);
+        pipeline.write_frame(1000, &data2);
+        pipeline.resize(3);
+        let data3: [u16; 9] = [0, 65535, 0, 0, 0, 65535, 65535, 65535, 0];
+        pipeline.write_frame(0, &data3);
+        pipeline.write_frame(1000, &data3);
+        let mut out = [0u8; 9];
+        pipeline.tick(500, &mut out);
+        assert_eq!(out[1], 255);
+        assert_eq!(out[5], 255);
     }
 }

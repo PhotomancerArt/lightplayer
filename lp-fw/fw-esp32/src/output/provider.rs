@@ -203,12 +203,8 @@ impl OutputProvider for Esp32OutputProvider {
                 new_num_leds = MAX_LEDS;
                 log::warn!("Esp32OutputProvider::write: Capping resize at {MAX_LEDS} LEDs");
             }
-            let new_byte_count = new_num_leds * 3;
-            channel.pipeline = DisplayPipeline::new(new_num_leds as u32, channel.options.clone())
-                .map_err(|e| OutputError::Other {
-                message: alloc::format!("DisplayPipeline resize failed: {e}"),
-            })?;
-            channel.byte_count = new_byte_count as u32;
+            channel.pipeline.resize(new_num_leds as u32);
+            channel.byte_count = (new_num_leds * 3) as u32;
             num_leds = new_num_leds;
             log::info!(
                 "Esp32OutputProvider::write: Resized channel to {} bytes ({} LEDs)",
