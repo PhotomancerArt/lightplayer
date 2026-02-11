@@ -121,6 +121,9 @@ async fn main(spawner: embassy_executor::Spawner) {
         spawner.spawn(io_task(usb_device)).ok();
         esp_println::println!("[INIT] I/O task spawned");
 
+        // Initialize log crate to write to outgoing serial (host will see these)
+        crate::logger::init(serial::io_task::log_write_to_outgoing);
+
         // Queue LoadProject message to auto-load the demo project
         // This simulates what FakeTransport used to do
         // Send to incoming channel so server loop can receive it

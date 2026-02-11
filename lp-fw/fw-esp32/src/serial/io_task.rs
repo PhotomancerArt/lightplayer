@@ -133,3 +133,12 @@ pub fn get_message_channels() -> (
 ) {
     (&INCOMING_MSG, &OUTGOING_MSG)
 }
+
+/// Write log output to the outgoing channel (serial to host).
+///
+/// Used by the logger so log::info!, log::debug!, etc. appear on the host.
+/// Lines are written without M! prefix so the client prints them.
+pub fn log_write_to_outgoing(msg: &str) {
+    use alloc::string::ToString;
+    let _ = OUTGOING_MSG.sender().try_send(msg.to_string());
+}

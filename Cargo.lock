@@ -1024,7 +1024,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-entity",
 ]
@@ -1032,12 +1032,12 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 
 [[package]]
 name = "cranelift-codegen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "bumpalo",
@@ -1063,7 +1063,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-codegen-shared",
  "cranelift-srcgen",
@@ -1073,17 +1073,17 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 
 [[package]]
 name = "cranelift-control"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 
 [[package]]
 name = "cranelift-entity"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-bitset",
 ]
@@ -1091,7 +1091,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.15.5",
@@ -1103,7 +1103,7 @@ dependencies = [
 [[package]]
 name = "cranelift-interpreter"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -1116,12 +1116,12 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 
 [[package]]
 name = "cranelift-jit"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1141,7 +1141,7 @@ dependencies = [
 [[package]]
 name = "cranelift-module"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1152,7 +1152,7 @@ dependencies = [
 [[package]]
 name = "cranelift-native"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -1162,7 +1162,7 @@ dependencies = [
 [[package]]
 name = "cranelift-object"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1176,7 +1176,7 @@ dependencies = [
 [[package]]
 name = "cranelift-reader"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1187,7 +1187,7 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 
 [[package]]
 name = "crc32fast"
@@ -3441,6 +3441,7 @@ dependencies = [
  "egui",
  "env_logger 0.11.8",
  "futures-util",
+ "log",
  "lp-client",
  "lp-engine-client",
  "lp-model",
@@ -5883,7 +5884,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
 version = "40.0.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -5894,7 +5895,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-math"
 version = "40.0.0"
-source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#387c0c2738a390900c6f53e95b54f943c9fe0c5f"
+source = "git+https://github.com/light-player/lp-cranelift.git?branch=feature%2Flp2025#3a6da7510c9b1b29b94b86c9d19dbe6b6d9b55fd"
 dependencies = [
  "libm",
 ]

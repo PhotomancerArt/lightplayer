@@ -675,6 +675,7 @@ impl ProjectRuntime {
         if let (Some(handle), Some(path)) = (target_handle, target_path) {
             // Check if it's node.json
             if change.path.has_suffix("/node.json") {
+                log::info!("Node config changed: {} (updating)", path.as_str());
                 // Reload config
                 let (_, config_for_update) =
                     crate::project::loader::load_node(&*self.fs.borrow(), &path)?;
@@ -733,6 +734,12 @@ impl ProjectRuntime {
                     path: LpPathBuf::from(relative_path),
                     change_type: change.change_type,
                 };
+
+                log::info!(
+                    "Node file changed: {} -> {} (handle_fs_change)",
+                    path.as_str(),
+                    relative_path
+                );
 
                 let mut runtime_opt = None;
                 if let Some(node_entry) = self.nodes.get_mut(&handle) {

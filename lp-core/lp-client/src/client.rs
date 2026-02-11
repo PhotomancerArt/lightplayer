@@ -163,8 +163,7 @@ impl LpClient {
 
         let mut line = format!(
             "{BOLD}{CYAN}[server]{RESET} {fps_color}FPS {:.0}{RESET} avg (σ{:.1} {:.0}-{:.0}) {DIM}|{RESET} \
-             {DIM}Frames {frame_count} | Uptime {uptime_secs:.1}s{RESET} {DIM}|{RESET} \
-             {CYAN}{projects_str}{RESET}",
+             {DIM}Uptime {uptime_secs:.1}s{RESET}",
             fps.avg, fps.sdev, fps.min, fps.max
         );
 
@@ -207,7 +206,7 @@ impl LpClient {
             let total_kb = mem.total_bytes / 1024;
 
             line.push_str(&format!(
-                " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} used ({free_kb}k free / {total_kb}k total)",
+                " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} ({free_kb}k free / {total_kb}k total)",
                 bar = bar,
                 used_pct = used_pct
             ));

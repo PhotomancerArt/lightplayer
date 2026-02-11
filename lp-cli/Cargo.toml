@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+log = { workspace = true }
 anyhow = "1"
 env_logger = { workspace = true }
 async-trait = "0.1"
