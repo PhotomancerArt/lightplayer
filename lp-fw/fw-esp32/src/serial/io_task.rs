@@ -114,9 +114,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
                 let incoming = router.incoming();
                 use alloc::string::ToString;
                 if incoming.sender().try_send(line_str.to_string()).is_err() {
-                    // Queue full - drop message (or could implement drop oldest)
-                    #[cfg(feature = "esp32c6")]
-                    log::warn!("Incoming queue full, dropping message");
+                    log::warn!("[io_task] incoming queue full, dropping M! message");
                 }
             }
             // Non-M! lines are ignored (debug output, etc.)
@@ -138,6 +136,8 @@ pub fn get_message_channels() -> (
 ///
 /// Used by the logger so log::info!, log::debug!, etc. appear on the host.
 /// Lines are written without M! prefix so the client prints them.
+/// Shares the channel with server responses; when channel is full, log lines are dropped.
+/// (Cannot log the drop - would recurse into logger.)
 pub fn log_write_to_outgoing(msg: &str) {
     use alloc::string::ToString;
     let _ = OUTGOING_MSG.sender().try_send(msg.to_string());
