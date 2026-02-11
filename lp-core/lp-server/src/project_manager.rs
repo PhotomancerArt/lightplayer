@@ -152,14 +152,18 @@ impl ProjectManager {
     /// Unload a project
     ///
     /// Removes the project from memory but doesn't delete it from the filesystem.
+    /// Output channels and other resources are freed before removal.
     pub fn unload_project(&mut self, handle: ProjectHandle) -> Result<(), ServerError> {
-        // Remove from projects map
-        let project = self
+        let mut project = self
             .projects
             .remove(&handle)
             .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
 
-        // Remove from name_to_handle map
+        project
+            .runtime_mut()
+            .destroy_all_nodes()
+            .map_err(|e| ServerError::Core(format!("Failed to destroy project nodes: {e}")))?;
+
         let name = project.name();
         self.name_to_handle.remove(name);
 
@@ -169,11 +173,17 @@ impl ProjectManager {
     /// Unload all loaded projects
     ///
     /// Removes all projects from memory but doesn't delete them from the filesystem.
+    /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
-    pub fn unload_all_projects(&mut self) {
-        self.projects.clear();
+    pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
+        for (_, mut project) in self.projects.drain() {
+            project
+                .runtime_mut()
+                .destroy_all_nodes()
+                .map_err(|e| ServerError::Core(format!("Failed to destroy project nodes: {e}")))?;
+        }
         self.name_to_handle.clear();
-        // Note: next_handle_id is not reset - handles continue incrementing
+        Ok(())
     }
 
     /// Get a project by handle

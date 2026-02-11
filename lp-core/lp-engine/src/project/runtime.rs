@@ -88,6 +88,20 @@ impl ProjectRuntime {
         })
     }
 
+    /// Destroy all node runtimes, releasing resources (e.g. output channels).
+    ///
+    /// Call before dropping the project to ensure output provider resources are freed.
+    pub fn destroy_all_nodes(&mut self) -> Result<(), Error> {
+        let provider = self.output_provider.borrow();
+        let output_provider: &dyn OutputProvider = &*provider;
+        for (_, entry) in &mut self.nodes {
+            if let Some(mut runtime) = entry.runtime.take() {
+                runtime.destroy(Some(output_provider))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Load nodes from filesystem (doesn't initialize them)
     pub fn load_nodes(&mut self) -> Result<(), Error> {
         let node_paths = crate::project::loader::discover_nodes(&*self.fs.borrow())?;
@@ -599,10 +613,11 @@ impl ProjectRuntime {
             // Extract node path from file path
             if let Some(node_path) = self.extract_node_path_from_file_path(change.path.as_path()) {
                 if let Ok(handle) = self.handle_for_path(node_path.as_path()) {
-                    // Destroy runtime if it exists
+                    // Destroy runtime if it exists (close output channels etc.)
                     if let Some(entry) = self.nodes.get_mut(&handle) {
                         if let Some(mut runtime) = entry.runtime.take() {
-                            runtime.destroy()?;
+                            let provider = self.output_provider.borrow();
+                            runtime.destroy(Some(&*provider))?;
                         }
                     }
                     // Remove node
@@ -613,10 +628,11 @@ impl ProjectRuntime {
             // Node directory was deleted
             if let Some(node_path) = self.extract_node_path_from_file_path(change.path.as_path()) {
                 if let Ok(handle) = self.handle_for_path(node_path.as_path()) {
-                    // Destroy runtime if it exists
+                    // Destroy runtime if it exists (close output channels etc.)
                     if let Some(entry) = self.nodes.get_mut(&handle) {
                         if let Some(mut runtime) = entry.runtime.take() {
-                            runtime.destroy()?;
+                            let provider = self.output_provider.borrow();
+                            runtime.destroy(Some(&*provider))?;
                         }
                     }
                     // Remove node

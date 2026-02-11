@@ -105,34 +105,7 @@ impl LpClient {
                     memory,
                 } = &response.msg
                 {
-                    // Display heartbeat information
-                    let uptime_secs = *uptime_ms as f64 / 1000.0;
-                    let projects_str = if loaded_projects.is_empty() {
-                        "none".to_string()
-                    } else {
-                        loaded_projects
-                            .iter()
-                            .map(|p| {
-                                // Extract project name from path
-                                p.path
-                                    .file_name()
-                                    .map(|n| n.to_string())
-                                    .unwrap_or_else(|| p.path.as_str().to_string())
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
-                    let mut line = format!(
-                        "[server] FPS avg={:.0} sdev={:.1} min={:.0} max={:.0} | Frames: {frame_count} | Uptime: {uptime_secs:.1}s ({uptime_ms}ms) | Projects: {projects_str}",
-                        fps.avg, fps.sdev, fps.min, fps.max
-                    );
-                    if let Some(mem) = memory {
-                        line.push_str(&format!(
-                            " | Memory: {} free / {} used / {} total bytes",
-                            mem.free_bytes, mem.used_bytes, mem.total_bytes
-                        ));
-                    }
-                    eprintln!("{line}");
+                    Self::display_heartbeat(fps, *frame_count, loaded_projects, *uptime_ms, memory);
                 }
                 // Continue waiting for actual response
                 continue;
@@ -146,6 +119,101 @@ impl LpClient {
             );
             // Continue waiting for actual response
         }
+    }
+
+    /// Display heartbeat with colors and memory bar chart
+    fn display_heartbeat(
+        fps: &lp_model::server::SampleStats,
+        frame_count: u64,
+        loaded_projects: &[lp_model::server::LoadedProject],
+        uptime_ms: u64,
+        memory: &Option<lp_model::server::MemoryStats>,
+    ) {
+        const BOLD: &str = "\x1b[1m";
+        const DIM: &str = "\x1b[90m";
+        const CYAN: &str = "\x1b[36m";
+        const GREEN: &str = "\x1b[32m";
+        const YELLOW: &str = "\x1b[33m";
+        const RED: &str = "\x1b[31m";
+        const RESET: &str = "\x1b[0m";
+
+        let uptime_secs = uptime_ms as f64 / 1000.0;
+        let projects_str = if loaded_projects.is_empty() {
+            format!("{DIM}none{RESET}")
+        } else {
+            loaded_projects
+                .iter()
+                .map(|p| {
+                    p.path
+                        .file_name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| p.path.as_str().to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let fps_color = if fps.avg >= 50.0 {
+            GREEN
+        } else if fps.avg >= 20.0 {
+            YELLOW
+        } else {
+            RED
+        };
+
+        let mut line = format!(
+            "{BOLD}{CYAN}[server]{RESET} {fps_color}FPS {:.0}{RESET} avg (σ{:.1} {:.0}-{:.0}) {DIM}|{RESET} \
+             {DIM}Frames {frame_count} | Uptime {uptime_secs:.1}s{RESET} {DIM}|{RESET} \
+             {CYAN}{projects_str}{RESET}",
+            fps.avg, fps.sdev, fps.min, fps.max
+        );
+
+        if let Some(mem) = memory {
+            let total = mem.total_bytes as f32;
+            let used_pct = if total > 0.0 {
+                (mem.used_bytes as f32 / total) * 100.0
+            } else {
+                0.0
+            };
+            let free_pct = 100.0 - used_pct;
+
+            const BAR_WIDTH: usize = 16;
+            let filled = if total > 0.0 {
+                ((mem.used_bytes as f32 / total) * BAR_WIDTH as f32).round() as usize
+            } else {
+                0
+            };
+            let filled = filled.min(BAR_WIDTH);
+
+            let (bar_fill_color, bar_empty_color) = if free_pct >= 40.0 {
+                (GREEN, DIM)
+            } else if free_pct >= 15.0 {
+                (YELLOW, DIM)
+            } else {
+                (RED, DIM)
+            };
+
+            let bar: String = (0..BAR_WIDTH)
+                .map(|i| {
+                    if i < filled {
+                        format!("{bar_fill_color}█{RESET}")
+                    } else {
+                        format!("{bar_empty_color}░{RESET}")
+                    }
+                })
+                .collect();
+
+            let free_kb = mem.free_bytes / 1024;
+            let total_kb = mem.total_bytes / 1024;
+
+            line.push_str(&format!(
+                " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} used ({free_kb}k free / {total_kb}k total)",
+                bar = bar,
+                used_pct = used_pct
+            ));
+        }
+
+        eprintln!("{line}");
     }
 
     /// Read a file from the server filesystem

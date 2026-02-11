@@ -1,5 +1,11 @@
 {
   "GpioStrip": {
-    "pin": 4
+    "pin": 4,
+    "options": {
+      "interpolation_enabled": true,
+      "dithering_enabled": false,
+      "lut_enabled": true,
+      "brightness": 0.25
+    }
   }
 }

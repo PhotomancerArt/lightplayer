@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
 use lp_shared::fs::fs_event::FsChange;
@@ -26,8 +27,9 @@ pub trait NodeRuntime: Send + Sync {
     /// Destroy the node (cleanup)
     ///
     /// Called when a node is being removed or the runtime is shutting down.
-    /// Default implementation does nothing - nodes can override if they need cleanup.
-    fn destroy(&mut self) -> Result<(), Error> {
+    /// If `output_provider` is `Some`, nodes that hold output channels (e.g. OutputRuntime)
+    /// should close them before teardown. Default implementation does nothing.
+    fn destroy(&mut self, _output_provider: Option<&dyn OutputProvider>) -> Result<(), Error> {
         Ok(())
     }
 

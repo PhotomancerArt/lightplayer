@@ -112,10 +112,18 @@ impl core::fmt::Display for Error {
     }
 }
 
+/// Maximum serialization buffer size (32KB).
+///
+/// Prevents unbounded growth that can cause OOM on ESP32 when serializing
+/// large messages (e.g. FsResponse::Read with big file contents).
+/// Messages exceeding this need chunked transfer (future work).
+const MAX_SERIALIZE_BUFFER: usize = 32 * 1024;
+
 /// Serialize a value to a JSON string
 ///
 /// This function allocates a buffer on the heap and grows it as needed,
 /// similar to how `serde_json::to_string()` works internally.
+/// Growth is capped at MAX_SERIALIZE_BUFFER to avoid OOM on constrained targets.
 pub fn to_string<T: Serialize>(value: &T) -> Result<String, Error> {
     // Start with 4KB buffer (reasonable default)
     let mut capacity = 4096;
@@ -131,8 +139,13 @@ pub fn to_string<T: Serialize>(value: &T) -> Result<String, Error> {
                 return Ok(json_str.to_string());
             }
             Err(serde_json_core::ser::Error::BufferFull) => {
-                // Buffer too small - double capacity and retry
-                capacity *= 2;
+                // Buffer too small - double capacity and retry, but cap to avoid OOM
+                if capacity >= MAX_SERIALIZE_BUFFER {
+                    return Err(Error::Serialization(
+                        serde_json_core::ser::Error::BufferFull,
+                    ));
+                }
+                capacity = (capacity * 2).min(MAX_SERIALIZE_BUFFER);
                 buffer.resize(capacity, 0);
             }
             Err(e) => {

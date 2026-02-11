@@ -197,6 +197,6 @@ fn handle_list_loaded_projects(
 fn handle_stop_all_projects(
     project_manager: &mut ProjectManager,
 ) -> Result<ServerMessagePayload, ServerError> {
-    project_manager.unload_all_projects();
+    project_manager.unload_all_projects()?;
     Ok(ServerMessagePayload::StopAllProjects)
 }

@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
-use crate::output::{OutputChannelHandle, OutputFormat};
+use crate::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -129,11 +129,14 @@ impl NodeRuntime for OutputRuntime {
         Ok(())
     }
 
-    fn destroy(&mut self) -> Result<(), Error> {
-        // Note: Provider cleanup should happen at a higher level
-        // since destroy() doesn't have access to the provider context
-        // For now, just clear the handle
-        self.channel_handle = None;
+    fn destroy(&mut self, output_provider: Option<&dyn OutputProvider>) -> Result<(), Error> {
+        if let (Some(provider), Some(handle)) =
+            (output_provider, core::mem::take(&mut self.channel_handle))
+        {
+            provider.close(handle).map_err(|e| Error::Other {
+                message: alloc::format!("Failed to close output channel: {e}"),
+            })?;
+        }
         Ok(())
     }
 

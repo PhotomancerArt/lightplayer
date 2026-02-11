@@ -268,3 +268,16 @@ fwtest-rmt-esp32c6: install-rv32-target
 
 fwtest-dithering-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --release
+
+# Decode ESP32-C6 backtrace addresses
+# Usage: just decode-backtrace 0x420381c2 0x42038172 0x420381e0 ...
+# Build first: just build-fw-esp32
+# Uses `addr2line` (cargo install addr2line) or riscv32-esp-elf-addr2line if available
+decode-backtrace *addrs:
+    # ELF is at workspace target dir when building from lp-fw/fw-esp32
+    @test -f target/{{ rv32_target }}/release/fw-esp32
+    if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then \
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 {{ addrs }}; \
+    else \
+        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a {{ addrs }}; \
+    fi
