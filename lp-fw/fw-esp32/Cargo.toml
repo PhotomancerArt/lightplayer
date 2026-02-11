@@ -23,6 +23,7 @@ test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
+demo_project = []  # Embed demo project and auto-load on boot (off by default; use for standalone runs)
 
 [dependencies]
 embassy-executor = "0.9.1"

@@ -259,10 +259,13 @@ demo example="basic":
 # Run firmware on ESP32-C6 device
 
 # Requires: ESP32-C6 device connected via USB
-demo-esp32c6: install-rv32-target
+demo-esp32c6-host: install-rv32-target
     cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
     cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
+
+demo-esp32c6-standalone: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --target {{ rv32_target }} --release --features esp32c6,demo_project
 
 fwtest-rmt-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
