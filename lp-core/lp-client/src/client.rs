@@ -14,6 +14,8 @@ use lp_model::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use tokio::time::timeout;
 
 use crate::transport::ClientTransport;
 
@@ -78,46 +80,58 @@ impl LpClient {
             .await
             .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
 
-        // Wait for response with matching ID
-        // Handle heartbeats and other interstitial messages
-        loop {
-            let response = transport
-                .receive()
-                .await
-                .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
+        // Wait for response with matching ID (with timeout to avoid deadlock if server
+        // never receives our request, e.g. host->device serial direction broken)
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-            // Check if this is the response we're waiting for
-            if response.id == id {
-                // Check if server returned an error response
-                if let ServerMsgBody::Error { error } = &response.msg {
-                    return Err(Error::msg(error.clone()));
+        let wait_response = async {
+            loop {
+                let response = transport
+                    .receive()
+                    .await
+                    .map_err(|e| Error::msg(format!("Transport error: {e}")))?;
+
+                if response.id == id {
+                    if let ServerMsgBody::Error { error } = &response.msg {
+                        return Err(Error::msg(error.clone()));
+                    }
+                    return Ok(response);
                 }
-                return Ok(response);
-            }
 
-            // Handle heartbeats (id: 0)
-            if response.id == 0 {
-                if let ServerMsgBody::Heartbeat {
-                    fps,
-                    frame_count,
-                    loaded_projects,
-                    uptime_ms,
-                    memory,
-                } = &response.msg
-                {
-                    Self::display_heartbeat(fps, *frame_count, loaded_projects, *uptime_ms, memory);
+                if response.id == 0 {
+                    if let ServerMsgBody::Heartbeat {
+                        fps,
+                        frame_count,
+                        loaded_projects,
+                        uptime_ms,
+                        memory,
+                    } = &response.msg
+                    {
+                        Self::display_heartbeat(
+                            fps,
+                            *frame_count,
+                            loaded_projects,
+                            *uptime_ms,
+                            memory,
+                        );
+                    }
+                    continue;
                 }
-                // Continue waiting for actual response
-                continue;
-            }
 
-            // Non-correlated message (shouldn't happen, but handle gracefully)
-            log::warn!(
-                "Received non-correlated message (id: {}, expected: {})",
-                response.id,
-                id
-            );
-            // Continue waiting for actual response
+                log::warn!(
+                    "Received non-correlated message (id: {}, expected: {})",
+                    response.id,
+                    id
+                );
+            }
+        };
+
+        match timeout(REQUEST_TIMEOUT, wait_response).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(Error::msg(
+                "Request timed out - server may not be receiving messages (check host->device serial)",
+            )),
         }
     }
 
