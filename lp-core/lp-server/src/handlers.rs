@@ -4,6 +4,7 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
+use crate::server::MemoryStatsFn;
 use alloc::{format, rc::Rc, vec::Vec};
 use core::cell::RefCell;
 use lp_model::{
@@ -13,11 +14,26 @@ use lp_model::{
 use lp_shared::fs::LpFs;
 use lp_shared::output::OutputProvider;
 
+/// Log memory stats if callback is provided and returns values
+fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
+    if let Some(f) = memory_stats {
+        if let Some((free, used)) = f() {
+            log::info!(
+                "[mem] {}: {}k free / {}k used",
+                label,
+                free / 1024,
+                used / 1024
+            );
+        }
+    }
+}
+
 /// Handle a client message and generate a server response
 pub fn handle_client_message(
     project_manager: &mut ProjectManager,
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
+    memory_stats: Option<&MemoryStatsFn>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessage, ServerError> {
@@ -27,11 +43,15 @@ pub fn handle_client_message(
         lp_model::ClientRequest::Filesystem(fs_request) => {
             ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
         }
-        lp_model::ClientRequest::LoadProject { path } => {
-            handle_load_project(project_manager, base_fs, output_provider, path.as_path())?
-        }
+        lp_model::ClientRequest::LoadProject { path } => handle_load_project(
+            project_manager,
+            base_fs,
+            output_provider,
+            memory_stats,
+            path.as_path(),
+        )?,
         lp_model::ClientRequest::UnloadProject { handle } => {
-            handle_unload_project(project_manager, handle)?
+            handle_unload_project(project_manager, memory_stats, handle)?
         }
         lp_model::ClientRequest::ProjectRequest { handle, request } => {
             handle_project_request(project_manager, handle, request, theoretical_fps)?
@@ -42,7 +62,9 @@ pub fn handle_client_message(
         lp_model::ClientRequest::ListLoadedProjects => {
             handle_list_loaded_projects(project_manager)?
         }
-        lp_model::ClientRequest::StopAllProjects => handle_stop_all_projects(project_manager)?,
+        lp_model::ClientRequest::StopAllProjects => {
+            handle_stop_all_projects(project_manager, memory_stats)?
+        }
     };
 
     Ok(ServerMessage { id, msg: response })
@@ -104,17 +126,23 @@ fn handle_load_project(
     project_manager: &mut ProjectManager,
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
+    memory_stats: Option<&MemoryStatsFn>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
+    log::info!("Loading project: {}", path.as_str());
+    log_memory(memory_stats, "load_project before");
     let handle = project_manager.load_project(path, base_fs, output_provider.clone())?;
+    log_memory(memory_stats, "load_project after");
     Ok(ServerMessagePayload::LoadProject { handle })
 }
 
 /// Handle an UnloadProject request
 fn handle_unload_project(
     project_manager: &mut ProjectManager,
+    _memory_stats: Option<&MemoryStatsFn>,
     handle: lp_model::project::ProjectHandle,
 ) -> Result<ServerMessagePayload, ServerError> {
+    log::info!("Unloading project handle {}", handle.id());
     project_manager.unload_project(handle)?;
     Ok(ServerMessagePayload::UnloadProject)
 }
@@ -196,7 +224,13 @@ fn handle_list_loaded_projects(
 /// Handle a StopAllProjects request
 fn handle_stop_all_projects(
     project_manager: &mut ProjectManager,
+    memory_stats: Option<&MemoryStatsFn>,
 ) -> Result<ServerMessagePayload, ServerError> {
+    let count = project_manager.list_loaded_projects().len();
+    log::info!("Stopping all projects ({} loaded)", count);
+    log_memory(memory_stats, "stop_all_projects before");
     project_manager.unload_all_projects()?;
+    log_memory(memory_stats, "stop_all_projects after");
+    log::info!("Stopped all projects");
     Ok(ServerMessagePayload::StopAllProjects)
 }

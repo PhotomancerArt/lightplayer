@@ -82,7 +82,12 @@ fn test_server_tick_propagates_to_projects() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Create server with prepared filesystem
-    let mut server = LpServer::new(output_provider.clone(), base_fs, "projects/".as_path());
+    let mut server = LpServer::new(
+        output_provider.clone(),
+        base_fs,
+        "projects/".as_path(),
+        None,
+    );
 
     // Load project
     // We need both project_manager_mut() and base_fs_mut(), but can't borrow server mutably twice.

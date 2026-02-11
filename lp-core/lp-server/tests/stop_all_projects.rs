@@ -80,7 +80,12 @@ fn test_stop_all_projects() {
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Create server with prepared filesystem
-    let mut server = LpServer::new(output_provider.clone(), base_fs, "projects/".as_path());
+    let mut server = LpServer::new(
+        output_provider.clone(),
+        base_fs,
+        "projects/".as_path(),
+        None,
+    );
 
     // Load project
     let project_handle = {
@@ -114,7 +119,7 @@ fn test_stop_all_projects() {
     let response = unsafe {
         let pm = (*server_ptr).project_manager_mut();
         let fs = (*server_ptr).base_fs_mut();
-        handle_client_message(pm, fs, &output_provider, request, None).unwrap()
+        handle_client_message(pm, fs, &output_provider, None, request, None).unwrap()
     };
 
     // Verify response is StopAllProjects

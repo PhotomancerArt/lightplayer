@@ -120,6 +120,7 @@ impl ProjectManager {
 
         // Store mappings
         self.projects.insert(handle, project);
+        log::info!("Project loaded: {name}");
         self.name_to_handle.insert(name, handle);
 
         Ok(handle)

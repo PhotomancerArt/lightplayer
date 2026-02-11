@@ -58,6 +58,13 @@ mod tests {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+fn esp32_memory_stats() -> Option<(u32, u32)> {
+    Some((
+        esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
+        esp_alloc::HEAP.used().min(u32::MAX as usize) as u32,
+    ))
+}
+
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_gpio")]
@@ -175,7 +182,12 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Create server
         esp_println::println!("[INIT] Creating LpServer instance...");
-        let server = LpServer::new(output_provider, base_fs, "projects/".as_path());
+        let server = LpServer::new(
+            output_provider,
+            base_fs,
+            "projects/".as_path(),
+            Some(esp32_memory_stats),
+        );
         esp_println::println!("[INIT] LpServer created");
 
         // Create time provider
