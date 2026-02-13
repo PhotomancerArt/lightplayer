@@ -97,26 +97,26 @@ test-log = "0.2"
 env_logger = "0.11"
 
 # Cranelift crates - git dependencies
-# cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-# cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-# cranelift-module = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-# cranelift-jit = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-# cranelift-native = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-# cranelift-object = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-# cranelift-reader = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
-# cranelift-control = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
-# cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-module = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-jit = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-native = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-object = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-reader = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
+cranelift-control = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0", default-features = false }
+cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", version = "0.127.0" }
 
-# Cranelift crates - git dependencies
-cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", default-features = false }
-cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", default-features = false }
-cranelift-module = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", default-features = false }
-cranelift-jit = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", default-features = false }
-cranelift-native = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025" }
-cranelift-object = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025" }
-cranelift-reader = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025" }
-cranelift-control = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025", default-features = false }
-cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift.git", branch = "feature/lp2025" }
+# Cranelift crates - path dependencies
+# cranelift-codegen = { path = "../feature/lp-cranelift-lp2025/cranelift/codegen", default-features = false }
+# cranelift-frontend = { path = "../feature/lp-cranelift-lp2025/cranelift/frontend", default-features = false }
+# cranelift-module = { path = "../feature/lp-cranelift-lp2025/cranelift/module", default-features = false }
+# cranelift-jit = { path = "../feature/lp-cranelift-lp2025/cranelift/jit", default-features = false }
+# cranelift-native = { path = "../feature/lp-cranelift-lp2025/cranelift/native" }
+# cranelift-object = { path = "../feature/lp-cranelift-lp2025/cranelift/object" }
+# cranelift-reader = { path = "../feature/lp-cranelift-lp2025/cranelift/reader" }
+# cranelift-control = { path = "../feature/lp-cranelift-lp2025/cranelift/control", default-features = false }
+# cranelift-interpreter = { path = "../feature/lp-cranelift-lp2025/cranelift/interpreter" }
 
 # regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
 regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
