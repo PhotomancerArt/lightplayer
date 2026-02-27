@@ -15,13 +15,15 @@ tokio-tungstenite = { version = "0.21", optional = true }
 futures-util = "0.3"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
 log = { workspace = true, features = ["std"] }
 serialport = { version = "4.8", optional = true }
+hashbrown = { workspace = true, optional = true }
 
 [features]
 default = []
-serial = ["lp-riscv-emu", "lp-riscv-emu/std", "serialport"]
+serial = ["lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown", "serialport"]
 ws = ["tokio-tungstenite"]
 
 [dev-dependencies]

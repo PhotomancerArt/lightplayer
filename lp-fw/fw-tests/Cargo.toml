@@ -10,6 +10,7 @@ rust-version.workspace = true
 test_usb = []
 
 [dependencies]
+hashbrown = { workspace = true }
 lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
 lp-engine-client = { path = "../../lp-core/lp-engine-client" }
 lp-model = { path = "../../lp-core/lp-model" }

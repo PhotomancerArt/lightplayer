@@ -32,7 +32,8 @@ async fn test_scene_render_fw_emu() {
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
-            .with_profile("release"),
+            .with_profile("release")
+            .with_backtrace_support(true),
     )
     .expect("Failed to build fw-emu");
 
@@ -45,7 +46,7 @@ async fn test_scene_render_fw_emu() {
     // Create emulator with simulated time mode
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
-        .with_log_level(LogLevel::None)
+        .with_log_level(LogLevel::Instructions)
         .with_time_mode(TimeMode::Simulated(0))
         .with_allow_unaligned_access(true);
 
@@ -59,8 +60,9 @@ async fn test_scene_render_fw_emu() {
     // Create shared emulator reference
     let emulator_arc = Arc::new(Mutex::new(emulator));
 
-    // Create serial client transport
-    let transport = SerialEmuClientTransport::new(emulator_arc.clone());
+    // Create serial client transport with backtrace support
+    let transport = SerialEmuClientTransport::new(emulator_arc.clone())
+        .with_backtrace(load_info.symbol_map.clone(), load_info.code_end);
 
     log::info!("Starting client...");
     let client = LpClient::new(Box::new(transport));

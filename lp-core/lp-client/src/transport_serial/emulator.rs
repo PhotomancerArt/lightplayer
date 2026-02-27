@@ -3,8 +3,10 @@
 //! Creates async serial transport that communicates with firmware running in emulator.
 //! The emulator runs on a separate thread that loops continuously.
 
+use hashbrown::HashMap;
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError};
+use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,12 +18,19 @@ use lp_riscv_emu::Riscv32Emulator as TestRiscv32Emulator;
 /// Maximum steps per emulator iteration before yielding
 const MAX_STEPS_PER_ITERATION: u64 = 100_000_000;
 
+/// Backtrace info for error reporting
+pub struct BacktraceInfo {
+    pub symbol_map: HashMap<String, u32>,
+    pub code_end: u32,
+}
+
 /// Emulator thread loop
 ///
 /// Runs continuously, processing messages and communicating via serial I/O.
 /// This function runs in a separate thread and owns the emulator.
 fn emulator_thread_loop(
     emulator: Arc<Mutex<Riscv32Emulator>>,
+    backtrace_info: Option<BacktraceInfo>,
     mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
     server_tx: mpsc::UnboundedSender<ServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
@@ -109,6 +118,16 @@ fn emulator_thread_loop(
                 log::trace!("Emulator thread: Emulator yielded");
             }
             Err(e) => {
+                // Log backtrace if symbol info available
+                if let Some(ref info) = backtrace_info {
+                    if let Ok(emu) = emulator.lock() {
+                        if let Some(regs) = e.regs() {
+                            let addrs = emu.unwind_backtrace(e.pc(), regs);
+                            let bt = format_backtrace(&addrs, &info.symbol_map, info.code_end);
+                            log::error!("Emulator thread: Backtrace:\n{bt}");
+                        }
+                    }
+                }
                 // Log detailed error information
                 match &e {
                     lp_riscv_emu::EmulatorError::InstructionLimitExceeded {
@@ -219,6 +238,7 @@ fn emulator_thread_loop(
 /// # Arguments
 ///
 /// * `emulator` - Shared reference to the emulator (will be moved to thread)
+/// * `backtrace_info` - Optional symbol info for backtrace on emulator errors
 ///
 /// # Returns
 ///
@@ -226,6 +246,7 @@ fn emulator_thread_loop(
 /// * `Err(TransportError)` - If channel creation or thread spawning fails
 pub fn create_emulator_serial_transport_pair(
     emulator: Arc<Mutex<Riscv32Emulator>>,
+    backtrace_info: Option<BacktraceInfo>,
 ) -> Result<super::AsyncSerialClientTransport, TransportError> {
     use super::AsyncSerialClientTransport;
 
@@ -238,7 +259,7 @@ pub fn create_emulator_serial_transport_pair(
     let thread_handle = thread::Builder::new()
         .name("lp-emulator-serial".to_string())
         .spawn(move || {
-            emulator_thread_loop(emulator, client_rx, server_tx, shutdown_rx);
+            emulator_thread_loop(emulator, backtrace_info, client_rx, server_tx, shutdown_rx);
         })
         .map_err(|e| TransportError::Other(format!("Failed to spawn emulator thread: {e}")))?;
 
@@ -260,7 +281,7 @@ mod tests {
         // Create a dummy emulator for testing
         let emulator = Arc::new(Mutex::new(TestRiscv32Emulator::new(vec![], vec![])));
 
-        let result = create_emulator_serial_transport_pair(emulator);
+        let result = create_emulator_serial_transport_pair(emulator, None);
         assert!(result.is_ok());
 
         let mut transport = result.unwrap();

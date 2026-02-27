@@ -4,8 +4,10 @@
 //! When sending a message, runs the emulator until it yields a response.
 
 use async_trait::async_trait;
+use hashbrown::HashMap;
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError, json};
+use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +20,10 @@ pub struct SerialEmuClientTransport {
     emulator: Arc<Mutex<Riscv32Emulator>>,
     /// Buffer for partial messages (when reading from serial)
     read_buffer: Vec<u8>,
+    /// Symbol map for backtrace (optional)
+    symbol_map: Option<HashMap<String, u32>>,
+    /// Code end address for backtrace symbolication
+    code_end: u32,
 }
 
 impl SerialEmuClientTransport {
@@ -29,7 +35,16 @@ impl SerialEmuClientTransport {
         Self {
             emulator,
             read_buffer: Vec::new(),
+            symbol_map: None,
+            code_end: 0,
         }
+    }
+
+    /// Enable backtrace on emulator errors using ELF symbol info
+    pub fn with_backtrace(mut self, symbol_map: HashMap<String, u32>, code_end: u32) -> Self {
+        self.symbol_map = Some(symbol_map);
+        self.code_end = code_end;
+        self
     }
 
     /// Read a complete JSON message from serial output
@@ -123,6 +138,13 @@ impl SerialEmuClientTransport {
                 // Print emulator state on error for debugging
                 if let Ok(emu) = self.emulator.lock() {
                     log::error!("Emulator error in run_until_yield: {e:?}");
+                    if let Some(ref symbol_map) = self.symbol_map {
+                        if let Some(regs) = e.regs() {
+                            let addrs = emu.unwind_backtrace(e.pc(), regs);
+                            let bt = format_backtrace(&addrs, symbol_map, self.code_end);
+                            log::error!("Backtrace:\n{bt}");
+                        }
+                    }
                     // InstructionFetch hint: identify jump source and dump vtable/GOT if applicable
                     if let lp_riscv_emu::EmulatorError::InvalidMemoryAccess {
                         address,

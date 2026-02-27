@@ -144,6 +144,10 @@ opt-level = "z"
 codegen-units = 1
 # Note: lto is inherited from workspace [profile.release]
 
+# fw-emu: keep debug info for backtrace symbolication
+[profile.release.package.fw-emu]
+debug = 1
+
 # ESP32 firmware release profile optimizations (embedded target)
 [profile.release.package.fw-esp32]
 # Strip debuginfo but keep symbols (needed for cargo bloat analysis) - saves ~1-1.5 MB
