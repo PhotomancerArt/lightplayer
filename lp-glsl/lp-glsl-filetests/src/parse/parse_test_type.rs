@@ -11,6 +11,8 @@ pub fn parse_test_type(line: &str) -> Option<TestType> {
         Some(TestType::TransformQ32)
     } else if trimmed.starts_with("// test run") {
         Some(TestType::Run)
+    } else if trimmed == "// test error" {
+        Some(TestType::Error)
     } else {
         None
     }
@@ -46,6 +48,12 @@ mod tests {
         assert_eq!(parse_test_type("// test run"), Some(TestType::Run));
         assert_eq!(parse_test_type("// test run "), Some(TestType::Run));
         assert_eq!(parse_test_type("  // test run  "), Some(TestType::Run));
+    }
+
+    #[test]
+    fn test_parse_test_type_error() {
+        assert_eq!(parse_test_type("// test error"), Some(TestType::Error));
+        assert_eq!(parse_test_type("  // test error  "), Some(TestType::Error));
     }
 
     #[test]

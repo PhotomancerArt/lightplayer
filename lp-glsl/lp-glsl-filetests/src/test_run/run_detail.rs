@@ -478,8 +478,7 @@ fn format_compilation_error(
         format_error(
             ErrorType::Compilation,
             &format!(
-                "Compilation failed for test case at line {directive_line}:\n\nTest case: {expression}\n\n{error}",
-                error = error
+                "Compilation failed for test case at line {directive_line}:\n\nTest case: {expression}\n\n{error}"
             ),
             relative_path,
             directive_line,

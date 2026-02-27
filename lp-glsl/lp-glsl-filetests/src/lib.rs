@@ -11,6 +11,7 @@ pub mod output_mode;
 pub mod parse;
 pub mod runner;
 pub mod test_compile;
+pub mod test_error;
 pub mod test_run;
 pub mod test_transform;
 pub mod util;
@@ -73,14 +74,16 @@ pub fn run_filetest_with_line_filter(
         }
     };
 
-    // Validate line number if provided
+    // Validate line number if provided (only for run tests; error tests ignore line filter)
     if let Some(line_number) = line_filter {
-        let has_matching_directive = test_file
-            .run_directives
-            .iter()
-            .any(|directive| directive.line_number == line_number);
-        if !has_matching_directive {
-            anyhow::bail!("line {line_number} does not contain a valid run directive");
+        if !test_file.test_types.contains(&parse::TestType::Error) {
+            let has_matching_directive = test_file
+                .run_directives
+                .iter()
+                .any(|directive| directive.line_number == line_number);
+            if !has_matching_directive {
+                anyhow::bail!("line {line_number} does not contain a valid run directive");
+            }
         }
     }
 
@@ -97,6 +100,11 @@ pub fn run_filetest_with_line_filter(
         .contains(&parse::TestType::TransformQ32)
     {
         // test_transform::run_transform_q32_test(...)?;
+    }
+
+    // Run error test if requested
+    if test_file.test_types.contains(&parse::TestType::Error) {
+        return test_error::run_error_test(&test_file, path);
     }
 
     // Run execution tests if requested
@@ -349,7 +357,10 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                 )
             );
 
-            // Exit with error - check for unexpected passes first
+            // Exit with error - show failure reason if available
+            if let Err(e) = &_result {
+                eprintln!("\n{e}");
+            }
             if stats.unexpected_pass > 0 {
                 if fix_xfail {
                     anyhow::bail!(
