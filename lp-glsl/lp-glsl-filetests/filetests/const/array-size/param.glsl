@@ -20,7 +20,7 @@ float test_param_array_call() {
     return test_param_array(test_arr);
 }
 
-// run: test_param_array_call() == 0.0 [expect-fail]
+// run: test_param_array_call() == 0.0
 
 vec2 test_nested_calls(vec2 arr[NESTED_SIZE]) {
     return helper_func(arr);
@@ -31,4 +31,4 @@ vec2 test_nested_calls_call() {
     return test_nested_calls(test_arr);
 }
 
-// run: test_nested_calls_call() ~= vec2(0.0, 0.0) [expect-fail]
+// run: test_nested_calls_call() ~= vec2(0.0, 0.0)

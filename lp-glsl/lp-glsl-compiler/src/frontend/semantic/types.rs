@@ -221,6 +221,8 @@ impl Type {
                 // We return F32 as the base type, actual storage handled in codegen
                 Ok(cranelift_codegen::ir::types::F32)
             }
+            // Float vectors: each component is F32 (same pattern as Mat)
+            Type::Vec2 | Type::Vec3 | Type::Vec4 => Ok(cranelift_codegen::ir::types::F32),
             // UVec types are stored as i32 (same as UInt)
             Type::UVec2 | Type::UVec3 | Type::UVec4 => Ok(cranelift_codegen::ir::types::I32),
             Type::Array(element_ty, _) => {
