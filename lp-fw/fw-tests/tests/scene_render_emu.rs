@@ -46,7 +46,6 @@ async fn test_scene_render_fw_emu() {
     let ram_size = load_info.ram.len();
     let mut emulator = Riscv32Emulator::new(load_info.code, load_info.ram)
         .with_log_level(LogLevel::None)
-        .with_max_instructions(10_000_000)
         .with_time_mode(TimeMode::Simulated(0));
 
     // Set up stack pointer
