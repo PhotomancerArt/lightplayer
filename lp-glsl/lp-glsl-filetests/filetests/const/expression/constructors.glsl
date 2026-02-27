@@ -16,16 +16,16 @@ vec2 test_constructors_vector() {
     return SCALED_VECTOR + vec2(1.0, 1.0);
 }
 
-// run: test_constructors_vector() ~= vec2(3.0, 1.0) [expect-fail]
+// run: test_constructors_vector() ~= vec2(3.0, 1.0)
 
 vec3 test_constructors_vector_ops() {
     return UP_VECTOR + RIGHT_VECTOR + FORWARD_VECTOR;
 }
 
-// run: test_constructors_vector_ops() ~= vec3(1.0, 1.0, 1.0) [expect-fail]
+// run: test_constructors_vector_ops() ~= vec3(1.0, 1.0, 1.0)
 
 mat2 test_constructors_matrix() {
     return SCALED_IDENTITY;
 }
 
-// run: test_constructors_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
+// run: test_constructors_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0)

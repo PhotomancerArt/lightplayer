@@ -1,14 +1,17 @@
 //! Type parsing utilities for converting GLSL AST types to our Type enum
 
-use crate::error::{GlslError, source_span_to_location};
+use crate::error::{GlslError, extract_span_from_expr, source_span_to_location};
+use crate::frontend::semantic::const_eval;
 use crate::frontend::semantic::types;
 use alloc::{boxed::Box, format, vec::Vec};
 
-/// Parse array dimensions from an ArraySpecifier
-/// Returns a vector of dimension sizes (outermost-first)
+/// Parse array dimensions from an ArraySpecifier.
+/// When const_env is Some, constant expressions (e.g. const variable refs) are resolved.
+/// Returns a vector of dimension sizes (outermost-first).
 fn parse_array_dimensions(
     array_spec: &glsl::syntax::ArraySpecifier,
     span: Option<glsl::syntax::SourceSpan>,
+    const_env: Option<&const_eval::ConstEnv>,
 ) -> Result<Vec<usize>, GlslError> {
     use glsl::syntax::ArraySpecifierDimension;
 
@@ -18,9 +21,13 @@ fn parse_array_dimensions(
     for dimension in &array_spec.dimensions.0 {
         let size = match dimension {
             ArraySpecifierDimension::ExplicitlySized(expr) => {
-                // Extract literal integer constant
+                // Literal integer or constant expression (when const_env provided)
                 if let glsl::syntax::Expr::IntConst(n, _) = expr.as_ref() {
                     *n as usize
+                } else if let Some(env) = const_env {
+                    let dim_span = extract_span_from_expr(expr.as_ref());
+                    let val = const_eval::eval_constant_expr(expr.as_ref(), env, Some(&dim_span))?;
+                    val.to_array_size()?
                 } else {
                     let mut error = GlslError::new(
                         crate::error::ErrorCode::E0400,
@@ -70,6 +77,23 @@ pub fn parse_type_specifier(
     ty: &glsl::syntax::TypeSpecifier,
     span: Option<glsl::syntax::SourceSpan>,
 ) -> Result<types::Type, GlslError> {
+    parse_type_specifier_with_env(ty, span, None)
+}
+
+/// Parse return type from fully specified type
+pub fn parse_return_type(
+    ty: &glsl::syntax::FullySpecifiedType,
+    span: Option<glsl::syntax::SourceSpan>,
+) -> Result<types::Type, GlslError> {
+    parse_type_specifier_with_env(&ty.ty, span, None)
+}
+
+/// Parse type specifier with optional const environment for array dimensions.
+pub fn parse_type_specifier_with_env(
+    ty: &glsl::syntax::TypeSpecifier,
+    span: Option<glsl::syntax::SourceSpan>,
+    const_env: Option<&const_eval::ConstEnv>,
+) -> Result<types::Type, GlslError> {
     use glsl::syntax::TypeSpecifierNonArray;
 
     // Parse base type
@@ -103,40 +127,27 @@ pub fn parse_type_specifier(
         }
     };
 
-    // Parse array dimensions (outermost-first)
-    // Example: float[5][3] -> Array(Box<Array(Box<Float>, 3)>, 5)
     if let Some(array_spec) = &ty.array_specifier {
-        let dimensions = parse_array_dimensions(array_spec, span)?;
+        let dimensions = parse_array_dimensions(array_spec, span, const_env)?;
         let mut current_type = base_type;
-
-        // Process dimensions from outermost to innermost
         for size in dimensions {
-            // Wrap current type in Array
             current_type = types::Type::Array(Box::new(current_type), size);
         }
-
         Ok(current_type)
     } else {
         Ok(base_type)
     }
 }
 
-/// Parse return type from fully specified type
-pub fn parse_return_type(
-    ty: &glsl::syntax::FullySpecifiedType,
-    span: Option<glsl::syntax::SourceSpan>,
-) -> Result<types::Type, GlslError> {
-    parse_type_specifier(&ty.ty, span)
-}
-
-/// Apply array specifier to a base type
+/// Apply array specifier to a base type.
 /// Used when array dimensions are in the declarator (e.g., "int arr[5];")
 pub fn apply_array_specifier(
     base_ty: &types::Type,
     array_spec: &glsl::syntax::ArraySpecifier,
     span: Option<glsl::syntax::SourceSpan>,
+    const_env: Option<&const_eval::ConstEnv>,
 ) -> Result<types::Type, GlslError> {
-    let dimensions = parse_array_dimensions(array_spec, span)?;
+    let dimensions = parse_array_dimensions(array_spec, span, const_env)?;
     let mut current_type = base_ty.clone();
 
     // Process dimensions from outermost to innermost
@@ -148,51 +159,51 @@ pub fn apply_array_specifier(
     Ok(current_type)
 }
 
-/// Parse a declaration type by combining a base type with an optional array specifier
+/// Parse a declaration type by combining a base type with an optional array specifier.
 /// This is the unified function for parsing types from declarations where array
 /// specifiers may be in the declarator rather than the type specifier.
 pub fn parse_declaration_type(
     base_ty: &types::Type,
     array_spec: Option<&glsl::syntax::ArraySpecifier>,
     span: Option<glsl::syntax::SourceSpan>,
+    const_env: Option<&const_eval::ConstEnv>,
 ) -> Result<types::Type, GlslError> {
     if let Some(array_spec) = array_spec {
-        apply_array_specifier(base_ty, array_spec, span)
+        apply_array_specifier(base_ty, array_spec, span, const_env)
     } else {
         Ok(base_ty.clone())
     }
 }
 
-/// Parse the type for a head declarator in an InitDeclaratorList
-/// Combines the base type from the list with the array specifier from SingleDeclaration
+/// Parse the type for a head declarator in an InitDeclaratorList.
+/// Combines the base type from the list with the array specifier from SingleDeclaration.
 pub fn parse_head_declarator_type(
     list: &glsl::syntax::InitDeclaratorList,
     name_span: &glsl::syntax::SourceSpan,
+    const_env: Option<&const_eval::ConstEnv>,
 ) -> Result<types::Type, GlslError> {
-    // Get base type from type specifier
     let base_ty = parse_return_type(&list.head.ty, None)?;
-
-    // Combine with array specifier from SingleDeclaration if present
     parse_declaration_type(
         &base_ty,
         list.head.array_specifier.as_ref(),
         Some(name_span.clone()),
+        const_env,
     )
 }
 
-/// Parse the type for a tail declarator in an InitDeclaratorList
-/// Combines the base type from the list with the array specifier from ArrayedIdentifier
+/// Parse the type for a tail declarator in an InitDeclaratorList.
+/// Combines the base type from the list with the array specifier from ArrayedIdentifier.
 pub fn parse_tail_declarator_type(
     base_ty: &types::Type,
     declarator: &glsl::syntax::SingleDeclarationNoType,
+    const_env: Option<&const_eval::ConstEnv>,
 ) -> Result<types::Type, GlslError> {
     let name_span = declarator.ident.ident.span.clone();
-
-    // Combine with array specifier from ArrayedIdentifier if present
     parse_declaration_type(
         base_ty,
         declarator.ident.array_spec.as_ref(),
         Some(name_span),
+        const_env,
     )
 }
 
@@ -246,7 +257,7 @@ mod tests {
             .unwrap()
             .array_specifier
             .unwrap();
-        let result = apply_array_specifier(&base_ty, &array_spec, None).unwrap();
+        let result = apply_array_specifier(&base_ty, &array_spec, None, None).unwrap();
         assert_eq!(result, types::Type::Array(Box::new(types::Type::Int), 5));
     }
 
@@ -257,7 +268,7 @@ mod tests {
             .unwrap()
             .array_specifier
             .unwrap();
-        let result = apply_array_specifier(&base_ty, &array_spec, None).unwrap();
+        let result = apply_array_specifier(&base_ty, &array_spec, None, None).unwrap();
         // Dimensions come as [3, 5] and we process left-to-right
         // So we wrap Float with 3 first, then wrap that with 5
         let expected = types::Type::Array(
@@ -270,7 +281,7 @@ mod tests {
     #[test]
     fn test_parse_declaration_type_without_array() {
         let base_ty = types::Type::Int;
-        let result = parse_declaration_type(&base_ty, None, None).unwrap();
+        let result = parse_declaration_type(&base_ty, None, None, None).unwrap();
         assert_eq!(result, types::Type::Int);
     }
 
@@ -281,7 +292,7 @@ mod tests {
             .unwrap()
             .array_specifier
             .unwrap();
-        let result = parse_declaration_type(&base_ty, Some(&array_spec), None).unwrap();
+        let result = parse_declaration_type(&base_ty, Some(&array_spec), None, None).unwrap();
         assert_eq!(result, types::Type::Array(Box::new(types::Type::Int), 5));
     }
 
@@ -290,7 +301,7 @@ mod tests {
         // Create an array specifier with zero size (should fail)
         let ty = parse_type_specifier_str("int[0]").unwrap();
         let array_spec = ty.array_specifier.unwrap();
-        let result = parse_array_dimensions(&array_spec, None);
+        let result = parse_array_dimensions(&array_spec, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("positive"));
     }
@@ -300,7 +311,7 @@ mod tests {
         // Create an unsized array specifier (should fail)
         let ty = TypeSpecifier::parse("int[]").unwrap();
         let array_spec = ty.array_specifier.unwrap();
-        let result = parse_array_dimensions(&array_spec, None);
+        let result = parse_array_dimensions(&array_spec, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("initializer"));
     }
@@ -310,7 +321,7 @@ mod tests {
         let decl = Declaration::parse("int arr[5];").unwrap();
         if let Declaration::InitDeclaratorList(list) = decl {
             let name_span = list.head.name.as_ref().unwrap().span.clone();
-            let result = parse_head_declarator_type(&list, &name_span).unwrap();
+            let result = parse_head_declarator_type(&list, &name_span, None).unwrap();
             assert_eq!(result, types::Type::Array(Box::new(types::Type::Int), 5));
         } else {
             panic!("Expected InitDeclaratorList");
@@ -322,7 +333,7 @@ mod tests {
         let decl = Declaration::parse("int x;").unwrap();
         if let Declaration::InitDeclaratorList(list) = decl {
             let name_span = list.head.name.as_ref().unwrap().span.clone();
-            let result = parse_head_declarator_type(&list, &name_span).unwrap();
+            let result = parse_head_declarator_type(&list, &name_span, None).unwrap();
             assert_eq!(result, types::Type::Int);
         } else {
             panic!("Expected InitDeclaratorList");
@@ -334,7 +345,7 @@ mod tests {
         let decl = Declaration::parse("int x, arr[5];").unwrap();
         if let Declaration::InitDeclaratorList(list) = decl {
             let base_ty = parse_return_type(&list.head.ty, None).unwrap();
-            let result = parse_tail_declarator_type(&base_ty, &list.tail[0]).unwrap();
+            let result = parse_tail_declarator_type(&base_ty, &list.tail[0], None).unwrap();
             assert_eq!(result, types::Type::Array(Box::new(types::Type::Int), 5));
         } else {
             panic!("Expected InitDeclaratorList");

@@ -18,7 +18,7 @@ float test_const_global_arrays() {
     return 1.0;
 }
 
-// run: test_const_global_arrays() == 1.0 [expect-fail]
+// run: test_const_global_arrays() == 1.0
 
 float test_local_const() {
     const int LOCAL_SIZE = 4;
@@ -26,4 +26,4 @@ float test_local_const() {
     return 1.0;
 }
 
-// run: test_local_const() == 1.0 [expect-fail]
+// run: test_local_const() == 1.0

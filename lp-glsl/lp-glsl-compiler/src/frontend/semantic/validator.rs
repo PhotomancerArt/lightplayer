@@ -7,6 +7,7 @@ use crate::error::{
     ErrorCode, GlslDiagnostics, GlslError, add_span_text_to_error, extract_span_from_expr,
     source_span_to_location,
 };
+use crate::frontend::semantic::const_eval::{self, ConstEnv};
 use crate::frontend::semantic::functions::FunctionRegistry;
 use crate::frontend::semantic::scope::{StorageClass, SymbolTable};
 use crate::frontend::semantic::type_check::{
@@ -15,8 +16,22 @@ use crate::frontend::semantic::type_check::{
 use crate::frontend::semantic::type_resolver;
 use crate::frontend::semantic::types::Type;
 use glsl::syntax::{JumpStatement, SimpleStatement, Statement};
+use glsl::syntax::{StorageQualifier, TypeQualifierSpec};
 
 use alloc::format;
+use alloc::vec::Vec;
+
+fn has_const_qualifier(ty: &glsl::syntax::FullySpecifiedType) -> bool {
+    let Some(ref type_qual) = ty.qualifier else {
+        return false;
+    };
+    for spec in &type_qual.qualifiers.0 {
+        if let TypeQualifierSpec::Storage(StorageQualifier::Const) = spec {
+            return true;
+        }
+    }
+    false
+}
 
 /// Validate a function body, collecting errors into diagnostics.
 pub fn validate_function(
@@ -30,6 +45,11 @@ pub fn validate_function(
     diagnostics: &mut GlslDiagnostics,
 ) {
     let mut symbols = SymbolTable::new();
+    let mut const_env: ConstEnv = global_constants
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let mut scope_const_keys: Vec<Vec<alloc::string::String>> = vec![vec![]];
 
     for (name, val) in global_constants {
         if let Err(e) = symbols.declare_variable(name.clone(), val.glsl_type(), StorageClass::Const)
@@ -60,6 +80,8 @@ pub fn validate_function(
         validate_statement(
             stmt,
             &mut symbols,
+            &mut const_env,
+            &mut scope_const_keys,
             &func.return_type,
             func_registry,
             source,
@@ -71,6 +93,8 @@ pub fn validate_function(
 fn validate_statement(
     stmt: &Statement,
     symbols: &mut SymbolTable,
+    const_env: &mut ConstEnv,
+    scope_const_keys: &mut Vec<Vec<alloc::string::String>>,
     return_type: &Type,
     func_registry: &FunctionRegistry,
     source: &str,
@@ -81,6 +105,8 @@ fn validate_statement(
             validate_simple_statement(
                 simple,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
@@ -89,19 +115,28 @@ fn validate_statement(
         }
         Statement::Compound(compound) => {
             symbols.push_scope();
+            scope_const_keys.push(vec![]);
             for stmt in &compound.statement_list {
                 if diagnostics.at_limit() {
+                    for k in scope_const_keys.pop().unwrap_or_default() {
+                        const_env.remove(&k);
+                    }
                     symbols.pop_scope();
                     return;
                 }
                 validate_statement(
                     stmt,
                     symbols,
+                    const_env,
+                    scope_const_keys,
                     return_type,
                     func_registry,
                     source,
                     diagnostics,
                 );
+            }
+            for k in scope_const_keys.pop().unwrap_or_default() {
+                const_env.remove(&k);
             }
             symbols.pop_scope();
         }
@@ -133,6 +168,8 @@ fn infer_or_error(
 fn validate_simple_statement(
     stmt: &SimpleStatement,
     symbols: &mut SymbolTable,
+    const_env: &mut ConstEnv,
+    scope_const_keys: &mut Vec<Vec<alloc::string::String>>,
     return_type: &Type,
     func_registry: &FunctionRegistry,
     source: &str,
@@ -145,7 +182,15 @@ fn validate_simple_statement(
     }
     match stmt {
         SimpleStatement::Declaration(decl) => {
-            validate_declaration(decl, symbols, func_registry, source, diagnostics);
+            validate_declaration(
+                decl,
+                symbols,
+                const_env,
+                scope_const_keys,
+                func_registry,
+                source,
+                diagnostics,
+            );
         }
         SimpleStatement::Expression(Some(expr)) => {
             let expr_span = extract_span_from_expr(expr);
@@ -163,6 +208,8 @@ fn validate_simple_statement(
             validate_selection(
                 selection,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
@@ -173,6 +220,8 @@ fn validate_simple_statement(
             validate_iteration(
                 iteration,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
@@ -201,12 +250,15 @@ fn validate_simple_statement(
 fn validate_declaration(
     decl: &glsl::syntax::Declaration,
     symbols: &mut SymbolTable,
+    const_env: &mut ConstEnv,
+    scope_const_keys: &mut Vec<Vec<alloc::string::String>>,
     func_registry: &FunctionRegistry,
     source: &str,
     diagnostics: &mut GlslDiagnostics,
 ) {
     match decl {
         glsl::syntax::Declaration::InitDeclaratorList(list) => {
+            let is_const = has_const_qualifier(&list.head.ty);
             let base_ty = match type_resolver::parse_return_type(&list.head.ty, None) {
                 Ok(t) => t,
                 Err(e) => {
@@ -217,7 +269,11 @@ fn validate_declaration(
 
             if let Some(name) = &list.head.name {
                 let name_span = name.span.clone();
-                let ty = match type_resolver::parse_head_declarator_type(list, &name_span) {
+                let ty = match type_resolver::parse_head_declarator_type(
+                    list,
+                    &name_span,
+                    Some(const_env),
+                ) {
                     Ok(t) => t,
                     Err(e) => {
                         let _ = diagnostics.push(e);
@@ -225,15 +281,33 @@ fn validate_declaration(
                     }
                 };
 
-                if let Err(e) =
-                    symbols.declare_variable(name.name.clone(), ty.clone(), StorageClass::Local)
-                {
+                let storage = if is_const {
+                    StorageClass::Const
+                } else {
+                    StorageClass::Local
+                };
+                if let Err(e) = symbols.declare_variable(name.name.clone(), ty.clone(), storage) {
                     let _ = diagnostics.push(e.with_location(source_span_to_location(&name_span)));
                     return;
                 }
 
                 if let Some(init) = &list.head.initializer {
                     validate_initializer(init, &ty, symbols, func_registry, source, diagnostics);
+                    if is_const {
+                        if let glsl::syntax::Initializer::Simple(expr) = init {
+                            let span = extract_span_from_expr(expr.as_ref());
+                            if let Ok(val) = const_eval::eval_constant_expr(
+                                expr.as_ref(),
+                                const_env,
+                                Some(&span),
+                            ) {
+                                const_env.insert(name.name.clone(), val);
+                                if let Some(keys) = scope_const_keys.last_mut() {
+                                    keys.push(name.name.clone());
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -242,19 +316,27 @@ fn validate_declaration(
                     return;
                 }
                 let name_span = declarator.ident.ident.span.clone();
-                let declarator_ty =
-                    match type_resolver::parse_tail_declarator_type(&base_ty, declarator) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            let _ = diagnostics.push(e);
-                            continue;
-                        }
-                    };
+                let declarator_ty = match type_resolver::parse_tail_declarator_type(
+                    &base_ty,
+                    declarator,
+                    Some(const_env),
+                ) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let _ = diagnostics.push(e);
+                        continue;
+                    }
+                };
 
+                let storage = if is_const {
+                    StorageClass::Const
+                } else {
+                    StorageClass::Local
+                };
                 if let Err(e) = symbols.declare_variable(
                     declarator.ident.ident.name.clone(),
                     declarator_ty.clone(),
-                    StorageClass::Local,
+                    storage,
                 ) {
                     let _ = diagnostics.push(e.with_location(source_span_to_location(&name_span)));
                     continue;
@@ -269,6 +351,21 @@ fn validate_declaration(
                         source,
                         diagnostics,
                     );
+                    if is_const {
+                        if let glsl::syntax::Initializer::Simple(expr) = init {
+                            let span = extract_span_from_expr(expr.as_ref());
+                            if let Ok(val) = const_eval::eval_constant_expr(
+                                expr.as_ref(),
+                                const_env,
+                                Some(&span),
+                            ) {
+                                const_env.insert(declarator.ident.ident.name.clone(), val);
+                                if let Some(keys) = scope_const_keys.last_mut() {
+                                    keys.push(declarator.ident.ident.name.clone());
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -315,6 +412,8 @@ fn validate_initializer(
 fn validate_selection(
     selection: &glsl::syntax::SelectionStatement,
     symbols: &mut SymbolTable,
+    const_env: &mut ConstEnv,
+    scope_const_keys: &mut Vec<Vec<alloc::string::String>>,
     return_type: &Type,
     func_registry: &FunctionRegistry,
     source: &str,
@@ -343,6 +442,8 @@ fn validate_selection(
             validate_statement(
                 then_stmt,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
@@ -353,6 +454,8 @@ fn validate_selection(
             validate_statement(
                 then_stmt,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
@@ -362,6 +465,8 @@ fn validate_selection(
                 validate_statement(
                     else_stmt,
                     symbols,
+                    const_env,
+                    scope_const_keys,
                     return_type,
                     func_registry,
                     source,
@@ -375,6 +480,8 @@ fn validate_selection(
 fn validate_iteration(
     iteration: &glsl::syntax::IterationStatement,
     symbols: &mut SymbolTable,
+    const_env: &mut ConstEnv,
+    scope_const_keys: &mut Vec<Vec<alloc::string::String>>,
     return_type: &Type,
     func_registry: &FunctionRegistry,
     source: &str,
@@ -407,26 +514,42 @@ fn validate_iteration(
                 }
             }
             symbols.push_scope();
+            scope_const_keys.push(vec![]);
             validate_statement(
                 stmt,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
                 diagnostics,
             );
+            if let Some(keys) = scope_const_keys.pop() {
+                for k in keys {
+                    const_env.remove(&k);
+                }
+            }
             symbols.pop_scope();
         }
         IterationStatement::DoWhile(stmt, cond_expr) => {
             symbols.push_scope();
+            scope_const_keys.push(vec![]);
             validate_statement(
                 stmt,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
                 diagnostics,
             );
+            if let Some(keys) = scope_const_keys.pop() {
+                for k in keys {
+                    const_env.remove(&k);
+                }
+            }
             symbols.pop_scope();
             let cond_span = extract_span_from_expr(cond_expr.as_ref());
             let cond_type = infer_or_error(
@@ -449,9 +572,18 @@ fn validate_iteration(
         }
         IterationStatement::For(init, rest, body) => {
             symbols.push_scope();
+            scope_const_keys.push(vec![]);
             match init {
                 glsl::syntax::ForInitStatement::Declaration(decl) => {
-                    validate_declaration(decl, symbols, func_registry, source, diagnostics);
+                    validate_declaration(
+                        decl,
+                        symbols,
+                        const_env,
+                        scope_const_keys,
+                        func_registry,
+                        source,
+                        diagnostics,
+                    );
                 }
                 glsl::syntax::ForInitStatement::Expression(Some(expr)) => {
                     let span = extract_span_from_expr(expr);
@@ -504,11 +636,18 @@ fn validate_iteration(
             validate_statement(
                 body,
                 symbols,
+                const_env,
+                scope_const_keys,
                 return_type,
                 func_registry,
                 source,
                 diagnostics,
             );
+            if let Some(keys) = scope_const_keys.pop() {
+                for k in keys {
+                    const_env.remove(&k);
+                }
+            }
             symbols.pop_scope();
         }
     }

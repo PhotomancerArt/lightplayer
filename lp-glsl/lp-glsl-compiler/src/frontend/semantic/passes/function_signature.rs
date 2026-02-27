@@ -47,6 +47,7 @@ pub fn extract_parameter(
                 &base_ty,
                 decl.ident.array_spec.as_ref(),
                 Some(param_span),
+                None,
             )?;
             let name = decl.ident.ident.name.clone();
 

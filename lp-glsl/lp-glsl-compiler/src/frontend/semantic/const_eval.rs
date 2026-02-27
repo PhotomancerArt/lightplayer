@@ -176,16 +176,111 @@ fn eval_binary(
     match op {
         BinaryOp::Add => eval_bin_arith(left, right, |a, b| a + b, |a, b| a + b, |a, b| a + b),
         BinaryOp::Sub => eval_bin_arith(left, right, |a, b| a - b, |a, b| a - b, |a, b| a - b),
-        BinaryOp::Mult => eval_bin_arith(left, right, |a, b| a * b, |a, b| a * b, |a, b| a * b),
-        BinaryOp::Div => eval_bin_arith(
-            left,
-            right,
-            |a, b| a / b,
-            |a, b| a / b,
-            |a, b| if b != 0.0 { a / b } else { f32::NAN },
-        ),
+        BinaryOp::Mult => {
+            if let Some(r) = eval_vec_mat_scalar(left, right, |a, b| a * b) {
+                return Ok(r);
+            }
+            eval_bin_arith(left, right, |a, b| a * b, |a, b| a * b, |a, b| a * b)
+        }
+        BinaryOp::Div => {
+            if let Some(r) = eval_vec_mat_scalar_div(left, right) {
+                return Ok(r);
+            }
+            eval_bin_arith(
+                left,
+                right,
+                |a, b| a / b,
+                |a, b| a / b,
+                |a, b| if b != 0.0 { a / b } else { f32::NAN },
+            )
+        }
         BinaryOp::Mod => eval_bin_mod(left, right),
         _ => Err("operator not allowed in constant expression"),
+    }
+}
+
+fn scalar_from_const_for_vec_mat(v: &ConstValue) -> Option<f32> {
+    match v {
+        ConstValue::Int(n) => Some(*n as f32),
+        ConstValue::UInt(n) => Some(*n as f32),
+        ConstValue::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
+/// Vec/mat * scalar or scalar * vec/mat (component-wise).
+fn eval_vec_mat_scalar<F>(left: &ConstValue, right: &ConstValue, op: F) -> Option<ConstValue>
+where
+    F: Fn(f32, f32) -> f32,
+{
+    let scalar = scalar_from_const_for_vec_mat(right)?;
+    match left {
+        ConstValue::Vec2(v) => Some(ConstValue::Vec2([op(v[0], scalar), op(v[1], scalar)])),
+        ConstValue::Vec3(v) => Some(ConstValue::Vec3([
+            op(v[0], scalar),
+            op(v[1], scalar),
+            op(v[2], scalar),
+        ])),
+        ConstValue::Vec4(v) => Some(ConstValue::Vec4([
+            op(v[0], scalar),
+            op(v[1], scalar),
+            op(v[2], scalar),
+            op(v[3], scalar),
+        ])),
+        ConstValue::Mat2(m) => Some(ConstValue::Mat2([
+            [op(m[0][0], scalar), op(m[0][1], scalar)],
+            [op(m[1][0], scalar), op(m[1][1], scalar)],
+        ])),
+        _ => None,
+    }
+    .or_else(|| {
+        let scalar = scalar_from_const_for_vec_mat(left)?;
+        match right {
+            ConstValue::Vec2(v) => Some(ConstValue::Vec2([op(scalar, v[0]), op(scalar, v[1])])),
+            ConstValue::Vec3(v) => Some(ConstValue::Vec3([
+                op(scalar, v[0]),
+                op(scalar, v[1]),
+                op(scalar, v[2]),
+            ])),
+            ConstValue::Vec4(v) => Some(ConstValue::Vec4([
+                op(scalar, v[0]),
+                op(scalar, v[1]),
+                op(scalar, v[2]),
+                op(scalar, v[3]),
+            ])),
+            ConstValue::Mat2(m) => Some(ConstValue::Mat2([
+                [op(scalar, m[0][0]), op(scalar, m[0][1])],
+                [op(scalar, m[1][0]), op(scalar, m[1][1])],
+            ])),
+            _ => None,
+        }
+    })
+}
+
+/// Vec/mat / scalar (scalar/vec not defined in GLSL).
+fn eval_vec_mat_scalar_div(left: &ConstValue, right: &ConstValue) -> Option<ConstValue> {
+    let scalar = scalar_from_const_for_vec_mat(right)?;
+    if scalar == 0.0 {
+        return None;
+    }
+    match left {
+        ConstValue::Vec2(v) => Some(ConstValue::Vec2([v[0] / scalar, v[1] / scalar])),
+        ConstValue::Vec3(v) => Some(ConstValue::Vec3([
+            v[0] / scalar,
+            v[1] / scalar,
+            v[2] / scalar,
+        ])),
+        ConstValue::Vec4(v) => Some(ConstValue::Vec4([
+            v[0] / scalar,
+            v[1] / scalar,
+            v[2] / scalar,
+            v[3] / scalar,
+        ])),
+        ConstValue::Mat2(m) => Some(ConstValue::Mat2([
+            [m[0][0] / scalar, m[0][1] / scalar],
+            [m[1][0] / scalar, m[1][1] / scalar],
+        ])),
+        _ => None,
     }
 }
 

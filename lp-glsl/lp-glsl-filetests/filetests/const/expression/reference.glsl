@@ -13,7 +13,7 @@ float test_reference_nested() {
     return QUARTER_PI + EIGHTH_PI;
 }
 
-// run: test_reference_nested() ~= 1.9635 [expect-fail]
+// run: test_reference_nested() ~= 1.1781
 
 const vec3 UP = vec3(0.0, 1.0, 0.0);
 const vec3 RIGHT = vec3(1.0, 0.0, 0.0);
@@ -26,4 +26,4 @@ vec3 test_reference_complex() {
     return OFFSET_BASIS;
 }
 
-// run: test_reference_complex() ~= vec3(0.6, 0.6, 0.6) [expect-fail]
+// run: test_reference_complex() ~= vec3(0.6, 0.6, 0.6)

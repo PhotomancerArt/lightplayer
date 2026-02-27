@@ -12,7 +12,7 @@ int test_constant_variable() {
     return arr[0] + arr[4];
 }
 
-// run: test_constant_variable() == 60 [expect-fail]
+// run: test_constant_variable() == 60
 
 int test_constant_expression() {
     int arr[3 + 2];
@@ -21,7 +21,7 @@ int test_constant_expression() {
     return arr[0] + arr[4];
 }
 
-// run: test_constant_expression() == 6 [expect-fail]
+// run: test_constant_expression() == 6
 
 int test_multiple_constants() {
     const int a = 2;
@@ -32,4 +32,4 @@ int test_multiple_constants() {
     return arr[0] + arr[5];
 }
 
-// run: test_multiple_constants() == 700 [expect-fail]
+// run: test_multiple_constants() == 700

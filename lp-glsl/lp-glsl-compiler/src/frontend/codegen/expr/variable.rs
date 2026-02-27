@@ -78,6 +78,9 @@ pub fn emit_variable_rvalue<M: cranelift_module::Module>(
             return emit_const_value_rvalue(ctx, val);
         }
     }
+    if let Some(val) = ctx.local_const_env.get(&ident.name).cloned() {
+        return emit_const_value_rvalue(ctx, &val);
+    }
     emit_lvalue_as_rvalue(ctx, expr)
 }
 

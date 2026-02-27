@@ -58,6 +58,11 @@ pub struct CodegenContext<'a, M: Module> {
     // Global const values (name -> evaluated value). Const refs emit value directly.
     pub global_constants:
         Option<&'a hashbrown::HashMap<String, crate::frontend::semantic::const_eval::ConstValue>>,
+
+    // Local const values declared in current function (for array size resolution).
+    pub local_const_env:
+        hashbrown::HashMap<String, crate::frontend::semantic::const_eval::ConstValue>,
+    scope_const_keys: Vec<Vec<String>>,
 }
 
 pub struct LoopContext {
@@ -87,6 +92,48 @@ impl<'a, M: Module> CodegenContext<'a, M> {
             source_map,
             current_file_id,
             global_constants: None,
+            local_const_env: HashMap::new(),
+            scope_const_keys: vec![vec![]],
+        }
+    }
+
+    /// Effective const env for array size resolution (global + local).
+    /// Caller passes a buffer to avoid allocation in hot paths.
+    pub fn fill_const_env(
+        &self,
+        out: &mut hashbrown::HashMap<String, crate::frontend::semantic::const_eval::ConstValue>,
+    ) {
+        out.clear();
+        if let Some(globals) = self.global_constants {
+            out.extend(globals.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+        out.extend(
+            self.local_const_env
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+    }
+
+    pub fn push_const_scope(&mut self) {
+        self.scope_const_keys.push(vec![]);
+    }
+
+    pub fn pop_const_scope(&mut self) {
+        if let Some(keys) = self.scope_const_keys.pop() {
+            for k in keys {
+                self.local_const_env.remove(&k);
+            }
+        }
+    }
+
+    pub fn add_local_const(
+        &mut self,
+        name: String,
+        val: crate::frontend::semantic::const_eval::ConstValue,
+    ) {
+        self.local_const_env.insert(name.clone(), val);
+        if let Some(keys) = self.scope_const_keys.last_mut() {
+            keys.push(name);
         }
     }
 
@@ -328,14 +375,15 @@ impl<'a, M: Module> CodegenContext<'a, M> {
     /// Enter a new variable scope
     pub fn enter_scope(&mut self) {
         self.variable_scopes.push(HashMap::new());
+        self.push_const_scope();
     }
 
     /// Exit the current variable scope
     pub fn exit_scope(&mut self) {
+        self.pop_const_scope();
         if self.variable_scopes.len() > 1 {
             self.variable_scopes.pop();
         }
-        // Don't pop the global scope
     }
 
     /// Store a value to a matrix element at m[col][row]
