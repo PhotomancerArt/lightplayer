@@ -1,5 +1,7 @@
 //! Integration tests for USB serial connection/disconnection scenarios
 
+#![cfg(feature = "test_usb")]
+
 use fw_tests::test_output::{print_step, print_test_header};
 use fw_tests::test_usb_helpers::*;
 use lp_model::DEFAULT_SERIAL_BAUD_RATE;
