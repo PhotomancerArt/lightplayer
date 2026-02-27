@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError, json};
-use lp_riscv_emu::Riscv32Emulator;
+use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
 use std::sync::{Arc, Mutex};
 
 /// Serial ClientTransport that communicates with firmware running in emulator
@@ -123,6 +123,63 @@ impl SerialEmuClientTransport {
                 // Print emulator state on error for debugging
                 if let Ok(emu) = self.emulator.lock() {
                     log::error!("Emulator error in run_until_yield: {e:?}");
+                    // InstructionFetch hint: identify jump source and dump vtable/GOT if applicable
+                    if let lp_riscv_emu::EmulatorError::InvalidMemoryAccess {
+                        address,
+                        kind: MemoryAccessKind::InstructionFetch,
+                        regs,
+                        ..
+                    } = &e
+                    {
+                        let bad_addr = *address;
+                        let reg_names = [
+                            "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0",
+                            "a1", "a2", "a3", "a4", "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6",
+                            "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6",
+                        ];
+                        let mut hint_regs = Vec::new();
+                        for (i, &v) in regs.iter().enumerate() {
+                            if i == 0 {
+                                continue; // x0 is always 0
+                            }
+                            let v32 = v as u32;
+                            if v32 == bad_addr || (v32 & !1) == (bad_addr & !1) {
+                                hint_regs.push((i, reg_names[i], v32));
+                            }
+                        }
+                        if !hint_regs.is_empty() {
+                            let reg_desc: String = hint_regs
+                                .iter()
+                                .map(|(i, n, v)| format!("{n} (x{i})=0x{v:08x}"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            log::error!(
+                                "InstructionFetch hint: Bad PC 0x{bad_addr:08x} likely from indirect jump. \
+                                 Registers holding this value: {reg_desc}. \
+                                 May indicate bad vtable/GOT entry or unresolved relocation."
+                            );
+                            // Find Load that populated this value and dump memory at that address
+                            for log in emu.get_logs().iter().rev() {
+                                if let lp_riscv_emu::InstLog::Load {
+                                    addr, rd_new, rd, ..
+                                } = log
+                                {
+                                    let rd_new_u32 = *rd_new as u32;
+                                    if rd_new_u32 == bad_addr
+                                        || (rd_new_u32 & !1) == (bad_addr & !1)
+                                    {
+                                        let load_addr = *addr & !3;
+                                        if let Some(dump) = emu.dump_memory_hex(load_addr, 32) {
+                                            log::error!(
+                                                "Memory at load source (0x{addr:08x}, {rd} received 0x{rd_new_u32:08x}):\n{dump}"
+                                            );
+                                        }
+                                        break; // Only dump for first (most recent) matching load
+                                    }
+                                }
+                            }
+                        }
+                    }
                     log::error!("Emulator state:\n{}", emu.dump_state());
                     log::error!(
                         "Last {} instructions:\n{}",
