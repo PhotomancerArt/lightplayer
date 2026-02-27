@@ -46,6 +46,7 @@ pub fn run(
         decimal_format,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
+        target_override: None,
     };
 
     // Count total test cases before compilation (so we can show counts even if compilation fails)

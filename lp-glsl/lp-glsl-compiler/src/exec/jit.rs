@@ -1478,6 +1478,7 @@ mod tests {
             decimal_format: DecimalFormat::Q32,
             q32_opts: Q32Options::default(),
             memory_optimized: false,
+            target_override: None,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1500,6 +1501,7 @@ mod tests {
             decimal_format: DecimalFormat::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
+            target_override: None,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1520,6 +1522,7 @@ mod tests {
             decimal_format: DecimalFormat::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
+            target_override: None,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1541,6 +1544,7 @@ mod tests {
             decimal_format: DecimalFormat::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
+            target_override: None,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");

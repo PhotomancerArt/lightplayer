@@ -19,15 +19,10 @@ use esp_hal::clock::CpuClock;
 use esp_hal::{interrupt::software::SoftwareInterruptControl, timer::timg::TimerGroup};
 use hashbrown::HashMap;
 
-use cranelift_codegen::isa::riscv32::isa_builder;
-use cranelift_codegen::settings::{self, Configurable};
 use lp_glsl_builtins::glsl::q32::types::q32::Q32;
-use lp_glsl_compiler::Compiler;
-use lp_glsl_compiler::backend::transform::q32::{FixedPointFormat, Q32Transform};
-use target_lexicon::Triple;
+use lp_glsl_compiler::{GlslOptions, glsl_jit};
 
 use esp_println::println;
-use lp_glsl_compiler::backend::codegen::jit::build_jit_executable_memory_optimized;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -172,72 +167,32 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     println!("End of GLSL program ({} lines)", source.lines().count());
     println!("");
 
-    // Create RISC-V32 ISA
-    println!("Step 1: Creating RISC-V32 ISA...");
-    let mut flag_builder = settings::builder();
-    flag_builder.set("opt_level", "none").unwrap();
-    flag_builder.set("is_pic", "false").unwrap();
-    flag_builder.set("enable_verifier", "false").unwrap();
-    flag_builder
-        .set("regalloc_algorithm", "single_pass")
-        .unwrap();
-    let isa_flags = settings::Flags::new(flag_builder);
+    // Unified JIT pipeline: glsl_jit() uses memory-optimized path, Q32 transform, and
+    // embedded-appropriate ISA flags (opt_level=none, Riscv32imac) via GlslOptions.
+    println!("Step 1: Compiling GLSL via unified glsl_jit pipeline...");
+    let options = GlslOptions::host_jit_embedded_riscv32().unwrap_or_else(|e| {
+        panic!(
+            "Failed to create embedded JIT options: {}",
+            e.message.as_str()
+        );
+    });
 
-    let triple = Triple {
-        architecture: target_lexicon::Architecture::Riscv32(
-            target_lexicon::Riscv32Architecture::Riscv32imac,
-        ),
-        vendor: target_lexicon::Vendor::Unknown,
-        operating_system: target_lexicon::OperatingSystem::None_,
-        environment: target_lexicon::Environment::Unknown,
-        binary_format: target_lexicon::BinaryFormat::Elf,
-    };
-
-    let isa = match isa_builder(triple).finish(isa_flags) {
-        Ok(isa) => {
-            println!("  ✓ ISA created");
-            print_memory_stats("After ISA Creation");
-            isa
-        }
-        Err(_e) => {
-            panic!("ISA creation failed");
-        }
-    };
-
-    // Compile GLSL using normal JIT path
-    println!("Step 2: Compiling GLSL to RISC-V machine code...");
-    let mut compiler = Compiler::new();
-
-    // Create a Target from the ISA for JIT compilation
-    use lp_glsl_compiler::backend::target::Target;
-    let flags = isa.flags().clone();
-    let target = Target::HostJit {
-        arch: None, // Auto-detect from host (ESP32 = RISC-V32)
-        flags,
-        isa: None, // Will be created from target
-    };
-
-    // Compile to JIT module
-    let gl_module = match compiler.compile_to_gl_module_jit(source, target) {
-        Ok(module) => {
-            println!("  ✓ GLSL compilation successful");
-            print_memory_stats("After GLSL Compilation");
-            module
+    let executable = match glsl_jit(source, options) {
+        Ok(exe) => {
+            println!("  ✓ GLSL compiled and JIT executable built");
+            print_memory_stats("After glsl_jit");
+            exe
         }
         Err(e) => {
-            // Build error message string
             use alloc::format;
             let mut error_msg =
                 format!("GLSL compilation failed!\nError: {}\n", e.message.as_str());
-
             if let Some(ref loc) = e.location {
                 error_msg.push_str(&format!("At line {}, column {}\n", loc.line, loc.column));
             }
-
             if let Some(ref span) = e.span_text {
                 error_msg.push_str(&format!("Source code: {}\n", span.as_str()));
             }
-
             if !e.notes.is_empty() {
                 error_msg.push_str("Error details:\n");
                 for note in &e.notes {
@@ -248,65 +203,16 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
                     }
                 }
             }
-
             panic!("{}", error_msg.as_str());
         }
     };
 
-    // Drop compiler before transform - we don't need it anymore
-    drop(compiler);
-    print_memory_stats("After Dropping Compiler");
+    let direct = executable.get_direct_call_info("main").unwrap_or_else(|| {
+        panic!("Function 'main' not found in JIT module");
+    });
+    print_memory_stats("After Getting Direct Call Info");
 
-    // Apply q32 transform to convert f32 operations to fixed-point (i32)
-    println!("Step 2b: Applying q32 transform...");
-    print_memory_stats("Before Q32 Transform");
-
-    // Explicitly drop the old module after transform by moving it into the function
-    // The transform consumes gl_module and creates a new one, but both may exist temporarily
-    let q32_module =
-        match gl_module.apply_transform(Q32Transform::new(FixedPointFormat::Fixed16x16)) {
-            Ok(module) => {
-                println!("  ✓ Q32 transform applied");
-                // The old gl_module should be dropped now, but let's verify
-                print_memory_stats("After Q32 Transform");
-                module
-            }
-            Err(e) => {
-                println!("Failed to apply q32 transform: {}", e.message.as_str());
-                panic!("Q32 transform failed");
-            }
-        };
-
-    println!("Step 3: Building executable...");
-
-    // Build JIT executable directly to get the concrete type with function pointers
-    // Use memory-optimized version to free CLIF IR after compilation
-    let jit_module = match build_jit_executable_memory_optimized(q32_module) {
-        Ok(module) => {
-            println!("  ✓ JIT executable built");
-            print_memory_stats("After JIT Executable Build");
-            module
-        }
-        Err(e) => {
-            println!("Failed to build executable: {}", e.message.as_str());
-            panic!("JIT executable build failed");
-        }
-    };
-
-    // Get the function pointer for "main"
-    let func_ptr = match jit_module.get_function_ptr("main") {
-        Ok(ptr) => {
-            println!("  ✓ Function pointer obtained");
-            print_memory_stats("After Getting Function Pointer");
-            ptr
-        }
-        Err(e) => {
-            println!("Failed to get function pointer: {}", e.message.as_str());
-            panic!("Function pointer not found");
-        }
-    };
-
-    println!("Step 3: Setting up continuous rendering loop...");
+    println!("Step 2: Setting up continuous rendering loop...");
 
     // Ensure instruction cache coherency
     unsafe {
@@ -353,11 +259,12 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
                 let frag_coord = [Q32::from_i32(x).to_fixed(), Q32::from_i32(y).to_fixed()];
                 let [r, g, b, a] = unsafe {
                     shader_call::call_vec4_shader(
-                        func_ptr,
+                        direct.func_ptr,
                         frag_coord,
                         output_size,
                         time.to_fixed(),
-                        &isa,
+                        direct.call_conv,
+                        direct.pointer_type,
                     )
                     .unwrap_or_else(|e| {
                         panic!("Shader call failed: {:?}", e);

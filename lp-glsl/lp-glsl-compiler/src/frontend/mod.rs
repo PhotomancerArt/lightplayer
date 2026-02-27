@@ -49,66 +49,68 @@ pub fn compile_glsl_to_gl_module_jit(
     options.validate()?;
     use crate::exec::executable::DecimalFormat;
 
-    // Determine target based on run mode
-    #[cfg(feature = "std")]
-    let target = match &options.run_mode {
-        RunMode::HostJit => Target::host_jit()?,
-        RunMode::Emulator { .. } => {
-            return Err(GlslError::new(
-                ErrorCode::E0400,
-                "Emulator mode not supported for JIT compilation",
-            ));
-        }
-    };
-
-    #[cfg(not(feature = "std"))]
-    let target = match &options.run_mode {
-        RunMode::HostJit => {
-            // In no_std mode, manually create HostJit target (riscv32 only)
-            // Use the same approach as esp32-glsl-jit: create flags manually
-            let mut flag_builder = settings::builder();
-            flag_builder.set("is_pic", "false").map_err(|e| {
-                GlslError::new(
+    // Use target override when set (e.g. embedded JIT); otherwise create from run_mode
+    let target = if let Some(ref t) = options.target_override {
+        t.clone()
+    } else {
+        #[cfg(feature = "std")]
+        match &options.run_mode {
+            RunMode::HostJit => Target::host_jit()?,
+            RunMode::Emulator { .. } => {
+                return Err(GlslError::new(
                     ErrorCode::E0400,
-                    alloc::format!("failed to set is_pic: {e}"),
-                )
-            })?;
-            flag_builder
-                .set("use_colocated_libcalls", "false")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set use_colocated_libcalls: {e}"),
-                    )
-                })?;
-            flag_builder
-                .set("enable_multi_ret_implicit_sret", "true")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set enable_multi_ret_implicit_sret: {e}"),
-                    )
-                })?;
-            flag_builder
-                .set("regalloc_algorithm", "single_pass")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set regalloc_algorithm: {e}"),
-                    )
-                })?;
-            let flags = settings::Flags::new(flag_builder);
-            Target::HostJit {
-                arch: None,
-                flags,
-                isa: None,
+                    "Emulator mode not supported for JIT compilation",
+                ));
             }
         }
-        RunMode::Emulator { .. } => {
-            return Err(GlslError::new(
-                ErrorCode::E0400,
-                "Emulator mode not supported for JIT compilation",
-            ));
+
+        #[cfg(not(feature = "std"))]
+        match &options.run_mode {
+            RunMode::HostJit => {
+                let mut flag_builder = settings::builder();
+                flag_builder.set("is_pic", "false").map_err(|e| {
+                    GlslError::new(
+                        ErrorCode::E0400,
+                        alloc::format!("failed to set is_pic: {e}"),
+                    )
+                })?;
+                flag_builder
+                    .set("use_colocated_libcalls", "false")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set use_colocated_libcalls: {e}"),
+                        )
+                    })?;
+                flag_builder
+                    .set("enable_multi_ret_implicit_sret", "true")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set enable_multi_ret_implicit_sret: {e}"),
+                        )
+                    })?;
+                flag_builder
+                    .set("regalloc_algorithm", "single_pass")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set regalloc_algorithm: {e}"),
+                        )
+                    })?;
+                let flags = settings::Flags::new(flag_builder);
+                Target::HostJit {
+                    arch: None,
+                    flags,
+                    isa: None,
+                }
+            }
+            RunMode::Emulator { .. } => {
+                return Err(GlslError::new(
+                    ErrorCode::E0400,
+                    "Emulator mode not supported for JIT compilation",
+                ));
+            }
         }
     };
 

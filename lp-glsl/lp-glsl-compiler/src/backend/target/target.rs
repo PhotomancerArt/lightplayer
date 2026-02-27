@@ -8,6 +8,8 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::isa::OwnedTargetIsa;
 use cranelift_codegen::settings::{self, Configurable, Flags};
 use target_lexicon::Architecture;
+#[cfg(not(feature = "std"))]
+use target_lexicon::Riscv32Architecture;
 
 /// Semantic target enum - caller doesn't need to know implementation details
 #[derive(Clone)]
@@ -59,6 +61,17 @@ impl Target {
         })
     }
 
+    /// Create RISC-V 32-bit host JIT target for embedded (no_std) use.
+    /// Caller specifies flags and architecture (e.g. Riscv32imac for ESP32-C6).
+    #[cfg(not(feature = "std"))]
+    pub fn riscv32_host_jit(flags: Flags, arch: Riscv32Architecture) -> Result<Self, GlslError> {
+        Ok(Self::HostJit {
+            arch: Some(Architecture::Riscv32(arch)),
+            flags,
+            isa: None,
+        })
+    }
+
     /// Create or get cached ISA for this target
     pub fn create_isa(&mut self) -> Result<&OwnedTargetIsa, GlslError> {
         match self {
@@ -87,12 +100,12 @@ impl Target {
                 Ok(isa.as_ref().unwrap())
             }
             Target::HostJit {
-                arch: _,
+                arch,
                 flags: _flags,
                 isa,
             } => {
                 if isa.is_none() {
-                    *isa = Some(create_host_isa(_flags.clone())?);
+                    *isa = Some(create_host_isa(_flags.clone(), *arch)?);
                 }
                 Ok(isa.as_ref().unwrap())
             }
@@ -148,6 +161,34 @@ fn default_riscv32_flags() -> Result<Flags, GlslError> {
     Ok(settings::Flags::new(flag_builder))
 }
 
+/// Create default flags for RISC-V 32-bit embedded JIT (e.g. ESP32-C6).
+/// Uses opt_level=none, enable_verifier=false to reduce memory and compile time.
+#[cfg(not(feature = "std"))]
+pub fn default_riscv32_embedded_jit_flags() -> Result<Flags, GlslError> {
+    let mut flag_builder = settings::builder();
+    flag_builder
+        .set("opt_level", "none")
+        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("failed to set opt_level: {e}")))?;
+    flag_builder
+        .set("is_pic", "false")
+        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("failed to set is_pic: {e}")))?;
+    flag_builder.set("enable_verifier", "false").map_err(|e| {
+        GlslError::new(
+            ErrorCode::E0400,
+            format!("failed to set enable_verifier: {e}"),
+        )
+    })?;
+    flag_builder
+        .set("regalloc_algorithm", "single_pass")
+        .map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("failed to set regalloc_algorithm: {e}"),
+            )
+        })?;
+    Ok(settings::Flags::new(flag_builder))
+}
+
 /// Helper: Create default flags for host target
 #[cfg(feature = "std")]
 fn default_host_flags() -> Result<Flags, GlslError> {
@@ -185,11 +226,12 @@ fn default_host_flags() -> Result<Flags, GlslError> {
 }
 
 /// Helper: Create ISA for host JIT target
-/// In std mode: uses cranelift_native for auto-detection
-/// In no_std mode: only supports riscv32, uses architecture-specific builder
-fn create_host_isa(flags: Flags) -> Result<OwnedTargetIsa, GlslError> {
+/// In std mode: uses cranelift_native for auto-detection (arch ignored)
+/// In no_std mode: uses given arch for triple, or riscv32_triple() default
+fn create_host_isa(flags: Flags, arch: Option<Architecture>) -> Result<OwnedTargetIsa, GlslError> {
     #[cfg(feature = "std")]
     {
+        let _ = arch;
         use cranelift_native;
         let isa_builder = cranelift_native::builder().map_err(|e| {
             GlslError::new(
@@ -203,8 +245,7 @@ fn create_host_isa(flags: Flags) -> Result<OwnedTargetIsa, GlslError> {
     }
     #[cfg(not(feature = "std"))]
     {
-        // In no_std mode, only support riscv32
-        let triple = riscv32_triple();
+        let triple = arch.map(triple_for_arch).unwrap_or_else(riscv32_triple);
         use cranelift_codegen::isa::riscv32::isa_builder;
         isa_builder(triple).finish(flags).map_err(|e| {
             GlslError::new(

@@ -23,7 +23,7 @@ pub use backend::transform::q32::Q32Options;
 #[cfg(feature = "emulator")]
 pub use exec::GlslEmulatorModule;
 pub use exec::GlslJitModule;
-pub use exec::{DecimalFormat, GlslExecutable, GlslOptions, GlslValue, RunMode};
+pub use exec::{DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, GlslValue, RunMode};
 pub use frontend::codegen;
 pub use frontend::semantic;
 pub use frontend::{

@@ -2099,9 +2099,6 @@ name = "esp32-glsl-jit"
 version = "0.0.0"
 dependencies = [
  "cranelift-codegen",
- "cranelift-control",
- "cranelift-frontend",
- "cranelift-module",
  "embassy-executor",
  "embassy-time",
  "esp-alloc",
@@ -2114,7 +2111,6 @@ dependencies = [
  "lp-glsl-builtins",
  "lp-glsl-compiler",
  "lp-glsl-jit-util",
- "target-lexicon",
 ]
 
 [[package]]

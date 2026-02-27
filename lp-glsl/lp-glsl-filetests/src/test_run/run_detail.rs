@@ -62,6 +62,7 @@ pub fn run(
         decimal_format,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
+        target_override: None,
     };
 
     // TODO: Implement bless mode when needed

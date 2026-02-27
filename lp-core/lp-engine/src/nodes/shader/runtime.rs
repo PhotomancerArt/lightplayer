@@ -521,6 +521,7 @@ impl ShaderRuntime {
             decimal_format: DecimalFormat::Q32,
             q32_opts,
             memory_optimized: GlslOptions::default_memory_optimized(),
+            target_override: None,
         };
 
         // Drop old executable before compiling to free memory for recompilation.

@@ -25,6 +25,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         decimal_format: DecimalFormat::Q32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
+        target_override: None,
     };
 
     // Compile and execute
@@ -111,8 +112,9 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
             log_level: None,
         },
         decimal_format: DecimalFormat::Q32,
-        q32_opts: Q32Options::default(),
+        q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
+        target_override: None,
     };
 
     // Compile and execute
@@ -193,6 +195,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         decimal_format: DecimalFormat::Q32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
+        target_override: None,
     };
 
     // Compile and execute
