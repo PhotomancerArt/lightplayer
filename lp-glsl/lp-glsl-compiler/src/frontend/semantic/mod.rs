@@ -55,22 +55,23 @@ impl SemanticAnalyzer {
     ) -> Result<TypedShader, GlslDiagnostics> {
         let mut diagnostics = GlslDiagnostics::new(max_errors);
 
-        // Pass 1: Collect function signatures
-        let mut registry_pass = passes::function_registry::FunctionRegistryPass::new();
-        registry_pass.run(shader, source, &mut diagnostics);
-        let registry = registry_pass.into_registry();
-
-        // Pass 2: Extract function bodies
-        let mut extraction_pass = passes::function_extraction::FunctionExtractionPass::new();
-        extraction_pass.run(shader, source, &mut diagnostics);
-        let (main_func, user_functions) = extraction_pass.into_results();
-
-        // Pass 2b: Collect global const declarations
+        // Pass 1: Collect global const declarations (needed for param array sizes)
         let mut global_const_pass = passes::global_const_pass::GlobalConstPass::new();
         global_const_pass.run(shader, source, &mut diagnostics);
         let global_const_result = global_const_pass.into_result();
+        let const_env = Some(&global_const_result.global_constants);
 
-        // Pass 3: Validate
+        // Pass 2: Collect function signatures (uses const_env for param array sizes)
+        let mut registry_pass = passes::function_registry::FunctionRegistryPass::new();
+        registry_pass.run_with_const_env(shader, source, &mut diagnostics, const_env);
+        let registry = registry_pass.into_registry();
+
+        // Pass 3: Extract function bodies (uses const_env for param array sizes)
+        let mut extraction_pass = passes::function_extraction::FunctionExtractionPass::new();
+        extraction_pass.run_with_const_env(shader, source, &mut diagnostics, const_env);
+        let (main_func, user_functions) = extraction_pass.into_results();
+
+        // Pass 4: Validate
         let typed_shader = TypedShader {
             main_function: main_func,
             user_functions,

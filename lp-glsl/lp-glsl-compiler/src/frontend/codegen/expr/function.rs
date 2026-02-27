@@ -612,47 +612,93 @@ fn prepare_call_arguments<M: cranelift_module::Module>(
                 }
             }
             ParamQualifier::In => {
-                // In parameters: evaluate expression and expand to components (existing behavior)
-                let (arg_vals_flat, _) = ctx.emit_expr_typed(arg_expr)?;
-                let mut arg_val_idx = 0;
+                // Array In parameters: pass pointer (arrays decay to pointer in GLSL)
+                if param.ty.is_array() {
+                    let lvalue = resolve_lvalue(ctx, arg_expr).map_err(|mut err| {
+                        if err.message.contains("not a valid LValue") {
+                            err.message = format!(
+                                "array parameter requires array variable, but got expression"
+                            );
+                        }
+                        err
+                    })?;
 
-                let component_count = if param.ty.is_vector() {
-                    param.ty.component_count().unwrap()
-                } else if param.ty.is_matrix() {
-                    param.ty.matrix_element_count().unwrap()
-                } else {
-                    1
-                };
+                    let array_ptr = match &lvalue {
+                        crate::frontend::codegen::lvalue::LValue::PointerBased { ptr, .. } => *ptr,
+                        crate::frontend::codegen::lvalue::LValue::Variable { .. } => {
+                            if let glsl::syntax::Expr::Variable(ident, _) = arg_expr {
+                                ctx.lookup_var_info(&ident.name)
+                                    .and_then(|v| v.array_ptr)
+                                    .ok_or_else(|| {
+                                        GlslError::new(
+                                            ErrorCode::E0400,
+                                            format!(
+                                                "array variable '{}' not found or not an array",
+                                                ident.name
+                                            ),
+                                        )
+                                    })?
+                            } else {
+                                return Err(GlslError::new(
+                                    ErrorCode::E0400,
+                                    "array parameter requires array variable",
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                "array parameter requires array variable",
+                            ));
+                        }
+                    };
 
-                let arg_base = if arg_ty.is_vector() {
-                    arg_ty.vector_base_type().unwrap()
+                    call_args.push(array_ptr);
                 } else {
-                    arg_ty.clone()
-                };
-                let param_base = if param.ty.is_vector() {
-                    param.ty.vector_base_type().unwrap()
-                } else {
-                    param.ty.clone()
-                };
+                    // Non-array In parameters: evaluate expression and expand to components
+                    let (arg_vals_flat, _) = ctx.emit_expr_typed(arg_expr)?;
+                    let mut arg_val_idx = 0;
 
-                for _ in 0..component_count {
-                    if arg_val_idx >= arg_vals_flat.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!("Not enough argument values for parameter {glsl_param_idx}"),
-                        ));
+                    let component_count = if param.ty.is_vector() {
+                        param.ty.component_count().unwrap()
+                    } else if param.ty.is_matrix() {
+                        param.ty.matrix_element_count().unwrap()
+                    } else {
+                        1
+                    };
+
+                    let arg_base = if arg_ty.is_vector() {
+                        arg_ty.vector_base_type().unwrap()
+                    } else {
+                        arg_ty.clone()
+                    };
+                    let param_base = if param.ty.is_vector() {
+                        param.ty.vector_base_type().unwrap()
+                    } else {
+                        param.ty.clone()
+                    };
+
+                    for _ in 0..component_count {
+                        if arg_val_idx >= arg_vals_flat.len() {
+                            return Err(GlslError::new(
+                                ErrorCode::E0400,
+                                format!(
+                                    "Not enough argument values for parameter {glsl_param_idx}"
+                                ),
+                            ));
+                        }
+
+                        let arg_val = arg_vals_flat[arg_val_idx];
+                        let converted = coercion::coerce_to_type_with_location(
+                            ctx,
+                            arg_val,
+                            &arg_base,
+                            &param_base,
+                            Some(call_span.clone()),
+                        )?;
+                        call_args.push(converted);
+                        arg_val_idx += 1;
                     }
-
-                    let arg_val = arg_vals_flat[arg_val_idx];
-                    let converted = coercion::coerce_to_type_with_location(
-                        ctx,
-                        arg_val,
-                        &arg_base,
-                        &param_base,
-                        Some(call_span.clone()),
-                    )?;
-                    call_args.push(converted);
-                    arg_val_idx += 1;
                 }
             }
         }

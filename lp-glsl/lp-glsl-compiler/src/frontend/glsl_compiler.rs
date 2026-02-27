@@ -521,41 +521,60 @@ impl GlslCompiler {
                     }
                 }
                 ParamQualifier::In => {
-                    let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector() {
-                        let count = param.ty.component_count().unwrap();
-                        let mut vals = Vec::new();
-                        for _ in 0..count {
-                            if param_idx >= block_params.len() {
-                                return Err(param_err());
-                            }
-                            vals.push(block_params[param_idx]);
-                            param_idx += 1;
-                        }
-                        vals
-                    } else if param.ty.is_matrix() {
-                        let count = param.ty.matrix_element_count().unwrap();
-                        let mut vals = Vec::new();
-                        for _ in 0..count {
-                            if param_idx >= block_params.len() {
-                                return Err(param_err());
-                            }
-                            vals.push(block_params[param_idx]);
-                            param_idx += 1;
-                        }
-                        vals
-                    } else {
+                    if param.ty.is_array() {
                         if param_idx >= block_params.len() {
                             return Err(param_err());
                         }
-                        let val = vec![block_params[param_idx]];
+                        let pointer_val = block_params[param_idx];
                         param_idx += 1;
-                        val
-                    };
 
-                    let vars =
-                        codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
-                    for (var, val) in vars.iter().zip(param_vals) {
-                        codegen_ctx.builder.def_var(*var, val);
+                        let var_info = VarInfo {
+                            cranelift_vars: Vec::new(),
+                            glsl_type: param.ty.clone(),
+                            array_ptr: Some(pointer_val),
+                            stack_slot: None,
+                        };
+                        if let Some(current_scope) = codegen_ctx.variable_scopes.last_mut() {
+                            current_scope.insert(param.name.clone(), var_info);
+                        }
+                    } else {
+                        let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector()
+                        {
+                            let count = param.ty.component_count().unwrap();
+                            let mut vals = Vec::new();
+                            for _ in 0..count {
+                                if param_idx >= block_params.len() {
+                                    return Err(param_err());
+                                }
+                                vals.push(block_params[param_idx]);
+                                param_idx += 1;
+                            }
+                            vals
+                        } else if param.ty.is_matrix() {
+                            let count = param.ty.matrix_element_count().unwrap();
+                            let mut vals = Vec::new();
+                            for _ in 0..count {
+                                if param_idx >= block_params.len() {
+                                    return Err(param_err());
+                                }
+                                vals.push(block_params[param_idx]);
+                                param_idx += 1;
+                            }
+                            vals
+                        } else {
+                            if param_idx >= block_params.len() {
+                                return Err(param_err());
+                            }
+                            let val = vec![block_params[param_idx]];
+                            param_idx += 1;
+                            val
+                        };
+
+                        let vars =
+                            codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
+                        for (var, val) in vars.iter().zip(param_vals) {
+                            codegen_ctx.builder.def_var(*var, val);
+                        }
                     }
                 }
             }

@@ -11,7 +11,7 @@ float test_builtin_length() {
     return LENGTH_UNIT;
 }
 
-// run: test_builtin_length() ~= 1.0 [expect-fail]
+// run: test_builtin_length() ~= 1.0
 
 const vec2 A = vec2(1.0, 0.0);
 const vec2 B = vec2(0.0, 1.0);
@@ -21,4 +21,4 @@ float test_builtin_dot() {
     return D;
 }
 
-// run: test_builtin_dot() ~= 0.0 [expect-fail]
+// run: test_builtin_dot() ~= 0.0
