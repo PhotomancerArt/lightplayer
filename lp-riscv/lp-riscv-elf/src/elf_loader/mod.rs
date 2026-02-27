@@ -6,6 +6,7 @@
 use hashbrown::HashMap;
 use object::{Object, ObjectSection};
 
+mod backtrace;
 mod layout;
 mod memory;
 mod object_file;
@@ -15,6 +16,7 @@ mod sections;
 mod symbols;
 
 // Re-export functions from submodules
+pub use backtrace::{format_backtrace, resolve_address};
 pub use object_file::load_object_file;
 pub use symbols::find_symbol_address;
 
