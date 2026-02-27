@@ -1,0 +1,63 @@
+name: Main push
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag-next-version:
+    runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate and push tag
+        env:
+          BRANCH: main
+          CI: "true"
+        run: ./scripts/tag-next-version.sh
+
+      - name: Get app version
+        id: version
+        run: echo "app_version=$(scripts/print-app-version.sh)" >> $GITHUB_OUTPUT
+
+  create-release:
+    needs: [tag-next-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --prune --prune-tags origin
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.tag-next-version.outputs.app_version }}
+        run: |
+          TAG="v${APP_VERSION}"
+          PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | grep -v "^${TAG}$" | head -n1 || true)
+          if [[ -n "$PREV_TAG" ]] && [[ -n "$TAG" ]]; then
+            NOTES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s (%h)" --no-merges || echo "(no commits)")
+          else
+            NOTES="Initial release"
+          fi
+          echo "## Changes" > release_notes.md
+          echo "" >> release_notes.md
+          echo "${NOTES}" >> release_notes.md
+          gh release create "${TAG}" --title "Release ${APP_VERSION}" --notes-file release_notes.md --latest
