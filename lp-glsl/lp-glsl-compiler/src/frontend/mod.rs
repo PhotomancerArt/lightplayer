@@ -209,7 +209,12 @@ pub fn compile_glsl_to_gl_module_object(
 /// Works in both std and no_std environments
 pub fn glsl_jit(source: &str, options: GlslOptions) -> Result<Box<dyn GlslExecutable>, GlslError> {
     let module = compile_glsl_to_gl_module_jit(source, &options)?;
-    module.build_executable()
+    let jit = if options.memory_optimized {
+        crate::backend::codegen::jit::build_jit_executable_memory_optimized(module)
+    } else {
+        crate::backend::codegen::jit::build_jit_executable(module)
+    }?;
+    Ok(alloc::boxed::Box::new(jit))
 }
 
 /// Compile and execute GLSL in RISC-V 32-bit emulator

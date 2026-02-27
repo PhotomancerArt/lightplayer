@@ -52,6 +52,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -93,6 +94,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -128,6 +130,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -182,6 +185,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -223,6 +227,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -269,6 +274,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -325,6 +331,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -398,6 +405,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     let result = glsl_jit(glsl, options_q32);

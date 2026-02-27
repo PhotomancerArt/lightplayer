@@ -7,6 +7,7 @@ fn main() {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Float,
         q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
     };
 
     // Example 1: Integer arithmetic

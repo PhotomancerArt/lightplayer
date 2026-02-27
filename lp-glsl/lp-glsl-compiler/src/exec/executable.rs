@@ -176,6 +176,9 @@ pub struct GlslOptions {
     pub run_mode: RunMode,
     pub decimal_format: DecimalFormat,
     pub q32_opts: crate::backend::transform::q32::Q32Options,
+    /// Use memory-optimized JIT path that frees CLIF IR after each function.
+    /// Reduces OOM risk on embedded (no_std). Default: true when `std` is disabled.
+    pub memory_optimized: bool,
 }
 
 impl GlslOptions {
@@ -209,12 +212,19 @@ impl GlslOptions {
         }
     }
 
+    /// Default value for memory_optimized: true on no_std (embedded), false otherwise.
+    #[inline]
+    pub fn default_memory_optimized() -> bool {
+        cfg!(not(feature = "std"))
+    }
+
     /// Default options for JIT execution
     pub fn jit() -> Self {
         Self {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Float,
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: Self::default_memory_optimized(),
         }
     }
 
@@ -230,6 +240,7 @@ impl GlslOptions {
             },
             decimal_format: DecimalFormat::Q32,
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: false,
         }
     }
 
@@ -246,6 +257,7 @@ impl GlslOptions {
             },
             decimal_format: DecimalFormat::Q32,
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: false,
         }
     }
 }

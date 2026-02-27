@@ -24,6 +24,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: Q32Options::default(),
+        memory_optimized: false,
     };
 
     // Compile and execute
@@ -111,6 +112,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         },
         decimal_format: DecimalFormat::Q32,
         q32_opts: Q32Options::default(),
+        memory_optimized: false,
     };
 
     // Compile and execute
@@ -190,6 +192,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
         q32_opts: Q32Options::default(),
+        memory_optimized: false,
     };
 
     // Compile and execute
