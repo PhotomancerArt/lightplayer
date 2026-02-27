@@ -68,7 +68,6 @@ impl SerialEmuClientTransport {
             }
 
             let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
-
             log::trace!(
                 "SerialEmuClientTransport: Parsing message ({} bytes)",
                 message_bytes.len()
