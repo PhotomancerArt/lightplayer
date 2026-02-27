@@ -97,6 +97,7 @@ fn test_stop_all_projects() {
                 &"/".as_path_buf().join(project_name),
                 fs,
                 output_provider.clone(),
+                None,
             )
             .unwrap()
         }

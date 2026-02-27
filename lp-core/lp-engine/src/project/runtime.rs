@@ -19,6 +19,9 @@ use lp_model::{
 };
 use lp_shared::fs::{LpFs, fs_event::FsChange};
 
+/// Optional callback for memory stats (free_bytes, used_bytes). Used for shed logging on ESP32.
+pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
+
 /// Project runtime - manages nodes and rendering
 pub struct ProjectRuntime {
     /// Current frame ID
@@ -33,6 +36,8 @@ pub struct ProjectRuntime {
     pub nodes: BTreeMap<NodeHandle, NodeEntry>,
     /// Next handle to assign
     pub next_handle: i32,
+    /// Optional memory stats for shed logging (ESP32 passes, others None)
+    pub memory_stats: Option<MemoryStatsFn>,
 }
 
 /// Node entry in runtime
@@ -75,6 +80,7 @@ impl ProjectRuntime {
     pub fn new(
         fs: Rc<RefCell<dyn LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
+        memory_stats: Option<MemoryStatsFn>,
     ) -> Result<Self, Error> {
         let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
 
@@ -85,6 +91,7 @@ impl ProjectRuntime {
             output_provider,
             nodes: BTreeMap::new(),
             next_handle: 1,
+            memory_stats,
         })
     }
 
@@ -729,6 +736,43 @@ impl ProjectRuntime {
                     change.path.as_str()
                 };
 
+                // Shed optional buffers before shader recompile to maximize memory
+                let is_shader_glsl = change.path.has_suffix(".glsl")
+                    && self
+                        .nodes
+                        .get(&handle)
+                        .map(|e| e.kind == NodeKind::Shader)
+                        .unwrap_or(false);
+
+                if is_shader_glsl {
+                    let free_before = self.memory_stats.and_then(|f| f().map(|(free, _)| free));
+                    if let Some(free) = free_before {
+                        log::info!("[mem] shed_before_shader_recompile: {}k free", free / 1024);
+                    }
+
+                    let provider = self.output_provider.borrow();
+                    let output_provider: &dyn OutputProvider = &*provider;
+                    for (_, entry) in &mut self.nodes {
+                        if let Some(runtime) = entry.runtime.as_mut() {
+                            runtime.shed_optional_buffers(Some(output_provider))?;
+                        }
+                    }
+                    drop(provider);
+
+                    if let Some(f) = self.memory_stats {
+                        if let Some((free_after, _)) = f() {
+                            let delta = free_after as i64 - free_before.unwrap_or(0) as i64;
+                            let sign = if delta >= 0 { "+" } else { "" };
+                            log::info!(
+                                "[mem] shed_after_shader_recompile: {}k free (delta: {}{}k)",
+                                free_after / 1024,
+                                sign,
+                                delta / 1024
+                            );
+                        }
+                    }
+                }
+
                 // Create FsChange with relative path
                 let relative_change = FsChange {
                     path: LpPathBuf::from(relative_path),
@@ -1329,15 +1373,16 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
                 path: format!("texture-{}", node_handle.as_i32()),
             })?;
 
-        // Get texture from runtime
+        // Ensure texture allocated (may have been shed before shader recompile)
         if let Some(runtime) = &mut entry.runtime {
             if let Some(tex_runtime) = runtime
                 .as_any_mut()
                 .downcast_mut::<crate::nodes::TextureRuntime>()
             {
-                tex_runtime.texture().ok_or_else(|| Error::Other {
+                tex_runtime.ensure_texture()?;
+                return tex_runtime.texture().ok_or_else(|| Error::Other {
                     message: "Texture not initialized".to_string(),
-                })
+                });
             } else {
                 Err(Error::Other {
                     message: "Texture runtime not found".to_string(),
@@ -1372,15 +1417,16 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
                 path: format!("texture-{}", node_handle.as_i32()),
             })?;
 
-        // Get mutable texture from runtime
+        // Ensure texture allocated and get mutable reference
         if let Some(runtime) = &mut entry.runtime {
             if let Some(tex_runtime) = runtime
                 .as_any_mut()
                 .downcast_mut::<crate::nodes::TextureRuntime>()
             {
-                tex_runtime.texture_mut().ok_or_else(|| Error::Other {
+                tex_runtime.ensure_texture()?;
+                return tex_runtime.texture_mut().ok_or_else(|| Error::Other {
                     message: "Texture not initialized".to_string(),
-                })
+                });
             } else {
                 Err(Error::Other {
                     message: "Texture runtime not found".to_string(),

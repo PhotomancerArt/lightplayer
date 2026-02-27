@@ -5,6 +5,7 @@ use crate::nodes::fixture::mapping::{
     generate_mapping_points,
 };
 use crate::nodes::{NodeConfig, NodeRuntime};
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
@@ -322,6 +323,16 @@ impl NodeRuntime for FixtureRuntime {
         // Update state with lamp colors
         self.state.lamp_colors.set(frame_id, lamp_colors);
 
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        self.precomputed_mapping = None;
+        self.mapping.clear();
+        self.mapping.shrink_to_fit();
         Ok(())
     }
 

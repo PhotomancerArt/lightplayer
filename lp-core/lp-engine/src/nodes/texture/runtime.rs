@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
 use alloc::{boxed::Box, format, string::ToString};
 use lp_model::{
@@ -48,6 +49,33 @@ impl TextureRuntime {
     pub fn get_config(&self) -> Option<&TextureConfig> {
         self.config.as_ref()
     }
+
+    /// Allocate texture if shed; required before get_texture/get_texture_mut.
+    pub fn ensure_texture(&mut self) -> Result<(), Error> {
+        if self.texture.is_some() {
+            return Ok(());
+        }
+        let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
+            node_path: format!("texture-{}", self.node_handle.as_i32()),
+            reason: "Config not set".to_string(),
+        })?;
+        let format = TextureFormat::Rgba16;
+        let texture = Texture::new(config.width, config.height, format).map_err(|e| {
+            Error::InvalidConfig {
+                node_path: format!("texture-{}", self.node_handle.as_i32()),
+                reason: format!("Failed to create texture: {e}"),
+            }
+        })?;
+        self.texture = Some(texture);
+        if let Some(tex) = &self.texture {
+            let frame_id = FrameId::default();
+            self.state.texture_data.set(frame_id, tex.data().to_vec());
+            self.state.width.set(frame_id, tex.width());
+            self.state.height.set(frame_id, tex.height());
+            self.state.format.set(frame_id, tex.format());
+        }
+        Ok(())
+    }
 }
 
 impl NodeRuntime for TextureRuntime {
@@ -83,6 +111,17 @@ impl NodeRuntime for TextureRuntime {
 
     fn render(&mut self, _ctx: &mut dyn RenderContext) -> Result<(), Error> {
         // No-op - textures don't render themselves, shaders render to textures
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        self.texture = None;
+        self.state
+            .texture_data
+            .set(FrameId::default(), alloc::vec::Vec::new());
         Ok(())
     }
 

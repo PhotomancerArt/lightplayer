@@ -13,6 +13,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
+use lp_engine::MemoryStatsFn;
 use lp_model::project::ProjectHandle;
 use lp_model::{LpPath, LpPathBuf};
 use lp_shared::fs::LpFs;
@@ -63,6 +64,7 @@ impl ProjectManager {
         path: &LpPath,
         base_fs: &mut dyn LpFs,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
+        memory_stats: Option<MemoryStatsFn>,
     ) -> Result<ProjectHandle, ServerError> {
         // Extract project name from path
         let name = self.extract_project_name_from_path(path.as_str())?;
@@ -98,6 +100,7 @@ impl ProjectManager {
             project_path.as_path(),
             project_fs,
             output_provider,
+            memory_stats,
         )?;
 
         // Auto-initialize the project runtime

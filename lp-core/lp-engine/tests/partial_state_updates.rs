@@ -55,7 +55,7 @@ fn test_partial_state_updates() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Start runtime
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone()).unwrap();
+    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

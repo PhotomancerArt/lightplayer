@@ -22,6 +22,8 @@ pub struct OutputRuntime {
     pin: u32,
     /// Output config (None until set)
     config: Option<OutputConfig>,
+    /// Last byte count before shed (for reopen after shed_optional_buffers)
+    last_byte_count: Option<u32>,
     pub state: OutputState,
 }
 
@@ -32,8 +34,33 @@ impl OutputRuntime {
             channel_handle: None,
             pin: 0,
             config: None,
+            last_byte_count: None,
             state: OutputState::new(FrameId::default()),
         }
+    }
+
+    /// Ensure channel is open; reopen after shed if needed.
+    fn ensure_channel_open(&mut self, output_provider: &dyn OutputProvider) -> Result<(), Error> {
+        if self.channel_handle.is_some() {
+            return Ok(());
+        }
+        let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
+            node_path: String::from("output"),
+            reason: "Config not set".to_string(),
+        })?;
+        // Use last_byte_count or derive from channel_data (may have been extended by fixtures)
+        let byte_count = self
+            .last_byte_count
+            .unwrap_or(3)
+            .max((self.channel_data.len() / 3 * 3) as u32)
+            .max(3);
+        let format = OutputFormat::Ws2811;
+        let handle =
+            output_provider.open(self.pin, byte_count, format, options_for_open(config))?;
+        self.channel_handle = Some(handle);
+        let num_leds = (byte_count / 3) as usize;
+        self.channel_data.resize(num_leds * 3, 0);
+        Ok(())
     }
 
     /// Set the output config
@@ -111,11 +138,15 @@ impl NodeRuntime for OutputRuntime {
         // Allocate 16-bit buffer: num_leds * 3 u16s
         let num_leds = (byte_count / 3) as usize;
         self.channel_data.resize(num_leds * 3, 0);
+        self.last_byte_count = Some(byte_count);
 
         Ok(())
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
+        // Reopen channel if shed (e.g. before shader recompile)
+        self.ensure_channel_open(ctx.output_provider())?;
+
         // Update state with current channel data
         let frame_id = ctx.frame_id();
         self.state
@@ -137,6 +168,26 @@ impl NodeRuntime for OutputRuntime {
                 message: alloc::format!("Failed to close output channel: {e}"),
             })?;
         }
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        let byte_count = (self.channel_data.len() / 3 * 3) as u32;
+        if byte_count > 0 {
+            self.last_byte_count = Some(byte_count.max(3));
+        }
+        if let (Some(provider), Some(handle)) =
+            (output_provider, core::mem::take(&mut self.channel_handle))
+        {
+            provider.close(handle).map_err(|e| Error::Other {
+                message: alloc::format!("Failed to close output channel: {e}"),
+            })?;
+        }
+        self.channel_data.clear();
+        self.channel_data.shrink_to_fit();
         Ok(())
     }
 
@@ -188,6 +239,7 @@ impl NodeRuntime for OutputRuntime {
                 self.channel_handle = Some(handle);
                 let num_leds = (byte_count / 3) as usize;
                 self.channel_data.resize(num_leds * 3, 0);
+                self.last_byte_count = Some(byte_count);
             }
         }
 

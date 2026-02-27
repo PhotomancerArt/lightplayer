@@ -131,7 +131,12 @@ fn handle_load_project(
 ) -> Result<ServerMessagePayload, ServerError> {
     log::info!("Loading project: {}", path.as_str());
     log_memory(memory_stats, "load_project before");
-    let handle = project_manager.load_project(path, base_fs, output_provider.clone())?;
+    let handle = project_manager.load_project(
+        path,
+        base_fs,
+        output_provider.clone(),
+        memory_stats.copied(),
+    )?;
     log_memory(memory_stats, "load_project after");
     Ok(ServerMessagePayload::LoadProject { handle })
 }

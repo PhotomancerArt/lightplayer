@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
 use alloc::{
     boxed::Box,
@@ -199,6 +200,21 @@ impl NodeRuntime for ShaderRuntime {
             }
         }
 
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        self.executable = None;
+        self.glsl_source = None;
+        self.direct_func_ptr = None;
+        self.direct_call_conv = None;
+        self.direct_pointer_type = None;
+        self.state
+            .glsl_code
+            .set(lp_model::project::FrameId::default(), String::new());
         Ok(())
     }
 

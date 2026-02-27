@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::error::ServerError;
 use alloc::{format, rc::Rc, string::String};
 use core::cell::RefCell;
-use lp_engine::ProjectRuntime;
+use lp_engine::{MemoryStatsFn, ProjectRuntime};
 use lp_model::{LpPath, LpPathBuf};
 use lp_shared::fs::{FsVersion, LpFs};
 use lp_shared::output::OutputProvider;
@@ -32,8 +32,9 @@ impl Project {
         path: &LpPath,
         fs: Rc<RefCell<dyn LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
+        memory_stats: Option<MemoryStatsFn>,
     ) -> Result<Self, ServerError> {
-        let runtime = ProjectRuntime::new(fs, output_provider)
+        let runtime = ProjectRuntime::new(fs, output_provider, memory_stats)
             .map_err(|e| ServerError::Core(format!("{e}")))?;
 
         Ok(Self {

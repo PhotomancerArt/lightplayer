@@ -35,7 +35,7 @@ fn test_fs_changes_not_repeated() {
         unsafe {
             let pm = (*server_ptr).project_manager_mut();
             let fs = (*server_ptr).base_fs_mut();
-            pm.load_project(&project_path, fs, output_provider.clone())
+            pm.load_project(&project_path, fs, output_provider.clone(), None)
                 .expect("Failed to load project")
         }
     };

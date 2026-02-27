@@ -33,6 +33,17 @@ pub trait NodeRuntime: Send + Sync {
         Ok(())
     }
 
+    /// Shed optional buffers to free memory (e.g. before shader recompilation).
+    ///
+    /// Nodes must be able to rebuild buffers on next use (render/init).
+    /// If `output_provider` is `Some`, output nodes should close channels. Default: no-op.
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Get reference to Any for downcasting
     fn as_any(&self) -> &dyn Any;
 

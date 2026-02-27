@@ -297,14 +297,25 @@ cargo-update:
                  -p cranelift-interpreter
 
 # Decode ESP32-C6 backtrace addresses
-# Usage: just decode-backtrace 0x420381c2 0x42038172 0x420381e0 ...
+# Usage: just decode-backtrace 0x420381c2 0x42038172 ...
+#        pbpaste | just decode-backtrace
 # Build first: just build-fw-esp32
 # Uses `addr2line` (cargo install addr2line) or riscv32-esp-elf-addr2line if available
 decode-backtrace *addrs:
-    # ELF is at workspace target dir when building from lp-fw/fw-esp32
-    @test -f target/{{ rv32_target }}/release/fw-esp32
-    if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then \
-        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 {{ addrs }}; \
-    else \
-        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a {{ addrs }}; \
+    #!/usr/bin/env bash
+    set -e
+    test -f target/{{ rv32_target }}/release/fw-esp32
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace 0x420... ... or: pbpaste | just decode-backtrace"
+        exit 1
+    fi
+    if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 $ADDRS
+    else
+        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a $ADDRS
     fi
