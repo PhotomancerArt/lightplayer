@@ -2,7 +2,7 @@
 
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
-use crate::error::GlslError;
+use crate::error::{GlslDiagnostics, GlslError};
 use crate::frontend::pipeline::CompilationPipeline;
 use crate::frontend::src_loc::GlSourceMap;
 use cranelift_codegen::ir::Function;
@@ -37,12 +37,13 @@ impl GlslCompiler {
         &mut self,
         source: &str,
         target: Target,
-    ) -> Result<GlModule<JITModule>, GlslError> {
+        max_errors: usize,
+    ) -> Result<GlModule<JITModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
 
         // 1. Parse and analyze GLSL
-        let semantic_result = CompilationPipeline::parse_and_analyze(source)?;
+        let semantic_result = CompilationPipeline::parse_and_analyze(source, max_errors)?;
         let typed_ast = semantic_result.typed_ast;
 
         // 2. Create ISA for signature building (before creating gl_module to avoid borrow conflicts)
@@ -183,12 +184,13 @@ impl GlslCompiler {
         &mut self,
         source: &str,
         target: Target,
-    ) -> Result<GlModule<ObjectModule>, GlslError> {
+        max_errors: usize,
+    ) -> Result<GlModule<ObjectModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
 
         // 1. Parse and analyze GLSL
-        let semantic_result = CompilationPipeline::parse_and_analyze(source)?;
+        let semantic_result = CompilationPipeline::parse_and_analyze(source, max_errors)?;
         let typed_ast = semantic_result.typed_ast;
 
         // 2. Create ISA for signature building (before creating gl_module to avoid borrow conflicts)

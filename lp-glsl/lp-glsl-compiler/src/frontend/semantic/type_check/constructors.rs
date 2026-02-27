@@ -20,6 +20,9 @@ pub fn check_vector_constructor_with_span(
     args: &[Type],
     span: Option<SourceSpan>,
 ) -> Result<Type, GlslError> {
+    if args.iter().any(|t| t.is_error()) {
+        return Ok(Type::Error);
+    }
     let result_type = parse_vector_type_name(type_name)?;
     let component_count = result_type.component_count().ok_or_else(|| {
         GlslError::new(
@@ -195,6 +198,9 @@ pub fn check_scalar_constructor_with_span(
     args: &[Type],
     span: Option<SourceSpan>,
 ) -> Result<Type, GlslError> {
+    if args.iter().any(|t| t.is_error()) {
+        return Ok(Type::Error);
+    }
     // Scalar constructors take exactly one argument
     if args.len() != 1 {
         let mut error = GlslError::new(
@@ -244,6 +250,9 @@ fn parse_matrix_type_name(name: &str) -> Result<Type, GlslError> {
 /// Check matrix constructor arguments and infer result type
 /// Implements GLSL spec: variables.adoc:72-97
 pub fn check_matrix_constructor(type_name: &str, args: &[Type]) -> Result<Type, GlslError> {
+    if args.iter().any(|t| t.is_error()) {
+        return Ok(Type::Error);
+    }
     let result_type = parse_matrix_type_name(type_name)?;
     let (rows, cols) = result_type.matrix_dims().ok_or_else(|| {
         GlslError::new(

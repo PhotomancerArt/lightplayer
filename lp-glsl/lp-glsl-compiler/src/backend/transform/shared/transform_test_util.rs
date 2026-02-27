@@ -189,7 +189,7 @@ pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
     // Compile GLSL to raw module (no transform)
     eprintln!("\n=== Compiling GLSL (raw, no transform) ===");
     let raw_module = compiler
-        .compile_to_gl_module_object(glsl_source, target.clone())
+        .compile_to_gl_module_object(glsl_source, target.clone(), crate::DEFAULT_MAX_ERRORS)
         .expect("Failed to compile GLSL");
 
     // Print CLIF before transformation
@@ -210,7 +210,7 @@ pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
     // Compile GLSL for identity transform
     eprintln!("\n=== Compiling GLSL (identity transform) ===");
     let identity_module = compiler
-        .compile_to_gl_module_object(glsl_source, target.clone())
+        .compile_to_gl_module_object(glsl_source, target.clone(), crate::DEFAULT_MAX_ERRORS)
         .expect("Failed to compile GLSL");
     let identity_module = identity_module
         .apply_transform(IdentityTransform)
@@ -220,7 +220,7 @@ pub fn run_int32_test(glsl_source: &str, expected_int: i32) {
     // Compile GLSL for q32 transform
     eprintln!("\n=== Compiling GLSL (q32 transform) ===");
     let q32_module = compiler
-        .compile_to_gl_module_object(glsl_source, target.clone())
+        .compile_to_gl_module_object(glsl_source, target.clone(), crate::DEFAULT_MAX_ERRORS)
         .expect("Failed to compile GLSL");
     let q32_transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
     let q32_module = q32_module

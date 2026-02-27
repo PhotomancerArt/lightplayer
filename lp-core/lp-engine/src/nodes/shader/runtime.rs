@@ -522,6 +522,7 @@ impl ShaderRuntime {
             q32_opts,
             memory_optimized: GlslOptions::default_memory_optimized(),
             target_override: None,
+            max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
         };
 
         // Drop old executable before compiling to free memory for recompilation.

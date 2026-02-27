@@ -170,6 +170,9 @@ pub enum DecimalFormat {
     Q32,
 }
 
+/// Default maximum number of errors to collect before stopping (bounded for memory-constrained targets).
+pub const DEFAULT_MAX_ERRORS: usize = 20;
+
 /// Compilation options
 #[derive(Clone)]
 pub struct GlslOptions {
@@ -182,6 +185,8 @@ pub struct GlslOptions {
     /// Override target (ISA, flags). When set, used instead of run_mode for target creation.
     /// Enables embedded JIT with custom flags (e.g. ESP32-C6 uses Riscv32imac, opt_level=none).
     pub target_override: Option<crate::backend::target::Target>,
+    /// Maximum number of semantic errors to collect before stopping. Bounded for memory (e.g. ESP32 ~200KB).
+    pub max_errors: usize,
 }
 
 impl core::fmt::Debug for GlslOptions {
@@ -192,6 +197,7 @@ impl core::fmt::Debug for GlslOptions {
             .field("q32_opts", &self.q32_opts)
             .field("memory_optimized", &self.memory_optimized)
             .field("target_override", &self.target_override.is_some())
+            .field("max_errors", &self.max_errors)
             .finish()
     }
 }
@@ -241,6 +247,7 @@ impl GlslOptions {
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
             memory_optimized: Self::default_memory_optimized(),
             target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
     }
 
@@ -258,6 +265,7 @@ impl GlslOptions {
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
     }
 
@@ -276,6 +284,7 @@ impl GlslOptions {
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
     }
 
@@ -283,7 +292,7 @@ impl GlslOptions {
     /// Uses memory-optimized path, Q32 format, and embedded-appropriate ISA flags.
     #[cfg(not(feature = "std"))]
     pub fn host_jit_embedded_riscv32() -> Result<Self, GlslError> {
-        use crate::backend::target::{Target, default_riscv32_embedded_jit_flags};
+        use crate::backend::target::{default_riscv32_embedded_jit_flags, Target};
         use target_lexicon::Riscv32Architecture;
 
         let flags = default_riscv32_embedded_jit_flags()?;
@@ -295,6 +304,7 @@ impl GlslOptions {
             q32_opts: crate::backend::transform::q32::Q32Options::default(),
             memory_optimized: true,
             target_override: Some(target),
+            max_errors: DEFAULT_MAX_ERRORS,
         })
     }
 }

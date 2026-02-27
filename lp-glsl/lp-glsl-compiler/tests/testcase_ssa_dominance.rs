@@ -54,6 +54,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -97,6 +98,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -134,6 +136,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -190,6 +193,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -233,6 +237,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -281,6 +286,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -339,6 +345,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);
@@ -414,6 +421,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     let result = glsl_jit(glsl, options_q32);

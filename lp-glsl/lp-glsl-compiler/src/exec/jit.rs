@@ -1479,6 +1479,7 @@ mod tests {
             q32_opts: Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: crate::DEFAULT_MAX_ERRORS,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1502,6 +1503,7 @@ mod tests {
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: crate::DEFAULT_MAX_ERRORS,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1523,6 +1525,7 @@ mod tests {
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: crate::DEFAULT_MAX_ERRORS,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");
@@ -1545,6 +1548,7 @@ mod tests {
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
+            max_errors: crate::DEFAULT_MAX_ERRORS,
         };
 
         let mut executable = glsl_jit(source, options).expect("Compilation failed");

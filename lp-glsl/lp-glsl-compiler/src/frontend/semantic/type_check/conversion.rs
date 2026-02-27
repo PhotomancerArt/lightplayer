@@ -10,6 +10,9 @@ use alloc::format;
 /// Promote numeric types (GLSL spec implicit conversion rules)
 /// Implements GLSL spec: variables.adoc:1182-1229
 pub fn promote_numeric(lhs: &Type, rhs: &Type) -> Type {
+    if lhs.is_error() || rhs.is_error() {
+        return Type::Error;
+    }
     match (lhs, rhs) {
         (Type::Int, Type::Int) => Type::Int,
         (Type::UInt, Type::UInt) => Type::UInt,
@@ -26,6 +29,10 @@ pub fn promote_numeric(lhs: &Type, rhs: &Type) -> Type {
 
 /// Check if implicit conversion is allowed (GLSL spec: variables.adoc:1182-1229)
 pub fn can_implicitly_convert(from: &Type, to: &Type) -> bool {
+    // Error type: allow to suppress cascading diagnostics
+    if from.is_error() || to.is_error() {
+        return true;
+    }
     // Exact match always allowed
     if from == to {
         return true;
@@ -104,6 +111,9 @@ pub fn check_assignment_with_span(
     rhs_ty: &Type,
     span: Option<SourceSpan>,
 ) -> Result<(), GlslError> {
+    if lhs_ty.is_error() || rhs_ty.is_error() {
+        return Ok(());
+    }
     if !can_implicitly_convert(rhs_ty, lhs_ty) {
         let mut error = GlslError::new(ErrorCode::E0102, "type mismatch in assignment")
             .with_note(format!(

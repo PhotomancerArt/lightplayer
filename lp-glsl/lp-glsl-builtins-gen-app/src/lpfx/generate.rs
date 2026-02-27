@@ -194,6 +194,7 @@ fn format_type(ty: &Type) -> String {
         Type::Mat3 => "Type::Mat3".to_string(),
         Type::Mat4 => "Type::Mat4".to_string(),
         Type::Sampler2D => "Type::Sampler2D".to_string(),
+        Type::Error => "Type::Error".to_string(),
         Type::Struct(id) => format!("Type::Struct({})", id),
         Type::Array(inner, size) => {
             format!("Type::Array(Box::new({}), {})", format_type(inner), size)

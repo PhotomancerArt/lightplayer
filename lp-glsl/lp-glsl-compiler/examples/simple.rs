@@ -9,6 +9,7 @@ fn main() {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     // Example 1: Integer arithmetic

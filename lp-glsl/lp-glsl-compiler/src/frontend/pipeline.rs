@@ -4,7 +4,7 @@
 //! by different backends (JIT, code generation, CLIF output).
 
 use crate::error::{
-    ErrorCode, GlslError, format_source_lines_around_span, source_span_to_location,
+    ErrorCode, GlslDiagnostics, GlslError, format_source_lines_around_span, source_span_to_location,
 };
 use crate::frontend::semantic::TypedShader;
 use crate::frontend::semantic::functions::FunctionRegistry;
@@ -103,10 +103,14 @@ impl CompilationPipeline {
     }
 
     /// Perform semantic analysis on parsed shader
-    pub fn analyze<'a>(parse_result: ParseResult<'a>) -> Result<SemanticResult<'a>, GlslError> {
+    pub fn analyze<'a>(
+        parse_result: ParseResult<'a>,
+        max_errors: usize,
+    ) -> Result<SemanticResult<'a>, GlslDiagnostics> {
         let typed_ast = crate::frontend::semantic::analyze_with_source(
             &parse_result.shader,
             parse_result.source,
+            max_errors,
         )?;
 
         Ok(SemanticResult {
@@ -133,26 +137,33 @@ impl CompilationPipeline {
     pub fn compile<'a>(
         source: &'a str,
         transforms: &[Box<dyn TransformationPass>],
-    ) -> Result<SemanticResult<'a>, GlslError> {
-        let parse_result = Self::parse(source)?;
-        let semantic_result = Self::analyze(parse_result)?;
+        max_errors: usize,
+    ) -> Result<SemanticResult<'a>, GlslDiagnostics> {
+        let parse_result =
+            Self::parse(source).map_err(|e| GlslDiagnostics::single(e, max_errors))?;
+        let semantic_result = Self::analyze(parse_result, max_errors)?;
         Self::transform(semantic_result, transforms)
+            .map_err(|e| GlslDiagnostics::single(e, max_errors))
     }
 
-    /// Parse and analyze in one step (backward compatibility)
-    pub fn parse_and_analyze<'a>(source: &'a str) -> Result<SemanticResult<'a>, GlslError> {
-        let parse_result = Self::parse(source)?;
-        Self::analyze(parse_result)
+    /// Parse and analyze in one step
+    pub fn parse_and_analyze<'a>(
+        source: &'a str,
+        max_errors: usize,
+    ) -> Result<SemanticResult<'a>, GlslDiagnostics> {
+        let parse_result =
+            Self::parse(source).map_err(|e| GlslDiagnostics::single(e, max_errors))?;
+        Self::analyze(parse_result, max_errors)
     }
 }
 
 /// Parse and type-check a GLSL program, returning function registry
 /// This function is useful for extracting function signatures without full compilation
-pub fn parse_program_with_registry(source: &str) -> Result<FunctionRegistry, GlslError> {
-    // Parse and analyze the program
-    let semantic_result = CompilationPipeline::parse_and_analyze(source)?;
-
-    // Extract function registry from the typed shader
+pub fn parse_program_with_registry(
+    source: &str,
+    max_errors: usize,
+) -> Result<FunctionRegistry, GlslDiagnostics> {
+    let semantic_result = CompilationPipeline::parse_and_analyze(source, max_errors)?;
     Ok(semantic_result.typed_ast.function_registry)
 }
 

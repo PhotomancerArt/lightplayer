@@ -1,10 +1,10 @@
-use crate::error::GlslError;
+use crate::error::GlslDiagnostics;
 use glsl::syntax::TranslationUnit;
 use passes::SemanticPass;
 
+use alloc::string::String;
 use alloc::vec::Vec;
 
-use alloc::string::String;
 pub mod builtins;
 pub mod functions;
 pub mod lpfx;
@@ -48,31 +48,35 @@ impl SemanticAnalyzer {
         &mut self,
         shader: &TranslationUnit,
         source: &str,
-    ) -> Result<TypedShader, GlslError> {
+        max_errors: usize,
+    ) -> Result<TypedShader, GlslDiagnostics> {
+        let mut diagnostics = GlslDiagnostics::new(max_errors);
+
         // Pass 1: Collect function signatures
         let mut registry_pass = passes::function_registry::FunctionRegistryPass::new();
-        registry_pass.run(shader, source)?;
+        registry_pass.run(shader, source, &mut diagnostics);
         let registry = registry_pass.into_registry();
 
         // Pass 2: Extract function bodies
         let mut extraction_pass = passes::function_extraction::FunctionExtractionPass::new();
-        extraction_pass.run(shader, source)?;
+        extraction_pass.run(shader, source, &mut diagnostics);
         let (main_func, user_functions) = extraction_pass.into_results();
 
         // Pass 3: Validate
-        // Main function is optional for filetests (functions can be called directly)
-        // For backward compatibility, we still allow requiring main, but don't enforce it here
         let typed_shader = TypedShader {
             main_function: main_func,
             user_functions,
             function_registry: registry,
         };
 
-        // Pass 3 (continued): Validate (using reference to registry from typed_shader)
         let mut validation_pass = passes::validation::ValidationPass;
-        validation_pass.validate(&typed_shader, source)?;
+        validation_pass.validate(&typed_shader, source, &mut diagnostics);
 
-        Ok(typed_shader)
+        if diagnostics.errors.is_empty() {
+            Ok(typed_shader)
+        } else {
+            Err(diagnostics)
+        }
     }
 }
 
@@ -83,15 +87,15 @@ impl Default for SemanticAnalyzer {
 }
 
 /// Analyze GLSL shader and produce typed AST
-pub fn analyze(shader: &TranslationUnit) -> Result<TypedShader, GlslError> {
-    analyze_with_source(shader, "")
+pub fn analyze(shader: &TranslationUnit) -> Result<TypedShader, GlslDiagnostics> {
+    analyze_with_source(shader, "", crate::DEFAULT_MAX_ERRORS)
 }
 
 /// Analyze GLSL shader with source text for better error messages
-/// This function maintains backward compatibility with the old API
 pub fn analyze_with_source(
     shader: &TranslationUnit,
     source: &str,
-) -> Result<TypedShader, GlslError> {
-    SemanticAnalyzer::new().analyze(shader, source)
+    max_errors: usize,
+) -> Result<TypedShader, GlslDiagnostics> {
+    SemanticAnalyzer::new().analyze(shader, source, max_errors)
 }

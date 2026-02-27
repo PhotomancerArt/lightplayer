@@ -2,7 +2,7 @@
 
 use super::SemanticPass;
 use super::function_signature;
-use crate::error::GlslError;
+use crate::error::GlslDiagnostics;
 use crate::frontend::semantic::functions::FunctionRegistry;
 
 pub struct FunctionRegistryPass {
@@ -26,15 +26,25 @@ impl SemanticPass for FunctionRegistryPass {
         &mut self,
         shader: &glsl::syntax::TranslationUnit,
         _source: &str,
-    ) -> Result<(), GlslError> {
-        // Extract function signatures (first pass logic)
+        diagnostics: &mut GlslDiagnostics,
+    ) {
         for decl in &shader.0 {
+            if diagnostics.at_limit() {
+                break;
+            }
             if let glsl::syntax::ExternalDeclaration::FunctionDefinition(func) = decl {
-                let sig = function_signature::extract_function_signature(&func.prototype)?;
-                self.registry.register_function(sig)?;
+                match function_signature::extract_function_signature(&func.prototype) {
+                    Ok(sig) => {
+                        let _ = self.registry.register_function(sig);
+                    }
+                    Err(e) => {
+                        if !diagnostics.push(e) {
+                            break;
+                        }
+                    }
+                }
             }
         }
-        Ok(())
     }
 
     fn name(&self) -> &str {

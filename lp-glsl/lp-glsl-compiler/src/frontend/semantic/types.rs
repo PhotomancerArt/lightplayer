@@ -28,11 +28,18 @@ pub enum Type {
     Sampler2D,
     Struct(StructId),
     Array(Box<Type>, usize),
+    /// Placeholder when inference fails; prevents cascading diagnostics.
+    Error,
 }
 
 pub type StructId = usize;
 
 impl Type {
+    /// Returns true if this type is the error placeholder (inference failed).
+    pub fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
+    }
+
     /// Returns true if this type is numeric (can be used in arithmetic)
     pub fn is_numeric(&self) -> bool {
         match self {
@@ -194,6 +201,12 @@ impl Type {
     pub fn to_cranelift_type(
         &self,
     ) -> Result<cranelift_codegen::ir::Type, crate::error::GlslError> {
+        if self.is_error() {
+            return Err(crate::error::GlslError::new(
+                crate::error::ErrorCode::E0109,
+                "Error type has no Cranelift representation",
+            ));
+        }
         match self {
             Type::Bool => Ok(cranelift_codegen::ir::types::I8),
             Type::Int => Ok(cranelift_codegen::ir::types::I32),

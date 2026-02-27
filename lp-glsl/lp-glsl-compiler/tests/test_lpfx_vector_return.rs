@@ -6,7 +6,9 @@
 
 #[cfg(feature = "emulator")]
 use lp_glsl_compiler::glsl_emu_riscv32;
-use lp_glsl_compiler::{DecimalFormat, GlslOptions, GlslValue, Q32Options, RunMode, glsl_jit};
+use lp_glsl_compiler::{
+    DEFAULT_MAX_ERRORS, DecimalFormat, GlslOptions, GlslValue, Q32Options, RunMode, glsl_jit,
+};
 
 /// Test lpfx_hsv2rgb with vec3 return (result pointer parameter) in JIT mode
 #[test]
@@ -26,6 +28,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: DEFAULT_MAX_ERRORS,
     };
 
     // Compile and execute
@@ -115,6 +118,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: lp_glsl_compiler::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: DEFAULT_MAX_ERRORS,
     };
 
     // Compile and execute
@@ -196,6 +200,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
+        max_errors: DEFAULT_MAX_ERRORS,
     };
 
     // Compile and execute

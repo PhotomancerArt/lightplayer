@@ -13,6 +13,8 @@ pub(crate) mod jit;
 
 #[cfg(feature = "emulator")]
 pub use emu::GlslEmulatorModule;
-pub use executable::{DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, RunMode};
+pub use executable::{
+    DEFAULT_MAX_ERRORS, DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, RunMode,
+};
 pub use glsl_value::GlslValue;
 pub use jit::GlslJitModule;

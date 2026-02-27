@@ -23,7 +23,10 @@ pub use backend::transform::q32::Q32Options;
 #[cfg(feature = "emulator")]
 pub use exec::GlslEmulatorModule;
 pub use exec::GlslJitModule;
-pub use exec::{DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, GlslValue, RunMode};
+pub use exec::{
+    DEFAULT_MAX_ERRORS, DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, GlslValue,
+    RunMode,
+};
 pub use frontend::codegen;
 pub use frontend::semantic;
 pub use frontend::{
@@ -33,7 +36,7 @@ pub use frontend::{
 
 /// Type alias for convenience
 pub type Compiler = GlslCompiler;
-pub use error::{ErrorCode, GlslError};
+pub use error::{ErrorCode, GlslDiagnostics, GlslError};
 pub use frontend::semantic::type_check::inference::infer_expr_type_in_context;
 
 // Public API functions
