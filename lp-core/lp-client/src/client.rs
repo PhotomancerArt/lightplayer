@@ -220,9 +220,7 @@ impl LpClient {
             let total_kb = mem.total_bytes / 1024;
 
             line.push_str(&format!(
-                " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} ({free_kb}k free / {total_kb}k total)",
-                bar = bar,
-                used_pct = used_pct
+                " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} ({free_kb}k free / {total_kb}k total)"
             ));
         }
 

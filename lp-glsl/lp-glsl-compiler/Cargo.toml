@@ -26,6 +26,7 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst", optional = true }
 lp-glsl-builtins = { path = "../lp-glsl-builtins" }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
+libm = "0.2"
 anyhow = { workspace = true, optional = true }
 log = { workspace = true, default-features = false }
 

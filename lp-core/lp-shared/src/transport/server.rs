@@ -52,7 +52,7 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 ///     }
 /// }
 /// ```
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, reason = "trait async fn stable in Rust 1.75+")]
 pub trait ServerTransport {
     /// Send a server message (consumes the message)
     async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError>;

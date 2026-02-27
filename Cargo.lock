@@ -3390,6 +3390,7 @@ dependencies = [
  "cranelift-reader",
  "glsl",
  "hashbrown 0.15.5",
+ "libm",
  "log",
  "lp-glsl-builtins",
  "lp-glsl-jit-util",

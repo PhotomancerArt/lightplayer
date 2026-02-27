@@ -8,6 +8,7 @@ use crate::error::{GlslDiagnostics, GlslError, extract_span_from_expr, source_sp
 use crate::frontend::semantic::const_eval::{self, ConstEnv, ConstValue};
 use hashbrown::HashMap;
 
+use alloc::format;
 use alloc::string::String;
 
 /// Check if a FullySpecifiedType has the const qualifier.

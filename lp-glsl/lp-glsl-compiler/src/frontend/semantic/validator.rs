@@ -18,8 +18,7 @@ use crate::frontend::semantic::types::Type;
 use glsl::syntax::{JumpStatement, SimpleStatement, Statement};
 use glsl::syntax::{StorageQualifier, TypeQualifierSpec};
 
-use alloc::format;
-use alloc::vec::Vec;
+use alloc::{format, vec, vec::Vec};
 
 fn has_const_qualifier(ty: &glsl::syntax::FullySpecifiedType) -> bool {
     let Some(ref type_qual) = ty.qualifier else {

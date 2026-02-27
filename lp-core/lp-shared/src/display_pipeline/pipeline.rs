@@ -12,7 +12,10 @@ use super::dither::dither_step;
 /// Below this value (post-LUT, post-brightness), use shared luminance dithering
 /// to avoid R/G/B divergence and color flicker. ~5% of 16-bit max.
 /// Disabled for now—was making colored light monochrome.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "kept for potential future luminance dithering tuning"
+)]
 const LOW_GRAY_THRESHOLD: u32 = 65535 / 20;
 
 /// Triple-buffered display pipeline. 16-bit in, 8-bit out.

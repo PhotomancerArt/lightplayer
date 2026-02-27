@@ -7,7 +7,7 @@ use crate::semantic::types::Type as GlslType;
 use cranelift_codegen::ir::{InstBuilder, Value, types};
 use glsl::syntax::Expr;
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 pub fn emit_variable<M: cranelift_module::Module>(
     ctx: &mut CodegenContext<'_, M>,

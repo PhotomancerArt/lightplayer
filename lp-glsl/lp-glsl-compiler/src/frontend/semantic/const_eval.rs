@@ -138,8 +138,7 @@ pub fn eval_constant_expr(
         }
 
         _ => Err(err(&format!(
-            "expression is not a constant expression: {:?}",
-            expr
+            "expression is not a constant expression: {expr:?}"
         ))),
     }
 }
@@ -394,28 +393,28 @@ fn eval_builtin(
                 return Err("floor requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "floor requires numeric")?;
-            Ok(Some(ConstValue::Float(x.floor())))
+            Ok(Some(ConstValue::Float(libm::floorf(x))))
         }
         "trunc" => {
             if args.len() != 1 {
                 return Err("trunc requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "trunc requires numeric")?;
-            Ok(Some(ConstValue::Float(x.trunc())))
+            Ok(Some(ConstValue::Float(libm::truncf(x))))
         }
         "round" => {
             if args.len() != 1 {
                 return Err("round requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "round requires numeric")?;
-            Ok(Some(ConstValue::Float(x.round())))
+            Ok(Some(ConstValue::Float(libm::roundf(x))))
         }
         "ceil" => {
             if args.len() != 1 {
                 return Err("ceil requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "ceil requires numeric")?;
-            Ok(Some(ConstValue::Float(x.ceil())))
+            Ok(Some(ConstValue::Float(libm::ceilf(x))))
         }
         "min" => {
             if args.len() != 2 {
@@ -448,21 +447,21 @@ fn eval_builtin(
             }
             let a = scalar_from_const(&args[0]).map_err(|_| "mod requires numeric")?;
             let b = scalar_from_const(&args[1]).map_err(|_| "mod requires numeric")?;
-            Ok(Some(ConstValue::Float(a - (a / b).floor() * b)))
+            Ok(Some(ConstValue::Float(a - libm::floorf(a / b) * b)))
         }
         "sqrt" => {
             if args.len() != 1 {
                 return Err("sqrt requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "sqrt requires numeric")?;
-            Ok(Some(ConstValue::Float(x.sqrt())))
+            Ok(Some(ConstValue::Float(libm::sqrtf(x))))
         }
         "inversesqrt" => {
             if args.len() != 1 {
                 return Err("inversesqrt requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "inversesqrt requires numeric")?;
-            Ok(Some(ConstValue::Float(1.0 / x.sqrt())))
+            Ok(Some(ConstValue::Float(1.0 / libm::sqrtf(x))))
         }
         "pow" => {
             if args.len() != 2 {
@@ -470,35 +469,35 @@ fn eval_builtin(
             }
             let base = scalar_from_const(&args[0]).map_err(|_| "pow requires numeric")?;
             let exp = scalar_from_const(&args[1]).map_err(|_| "pow requires numeric")?;
-            Ok(Some(ConstValue::Float(base.powf(exp))))
+            Ok(Some(ConstValue::Float(libm::powf(base, exp))))
         }
         "exp" => {
             if args.len() != 1 {
                 return Err("exp requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "exp requires numeric")?;
-            Ok(Some(ConstValue::Float(x.exp())))
+            Ok(Some(ConstValue::Float(libm::expf(x))))
         }
         "log" => {
             if args.len() != 1 {
                 return Err("log requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "log requires numeric")?;
-            Ok(Some(ConstValue::Float(x.ln())))
+            Ok(Some(ConstValue::Float(libm::logf(x))))
         }
         "exp2" => {
             if args.len() != 1 {
                 return Err("exp2 requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "exp2 requires numeric")?;
-            Ok(Some(ConstValue::Float(2.0f32.powf(x))))
+            Ok(Some(ConstValue::Float(libm::exp2f(x))))
         }
         "log2" => {
             if args.len() != 1 {
                 return Err("log2 requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "log2 requires numeric")?;
-            Ok(Some(ConstValue::Float(x.log2())))
+            Ok(Some(ConstValue::Float(libm::log2f(x))))
         }
         "radians" => {
             if args.len() != 1 {
@@ -519,28 +518,28 @@ fn eval_builtin(
                 return Err("sin requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "sin requires numeric")?;
-            Ok(Some(ConstValue::Float(x.sin())))
+            Ok(Some(ConstValue::Float(libm::sinf(x))))
         }
         "cos" => {
             if args.len() != 1 {
                 return Err("cos requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "cos requires numeric")?;
-            Ok(Some(ConstValue::Float(x.cos())))
+            Ok(Some(ConstValue::Float(libm::cosf(x))))
         }
         "asin" => {
             if args.len() != 1 {
                 return Err("asin requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "asin requires numeric")?;
-            Ok(Some(ConstValue::Float(x.asin())))
+            Ok(Some(ConstValue::Float(libm::asinf(x))))
         }
         "acos" => {
             if args.len() != 1 {
                 return Err("acos requires 1 argument");
             }
             let x = scalar_from_const(&args[0]).map_err(|_| "acos requires numeric")?;
-            Ok(Some(ConstValue::Float(x.acos())))
+            Ok(Some(ConstValue::Float(libm::acosf(x))))
         }
         "length" => {
             if args.len() != 1 {
@@ -548,10 +547,10 @@ fn eval_builtin(
             }
             let len = match &args[0] {
                 ConstValue::Float(f) => *f,
-                ConstValue::Vec2(v) => (v[0] * v[0] + v[1] * v[1]).sqrt(),
-                ConstValue::Vec3(v) => (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                ConstValue::Vec2(v) => libm::sqrtf(v[0] * v[0] + v[1] * v[1]),
+                ConstValue::Vec3(v) => libm::sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]),
                 ConstValue::Vec4(v) => {
-                    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt()
+                    libm::sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
                 }
                 _ => return Err("length requires float or vector"),
             };
@@ -580,10 +579,10 @@ fn eval_builtin(
             }
             let len = match &args[0] {
                 ConstValue::Float(f) => *f,
-                ConstValue::Vec2(v) => (v[0] * v[0] + v[1] * v[1]).sqrt(),
-                ConstValue::Vec3(v) => (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                ConstValue::Vec2(v) => libm::sqrtf(v[0] * v[0] + v[1] * v[1]),
+                ConstValue::Vec3(v) => libm::sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]),
                 ConstValue::Vec4(v) => {
-                    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt()
+                    libm::sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
                 }
                 _ => return Err("normalize requires float or vector"),
             };

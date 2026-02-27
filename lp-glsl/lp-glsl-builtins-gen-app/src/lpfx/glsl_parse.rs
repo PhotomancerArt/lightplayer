@@ -37,7 +37,7 @@ pub fn parse_glsl_signature(
     // Find the function definition in the shader
     for decl in &shader.0 {
         if let ExternalDeclaration::FunctionDefinition(func_def) = decl {
-            return extract_function_signature(&func_def.prototype).map_err(|e| {
+            return extract_function_signature(&func_def.prototype, None).map_err(|e| {
                 LpfxCodegenError::InvalidSignature {
                     function_name: function_name.to_string(),
                     file_path: file_path.to_string(),

@@ -183,27 +183,8 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
             print_memory_stats("After glsl_jit");
             exe
         }
-        Err(e) => {
-            use alloc::format;
-            let mut error_msg =
-                format!("GLSL compilation failed!\nError: {}\n", e.message.as_str());
-            if let Some(ref loc) = e.location {
-                error_msg.push_str(&format!("At line {}, column {}\n", loc.line, loc.column));
-            }
-            if let Some(ref span) = e.span_text {
-                error_msg.push_str(&format!("Source code: {}\n", span.as_str()));
-            }
-            if !e.notes.is_empty() {
-                error_msg.push_str("Error details:\n");
-                for note in &e.notes {
-                    for line in note.lines() {
-                        if !line.trim().is_empty() {
-                            error_msg.push_str(&format!("  {}\n", line));
-                        }
-                    }
-                }
-            }
-            panic!("{}", error_msg.as_str());
+        Err(diag) => {
+            panic!("GLSL compilation failed!\n{diag}");
         }
     };
 

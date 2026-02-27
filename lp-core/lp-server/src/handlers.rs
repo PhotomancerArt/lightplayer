@@ -232,7 +232,7 @@ fn handle_stop_all_projects(
     memory_stats: Option<&MemoryStatsFn>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let count = project_manager.list_loaded_projects().len();
-    log::info!("Stopping all projects ({} loaded)", count);
+    log::info!("Stopping all projects ({count} loaded)");
     log_memory(memory_stats, "stop_all_projects before");
     project_manager.unload_all_projects()?;
     log_memory(memory_stats, "stop_all_projects after");

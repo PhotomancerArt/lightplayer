@@ -2,7 +2,7 @@
 
 use crate::error::{GlslError, extract_span_from_identifier, source_span_to_location};
 use crate::frontend::codegen::context::CodegenContext;
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
 use super::super::types::{LValue, PointerAccessPattern};
 
