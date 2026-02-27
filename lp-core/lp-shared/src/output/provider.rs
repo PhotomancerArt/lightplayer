@@ -1,4 +1,8 @@
+use crate::display_pipeline::DisplayPipelineOptions;
 use crate::error::OutputError;
+
+/// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.
+pub type OutputDriverOptions = DisplayPipelineOptions;
 
 /// Handle for an opened output channel
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,20 +51,21 @@ pub trait OutputProvider {
         pin: u32,
         byte_count: u32,
         format: OutputFormat,
+        options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError>;
 
-    /// Write data to an output channel
+    /// Write 16-bit RGB data to an output channel
     ///
     /// # Arguments
     /// * `handle` - Output channel handle from `open()`
-    /// * `data` - Data to write (must match `byte_count` from `open()`)
+    /// * `data` - 16-bit RGB data: [r,g,b; num_leds], length = num_leds * 3
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or `OutputError` if:
     /// - Handle is invalid
-    /// - Data length doesn't match expected byte_count
+    /// - Data length doesn't match expected (num_leds * 3)
     /// - Hardware write failed
-    fn write(&self, handle: OutputChannelHandle, data: &[u8]) -> Result<(), OutputError>;
+    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError>;
 
     /// Close an output channel
     ///

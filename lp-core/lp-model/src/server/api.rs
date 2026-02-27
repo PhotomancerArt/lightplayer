@@ -75,19 +75,23 @@ pub enum ServerMsgBody {
     ///
     /// # Fields
     ///
-    /// * `fps` - Current frames per second (calculated over recent frames)
+    /// * `fps` - FPS statistics (avg, sdev, min, max) over a recent window (e.g. 5s)
     /// * `frame_count` - Total frame count since server startup
     /// * `loaded_projects` - List of currently loaded projects with handles and paths
     /// * `uptime_ms` - Server uptime in milliseconds since startup
+    /// * `memory` - Optional memory statistics (platform-dependent; ESP32 reports heap)
     Heartbeat {
-        /// Current FPS (frames per second)
-        fps: u32,
+        /// FPS statistics over the configured window (e.g. 5 seconds)
+        fps: SampleStats,
         /// Total frame count since startup
         frame_count: u64,
         /// List of loaded projects
         loaded_projects: Vec<LoadedProject>,
         /// Uptime in milliseconds since server startup
         uptime_ms: u64,
+        /// Optional memory statistics (ESP32 reports heap; absent on other platforms)
+        #[serde(default)]
+        memory: Option<MemoryStats>,
     },
     /// Error response for any request type
     Error {
@@ -108,8 +112,29 @@ pub struct AvailableProject {
     pub path: LpPathBuf,
 }
 
+/// Sample statistics over a time window (e.g. FPS over 5s).
+///
+/// Reusable for any scalar metric: avg, population standard deviation, min, max.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleStats {
+    pub avg: f32,
+    pub sdev: f32,
+    pub min: f32,
+    pub max: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadedProject {
     pub handle: ProjectHandle,
     pub path: LpPathBuf,
+}
+
+/// Optional memory statistics (platform-dependent; ESP32 reports heap).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStats {
+    pub free_bytes: u32,
+    pub used_bytes: u32,
+    pub total_bytes: u32,
 }

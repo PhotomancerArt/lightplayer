@@ -12,6 +12,7 @@ extern crate alloc;
 use esp_backtrace as _; // Import to activate panic handler
 
 mod board;
+#[cfg(feature = "demo_project")]
 mod demo_project;
 mod jit_fns;
 mod logger;
@@ -19,14 +20,17 @@ mod output;
 mod serial;
 mod server_loop;
 mod time;
+#[cfg(feature = "server")]
+mod transport;
 
-use alloc::{boxed::Box, format, rc::Rc, string::String};
+use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
 
 use board::{init_board, start_runtime};
 use fw_core::message_router::MessageRouter;
-use fw_core::transport::MessageRouterTransport;
-use lp_model::{ClientMessage, ClientRequest, json, path::AsLpPath};
+use lp_model::path::AsLpPath;
+#[cfg(feature = "demo_project")]
+use lp_model::{ClientMessage, ClientRequest, json};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
@@ -41,6 +45,11 @@ mod tests {
     pub mod test_rmt;
 }
 
+#[cfg(feature = "test_dither")]
+mod tests {
+    pub mod test_dither;
+}
+
 #[cfg(feature = "test_gpio")]
 mod tests {
     pub mod test_gpio;
@@ -51,7 +60,19 @@ mod tests {
     pub mod test_usb;
 }
 
+#[cfg(feature = "test_json")]
+mod tests {
+    pub mod test_json;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
+
+fn esp32_memory_stats() -> Option<(u32, u32)> {
+    Some((
+        esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
+        esp_alloc::HEAP.used().min(u32::MAX as usize) as u32,
+    ))
+}
 
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
@@ -67,13 +88,31 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_rmt_test().await;
     }
 
+    #[cfg(feature = "test_dither")]
+    {
+        use tests::test_dither::run_dithering_test;
+        run_dithering_test().await;
+    }
+
     #[cfg(feature = "test_usb")]
     {
         use tests::test_usb::run_usb_test;
         run_usb_test(spawner).await;
     }
 
-    #[cfg(not(any(feature = "test_rmt", feature = "test_gpio", feature = "test_usb")))]
+    #[cfg(feature = "test_json")]
+    {
+        use tests::test_json::run_test_json;
+        run_test_json(spawner).await;
+    }
+
+    #[cfg(not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_usb",
+        feature = "test_json"
+    )))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
@@ -87,36 +126,42 @@ async fn main(spawner: embassy_executor::Spawner) {
         // or can be disabled if USB host is not connected
         esp_println::println!("[INIT] fw-esp32 starting...");
 
-        // Create message router with static channels
-        esp_println::println!("[INIT] Creating message router...");
+        // Create message router with static channels (used for demo_project send_incoming)
         let (incoming_channel, outgoing_channel) = get_message_channels();
+        #[allow(
+            unused_variables,
+            reason = "router used only in demo_project feature block"
+        )]
         let router = MessageRouter::new(incoming_channel, outgoing_channel);
-        esp_println::println!("[INIT] Message router created");
 
         // Spawn I/O task (handles serial communication)
         esp_println::println!("[INIT] Spawning I/O task...");
         spawner.spawn(io_task(usb_device)).ok();
         esp_println::println!("[INIT] I/O task spawned");
 
-        // Queue LoadProject message to auto-load the demo project
-        // This simulates what FakeTransport used to do
-        // Send to incoming channel so server loop can receive it
-        esp_println::println!("[INIT] Queueing LoadProject message...");
-        let load_msg = ClientMessage {
-            id: 1,
-            msg: ClientRequest::LoadProject {
-                path: String::from("test-project"),
-            },
-        };
-        let json = json::to_string(&load_msg).unwrap();
-        let message = format!("M!{json}\n");
-        router.send_incoming(message).ok(); // Non-blocking, ignore if queue full
-        esp_println::println!("[INIT] LoadProject message queued");
+        // Initialize log crate to write to outgoing serial (host will see these)
+        crate::logger::init(serial::io_task::log_write_to_outgoing);
 
-        // Create transport wrapper
-        esp_println::println!("[INIT] Creating MessageRouterTransport...");
-        let transport = MessageRouterTransport::new(router);
-        esp_println::println!("[INIT] MessageRouterTransport created");
+        #[cfg(feature = "demo_project")]
+        {
+            // Queue LoadProject message to auto-load the demo project
+            esp_println::println!("[INIT] Queueing LoadProject message...");
+            let load_msg = ClientMessage {
+                id: 1,
+                msg: ClientRequest::LoadProject {
+                    path: alloc::string::String::from("test-project"),
+                },
+            };
+            let json = json::to_string(&load_msg).unwrap();
+            let message = alloc::format!("M!{json}\n");
+            router.send_incoming(message).ok(); // Non-blocking, ignore if queue full
+            esp_println::println!("[INIT] LoadProject message queued");
+        }
+
+        // Create streaming transport (serializes in io_task, never buffers full JSON)
+        esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
+        let transport = transport::StreamingMessageRouterTransport::from_io_channels();
+        esp_println::println!("[INIT] StreamingMessageRouterTransport created");
 
         // Initialize RMT peripheral for output
         // Use 80MHz clock rate (standard for ESP32-C6)
@@ -146,20 +191,28 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Create filesystem (in-memory for now)
         esp_println::println!("[INIT] Creating in-memory filesystem...");
+        #[allow(unused_mut, reason = "base_fs mutated when populating demo_project")]
         let mut base_fs = Box::new(LpFsMemory::new());
         esp_println::println!("[INIT] In-memory filesystem created");
 
-        // Populate filesystem with basic test project
-        esp_println::println!("[INIT] Populating filesystem with basic test project...");
-        if let Err(e) = demo_project::write_basic_project(&mut base_fs) {
-            esp_println::println!("[WARN] Failed to populate test project: {:?}", e);
-        } else {
-            esp_println::println!("[INIT] Populated filesystem with basic test project");
+        #[cfg(feature = "demo_project")]
+        {
+            esp_println::println!("[INIT] Populating filesystem with basic test project...");
+            if let Err(e) = demo_project::write_basic_project(&mut base_fs) {
+                esp_println::println!("[WARN] Failed to populate test project: {:?}", e);
+            } else {
+                esp_println::println!("[INIT] Populated filesystem with basic test project");
+            }
         }
 
         // Create server
         esp_println::println!("[INIT] Creating LpServer instance...");
-        let server = LpServer::new(output_provider, base_fs, "projects/".as_path());
+        let server = LpServer::new(
+            output_provider,
+            base_fs,
+            "projects/".as_path(),
+            Some(esp32_memory_stats),
+        );
         esp_println::println!("[INIT] LpServer created");
 
         // Create time provider

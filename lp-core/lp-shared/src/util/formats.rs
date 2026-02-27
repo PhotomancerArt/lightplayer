@@ -1,25 +1,24 @@
 //! Texture format constants and utilities
 
-/// RGB8 format constant
+// Re-export TextureFormat from lp-model
+pub use lp_model::nodes::texture::TextureFormat;
+
+// Backward compatibility: Keep constants for migration period
+/// RGB8 format constant (deprecated: use TextureFormat::Rgb8)
 pub const RGB8: &str = "RGB8";
 
-/// RGBA8 format constant
+/// RGBA8 format constant (deprecated: use TextureFormat::Rgba8)
 pub const RGBA8: &str = "RGBA8";
 
-/// R8 format constant
+/// R8 format constant (deprecated: use TextureFormat::R8)
 pub const R8: &str = "R8";
 
-/// Check if a format string is valid
+/// Check if a format string is valid (deprecated: use TextureFormat::from_str)
 pub fn is_valid(format: &str) -> bool {
-    matches!(format, RGB8 | RGBA8 | R8)
+    TextureFormat::from_str(format).is_some()
 }
 
-/// Get bytes per pixel for a format
+/// Get bytes per pixel for a format (deprecated: use TextureFormat::bytes_per_pixel)
 pub fn bytes_per_pixel(format: &str) -> Option<usize> {
-    match format {
-        RGB8 => Some(3),
-        RGBA8 => Some(4),
-        R8 => Some(1),
-        _ => None,
-    }
+    TextureFormat::from_str(format).map(|f| f.bytes_per_pixel())
 }

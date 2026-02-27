@@ -271,7 +271,7 @@ impl WebSocketServerTransport {
 }
 
 impl ServerTransport for WebSocketServerTransport {
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         // Send to the first available connection
         // TODO: In phase 7, we'll need to route messages to the correct connection
         // based on the request ID or connection tracking
@@ -324,13 +324,13 @@ impl ServerTransport for WebSocketServerTransport {
         ))
     }
 
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
         // Check for messages in the queue
         let mut state = self.shared_state.lock().unwrap();
         Ok(state.pending_messages.pop_front().map(|(_, msg)| msg))
     }
 
-    fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
         // Drain all messages from the queue
         let mut state = self.shared_state.lock().unwrap();
         let mut messages = Vec::new();
@@ -340,7 +340,7 @@ impl ServerTransport for WebSocketServerTransport {
         Ok(messages)
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
+    async fn close(&mut self) -> Result<(), TransportError> {
         // Close all connections by clearing them
         let mut state = self.shared_state.lock().unwrap();
         state.connections.clear();

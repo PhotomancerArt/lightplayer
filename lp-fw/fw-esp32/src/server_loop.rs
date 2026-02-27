@@ -9,6 +9,7 @@
 //! - Total frame count since startup
 //! - List of loaded projects
 //! - Server uptime in milliseconds
+//! - Memory statistics (heap free/used from esp_alloc)
 //!
 //! These messages use `ServerMessage` with `id: 0` to indicate they are unsolicited
 //! status updates (not responses to client requests). Clients can subscribe to these
@@ -27,6 +28,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 use lp_model::Message;
 use lp_server::LpServer;
+use lp_shared::fps::FpsTracker;
+use lp_shared::stats::WindowedStatsCollector;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
 
@@ -37,6 +40,9 @@ const FPS_LOG_INTERVAL: u32 = 60;
 
 /// Heartbeat message interval (send every N milliseconds)
 const HEARTBEAT_INTERVAL_MS: u64 = 1000; // Send every second
+
+/// FPS statistics window: stats are computed over samples from the last N milliseconds
+const FPS_STATS_WINDOW_MS: u64 = 5000;
 
 /// Special message ID for unsolicited heartbeat messages
 ///
@@ -56,9 +62,10 @@ pub async fn run_server_loop<T: ServerTransport>(
 ) -> ! {
     let mut last_tick = time_provider.now_ms();
     let mut frame_count = 0u32;
-    let mut fps_last_log_time = time_provider.now_ms();
+    let mut fps_tracker = FpsTracker::new(time_provider.now_ms());
     let mut heartbeat_last_sent = time_provider.now_ms();
     let startup_time = time_provider.now_ms();
+    let mut fps_collector = WindowedStatsCollector::new();
 
     loop {
         let frame_start = time_provider.now_ms();
@@ -66,7 +73,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Collect incoming messages (non-blocking)
         let mut incoming_messages = Vec::new();
         loop {
-            match transport.receive() {
+            match transport.receive().await {
                 Ok(Some(msg)) => {
                     incoming_messages.push(Message::Client(msg));
                 }
@@ -92,7 +99,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                 // Send responses
                 for response in responses {
                     if let Message::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg) {
+                        if let Err(e) = transport.send(server_msg).await {
                             log::warn!("run_server_loop: Failed to send response: {e:?}");
                             // Transport error - continue with next message
                         }
@@ -111,11 +118,12 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Log FPS periodically
         let current_time = time_provider.now_ms();
         if frame_count % FPS_LOG_INTERVAL == 0 {
-            let elapsed_ms = current_time.saturating_sub(fps_last_log_time);
+            let elapsed_ms = current_time.saturating_sub(fps_tracker.last_log_time_ms());
             if elapsed_ms > 0 {
-                let fps = (FPS_LOG_INTERVAL as u64 * 1000) / elapsed_ms;
+                let frames_done = frame_count.saturating_sub(fps_tracker.last_log_frame());
+                let fps = (frames_done as u64 * 1000) / elapsed_ms;
                 log::info!("FPS: {fps} (frame_count: {frame_count}, elapsed: {elapsed_ms}ms)");
-                fps_last_log_time = current_time;
+                fps_tracker.record_log(frame_count, current_time);
             }
         }
 
@@ -126,37 +134,37 @@ pub async fn run_server_loop<T: ServerTransport>(
             // Get loaded projects from server
             let loaded_projects = server.project_manager().list_loaded_projects();
 
-            // Calculate current FPS (use same calculation as FPS logging)
-            let fps = if frame_count >= FPS_LOG_INTERVAL {
-                let elapsed_ms = current_time.saturating_sub(fps_last_log_time);
-                if elapsed_ms > 0 {
-                    ((FPS_LOG_INTERVAL as u64 * 1000) / elapsed_ms) as u32
-                } else {
-                    0
-                }
-            } else {
-                // Not enough frames yet - estimate from frame count and uptime
-                let uptime_ms = current_time.saturating_sub(startup_time);
-                if uptime_ms > 0 {
-                    ((frame_count as u64 * 1000) / uptime_ms) as u32
-                } else {
-                    0
-                }
-            };
+            let fps_current = fps_tracker
+                .instantaneous_fps(frame_count, current_time, startup_time)
+                .unwrap_or(0.0);
+
+            fps_collector.push(current_time, fps_current);
+            fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
+            let fps_stats = fps_collector.compute_stats();
+
+            // Query heap memory from esp_alloc
+            let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+            let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+            let memory = Some(lp_model::server::MemoryStats {
+                free_bytes,
+                used_bytes,
+                total_bytes: used_bytes.saturating_add(free_bytes),
+            });
 
             // Create heartbeat message
             let heartbeat_msg = lp_model::ServerMessage {
                 id: HEARTBEAT_MESSAGE_ID,
                 msg: lp_model::server::ServerMsgBody::Heartbeat {
-                    fps,
+                    fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,
                     uptime_ms: current_time.saturating_sub(startup_time),
+                    memory,
                 },
             };
 
             // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg) {
+            if let Err(e) = transport.send(heartbeat_msg).await {
                 log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
             }
 

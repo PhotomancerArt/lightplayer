@@ -26,7 +26,7 @@ pub fn init_board() -> (
     let peripherals = esp_hal::init(config);
 
     // Allocate heap
-    esp_alloc::heap_allocator!(size: 300_000);
+    esp_alloc::heap_allocator!(size: 340_000);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;

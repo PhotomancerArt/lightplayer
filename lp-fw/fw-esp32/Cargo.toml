@@ -15,13 +15,17 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "lp-model",
     "lp-server",
     "lp-shared",
-    "lp-model",
+    "ser-write-json",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
-test_rmt = []  # Test RMT driver with simple patterns
+test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
+test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
+demo_project = []  # Embed demo project and auto-load on boot (off by default; use for standalone runs)
+test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 
 [dependencies]
 embassy-executor = "0.9.1"
@@ -39,7 +43,8 @@ fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] 
 # This saves ~166-219 KB by disabling unused Cranelift optimizer and verifier code
 lp-server = { path = "../../lp-core/lp-server", default-features = false, optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
-lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true }
+lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true, features = ["ser-write-json"] }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 lp-engine = { path = "../../lp-core/lp-engine", default-features = false, optional = true }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }

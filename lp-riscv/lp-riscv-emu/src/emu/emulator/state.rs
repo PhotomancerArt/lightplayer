@@ -76,6 +76,12 @@ impl Riscv32Emulator {
         self
     }
 
+    /// Allow misaligned memory access (matches embedded targets like ESP32).
+    pub fn with_allow_unaligned_access(mut self, allow: bool) -> Self {
+        self.memory.set_allow_unaligned_access(allow);
+        self
+    }
+
     /// Get the number of instructions executed so far.
     pub fn get_instruction_count(&self) -> u64 {
         self.instruction_count

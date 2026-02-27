@@ -36,29 +36,27 @@ impl FakeTransport {
 }
 
 impl ServerTransport for FakeTransport {
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        // Log the message (if logging is available)
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         #[cfg(any(feature = "emu", feature = "esp32"))]
         log::debug!("FakeTransport: Would send message id={}", msg.id);
-
-        // Suppress unused variable warning when logging features are disabled
         #[cfg(not(any(feature = "emu", feature = "esp32")))]
         let _ = msg;
-
         Ok(())
     }
 
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-        // Return queued messages first, then None
-        if !self.message_queue.is_empty() {
-            Ok(Some(self.message_queue.remove(0)))
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        Ok(if self.message_queue.is_empty() {
+            None
         } else {
-            Ok(None)
-        }
+            Some(self.message_queue.remove(0))
+        })
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
-        // Nothing to close
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        Ok(core::mem::take(&mut self.message_queue))
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
     }
 }

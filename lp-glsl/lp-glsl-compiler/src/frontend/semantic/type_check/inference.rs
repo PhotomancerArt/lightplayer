@@ -6,7 +6,7 @@ use crate::error::{
     source_span_to_location,
 };
 use crate::frontend::semantic::functions::FunctionRegistry;
-use crate::frontend::semantic::scope::SymbolTable;
+use crate::frontend::semantic::scope::{StorageClass, SymbolTable};
 use crate::frontend::semantic::types::Type;
 use glsl::syntax::Expr;
 
@@ -76,7 +76,19 @@ pub fn infer_expr_type_with_registry(
             infer_unary_result_type(op, &expr_ty, span.clone())
         }
 
-        Expr::Assignment(lhs, _op, _rhs, _span) => {
+        Expr::Assignment(lhs, _op, _rhs, span) => {
+            // Reject assignment to const (spec §4.3.3)
+            if let Expr::Variable(ident, _) = lhs.as_ref() {
+                if let Some(var) = symbols.lookup_variable(&ident.name) {
+                    if var.storage_class == StorageClass::Const {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            format!("cannot assign to const variable `{}`", ident.name),
+                        )
+                        .with_location(source_span_to_location(span)));
+                    }
+                }
+            }
             // Assignment result has same type as LHS
             infer_expr_type_with_registry(lhs, symbols, func_registry)
         }

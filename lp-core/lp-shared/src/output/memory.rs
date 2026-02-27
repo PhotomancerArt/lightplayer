@@ -1,5 +1,7 @@
 use crate::error::OutputError;
-use crate::output::provider::{OutputChannelHandle, OutputFormat, OutputProvider};
+use crate::output::provider::{
+    OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
+};
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::vec;
@@ -9,10 +11,14 @@ use core::cell::RefCell;
 /// Channel state for in-memory provider
 struct ChannelState {
     pin: u32,
+    #[allow(
+        dead_code,
+        reason = "Stored for validation; may be used for protocol-specific handling"
+    )]
     byte_count: u32,
     #[allow(dead_code, reason = "Stored for future protocol-specific handling")]
     format: OutputFormat,
-    data: Vec<u8>,
+    data: Vec<u16>,
 }
 
 /// Internal state for memory provider (wrapped in RefCell for interior mutability)
@@ -42,8 +48,8 @@ impl MemoryOutputProvider {
         }
     }
 
-    /// Get the data written to a channel (for testing)
-    pub fn get_data(&self, handle: OutputChannelHandle) -> Option<Vec<u8>> {
+    /// Get the 16-bit data written to a channel (for testing)
+    pub fn get_data(&self, handle: OutputChannelHandle) -> Option<Vec<u16>> {
         self.state
             .borrow()
             .channels
@@ -84,7 +90,9 @@ impl OutputProvider for MemoryOutputProvider {
         pin: u32,
         byte_count: u32,
         format: OutputFormat,
+        options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
+        let _ = options;
         let mut state = self.state.borrow_mut();
 
         // Check if pin is already open
@@ -103,12 +111,16 @@ impl OutputProvider for MemoryOutputProvider {
         let handle = OutputChannelHandle::new(state.next_handle);
         state.next_handle += 1;
 
+        // num_leds = byte_count/3 (8-bit output size), 16-bit input = num_leds*3 u16s
+        let num_leds = (byte_count / 3) as usize;
+        let u16_count = num_leds * 3;
+
         // Create channel state
         let channel_state = ChannelState {
             pin,
             byte_count,
             format,
-            data: vec![0u8; byte_count as usize],
+            data: vec![0u16; u16_count],
         };
 
         // Store state
@@ -118,7 +130,7 @@ impl OutputProvider for MemoryOutputProvider {
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u8]) -> Result<(), OutputError> {
+    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
         let mut state = self.state.borrow_mut();
 
         // Check if handle exists and get mutable reference
@@ -130,16 +142,23 @@ impl OutputProvider for MemoryOutputProvider {
                     handle: handle.as_i32(),
                 })?;
 
-        // Validate data length
-        if data.len() != channel_state.byte_count as usize {
+        let expected_len = channel_state.data.len();
+
+        // Resize channel if data is larger (matches ESP32 provider behavior)
+        if data.len() > expected_len {
+            let new_len = (data.len() / 3) * 3; // round down to full LEDs
+            channel_state.data.resize(new_len, 0);
+            channel_state.byte_count = new_len as u32;
+        } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
-                expected: channel_state.byte_count,
+                expected: expected_len as u32,
                 actual: data.len(),
             });
         }
 
         // Store data
-        channel_state.data.copy_from_slice(data);
+        let len = channel_state.data.len();
+        channel_state.data.copy_from_slice(&data[..len]);
 
         Ok(())
     }

@@ -170,11 +170,36 @@ pub enum DecimalFormat {
     Q32,
 }
 
+/// Default maximum number of errors to collect before stopping (bounded for memory-constrained targets).
+pub const DEFAULT_MAX_ERRORS: usize = 20;
+
 /// Compilation options
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GlslOptions {
     pub run_mode: RunMode,
     pub decimal_format: DecimalFormat,
+    pub q32_opts: crate::backend::transform::q32::Q32Options,
+    /// Use memory-optimized JIT path that frees CLIF IR after each function.
+    /// Reduces OOM risk on embedded (no_std). Default: true when `std` is disabled.
+    pub memory_optimized: bool,
+    /// Override target (ISA, flags). When set, used instead of run_mode for target creation.
+    /// Enables embedded JIT with custom flags (e.g. ESP32-C6 uses Riscv32imac, opt_level=none).
+    pub target_override: Option<crate::backend::target::Target>,
+    /// Maximum number of semantic errors to collect before stopping. Bounded for memory (e.g. ESP32 ~200KB).
+    pub max_errors: usize,
+}
+
+impl core::fmt::Debug for GlslOptions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GlslOptions")
+            .field("run_mode", &self.run_mode)
+            .field("decimal_format", &self.decimal_format)
+            .field("q32_opts", &self.q32_opts)
+            .field("memory_optimized", &self.memory_optimized)
+            .field("target_override", &self.target_override.is_some())
+            .field("max_errors", &self.max_errors)
+            .finish()
+    }
 }
 
 impl GlslOptions {
@@ -208,11 +233,21 @@ impl GlslOptions {
         }
     }
 
+    /// Default value for memory_optimized: true on no_std (embedded), false otherwise.
+    #[inline]
+    pub fn default_memory_optimized() -> bool {
+        cfg!(not(feature = "std"))
+    }
+
     /// Default options for JIT execution
     pub fn jit() -> Self {
         Self {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Float,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: Self::default_memory_optimized(),
+            target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
     }
 
@@ -227,6 +262,10 @@ impl GlslOptions {
                 log_level: None,
             },
             decimal_format: DecimalFormat::Q32,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: false,
+            target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
     }
 
@@ -242,7 +281,31 @@ impl GlslOptions {
                 max_instructions: 10_000,
             },
             decimal_format: DecimalFormat::Q32,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: false,
+            target_override: None,
+            max_errors: DEFAULT_MAX_ERRORS,
         }
+    }
+
+    /// Options for embedded RISC-V 32 JIT (e.g. ESP32-C6).
+    /// Uses memory-optimized path, Q32 format, and embedded-appropriate ISA flags.
+    #[cfg(not(feature = "std"))]
+    pub fn host_jit_embedded_riscv32() -> Result<Self, GlslError> {
+        use crate::backend::target::{Target, default_riscv32_embedded_jit_flags};
+        use target_lexicon::Riscv32Architecture;
+
+        let flags = default_riscv32_embedded_jit_flags()?;
+        let target = Target::riscv32_host_jit(flags, Riscv32Architecture::Riscv32imac)?;
+
+        Ok(Self {
+            run_mode: RunMode::HostJit,
+            decimal_format: DecimalFormat::Q32,
+            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            memory_optimized: true,
+            target_override: Some(target),
+            max_errors: DEFAULT_MAX_ERRORS,
+        })
     }
 }
 

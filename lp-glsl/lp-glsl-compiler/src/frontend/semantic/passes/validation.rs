@@ -1,6 +1,6 @@
 //! Pass for validating function bodies
 
-use crate::error::GlslError;
+use crate::error::GlslDiagnostics;
 use crate::frontend::semantic::TypedShader;
 use crate::frontend::semantic::validator;
 
@@ -9,18 +9,36 @@ use crate::frontend::semantic::validator;
 pub struct ValidationPass;
 
 impl ValidationPass {
-    /// Run validation on a TypedShader (different from SemanticPass trait)
-    pub fn validate(&mut self, shader: &TypedShader, source: &str) -> Result<(), GlslError> {
-        // Validate all functions (third pass logic)
-        // Use the registry from the typed shader
+    /// Run validation on a TypedShader, collecting errors into diagnostics.
+    pub fn validate(
+        &mut self,
+        shader: &TypedShader,
+        source: &str,
+        diagnostics: &mut GlslDiagnostics,
+    ) {
         for func in &shader.user_functions {
-            validator::validate_function(func, &shader.function_registry, source)?;
+            if diagnostics.at_limit() {
+                break;
+            }
+            validator::validate_function(
+                func,
+                &shader.function_registry,
+                &shader.global_constants,
+                source,
+                diagnostics,
+            );
         }
-        // Validate main function if present (optional for filetests)
-        if let Some(ref main_function) = shader.main_function {
-            validator::validate_function(main_function, &shader.function_registry, source)?;
+        if !diagnostics.at_limit() {
+            if let Some(ref main_function) = shader.main_function {
+                validator::validate_function(
+                    main_function,
+                    &shader.function_registry,
+                    &shader.global_constants,
+                    source,
+                    diagnostics,
+                );
+            }
         }
-        Ok(())
     }
 }
 

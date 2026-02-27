@@ -11,10 +11,11 @@ default = ["std"]
 std = []
 
 [dependencies]
-log = { workspace = true, default-features = false }
 hashbrown = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+libm = "0.2"
+log = { workspace = true, default-features = false }
 lp-model = { path = "../lp-model", default-features = false }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

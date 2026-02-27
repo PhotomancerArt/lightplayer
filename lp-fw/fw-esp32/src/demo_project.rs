@@ -53,7 +53,8 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     }
   },
   "color_order": "Rgb",
-  "brightness": 128,
+  "brightness": 255,
+  "gamma_correction": false,
   "transform": [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -67,8 +68,8 @@ pub fn write_basic_project(fs: &mut LpFsMemory) -> Result<(), FsError> {
     fs.write_file_mut(
         "/projects/test-project/src/main.texture/node.json".as_path(),
         br#"{
-  "width": 12,
-  "height": 12
+  "width": 24,
+  "height": 24
 }"#,
     )?;
 
@@ -162,7 +163,12 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
         br#"{
   "glsl_path": "main.glsl",
   "texture_spec": "/src/main.texture",
-  "render_order": 0
+  "render_order": 0,
+  "glsl_opts": {
+    "add_sub": "wrapping",
+    "mul": "saturating",
+    "div": "saturating"
+  }
 }"#,
     )?;
 
@@ -170,7 +176,7 @@ vec4 prsd_demo(vec2 scaledCoord, float time) {
     // Note: Using pin 18 (GPIO18) which is hardcoded in Esp32OutputProvider
     fs.write_file_mut(
         "/projects/test-project/src/strip.output/node.json".as_path(),
-        br#"{"GpioStrip": {"pin": 18}}"#,
+        br#"{"GpioStrip": {"pin": 18, "options": {"interpolation_enabled": true, "dithering_enabled": false, "lut_enabled": true, "brightness": 0.25}}}"#,
     )?;
 
     Ok(())

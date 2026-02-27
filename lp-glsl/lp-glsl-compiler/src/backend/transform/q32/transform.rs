@@ -2,6 +2,7 @@
 
 use crate::backend::transform::pipeline::{Transform, TransformContext};
 use crate::backend::transform::q32::instructions::convert_all_instructions;
+use crate::backend::transform::q32::options::Q32Options;
 use crate::backend::transform::q32::signature::convert_signature;
 use crate::backend::transform::q32::types::FixedPointFormat;
 use crate::backend::transform::shared::transform_function_body;
@@ -12,17 +13,26 @@ use cranelift_module::Module;
 /// Q32 transform - converts F32 to fixed-point representation
 pub struct Q32Transform {
     format: FixedPointFormat,
+    q32_opts: Q32Options,
 }
 
 impl Q32Transform {
     /// Create a new Q32 transform with the specified format
     pub fn new(format: FixedPointFormat) -> Self {
-        Self { format }
+        Self {
+            format,
+            q32_opts: Q32Options::default(),
+        }
     }
 
     /// Create a Q32 transform with default format (Fixed16x16)
     pub fn default() -> Self {
         Self::new(FixedPointFormat::Fixed16x16)
+    }
+
+    pub fn with_q32_opts(mut self, q32_opts: Q32Options) -> Self {
+        self.q32_opts = q32_opts;
+        self
     }
 }
 
@@ -39,6 +49,7 @@ impl Transform for Q32Transform {
         // 1. Convert signature (happens before transform_function_body)
         let new_sig = convert_signature(&old_func.signature, self.format);
         let format = self.format;
+        let q32_opts = self.q32_opts;
 
         // 2. Get pointer type from module ISA (needed for builtin signatures)
         let pointer_type = ctx.module.module_internal().isa().pointer_type();
@@ -67,6 +78,7 @@ impl Transform for Q32Transform {
                     builder,
                     value_map,
                     format,
+                    q32_opts,
                     block_map,
                     stack_slot_map,
                     &mut *call_state.borrow_mut(),

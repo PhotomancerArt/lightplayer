@@ -172,7 +172,7 @@ async fn handle_dev_async(
         if let Err(e) = eframe::run_native(
             "LightPlayer Dev UI",
             options,
-            Box::new(|_cc| Box::new(ui_state)),
+            Box::new(|_cc| Ok(Box::new(ui_state))),
         ) {
             eprintln!("UI error: {e}");
         }

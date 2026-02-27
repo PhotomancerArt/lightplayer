@@ -542,6 +542,17 @@ fn extract_functions_from_source_using_ast(
     // Sort by start line to maintain order
     function_ranges.sort_by_key(|(start, _)| *start);
 
+    // Include all lines before the first function as preamble (global declarations like const).
+    // Filtered functions may depend on these.
+    let min_func_start = function_ranges
+        .first()
+        .map(|(s, _)| *s)
+        .unwrap_or(usize::MAX);
+    if min_func_start > 1 {
+        function_ranges.insert(0, (1, min_func_start.saturating_sub(1)));
+    }
+    function_ranges.sort_by_key(|(start, _)| *start);
+
     // Extract the functions from source
     let mut result = String::new();
     let mut extracted_lines = HashSet::new();

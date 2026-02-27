@@ -256,6 +256,74 @@ impl fmt::Display for GlslError {
 #[cfg(feature = "std")]
 impl std::error::Error for GlslError {}
 
+/// Collection of compilation diagnostics with bounded size for memory-constrained targets.
+#[derive(Clone, Debug)]
+pub struct GlslDiagnostics {
+    pub errors: Vec<GlslError>,
+    /// Limit used (for display: "further errors suppressed")
+    pub limit: usize,
+}
+
+impl GlslDiagnostics {
+    /// Create diagnostics collector with the given error limit.
+    pub fn new(limit: usize) -> Self {
+        Self {
+            errors: Vec::new(),
+            limit,
+        }
+    }
+
+    /// Add an error. Returns false if at limit (callers can stop collecting).
+    pub fn push(&mut self, e: GlslError) -> bool {
+        if self.errors.len() < self.limit {
+            self.errors.push(e);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether the error limit has been reached.
+    pub fn at_limit(&self) -> bool {
+        self.errors.len() >= self.limit
+    }
+
+    /// Wrap a single error (e.g. parse error) as GlslDiagnostics.
+    pub fn single(e: GlslError, limit: usize) -> Self {
+        let mut errors = Vec::new();
+        errors.push(e);
+        Self { errors, limit }
+    }
+}
+
+impl fmt::Display for GlslDiagnostics {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, err) in self.errors.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{err}")?;
+        }
+        if self.at_limit() && !self.errors.is_empty() {
+            writeln!(
+                f,
+                "\nnote: further errors suppressed (limit {})",
+                self.limit
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for GlslDiagnostics {}
+
+impl From<GlslError> for GlslDiagnostics {
+    fn from(e: GlslError) -> Self {
+        GlslDiagnostics::single(e, crate::DEFAULT_MAX_ERRORS)
+    }
+}
+
 // Convenience constructors for common errors
 
 impl GlslError {

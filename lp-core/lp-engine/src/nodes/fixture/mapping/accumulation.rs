@@ -3,7 +3,12 @@
 use super::entry::PixelMappingEntry;
 use super::sampling::create_sampler;
 use alloc::vec::Vec;
-use lp_glsl_builtins::glsl::q32::types::q32::{Q32, ToQ32};
+use lp_glsl_builtins::glsl::q32::types::q32::Q32;
+
+/// Convert u8 (0-255) from sampler to Q32 (0-1)
+fn u8_to_q32_normalized(v: u8) -> Q32 {
+    Q32(((v as i64) * 65536 / 255) as i32)
+}
 
 /// Channel accumulator result
 pub struct ChannelAccumulators {
@@ -53,7 +58,7 @@ pub fn initialize_channel_accumulators(entries: &[PixelMappingEntry]) -> Channel
 /// # Arguments
 /// * `entries` - Precomputed mapping entries
 /// * `texture_data` - Raw texture pixel data
-/// * `texture_format` - Texture format string (RGB8, RGBA8, R8)
+/// * `texture_format` - Texture format
 /// * `texture_width` - Texture width in pixels
 /// * `texture_height` - Texture height in pixels
 ///
@@ -62,14 +67,14 @@ pub fn initialize_channel_accumulators(entries: &[PixelMappingEntry]) -> Channel
 pub fn accumulate_from_mapping(
     entries: &[PixelMappingEntry],
     texture_data: &[u8],
-    texture_format: &str,
+    texture_format: lp_model::nodes::texture::TextureFormat,
     texture_width: u32,
     texture_height: u32,
 ) -> ChannelAccumulators {
     let mut accumulators = initialize_channel_accumulators(entries);
 
     // Create format-specific sampler
-    let sampler = create_sampler(texture_format).expect("Unsupported texture format");
+    let sampler = create_sampler(texture_format);
 
     // Iterate through entries and accumulate
     // Entries are ordered by pixel (x, y), with consecutive entries per pixel
@@ -99,23 +104,19 @@ pub fn accumulate_from_mapping(
 
                 if contribution_raw == 0 {
                     // Full contribution (100%)
-                    accumulators.r[channel] += pixel_r.to_q32();
-                    accumulators.g[channel] += pixel_g.to_q32();
-                    accumulators.b[channel] += pixel_b.to_q32();
+                    accumulators.r[channel] += u8_to_q32_normalized(pixel_r);
+                    accumulators.g[channel] += u8_to_q32_normalized(pixel_g);
+                    accumulators.b[channel] += u8_to_q32_normalized(pixel_b);
                 } else {
                     let frac = Q32(contribution_raw);
+                    let norm_r = u8_to_q32_normalized(pixel_r);
+                    let norm_g = u8_to_q32_normalized(pixel_g);
+                    let norm_b = u8_to_q32_normalized(pixel_b);
 
-                    // Note: this is safe, because frac.0 is in range [1, 65535]
-                    //       and thusly cannot overflow when multiplying by an 8-bit value
-                    //       0xFF * 0xFFFF = 0xFEFF01
-                    //
-                    //       it also converts into Q32 because of the natural shift
-                    //       from multiplying by a Q32 value, but is much faster than
-                    //       doing a full Q32 multiplication
-
-                    let accumulated_r = Q32((pixel_r as i32) * frac.0);
-                    let accumulated_g = Q32((pixel_g as i32) * frac.0);
-                    let accumulated_b = Q32((pixel_b as i32) * frac.0);
+                    // Q32 multiplication: (a.0 * b.0) >> 16
+                    let accumulated_r = Q32(((norm_r.0 as i64 * frac.0 as i64) >> 16) as i32);
+                    let accumulated_g = Q32(((norm_g.0 as i64 * frac.0 as i64) >> 16) as i32);
+                    let accumulated_b = Q32(((norm_b.0 as i64 * frac.0 as i64) >> 16) as i32);
 
                     accumulators.r[channel] += accumulated_r;
                     accumulators.g[channel] += accumulated_g;

@@ -55,7 +55,7 @@ pub extern "C" fn _lp_main() -> ! {
         Rc::new(RefCell::new(SyscallOutputProvider::new()));
 
     // Create server
-    let server = LpServer::new(output_provider, base_fs, "projects/".as_path());
+    let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
 
     // Create serial transport
     let serial_io = SyscallSerialIo::new();

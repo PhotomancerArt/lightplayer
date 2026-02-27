@@ -55,7 +55,7 @@ pub(crate) unsafe fn start_transmission_with_state(
         rmt_base.add(j).write_volatile(0);
     }
 
-    log::debug!("start_transmission: buffer cleared");
+    //log::trace!("start_transmission: buffer cleared");
     // Init the buffer
     write_half_buffer(true, channel_idx);
     write_half_buffer(false, channel_idx);
@@ -96,7 +96,7 @@ pub(crate) unsafe fn start_transmission_with_state(
     rmt.ch_tx_conf0(ch_idx)
         .modify(|_, w| w.conf_update().set_bit());
 
-    log::debug!("start_transmission: configuration updated");
+    //log::trace!("start_transmission: configuration updated");
 
     // Start transmission (like esp-hal start_tx)
     rmt.ch_tx_conf0(ch_idx).modify(|_, w| {
@@ -105,7 +105,7 @@ pub(crate) unsafe fn start_transmission_with_state(
         w.tx_start().set_bit()
     });
 
-    log::debug!("start_transmission: transmission started");
+    //log::trace!("start_transmission: transmission started");
 
     // Update again after starting (like esp-hal does)
     rmt.ch_tx_conf0(ch_idx)
@@ -114,7 +114,7 @@ pub(crate) unsafe fn start_transmission_with_state(
     // Write the guard. With any luck we are past the first byte at this point.
     write_buffer_guard(false);
 
-    log::debug!("transmission started");
+    //log::trace!("transmission started");
 }
 
 /// RMT interrupt handler - this is where the magic happens

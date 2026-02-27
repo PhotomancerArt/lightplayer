@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
 use alloc::{
     boxed::Box,
@@ -13,6 +14,7 @@ use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
     LpPathBuf, NodeHandle,
     nodes::shader::{ShaderConfig, ShaderState},
+    project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
 
@@ -32,6 +34,7 @@ pub struct ShaderRuntime {
     executable: Option<Box<dyn GlslExecutable + Send + Sync>>, // Compiled shader (must be Send + Sync for NodeRuntime)
     texture_handle: Option<TextureHandle>,                     // Resolved texture handle
     compilation_error: Option<String>,                         // Compilation error if any
+    pub state: ShaderState,
     node_handle: NodeHandle,
     render_order: i32, // Render order (from config)
     // Direct call optimization: cached function pointer and calling convention
@@ -48,6 +51,7 @@ impl ShaderRuntime {
             executable: None,
             texture_handle: None,
             compilation_error: None,
+            state: ShaderState::new(FrameId::default()),
             node_handle,
             render_order: 0,
             direct_func_ptr: None,
@@ -66,10 +70,8 @@ impl ShaderRuntime {
     }
 
     pub fn get_state(&self) -> ShaderState {
-        ShaderState {
-            glsl_code: self.glsl_source.clone().unwrap_or_default(),
-            error: self.compilation_error.clone(),
-        }
+        // Return cloned state
+        self.state.clone()
     }
 
     /// Check if this shader targets the given texture handle
@@ -185,20 +187,34 @@ impl NodeRuntime for ShaderRuntime {
                         });
                     }
 
-                    // Convert from [0, 1] to [0, 255] and clamp
+                    // Convert from [0, 1] to [0, 65535] u16 for Rgba16 texture
                     let rgba = [
-                        (result[0].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[1].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[2].clamp(0.0, 1.0) * 255.0) as u8,
-                        (result[3].clamp(0.0, 1.0) * 255.0) as u8,
+                        (result[0].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[1].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[2].clamp(0.0, 1.0) * 65535.0) as u16,
+                        (result[3].clamp(0.0, 1.0) * 65535.0) as u16,
                     ];
 
-                    // Write to texture
-                    texture.set_pixel(x, y, rgba);
+                    texture.set_pixel_u16(x, y, rgba);
                 }
             }
         }
 
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        self.executable = None;
+        self.glsl_source = None;
+        self.direct_func_ptr = None;
+        self.direct_call_conv = None;
+        self.direct_pointer_type = None;
+        self.state
+            .glsl_code
+            .set(lp_model::project::FrameId::default(), String::new());
         Ok(())
     }
 
@@ -239,7 +255,13 @@ impl NodeRuntime for ShaderRuntime {
             let texture_handle = ctx
                 .resolve_texture(&shader_config.texture_spec)
                 .map_err(|e| {
-                    self.compilation_error = Some(format!("Failed to resolve texture: {e}"));
+                    let error_msg = format!("Failed to resolve texture: {e}");
+                    self.compilation_error = Some(error_msg.clone());
+
+                    // Update state
+                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    self.state.error.set(frame_id, Some(error_msg));
+
                     e
                 })?;
             self.texture_handle = Some(texture_handle);
@@ -292,7 +314,13 @@ impl NodeRuntime for ShaderRuntime {
                     self.direct_func_ptr = None;
                     self.direct_call_conv = None;
                     self.direct_pointer_type = None;
-                    self.compilation_error = Some("GLSL file deleted".to_string());
+                    let error_msg = "GLSL file deleted".to_string();
+                    self.compilation_error = Some(error_msg.clone());
+
+                    // Update state
+                    let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                    self.state.glsl_code.set(frame_id, String::new());
+                    self.state.error.set(frame_id, Some(error_msg));
                 }
             }
         }
@@ -396,17 +424,15 @@ impl ShaderRuntime {
                     }
                 };
 
-                // Convert Q32 to u8: (clamped_q32 * 255) / 65536
-                // Use i64 intermediate to avoid overflow
-                let r = ((clamp_q32(r_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let g = ((clamp_q32(g_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let b = ((clamp_q32(b_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
-                let a = ((clamp_q32(a_q32) as i64 * 255) / Q32_SCALE as i64) as u8;
+                // Convert Q32 to u16: (clamped_q32 * 65535) / 65536
+                let r = ((clamp_q32(r_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let g = ((clamp_q32(g_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let b = ((clamp_q32(b_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
+                let a = ((clamp_q32(a_q32) as i64 * 65535) / Q32_SCALE as i64) as u16;
 
                 let rgba = [r, g, b, a];
 
-                // Write to texture
-                texture.set_pixel(x, y, rgba);
+                texture.set_pixel_u16(x, y, rgba);
             }
         }
 
@@ -419,7 +445,13 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let texture_handle = ctx.resolve_texture(&config.texture_spec).map_err(|e| {
-            self.compilation_error = Some(format!("Failed to resolve texture: {e}"));
+            let error_msg = format!("Failed to resolve texture: {e}");
+            self.compilation_error = Some(error_msg.clone());
+
+            // Update state
+            let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+            self.state.error.set(frame_id, Some(error_msg));
+
             e
         })?;
         self.texture_handle = Some(texture_handle);
@@ -456,6 +488,10 @@ impl ShaderRuntime {
         // Store source for state extraction
         self.glsl_source = Some(glsl_source.clone());
 
+        // Update state
+        let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+        self.state.glsl_code.set(frame_id, glsl_source.clone());
+
         Ok(glsl_source)
     }
 
@@ -468,10 +504,33 @@ impl ShaderRuntime {
         );
         log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
 
+        use lp_glsl_compiler::Q32Options;
+
+        let q32_opts = self
+            .config
+            .as_ref()
+            .map(|c| Q32Options {
+                add_sub: c.glsl_opts.add_sub,
+                mul: c.glsl_opts.mul,
+                div: c.glsl_opts.div,
+            })
+            .unwrap_or_else(Q32Options::default);
+
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
+            q32_opts,
+            memory_optimized: GlslOptions::default_memory_optimized(),
+            target_override: None,
+            max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
         };
+
+        // Drop old executable before compiling to free memory for recompilation.
+        // On embedded, holding both old JIT code and new compilation allocations can OOM.
+        self.executable = None;
+        self.direct_func_ptr = None;
+        self.direct_call_conv = None;
+        self.direct_pointer_type = None;
 
         match glsl_jit(glsl_source, options) {
             Ok(executable) => {
@@ -494,6 +553,11 @@ impl ShaderRuntime {
                     unsafe { core::mem::transmute(executable) };
                 self.executable = Some(executable_with_bounds);
                 self.compilation_error = None;
+
+                // Update state
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.error.set(frame_id, None);
+
                 log::debug!(
                     "ShaderRuntime::compile_shader: Shader {} compiled successfully",
                     self.node_handle.as_i32()
@@ -501,11 +565,17 @@ impl ShaderRuntime {
                 Ok(())
             }
             Err(e) => {
-                self.compilation_error = Some(format!("{e}"));
+                let error_msg = format!("{e}");
+                self.compilation_error = Some(error_msg.clone());
                 self.executable = None;
                 self.direct_func_ptr = None;
                 self.direct_call_conv = None;
                 self.direct_pointer_type = None;
+
+                // Update state
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.error.set(frame_id, Some(error_msg.clone()));
+
                 log::warn!(
                     "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),

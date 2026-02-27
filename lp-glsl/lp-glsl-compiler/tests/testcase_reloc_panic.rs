@@ -4,7 +4,9 @@
 //! that causes a panic when compiling on macOS due to unimplemented
 //! TestCase relocation handling.
 
-use lp_glsl_compiler::{DecimalFormat, GlslOptions, RunMode, glsl_jit};
+use lp_glsl_compiler::{
+    DEFAULT_MAX_ERRORS, DecimalFormat, GlslOptions, Q32Options, RunMode, glsl_jit,
+};
 
 #[test]
 fn test_default_project_shader_compilation() {
@@ -58,6 +60,10 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Q32,
+        q32_opts: Q32Options::default(),
+        memory_optimized: false,
+        target_override: None,
+        max_errors: DEFAULT_MAX_ERRORS,
     };
 
     // This should not panic - Q32 format goes through transform that converts TestCase names
@@ -83,18 +89,26 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     let options_float = GlslOptions {
         run_mode: RunMode::HostJit,
         decimal_format: DecimalFormat::Float,
+        q32_opts: Q32Options::default(),
+        memory_optimized: false,
+        target_override: None,
+        max_errors: DEFAULT_MAX_ERRORS,
     };
 
     match glsl_jit(glsl, options_float) {
         Ok(_) => {
             panic!("Float format should be rejected with an error");
         }
-        Err(e) => {
-            // Expected error - Float format is not supported
+        Err(diagnostics) => {
+            let msg = diagnostics
+                .errors
+                .first()
+                .map(|e| e.message.as_str())
+                .unwrap_or("");
             assert!(
-                e.message.contains("Float format is not yet supported"),
+                msg.contains("Float format is not yet supported"),
                 "Error message should mention Float format is not supported, got: {}",
-                e.message
+                msg
             );
         }
     }

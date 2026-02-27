@@ -114,6 +114,45 @@ impl ColorOrder {
             }
         }
     }
+
+    /// Write 16-bit RGB values to buffer in the correct order
+    pub fn write_rgb_u16(&self, buffer: &mut [u16], offset: usize, r: u16, g: u16, b: u16) {
+        if offset + 3 > buffer.len() {
+            return;
+        }
+        match self {
+            ColorOrder::Rgb => {
+                buffer[offset] = r;
+                buffer[offset + 1] = g;
+                buffer[offset + 2] = b;
+            }
+            ColorOrder::Grb => {
+                buffer[offset] = g;
+                buffer[offset + 1] = r;
+                buffer[offset + 2] = b;
+            }
+            ColorOrder::Rbg => {
+                buffer[offset] = r;
+                buffer[offset + 1] = b;
+                buffer[offset + 2] = g;
+            }
+            ColorOrder::Gbr => {
+                buffer[offset] = g;
+                buffer[offset + 1] = b;
+                buffer[offset + 2] = r;
+            }
+            ColorOrder::Brg => {
+                buffer[offset] = b;
+                buffer[offset + 1] = r;
+                buffer[offset + 2] = g;
+            }
+            ColorOrder::Bgr => {
+                buffer[offset] = b;
+                buffer[offset + 1] = g;
+                buffer[offset + 2] = r;
+            }
+        }
+    }
 }
 
 #[cfg(test)]

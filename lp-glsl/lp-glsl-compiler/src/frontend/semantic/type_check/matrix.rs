@@ -15,6 +15,9 @@ pub fn infer_matrix_binary_result_type(
     rhs_ty: &Type,
     span: SourceSpan,
 ) -> Result<Type, GlslError> {
+    if lhs_ty.is_error() || rhs_ty.is_error() {
+        return Ok(Type::Error);
+    }
     use BinaryOp::*;
 
     match op {

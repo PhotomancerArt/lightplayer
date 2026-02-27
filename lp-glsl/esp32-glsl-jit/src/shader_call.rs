@@ -1,4 +1,5 @@
 /// Direct shader function calling without abstraction overhead
+use cranelift_codegen::ir::Type;
 use lp_glsl_jit_util::call_structreturn_with_args;
 
 /// Call a vec4 shader function directly using q32 format
@@ -8,7 +9,8 @@ use lp_glsl_jit_util::call_structreturn_with_args;
 /// - `frag_coord`: Fragment coordinates [x, y] as q32 (i32)
 /// - `output_size`: Output size [width, height] as q32 (i32)
 /// - `time`: Time value as q32 (i32)
-/// - `isa`: ISA for calling convention and pointer type
+/// - `call_conv`: Calling convention (from DirectCallInfo)
+/// - `pointer_type`: Pointer type (from DirectCallInfo)
 ///
 /// # Returns
 /// Returns [r, g, b, a] as q32 (i32) values
@@ -17,7 +19,8 @@ pub unsafe fn call_vec4_shader(
     frag_coord: [i32; 2],
     output_size: [i32; 2],
     time: i32,
-    isa: &cranelift_codegen::isa::OwnedTargetIsa,
+    call_conv: cranelift_codegen::isa::CallConv,
+    pointer_type: Type,
 ) -> Result<[i32; 4], lp_glsl_jit_util::JitCallError> {
     // Prepare JIT call arguments (i32 values as u64)
     // vec2 expands to 2 i32s each, so we have 5 i32 parameters total
@@ -39,8 +42,8 @@ pub unsafe fn call_vec4_shader(
             result_buffer.as_mut_ptr(),
             16, // 4 i32s = 16 bytes
             &jit_args,
-            isa.default_call_conv(),
-            isa.pointer_type(),
+            call_conv,
+            pointer_type,
         )?;
     }
 

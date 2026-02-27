@@ -41,6 +41,12 @@ pub async fn sync_file_change(
     };
     let server_path = format!("/projects/{project_uid}/{relative_path}");
 
+    log::info!(
+        "Sending local fs change to server: {:?} {}",
+        change.change_type,
+        change.path.as_str()
+    );
+
     match change.change_type {
         ChangeType::Create | ChangeType::Modify => {
             // Check if file still exists (it might have been deleted by the time we sync)

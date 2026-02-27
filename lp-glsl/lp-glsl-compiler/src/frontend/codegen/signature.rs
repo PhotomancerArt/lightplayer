@@ -85,8 +85,11 @@ impl SignatureBuilder {
                 sig.params.push(AbiParam::new(pointer_type));
             }
             ParamQualifier::In => {
-                // In parameters: expand to components (existing behavior)
-                if ty.is_vector() {
+                // In parameters: expand to components, or pass pointer for arrays
+                if ty.is_array() {
+                    // Array: pass as pointer (arrays decay to pointer in GLSL)
+                    sig.params.push(AbiParam::new(pointer_type));
+                } else if ty.is_vector() {
                     // Vector: pass each component as separate parameter
                     let base_ty = ty.vector_base_type().unwrap();
                     let cranelift_ty = base_ty
@@ -161,8 +164,10 @@ impl SignatureBuilder {
                 1
             }
             ParamQualifier::In => {
-                // In parameters: expand to components
-                if ty.is_vector() {
+                // In parameters: expand to components, or 1 for array (pointer)
+                if ty.is_array() {
+                    1
+                } else if ty.is_vector() {
                     ty.component_count().unwrap()
                 } else if ty.is_matrix() {
                     ty.matrix_element_count().unwrap()

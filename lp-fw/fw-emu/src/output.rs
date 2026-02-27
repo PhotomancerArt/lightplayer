@@ -36,7 +36,9 @@ impl OutputProvider for SyscallOutputProvider {
         pin: u32,
         byte_count: u32,
         format: OutputFormat,
+        options: Option<lp_shared::output::OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
+        let _ = options;
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id as i32);
@@ -50,7 +52,7 @@ impl OutputProvider for SyscallOutputProvider {
         Ok(handle)
     }
 
-    fn write(&self, handle: OutputChannelHandle, data: &[u8]) -> Result<(), OutputError> {
+    fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
         println!("[output] write: handle={:?}, len={}", handle, data.len());
         // TODO: Implement syscall for writing LED data to host
         // For now, just succeed

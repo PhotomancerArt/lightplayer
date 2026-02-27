@@ -89,10 +89,11 @@ pub fn extract_source_and_expectations(
     let run_start = boundaries.run_start;
 
     // Extract GLSL source (everything before expectations)
+    // For error tests, do not skip directive lines so line numbers match compiler output
+    let skip_directives = !test_types.contains(&TestType::Error);
     for line in lines.iter().take(glsl_end) {
         let trimmed = line.trim();
-        // Skip directives
-        if trimmed.starts_with("// test") || trimmed.starts_with("// target") {
+        if skip_directives && (trimmed.starts_with("// test") || trimmed.starts_with("// target")) {
             continue;
         }
         glsl_source.push_str(line);

@@ -10,7 +10,7 @@ use lp_model::nodes::{
     texture::TextureConfig,
 };
 use lp_model::path::LpPathBuf;
-use lp_model::{AsLpPath, AsLpPathBuf};
+use lp_model::{AsLpPath, AsLpPathBuf, glsl_opts::GlslOpts};
 
 /// Builder for creating test projects
 pub struct ProjectBuilder {
@@ -239,6 +239,7 @@ impl ShaderBuilder {
             glsl_path: "main.glsl".as_path_buf(),
             texture_spec: NodeSpecifier::from(self.texture_path.as_str()),
             render_order: self.render_order,
+            glsl_opts: GlslOpts::default(),
         };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize shader config");
@@ -270,7 +271,10 @@ impl OutputBuilder {
         let path_str = format!("/src/output-{id}.output");
         let node_path = format!("{path_str}/node.json");
 
-        let config = OutputConfig::GpioStrip { pin: self.pin };
+        let config = OutputConfig::GpioStrip {
+            pin: self.pin,
+            options: None,
+        };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");
 

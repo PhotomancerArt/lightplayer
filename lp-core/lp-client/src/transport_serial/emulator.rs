@@ -176,8 +176,15 @@ fn emulator_thread_loop(
                 }
             };
 
-            // Parse JSON message
-            match lp_model::json::from_str::<ServerMessage>(message_str) {
+            // Check for M! prefix - protocol messages; non-M! lines are server logs
+            if !message_str.starts_with("M!") {
+                eprintln!("[serial] {message_str}");
+                continue;
+            }
+
+            // Parse JSON message (strip M! prefix)
+            let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
+            match lp_model::json::from_str::<ServerMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "Emulator thread: Parsed server message id={} ({} bytes)",
@@ -192,7 +199,9 @@ fn emulator_thread_loop(
                     }
                 }
                 Err(e) => {
-                    log::warn!("Emulator thread: Failed to parse JSON message: {e}");
+                    log::warn!(
+                        "Emulator thread: Failed to parse JSON message: {e} | json: {json_str}"
+                    );
                     // Continue - don't crash on parse errors
                 }
             }

@@ -1,14 +1,14 @@
 //! Low-level texture abstraction for pixel buffer management
 
 use crate::error::TextureError;
-use crate::util::formats;
+use crate::util::formats::TextureFormat;
 
 /// Texture structure for managing pixel buffers
 #[derive(Debug, Clone)]
 pub struct Texture {
     width: u32,
     height: u32,
-    format: alloc::string::String,
+    format: TextureFormat,
     data: alloc::vec::Vec<u8>,
 }
 
@@ -16,18 +16,8 @@ impl Texture {
     /// Create a new texture with the given dimensions and format
     ///
     /// Allocates buffer and initializes to zeros.
-    /// Returns an error if the format is invalid.
-    pub fn new(
-        width: u32,
-        height: u32,
-        format: alloc::string::String,
-    ) -> Result<Self, TextureError> {
-        if !formats::is_valid(&format) {
-            return Err(TextureError::InvalidFormat(format));
-        }
-
-        let bytes_per_pixel = formats::bytes_per_pixel(&format)
-            .ok_or_else(|| TextureError::InvalidFormat(format.clone()))?;
+    pub fn new(width: u32, height: u32, format: TextureFormat) -> Result<Self, TextureError> {
+        let bytes_per_pixel = format.bytes_per_pixel();
 
         let buffer_size = (width as usize)
             .checked_mul(height as usize)
@@ -47,14 +37,14 @@ impl Texture {
         })
     }
 
-    /// Get the format string
-    pub fn format(&self) -> &str {
-        &self.format
+    /// Get the format
+    pub fn format(&self) -> TextureFormat {
+        self.format
     }
 
     /// Get bytes per pixel for this texture's format
     pub fn bytes_per_pixel(&self) -> usize {
-        formats::bytes_per_pixel(&self.format).unwrap_or(0)
+        self.format.bytes_per_pixel()
     }
 
     /// Get the width
@@ -83,29 +73,57 @@ impl Texture {
         }
 
         let mut result = [0u8; 4];
-        match self.format.as_str() {
-            formats::RGB8 => {
+        match self.format {
+            TextureFormat::Rgb8 => {
                 result[0] = self.data[offset];
                 result[1] = self.data[offset + 1];
                 result[2] = self.data[offset + 2];
                 result[3] = 255; // Alpha defaults to 255
             }
-            formats::RGBA8 => {
+            TextureFormat::Rgba8 => {
                 result[0] = self.data[offset];
                 result[1] = self.data[offset + 1];
                 result[2] = self.data[offset + 2];
                 result[3] = self.data[offset + 3];
             }
-            formats::R8 => {
+            TextureFormat::R8 => {
                 result[0] = self.data[offset];
                 result[1] = self.data[offset]; // Grayscale: R=G=B
                 result[2] = self.data[offset];
                 result[3] = 255; // Alpha defaults to 255
             }
-            _ => return None,
+            TextureFormat::Rgba16 => {
+                let r = u16::from_le_bytes([self.data[offset], self.data[offset + 1]]);
+                let g = u16::from_le_bytes([self.data[offset + 2], self.data[offset + 3]]);
+                let b = u16::from_le_bytes([self.data[offset + 4], self.data[offset + 5]]);
+                result[0] = (r >> 8) as u8;
+                result[1] = (g >> 8) as u8;
+                result[2] = (b >> 8) as u8;
+                result[3] = 255;
+            }
         }
 
         Some(result)
+    }
+
+    /// Get a pixel value as u16 RGBA (for Rgba16 format)
+    pub fn get_pixel_u16(&self, x: u32, y: u32) -> Option<[u16; 4]> {
+        if self.format != TextureFormat::Rgba16 {
+            return None;
+        }
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let offset = ((y * self.width + x) as usize) * 8;
+        if offset + 8 > self.data.len() {
+            return None;
+        }
+        Some([
+            u16::from_le_bytes([self.data[offset], self.data[offset + 1]]),
+            u16::from_le_bytes([self.data[offset + 2], self.data[offset + 3]]),
+            u16::from_le_bytes([self.data[offset + 4], self.data[offset + 5]]),
+            u16::from_le_bytes([self.data[offset + 6], self.data[offset + 7]]),
+        ])
     }
 
     /// Set a pixel value at the given coordinates
@@ -126,23 +144,50 @@ impl Texture {
             return;
         }
 
-        match self.format.as_str() {
-            formats::RGB8 => {
+        match self.format {
+            TextureFormat::Rgb8 => {
                 self.data[offset] = color[0];
                 self.data[offset + 1] = color[1];
                 self.data[offset + 2] = color[2];
             }
-            formats::RGBA8 => {
+            TextureFormat::Rgba8 => {
                 self.data[offset] = color[0];
                 self.data[offset + 1] = color[1];
                 self.data[offset + 2] = color[2];
                 self.data[offset + 3] = color[3];
             }
-            formats::R8 => {
+            TextureFormat::R8 => {
                 self.data[offset] = color[0];
             }
-            _ => {}
+            TextureFormat::Rgba16 => {
+                let r = (color[0] as u16) * 257;
+                let g = (color[1] as u16) * 257;
+                let b = (color[2] as u16) * 257;
+                let a = (color[3] as u16) * 257;
+                self.data[offset..offset + 2].copy_from_slice(&r.to_le_bytes());
+                self.data[offset + 2..offset + 4].copy_from_slice(&g.to_le_bytes());
+                self.data[offset + 4..offset + 6].copy_from_slice(&b.to_le_bytes());
+                self.data[offset + 6..offset + 8].copy_from_slice(&a.to_le_bytes());
+            }
         }
+    }
+
+    /// Set a pixel value as u16 RGBA (for Rgba16 format)
+    pub fn set_pixel_u16(&mut self, x: u32, y: u32, color: [u16; 4]) {
+        if self.format != TextureFormat::Rgba16 {
+            return;
+        }
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let offset = ((y * self.width + x) as usize) * 8;
+        if offset + 8 > self.data.len() {
+            return;
+        }
+        self.data[offset..offset + 2].copy_from_slice(&color[0].to_le_bytes());
+        self.data[offset + 2..offset + 4].copy_from_slice(&color[1].to_le_bytes());
+        self.data[offset + 4..offset + 6].copy_from_slice(&color[2].to_le_bytes());
+        self.data[offset + 6..offset + 8].copy_from_slice(&color[3].to_le_bytes());
     }
 
     /// Sample the texture at normalized coordinates (u, v) in [0, 1]
@@ -226,27 +271,20 @@ impl Texture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::formats;
-    use alloc::string::ToString;
+    use crate::util::formats::TextureFormat;
 
     #[test]
     fn test_texture_new_valid() {
-        let texture = Texture::new(64, 64, formats::RGB8.to_string()).unwrap();
+        let texture = Texture::new(64, 64, TextureFormat::Rgb8).unwrap();
         assert_eq!(texture.width(), 64);
         assert_eq!(texture.height(), 64);
-        assert_eq!(texture.format(), formats::RGB8);
+        assert_eq!(texture.format(), TextureFormat::Rgb8);
         assert_eq!(texture.bytes_per_pixel(), 3);
     }
 
     #[test]
-    fn test_texture_new_invalid_format() {
-        let result = Texture::new(64, 64, "INVALID".to_string());
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_texture_buffer_initialized_to_zeros() {
-        let texture = Texture::new(10, 10, formats::RGB8.to_string()).unwrap();
+        let texture = Texture::new(10, 10, TextureFormat::Rgb8).unwrap();
         // Check that buffer is initialized to zeros
         assert_eq!(texture.data()[0], 0);
         assert_eq!(texture.data()[texture.data().len() - 1], 0);
@@ -254,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_get_set_pixel_rgb8() {
-        let mut texture = Texture::new(10, 10, formats::RGB8.to_string()).unwrap();
+        let mut texture = Texture::new(10, 10, TextureFormat::Rgb8).unwrap();
         texture.set_pixel(5, 5, [100, 200, 255, 0]);
         let pixel = texture.get_pixel(5, 5).unwrap();
         assert_eq!(pixel[0], 100);
@@ -265,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_get_set_pixel_rgba8() {
-        let mut texture = Texture::new(10, 10, formats::RGBA8.to_string()).unwrap();
+        let mut texture = Texture::new(10, 10, TextureFormat::Rgba8).unwrap();
         texture.set_pixel(5, 5, [100, 200, 255, 128]);
         let pixel = texture.get_pixel(5, 5).unwrap();
         assert_eq!(pixel, [100, 200, 255, 128]);
@@ -273,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_get_set_pixel_r8() {
-        let mut texture = Texture::new(10, 10, formats::R8.to_string()).unwrap();
+        let mut texture = Texture::new(10, 10, TextureFormat::R8).unwrap();
         texture.set_pixel(5, 5, [128, 0, 0, 0]); // Only first byte matters
         let pixel = texture.get_pixel(5, 5).unwrap();
         assert_eq!(pixel[0], 128);
@@ -283,15 +321,28 @@ mod tests {
     }
 
     #[test]
+    fn test_get_set_pixel_rgba16() {
+        let mut texture = Texture::new(10, 10, TextureFormat::Rgba16).unwrap();
+        texture.set_pixel_u16(5, 5, [0x0100, 0x0200, 0xFFFF, 0x8000]);
+        let pixel = texture.get_pixel_u16(5, 5).unwrap();
+        assert_eq!(pixel, [0x0100, 0x0200, 0xFFFF, 0x8000]);
+        // get_pixel returns high byte (alpha is always 255 for Rgba16 in get_pixel)
+        let pixel_u8 = texture.get_pixel(5, 5).unwrap();
+        assert_eq!(pixel_u8[0], 1);
+        assert_eq!(pixel_u8[1], 2);
+        assert_eq!(pixel_u8[2], 255);
+    }
+
+    #[test]
     fn test_get_pixel_out_of_bounds() {
-        let texture = Texture::new(10, 10, formats::RGB8.to_string()).unwrap();
+        let texture = Texture::new(10, 10, TextureFormat::Rgb8).unwrap();
         assert!(texture.get_pixel(10, 5).is_none());
         assert!(texture.get_pixel(5, 10).is_none());
     }
 
     #[test]
     fn test_sample() {
-        let mut texture = Texture::new(2, 2, formats::RGB8.to_string()).unwrap();
+        let mut texture = Texture::new(2, 2, TextureFormat::Rgb8).unwrap();
         // Set corners to different colors
         texture.set_pixel(0, 0, [255, 0, 0, 255]); // Red
         texture.set_pixel(1, 0, [0, 255, 0, 255]); // Green
@@ -314,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_compute_all() {
-        let mut texture = Texture::new(10, 10, formats::RGB8.to_string()).unwrap();
+        let mut texture = Texture::new(10, 10, TextureFormat::Rgb8).unwrap();
         texture.compute_all(|x, y| [(x * 10) as u8, (y * 10) as u8, 128, 255]);
 
         // Check a few pixels

@@ -2,7 +2,7 @@
 
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
-use crate::error::GlslError;
+use crate::error::{GlslDiagnostics, GlslError};
 use crate::frontend::pipeline::CompilationPipeline;
 use crate::frontend::src_loc::GlSourceMap;
 use cranelift_codegen::ir::Function;
@@ -37,12 +37,13 @@ impl GlslCompiler {
         &mut self,
         source: &str,
         target: Target,
-    ) -> Result<GlModule<JITModule>, GlslError> {
+        max_errors: usize,
+    ) -> Result<GlModule<JITModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
 
         // 1. Parse and analyze GLSL
-        let semantic_result = CompilationPipeline::parse_and_analyze(source)?;
+        let semantic_result = CompilationPipeline::parse_and_analyze(source, max_errors)?;
         let typed_ast = semantic_result.typed_ast;
 
         // 2. Create ISA for signature building (before creating gl_module to avoid borrow conflicts)
@@ -109,6 +110,7 @@ impl GlslCompiler {
                     func_id,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     &mut source_loc_manager,
@@ -144,6 +146,7 @@ impl GlslCompiler {
                     main_function,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     semantic_result.source,
@@ -183,12 +186,13 @@ impl GlslCompiler {
         &mut self,
         source: &str,
         target: Target,
-    ) -> Result<GlModule<ObjectModule>, GlslError> {
+        max_errors: usize,
+    ) -> Result<GlModule<ObjectModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
 
         // 1. Parse and analyze GLSL
-        let semantic_result = CompilationPipeline::parse_and_analyze(source)?;
+        let semantic_result = CompilationPipeline::parse_and_analyze(source, max_errors)?;
         let typed_ast = semantic_result.typed_ast;
 
         // 2. Create ISA for signature building (before creating gl_module to avoid borrow conflicts)
@@ -255,6 +259,7 @@ impl GlslCompiler {
                     func_id,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     &mut source_loc_manager,
@@ -290,6 +295,7 @@ impl GlslCompiler {
                     main_function,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     semantic_result.source,
@@ -328,19 +334,88 @@ impl GlslCompiler {
         _func_id: FuncId,
         func_ids: &HashMap<String, FuncId>,
         func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
         gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
         isa: &dyn cranelift_codegen::isa::TargetIsa,
         source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
         source_map: &mut crate::frontend::src_loc::GlSourceMap,
         file_id: crate::frontend::src_loc::GlFileId,
     ) -> Result<Function, GlslError> {
+        let error_context = format!("function '{}'", func.name);
+        self.compile_function_to_clif_impl(
+            func,
+            func_ids,
+            func_registry,
+            global_constants,
+            gl_module,
+            isa,
+            None,
+            &error_context,
+            source_loc_manager,
+            source_map,
+            file_id,
+        )
+    }
+
+    fn compile_main_function_to_clif<M: Module>(
+        &mut self,
+        main_func: &crate::frontend::semantic::TypedFunction,
+        func_ids: &HashMap<String, FuncId>,
+        func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
+        gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
+        isa: &dyn cranelift_codegen::isa::TargetIsa,
+        source_text: &str,
+        source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
+        source_map: &mut crate::frontend::src_loc::GlSourceMap,
+        file_id: crate::frontend::src_loc::GlFileId,
+    ) -> Result<Function, GlslError> {
+        self.compile_function_to_clif_impl(
+            main_func,
+            func_ids,
+            func_registry,
+            global_constants,
+            gl_module,
+            isa,
+            Some(source_text),
+            "main function",
+            source_loc_manager,
+            source_map,
+            file_id,
+        )
+    }
+
+    fn compile_function_to_clif_impl<M: Module>(
+        &mut self,
+        func: &crate::frontend::semantic::TypedFunction,
+        func_ids: &HashMap<String, FuncId>,
+        func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
+        gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
+        isa: &dyn cranelift_codegen::isa::TargetIsa,
+        source_text: Option<&str>,
+        error_context: &str,
+        source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
+        source_map: &mut crate::frontend::src_loc::GlSourceMap,
+        file_id: crate::frontend::src_loc::GlFileId,
+    ) -> Result<Function, GlslError> {
         use crate::error::{ErrorCode, GlslError};
+        use crate::frontend::codegen::context::VarInfo;
         use crate::frontend::codegen::signature::SignatureBuilder;
+        use crate::semantic::functions::ParamQualifier;
         use cranelift_codegen::Context;
 
         let mut ctx = Context::new();
 
-        // Build signature (same as declaration) and set it on the function
         let pointer_type = isa.pointer_type();
         let triple = isa.triple();
         let sig = SignatureBuilder::build_with_triple(
@@ -353,14 +428,11 @@ impl GlslCompiler {
         use cranelift_codegen::ir::UserFuncName;
         ctx.func.name = UserFuncName::user(0, 0); // TODO: Use proper function name
 
-        // Create function builder
         let mut func_builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_builder_context);
 
-        // Set up entry block
         let entry_block = Self::setup_function_builder(&mut builder);
 
-        // Create codegen context with function IDs
         let mut codegen_ctx = crate::frontend::codegen::context::CodegenContext::new(
             builder, gl_module, source_map, file_id,
         );
@@ -368,20 +440,21 @@ impl GlslCompiler {
         codegen_ctx.set_function_registry(func_registry);
         codegen_ctx.set_return_type(func.return_type.clone());
         codegen_ctx.set_entry_block(entry_block);
-        // Copy the shared SourceLocManager into the context
         codegen_ctx.source_loc_manager = source_loc_manager.clone();
 
-        // Declare parameters as variables in the function
+        if let Some(text) = source_text {
+            codegen_ctx.set_source_text(text);
+        }
+        codegen_ctx.set_global_constants(global_constants);
+
         let block_params = codegen_ctx.builder.block_params(entry_block).to_vec();
 
-        // Check if function uses StructReturn
         let uses_struct_return = codegen_ctx
             .builder
             .func
             .signature
             .uses_special_param(cranelift_codegen::ir::ArgumentPurpose::StructReturn);
 
-        // Validate parameter count
         let expected_param_count: usize = func
             .parameters
             .iter()
@@ -393,39 +466,36 @@ impl GlslCompiler {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
-                    "function parameter mismatch: expected {} block parameters, got {}",
+                    "{} parameter mismatch: expected {} block parameters, got {}",
+                    error_context,
                     expected_param_count,
                     block_params.len()
                 ),
             ));
         }
 
-        // Skip StructReturn parameter if present
         let mut param_idx = if uses_struct_return { 1 } else { 0 };
 
         for param in &func.parameters {
-            use crate::semantic::functions::ParamQualifier;
+            let param_err = || {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "not enough block parameters for {} parameter `{}`",
+                        error_context, param.name
+                    ),
+                )
+            };
 
             match param.qualifier {
                 ParamQualifier::Out | ParamQualifier::InOut => {
-                    // Out/inout parameters: arrive as pointers
                     if param_idx >= block_params.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!(
-                                "not enough block parameters for function parameter `{}`",
-                                param.name
-                            ),
-                        ));
+                        return Err(param_err());
                     }
                     let pointer_val = block_params[param_idx];
                     param_idx += 1;
 
-                    // For arrays: store pointer in array_ptr field
-                    // For non-arrays: also store pointer in array_ptr (even though not an array)
                     if param.ty.is_array() {
-                        // Arrays: create VarInfo with array_ptr
-                        use crate::frontend::codegen::context::VarInfo;
                         let var_info = VarInfo {
                             cranelift_vars: Vec::new(),
                             glsl_type: param.ty.clone(),
@@ -436,14 +506,11 @@ impl GlslCompiler {
                             current_scope.insert(param.name.clone(), var_info);
                         }
                     } else {
-                        // Non-arrays: declare variable and store pointer in array_ptr
                         let _vars =
                             codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
 
-                        // Store pointer in VarInfo (using array_ptr even though not an array)
                         if let Some(current_scope) = codegen_ctx.variable_scopes.last_mut() {
                             if let Some(info) = current_scope.remove(&param.name) {
-                                use crate::frontend::codegen::context::VarInfo;
                                 let updated_info = VarInfo {
                                     array_ptr: Some(pointer_val),
                                     ..info
@@ -454,271 +521,87 @@ impl GlslCompiler {
                     }
                 }
                 ParamQualifier::In => {
-                    // In parameters: arrive as values (existing behavior)
-                    let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector() {
-                        let count = param.ty.component_count().unwrap();
-                        let mut vals = Vec::new();
-                        for _ in 0..count {
-                            if param_idx >= block_params.len() {
-                                return Err(GlslError::new(
-                                    ErrorCode::E0400,
-                                    format!(
-                                        "not enough block parameters for function parameter `{}`",
-                                        param.name
-                                    ),
-                                ));
-                            }
-                            vals.push(block_params[param_idx]);
-                            param_idx += 1;
-                        }
-                        vals
-                    } else if param.ty.is_matrix() {
-                        let count = param.ty.matrix_element_count().unwrap();
-                        let mut vals = Vec::new();
-                        for _ in 0..count {
-                            if param_idx >= block_params.len() {
-                                return Err(GlslError::new(
-                                    ErrorCode::E0400,
-                                    format!(
-                                        "not enough block parameters for function parameter `{}`",
-                                        param.name
-                                    ),
-                                ));
-                            }
-                            vals.push(block_params[param_idx]);
-                            param_idx += 1;
-                        }
-                        vals
-                    } else {
+                    if param.ty.is_array() {
                         if param_idx >= block_params.len() {
-                            return Err(GlslError::new(
-                                ErrorCode::E0400,
-                                format!(
-                                    "not enough block parameters for function parameter `{}`",
-                                    param.name
-                                ),
-                            ));
+                            return Err(param_err());
                         }
-                        let val = vec![block_params[param_idx]];
+                        let pointer_val = block_params[param_idx];
                         param_idx += 1;
-                        val
-                    };
 
-                    // Declare parameter as variable and initialize
-                    let vars =
-                        codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
-                    for (var, val) in vars.iter().zip(param_vals) {
-                        codegen_ctx.builder.def_var(*var, val);
+                        let var_info = VarInfo {
+                            cranelift_vars: Vec::new(),
+                            glsl_type: param.ty.clone(),
+                            array_ptr: Some(pointer_val),
+                            stack_slot: None,
+                        };
+                        if let Some(current_scope) = codegen_ctx.variable_scopes.last_mut() {
+                            current_scope.insert(param.name.clone(), var_info);
+                        }
+                    } else {
+                        let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector()
+                        {
+                            let count = param.ty.component_count().unwrap();
+                            let mut vals = Vec::new();
+                            for _ in 0..count {
+                                if param_idx >= block_params.len() {
+                                    return Err(param_err());
+                                }
+                                vals.push(block_params[param_idx]);
+                                param_idx += 1;
+                            }
+                            vals
+                        } else if param.ty.is_matrix() {
+                            let count = param.ty.matrix_element_count().unwrap();
+                            let mut vals = Vec::new();
+                            for _ in 0..count {
+                                if param_idx >= block_params.len() {
+                                    return Err(param_err());
+                                }
+                                vals.push(block_params[param_idx]);
+                                param_idx += 1;
+                            }
+                            vals
+                        } else {
+                            if param_idx >= block_params.len() {
+                                return Err(param_err());
+                            }
+                            let val = vec![block_params[param_idx]];
+                            param_idx += 1;
+                            val
+                        };
+
+                        let vars =
+                            codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
+                        for (var, val) in vars.iter().zip(param_vals) {
+                            codegen_ctx.builder.def_var(*var, val);
+                        }
                     }
                 }
             }
         }
 
-        // Translate function body
         for stmt in &func.body {
             codegen_ctx.emit_statement(stmt)?;
         }
 
-        // Generate default return if needed
         crate::frontend::codegen::helpers::generate_default_return(
             &mut codegen_ctx,
             &func.return_type,
         )?;
 
-        // Seal all blocks before finalizing (safety net for any blocks not explicitly sealed)
         codegen_ctx.builder.seal_all_blocks();
-
-        // Finalize
         codegen_ctx.builder.finalize();
 
-        // Merge SourceLocManager back into shared one
         source_loc_manager.merge_from(&codegen_ctx.source_loc_manager);
 
-        // Verify function (only if verifier feature is enabled)
         #[cfg(feature = "cranelift-verifier")]
         {
             cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
                 GlslError::new(
                     ErrorCode::E0400,
                     format!(
-                        "verifier error in function '{}': {}\n\nFunction IR:\n{}",
-                        func.name, e, ctx.func
-                    ),
-                )
-            })?;
-        }
-
-        Ok(ctx.func)
-    }
-
-    fn compile_main_function_to_clif<M: Module>(
-        &mut self,
-        main_func: &crate::frontend::semantic::TypedFunction,
-        func_ids: &HashMap<String, FuncId>,
-        func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
-        gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
-        isa: &dyn cranelift_codegen::isa::TargetIsa,
-        source_text: &str,
-        source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
-        source_map: &mut crate::frontend::src_loc::GlSourceMap,
-        file_id: crate::frontend::src_loc::GlFileId,
-    ) -> Result<Function, GlslError> {
-        use crate::error::{ErrorCode, GlslError};
-        use crate::frontend::codegen::signature::SignatureBuilder;
-        use cranelift_codegen::Context;
-
-        let mut ctx = Context::new();
-
-        // Build signature with parameters (same as regular functions)
-        let pointer_type = isa.pointer_type();
-        let triple = isa.triple();
-        let sig = SignatureBuilder::build_with_triple(
-            &main_func.return_type,
-            &main_func.parameters,
-            pointer_type,
-            triple,
-        );
-        ctx.func.signature = sig.clone();
-        use cranelift_codegen::ir::UserFuncName;
-        ctx.func.name = UserFuncName::user(0, 0); // TODO: Use "main" as function name
-
-        // Create function builder
-        let mut main_builder_context = FunctionBuilderContext::new();
-        let mut builder = FunctionBuilder::new(&mut ctx.func, &mut main_builder_context);
-
-        // Set up entry block
-        let entry_block = Self::setup_function_builder(&mut builder);
-
-        // Create codegen context
-        let mut codegen_ctx = crate::frontend::codegen::context::CodegenContext::new(
-            builder, gl_module, source_map, file_id,
-        );
-        codegen_ctx.set_function_ids(func_ids);
-        codegen_ctx.set_function_registry(func_registry);
-        codegen_ctx.set_source_text(source_text);
-        codegen_ctx.set_return_type(main_func.return_type.clone());
-        codegen_ctx.set_entry_block(entry_block);
-        // Replace the default SourceLocManager with the shared one
-        codegen_ctx.source_loc_manager = source_loc_manager.clone();
-
-        // Declare parameters as variables in the function (same as compile_function_to_clif)
-        let block_params = codegen_ctx.builder.block_params(entry_block).to_vec();
-
-        // Check if function uses StructReturn
-        let uses_struct_return = codegen_ctx
-            .builder
-            .func
-            .signature
-            .uses_special_param(cranelift_codegen::ir::ArgumentPurpose::StructReturn);
-
-        // Validate parameter count
-        let expected_param_count: usize = main_func
-            .parameters
-            .iter()
-            .map(|p| SignatureBuilder::count_parameters(&p.ty, p.qualifier))
-            .sum::<usize>()
-            + if uses_struct_return { 1 } else { 0 };
-
-        if block_params.len() < expected_param_count {
-            return Err(GlslError::new(
-                ErrorCode::E0400,
-                format!(
-                    "main function parameter mismatch: expected {} block parameters, got {}",
-                    expected_param_count,
-                    block_params.len()
-                ),
-            ));
-        }
-
-        // Skip StructReturn parameter if present
-        let mut param_idx = if uses_struct_return { 1 } else { 0 };
-
-        for param in &main_func.parameters {
-            let param_vals: Vec<cranelift_codegen::ir::Value> = if param.ty.is_vector() {
-                let count = param.ty.component_count().unwrap();
-                let mut vals = Vec::new();
-                for _ in 0..count {
-                    if param_idx >= block_params.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!(
-                                "not enough block parameters for main parameter `{}`",
-                                param.name
-                            ),
-                        ));
-                    }
-                    vals.push(block_params[param_idx]);
-                    param_idx += 1;
-                }
-                vals
-            } else if param.ty.is_matrix() {
-                let count = param.ty.matrix_element_count().unwrap();
-                let mut vals = Vec::new();
-                for _ in 0..count {
-                    if param_idx >= block_params.len() {
-                        return Err(GlslError::new(
-                            ErrorCode::E0400,
-                            format!(
-                                "not enough block parameters for main parameter `{}`",
-                                param.name
-                            ),
-                        ));
-                    }
-                    vals.push(block_params[param_idx]);
-                    param_idx += 1;
-                }
-                vals
-            } else {
-                // Scalar parameter
-                if param_idx >= block_params.len() {
-                    return Err(GlslError::new(
-                        ErrorCode::E0400,
-                        format!(
-                            "not enough block parameters for main parameter `{}`",
-                            param.name
-                        ),
-                    ));
-                }
-                vec![block_params[param_idx]]
-            };
-
-            // Declare parameter as variable and initialize
-            let vars = codegen_ctx.declare_variable(param.name.clone(), param.ty.clone())?;
-            for (var, val) in vars.iter().zip(param_vals.iter()) {
-                codegen_ctx.builder.def_var(*var, *val);
-            }
-            // Note: param_idx is already incremented inside the loop above, don't increment again
-        }
-
-        // Translate main function body
-        for stmt in &main_func.body {
-            codegen_ctx.emit_statement(stmt)?;
-        }
-
-        // Generate default return if needed
-        crate::frontend::codegen::helpers::generate_default_return(
-            &mut codegen_ctx,
-            &main_func.return_type,
-        )?;
-
-        // Seal all blocks before finalizing (safety net for any blocks not explicitly sealed)
-        codegen_ctx.builder.seal_all_blocks();
-
-        // Finalize
-        codegen_ctx.builder.finalize();
-
-        // Merge SourceLocManager back into shared one
-        source_loc_manager.merge_from(&codegen_ctx.source_loc_manager);
-
-        // Verify function (only if verifier feature is enabled)
-        #[cfg(feature = "cranelift-verifier")]
-        {
-            cranelift_codegen::verify_function(&ctx.func, isa).map_err(|e| {
-                GlslError::new(
-                    ErrorCode::E0400,
-                    format!(
-                        "verifier error in main function: {}\n\nFunction IR:\n{}",
-                        e, ctx.func
+                        "verifier error in {}: {}\n\nFunction IR:\n{}",
+                        error_context, e, ctx.func
                     ),
                 )
             })?;

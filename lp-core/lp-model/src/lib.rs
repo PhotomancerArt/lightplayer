@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+pub mod glsl_opts;
 pub mod json;
 pub mod message;
 pub mod nodes;
@@ -19,6 +20,7 @@ pub mod project;
 pub mod serde_base64;
 pub mod serial;
 pub mod server;
+pub mod state;
 pub mod transport_error;
 
 pub use message::{ClientMessage, ClientRequest, Message, ServerMessage};

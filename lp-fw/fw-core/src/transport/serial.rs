@@ -2,12 +2,17 @@
 //!
 //! Handles message framing (JSON + `\n` termination), buffering partial reads,
 //! and JSON parsing. Implements `ServerTransport` trait.
+//!
+//! When `emu` feature is enabled, uses ser-write-json for streaming serialization
+//! (same as fw-esp32) instead of buffering full JSON.
 
 extern crate alloc;
 
 use alloc::{format, vec::Vec};
 use core::str;
 
+#[cfg(feature = "emu")]
+use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError, json};
@@ -34,43 +39,67 @@ impl<Io: SerialIo> SerialTransport<Io> {
     }
 }
 
+/// SerWrite adapter for SerialIo - streams bytes to serial without buffering full JSON
+#[cfg(feature = "emu")]
+struct SerialIoSerWrite<'a, Io: SerialIo>(&'a mut Io);
+
+#[cfg(feature = "emu")]
+impl<Io: SerialIo> ser_write_json::SerWrite for SerialIoSerWrite<'_, Io> {
+    type Error = SerialError;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.0.write(buf)
+    }
+}
+
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        // Serialize to JSON
-        let json = json::to_string(&msg).map_err(|e| {
-            TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
-        })?;
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+        let id = msg.id;
 
-        // Add M! prefix and newline
-        let message = format!("M!{json}\n");
-        let message_bytes = message.as_bytes();
+        #[cfg(feature = "emu")]
+        {
+            // Stream JSON via ser-write-json (same as fw-esp32, no full buffer)
+            self.io
+                .write(b"M!")
+                .map_err(|e| TransportError::Other(alloc::format!("Serial write error: {e}")))?;
+            let mut writer = SerialIoSerWrite(&mut self.io);
+            ser_write_json::ser::to_writer(&mut writer, &msg).map_err(|e| {
+                TransportError::Serialization(alloc::format!(
+                    "Failed to serialize ServerMessage: {e}"
+                ))
+            })?;
+            self.io
+                .write(b"\n")
+                .map_err(|e| TransportError::Other(alloc::format!("Serial write error: {e}")))?;
+            log::debug!(
+                "SerialTransport: Sent message id={} via ser-write-json (streaming)",
+                id
+            );
+        }
 
-        log::debug!(
-            "SerialTransport: Sending message id={} ({} bytes): M!{}",
-            msg.id,
-            message_bytes.len(),
-            json
-        );
-
-        log::trace!(
-            "SerialTransport: Serialized message to {} bytes JSON",
-            json.as_bytes().len()
-        );
-
-        // Write message with M! prefix (blocking)
-        self.io
-            .write(message_bytes)
-            .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
-
-        log::trace!(
-            "SerialTransport: Wrote {} bytes to serial",
-            message_bytes.len()
-        );
+        #[cfg(not(feature = "emu"))]
+        {
+            // Buffered serialization (legacy path)
+            let json = json::to_string(&msg).map_err(|e| {
+                TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
+            })?;
+            let message = format!("M!{json}\n");
+            let message_bytes = message.as_bytes();
+            log::debug!(
+                "SerialTransport: Sending message id={} ({} bytes): M!{}",
+                id,
+                message_bytes.len(),
+                json
+            );
+            self.io
+                .write(message_bytes)
+                .map_err(|e| TransportError::Other(format!("Serial write error: {e}")))?;
+        }
 
         Ok(())
     }
 
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
         // Read available bytes in a loop until we have a complete message or no more data
         let mut temp_buf = [0u8; 256];
         loop {
@@ -144,7 +173,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
-                    log::warn!("SerialTransport: Failed to parse JSON message: {e}");
+                    log::warn!(
+                        "SerialTransport: Failed to parse JSON message: {e} | json: {json_str}"
+                    );
                     Ok(None)
                 }
             }
@@ -202,8 +233,18 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         }
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
-        // Clear read buffer
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        let mut messages = Vec::new();
+        loop {
+            match self.receive().await? {
+                Some(msg) => messages.push(msg),
+                None => break,
+            }
+        }
+        Ok(messages)
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
         self.read_buffer.clear();
         Ok(())
     }
@@ -272,7 +313,7 @@ mod tests {
             id: 1,
             msg: lp_model::server::ServerMsgBody::UnloadProject,
         };
-        transport.send(msg).unwrap();
+        pollster::block_on(transport.send(msg)).unwrap();
 
         let written = transport.io.take_written();
         let written_str = str::from_utf8(&written).unwrap();
@@ -298,7 +339,7 @@ mod tests {
 
         transport.io.push_read(&msg_bytes);
 
-        let received = transport.receive().unwrap();
+        let received = pollster::block_on(transport.receive()).unwrap();
         assert!(received.is_some());
         let received_msg = received.unwrap();
         assert_eq!(received_msg.id, 1);
@@ -322,7 +363,7 @@ mod tests {
 
         transport.io.push_read(partial);
 
-        let received = transport.receive().unwrap();
+        let received = pollster::block_on(transport.receive()).unwrap();
         assert!(received.is_none());
     }
 
@@ -346,11 +387,11 @@ mod tests {
 
         transport.io.push_read(&combined);
 
-        let received1 = transport.receive().unwrap();
+        let received1 = pollster::block_on(transport.receive()).unwrap();
         assert!(received1.is_some());
         assert_eq!(received1.unwrap().id, 1);
 
-        let received2 = transport.receive().unwrap();
+        let received2 = pollster::block_on(transport.receive()).unwrap();
         assert!(received2.is_some());
         assert_eq!(received2.unwrap().id, 2);
     }
@@ -364,7 +405,7 @@ mod tests {
         transport.io.push_read(invalid_json);
 
         // Should return None (parse error ignored)
-        let received = transport.receive().unwrap();
+        let received = pollster::block_on(transport.receive()).unwrap();
         assert!(received.is_none());
     }
 
@@ -377,7 +418,7 @@ mod tests {
         transport.io.push_read(b"debug: some log output\n");
 
         // Should return None (filtered out)
-        let received = transport.receive().unwrap();
+        let received = pollster::block_on(transport.receive()).unwrap();
         assert!(
             received.is_none(),
             "Non-message lines should be filtered out"
@@ -393,7 +434,7 @@ mod tests {
         transport.io.push_read(&msg_bytes);
 
         // Should parse successfully
-        let received = transport.receive().unwrap();
+        let received = pollster::block_on(transport.receive()).unwrap();
         assert!(received.is_some());
         assert_eq!(received.unwrap().id, 1);
     }

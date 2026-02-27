@@ -26,7 +26,7 @@ fn test_node_json_modification() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone()).unwrap();
+    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -102,7 +102,7 @@ fn test_main_glsl_modification() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone()).unwrap();
+    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -183,7 +183,7 @@ fn test_node_deletion() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Start runtime with shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone()).unwrap();
+    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

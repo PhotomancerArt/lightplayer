@@ -36,7 +36,7 @@ fn test_scene_render() {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
 
     // Start runtime with a shared filesystem (Rc<RefCell<>> so changes are visible)
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone()).unwrap();
+    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();
@@ -93,13 +93,14 @@ fn assert_memory_output_red(
 
     assert!(
         data.len() >= 3,
-        "Output data should have at least 3 bytes (RGB) for first channel, got {}",
+        "Output data should have at least 3 u16s (RGB) for first channel, got {}",
         data.len()
     );
 
-    let r = data[0];
-    let g = data[1];
-    let b = data[2];
+    // Use rounded conversion (value + 128) >> 8 to match display pipeline behavior
+    let r = ((data[0] + 128) >> 8).min(255) as u8;
+    let g = ((data[1] + 128) >> 8).min(255) as u8;
+    let b = ((data[2] + 128) >> 8).min(255) as u8;
 
     assert_eq!(
         r, expected_r,

@@ -1,7 +1,7 @@
 use eframe::epaint::{Color32, ColorImage, TextureHandle};
 use egui::Image;
 use lp_engine_client::ClientNodeEntry;
-use lp_model::nodes::texture::TextureState;
+use lp_model::nodes::texture::{TextureFormat, TextureState};
 
 /// Render texture panel
 pub fn render_texture_panel(
@@ -18,20 +18,31 @@ pub fn render_texture_panel(
     // Display metadata
     ui.group(|ui| {
         ui.label(format!("Path: {:?}", entry.path));
-        ui.label(format!("Size: {}x{}", state.width, state.height));
-        ui.label(format!("Format: {}", state.format));
-        ui.label(format!("Data size: {} bytes", state.texture_data.len()));
+        ui.label(format!(
+            "Size: {}x{}",
+            state.width.value(),
+            state.height.value()
+        ));
+        ui.label(format!("Format: {}", state.format.value()));
+        ui.label(format!(
+            "Data size: {} bytes",
+            state.texture_data.value().len()
+        ));
     });
 
     ui.separator();
 
     // Display texture image
-    if show_background && !state.texture_data.is_empty() && state.width > 0 && state.height > 0 {
+    if show_background
+        && !state.texture_data.value().is_empty()
+        && *state.width.value() > 0
+        && *state.height.value() > 0
+    {
         let color_image = texture_data_to_color_image(
-            &state.texture_data,
-            state.width,
-            state.height,
-            &state.format,
+            state.texture_data.value(),
+            *state.width.value(),
+            *state.height.value(),
+            *state.format.value(),
         );
 
         // Create texture handle
@@ -43,11 +54,11 @@ pub fn render_texture_panel(
         // Scale to fit available width, max 8x native size, but limit height
         let available_width = ui.available_width();
         let max_height = 400.0; // Limit texture height to prevent huge images
-        let scale = (available_width / state.width as f32)
-            .min(max_height / state.height as f32)
+        let scale = (available_width / *state.width.value() as f32)
+            .min(max_height / *state.height.value() as f32)
             .min(8.0);
-        let display_width = state.width as f32 * scale;
-        let display_height = state.height as f32 * scale;
+        let display_width = *state.width.value() as f32 * scale;
+        let display_height = *state.height.value() as f32 * scale;
 
         ui.add(
             Image::new(&texture_handle)
@@ -62,46 +73,51 @@ pub fn render_texture_panel(
 
 /// Convert texture data to egui ColorImage
 ///
-/// Handles RGB8, RGBA8, and R8 formats.
+/// Handles Rgb8, Rgba8, R8, and Rgba16 formats.
 pub fn texture_data_to_color_image(
     data: &[u8],
     width: u32,
     height: u32,
-    format: &str,
+    format: TextureFormat,
 ) -> ColorImage {
     let mut pixels = Vec::with_capacity((width * height) as usize);
 
-    let bytes_per_pixel = match format {
-        "RGB8" => 3,
-        "RGBA8" => 4,
-        "R8" => 1,
-        _ => 3, // Default to RGB8
-    };
+    let bytes_per_pixel = format.bytes_per_pixel();
 
     for y in 0..height {
         for x in 0..width {
-            let idx = ((y * width + x) * bytes_per_pixel) as usize;
-            let bytes_per_pixel_usize = bytes_per_pixel as usize;
-            if idx + bytes_per_pixel_usize <= data.len() {
+            let idx = ((y * width + x) as usize) * bytes_per_pixel;
+            if idx + bytes_per_pixel <= data.len() {
                 let color = match format {
-                    "RGB8" => {
+                    TextureFormat::Rgb8 => {
                         let r = data[idx];
                         let g = data[idx + 1];
                         let b = data[idx + 2];
                         Color32::from_rgb(r, g, b)
                     }
-                    "RGBA8" => {
+                    TextureFormat::Rgba8 => {
                         let r = data[idx];
                         let g = data[idx + 1];
                         let b = data[idx + 2];
                         let a = data[idx + 3];
                         Color32::from_rgba_unmultiplied(r, g, b, a)
                     }
-                    "R8" => {
+                    TextureFormat::R8 => {
                         let gray = data[idx];
                         Color32::from_gray(gray)
                     }
-                    _ => Color32::BLACK,
+                    TextureFormat::Rgba16 => {
+                        let r = u16::from_le_bytes([data[idx], data[idx + 1]]);
+                        let g = u16::from_le_bytes([data[idx + 2], data[idx + 3]]);
+                        let b = u16::from_le_bytes([data[idx + 4], data[idx + 5]]);
+                        let a = u16::from_le_bytes([data[idx + 6], data[idx + 7]]);
+                        Color32::from_rgba_unmultiplied(
+                            ((r as u32 + 128) >> 8).min(255) as u8,
+                            ((g as u32 + 128) >> 8).min(255) as u8,
+                            ((b as u32 + 128) >> 8).min(255) as u8,
+                            ((a as u32 + 128) >> 8).min(255) as u8,
+                        )
+                    }
                 };
                 pixels.push(color);
             } else {

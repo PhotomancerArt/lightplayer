@@ -85,8 +85,7 @@ impl SerialEmuClientTransport {
                 }
                 Err(e) => {
                     log::warn!(
-                        "SerialEmuClientTransport: Failed to parse M! line: {e} | {}",
-                        message_str
+                        "SerialEmuClientTransport: Failed to parse M! line: {e} | {message_str}"
                     );
                 }
             }

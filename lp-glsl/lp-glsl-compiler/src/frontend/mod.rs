@@ -28,7 +28,7 @@ pub use pipeline::{
 use crate::backend::codegen::emu::EmulatorOptions;
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
-use crate::error::{ErrorCode, GlslError};
+use crate::error::{ErrorCode, GlslDiagnostics, GlslError};
 use crate::exec::executable::{GlslExecutable, GlslOptions, RunMode};
 #[cfg(not(feature = "std"))]
 use cranelift_codegen::settings::{self, Configurable};
@@ -45,90 +45,93 @@ use alloc::string::String;
 pub fn compile_glsl_to_gl_module_jit(
     source: &str,
     options: &GlslOptions,
-) -> Result<GlModule<JITModule>, GlslError> {
-    options.validate()?;
+) -> Result<GlModule<JITModule>, GlslDiagnostics> {
+    options.validate().map_err(GlslDiagnostics::from)?;
     use crate::exec::executable::DecimalFormat;
 
-    // Determine target based on run mode
-    #[cfg(feature = "std")]
-    let target = match &options.run_mode {
-        RunMode::HostJit => Target::host_jit()?,
-        RunMode::Emulator { .. } => {
-            return Err(GlslError::new(
-                ErrorCode::E0400,
-                "Emulator mode not supported for JIT compilation",
-            ));
-        }
-    };
-
-    #[cfg(not(feature = "std"))]
-    let target = match &options.run_mode {
-        RunMode::HostJit => {
-            // In no_std mode, manually create HostJit target (riscv32 only)
-            // Use the same approach as esp32-glsl-jit: create flags manually
-            let mut flag_builder = settings::builder();
-            flag_builder.set("is_pic", "false").map_err(|e| {
-                GlslError::new(
+    // Use target override when set (e.g. embedded JIT); otherwise create from run_mode
+    let target = if let Some(ref t) = options.target_override {
+        t.clone()
+    } else {
+        #[cfg(feature = "std")]
+        match &options.run_mode {
+            RunMode::HostJit => Target::host_jit()?,
+            RunMode::Emulator { .. } => {
+                return Err(GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
-                    alloc::format!("failed to set is_pic: {e}"),
-                )
-            })?;
-            flag_builder
-                .set("use_colocated_libcalls", "false")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set use_colocated_libcalls: {e}"),
-                    )
-                })?;
-            flag_builder
-                .set("enable_multi_ret_implicit_sret", "true")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set enable_multi_ret_implicit_sret: {e}"),
-                    )
-                })?;
-            flag_builder
-                .set("regalloc_algorithm", "single_pass")
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        alloc::format!("failed to set regalloc_algorithm: {e}"),
-                    )
-                })?;
-            let flags = settings::Flags::new(flag_builder);
-            Target::HostJit {
-                arch: None,
-                flags,
-                isa: None,
+                    "Emulator mode not supported for JIT compilation",
+                )));
             }
         }
-        RunMode::Emulator { .. } => {
-            return Err(GlslError::new(
-                ErrorCode::E0400,
-                "Emulator mode not supported for JIT compilation",
-            ));
+
+        #[cfg(not(feature = "std"))]
+        match &options.run_mode {
+            RunMode::HostJit => {
+                let mut flag_builder = settings::builder();
+                flag_builder.set("is_pic", "false").map_err(|e| {
+                    GlslError::new(
+                        ErrorCode::E0400,
+                        alloc::format!("failed to set is_pic: {e}"),
+                    )
+                })?;
+                flag_builder
+                    .set("use_colocated_libcalls", "false")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set use_colocated_libcalls: {e}"),
+                        )
+                    })?;
+                flag_builder
+                    .set("enable_multi_ret_implicit_sret", "true")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set enable_multi_ret_implicit_sret: {e}"),
+                        )
+                    })?;
+                flag_builder
+                    .set("regalloc_algorithm", "single_pass")
+                    .map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            alloc::format!("failed to set regalloc_algorithm: {e}"),
+                        )
+                    })?;
+                let flags = settings::Flags::new(flag_builder);
+                Target::HostJit {
+                    arch: None,
+                    flags,
+                    isa: None,
+                }
+            }
+            RunMode::Emulator { .. } => {
+                return Err(GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    "Emulator mode not supported for JIT compilation",
+                )));
+            }
         }
     };
 
     // Compile to GlModule (works in both std and no_std)
     let mut compiler = GlslCompiler::new();
-    let mut module = compiler.compile_to_gl_module_jit(source, target)?;
+    let mut module = compiler.compile_to_gl_module_jit(source, target, options.max_errors)?;
 
     // Apply transformations
     match options.decimal_format {
         DecimalFormat::Q32 => {
             use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+            let transform =
+                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
             module = module.apply_transform(transform)?;
         }
         DecimalFormat::Float => {
-            return Err(GlslError::new(
+            return Err(GlslDiagnostics::from(GlslError::new(
                 crate::error::ErrorCode::E0400,
                 "Float format is not yet supported. Only Q32 format is currently supported. \
                  Float format will cause TestCase relocation errors. Use Q32 format instead.",
-            ));
+            )));
         }
     }
 
@@ -142,12 +145,12 @@ pub fn compile_glsl_to_gl_module_jit(
 pub fn compile_glsl_to_gl_module_object(
     source: &str,
     options: &GlslOptions,
-) -> Result<(GlModule<ObjectModule>, Option<String>, Option<String>), GlslError> {
+) -> Result<(GlModule<ObjectModule>, Option<String>, Option<String>), GlslDiagnostics> {
     #[cfg(feature = "std")]
     use crate::backend::util::clif_format::format_clif_module;
     use crate::exec::executable::DecimalFormat;
 
-    options.validate()?;
+    options.validate().map_err(GlslDiagnostics::from)?;
 
     let mut compiler = GlslCompiler::new();
 
@@ -155,15 +158,15 @@ pub fn compile_glsl_to_gl_module_object(
     let target = match &options.run_mode {
         RunMode::Emulator { .. } => Target::riscv32_emulator()?,
         RunMode::HostJit => {
-            return Err(GlslError::new(
+            return Err(GlslDiagnostics::from(GlslError::new(
                 crate::error::ErrorCode::E0400,
                 "HostJit mode not supported for object compilation",
-            ));
+            )));
         }
     };
 
     // Compile to GlModule
-    let mut module = compiler.compile_to_gl_module_object(source, target)?;
+    let mut module = compiler.compile_to_gl_module_object(source, target, options.max_errors)?;
 
     // Capture original CLIF IR before transformation (only in std builds)
     #[cfg(feature = "std")]
@@ -175,7 +178,8 @@ pub fn compile_glsl_to_gl_module_object(
     let transformed_clif = match options.decimal_format {
         DecimalFormat::Q32 => {
             use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+            let transform =
+                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
             module = module.apply_transform(transform)?;
             // Capture transformed CLIF IR after transformation (only in std builds)
             #[cfg(feature = "std")]
@@ -205,9 +209,17 @@ pub fn compile_glsl_to_gl_module_object(
 
 /// Compile and JIT execute GLSL
 /// Works in both std and no_std environments
-pub fn glsl_jit(source: &str, options: GlslOptions) -> Result<Box<dyn GlslExecutable>, GlslError> {
+pub fn glsl_jit(
+    source: &str,
+    options: GlslOptions,
+) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
     let module = compile_glsl_to_gl_module_jit(source, &options)?;
-    module.build_executable()
+    let jit = if options.memory_optimized {
+        crate::backend::codegen::jit::build_jit_executable_memory_optimized(module)
+    } else {
+        crate::backend::codegen::jit::build_jit_executable(module)
+    }?;
+    Ok(alloc::boxed::Box::new(jit))
 }
 
 /// Compile and execute GLSL in RISC-V 32-bit emulator
@@ -216,7 +228,7 @@ pub fn glsl_jit(source: &str, options: GlslOptions) -> Result<Box<dyn GlslExecut
 pub fn glsl_emu_riscv32(
     source: &str,
     options: GlslOptions,
-) -> Result<Box<dyn GlslExecutable>, GlslError> {
+) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
     glsl_emu_riscv32_with_metadata(source, options, None)
 }
 
@@ -227,7 +239,7 @@ pub fn glsl_emu_riscv32_with_metadata(
     source: &str,
     options: GlslOptions,
     source_file_path: Option<String>,
-) -> Result<Box<dyn GlslExecutable>, GlslError> {
+) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
     // Compile to GlModule (transformations already applied)
     let (module, original_clif, transformed_clif) =
         compile_glsl_to_gl_module_object(source, &options)?;
@@ -248,10 +260,10 @@ pub fn glsl_emu_riscv32_with_metadata(
             }
         }
         _ => {
-            return Err(GlslError::new(
+            return Err(GlslDiagnostics::from(GlslError::new(
                 crate::error::ErrorCode::E0400,
                 "Invalid run mode for emulator",
-            ));
+            )));
         }
     };
 
@@ -259,5 +271,7 @@ pub fn glsl_emu_riscv32_with_metadata(
     // This can be added later if needed
     let _ = source_file_path;
 
-    module.build_executable(&emulator_options, original_clif, transformed_clif)
+    module
+        .build_executable(&emulator_options, original_clif, transformed_clif)
+        .map_err(GlslDiagnostics::from)
 }

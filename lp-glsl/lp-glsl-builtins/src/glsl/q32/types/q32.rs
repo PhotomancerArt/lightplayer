@@ -1,3 +1,4 @@
+use crate::builtins::q32::__lp_q32_sqrt;
 /// Fixed-point arithmetic (16.16 format)
 ///
 /// Core type and conversion utilities for fixed-point fixed.
@@ -112,6 +113,13 @@ impl Q32 {
         self.to_i32().clamp(0, 255) as u8
     }
 
+    /// Get value as u16 clamped to [0, 65535]
+    #[inline]
+    pub fn to_u16_clamped(self) -> u16 {
+        let scaled = (self.0 as i64 * 65535) / 65536;
+        scaled.clamp(0, 65535) as u16
+    }
+
     /// Multiply by an integer (more efficient than converting to Fixed first)
     #[inline]
     pub const fn mul_int(self, i: i32) -> Q32 {
@@ -123,6 +131,10 @@ impl Q32 {
     #[inline]
     pub fn mix(self, other: Q32, t: Q32) -> Q32 {
         crate::glsl::q32::fns::mix_q32(self, other, t)
+    }
+
+    pub fn sqrt(self) -> Q32 {
+        Q32(__lp_q32_sqrt(self.0))
     }
 }
 

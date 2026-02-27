@@ -85,3 +85,20 @@ impl fmt::Display for OutputError {
         }
     }
 }
+
+/// Display pipeline error type
+#[derive(Debug, Clone)]
+pub enum DisplayPipelineError {
+    /// Allocation failed (e.g. too many LEDs)
+    AllocationFailed { num_leds: u32 },
+}
+
+impl fmt::Display for DisplayPipelineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DisplayPipelineError::AllocationFailed { num_leds } => {
+                write!(f, "DisplayPipeline allocation failed for {num_leds} LEDs")
+            }
+        }
+    }
+}

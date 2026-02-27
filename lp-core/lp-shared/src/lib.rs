@@ -14,15 +14,19 @@ extern crate alloc;
 extern crate std;
 
 pub mod error;
+pub mod fps;
 pub mod fs;
+pub mod stats;
 pub mod util; // Temporarily enabled for Texture
 
+pub mod display_pipeline;
 pub mod output;
 pub mod project;
 pub mod time;
 pub mod transport;
 
-pub use error::{FsError, OutputError, TextureError};
+pub use display_pipeline::{DisplayPipeline, DisplayPipelineOptions};
+pub use error::{DisplayPipelineError, FsError, OutputError, TextureError};
 // Re-export TransportError from lp-model for convenience
 pub use lp_model::TransportError;
 pub use project::ProjectBuilder;

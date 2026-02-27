@@ -28,11 +28,18 @@ pub enum Type {
     Sampler2D,
     Struct(StructId),
     Array(Box<Type>, usize),
+    /// Placeholder when inference fails; prevents cascading diagnostics.
+    Error,
 }
 
 pub type StructId = usize;
 
 impl Type {
+    /// Returns true if this type is the error placeholder (inference failed).
+    pub fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
+    }
+
     /// Returns true if this type is numeric (can be used in arithmetic)
     pub fn is_numeric(&self) -> bool {
         match self {
@@ -194,6 +201,12 @@ impl Type {
     pub fn to_cranelift_type(
         &self,
     ) -> Result<cranelift_codegen::ir::Type, crate::error::GlslError> {
+        if self.is_error() {
+            return Err(crate::error::GlslError::new(
+                crate::error::ErrorCode::E0109,
+                "Error type has no Cranelift representation",
+            ));
+        }
         match self {
             Type::Bool => Ok(cranelift_codegen::ir::types::I8),
             Type::Int => Ok(cranelift_codegen::ir::types::I32),
@@ -208,6 +221,8 @@ impl Type {
                 // We return F32 as the base type, actual storage handled in codegen
                 Ok(cranelift_codegen::ir::types::F32)
             }
+            // Float vectors: each component is F32 (same pattern as Mat)
+            Type::Vec2 | Type::Vec3 | Type::Vec4 => Ok(cranelift_codegen::ir::types::F32),
             // UVec types are stored as i32 (same as UInt)
             Type::UVec2 | Type::UVec3 | Type::UVec4 => Ok(cranelift_codegen::ir::types::I32),
             Type::Array(element_ty, _) => {

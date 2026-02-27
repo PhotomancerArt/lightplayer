@@ -1,6 +1,7 @@
 //! Shared utilities for extracting function signatures from AST
 
 use crate::error::GlslError;
+use crate::frontend::semantic::const_eval::ConstEnv;
 use crate::frontend::semantic::functions::{FunctionSignature, ParamQualifier, Parameter};
 use crate::frontend::semantic::type_resolver;
 
@@ -8,9 +9,11 @@ use alloc::vec::Vec;
 
 use alloc::string::String;
 
-/// Extract a function signature from a function prototype
+/// Extract a function signature from a function prototype.
+/// When const_env is Some, parameter array dimensions (e.g. float arr[N]) can use global consts.
 pub fn extract_function_signature(
     prototype: &glsl::syntax::FunctionPrototype,
+    const_env: Option<&ConstEnv>,
 ) -> Result<FunctionSignature, GlslError> {
     let name = prototype.name.name.clone();
     // Extract span from function name for error reporting (fallback to type location)
@@ -19,7 +22,7 @@ pub fn extract_function_signature(
 
     let mut parameters = Vec::new();
     for param_decl in &prototype.parameters {
-        let param = extract_parameter(param_decl)?;
+        let param = extract_parameter(param_decl, const_env)?;
         parameters.push(param);
     }
 
@@ -30,9 +33,11 @@ pub fn extract_function_signature(
     })
 }
 
-/// Extract a parameter from a function parameter declaration
+/// Extract a parameter from a function parameter declaration.
+/// When const_env is Some, array dimensions (e.g. float arr[N]) can use global consts.
 pub fn extract_parameter(
     param_decl: &glsl::syntax::FunctionParameterDeclaration,
+    const_env: Option<&ConstEnv>,
 ) -> Result<Parameter, GlslError> {
     use glsl::syntax::FunctionParameterDeclaration;
 
@@ -47,6 +52,7 @@ pub fn extract_parameter(
                 &base_ty,
                 decl.ident.array_spec.as_ref(),
                 Some(param_span),
+                const_env,
             )?;
             let name = decl.ident.ident.name.clone();
 

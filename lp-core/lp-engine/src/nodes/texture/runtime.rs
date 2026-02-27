@@ -1,10 +1,12 @@
 use crate::error::Error;
 use crate::nodes::{NodeConfig, NodeRuntime};
+use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext};
-use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+use alloc::{boxed::Box, format, string::ToString};
 use lp_model::{
     NodeHandle,
-    nodes::texture::{TextureConfig, TextureState},
+    nodes::texture::{TextureConfig, TextureFormat, TextureState},
+    project::FrameId,
 };
 use lp_shared::{Texture, fs::fs_event::FsChange};
 
@@ -12,6 +14,7 @@ use lp_shared::{Texture, fs::fs_event::FsChange};
 pub struct TextureRuntime {
     config: Option<TextureConfig>,
     texture: Option<Texture>,
+    pub state: TextureState,
     node_handle: NodeHandle,
 }
 
@@ -20,6 +23,7 @@ impl TextureRuntime {
         Self {
             config: None,
             texture: None,
+            state: TextureState::new(FrameId::default()),
             node_handle,
         }
     }
@@ -37,36 +41,40 @@ impl TextureRuntime {
     }
 
     pub fn get_state(&self) -> TextureState {
-        // Extract state for sync API
-        if let Some(tex) = &self.texture {
-            TextureState {
-                texture_data: tex.data().to_vec(),
-                width: tex.width(),
-                height: tex.height(),
-                format: tex.format().to_string(),
-            }
-        } else if let Some(config) = &self.config {
-            // Fallback to config if texture not initialized
-            TextureState {
-                texture_data: Vec::new(),
-                width: config.width,
-                height: config.height,
-                format: "RGBA8".to_string(), // Default format
-            }
-        } else {
-            // No texture or config available
-            TextureState {
-                texture_data: Vec::new(),
-                width: 0,
-                height: 0,
-                format: "RGBA8".to_string(),
-            }
-        }
+        // Return cloned state
+        self.state.clone()
     }
 
     /// Get the texture config (for state extraction)
     pub fn get_config(&self) -> Option<&TextureConfig> {
         self.config.as_ref()
+    }
+
+    /// Allocate texture if shed; required before get_texture/get_texture_mut.
+    pub fn ensure_texture(&mut self) -> Result<(), Error> {
+        if self.texture.is_some() {
+            return Ok(());
+        }
+        let config = self.config.as_ref().ok_or_else(|| Error::InvalidConfig {
+            node_path: format!("texture-{}", self.node_handle.as_i32()),
+            reason: "Config not set".to_string(),
+        })?;
+        let format = TextureFormat::Rgba16;
+        let texture = Texture::new(config.width, config.height, format).map_err(|e| {
+            Error::InvalidConfig {
+                node_path: format!("texture-{}", self.node_handle.as_i32()),
+                reason: format!("Failed to create texture: {e}"),
+            }
+        })?;
+        self.texture = Some(texture);
+        if let Some(tex) = &self.texture {
+            let frame_id = FrameId::default();
+            self.state.texture_data.set(frame_id, tex.data().to_vec());
+            self.state.width.set(frame_id, tex.width());
+            self.state.height.set(frame_id, tex.height());
+            self.state.format.set(frame_id, tex.format());
+        }
+        Ok(())
     }
 }
 
@@ -79,7 +87,7 @@ impl NodeRuntime for TextureRuntime {
 
         // Create texture with RGBA8 format (default for now)
         // Format will be added to TextureConfig later
-        let format = "RGBA8".to_string();
+        let format = TextureFormat::Rgba16;
         let texture = Texture::new(config.width, config.height, format).map_err(|e| {
             Error::InvalidConfig {
                 node_path: format!("texture-{}", self.node_handle.as_i32()),
@@ -88,11 +96,32 @@ impl NodeRuntime for TextureRuntime {
         })?;
 
         self.texture = Some(texture);
+
+        // Update state with texture data
+        if let Some(tex) = &self.texture {
+            let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+            self.state.texture_data.set(frame_id, tex.data().to_vec());
+            self.state.width.set(frame_id, tex.width());
+            self.state.height.set(frame_id, tex.height());
+            self.state.format.set(frame_id, tex.format());
+        }
+
         Ok(())
     }
 
     fn render(&mut self, _ctx: &mut dyn RenderContext) -> Result<(), Error> {
         // No-op - textures don't render themselves, shaders render to textures
+        Ok(())
+    }
+
+    fn shed_optional_buffers(
+        &mut self,
+        _output_provider: Option<&dyn OutputProvider>,
+    ) -> Result<(), Error> {
+        self.texture = None;
+        self.state
+            .texture_data
+            .set(FrameId::default(), alloc::vec::Vec::new());
         Ok(())
     }
 
@@ -127,13 +156,22 @@ impl NodeRuntime for TextureRuntime {
 
         // If dimensions changed, resize texture
         if needs_resize {
-            let format = "RGBA8".to_string();
+            let format = TextureFormat::Rgba16;
             let texture = Texture::new(texture_config.width, texture_config.height, format)
                 .map_err(|e| Error::InvalidConfig {
                     node_path: format!("texture-{}", self.node_handle.as_i32()),
                     reason: format!("Failed to resize texture: {e}"),
                 })?;
             self.texture = Some(texture);
+
+            // Update state with new texture data
+            if let Some(tex) = &self.texture {
+                let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
+                self.state.texture_data.set(frame_id, tex.data().to_vec());
+                self.state.width.set(frame_id, tex.width());
+                self.state.height.set(frame_id, tex.height());
+                self.state.format.set(frame_id, tex.format());
+            }
         }
 
         Ok(())

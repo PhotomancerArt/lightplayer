@@ -18,6 +18,9 @@ pub fn infer_binary_result_type(
     rhs_ty: &Type,
     span: SourceSpan,
 ) -> Result<Type, GlslError> {
+    if lhs_ty.is_error() || rhs_ty.is_error() {
+        return Ok(Type::Error);
+    }
     use BinaryOp::*;
 
     match op {
@@ -257,6 +260,9 @@ pub fn infer_unary_result_type(
     operand_ty: &Type,
     span: SourceSpan,
 ) -> Result<Type, GlslError> {
+    if operand_ty.is_error() {
+        return Ok(Type::Error);
+    }
     use UnaryOp::*;
 
     match op {
@@ -305,6 +311,9 @@ pub fn infer_unary_result_type(
 
 /// Validate condition expression type (must be bool)
 pub fn check_condition(cond_ty: &Type) -> Result<(), GlslError> {
+    if cond_ty.is_error() {
+        return Ok(());
+    }
     if cond_ty != &Type::Bool {
         return Err(
             GlslError::new(ErrorCode::E0107, "condition must be bool type")
@@ -317,6 +326,9 @@ pub fn check_condition(cond_ty: &Type) -> Result<(), GlslError> {
 /// Infer result type of post-increment operation
 /// Implements GLSL spec: operators.adoc:856-869
 pub fn infer_postinc_result_type(operand_ty: &Type, span: SourceSpan) -> Result<Type, GlslError> {
+    if operand_ty.is_error() {
+        return Ok(Type::Error);
+    }
     // Post-increment requires numeric operand (int, float, or vector/matrix of these)
     if !operand_ty.is_numeric() {
         return Err(GlslError::new(
@@ -334,6 +346,9 @@ pub fn infer_postinc_result_type(operand_ty: &Type, span: SourceSpan) -> Result<
 /// Infer result type of pre-increment operation
 /// Implements GLSL spec: operators.adoc:856-869
 pub fn infer_preinc_result_type(operand_ty: &Type, span: SourceSpan) -> Result<Type, GlslError> {
+    if operand_ty.is_error() {
+        return Ok(Type::Error);
+    }
     // Pre-increment requires numeric operand (int, float, or vector/matrix of these)
     if !operand_ty.is_numeric() {
         return Err(GlslError::new(
@@ -351,6 +366,9 @@ pub fn infer_preinc_result_type(operand_ty: &Type, span: SourceSpan) -> Result<T
 /// Infer result type of pre-decrement operation
 /// Implements GLSL spec: operators.adoc:856-869
 pub fn infer_predec_result_type(operand_ty: &Type, span: SourceSpan) -> Result<Type, GlslError> {
+    if operand_ty.is_error() {
+        return Ok(Type::Error);
+    }
     // Pre-decrement requires numeric operand (int, float, or vector/matrix of these)
     if !operand_ty.is_numeric() {
         return Err(GlslError::new(
@@ -368,6 +386,9 @@ pub fn infer_predec_result_type(operand_ty: &Type, span: SourceSpan) -> Result<T
 /// Infer result type of post-decrement operation
 /// Implements GLSL spec: operators.adoc:856-869
 pub fn infer_postdec_result_type(operand_ty: &Type, span: SourceSpan) -> Result<Type, GlslError> {
+    if operand_ty.is_error() {
+        return Ok(Type::Error);
+    }
     // Post-decrement requires numeric operand (int, float, or vector/matrix of these)
     if !operand_ty.is_numeric() {
         return Err(GlslError::new(

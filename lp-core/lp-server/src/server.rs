@@ -13,6 +13,10 @@ use lp_model::{LpPath, LpPathBuf, Message};
 use lp_shared::fs::{FsChange, LpFs};
 use lp_shared::output::OutputProvider;
 
+/// Optional callback returning (free_bytes, used_bytes) for memory logging.
+/// Platforms without heap stats (e.g. fw-emu) pass `None`.
+pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
+
 /// Main server struct for processing client-server messages
 ///
 /// Uses a tick-based API similar to game engines, processing incoming messages
@@ -27,6 +31,8 @@ pub struct LpServer {
     base_fs: Box<dyn LpFs>,
     /// Last frame processing time in microseconds (for theoretical FPS calculation)
     last_frame_time_us: RefCell<Option<u64>>,
+    /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
+    memory_stats: Option<MemoryStatsFn>,
 }
 
 impl LpServer {
@@ -51,12 +57,13 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let server = LpServer::new(output_provider, base_fs, "projects/".as_path());
+    /// let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
     /// ```
     pub fn new(
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         base_fs: Box<dyn LpFs>,
         projects_base_dir: &LpPath,
+        memory_stats: Option<MemoryStatsFn>,
     ) -> Self {
         let project_manager = ProjectManager::new(projects_base_dir);
         Self {
@@ -64,6 +71,7 @@ impl LpServer {
             project_manager,
             base_fs,
             last_frame_time_us: RefCell::new(None),
+            memory_stats,
         }
     }
 
@@ -95,7 +103,7 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsMemory::new());
-    /// let mut server = LpServer::new(output_provider, base_fs, "projects/".as_path());
+    /// let mut server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
     /// let incoming = vec![/* messages */];
     /// let responses = server.tick(16, incoming).unwrap();
     /// ```
@@ -238,6 +246,7 @@ impl LpServer {
                         &mut self.project_manager,
                         &mut *self.base_fs,
                         &self.output_provider,
+                        self.memory_stats.as_ref(),
                         client_msg,
                         theoretical_fps,
                     ) {

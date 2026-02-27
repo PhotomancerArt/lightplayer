@@ -55,6 +55,10 @@ build-fw-esp32: install-rv32-target
 build-rv32-emu-guest-test-app: install-rv32-target
     cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
+# riscv32: fw-emu (firmware that runs in RISC-V emulator)
+build-fw-emu: install-rv32-target
+    cargo build --target {{ rv32_target }} -p fw-emu
+
 [parallel]
 build: build-host build-rv32
 
@@ -206,7 +210,7 @@ ci-app: fmt-check clippy-app build-app test-app
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
 # Fix code issues then run CI (sequential, not parallel)
-fci: 
+fci:
     @just fix
     @just ci
 
@@ -257,6 +261,61 @@ demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
 
 # Run firmware on ESP32-C6 device
+
 # Requires: ESP32-C6 device connected via USB
-demo-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --target {{ rv32_target }} --release --features esp32c6
+demo-esp32c6-host: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
+    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
+    cargo run --package lp-cli -- dev examples/basic --push serial:auto
+
+# Run firmware on ESP32-C6 device using the demo mode
+demo-esp32c6-standalone: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --target {{ rv32_target }} --release --features esp32c6,demo_project
+
+# Run firmware on ESP32-C6 device using the test_rmt feature
+fwtest-rmt-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
+
+# Run firmware on ESP32-C6 device using the test_dither feature
+fwtest-dithering-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --release
+
+# Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
+fwtest-json-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --release
+
+cargo-update:
+    cargo update -p regalloc2 \
+                 -p cranelift-codegen \
+                 -p cranelift-frontend \
+                 -p cranelift-module \
+                 -p cranelift-jit \
+                 -p cranelift-native \
+                 -p cranelift-object \
+                 -p cranelift-reader \
+                 -p cranelift-control \
+                 -p cranelift-interpreter
+
+# Decode ESP32-C6 backtrace addresses
+# Usage: just decode-backtrace 0x420381c2 0x42038172 ...
+#        pbpaste | just decode-backtrace
+# Build first: just build-fw-esp32
+# Uses `addr2line` (cargo install addr2line) or riscv32-esp-elf-addr2line if available
+decode-backtrace *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f target/{{ rv32_target }}/release/fw-esp32
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace 0x420... ... or: pbpaste | just decode-backtrace"
+        exit 1
+    fi
+    if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 $ADDRS
+    else
+        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a $ADDRS
+    fi

@@ -20,5 +20,5 @@ pub mod runtime;
 pub use error::Error;
 pub use nodes::{NodeConfig, NodeRuntime};
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
-pub use project::ProjectRuntime;
+pub use project::{MemoryStatsFn, ProjectRuntime};
 pub use runtime::{NodeInitContext, RenderContext};

@@ -19,6 +19,9 @@ use lp_model::{
 };
 use lp_shared::fs::{LpFs, fs_event::FsChange};
 
+/// Optional callback for memory stats (free_bytes, used_bytes). Used for shed logging on ESP32.
+pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
+
 /// Project runtime - manages nodes and rendering
 pub struct ProjectRuntime {
     /// Current frame ID
@@ -33,6 +36,8 @@ pub struct ProjectRuntime {
     pub nodes: BTreeMap<NodeHandle, NodeEntry>,
     /// Next handle to assign
     pub next_handle: i32,
+    /// Optional memory stats for shed logging (ESP32 passes, others None)
+    pub memory_stats: Option<MemoryStatsFn>,
 }
 
 /// Node entry in runtime
@@ -70,32 +75,12 @@ pub enum NodeStatus {
     Error(String),
 }
 
-/// Apply 4x4 transform matrix to a 2D point
-///
-/// Treats the point as homogeneous coordinate [x, y, 0, 1] and applies the transform.
-/// Returns the transformed 2D point.
-fn apply_transform_2d(point: [f32; 2], transform: [[f32; 4]; 4]) -> [f32; 2] {
-    let x = point[0];
-    let y = point[1];
-
-    // Apply transform: [x', y', z', w'] = transform * [x, y, 0, 1]
-    let x_prime = transform[0][0] * x + transform[0][1] * y + transform[0][3];
-    let y_prime = transform[1][0] * x + transform[1][1] * y + transform[1][3];
-    let w_prime = transform[3][0] * x + transform[3][1] * y + transform[3][3];
-
-    // Normalize by w if not zero
-    if w_prime.abs() > 1e-6 {
-        [x_prime / w_prime, y_prime / w_prime]
-    } else {
-        [x_prime, y_prime]
-    }
-}
-
 impl ProjectRuntime {
     /// Create new project runtime
     pub fn new(
         fs: Rc<RefCell<dyn LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
+        memory_stats: Option<MemoryStatsFn>,
     ) -> Result<Self, Error> {
         let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
 
@@ -106,7 +91,22 @@ impl ProjectRuntime {
             output_provider,
             nodes: BTreeMap::new(),
             next_handle: 1,
+            memory_stats,
         })
+    }
+
+    /// Destroy all node runtimes, releasing resources (e.g. output channels).
+    ///
+    /// Call before dropping the project to ensure output provider resources are freed.
+    pub fn destroy_all_nodes(&mut self) -> Result<(), Error> {
+        let provider = self.output_provider.borrow();
+        let output_provider: &dyn OutputProvider = &*provider;
+        for (_, entry) in &mut self.nodes {
+            if let Some(mut runtime) = entry.runtime.take() {
+                runtime.destroy(Some(output_provider))?;
+            }
+        }
+        Ok(())
     }
 
     /// Load nodes from filesystem (doesn't initialize them)
@@ -155,7 +155,10 @@ impl ProjectRuntime {
                             Box::new(lp_model::nodes::shader::ShaderConfig::default())
                         }
                         NodeKind::Output => {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip { pin: 0 })
+                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                pin: 0,
+                                options: None,
+                            })
                         }
                         NodeKind::Fixture => Box::new(lp_model::nodes::fixture::FixtureConfig {
                             output_spec: lp_model::NodeSpecifier::from(""),
@@ -617,10 +620,11 @@ impl ProjectRuntime {
             // Extract node path from file path
             if let Some(node_path) = self.extract_node_path_from_file_path(change.path.as_path()) {
                 if let Ok(handle) = self.handle_for_path(node_path.as_path()) {
-                    // Destroy runtime if it exists
+                    // Destroy runtime if it exists (close output channels etc.)
                     if let Some(entry) = self.nodes.get_mut(&handle) {
                         if let Some(mut runtime) = entry.runtime.take() {
-                            runtime.destroy()?;
+                            let provider = self.output_provider.borrow();
+                            runtime.destroy(Some(&*provider))?;
                         }
                     }
                     // Remove node
@@ -631,10 +635,11 @@ impl ProjectRuntime {
             // Node directory was deleted
             if let Some(node_path) = self.extract_node_path_from_file_path(change.path.as_path()) {
                 if let Ok(handle) = self.handle_for_path(node_path.as_path()) {
-                    // Destroy runtime if it exists
+                    // Destroy runtime if it exists (close output channels etc.)
                     if let Some(entry) = self.nodes.get_mut(&handle) {
                         if let Some(mut runtime) = entry.runtime.take() {
-                            runtime.destroy()?;
+                            let provider = self.output_provider.borrow();
+                            runtime.destroy(Some(&*provider))?;
                         }
                     }
                     // Remove node
@@ -677,6 +682,7 @@ impl ProjectRuntime {
         if let (Some(handle), Some(path)) = (target_handle, target_path) {
             // Check if it's node.json
             if change.path.has_suffix("/node.json") {
+                log::info!("Node config changed: {} (updating)", path.as_str());
                 // Reload config
                 let (_, config_for_update) =
                     crate::project::loader::load_node(&*self.fs.borrow(), &path)?;
@@ -730,11 +736,54 @@ impl ProjectRuntime {
                     change.path.as_str()
                 };
 
+                // Shed optional buffers before shader recompile to maximize memory
+                let is_shader_glsl = change.path.has_suffix(".glsl")
+                    && self
+                        .nodes
+                        .get(&handle)
+                        .map(|e| e.kind == NodeKind::Shader)
+                        .unwrap_or(false);
+
+                if is_shader_glsl {
+                    let free_before = self.memory_stats.and_then(|f| f().map(|(free, _)| free));
+                    if let Some(free) = free_before {
+                        log::info!("[mem] shed_before_shader_recompile: {}k free", free / 1024);
+                    }
+
+                    let provider = self.output_provider.borrow();
+                    let output_provider: &dyn OutputProvider = &*provider;
+                    for (_, entry) in &mut self.nodes {
+                        if let Some(runtime) = entry.runtime.as_mut() {
+                            runtime.shed_optional_buffers(Some(output_provider))?;
+                        }
+                    }
+                    drop(provider);
+
+                    if let Some(f) = self.memory_stats {
+                        if let Some((free_after, _)) = f() {
+                            let delta = free_after as i64 - free_before.unwrap_or(0) as i64;
+                            let sign = if delta >= 0 { "+" } else { "" };
+                            log::info!(
+                                "[mem] shed_after_shader_recompile: {}k free (delta: {}{}k)",
+                                free_after / 1024,
+                                sign,
+                                delta / 1024
+                            );
+                        }
+                    }
+                }
+
                 // Create FsChange with relative path
                 let relative_change = FsChange {
                     path: LpPathBuf::from(relative_path),
                     change_type: change.change_type,
                 };
+
+                log::info!(
+                    "Node file changed: {} -> {} (handle_fs_change)",
+                    path.as_str(),
+                    relative_path
+                );
 
                 let mut runtime_opt = None;
                 if let Some(node_entry) = self.nodes.get_mut(&handle) {
@@ -926,23 +975,26 @@ impl ProjectRuntime {
                             if let Some(tex_runtime) =
                                 runtime.as_any().downcast_ref::<TextureRuntime>()
                             {
-                                NodeState::Texture(tex_runtime.get_state())
+                                // Clone state and update with current texture data
+                                let mut state = tex_runtime.state.clone();
+                                // Update texture_data from current texture if available
+                                if let Some(tex) = tex_runtime.texture() {
+                                    state.texture_data.set(self.frame_id, tex.data().to_vec());
+                                    state.width.set(self.frame_id, tex.width());
+                                    state.height.set(self.frame_id, tex.height());
+                                    state.format.set(self.frame_id, tex.format());
+                                }
+                                NodeState::Texture(state)
                             } else {
                                 // Fallback to empty state
-                                NodeState::Texture(lp_model::nodes::texture::TextureState {
-                                    texture_data: Vec::new(),
-                                    width: 0,
-                                    height: 0,
-                                    format: "RGBA8".to_string(),
-                                })
+                                NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Texture(lp_model::nodes::texture::TextureState {
-                                texture_data: Vec::new(),
-                                width: 0,
-                                height: 0,
-                                format: "RGBA8".to_string(),
-                            })
+                            NodeState::Texture(lp_model::nodes::texture::TextureState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Shader => {
@@ -951,19 +1003,17 @@ impl ProjectRuntime {
                             if let Some(shader_runtime) =
                                 runtime.as_any().downcast_ref::<ShaderRuntime>()
                             {
-                                NodeState::Shader(shader_runtime.get_state())
+                                NodeState::Shader(shader_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Shader(lp_model::nodes::shader::ShaderState {
-                                    glsl_code: String::new(),
-                                    error: None,
-                                })
+                                NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Shader(lp_model::nodes::shader::ShaderState {
-                                glsl_code: String::new(),
-                                error: None,
-                            })
+                            NodeState::Shader(lp_model::nodes::shader::ShaderState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Output => {
@@ -973,86 +1023,41 @@ impl ProjectRuntime {
                                 .as_any()
                                 .downcast_ref::<crate::nodes::OutputRuntime>(
                             ) {
-                                NodeState::Output(lp_model::nodes::output::OutputState {
-                                    channel_data: output_runtime.get_channel_data().to_vec(),
-                                })
+                                // Clone state and update with current channel data
+                                let mut state = output_runtime.state.clone();
+                                // Update channel_data from current buffer
+                                state
+                                    .channel_data
+                                    .set(self.frame_id, output_runtime.get_channel_data());
+                                NodeState::Output(state)
                             } else {
-                                NodeState::Output(lp_model::nodes::output::OutputState {
-                                    channel_data: Vec::new(),
-                                })
+                                NodeState::Output(lp_model::nodes::output::OutputState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Output(lp_model::nodes::output::OutputState {
-                                channel_data: Vec::new(),
-                            })
+                            NodeState::Output(lp_model::nodes::output::OutputState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                     NodeKind::Fixture => {
-                        // Fixture runtime state extraction
+                        // Fixture runtime state extraction - just clone the state directly
                         if let Some(runtime) = &entry.runtime {
                             if let Some(fixture_runtime) =
                                 runtime.as_any().downcast_ref::<FixtureRuntime>()
                             {
-                                // Get mapping points and transform from runtime
-                                let mapping_points = fixture_runtime.get_mapping();
-                                let transform = fixture_runtime.get_transform();
-
-                                // Convert mapping points to MappingCells with post-transform coordinates
-                                let mapping_cells: Vec<lp_model::nodes::fixture::MappingCell> =
-                                    mapping_points
-                                        .iter()
-                                        .map(|mp| {
-                                            // Apply transform to convert from texture space to texture space
-                                            // Both input and output are in texture space [0, 1]
-                                            let transformed =
-                                                apply_transform_2d(mp.center, transform);
-                                            // Ensure coordinates are in [0, 1] range (clamp if needed)
-                                            let texture_coords = [
-                                                transformed[0].max(0.0).min(1.0),
-                                                transformed[1].max(0.0).min(1.0),
-                                            ];
-
-                                            lp_model::nodes::fixture::MappingCell {
-                                                channel: mp.channel,
-                                                center: texture_coords,
-                                                radius: mp.radius,
-                                            }
-                                        })
-                                        .collect();
-
-                                // Extract handles from runtime
-                                let texture_handle = fixture_runtime
-                                    .get_texture_handle()
-                                    .map(|h| h.as_node_handle());
-                                let output_handle = fixture_runtime
-                                    .get_output_handle()
-                                    .map(|h| h.as_node_handle());
-
-                                // Extract lamp colors from runtime
-                                let lamp_colors = fixture_runtime.get_lamp_colors().to_vec();
-
-                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                    lamp_colors,
-                                    mapping_cells,
-                                    texture_handle,
-                                    output_handle,
-                                })
+                                NodeState::Fixture(fixture_runtime.state.clone())
                             } else {
                                 // Fallback to empty state
-                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                    lamp_colors: Vec::new(),
-                                    mapping_cells: Vec::new(),
-                                    texture_handle: None,
-                                    output_handle: None,
-                                })
+                                NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                                    self.frame_id,
+                                ))
                             }
                         } else {
-                            NodeState::Fixture(lp_model::nodes::fixture::FixtureState {
-                                lamp_colors: Vec::new(),
-                                mapping_cells: Vec::new(),
-                                texture_handle: None,
-                                output_handle: None,
-                            })
+                            NodeState::Fixture(lp_model::nodes::fixture::FixtureState::new(
+                                self.frame_id,
+                            ))
                         }
                     }
                 };
@@ -1112,15 +1117,20 @@ impl ProjectRuntime {
                                 } else {
                                     Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                         pin: 0,
+                                        options: None,
                                     })
                                 }
                             } else {
                                 Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
                                     pin: 0,
+                                    options: None,
                                 })
                             }
                         } else {
-                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip { pin: 0 })
+                            Box::new(lp_model::nodes::output::OutputConfig::GpioStrip {
+                                pin: 0,
+                                options: None,
+                            })
                         }
                     }
                     NodeKind::Fixture => {
@@ -1189,6 +1199,7 @@ impl ProjectRuntime {
 
         Ok(ProjectResponse::GetChanges {
             current_frame: self.frame_id,
+            since_frame,
             node_handles,
             node_changes,
             node_details,
@@ -1362,15 +1373,16 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
                 path: format!("texture-{}", node_handle.as_i32()),
             })?;
 
-        // Get texture from runtime
+        // Ensure texture allocated (may have been shed before shader recompile)
         if let Some(runtime) = &mut entry.runtime {
             if let Some(tex_runtime) = runtime
                 .as_any_mut()
                 .downcast_mut::<crate::nodes::TextureRuntime>()
             {
-                tex_runtime.texture().ok_or_else(|| Error::Other {
+                tex_runtime.ensure_texture()?;
+                return tex_runtime.texture().ok_or_else(|| Error::Other {
                     message: "Texture not initialized".to_string(),
-                })
+                });
             } else {
                 Err(Error::Other {
                     message: "Texture runtime not found".to_string(),
@@ -1405,15 +1417,16 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
                 path: format!("texture-{}", node_handle.as_i32()),
             })?;
 
-        // Get mutable texture from runtime
+        // Ensure texture allocated and get mutable reference
         if let Some(runtime) = &mut entry.runtime {
             if let Some(tex_runtime) = runtime
                 .as_any_mut()
                 .downcast_mut::<crate::nodes::TextureRuntime>()
             {
-                tex_runtime.texture_mut().ok_or_else(|| Error::Other {
+                tex_runtime.ensure_texture()?;
+                return tex_runtime.texture_mut().ok_or_else(|| Error::Other {
                     message: "Texture not initialized".to_string(),
-                })
+                });
             } else {
                 Err(Error::Other {
                     message: "Texture runtime not found".to_string(),
@@ -1437,7 +1450,7 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
         _universe: u32,
         start_ch: u32,
         ch_count: u32,
-    ) -> Result<&mut [u8], Error> {
+    ) -> Result<&mut [u16], Error> {
         // Get output runtime
         let node_handle = handle.as_node_handle();
         let entry = self
@@ -1486,6 +1499,10 @@ impl<'a> crate::runtime::contexts::RenderContext for RenderContextImpl<'a> {
         // SAFETY: This is safe because the trait only allows immutable access
         // and we're not holding the borrow across any potential panics
         unsafe { &*self.output_provider.as_ptr() }
+    }
+
+    fn frame_id(&self) -> FrameId {
+        self.frame_id
     }
 }
 

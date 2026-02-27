@@ -60,6 +60,10 @@ pub fn run(
     let options = GlslOptions {
         run_mode,
         decimal_format,
+        q32_opts: lp_glsl_compiler::Q32Options::default(),
+        memory_optimized: false,
+        target_override: None,
+        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
     };
 
     // TODO: Implement bless mode when needed
@@ -109,7 +113,7 @@ pub fn run(
                 // Compilation failed - check if this is an expected failure
                 record_failure(directive, &mut stats, &mut failed_lines);
                 let formatted_error = format_compilation_error(
-                    &e,
+                    e,
                     &test_glsl_result,
                     directive.line_number,
                     &directive.expression_str,
@@ -462,7 +466,7 @@ enum ErrorType {
 
 /// Format a compilation error with test GLSL code context.
 fn format_compilation_error(
-    error: &lp_glsl_compiler::error::GlslError,
+    error: lp_glsl_compiler::GlslDiagnostics,
     test_glsl: &test_glsl::TestGlslResult,
     directive_line: usize,
     expression: &str,

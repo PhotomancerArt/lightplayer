@@ -31,76 +31,38 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 /// struct MyTransport;
 ///
 /// impl ServerTransport for MyTransport {
-///     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+///     async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
 ///         // Send message (transport handles serialization)
+///         let _ = msg;
 ///         Ok(())
 ///     }
 ///
-///     fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+///     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
 ///         // Receive message (transport handles deserialization)
 ///         Ok(None)
 ///     }
 ///
-///     fn close(&mut self) -> Result<(), TransportError> {
+///     async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+///         Ok(Vec::new())
+///     }
+///
+///     async fn close(&mut self) -> Result<(), TransportError> {
 ///         // Close the transport connection
 ///         Ok(())
 ///     }
 /// }
 /// ```
+#[allow(async_fn_in_trait, reason = "trait async fn stable in Rust 1.75+")]
 pub trait ServerTransport {
     /// Send a server message (consumes the message)
-    ///
-    /// The transport handles serialization internally.
-    ///
-    /// # Arguments
-    ///
-    /// * `msg` - The server message to send (consumed/moved)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` if the message was sent successfully
-    /// * `Err(TransportError)` if sending failed
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError>;
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError>;
 
-    /// Receive a client message (non-blocking)
-    ///
-    /// The transport handles deserialization internally.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Some(ClientMessage))` if a message is available
-    /// * `Ok(None)` if no message is available (non-blocking)
-    /// * `Err(TransportError)` if receiving failed
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError>;
+    /// Receive a client message (non-blocking). Returns `Ok(None)` if no message is available.
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError>;
 
     /// Receive all available client messages (non-blocking)
-    ///
-    /// Drains all available messages from the transport in a single call.
-    /// This is more efficient than calling `receive()` in a loop.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Vec<ClientMessage>)` - Vector of all available messages (may be empty)
-    /// * `Err(TransportError)` if receiving failed
-    fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
-        let mut messages = Vec::new();
-        loop {
-            match self.receive()? {
-                Some(msg) => messages.push(msg),
-                None => break,
-            }
-        }
-        Ok(messages)
-    }
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError>;
 
     /// Close the transport connection
-    ///
-    /// Explicitly closes the transport connection. This method is idempotent -
-    /// calling it multiple times is safe and will return `Ok(())` if already closed.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` if the transport was closed successfully (or already closed)
-    /// * `Err(TransportError)` if closing failed
-    fn close(&mut self) -> Result<(), TransportError>;
+    async fn close(&mut self) -> Result<(), TransportError>;
 }

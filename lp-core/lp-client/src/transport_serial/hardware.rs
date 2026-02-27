@@ -133,7 +133,9 @@ fn serial_thread_loop(
                         }
                     }
                     Err(e) => {
-                        log::warn!("Serial thread: Failed to parse JSON message: {e}");
+                        log::warn!(
+                            "Serial thread: Failed to parse JSON message: {e} | json: {json_str}"
+                        );
                         // Continue - don't crash on parse errors
                     }
                 }

@@ -9,6 +9,8 @@ pub enum TestType {
     TransformQ32,
     /// `test run` - execute and verify results
     Run,
+    /// `test error` - expect compile error(s), match inline expectations
+    Error,
 }
 
 /// CLIF expectations extracted from test file comments.
@@ -46,6 +48,17 @@ pub struct RunDirective {
     pub expect_fail: bool,
 }
 
+/// An error expectation parsed from `// expected-error {{...}}` and optional `// expected-error-code: E0xxx`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ErrorExpectation {
+    /// Line number where the error is expected (1-indexed; may include @+N/@-N offset).
+    pub line: usize,
+    /// Expected message substring (optional).
+    pub message: Option<String>,
+    /// Expected error code (e.g. "E0400").
+    pub code: Option<String>,
+}
+
 /// A trap expectation parsed from a `// EXPECT_TRAP:` or `// EXPECT_TRAP_CODE:` line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrapExpectation {
@@ -73,4 +86,6 @@ pub struct TestFile {
     pub test_types: Vec<TestType>,
     /// CLIF expectations extracted from comments.
     pub clif_expectations: ClifExpectations,
+    /// Error expectations for `test error` files (inline `expected-error` / `expected-error-code`).
+    pub error_expectations: Vec<ErrorExpectation>,
 }

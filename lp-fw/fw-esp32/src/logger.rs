@@ -11,7 +11,7 @@ use fw_core::serial::SerialIo;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
 #[allow(dead_code, reason = "used in init function")]
-const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
+const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
 /// Initialize the ESP32 logger with a write function
 ///
@@ -23,7 +23,7 @@ pub fn init(write_fn: LogWriteFn) {
         set_log_write_fn(write_fn);
     }
 
-    let logger = alloc::boxed::Box::new(Esp32Logger::new(LevelFilter::Debug));
+    let logger = alloc::boxed::Box::new(Esp32Logger::new(LOG_LEVEL));
     log::set_logger(alloc::boxed::Box::leak(logger))
         .map(|()| log::set_max_level(LOG_LEVEL))
         .expect("Failed to set ESP32 logger");

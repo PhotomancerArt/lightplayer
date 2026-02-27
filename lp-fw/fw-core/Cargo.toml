@@ -13,11 +13,12 @@ cranelift-optimizer = ["lp-server/cranelift-optimizer"]
 # Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
 cranelift-verifier = ["lp-server/cranelift-verifier"]
 std = ["log/std"]
-emu = []
+emu = ["ser-write-json", "lp-model/ser-write-json"]
 esp32 = []
 
 [dependencies]
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-server = { path = "../../lp-core/lp-server", default-features = false }
 log = { workspace = true, default-features = false }
@@ -28,6 +29,7 @@ serde = { workspace = true, default-features = false, features = ["derive", "all
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, features = ["std"] }
 lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["std"] }
 critical-section = { version = "1.2", features = ["std"] }
+pollster = "0.3"
 
 [lints]
 workspace = true

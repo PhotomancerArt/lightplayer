@@ -1,6 +1,7 @@
 //! Instruction conversion routing for fixed-point transformation.
 
 use crate::backend::transform::q32::converters;
+use crate::backend::transform::q32::options::Q32Options;
 use crate::backend::transform::q32::types::FixedPointFormat;
 use crate::backend::transform::shared::copy_instruction;
 use crate::error::GlslError;
@@ -34,6 +35,7 @@ pub(crate) fn convert_all_instructions(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<Value, Value>,
     format: FixedPointFormat,
+    q32_opts: Q32Options,
     block_map: &HashMap<Block, Block>,
     stack_slot_map: Option<&HashMap<StackSlot, StackSlot>>,
     call_state: &mut CallConversionState,
@@ -47,6 +49,7 @@ pub(crate) fn convert_all_instructions(
         builder,
         value_map,
         format,
+        q32_opts,
         block_map,
         stack_slot_map,
         call_state,
@@ -63,6 +66,7 @@ fn convert_instruction(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<Value, Value>,
     format: FixedPointFormat,
+    q32_opts: Q32Options,
     block_map: &HashMap<Block, Block>,
     stack_slot_map: Option<&HashMap<StackSlot, StackSlot>>,
     call_state: &mut CallConversionState,
@@ -92,6 +96,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                q32_opts.add_sub,
                 func_id_map,
             )?;
         }
@@ -102,6 +107,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                q32_opts.add_sub,
                 func_id_map,
             )?;
         }
@@ -112,6 +118,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                q32_opts.mul,
                 func_id_map,
             )?;
         }
@@ -122,6 +129,7 @@ fn convert_instruction(
                 builder,
                 value_map,
                 format,
+                q32_opts.div,
                 func_id_map,
             )?;
         }

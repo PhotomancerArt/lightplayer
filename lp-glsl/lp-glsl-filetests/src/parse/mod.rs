@@ -1,5 +1,6 @@
 //! Test file parsing.
 
+pub mod parse_expected_error;
 pub mod parse_run;
 pub mod parse_source;
 pub mod parse_target;
@@ -9,7 +10,8 @@ pub mod test_type;
 
 // Re-exports
 pub use test_type::{
-    ClifExpectations, ComparisonOp, RunDirective, TestFile, TestType, TrapExpectation,
+    ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, TestFile, TestType,
+    TrapExpectation,
 };
 
 use anyhow::{Context, Result};
@@ -54,7 +56,16 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         }
     }
 
-    // Second pass: extract GLSL source and CLIF expectations
+    // Collect error expectations when this is an error test
+    let mut error_expectations = Vec::new();
+    if test_types.contains(&TestType::Error) {
+        for (line_num, line) in lines.iter().enumerate() {
+            let exp = parse_expected_error::parse_expected_errors_from_line(line, line_num + 1)?;
+            error_expectations.extend(exp);
+        }
+    }
+
+    // Third pass: extract GLSL source and CLIF expectations
     let (glsl_source, clif_expectations) =
         parse_source::extract_source_and_expectations(&lines, &test_types)?;
 
@@ -66,5 +77,6 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         is_test_run,
         test_types,
         clif_expectations,
+        error_expectations,
     })
 }
