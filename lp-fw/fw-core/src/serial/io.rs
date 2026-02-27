@@ -28,6 +28,13 @@ impl core::fmt::Display for SerialError {
     }
 }
 
+#[cfg(feature = "emu")]
+impl serde::ser::Error for SerialError {
+    fn custom<T: core::fmt::Display>(msg: T) -> Self {
+        SerialError::Other(alloc::format!("{}", msg))
+    }
+}
+
 /// Trait for serial I/O operations
 ///
 /// Provides a simple, synchronous interface for reading and writing raw bytes.

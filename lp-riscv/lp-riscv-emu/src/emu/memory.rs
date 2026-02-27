@@ -13,6 +13,8 @@ pub struct Memory {
     ram: Vec<u8>,
     code_start: u32,
     ram_start: u32,
+    /// When true, allow misaligned loads/stores (matches embedded targets like ESP32).
+    allow_unaligned_access: bool,
 }
 
 impl Memory {
@@ -30,6 +32,7 @@ impl Memory {
             ram,
             code_start,
             ram_start,
+            allow_unaligned_access: false,
         }
     }
 
@@ -38,21 +41,36 @@ impl Memory {
         Self::new(code, ram, 0x0, DEFAULT_RAM_START)
     }
 
+    /// Enable misaligned memory access (matches embedded targets like ESP32).
+    pub fn set_allow_unaligned_access(&mut self, allow: bool) {
+        self.allow_unaligned_access = allow;
+    }
+
     /// Read a 32-bit word from memory.
     ///
-    /// Returns an error if the address is out of bounds or unaligned.
+    /// When allow_unaligned_access is enabled, supports unaligned addresses to match
+    /// embedded targets like ESP32. Otherwise returns UnalignedAccess for misaligned addresses.
     pub fn read_word(&self, address: u32) -> Result<i32, EmulatorError> {
-        // Check alignment
-        if address % 4 != 0 {
+        if address % 4 != 0 && !self.allow_unaligned_access {
             return Err(EmulatorError::UnalignedAccess {
                 address,
                 alignment: 4,
-                pc: 0, // Will be filled in by caller
+                pc: 0,
                 regs: [0; 32],
             });
         }
+        if address % 4 == 0 {
+            return self.read_word_aligned(address);
+        }
+        let b0 = self.read_u8(address)?;
+        let b1 = self.read_u8(address.wrapping_add(1))?;
+        let b2 = self.read_u8(address.wrapping_add(2))?;
+        let b3 = self.read_u8(address.wrapping_add(3))?;
+        Ok(i32::from_le_bytes([b0, b1, b2, b3]))
+    }
 
-        // Determine which region
+    /// Read a 32-bit word from memory (aligned addresses only).
+    fn read_word_aligned(&self, address: u32) -> Result<i32, EmulatorError> {
         if address >= self.ram_start {
             // RAM region
             let offset = (address - self.ram_start) as usize;
@@ -96,18 +114,29 @@ impl Memory {
 
     /// Write a 32-bit word to memory.
     ///
-    /// Returns an error if the address is out of bounds, unaligned, or in the code region.
+    /// When allow_unaligned_access is enabled, supports unaligned addresses.
     pub fn write_word(&mut self, address: u32, value: i32) -> Result<(), EmulatorError> {
-        // Check alignment
-        if address % 4 != 0 {
+        if address % 4 != 0 && !self.allow_unaligned_access {
             return Err(EmulatorError::UnalignedAccess {
                 address,
                 alignment: 4,
-                pc: 0, // Will be filled in by caller
+                pc: 0,
                 regs: [0; 32],
             });
         }
+        if address % 4 == 0 {
+            return self.write_word_aligned(address, value);
+        }
+        let bytes = value.to_le_bytes();
+        self.write_byte(address, bytes[0] as i8)?;
+        self.write_byte(address.wrapping_add(1), bytes[1] as i8)?;
+        self.write_byte(address.wrapping_add(2), bytes[2] as i8)?;
+        self.write_byte(address.wrapping_add(3), bytes[3] as i8)?;
+        Ok(())
+    }
 
+    /// Write a 32-bit word to memory (aligned addresses only).
+    fn write_word_aligned(&mut self, address: u32, value: i32) -> Result<(), EmulatorError> {
         // Prevent writes to address 0 (null pointer)
         if address == 0 {
             return Err(EmulatorError::InvalidMemoryAccess {
@@ -183,8 +212,7 @@ impl Memory {
 
     /// Read a halfword (16-bit) from memory.
     pub fn read_halfword(&self, address: u32) -> Result<i16, EmulatorError> {
-        // Check alignment
-        if address % 2 != 0 {
+        if address % 2 != 0 && !self.allow_unaligned_access {
             return Err(EmulatorError::UnalignedAccess {
                 address,
                 alignment: 2,
@@ -192,8 +220,16 @@ impl Memory {
                 regs: [0; 32],
             });
         }
+        if address % 2 == 0 {
+            return self.read_halfword_aligned(address);
+        }
+        let b0 = self.read_u8(address)?;
+        let b1 = self.read_u8(address.wrapping_add(1))?;
+        Ok(i16::from_le_bytes([b0, b1]))
+    }
 
-        // Determine which region
+    /// Read a halfword from memory (aligned addresses only).
+    fn read_halfword_aligned(&self, address: u32) -> Result<i16, EmulatorError> {
         if address >= self.ram_start {
             // RAM region
             let offset = (address - self.ram_start) as usize;
@@ -266,8 +302,7 @@ impl Memory {
 
     /// Write a halfword (16-bit) to memory.
     pub fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), EmulatorError> {
-        // Check alignment
-        if address % 2 != 0 {
+        if address % 2 != 0 && !self.allow_unaligned_access {
             return Err(EmulatorError::UnalignedAccess {
                 address,
                 alignment: 2,
@@ -275,7 +310,17 @@ impl Memory {
                 regs: [0; 32],
             });
         }
+        if address % 2 == 0 {
+            return self.write_halfword_aligned(address, value);
+        }
+        let bytes = value.to_le_bytes();
+        self.write_byte(address, bytes[0] as i8)?;
+        self.write_byte(address.wrapping_add(1), bytes[1] as i8)?;
+        Ok(())
+    }
 
+    /// Write a halfword to memory (aligned addresses only).
+    fn write_halfword_aligned(&mut self, address: u32, value: i16) -> Result<(), EmulatorError> {
         // Prevent writes to address 0 (null pointer)
         if address == 0 {
             return Err(EmulatorError::InvalidMemoryAccess {

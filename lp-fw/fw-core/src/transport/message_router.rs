@@ -29,45 +29,29 @@ impl MessageRouterTransport {
 }
 
 impl ServerTransport for MessageRouterTransport {
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        // Serialize to JSON
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         let json = json::to_string(&msg).map_err(|e| {
             TransportError::Serialization(format!("Failed to serialize ServerMessage: {e}"))
         })?;
-
-        // Add M! prefix and newline
-        let message = format!("M!{json}\n");
-
-        // Send via router (non-blocking)
+        let message = alloc::format!("M!{json}\n");
         self.router.send(message).map_err(|_| {
-            TransportError::Other(format!("MessageRouter send error: channel full"))
+            TransportError::Other(alloc::format!("MessageRouter send error: channel full"))
         })?;
-
         log::debug!(
             "MessageRouterTransport: Sent message id={} via router",
             msg.id
         );
-
         Ok(())
     }
 
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-        // Receive all available messages from router
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
         let messages = self.router.receive_all();
-
-        // Process first valid message
         for msg_line in messages {
-            // Check for M! prefix
             if !msg_line.starts_with("M!") {
-                log::trace!("MessageRouterTransport: Skipping non-message line (no M! prefix)");
                 continue;
             }
-
-            // Extract JSON (skip M! prefix and trim newline)
             let json_str = msg_line.strip_prefix("M!").unwrap_or(&msg_line);
             let json_str = json_str.trim_end_matches('\n');
-
-            // Parse JSON
             match json::from_str::<ClientMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
@@ -84,14 +68,26 @@ impl ServerTransport for MessageRouterTransport {
                 }
             }
         }
-
-        // No messages available
         Ok(None)
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
-        // MessageRouter doesn't need explicit closing
-        // Channels will be dropped when router is dropped
+    async fn receive_all(&mut self) -> Result<alloc::vec::Vec<ClientMessage>, TransportError> {
+        let messages = self.router.receive_all();
+        let mut result = alloc::vec::Vec::new();
+        for msg_line in messages {
+            if !msg_line.starts_with("M!") {
+                continue;
+            }
+            let json_str = msg_line.strip_prefix("M!").unwrap_or(&msg_line);
+            let json_str = json_str.trim_end_matches('\n');
+            if let Ok(msg) = json::from_str::<ClientMessage>(json_str) {
+                result.push(msg);
+            }
+        }
+        Ok(result)
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
     }
 }
@@ -131,7 +127,7 @@ mod tests {
             id: 1,
             msg: lp_model::server::ServerMsgBody::UnloadProject,
         };
-        transport.send(msg).unwrap();
+        pollster::block_on(transport.send(msg)).unwrap();
 
         // Check message was sent to router
         let router_msg = outgoing.receiver().try_receive().unwrap();
@@ -155,7 +151,7 @@ mod tests {
             .unwrap();
 
         // Receive via transport
-        let msg = transport.receive().unwrap().unwrap();
+        let msg = pollster::block_on(transport.receive()).unwrap().unwrap();
         assert_eq!(msg.id, 1);
         match msg.msg {
             ClientRequest::LoadProject { path } => assert_eq!(path, "test"),
@@ -175,6 +171,6 @@ mod tests {
             .unwrap();
 
         // Should return None (filtered out)
-        assert!(transport.receive().unwrap().is_none());
+        assert!(pollster::block_on(transport.receive()).unwrap().is_none());
     }
 }

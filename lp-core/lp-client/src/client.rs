@@ -595,6 +595,7 @@ mod tests {
         project::handle::ProjectHandle,
         server::{LoadedProject, SampleStats, ServerMsgBody},
     };
+    use lp_shared::transport::ServerTransport;
     use tokio::task;
 
     #[tokio::test]
@@ -629,14 +630,14 @@ mod tests {
                     memory: None,
                 },
             };
-            server_transport.send(heartbeat).unwrap();
+            server_transport.send(heartbeat).await.unwrap();
 
             // Send actual response
             let response = ServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
-            server_transport.send(response).unwrap();
+            server_transport.send(response).await.unwrap();
         });
 
         // Send request - should handle heartbeat and get response
@@ -680,7 +681,7 @@ mod tests {
                         memory: None,
                     },
                 };
-                server_transport.send(heartbeat).unwrap();
+                server_transport.send(heartbeat).await.unwrap();
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             }
 
@@ -689,7 +690,7 @@ mod tests {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
-            server_transport.send(response).unwrap();
+            server_transport.send(response).await.unwrap();
         });
 
         // Send request - should handle all heartbeats and get response
@@ -734,14 +735,14 @@ mod tests {
                     memory: None,
                 },
             };
-            server_transport.send(heartbeat).unwrap();
+            server_transport.send(heartbeat).await.unwrap();
 
             // Send actual response
             let response = ServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
-            server_transport.send(response).unwrap();
+            server_transport.send(response).await.unwrap();
         });
 
         // Send request - should handle heartbeat and get response
@@ -772,14 +773,14 @@ mod tests {
                 id: request_id + 100,
                 msg: ServerMsgBody::StopAllProjects,
             };
-            server_transport.send(wrong_response).unwrap();
+            server_transport.send(wrong_response).await.unwrap();
 
             // Send correct response
             let response = ServerMessage {
                 id: request_id,
                 msg: ServerMsgBody::StopAllProjects,
             };
-            server_transport.send(response).unwrap();
+            server_transport.send(response).await.unwrap();
         });
 
         // Send request - should skip wrong ID and get correct response

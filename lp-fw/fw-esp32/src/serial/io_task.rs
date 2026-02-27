@@ -2,6 +2,7 @@
 //!
 //! Responsibilities:
 //! - Drain outgoing queue and send via serial (with M! prefix)
+//! - Drain OUTGOING_SERVER_MSG and stream JSON to serial (server feature)
 //! - Read from serial and push to incoming queue (filter M! prefix)
 //! - Handle serial state (Ready/Disconnected/Error)
 //! - Retry serial initialization if disconnected
@@ -20,6 +21,51 @@ use log;
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
+
+/// Server messages for streaming transport (capacity 1 = backpressure)
+///
+/// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
+/// io_task receives, serializes with ser-write-json directly to serial, never buffers full JSON.
+#[cfg(feature = "server")]
+static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lp_model::ServerMessage, 1> =
+    Channel::new();
+
+/// SerWrite that buffers bytes and writes to async USB serial
+///
+/// ser_write_json::to_writer calls write() synchronously. We buffer and flush
+/// when buffer reaches 512 bytes using embassy_futures::block_on.
+#[cfg(feature = "server")]
+struct BufferingSerialWriter<'a, W: Write> {
+    tx: &'a mut W,
+    buffer: Vec<u8>,
+}
+
+#[cfg(feature = "server")]
+const SERIAL_BUFFER_FLUSH_THRESHOLD: usize = 512;
+
+#[cfg(feature = "server")]
+impl<W: Write> ser_write_json::SerWrite for BufferingSerialWriter<'_, W> {
+    type Error = core::convert::Infallible;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), core::convert::Infallible> {
+        self.buffer.extend_from_slice(buf);
+        while self.buffer.len() >= SERIAL_BUFFER_FLUSH_THRESHOLD {
+            let to_flush: Vec<u8> = self.buffer.drain(..SERIAL_BUFFER_FLUSH_THRESHOLD).collect();
+            embassy_futures::block_on(Write::write(self.tx, &to_flush)).ok();
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "server")]
+impl<W: Write> BufferingSerialWriter<'_, W> {
+    fn flush(&mut self) {
+        if !self.buffer.is_empty() {
+            let to_flush = core::mem::take(&mut self.buffer);
+            embassy_futures::block_on(Write::write(self.tx, &to_flush)).ok();
+        }
+    }
+}
 
 /// I/O task for handling serial communication
 ///
@@ -46,26 +92,23 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
 
     // Main I/O loop
     loop {
-        // Drain outgoing queue and send via serial
+        // Drain OUTGOING_SERVER_MSG first (streaming: serialize directly to serial)
+        #[cfg(feature = "server")]
+        drain_outgoing_server_msg(&mut tx);
+
+        // Drain outgoing queue (log lines, or MessageRouterTransport if still used)
         let outgoing = router.outgoing();
         let receiver = outgoing.receiver();
-
         loop {
             match receiver.try_receive() {
                 Ok(msg) => {
                     // Message already has M! prefix from MessageRouterTransport
-                    // Send via serial (handle errors gracefully)
                     if Write::write(&mut tx, msg.as_bytes()).await.is_err() {
-                        // Write error - USB may be disconnected, continue
                         break;
                     }
-                    // Flush after each message
                     let _ = Write::flush(&mut tx).await;
                 }
-                Err(_) => {
-                    // No messages - break to read
-                    break;
-                }
+                Err(_) => break,
             }
         }
 
@@ -94,6 +137,33 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
 
         // Small delay to yield
         Timer::after(Duration::from_millis(1)).await;
+    }
+}
+
+/// Drain OUTGOING_SERVER_MSG: receive ServerMessage, serialize with ser-write-json to serial
+#[cfg(feature = "server")]
+fn drain_outgoing_server_msg<W: Write>(tx: &mut W) {
+    let receiver = OUTGOING_SERVER_MSG.receiver();
+    if let Ok(msg) = receiver.try_receive() {
+        // Write M! prefix (block_on for async Write from sync context)
+        if embassy_futures::block_on(Write::write(tx, b"M!")).is_err() {
+            return;
+        }
+        // Stream JSON via BufferingSerialWriter (writer borrows tx)
+        let ok = {
+            let mut writer = BufferingSerialWriter {
+                tx,
+                buffer: Vec::new(),
+            };
+            let ok = ser_write_json::ser::to_writer(&mut writer, &msg).is_ok();
+            if ok {
+                writer.flush();
+            }
+            ok
+        };
+        if ok {
+            let _ = embassy_futures::block_on(Write::write(tx, b"\n"));
+        }
     }
 }
 
@@ -130,6 +200,13 @@ pub fn get_message_channels() -> (
     &'static Channel<CriticalSectionRawMutex, String, 32>,
 ) {
     (&INCOMING_MSG, &OUTGOING_MSG)
+}
+
+/// Get reference to OUTGOING_SERVER_MSG channel for StreamingMessageRouterTransport
+#[cfg(feature = "server")]
+pub fn get_server_msg_channel()
+-> &'static Channel<CriticalSectionRawMutex, lp_model::ServerMessage, 1> {
+    &OUTGOING_SERVER_MSG
 }
 
 /// Write log output to the outgoing channel (serial to host).

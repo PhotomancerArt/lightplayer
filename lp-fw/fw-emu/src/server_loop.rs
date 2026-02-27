@@ -5,6 +5,9 @@
 use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
 use alloc::vec::Vec;
+use core::future::Future;
+use core::pin::pin;
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
 use log;
 use lp_model::Message;
@@ -13,8 +16,22 @@ use lp_server::LpServer;
 use lp_shared::time::TimeProvider;
 use lp_shared::transport::ServerTransport;
 
-/// Target frame time for 60 FPS (16.67ms per frame)
-const TARGET_FRAME_TIME_MS: u32 = 16;
+/// Block on a future until completion. Uses sys_yield when pending.
+fn block_on<F: Future>(future: F) -> F::Output {
+    let waker = unsafe {
+        static VTABLE: RawWakerVTable =
+            RawWakerVTable::new(|data| RawWaker::new(data, &VTABLE), |_| {}, |_| {}, |_| {});
+        Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE))
+    };
+    let mut cx = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    loop {
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => sys_yield(),
+        }
+    }
+}
 
 /// Run the server loop
 ///
@@ -41,7 +58,7 @@ pub fn run_server_loop(
         let mut receive_calls = 0;
         loop {
             receive_calls += 1;
-            match transport.receive() {
+            match block_on(transport.receive()) {
                 Ok(Some(msg)) => {
                     log::debug!(
                         "run_server_loop: Received message id={} on receive call #{}",
@@ -90,7 +107,7 @@ pub fn run_server_loop(
                             "run_server_loop: Sending response message id={}",
                             server_msg.id
                         );
-                        if let Err(e) = transport.send(server_msg) {
+                        if let Err(e) = block_on(transport.send(server_msg)) {
                             log::warn!("run_server_loop: Failed to send response: {:?}", e);
                             // Transport error - continue with next message
                         }

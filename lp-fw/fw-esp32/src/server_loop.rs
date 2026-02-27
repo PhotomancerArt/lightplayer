@@ -73,7 +73,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Collect incoming messages (non-blocking)
         let mut incoming_messages = Vec::new();
         loop {
-            match transport.receive() {
+            match transport.receive().await {
                 Ok(Some(msg)) => {
                     incoming_messages.push(Message::Client(msg));
                 }
@@ -99,7 +99,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                 // Send responses
                 for response in responses {
                     if let Message::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg) {
+                        if let Err(e) = transport.send(server_msg).await {
                             log::warn!("run_server_loop: Failed to send response: {e:?}");
                             // Transport error - continue with next message
                         }
@@ -164,7 +164,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             };
 
             // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg) {
+            if let Err(e) = transport.send(heartbeat_msg).await {
                 log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
             }
 

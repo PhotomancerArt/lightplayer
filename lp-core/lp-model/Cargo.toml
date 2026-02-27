@@ -9,12 +9,16 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 std = []
+# Experimental: ser-write-json for streaming serialization (ESP32)
+# Enables format compatibility tests and test_json in fw-esp32
+ser-write-json = ["dep:ser-write-json"]
 
 [dependencies]
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde-json-core = { version = "0.6", default-features = false, features = ["custom-error-messages"] }
 base64 = { workspace = true }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 tempfile = "3"

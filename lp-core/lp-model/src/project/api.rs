@@ -14,7 +14,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant};
 
 /// Node specifier for API requests
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -255,6 +255,26 @@ pub enum SerializableProjectResponse {
     },
 }
 
+/// Wraps state serialization so it produces NodeState variant format (e.g. {"Texture": {...}})
+/// instead of a bare struct. Required because NodeState is an externally tagged enum.
+enum NodeStateSerializer<'a> {
+    Texture(&'a SerializableTextureState<'a>),
+    Shader(&'a SerializableShaderState<'a>),
+    Output(&'a SerializableOutputState<'a>),
+    Fixture(&'a SerializableFixtureState<'a>),
+}
+
+impl Serialize for NodeStateSerializer<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Texture(s) => serializer.serialize_newtype_variant("NodeState", 0, "Texture", s),
+            Self::Shader(s) => serializer.serialize_newtype_variant("NodeState", 1, "Shader", s),
+            Self::Output(s) => serializer.serialize_newtype_variant("NodeState", 2, "Output", s),
+            Self::Fixture(s) => serializer.serialize_newtype_variant("NodeState", 3, "Fixture", s),
+        }
+    }
+}
+
 // Helper struct to serialize SerializableNodeDetail with since_frame context
 struct SerializableNodeDetailWithFrame<'a> {
     detail: &'a SerializableNodeDetail,
@@ -272,14 +292,22 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 config,
                 state,
             } => {
-                let mut s = serializer.serialize_struct("Texture", 3)?;
+                let mut s = serializer.serialize_struct_variant(
+                    "SerializableNodeDetail",
+                    0,
+                    "Texture",
+                    3,
+                )?;
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
                     NodeState::Texture(texture_state) => {
                         let serializable_state =
                             SerializableTextureState::new(texture_state, self.since_frame);
-                        s.serialize_field("state", &serializable_state)?;
+                        s.serialize_field(
+                            "state",
+                            &NodeStateSerializer::Texture(&serializable_state),
+                        )?;
                     }
                     _ => return Err(serde::ser::Error::custom("State kind mismatch")),
                 }
@@ -290,14 +318,22 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 config,
                 state,
             } => {
-                let mut s = serializer.serialize_struct("Shader", 3)?;
+                let mut s = serializer.serialize_struct_variant(
+                    "SerializableNodeDetail",
+                    1,
+                    "Shader",
+                    3,
+                )?;
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
                     NodeState::Shader(shader_state) => {
                         let serializable_state =
                             SerializableShaderState::new(shader_state, self.since_frame);
-                        s.serialize_field("state", &serializable_state)?;
+                        s.serialize_field(
+                            "state",
+                            &NodeStateSerializer::Shader(&serializable_state),
+                        )?;
                     }
                     _ => return Err(serde::ser::Error::custom("State kind mismatch")),
                 }
@@ -308,14 +344,22 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 config,
                 state,
             } => {
-                let mut s = serializer.serialize_struct("Output", 3)?;
+                let mut s = serializer.serialize_struct_variant(
+                    "SerializableNodeDetail",
+                    2,
+                    "Output",
+                    3,
+                )?;
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
                     NodeState::Output(output_state) => {
                         let serializable_state =
                             SerializableOutputState::new(output_state, self.since_frame);
-                        s.serialize_field("state", &serializable_state)?;
+                        s.serialize_field(
+                            "state",
+                            &NodeStateSerializer::Output(&serializable_state),
+                        )?;
                     }
                     _ => return Err(serde::ser::Error::custom("State kind mismatch")),
                 }
@@ -326,14 +370,22 @@ impl<'a> Serialize for SerializableNodeDetailWithFrame<'a> {
                 config,
                 state,
             } => {
-                let mut s = serializer.serialize_struct("Fixture", 3)?;
+                let mut s = serializer.serialize_struct_variant(
+                    "SerializableNodeDetail",
+                    3,
+                    "Fixture",
+                    3,
+                )?;
                 s.serialize_field("path", path)?;
                 s.serialize_field("config", config)?;
                 match state {
                     NodeState::Fixture(fixture_state) => {
                         let serializable_state =
                             SerializableFixtureState::new(fixture_state, self.since_frame);
-                        s.serialize_field("state", &serializable_state)?;
+                        s.serialize_field(
+                            "state",
+                            &NodeStateSerializer::Fixture(&serializable_state),
+                        )?;
                     }
                     _ => return Err(serde::ser::Error::custom("State kind mismatch")),
                 }

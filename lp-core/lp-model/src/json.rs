@@ -291,3 +291,140 @@ mod tests {
         assert_eq!(original.name, deserialized.name);
     }
 }
+
+/// Experimental: ser-write-json format compatibility tests
+///
+/// Validates that ser-write-json produces JSON compatible with our
+/// serde-json-core deserializer. Run with: cargo test -p lp-model --features ser-write-json
+#[cfg(all(test, feature = "ser-write-json"))]
+mod ser_write_json_tests {
+    use super::*;
+    use crate::path::AsLpPathBuf;
+    use crate::project::ProjectHandle;
+    use crate::server::{FsResponse, LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::convert::Infallible;
+    use ser_write_json::SerWrite;
+    use ser_write_json::ser::to_writer;
+    use serde::Serialize;
+
+    /// SerWrite implementation for Vec<u8> - allows streaming to a buffer
+    struct VecWriter<'a>(&'a mut Vec<u8>);
+
+    impl SerWrite for VecWriter<'_> {
+        type Error = Infallible;
+
+        fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+            self.0.extend_from_slice(buf);
+            Ok(())
+        }
+    }
+
+    fn serialize_with_ser_write_json<T: Serialize>(
+        value: &T,
+    ) -> Result<String, ser_write_json::ser::Error<Infallible>> {
+        let mut buffer = Vec::new();
+        let mut writer = VecWriter(&mut buffer);
+        to_writer(&mut writer, value)?;
+        Ok(core::str::from_utf8(&buffer)
+            .expect("JSON output is valid UTF-8")
+            .to_string())
+    }
+
+    #[test]
+    fn ser_write_json_server_message_round_trip() {
+        use crate::ServerMessage;
+
+        let msg = ServerMessage {
+            id: 1,
+            msg: ServerMsgBody::UnloadProject,
+        };
+
+        let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
+        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
+
+        assert_eq!(msg.id, deserialized.id);
+        assert!(matches!(deserialized.msg, ServerMsgBody::UnloadProject));
+    }
+
+    #[test]
+    fn ser_write_json_fs_response_read_round_trip() {
+        let resp = FsResponse::Read {
+            path: "/project.json".as_path_buf(),
+            data: Some(b"{\"uid\":\"test\"}".to_vec()),
+            error: None,
+        };
+
+        let json = serialize_with_ser_write_json(&resp).expect("ser-write-json serialize");
+        let deserialized: FsResponse = from_str(&json).expect("from_str(ser-write-json output)");
+
+        match (&resp, &deserialized) {
+            (
+                FsResponse::Read {
+                    path: p1,
+                    data: d1,
+                    error: e1,
+                },
+                FsResponse::Read {
+                    path: p2,
+                    data: d2,
+                    error: e2,
+                },
+            ) => {
+                assert_eq!(p1.as_str(), p2.as_str());
+                assert_eq!(d1, d2);
+                assert_eq!(e1, e2);
+            }
+            _ => panic!("Variant mismatch"),
+        }
+    }
+
+    #[test]
+    fn ser_write_json_heartbeat_round_trip() {
+        use crate::ServerMessage;
+        use crate::server::{LoadedProject, MemoryStats, SampleStats};
+
+        let msg = ServerMessage {
+            id: 0,
+            msg: ServerMsgBody::Heartbeat {
+                fps: SampleStats {
+                    avg: 60.0,
+                    sdev: 1.0,
+                    min: 58.0,
+                    max: 62.0,
+                },
+                frame_count: 1000,
+                loaded_projects: vec![LoadedProject {
+                    handle: ProjectHandle::new(1),
+                    path: "projects/test".as_path_buf(),
+                }],
+                uptime_ms: 5000,
+                memory: Some(MemoryStats {
+                    free_bytes: 100000,
+                    used_bytes: 200000,
+                    total_bytes: 300000,
+                }),
+            },
+        };
+
+        let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
+        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
+
+        assert_eq!(msg.id, deserialized.id);
+        if let (
+            ServerMsgBody::Heartbeat {
+                frame_count: c1, ..
+            },
+            ServerMsgBody::Heartbeat {
+                frame_count: c2, ..
+            },
+        ) = (&msg.msg, &deserialized.msg)
+        {
+            assert_eq!(c1, c2);
+        } else {
+            panic!("Heartbeat variant mismatch");
+        }
+    }
+}

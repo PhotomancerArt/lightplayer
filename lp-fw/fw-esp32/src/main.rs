@@ -20,16 +20,17 @@ mod output;
 mod serial;
 mod server_loop;
 mod time;
+#[cfg(feature = "server")]
+mod transport;
 
 use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
 
 use board::{init_board, start_runtime};
 use fw_core::message_router::MessageRouter;
-use fw_core::transport::MessageRouterTransport;
 use lp_model::path::AsLpPath;
 #[cfg(feature = "demo_project")]
-use lp_model::{json, ClientMessage, ClientRequest};
+use lp_model::{ClientMessage, ClientRequest, json};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
@@ -57,6 +58,11 @@ mod tests {
 #[cfg(feature = "test_usb")]
 mod tests {
     pub mod test_usb;
+}
+
+#[cfg(feature = "test_json")]
+mod tests {
+    pub mod test_json;
 }
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -94,11 +100,18 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_usb_test(spawner).await;
     }
 
+    #[cfg(feature = "test_json")]
+    {
+        use tests::test_json::run_test_json;
+        run_test_json(spawner).await;
+    }
+
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
-        feature = "test_usb"
+        feature = "test_usb",
+        feature = "test_json"
     )))]
     {
         // Initialize board (clock, heap, runtime) and get hardware peripherals
@@ -113,11 +126,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         // or can be disabled if USB host is not connected
         esp_println::println!("[INIT] fw-esp32 starting...");
 
-        // Create message router with static channels
-        esp_println::println!("[INIT] Creating message router...");
+        // Create message router with static channels (used for demo_project send_incoming)
         let (incoming_channel, outgoing_channel) = get_message_channels();
+        #[allow(unused_variables)]
         let router = MessageRouter::new(incoming_channel, outgoing_channel);
-        esp_println::println!("[INIT] Message router created");
 
         // Spawn I/O task (handles serial communication)
         esp_println::println!("[INIT] Spawning I/O task...");
@@ -143,10 +155,10 @@ async fn main(spawner: embassy_executor::Spawner) {
             esp_println::println!("[INIT] LoadProject message queued");
         }
 
-        // Create transport wrapper
-        esp_println::println!("[INIT] Creating MessageRouterTransport...");
-        let transport = MessageRouterTransport::new(router);
-        esp_println::println!("[INIT] MessageRouterTransport created");
+        // Create streaming transport (serializes in io_task, never buffers full JSON)
+        esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
+        let transport = transport::StreamingMessageRouterTransport::from_io_channels();
+        esp_println::println!("[INIT] StreamingMessageRouterTransport created");
 
         // Initialize RMT peripheral for output
         // Use 80MHz clock rate (standard for ESP32-C6)

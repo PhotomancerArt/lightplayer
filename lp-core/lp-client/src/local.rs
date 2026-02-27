@@ -106,57 +106,10 @@ impl AsyncLocalServerTransport {
             closed: false,
         }
     }
-
-    /// Receive a client message (async, blocking)
-    ///
-    /// Waits until a message is available or the connection is closed.
-    #[allow(
-        dead_code,
-        reason = "Will be used in future async server implementations"
-    )]
-    pub async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-        if self.closed {
-            return Err(TransportError::ConnectionLost);
-        }
-
-        Ok(self.server_rx.recv().await)
-    }
-
-    /// Send a server message
-    #[allow(
-        dead_code,
-        reason = "Will be used in future async server implementations"
-    )]
-    pub fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
-        if self.closed {
-            return Err(TransportError::ConnectionLost);
-        }
-
-        match &self.server_tx {
-            Some(tx) => tx.send(msg).map_err(|_| TransportError::ConnectionLost),
-            None => Err(TransportError::ConnectionLost),
-        }
-    }
-
-    /// Close the transport
-    #[allow(
-        dead_code,
-        reason = "Will be used in future async server implementations"
-    )]
-    pub fn close(&mut self) -> Result<(), TransportError> {
-        if self.closed {
-            return Ok(());
-        }
-
-        self.closed = true;
-        // Drop the sender to signal closure to the other side
-        self.server_tx = None;
-        Ok(())
-    }
 }
 
 impl ServerTransport for AsyncLocalServerTransport {
-    fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -167,30 +120,39 @@ impl ServerTransport for AsyncLocalServerTransport {
         }
     }
 
-    fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
 
-        // Use non-blocking try_recv() since ServerTransport::receive() is sync and non-blocking
         match self.server_rx.try_recv() {
             Ok(msg) => Ok(Some(msg)),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                // Channel disconnected - mark as closed and return error
                 self.closed = true;
                 Err(TransportError::ConnectionLost)
             }
         }
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        if self.closed {
+            return Err(TransportError::ConnectionLost);
+        }
+
+        let mut messages = Vec::new();
+        while let Ok(msg) = self.server_rx.try_recv() {
+            messages.push(msg);
+        }
+        Ok(messages)
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
         if self.closed {
             return Ok(());
         }
 
         self.closed = true;
-        // Drop the sender to signal closure to the other side
         self.server_tx = None;
         Ok(())
     }
@@ -244,7 +206,7 @@ mod tests {
             id: 1,
             msg: lp_model::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         };
-        server_transport.send(server_msg).unwrap();
+        server_transport.send(server_msg).await.unwrap();
 
         // Receive on client
         let received = client_transport.receive().await.unwrap();

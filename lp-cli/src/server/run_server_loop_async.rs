@@ -34,7 +34,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
         // Collect incoming messages from all connections (non-blocking)
         let mut incoming_messages = Vec::new();
         loop {
-            match transport.receive() {
+            match transport.receive().await {
                 Ok(Some(client_msg)) => {
                     // Wrap in Message envelope
                     incoming_messages.push(Message::Client(client_msg));
@@ -73,7 +73,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
                 // Send responses back via transport
                 for response in responses {
                     if let Message::Server(server_msg) = response {
-                        if let Err(e) = transport.send(server_msg) {
+                        if let Err(e) = transport.send(server_msg).await {
                             eprintln!("Failed to send response: {e}");
                         }
                     }

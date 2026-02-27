@@ -6,8 +6,8 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::args::ServeArgs;
-use super::server_loop::run_server_loop;
 use crate::server::create_server;
+use crate::server::run_server_loop_async;
 use crate::server::transport_ws::WebSocketServerTransport;
 
 /// Handle the serve command
@@ -29,7 +29,7 @@ pub fn handle_serve(args: ServeArgs) -> Result<()> {
     println!("Press Ctrl+C to stop");
 
     // Run server loop (blocks until interrupted)
-    run_server_loop(server, transport)?;
-
-    Ok(())
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|e| anyhow::anyhow!("Failed to create runtime: {e}"))?;
+    runtime.block_on(run_server_loop_async(server, transport))
 }
