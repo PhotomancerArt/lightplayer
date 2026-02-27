@@ -1,62 +1,145 @@
-# Plan: Const Globals Support
+# Plan: Const Spec Filetest Suite
 
 ## Scope of Work
 
-Add support for **const globals** in the GLSL compiler. Const globals are compile-time constants that should be **substituted at compile time** rather than allocated in memory. No support for other global qualifiers (uniform, in, out, buffer, etc.) in this plan.
+Create a **spec-mirroring, feature-based filetest suite** for GLSL const and constant expressions. The suite will:
 
-Example:
-```glsl
-const float PI = 3.14159;
-const float TWO_PI = 2.0 * PI;
-const vec2 UNIT = vec2(1.0, 0.0);
+1. Mirror the GLSL spec (variables.adoc §§ Constant Qualifier, Constant Expressions)
+2. Be organized by **feature** so each feature maps cleanly to a future implementation plan
+3. Live in a dedicated `const/` category, **separate from globals**
+4. Provide clean validation targets as const support is implemented
 
-float main() {
-    return TWO_PI + length(UNIT);  // PI, TWO_PI, UNIT substituted at compile time
-}
+**This plan does NOT implement const support.** It establishes the test foundation. Implementation plans will reference these filetests as pass criteria.
+
+## Spec Reference
+
+- **variables.adoc** §4.3.3 "Constant Qualifier": const semantics (must init, read-only)
+- **variables.adoc** §4.3.3.1 "Constant Expressions": what forms a constant expression
+
+## Proposed Directory Structure
+
+Feature-based layout. Each subdirectory = one feature/plan boundary.
+
+```
+filetests/const/
+├── qualifier/              # Const qualifier semantics (spec §4.3.3)
+│   ├── must-init.glsl      # Const must be initialized
+│   ├── readonly.glsl      # Const is read-only; read allowed
+│   └── write-error.glsl    # Write to const is compile error
+│
+├── expression/             # Constant expression forms (spec §4.3.3.1)
+│   ├── literal.glsl       # Literal values (5, true, 3.14)
+│   ├── operators.glsl     # Operators on const (+, -, *, /, %)
+│   ├── constructors.glsl  # vec/mat constructors with const args
+│   ├── reference.glsl     # Const references other const (ordering)
+│   └── unary.glsl         # Unary minus, etc.
+│
+├── builtin/                # Built-in functions in const init (spec list)
+│   ├── geometric.glsl     # length, dot, normalize
+│   ├── trig.glsl          # radians, degrees, sin, cos, asin, acos
+│   ├── exp.glsl           # pow, exp, log, exp2, log2, sqrt, inversesqrt
+│   └── common.glsl        # abs, sign, floor, trunc, round, ceil, mod, min, max, clamp
+│
+├── array-size/             # Constant integral expression for array dimensions
+│   ├── const-int.glsl     # const int N = 5; float arr[N];
+│   ├── const-expr.glsl    # const int N = 2+3; float arr[N];
+│   ├── local.glsl         # local const as array size
+│   ├── multidim.glsl      # const in multidim array dims (from declare-multidim-const)
+│   ├── struct-field.glsl  # const in struct array fields (from struct-array-const-size)
+│   └── param.glsl         # const in param array size (from param-array-const-size)
+│
+├── scope/                  # Global vs local const
+│   ├── global.glsl        # Global const declaration and use
+│   └── local.glsl        # Local const (inside function)
+│
+└── errors/                 # Invalid const (compile errors) — uses test error + inline expected-error
+    ├── user-func.glsl     # User-defined func in const init → error
+    └── non-const-init.glsl # Non-constant expr in init → error
 ```
 
-## Current State of the Codebase
+## Error Test Format (const/errors/)
 
-### Parsing and AST
-- **glsl crate** (light-player/glsl-parser, feature/spans) parses GLSL and produces `TranslationUnit` = list of `ExternalDeclaration`.
-- `ExternalDeclaration` variants: `Preprocessor`, `FunctionDefinition`, `Declaration`.
-- `const float PI = 3.14;` parses as `ExternalDeclaration::Declaration(Declaration::InitDeclaratorList(...))`.
-- `InitDeclaratorList` has `head: SingleDeclaration` with `ty`, `name`, `initializer`, and optional `TypeQualifier` (which includes `StorageQualifier::Const`).
+Error tests use `// test error` and **inline** `// expected-error` directives (commit f66023c):
 
-### Semantic Pipeline
-- **CompilationPipeline** (`pipeline.rs`): parse → analyze → (optional) transform.
-- **Semantic passes** only process `FunctionDefinition`; they **ignore** `ExternalDeclaration::Declaration` entirely.
-- **TypedShader** has: `main_function`, `user_functions`, `function_registry`. **No globals.**
-- **FunctionExtractionPass**, **FunctionRegistryPass**: iterate `shader.0`, only handle `FunctionDefinition`.
+```
+// test error
+// target riscv32.q32
 
-### Codegen / Variable Resolution
-- **CodegenContext** has `variables: HashMap<String, VarInfo>` for function params and local decls.
-- **Variable resolution** (`expr/variable.rs`, `lvalue/resolve/variable.rs`): `lookup_variable_type`, `lookup_variables`, `lookup_var_info` — all expect variables to exist in context from params/locals.
-- **Array sizes** (`type_resolver.rs`): `parse_array_dimensions` only accepts `Expr::IntConst`; **const variables like `float arr[ADD_SIZE]` are rejected** with "array size must be a compile-time constant integer".
+// Non-constant expression in const init — spec requires constant expression
+float non_const = 1.0;
+const float BAD = non_const;  // expected-error {{initializer must be constant expression}}
+```
 
-### Filetests
-- `global/const-expression.glsl` — const globals (PI, TWO_PI, vectors, matrices). **All [expect-fail]**.
-- `global/access-read.glsl` — reads from const (`CONST_FLOAT`), uniform, in, buffer, etc. **All [expect-fail]**.
-- `array/declare-const-expression.glsl` — `const int ADD_SIZE = 2+3; float arr_add[ADD_SIZE];` — no [expect-fail], but type_resolver rejects const names in array dims.
-- `array/declare-multidim-const.glsl`, `array/struct-array-const-size.glsl` — similar use of const in array sizes.
+Syntax: `// expected-error [E0xxx:] {{message}}` or `// expected-error@+N [E0xxx:] {{message}}` for line offset. Message/code optional but at least one required.
 
-## Reference: DirectXShaderCompiler (HLSL)
+## File Conventions
 
-- DXC evaluates **constant expressions** at compile time (SemaHLSL, const-expr.hlsl).
-- Const locals (`const float sqrt_2 = 1.414...`) and const globals are folded.
-- Array dimensions can use const integral expressions (e.g. `const uint sc_One = 1; float arr[sc_One];`).
-- Const substitution: when a const is referenced, the compiler substitutes its evaluated value rather than emitting a load.
+- **Header block**: First lines cite spec section and describe the file's scope
+- **One concept per file** where practical; avoid mixing features
+- **expect-fail** on all run directives until implementation exists
+- **Minimal, focused tests** — enough to validate, not exhaust
 
-## Questions to Resolve
+Example header:
+```
+// test run
+// target riscv32.q32
 
-1. **Const expression subset**: Which expressions can appear in const initializers?
-   - Suggested: literals, binary ops (+, -, *, /, %), unary (-), vector/matrix constructors, references to other consts. Defer: `length()`, `sin()` etc. (can add later if needed for const-init).
+// Spec: variables.adoc §4.3.3 "Constant Qualifier"
+// Const variables must be initialized at declaration.
+```
 
-2. **Where to perform substitution**: Semantic pass (pre-codegen) vs. codegen-time lookup?
-   - Suggested: Build a **ConstEnv** (name → evaluated value) in a semantic pass, pass it to codegen. On variable ref, check ConstEnv first; if present, emit literal. Keeps codegen simple and allows array-size resolution to use the same env.
+## Migration from global/
 
-3. **Ordering of const declarations**: `const B = A + 1` requires A to be defined first.
-   - Suggested: Process `ExternalDeclaration::Declaration` in order; for `InitDeclaratorList` with Const qualifier, evaluate initializer (which may reference earlier consts), add to ConstEnv. Reject circular refs.
+Move and **split** existing const tests into the new structure:
 
-4. **Scope of const**: Global scope only for this plan?
-   - Suggested: Yes. Local `const float x = 1.0;` inside functions is already handled as local decls — no change needed. This plan focuses on **global** const only.
+| Current file | Target | Notes |
+|--------------|--------|-------|
+| global/const-expression.glsl | Split | → expression/literal, operators, constructors, reference, builtin/geometric |
+| global/const-must-init.glsl | qualifier/must-init.glsl | Merge with init parts of others |
+| global/const-readonly.glsl | qualifier/readonly.glsl | |
+| global/declare-const.glsl | scope/global.glsl | Types + declaration |
+| global/initialize-const.glsl | Merged into expression/* | Split by form |
+| global/edge-const-write-error.glsl | qualifier/write-error.glsl | |
+| global/access-read.glsl | Keep in global/ | Qualifier matrix; const is 1 of many |
+
+## Array Tests
+
+Array tests that use const for sizes move from `array/` to `const/array-size/`:
+
+| Current file | Target |
+|--------------|--------|
+| array/declare-const-size.glsl | const/array-size/const-int.glsl (global + local) |
+| array/declare-const-expression.glsl | const/array-size/const-expr.glsl |
+| array/phase/8-constant-expressions.glsl | const/array-size/local.glsl |
+| array/declare-multidim-const.glsl | const/array-size/multidim.glsl (or keep in array/ if focus is multidim) |
+| array/struct-array-const-size.glsl | const/array-size/struct-field.glsl |
+| array/param-array-const-size.glsl | const/array-size/param.glsl |
+
+**Decision**: Array tests primarily about **const as integral expr** → `const/array-size/`. Tests primarily about array declaration syntax (multidim, struct) could stay in `array/` with a note that they require const; or move to `const/array-size/` for co-location. Recommend: move all const-in-array-size tests to `const/array-size/`.
+
+## Function Const Parameters
+
+**Leave in function/**: `param-const.glsl`, `edge-const-out-error.glsl`. Const *parameters* are a different spec section (function parameters), not constant expressions.
+
+## Out of Scope
+
+- Specialization constants (`layout(constant_id=...)`) — separate feature
+- Built-in const variables (e.g. `gl_MaxVertexAttribs`) — implementation detail
+
+## Error Test Infrastructure (resolved)
+
+Error test support was added in f66023c: `TestType::Error`, inline `// expected-error`, and `test_error::run_error_test`. The `const/errors/` directory can be fully implemented—no need to defer or use placeholders.
+
+## Summary
+
+| Action | Count |
+|--------|-------|
+| New const/ category | 1 |
+| Subdirectories | 6 (qualifier, expression, builtin, array-size, scope, errors) |
+| Files to create | ~20 |
+| Files to remove from global/ | 6 |
+| Files to remove from array/ | 4–6 |
+
+## Next Steps
+
+After the filetest suite is in place, implementation plans can proceed feature-by-feature (e.g. qualifier + literals, then operators + constructors) with clear pass criteria: the corresponding const filetests must pass.
