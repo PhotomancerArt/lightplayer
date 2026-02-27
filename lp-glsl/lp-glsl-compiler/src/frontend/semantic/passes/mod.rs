@@ -20,4 +20,5 @@ pub trait SemanticPass {
 pub mod function_extraction;
 pub mod function_registry;
 pub mod function_signature;
+pub mod global_const_pass;
 pub mod validation;

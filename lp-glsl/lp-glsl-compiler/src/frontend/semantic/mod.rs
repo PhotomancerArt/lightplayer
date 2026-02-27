@@ -6,6 +6,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 pub mod builtins;
+pub mod const_eval;
 pub mod functions;
 pub mod lpfx;
 pub mod passes;
@@ -22,6 +23,8 @@ pub struct TypedShader {
     pub main_function: Option<TypedFunction>,
     pub user_functions: Vec<TypedFunction>,
     pub function_registry: functions::FunctionRegistry,
+    /// Global const declarations (name -> evaluated value).
+    pub global_constants: hashbrown::HashMap<alloc::string::String, const_eval::ConstValue>,
 }
 
 pub struct TypedFunction {
@@ -62,11 +65,17 @@ impl SemanticAnalyzer {
         extraction_pass.run(shader, source, &mut diagnostics);
         let (main_func, user_functions) = extraction_pass.into_results();
 
+        // Pass 2b: Collect global const declarations
+        let mut global_const_pass = passes::global_const_pass::GlobalConstPass::new();
+        global_const_pass.run(shader, source, &mut diagnostics);
+        let global_const_result = global_const_pass.into_result();
+
         // Pass 3: Validate
         let typed_shader = TypedShader {
             main_function: main_func,
             user_functions,
             function_registry: registry,
+            global_constants: global_const_result.global_constants,
         };
 
         let mut validation_pass = passes::validation::ValidationPass;

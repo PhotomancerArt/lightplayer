@@ -54,6 +54,10 @@ pub struct CodegenContext<'a, M: Module> {
 
     // Current file being compiled
     pub current_file_id: GlFileId,
+
+    // Global const values (name -> evaluated value). Const refs emit value directly.
+    pub global_constants:
+        Option<&'a hashbrown::HashMap<String, crate::frontend::semantic::const_eval::ConstValue>>,
 }
 
 pub struct LoopContext {
@@ -82,7 +86,18 @@ impl<'a, M: Module> CodegenContext<'a, M> {
             source_loc_manager: SourceLocManager::new(),
             source_map,
             current_file_id,
+            global_constants: None,
         }
+    }
+
+    pub fn set_global_constants(
+        &mut self,
+        constants: &'a hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
+    ) {
+        self.global_constants = Some(constants);
     }
 
     /// Get mutable reference to the source location manager.

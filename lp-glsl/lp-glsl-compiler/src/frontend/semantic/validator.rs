@@ -22,10 +22,23 @@ use alloc::format;
 pub fn validate_function(
     func: &crate::frontend::semantic::TypedFunction,
     func_registry: &FunctionRegistry,
+    global_constants: &hashbrown::HashMap<
+        alloc::string::String,
+        crate::frontend::semantic::const_eval::ConstValue,
+    >,
     source: &str,
     diagnostics: &mut GlslDiagnostics,
 ) {
     let mut symbols = SymbolTable::new();
+
+    for (name, val) in global_constants {
+        if let Err(e) = symbols.declare_variable(name.clone(), val.glsl_type(), StorageClass::Const)
+        {
+            if !diagnostics.push(e) {
+                return;
+            }
+        }
+    }
 
     for param in &func.parameters {
         if diagnostics.at_limit() {

@@ -110,6 +110,7 @@ impl GlslCompiler {
                     func_id,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     &mut source_loc_manager,
@@ -145,6 +146,7 @@ impl GlslCompiler {
                     main_function,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     semantic_result.source,
@@ -257,6 +259,7 @@ impl GlslCompiler {
                     func_id,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     &mut source_loc_manager,
@@ -292,6 +295,7 @@ impl GlslCompiler {
                     main_function,
                     &func_ids,
                     &typed_ast.function_registry,
+                    &typed_ast.global_constants,
                     &mut gl_module,
                     isa_ref.as_ref(),
                     semantic_result.source,
@@ -330,6 +334,10 @@ impl GlslCompiler {
         _func_id: FuncId,
         func_ids: &HashMap<String, FuncId>,
         func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
         gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
         isa: &dyn cranelift_codegen::isa::TargetIsa,
         source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
@@ -341,6 +349,7 @@ impl GlslCompiler {
             func,
             func_ids,
             func_registry,
+            global_constants,
             gl_module,
             isa,
             None,
@@ -356,6 +365,10 @@ impl GlslCompiler {
         main_func: &crate::frontend::semantic::TypedFunction,
         func_ids: &HashMap<String, FuncId>,
         func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
         gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
         isa: &dyn cranelift_codegen::isa::TargetIsa,
         source_text: &str,
@@ -367,6 +380,7 @@ impl GlslCompiler {
             main_func,
             func_ids,
             func_registry,
+            global_constants,
             gl_module,
             isa,
             Some(source_text),
@@ -382,6 +396,10 @@ impl GlslCompiler {
         func: &crate::frontend::semantic::TypedFunction,
         func_ids: &HashMap<String, FuncId>,
         func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
         gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
         isa: &dyn cranelift_codegen::isa::TargetIsa,
         source_text: Option<&str>,
@@ -427,6 +445,7 @@ impl GlslCompiler {
         if let Some(text) = source_text {
             codegen_ctx.set_source_text(text);
         }
+        codegen_ctx.set_global_constants(global_constants);
 
         let block_params = codegen_ctx.builder.block_params(entry_block).to_vec();
 

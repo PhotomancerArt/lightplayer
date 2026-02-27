@@ -14,16 +14,14 @@ float test_global_float() {
     return PI * 2.0;
 }
 
-// run: test_global_float() ~= 6.28318 [expect-fail]
-
+// run: test_global_float() ~= 6.28318
 vec2 test_global_vec2() {
     return UNIT_X * 2.0;
 }
 
-// run: test_global_vec2() ~= vec2(2.0, 0.0) [expect-fail]
-
+// run: test_global_vec2() ~= vec2(2.0, 0.0)
 vec3 test_global_vec3() {
     return UP_VECTOR + vec3(0.0, 0.0, 1.0);
 }
 
-// run: test_global_vec3() ~= vec3(0.0, 1.0, 1.0) [expect-fail]
+// run: test_global_vec3() ~= vec3(0.0, 1.0, 1.0)

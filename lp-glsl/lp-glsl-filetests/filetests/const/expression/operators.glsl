@@ -14,10 +14,10 @@ float test_operators_arithmetic() {
     return TWO_PI + PI_OVER_TWO;
 }
 
-// run: test_operators_arithmetic() ~= 9.42477 [expect-fail]
+// run: test_operators_arithmetic() ~= 7.85398
 
 int test_operators_int_math() {
     return DOUBLE_ANSWER / 2;
 }
 
-// run: test_operators_int_math() == 42 [expect-fail]
+// run: test_operators_int_math() == 42

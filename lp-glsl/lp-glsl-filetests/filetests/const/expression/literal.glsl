@@ -17,22 +17,19 @@ float test_literal_float() {
     return PI;
 }
 
-// run: test_literal_float() ~= 3.14159 [expect-fail]
-
+// run: test_literal_float() ~= 3.14159
 int test_literal_int() {
     return ANSWER;
 }
 
-// run: test_literal_int() == 42 [expect-fail]
-
+// run: test_literal_int() == 42
 vec2 test_literal_vec2() {
     return V2;
 }
 
-// run: test_literal_vec2() ~= vec2(1.0, 0.0) [expect-fail]
-
+// run: test_literal_vec2() ~= vec2(1.0, 0.0)
 mat2 test_literal_mat2() {
     return M2;
 }
 
-// run: test_literal_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0) [expect-fail]
+// run: test_literal_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)

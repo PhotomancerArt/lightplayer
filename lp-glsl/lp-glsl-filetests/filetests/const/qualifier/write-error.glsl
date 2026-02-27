@@ -13,26 +13,22 @@ float test_edge_const_write_error_read() {
     return PI * 2.0;
 }
 
-// run: test_edge_const_write_error_read() ~= 6.28318 [expect-fail]
-
+// run: test_edge_const_write_error_read() ~= 6.28318
 int test_edge_const_write_error_int() {
     return MAX_VALUE / 2;
 }
 
-// run: test_edge_const_write_error_int() == 500 [expect-fail]
-
+// run: test_edge_const_write_error_int() == 500
 vec2 test_edge_const_write_error_vec() {
     return UNIT_VECTOR * 3.0;
 }
 
-// run: test_edge_const_write_error_vec() ~= vec2(3.0, 0.0) [expect-fail]
-
+// run: test_edge_const_write_error_vec() ~= vec2(3.0, 0.0)
 mat2 test_edge_const_write_error_mat() {
     return IDENTITY * 2.0;
 }
 
-// run: test_edge_const_write_error_mat() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
-
+// run: test_edge_const_write_error_mat() ~= mat2(2.0, 0.0, 0.0, 2.0)
 float test_edge_const_write_error_calculations() {
     float radius = 5.0;
     float circumference = 2.0 * PI * radius;
@@ -40,4 +36,4 @@ float test_edge_const_write_error_calculations() {
     return circumference + scaled_unit.x + scaled_unit.y;
 }
 
-// run: test_edge_const_write_error_calculations() ~= 36.28318 [expect-fail]
+// run: test_edge_const_write_error_calculations() ~= 36.41586

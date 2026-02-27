@@ -20,13 +20,20 @@ impl ValidationPass {
             if diagnostics.at_limit() {
                 break;
             }
-            validator::validate_function(func, &shader.function_registry, source, diagnostics);
+            validator::validate_function(
+                func,
+                &shader.function_registry,
+                &shader.global_constants,
+                source,
+                diagnostics,
+            );
         }
         if !diagnostics.at_limit() {
             if let Some(ref main_function) = shader.main_function {
                 validator::validate_function(
                     main_function,
                     &shader.function_registry,
+                    &shader.global_constants,
                     source,
                     diagnostics,
                 );

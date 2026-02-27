@@ -21,6 +21,7 @@ pub struct VarDecl {
 #[derive(Debug, Clone, Copy)]
 pub enum StorageClass {
     Local,
+    Const,
     // Future: Uniform, In, Out
 }
 

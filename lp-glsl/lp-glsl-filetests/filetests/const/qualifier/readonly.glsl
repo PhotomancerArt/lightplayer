@@ -14,32 +14,27 @@ float test_const_readonly_float() {
     return PI * 2.0;
 }
 
-// run: test_const_readonly_float() ~= 6.28318 [expect-fail]
-
+// run: test_const_readonly_float() ~= 6.28318
 int test_const_readonly_int() {
     return MAX_INT / 2;
 }
 
-// run: test_const_readonly_int() == 1073741823 [expect-fail]
-
+// run: test_const_readonly_int() == 1073741823
 vec2 test_const_readonly_vec2() {
     return UNIT_VECTOR * 3.0;
 }
 
-// run: test_const_readonly_vec2() ~= vec2(3.0, 0.0) [expect-fail]
-
+// run: test_const_readonly_vec2() ~= vec2(3.0, 0.0)
 vec3 test_const_readonly_vec3() {
     return UP_VECTOR + vec3(0.0, 0.0, 1.0);
 }
 
-// run: test_const_readonly_vec3() ~= vec3(0.0, 1.0, 1.0) [expect-fail]
-
+// run: test_const_readonly_vec3() ~= vec3(0.0, 1.0, 1.0)
 mat2 test_const_readonly_mat2() {
     return IDENTITY_MATRIX * 2.0;
 }
 
-// run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0) [expect-fail]
-
+// run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0)
 float test_const_readonly_calculations() {
     float radius = 5.0;
     float circumference = 2.0 * PI * radius;
@@ -47,4 +42,4 @@ float test_const_readonly_calculations() {
     return circumference + area;
 }
 
-// run: test_const_readonly_calculations() ~= 94.2477 [expect-fail]
+// run: test_const_readonly_calculations() ~= 109.95552
