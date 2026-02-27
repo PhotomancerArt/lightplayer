@@ -53,42 +53,53 @@ impl SerialEmuClientTransport {
             self.read_buffer.extend_from_slice(&output);
         }
 
-        // Look for complete message (newline-terminated)
-        if let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
+        // Process complete lines (newline-terminated); skip non-M! lines (server logs)
+        while let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
             let message_bytes = self.read_buffer.drain(..=newline_pos).collect::<Vec<_>>();
             let message_str = std::str::from_utf8(&message_bytes[..message_bytes.len() - 1])
                 .map_err(|e| TransportError::Serialization(format!("Invalid UTF-8: {e}")))?;
 
+            if !message_str.starts_with("M!") {
+                log::trace!(
+                    "SerialEmuClientTransport: Skipping non-message line ({} bytes)",
+                    message_bytes.len()
+                );
+                continue;
+            }
+
+            let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
             log::trace!(
                 "SerialEmuClientTransport: Parsing message ({} bytes)",
                 message_bytes.len()
             );
 
-            let message: ServerMessage = json::from_str(message_str)
-                .map_err(|e| TransportError::Serialization(format!("JSON parse error: {e}")))?;
-
-            log::debug!(
-                "SerialEmuClientTransport: Received message id={} ({} bytes): {}",
-                message.id,
-                message_bytes.len(),
-                message_str
-            );
-            log::trace!(
-                "SerialEmuClientTransport: Message size={} bytes",
-                message_bytes.len()
-            );
-
-            Ok(Some(message))
-        } else {
-            if !self.read_buffer.is_empty() {
-                log::trace!(
-                    "SerialEmuClientTransport: Partial message buffered ({} bytes): {:?}",
-                    self.read_buffer.len(),
-                    String::from_utf8_lossy(&self.read_buffer)
-                );
+            match json::from_str::<ServerMessage>(json_str) {
+                Ok(message) => {
+                    log::debug!(
+                        "SerialEmuClientTransport: Received message id={} ({} bytes): {}",
+                        message.id,
+                        message_bytes.len(),
+                        message_str
+                    );
+                    return Ok(Some(message));
+                }
+                Err(e) => {
+                    log::warn!(
+                        "SerialEmuClientTransport: Failed to parse M! line: {e} | {}",
+                        message_str
+                    );
+                }
             }
-            Ok(None)
         }
+
+        if !self.read_buffer.is_empty() {
+            log::trace!(
+                "SerialEmuClientTransport: Partial message buffered ({} bytes): {:?}",
+                self.read_buffer.len(),
+                String::from_utf8_lossy(&self.read_buffer)
+            );
+        }
+        Ok(None)
     }
 
     /// Run emulator until yield
@@ -132,12 +143,12 @@ impl SerialEmuClientTransport {
 #[async_trait]
 impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
-        // Serialize message to JSON
+        // Serialize message to JSON (M! prefix per protocol)
         let json = json::to_string(&msg)
             .map_err(|e| TransportError::Serialization(format!("JSON serialize error: {e}")))?;
 
-        // Add newline terminator
-        let mut data = json.clone().into_bytes();
+        let mut data = b"M!".to_vec();
+        data.extend_from_slice(json.as_bytes());
         data.push(b'\n');
         let total_bytes = data.len();
 
