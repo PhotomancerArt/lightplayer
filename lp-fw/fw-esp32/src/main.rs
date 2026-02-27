@@ -128,7 +128,10 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Create message router with static channels (used for demo_project send_incoming)
         let (incoming_channel, outgoing_channel) = get_message_channels();
-        #[allow(unused_variables)]
+        #[allow(
+            unused_variables,
+            reason = "router used only in demo_project feature block"
+        )]
         let router = MessageRouter::new(incoming_channel, outgoing_channel);
 
         // Spawn I/O task (handles serial communication)
@@ -188,7 +191,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Create filesystem (in-memory for now)
         esp_println::println!("[INIT] Creating in-memory filesystem...");
-        #[allow(unused_mut)]
+        #[allow(unused_mut, reason = "base_fs mutated when populating demo_project")]
         let mut base_fs = Box::new(LpFsMemory::new());
         esp_println::println!("[INIT] In-memory filesystem created");
 

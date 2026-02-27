@@ -38,10 +38,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
     async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         self.server_msg_channel.sender().send(msg).await;
-        log::debug!(
-            "StreamingMessageRouterTransport: Sent message id={} via server_msg channel",
-            id
-        );
+        log::debug!("StreamingMessageRouterTransport: Sent message id={id} via server_msg channel");
         Ok(())
     }
 

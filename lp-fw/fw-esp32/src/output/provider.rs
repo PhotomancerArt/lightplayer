@@ -25,6 +25,7 @@ struct ChannelState {
     format: OutputFormat,
     pipeline: DisplayPipeline,
     /// Stored for resize: create new pipeline with same options when data grows
+    #[allow(dead_code, reason = "reserved for future pipeline resize")]
     options: OutputDriverOptions,
 }
 
