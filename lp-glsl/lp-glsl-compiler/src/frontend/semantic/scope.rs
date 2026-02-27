@@ -18,7 +18,7 @@ pub struct VarDecl {
     pub storage_class: StorageClass,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageClass {
     Local,
     Const,

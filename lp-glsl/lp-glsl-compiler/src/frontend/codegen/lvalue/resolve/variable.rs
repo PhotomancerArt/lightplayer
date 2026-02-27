@@ -13,6 +13,26 @@ pub fn resolve_variable_lvalue<M: cranelift_module::Module>(
 ) -> Result<LValue, GlslError> {
     let span = extract_span_from_identifier(ident);
 
+    // Const variables (global or local) are read-only - reject write
+    if ctx.local_const_env.contains_key(&ident.name) {
+        let error = GlslError::new(
+            crate::error::ErrorCode::E0400,
+            format!("cannot assign to const variable `{}`", ident.name),
+        )
+        .with_location(source_span_to_location(&span));
+        return Err(ctx.add_span_to_error(error, &span));
+    }
+    if let Some(constants) = ctx.global_constants {
+        if constants.contains_key(&ident.name) {
+            let error = GlslError::new(
+                crate::error::ErrorCode::E0400,
+                format!("cannot assign to const variable `{}`", ident.name),
+            )
+            .with_location(source_span_to_location(&span));
+            return Err(ctx.add_span_to_error(error, &span));
+        }
+    }
+
     // Get variable type first to check if it's an array
     let ty = ctx
         .lookup_variable_type(&ident.name)

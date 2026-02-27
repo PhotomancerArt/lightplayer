@@ -2,7 +2,7 @@
 // target riscv32.q32
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
-// Writing to const is compile error. This file tests read path (write would error).
+// Const read path only. Write rejection is tested in const/errors/const-write-error.glsl.
 
 const float PI = 3.14159;
 const int MAX_VALUE = 1000;
