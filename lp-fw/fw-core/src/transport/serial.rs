@@ -11,7 +11,9 @@ extern crate alloc;
 use alloc::{format, vec::Vec};
 use core::str;
 
-use crate::serial::{SerialError, SerialIo};
+use crate::serial::SerialIo;
+#[cfg(feature = "emu")]
+use crate::serial::SerialError;
 use log;
 use lp_model::{ClientMessage, ServerMessage, TransportError, json};
 use lp_shared::transport::ServerTransport;

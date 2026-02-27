@@ -31,22 +31,28 @@ use lp_model::{ClientMessage, ServerMessage, TransportError};
 /// struct MyTransport;
 ///
 /// impl ServerTransport for MyTransport {
-///     fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
+///     async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError> {
 ///         // Send message (transport handles serialization)
+///         let _ = msg;
 ///         Ok(())
 ///     }
 ///
-///     fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+///     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
 ///         // Receive message (transport handles deserialization)
 ///         Ok(None)
 ///     }
 ///
-///     fn close(&mut self) -> Result<(), TransportError> {
+///     async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+///         Ok(Vec::new())
+///     }
+///
+///     async fn close(&mut self) -> Result<(), TransportError> {
 ///         // Close the transport connection
 ///         Ok(())
 ///     }
 /// }
 /// ```
+#[allow(async_fn_in_trait)]
 pub trait ServerTransport {
     /// Send a server message (consumes the message)
     async fn send(&mut self, msg: ServerMessage) -> Result<(), TransportError>;

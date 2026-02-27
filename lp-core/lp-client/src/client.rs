@@ -138,7 +138,7 @@ impl LpClient {
     /// Display heartbeat with colors and memory bar chart
     fn display_heartbeat(
         fps: &lp_model::server::SampleStats,
-        frame_count: u64,
+        _frame_count: u64,
         loaded_projects: &[lp_model::server::LoadedProject],
         uptime_ms: u64,
         memory: &Option<lp_model::server::MemoryStats>,
@@ -152,7 +152,7 @@ impl LpClient {
         const RESET: &str = "\x1b[0m";
 
         let uptime_secs = uptime_ms as f64 / 1000.0;
-        let projects_str = if loaded_projects.is_empty() {
+        let _projects_str = if loaded_projects.is_empty() {
             format!("{DIM}none{RESET}")
         } else {
             loaded_projects
