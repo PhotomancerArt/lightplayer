@@ -11,7 +11,7 @@ use std::time::Duration;
 use log;
 use lp_client::{
     LpClient, serializable_response_to_project_response,
-    transport_serial::create_emulator_serial_transport_pair,
+    transport_serial::{BacktraceInfo, create_emulator_serial_transport_pair},
 };
 use lp_engine_client::ClientProjectView;
 use lp_model::{AsLpPath, FrameId};
@@ -37,7 +37,8 @@ async fn test_scene_render_fw_emu_async() {
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
-            .with_profile("release"),
+            .with_profile("release")
+            .with_backtrace_support(true),
     )
     .expect("Failed to build fw-emu");
 
@@ -64,8 +65,12 @@ async fn test_scene_render_fw_emu_async() {
     // Create shared emulator reference
     let emulator_arc = Arc::new(Mutex::new(emulator));
 
-    // Create async serial client transport (emulator runs on separate thread)
-    let transport = create_emulator_serial_transport_pair(emulator_arc)
+    // Create async serial client transport with backtrace (emulator runs on separate thread)
+    let backtrace_info = BacktraceInfo {
+        symbol_map: load_info.symbol_map.clone(),
+        code_end: load_info.code_end,
+    };
+    let transport = create_emulator_serial_transport_pair(emulator_arc, Some(backtrace_info))
         .expect("Failed to create async serial transport");
 
     log::info!("Starting client...");

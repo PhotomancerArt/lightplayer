@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 #[cfg(feature = "serial")]
 use lp_client::transport_serial::{
-    create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
+    BacktraceInfo, create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
 };
 use lp_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 #[cfg(feature = "serial")]
@@ -97,7 +97,8 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
             let fw_emu_path = ensure_binary_built(
                 BinaryBuildConfig::new("fw-emu")
                     .with_target("riscv32imac-unknown-none-elf")
-                    .with_profile("release"),
+                    .with_profile("release")
+                    .with_backtrace_support(true),
             )
             .map_err(|e| anyhow::anyhow!("Failed to build fw-emu: {e}"))?;
 
@@ -124,9 +125,15 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
             // Create shared emulator reference
             let emulator_arc = Arc::new(Mutex::new(emulator));
 
-            // Create async serial transport
-            let transport = create_emulator_serial_transport_pair(emulator_arc)
-                .map_err(|e| anyhow::anyhow!("Failed to create emulator serial transport: {e}"))?;
+            // Create async serial transport with backtrace support
+            let backtrace_info = BacktraceInfo {
+                symbol_map: load_info.symbol_map.clone(),
+                code_end: load_info.code_end,
+            };
+            let transport =
+                create_emulator_serial_transport_pair(emulator_arc, Some(backtrace_info)).map_err(
+                    |e| anyhow::anyhow!("Failed to create emulator serial transport: {e}"),
+                )?;
 
             Ok(Box::new(transport))
         }

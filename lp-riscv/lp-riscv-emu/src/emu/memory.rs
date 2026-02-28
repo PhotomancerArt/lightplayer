@@ -483,4 +483,14 @@ impl Memory {
     pub fn code_start(&self) -> u32 {
         self.code_start
     }
+
+    /// Get the base address of the RAM region.
+    pub fn ram_start(&self) -> u32 {
+        self.ram_start
+    }
+
+    /// Get the end address of the RAM region (exclusive).
+    pub fn ram_end(&self) -> u32 {
+        self.ram_start.wrapping_add(self.ram.len() as u32)
+    }
 }

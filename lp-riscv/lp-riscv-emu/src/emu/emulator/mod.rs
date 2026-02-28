@@ -9,6 +9,7 @@
 //! - `run_loops`: High-level run methods
 //! - `debug`: Debug formatting and logging
 
+mod backtrace;
 mod debug;
 mod execution;
 mod function_call;

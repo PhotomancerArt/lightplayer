@@ -48,6 +48,17 @@ mod std_impl {
             self.profile = profile.into();
             self
         }
+
+        /// Enable frame pointers for backtrace support (required for stack unwinding).
+        ///
+        /// Adds `-C force-frame-pointers=yes` to RUSTFLAGS when building the binary.
+        pub fn with_backtrace_support(mut self, enable: bool) -> Self {
+            if enable {
+                let extra = " -C force-frame-pointers=yes";
+                self.rustflags = Some(self.rustflags.unwrap_or_default() + extra);
+            }
+            self
+        }
     }
 
     /// Cache for built binary paths (cache_key -> path)
@@ -69,7 +80,14 @@ mod std_impl {
     /// * `Ok(PathBuf)` - Path to built binary
     /// * `Err(String)` - Error message if build failed
     pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String> {
-        let cache_key = std::format!("{}-{}-{}", config.package, config.target, config.profile);
+        let rustflags_part = config.rustflags.as_deref().unwrap_or("");
+        let cache_key = std::format!(
+            "{}-{}-{}-{}",
+            config.package,
+            config.target,
+            config.profile,
+            rustflags_part.replace(' ', "_")
+        );
 
         // Check cache first
         {

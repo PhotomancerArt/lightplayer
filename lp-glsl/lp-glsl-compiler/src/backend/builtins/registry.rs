@@ -336,8 +336,10 @@ impl BuiltinId {
     pub fn signature(&self, pointer_type: types::Type) -> Signature {
         let mut sig = Signature::new(CallConv::SystemV);
         match self {
-            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
-                // Out parameter function: (5 i32 params, pointer_type) -> i32
+            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
+                // Out parameter function: (7 i32 params, pointer_type) -> i32
+                sig.params.push(AbiParam::new(types::I32));
+                sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
@@ -346,10 +348,8 @@ impl BuiltinId {
                 sig.params.push(AbiParam::new(pointer_type));
                 sig.returns.push(AbiParam::new(types::I32));
             }
-            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
-                // Out parameter function: (7 i32 params, pointer_type) -> i32
-                sig.params.push(AbiParam::new(types::I32));
-                sig.params.push(AbiParam::new(types::I32));
+            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
+                // Out parameter function: (5 i32 params, pointer_type) -> i32
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));

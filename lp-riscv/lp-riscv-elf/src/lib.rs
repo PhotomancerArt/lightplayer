@@ -12,4 +12,6 @@ mod elf_linker;
 mod elf_loader;
 
 pub use elf_linker::{LinkerError, link_static_library};
-pub use elf_loader::{ElfLoadInfo, find_symbol_address, load_elf, load_object_file};
+pub use elf_loader::{
+    ElfLoadInfo, find_symbol_address, format_backtrace, load_elf, load_object_file, resolve_address,
+};

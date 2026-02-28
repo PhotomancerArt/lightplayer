@@ -6,7 +6,10 @@ use core::cell::RefCell;
 use lp_model::nodes::fixture::ColorOrder;
 use lp_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
 use lp_model::nodes::{
-    NodeSpecifier, fixture::FixtureConfig, output::OutputConfig, shader::ShaderConfig,
+    NodeSpecifier,
+    fixture::FixtureConfig,
+    output::{OutputConfig, OutputDriverOptionsConfig},
+    shader::ShaderConfig,
     texture::TextureConfig,
 };
 use lp_model::path::LpPathBuf;
@@ -53,6 +56,7 @@ pub struct ShaderBuilder {
 /// Builder for output nodes
 pub struct OutputBuilder {
     pin: u32,
+    options: OutputDriverOptionsConfig,
 }
 
 /// Builder for fixture nodes
@@ -116,9 +120,19 @@ impl ProjectBuilder {
         }
     }
 
-    /// Start building an output node (defaults to GPIO pin 0)
+    /// Start building an output node (defaults to GPIO pin 0, no interpolation/dithering/LUT, full brightness)
     pub fn output(&mut self) -> OutputBuilder {
-        OutputBuilder { pin: 0 }
+        OutputBuilder {
+            pin: 0,
+            options: OutputDriverOptionsConfig {
+                lum_power: 2.0,
+                white_point: [1.0, 1.0, 1.0],
+                brightness: 1.0,
+                interpolation_enabled: false,
+                dithering_enabled: false,
+                lut_enabled: false,
+            },
+        }
     }
 
     /// Start building a fixture node
@@ -273,7 +287,7 @@ impl OutputBuilder {
 
         let config = OutputConfig::GpioStrip {
             pin: self.pin,
-            options: None,
+            options: Some(self.options),
         };
 
         let json = lp_model::json::to_string(&config).expect("Failed to serialize output config");

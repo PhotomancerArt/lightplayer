@@ -28,6 +28,48 @@ impl Riscv32Emulator {
         self.log_buffer.clear();
     }
 
+    /// Dump memory as hex for debugging (e.g. vtable/GOT inspection).
+    /// Returns None if the address is invalid; otherwise returns hex dump of up to `len` bytes.
+    pub fn dump_memory_hex(&self, addr: u32, len: usize) -> Option<String> {
+        let addr_aligned = addr & !3;
+        let size = ((len + 3) & !3).min(64);
+        let mut bytes = Vec::with_capacity(size);
+        for i in 0..size {
+            let a = addr_aligned.wrapping_add(i as u32);
+            match self.memory.read_u8(a) {
+                Ok(b) => bytes.push(b),
+                Err(_) => {
+                    if bytes.is_empty() {
+                        return None;
+                    }
+                    break;
+                }
+            }
+        }
+        let mut result = String::new();
+        result.push_str(&format!("Memory at 0x{addr_aligned:08x}:\n"));
+        for (i, chunk) in bytes.chunks(16).enumerate() {
+            let hex: String = chunk
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let ascii: String = chunk
+                .iter()
+                .map(|&b| {
+                    if (32..127).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            let line_addr = addr_aligned.wrapping_add((i * 16) as u32);
+            result.push_str(&format!("  0x{line_addr:08x}  {hex:<48}  {ascii}\n"));
+        }
+        Some(result)
+    }
+
     /// Log an instruction based on the current log level.
     pub fn log_instruction(&mut self, log: InstLog) {
         // This is only called when log is Some, so we know logging is enabled
