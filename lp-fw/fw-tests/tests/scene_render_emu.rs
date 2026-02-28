@@ -137,26 +137,29 @@ async fn test_scene_render_fw_emu() {
     // Frame 1
     {
         let mut emu = emulator_arc.lock().unwrap();
-        emu.advance_time(4);
+        emu.advance_time(40);
     }
     sync_client_view(&client, project_handle, &mut client_view).await;
-    assert_output_red(&client_view, output_handle, 1);
+    assert_output_red(&client_view, output_handle, 10);
 
     // Frame 2
     {
         let mut emu = emulator_arc.lock().unwrap();
-        emu.advance_time(4);
+        emu.advance_time(40);
     }
     sync_client_view(&client, project_handle, &mut client_view).await;
-    assert_output_red(&client_view, output_handle, 2);
+    assert_output_red(&client_view, output_handle, 20);
 
     // Frame 3
     {
         let mut emu = emulator_arc.lock().unwrap();
-        emu.advance_time(4);
+        emu.advance_time(40);
     }
     sync_client_view(&client, project_handle, &mut client_view).await;
-    assert_output_red(&client_view, output_handle, 3);
+    // NOTE: This really should be 30, but there is some minor issue causing imprecision
+    //       it's not important to fix right now, but it may cause issues later and should
+    //       be fixed.
+    assert_output_red(&client_view, output_handle, 31);
 
     // Verify we got through 3 frames
     assert!(

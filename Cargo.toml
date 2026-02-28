@@ -43,6 +43,7 @@ default-members = [
     "lp-core/lp-server",
     "lp-core/lp-client",
     "lp-fw/fw-core",
+    "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lp-model",
     # lp-glsl workspace members (excluding lp-glsl-builtins-emu-app)
@@ -129,10 +130,11 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 # Link-time optimization for all release builds - saves ~100-300 KB
 # This applies to all packages in the workspace
 lto = true
-# Optimize all dependencies for size (embedded target)
-# Individual packages can override this if needed
-opt-level = "z"
-codegen-units = 1
+# Revert of 88eb565: Workspace-level opt-level="z" and codegen-units=1 cause
+# memory/codegen bugs (InvalidMemoryAccess, UnalignedAccess) in test_scene_render_fw_emu.
+# Per-package overrides (esp32-glsl-jit, fw-esp32) retain size optimization for embedded.
+# opt-level = "z"
+# codegen-units = 1
 
 # ESP32 app release profile optimizations (embedded target)
 [profile.release.package.esp32-glsl-jit]
