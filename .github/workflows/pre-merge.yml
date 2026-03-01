@@ -55,7 +55,7 @@ jobs:
         uses: extractions/setup-just@v3
 
       - name: Validate
-        run: cd lp2025 && just check build test
+        run: cd lp2025 && just check build-ci test
 
   build-arm:
     name: Build (ARM)
@@ -101,4 +101,4 @@ jobs:
         uses: extractions/setup-just@v3
 
       - name: Build
-        run: cd lp2025 && just check build
+        run: cd lp2025 && just check build-ci
