@@ -47,6 +47,19 @@ where
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    {
+        match (call_conv, pointer_type) {
+            (CallConv::SystemV, types::I64) => unsafe {
+                call_structreturn_x86_64_systemv(func_ptr, buffer as *mut u8, buffer_size)
+            },
+            _ => Err(JitCallError::UnsupportedCallingConvention {
+                call_conv,
+                pointer_type,
+            }),
+        }
+    }
+
     #[cfg(target_arch = "riscv32")]
     {
         return match (call_conv, pointer_type) {
@@ -60,7 +73,11 @@ where
         };
     }
 
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv32")))]
+    #[cfg(not(any(
+        target_arch = "aarch64",
+        target_arch = "riscv32",
+        target_arch = "x86_64"
+    )))]
     {
         let _ = (func_ptr, buffer, buffer_size);
         Err(JitCallError::UnsupportedCallingConvention {
@@ -68,6 +85,19 @@ where
             pointer_type,
         })
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn call_structreturn_x86_64_systemv(
+    func_ptr: *const u8,
+    buffer: *mut u8,
+    _buffer_size: usize,
+) -> Result<(), JitCallError> {
+    // x86_64 SystemV: sret pointer passed in RDI as first (hidden) argument
+    // Matches Rust's extern "C" fn(*mut u8) signature
+    let func: extern "C" fn(*mut u8) = core::mem::transmute(func_ptr);
+    func(buffer);
+    Ok(())
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -171,6 +201,24 @@ where
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    {
+        match (call_conv, pointer_type) {
+            (CallConv::SystemV, types::I64) => unsafe {
+                call_structreturn_x86_64_systemv_with_args(
+                    func_ptr,
+                    buffer as *mut u8,
+                    buffer_size,
+                    args,
+                )
+            },
+            _ => Err(JitCallError::UnsupportedCallingConvention {
+                call_conv,
+                pointer_type,
+            }),
+        }
+    }
+
     #[cfg(target_arch = "riscv32")]
     {
         return match (call_conv, pointer_type) {
@@ -184,7 +232,11 @@ where
         };
     }
 
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv32")))]
+    #[cfg(not(any(
+        target_arch = "aarch64",
+        target_arch = "riscv32",
+        target_arch = "x86_64"
+    )))]
     {
         let _ = (func_ptr, buffer, buffer_size, args);
         Err(JitCallError::UnsupportedCallingConvention {
@@ -463,6 +515,59 @@ unsafe fn call_structreturn_arm64_systemv_with_args(
 ) -> Result<(), JitCallError> {
     // SystemV on ARM64 also uses x8 for StructReturn
     unsafe { call_structreturn_arm64_apple_with_args(func_ptr, buffer, buffer_size, args) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn call_structreturn_x86_64_systemv_with_args(
+    func_ptr: *const u8,
+    buffer: *mut u8,
+    _buffer_size: usize,
+    args: &[u64],
+) -> Result<(), JitCallError> {
+    // x86_64 SystemV: sret pointer in RDI, then RSI, RDX, RCX, R8, R9 for args
+    if args.len() > 6 {
+        return Err(JitCallError::UnsupportedCallingConvention {
+            call_conv: CallConv::SystemV,
+            pointer_type: types::I64,
+        });
+    }
+    unsafe {
+        match args.len() {
+            0 => {
+                let func: extern "C" fn(*mut u8) = core::mem::transmute(func_ptr);
+                func(buffer);
+            }
+            1 => {
+                let func: extern "C" fn(*mut u8, u64) = core::mem::transmute(func_ptr);
+                func(buffer, args[0]);
+            }
+            2 => {
+                let func: extern "C" fn(*mut u8, u64, u64) = core::mem::transmute(func_ptr);
+                func(buffer, args[0], args[1]);
+            }
+            3 => {
+                let func: extern "C" fn(*mut u8, u64, u64, u64) = core::mem::transmute(func_ptr);
+                func(buffer, args[0], args[1], args[2]);
+            }
+            4 => {
+                let func: extern "C" fn(*mut u8, u64, u64, u64, u64) =
+                    core::mem::transmute(func_ptr);
+                func(buffer, args[0], args[1], args[2], args[3]);
+            }
+            5 => {
+                let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64) =
+                    core::mem::transmute(func_ptr);
+                func(buffer, args[0], args[1], args[2], args[3], args[4]);
+            }
+            6 => {
+                let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64, u64) =
+                    core::mem::transmute(func_ptr);
+                func(buffer, args[0], args[1], args[2], args[3], args[4], args[5]);
+            }
+            _ => unreachable!(),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_arch = "riscv32")]
