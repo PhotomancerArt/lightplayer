@@ -1,8 +1,4 @@
-//! Emit linker script arg for ESP32 memory layout.
-//!
-//! esp-hal copies linker scripts (including linkall.x) to its OUT_DIR and adds
-//! link-search. We must tell the linker to use linkall.x explicitly via -T.
+//! No-op build script.
+//! Linker script (-Tlinkall.x) is configured via .cargo/config.toml.
 
-fn main() {
-    println!("cargo:rustc-link-arg=-Tlinkall.x");
-}
+fn main() {}
