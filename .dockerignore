@@ -1,6 +1,9 @@
-# Exclude from Docker build context
+# Exclude from Docker build context (reduces upload size)
 target/
 .git/
+.cursor/
 *.swp
 *.swo
 .DS_Store
+docs/
+*.md
