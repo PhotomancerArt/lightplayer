@@ -532,40 +532,39 @@ unsafe fn call_structreturn_x86_64_systemv_with_args(
         });
     }
     match args.len() {
-            0 => {
-                let func: extern "C" fn(*mut u8) = unsafe { core::mem::transmute(func_ptr) };
-                func(buffer);
-            }
-            1 => {
-                let func: extern "C" fn(*mut u8, u64) = unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0]);
-            }
-            2 => {
-                let func: extern "C" fn(*mut u8, u64, u64) =
-                    unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0], args[1]);
-            }
-            3 => {
-                let func: extern "C" fn(*mut u8, u64, u64, u64) =
-                    unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0], args[1], args[2]);
-            }
-            4 => {
-                let func: extern "C" fn(*mut u8, u64, u64, u64, u64) =
-                    unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0], args[1], args[2], args[3]);
-            }
-            5 => {
-                let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64) =
-                    unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0], args[1], args[2], args[3], args[4]);
-            }
-            6 => {
-                let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64, u64) =
-                    unsafe { core::mem::transmute(func_ptr) };
-                func(buffer, args[0], args[1], args[2], args[3], args[4], args[5]);
-            }
-            _ => unreachable!(),
+        0 => {
+            let func: extern "C" fn(*mut u8) = unsafe { core::mem::transmute(func_ptr) };
+            func(buffer);
+        }
+        1 => {
+            let func: extern "C" fn(*mut u8, u64) = unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0]);
+        }
+        2 => {
+            let func: extern "C" fn(*mut u8, u64, u64) = unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0], args[1]);
+        }
+        3 => {
+            let func: extern "C" fn(*mut u8, u64, u64, u64) =
+                unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0], args[1], args[2]);
+        }
+        4 => {
+            let func: extern "C" fn(*mut u8, u64, u64, u64, u64) =
+                unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0], args[1], args[2], args[3]);
+        }
+        5 => {
+            let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64) =
+                unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0], args[1], args[2], args[3], args[4]);
+        }
+        6 => {
+            let func: extern "C" fn(*mut u8, u64, u64, u64, u64, u64, u64) =
+                unsafe { core::mem::transmute(func_ptr) };
+            func(buffer, args[0], args[1], args[2], args[3], args[4], args[5]);
+        }
+        _ => unreachable!(),
     }
     Ok(())
 }
