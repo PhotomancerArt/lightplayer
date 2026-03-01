@@ -4,8 +4,8 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 use lp_engine::{MemoryOutputProvider, ProjectRuntime};
 use lp_engine_client::ClientProjectView;
-use lp_shared::fs::LpFsMemory;
 use lp_shared::ProjectBuilder;
+use lp_shared::fs::LpFsMemory;
 
 #[test]
 fn test_scene_render() {
