@@ -59,6 +59,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     # ARM: build only; JIT tests fail due to memory protection on runner
     steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
       - name: Checkout lp2025
         uses: actions/checkout@v4
         with:
