@@ -4,8 +4,8 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 use lp_engine::{MemoryOutputProvider, ProjectRuntime};
 use lp_engine_client::ClientProjectView;
-use lp_shared::ProjectBuilder;
 use lp_shared::fs::LpFsMemory;
+use lp_shared::ProjectBuilder;
 
 #[test]
 fn test_scene_render() {
@@ -57,19 +57,19 @@ fn test_scene_render() {
     // Advancing time by 4ms gives an increment of (4/1000 * 255) = 1.02 ≈ 1
 
     // Frame 1
-    runtime.tick(4).unwrap();
+    runtime.tick(40).unwrap();
     sync_client_view(&runtime, &mut client_view);
-    assert_memory_output_red(&output_provider, 0, 1);
+    assert_memory_output_red(&output_provider, 0, 10);
 
     // Frame 2
-    runtime.tick(4).unwrap();
+    runtime.tick(40).unwrap();
     sync_client_view(&runtime, &mut client_view);
-    assert_memory_output_red(&output_provider, 0, 2);
+    assert_memory_output_red(&output_provider, 0, 20);
 
     // Frame 3
-    runtime.tick(4).unwrap();
+    runtime.tick(40).unwrap();
     sync_client_view(&runtime, &mut client_view);
-    assert_memory_output_red(&output_provider, 0, 3);
+    assert_memory_output_red(&output_provider, 0, 30);
 
     // Verify client view frame_id matches runtime
     assert_eq!(client_view.frame_id, runtime.frame_id);
