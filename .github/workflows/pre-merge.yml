@@ -2,17 +2,17 @@ name: CI
 
 on:
   pull_request:
-    branches: [ "feature/*" ]
+    branches: ["feature/*"]
   push:
-    branches: [ "feature/*" ]
+    branches: ["feature/*"]
 
 env:
   RUST_BACKTRACE: 1
   RISC_V_TARGET: riscv32imac-unknown-none-elf
 
 jobs:
-  test-x64:
-    name: Test (x64)
+  validate-x64:
+    name: Validate (x64)
     runs-on: ubuntu-24.04
     # x64: full check + build + test
     steps:
@@ -57,8 +57,8 @@ jobs:
       - name: Validate
         run: cd lp2025 && just check build-ci test
 
-  build-arm:
-    name: Build (ARM)
+  validate-arm:
+    name: Validate (ARM)
     runs-on: ubuntu-24.04-arm
     # ARM: full check + build + test (lp-cranelift handles membarrier ENOSYS)
     steps:
