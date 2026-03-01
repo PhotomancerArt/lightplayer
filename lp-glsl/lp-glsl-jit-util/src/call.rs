@@ -63,10 +63,10 @@ where
     #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv32")))]
     {
         let _ = (func_ptr, buffer, buffer_size);
-        return Err(JitCallError::UnsupportedCallingConvention {
+        Err(JitCallError::UnsupportedCallingConvention {
             call_conv,
             pointer_type,
-        });
+        })
     }
 }
 
@@ -187,10 +187,10 @@ where
     #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv32")))]
     {
         let _ = (func_ptr, buffer, buffer_size, args);
-        return Err(JitCallError::UnsupportedCallingConvention {
+        Err(JitCallError::UnsupportedCallingConvention {
             call_conv,
             pointer_type,
-        });
+        })
     }
 }
 
