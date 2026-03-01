@@ -75,6 +75,22 @@ impl LpFsStd {
             &normalized_str[1..]
         };
 
+        // Reject paths with .. that would escape root (before canonicalize fallback)
+        let components: Vec<_> = normalized_path.split('/').collect();
+        let mut depth = 0;
+        for component in components {
+            if component == ".." {
+                if depth == 0 {
+                    return Err(FsError::InvalidPath(format!(
+                        "Path {path:?} would escape root directory"
+                    )));
+                }
+                depth -= 1;
+            } else if !component.is_empty() && component != "." {
+                depth += 1;
+            }
+        }
+
         // Join with root path
         let full_path = self.root_path.join(normalized_path);
 
