@@ -531,8 +531,7 @@ unsafe fn call_structreturn_x86_64_systemv_with_args(
             pointer_type: types::I64,
         });
     }
-    unsafe {
-        match args.len() {
+    match args.len() {
             0 => {
                 let func: extern "C" fn(*mut u8) = unsafe { core::mem::transmute(func_ptr) };
                 func(buffer);
@@ -567,7 +566,6 @@ unsafe fn call_structreturn_x86_64_systemv_with_args(
                 func(buffer, args[0], args[1], args[2], args[3], args[4], args[5]);
             }
             _ => unreachable!(),
-        }
     }
     Ok(())
 }
