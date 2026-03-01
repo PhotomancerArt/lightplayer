@@ -3322,6 +3322,7 @@ name = "lp-engine"
 version = "40.0.0"
 dependencies = [
  "cranelift-codegen",
+ "env_logger 0.11.8",
  "hashbrown 0.15.5",
  "libm",
  "log",
