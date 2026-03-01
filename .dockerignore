@@ -1,0 +1,6 @@
+# Exclude from Docker build context
+target/
+.git/
+*.swp
+*.swo
+.DS_Store

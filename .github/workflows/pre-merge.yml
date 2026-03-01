@@ -11,12 +11,21 @@ env:
   RISC_V_TARGET: riscv32imac-unknown-none-elf
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-24.04-arm
+  test-x64:
+    name: Test (x64)
+    runs-on: ubuntu-24.04
+    # x64: full check + build + test (JIT works; ARM has memory protection issues)
     steps:
-      - name: Checkout code
+      - name: Checkout lp2025
         uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -35,15 +44,55 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Install just
         uses: extractions/setup-just@v3
 
       - name: Validate
-        # Note: we don't run tests on ci right now because jit tests fail on arm
-        #       due to memory protection, and don't run on x64 due to some cranelift
-        #       x64 build issue.
-        run: just check build
+        run: cd lp2025 && just check build test
+
+  build-arm:
+    name: Build (ARM)
+    runs-on: ubuntu-24.04-arm
+    # ARM: build only; JIT tests fail due to memory protection on runner
+    steps:
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Build
+        run: cd lp2025 && just check build
