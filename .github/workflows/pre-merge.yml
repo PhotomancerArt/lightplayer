@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: ["feature/*"]
+    branches: [ "feature/*" ]
   push:
-    branches: ["feature/*"]
+    branches: [ "feature/*" ]
 
 env:
   RUST_BACKTRACE: 1
@@ -100,5 +100,5 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      - name: Build
-        run: cd lp2025 && just check build-ci
+      - name: Validate
+        run: cd lp2025 && just check build-ci test
