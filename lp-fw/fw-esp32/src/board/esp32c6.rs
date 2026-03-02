@@ -25,8 +25,9 @@ pub fn init_board() -> (
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Allocate heap
-    esp_alloc::heap_allocator!(size: 340_000);
+    // Allocate heap. Reserve headroom for main task stack (Cranelift JIT lowering is stack-heavy).
+    // It's a balance between stack and heap, and this was chosen based on empirical testing.
+    esp_alloc::heap_allocator!(size: 320_000);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
