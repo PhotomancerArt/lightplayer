@@ -122,6 +122,8 @@ mod std_impl {
 
         if config.profile == "release" {
             cmd.arg("--release");
+        } else if config.profile != "debug" {
+            cmd.args(["--profile", &config.profile]);
         }
 
         let output = cmd

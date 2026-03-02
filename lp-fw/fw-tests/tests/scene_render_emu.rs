@@ -32,7 +32,7 @@ async fn test_scene_render_fw_emu() {
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
-            .with_profile("release")
+            .with_profile("release-emu")
             .with_backtrace_support(true),
     )
     .expect("Failed to build fw-emu");
