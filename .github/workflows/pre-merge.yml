@@ -11,12 +11,24 @@ env:
   RISC_V_TARGET: riscv32imac-unknown-none-elf
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-24.04-arm
+  validate-x64:
+    name: Validate (x64)
+    runs-on: ubuntu-24.04
+    # x64: full check + build + test
     steps:
-      - name: Checkout code
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
         uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -35,15 +47,113 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Install just
         uses: extractions/setup-just@v3
 
       - name: Validate
-        # Note: we don't run tests on ci right now because jit tests fail on arm
-        #       due to memory protection, and don't run on x64 due to some cranelift
-        #       x64 build issue.
-        run: just check build
+        run: cd lp2025 && just check build-ci test
+
+  validate-arm:
+    name: Validate (ARM)
+    runs-on: ubuntu-24.04-arm
+    # ARM: full check + build + test (lp-cranelift handles membarrier ENOSYS)
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Validate
+        run: cd lp2025 && just check build-ci test
+
+  # build-esp32-arm:
+  #   name: Build ESP32 (ARM)
+  #   runs-on: ubuntu-24.04-arm
+  #   # ARM: full check + build + test (lp-cranelift handles membarrier ENOSYS)
+  #   steps:
+  #     - name: Install system deps (libudev for serialport)
+  #       run: sudo apt-get update && sudo apt-get install -y libudev-dev gcc build-essential curl pkg-config
+
+  #     - name: Checkout lp2025
+  #       uses: actions/checkout@v4
+  #       with:
+  #         path: lp2025
+
+  #     - name: Checkout lp-regalloc2
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: light-player/lp-regalloc2
+  #         path: lp-regalloc2
+
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         components: rustfmt, clippy
+
+  #     - name: Install RISC-V target
+  #       run: rustup target add ${{ env.RISC_V_TARGET }}
+
+  #     - name: Install espup and ESP32 toolchain (esp32c6)
+  #       run: |
+  #         curl -sL https://github.com/esp-rs/espup/releases/latest/download/espup-aarch64-unknown-linux-gnu -o espup
+  #         chmod +x espup
+  #         ./espup install --targets esp32c6
+
+  #     - name: Cache cargo registry
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           ~/.espressif/
+  #           lp2025/target/
+  #         key: ${{ runner.os }}-${{ runner.arch }}-espup-v1-${{ hashFiles('lp2025/Cargo.lock') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-${{ runner.arch }}-espup-v1-cargo-
+
+  #     - name: Install just
+  #       uses: extractions/setup-just@v3
+
+  #     - name: build-rv32-jit-test
+  #       run: |
+  #         . $HOME/export-esp.sh
+  #         cd lp2025 && just build-rv32-jit-test

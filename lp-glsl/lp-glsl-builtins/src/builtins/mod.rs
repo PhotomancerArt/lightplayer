@@ -22,22 +22,22 @@
 //!    - Has `#[lpfx_impl_macro::lpfx_impl]` annotation for auto-registration
 //!    - Has `#[unsafe(no_mangle)]` and `pub extern "C"` attributes
 //!
-//! Example:
+//! Example (using a fictional `lpfx_example` to avoid duplicate symbol with actual builtins):
 //! ```rust
 //! use lp_glsl_builtins::glsl::q32::types::q32::Q32;
 //!
 //! // Public Rust API - can be inlined
 //! #[inline(always)]
-//! pub fn lpfx_saturate_q32(value: Q32) -> Q32 {
+//! pub fn lpfx_example_q32(value: Q32) -> Q32 {
 //!     // Actual implementation
 //!     value.max(Q32::ZERO).min(Q32::ONE)
 //! }
 //!
 //! // Extern C wrapper for compiler
-//! #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_saturate(float x)")]
+//! #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_example(float x)")]
 //! #[unsafe(no_mangle)]
-//! pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
-//!     lpfx_saturate_q32(Q32::from_fixed(value)).to_fixed()
+//! pub extern "C" fn __lpfx_example_q32(value: i32) -> i32 {
+//!     lpfx_example_q32(Q32::from_fixed(value)).to_fixed()
 //! }
 //! ```
 //!

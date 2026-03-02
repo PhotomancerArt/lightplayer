@@ -59,6 +59,15 @@ build-rv32-emu-guest-test-app: install-rv32-target
 build-fw-emu: install-rv32-target
     cargo build --target {{ rv32_target }} -p fw-emu
 
+# CI build: host + rv32 builtins + emu-guest. Skips esp32-glsl-jit and fw-esp32
+# (they need ESP32 linker symbols / toolchain not available on generic runners)
+[parallel]
+build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
+
+# riscv32: builtins only (for filetests; no ESP32 firmware)
+build-rv32-builtins: install-rv32-target
+    cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
+
 [parallel]
 build: build-host build-rv32
 

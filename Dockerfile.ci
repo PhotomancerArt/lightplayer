@@ -1,0 +1,26 @@
+# Reproduce GitHub x64 CI environment for lp2025
+# Run from photomancer/ (parent of lp2025): 
+#   docker build --platform linux/amd64 -f lp2025/Dockerfile.ci -t lp2025-ci .
+#   docker run --platform linux/amd64 --rm lp2025-ci
+#
+# --platform linux/amd64 forces x64 even on ARM hosts (uses QEMU)
+# Build context must include lp-regalloc2 sibling for path dependency
+
+FROM rust:1.90-bookworm
+
+RUN rustup component add rustfmt clippy && \
+    rustup target add riscv32imac-unknown-none-elf
+
+RUN cargo install just
+
+# Structure: lp2025 expects ../lp-regalloc2 (sibling)
+WORKDIR /build
+COPY lp2025 /build/lp2025
+COPY lp-regalloc2 /build/lp-regalloc2
+WORKDIR /build/lp2025
+
+ENV RUST_BACKTRACE=1
+ENV RISC_V_TARGET=riscv32imac-unknown-none-elf
+
+# Same as CI: check, build, then test
+RUN just check build && just test

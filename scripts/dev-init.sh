@@ -108,6 +108,22 @@ fi
 
 echo ""
 
+# Update tools to latest (keeps machines in sync with CI)
+echo "Updating tools to latest versions..."
+if rustup self update 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} rustup updated"
+else
+    echo -e "${YELLOW}⚠${NC} rustup self-update skipped (may require network)"
+fi
+rustup update stable
+echo -e "${GREEN}✓${NC} Rust toolchain updated to latest stable"
+if cargo install just; then
+    echo -e "${GREEN}✓${NC} just updated"
+else
+    echo -e "${YELLOW}⚠${NC} just update skipped (try: cargo install just)"
+fi
+echo ""
+
 # Install RISC-V target
 RISC_V_TARGET="riscv32imac-unknown-none-elf"
 echo "Checking RISC-V target ($RISC_V_TARGET)..."

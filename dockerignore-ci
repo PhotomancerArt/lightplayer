@@ -1,0 +1,14 @@
+# For builds from parent context (cd .. && docker build -f lp2025/Dockerfile.ci .)
+# Copy to parent as .dockerignore before building
+# Exclude Cargo target dirs only - do NOT use **/target (excludes lp-glsl-compiler/src/backend/target/)
+lp2025/target
+lp-regalloc2/target
+lp2025/lp-glsl/target
+# Exclude rust-toolchain.toml to avoid rustup triggering under QEMU (rename fails on overlay fs)
+lp2025/rust-toolchain.toml
+.git
+lp2025/.git
+lp-regalloc2/.git
+*.swp
+*.swo
+.DS_Store

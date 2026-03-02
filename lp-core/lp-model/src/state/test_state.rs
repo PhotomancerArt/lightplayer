@@ -3,8 +3,6 @@ use crate::state::StateField;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
-use crate::impl_state_serialization;
-
 /// Test state struct for validating StateField serialization
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestState {
