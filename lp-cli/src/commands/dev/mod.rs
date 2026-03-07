@@ -1,4 +1,5 @@
 pub mod args;
+pub mod validation;
 // TODO: Will be recreated in client/ directory in phase 5
 pub mod async_client;
 pub mod fs_loop;

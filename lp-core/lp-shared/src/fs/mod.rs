@@ -10,6 +10,7 @@ pub mod lp_fs_view;
 pub use fs_event::{ChangeType, FsChange, FsVersion};
 pub use lp_fs::LpFs;
 pub use lp_fs_mem::LpFsMemory;
+pub use lp_fs_view::LpFsView;
 
 #[cfg(feature = "std")]
 pub use lp_fs_std::LpFsStd;

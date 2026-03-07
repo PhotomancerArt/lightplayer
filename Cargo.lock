@@ -222,7 +222,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -233,7 +233,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1839,7 +1839,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2072,6 +2072,21 @@ dependencies = [
  "esp-sync",
  "log",
  "portable-atomic",
+]
+
+[[package]]
+name = "esp-storage"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1495fc1f5549bdd840b52d9ceb201746200e1620d2636f46958c11e765623b80"
+dependencies = [
+ "document-features",
+ "embedded-storage",
+ "esp-hal",
+ "esp-hal-procmacros",
+ "esp-metadata-generated 0.3.0",
+ "esp-rom-sys",
+ "esp-sync",
 ]
 
 [[package]]
@@ -2465,14 +2480,17 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.6.1",
+ "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
  "esp-rtos",
+ "esp-storage",
  "fw-core",
  "hashbrown 0.15.5",
+ "littlefs-rust",
  "log",
  "lp-engine",
  "lp-glsl-builtins",
@@ -3031,7 +3049,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3240,6 +3258,18 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "littlefs-rust"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.10.0",
+ "littlefs-rust-core",
+]
+
+[[package]]
+name = "littlefs-rust-core"
+version = "0.1.0"
 
 [[package]]
 name = "lock_api"
@@ -3855,7 +3885,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4749,7 +4779,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5315,7 +5345,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6195,7 +6225,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

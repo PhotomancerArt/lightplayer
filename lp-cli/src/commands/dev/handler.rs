@@ -3,54 +3,16 @@
 //! Orchestrates the dev command: connects to server, syncs project, and runs file watching and UI.
 
 use anyhow::{Context, Result};
-use lp_model::AsLpPath;
-use lp_model::project::ProjectConfig;
 use lp_shared::fs::{LpFs, LpFsStd};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 
 use crate::client::{LpClient, client_connect};
-use crate::commands::dev::{fs_loop, push_project_async};
+use crate::commands::dev::{fs_loop, push_project_async, validation};
 use crate::debug_ui::DebugUiState;
 use lp_client::HostSpecifier;
 
 use super::args::DevArgs;
-
-/// Validate that a local project exists and extract project info
-///
-/// # Arguments
-///
-/// * `project_dir` - Path to the project directory
-///
-/// # Returns
-///
-/// * `Ok((project_uid, project_name))` if project is valid
-/// * `Err` if project.json is missing or invalid
-fn validate_local_project(project_dir: &PathBuf) -> Result<(String, String)> {
-    // Create filesystem for reading project.json
-    let fs = LpFsStd::new(project_dir.clone());
-
-    // Read and parse project.json
-    let data = fs.read_file("/project.json".as_path()).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to read project.json from: {}\n\
-             Error: {}\n\
-             Make sure you're in a project directory or specify the project directory with --dir",
-            project_dir.display(),
-            e
-        )
-    })?;
-
-    let config: ProjectConfig = serde_json::from_slice(&data).with_context(|| {
-        format!(
-            "Failed to parse project.json from: {}",
-            project_dir.display()
-        )
-    })?;
-
-    Ok((config.uid.clone(), config.name.clone()))
-}
 
 /// Handle the dev command
 ///
@@ -68,7 +30,7 @@ pub fn handle_dev(mut args: DevArgs) -> Result<()> {
         })?;
 
     // Validate local project
-    let (project_uid, _project_name) = validate_local_project(&args.dir)?;
+    let (project_uid, _project_name) = validation::validate_local_project(&args.dir)?;
 
     // Parse host specifier
     // Default behavior: push to local server (equivalent to --push without argument)

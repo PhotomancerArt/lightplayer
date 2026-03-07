@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, serve};
+use commands::{create, dev, serve, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -37,6 +37,13 @@ enum Cli {
         /// Run without UI (headless mode)
         #[arg(long)]
         headless: bool,
+    },
+    /// Upload project to host and exit (non-interactive)
+    Upload {
+        /// Project directory
+        dir: std::path::PathBuf,
+        /// Host to upload to (e.g. serial:auto, ws://localhost:2812/)
+        host: String,
     },
     /// Create a new project
     Create {
@@ -69,6 +76,7 @@ fn main() -> Result<()> {
             push_host: push,
             headless,
         }),
+        Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
         Cli::Create { dir, name, uid } => {
             create::handle_create(create::CreateArgs { dir, name, uid })
         }

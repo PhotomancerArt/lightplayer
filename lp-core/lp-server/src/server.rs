@@ -300,6 +300,31 @@ impl LpServer {
         &mut *self.base_fs
     }
 
+    /// Get the output provider (for loading projects)
+    pub fn output_provider(&self) -> &Rc<RefCell<dyn OutputProvider>> {
+        &self.output_provider
+    }
+
+    /// Get the memory stats callback
+    pub fn memory_stats(&self) -> Option<MemoryStatsFn> {
+        self.memory_stats
+    }
+
+    /// Load a project (internal use, e.g. boot auto-load).
+    ///
+    /// Avoids multiple borrows when caller needs to pass base_fs, output_provider, etc.
+    pub fn load_project(
+        &mut self,
+        path: &lp_model::path::LpPath,
+    ) -> Result<lp_model::project::ProjectHandle, ServerError> {
+        self.project_manager.load_project(
+            path,
+            &mut *self.base_fs,
+            self.output_provider.clone(),
+            self.memory_stats,
+        )
+    }
+
     /// Set the last frame processing time (called by server loop)
     ///
     /// # Arguments

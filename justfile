@@ -60,6 +60,7 @@ build-fw-emu: install-rv32-target
     cargo build --target {{ rv32_target }} -p fw-emu
 
 # CI build: host + rv32 builtins + emu-guest. Skips esp32-glsl-jit and fw-esp32
+
 # (they need ESP32 linker symbols / toolchain not available on generic runners)
 [parallel]
 build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
@@ -274,12 +275,12 @@ demo example="basic":
 # Requires: ESP32-C6 device connected via USB
 demo-esp32c6-host: install-rv32-target
     cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
-    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6
+    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
-# Run firmware on ESP32-C6 device using the demo mode
+# Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --target {{ rv32_target }} --release --features esp32c6,demo_project
+    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
@@ -309,6 +310,7 @@ cargo-update:
 # Usage: just decode-backtrace 0x420381c2 0x42038172 ...
 #        pbpaste | just decode-backtrace
 # Build first: just build-fw-esp32
+
 # Uses `addr2line` (cargo install addr2line) or riscv32-esp-elf-addr2line if available
 decode-backtrace *addrs:
     #!/usr/bin/env bash

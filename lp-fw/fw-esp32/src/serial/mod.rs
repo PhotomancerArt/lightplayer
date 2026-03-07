@@ -10,4 +10,4 @@ pub use usb_serial::Esp32UsbSerialIo;
 pub mod io_task;
 
 #[cfg(feature = "esp32c6")]
-pub use io_task::{get_message_channels, io_task};
+pub use io_task::io_task;

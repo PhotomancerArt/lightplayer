@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+pub mod config;
 pub mod glsl_opts;
 pub mod json;
 pub mod message;
@@ -23,6 +24,7 @@ pub mod server;
 pub mod state;
 pub mod transport_error;
 
+pub use config::LightplayerConfig;
 pub use message::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use nodes::{NodeConfig, NodeHandle, NodeKind, NodeSpecifier};
 pub use path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
