@@ -12,11 +12,11 @@
 extern crate alloc;
 
 use alloc::vec;
-use lp_model::ServerMessage;
 use lp_model::path::AsLpPathBuf;
 use lp_model::server::{LoadedProject, MemoryStats, SampleStats, ServerMsgBody};
+use lp_model::ServerMessage;
 
-use crate::board::{init_board, start_runtime};
+use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;
 use crate::serial::io_task;
 

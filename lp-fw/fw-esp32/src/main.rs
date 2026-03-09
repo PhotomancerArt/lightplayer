@@ -9,7 +9,7 @@
 
 extern crate alloc;
 
-use esp_backtrace as _; // Import to activate panic handler
+use esp_backtrace as _; // panic handler
 
 mod board;
 mod boot;
@@ -30,7 +30,7 @@ mod lp_fs_flash;
 use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
 
-use board::{init_board, start_runtime};
+use board::esp32c6::init::{init_board, start_runtime};
 use lp_model::path::AsLpPath;
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
@@ -115,6 +115,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_json"
     )))]
     {
+        // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
+        // io_task's connection monitor. May block if no USB host is connected during
+        // boot. Hasn't been observed yet but worth investigating if boot hangs occur.
+
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
         let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash) = init_board();

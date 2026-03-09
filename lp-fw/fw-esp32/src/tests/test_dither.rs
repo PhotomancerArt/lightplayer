@@ -15,7 +15,7 @@ use esp_hal::time::Rate;
 use log::info;
 use lp_shared::{DisplayPipeline, DisplayPipelineOptions};
 
-use crate::board::{init_board, start_runtime};
+use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
 use crate::output::LedChannel;
 use crate::serial::Esp32UsbSerialIo;
