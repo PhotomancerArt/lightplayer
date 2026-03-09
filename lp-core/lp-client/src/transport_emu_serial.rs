@@ -118,7 +118,7 @@ impl SerialEmuClientTransport {
 
     /// Run emulator until yield
     fn run_until_yield(&mut self) -> Result<(), TransportError> {
-        const MAX_STEPS_PER_ITERATION: u64 = 100_000_000;
+        const MAX_STEPS_PER_ITERATION: u64 = 500_000_000;
 
         // Run emulator until yield
         let result = {
