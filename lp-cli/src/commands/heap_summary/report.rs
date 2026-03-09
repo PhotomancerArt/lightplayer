@@ -59,8 +59,7 @@ impl Report {
         self.write_header(&mut out);
         self.write_overview(&mut out);
         self.write_peak(&mut out);
-        self.write_peak_hotspots(&mut out);
-        self.write_peak_by_origin(&mut out);
+        self.write_peak_breakdown(&mut out);
         self.write_live(&mut out);
         self.write_hotspots(&mut out);
         out
@@ -144,15 +143,15 @@ impl Report {
         writeln!(out).unwrap();
     }
 
-    fn write_peak_hotspots(&self, out: &mut String) {
+    fn write_peak_breakdown(&self, out: &mut String) {
         let total_bytes: u64 = self.peak_live.values().map(|a| a.size as u64).sum();
         let used = self.heap_size as u64 - self.stats.min_free;
         writeln!(
             out,
-            "--- Allocations at Peak (by caller, {} bytes in {} allocs, {} bytes used) ---",
+            "--- Allocations at Peak ({} bytes tracked, {} bytes used, {} allocs) ---",
             fmt_num(total_bytes),
-            self.peak_live.len(),
             fmt_num(used),
+            self.peak_live.len(),
         )
         .unwrap();
 
@@ -162,57 +161,47 @@ impl Report {
             return;
         }
 
-        let mut by_caller: HashMap<String, (u64, usize)> = HashMap::new();
+        // Group by origin, with sub-breakdown by mechanism
+        // origin = first non-infra caller; mechanism = the infra fn (e.g. RawVecInner::finish_grow)
+        let mut by_origin: HashMap<String, OriginGroup> = HashMap::new();
         for alloc in self.peak_live.values() {
-            let caller = if alloc.frames.len() > 1 {
-                self.resolver.resolve(alloc.frames[1]).to_string()
-            } else if !alloc.frames.is_empty() {
-                self.resolver.resolve(alloc.frames[0]).to_string()
-            } else {
-                "???".to_string()
-            };
-            let entry = by_caller.entry(caller).or_insert((0, 0));
-            entry.0 += alloc.size as u64;
-            entry.1 += 1;
-        }
-
-        let mut sorted: Vec<_> = by_caller.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
-
-        for (caller, (bytes, count)) in sorted.iter().take(self.top) {
-            writeln!(out, "  {} ({} allocs)  {}", fmt_num(*bytes), count, caller).unwrap();
-        }
-        writeln!(out).unwrap();
-    }
-
-    fn write_peak_by_origin(&self, out: &mut String) {
-        let total_bytes: u64 = self.peak_live.values().map(|a| a.size as u64).sum();
-        writeln!(
-            out,
-            "--- Allocations at Peak by Origin ({} bytes, skipping infra fns) ---",
-            fmt_num(total_bytes),
-        )
-        .unwrap();
-
-        if self.peak_live.is_empty() {
-            writeln!(out, "  (no snapshot)").unwrap();
-            writeln!(out).unwrap();
-            return;
-        }
-
-        let mut by_origin: HashMap<String, (u64, usize)> = HashMap::new();
-        for alloc in self.peak_live.values() {
-            let origin = self.resolver.resolve_past_infra(&alloc.frames).to_string();
-            let entry = by_origin.entry(origin).or_insert((0, 0));
-            entry.0 += alloc.size as u64;
-            entry.1 += 1;
+            let (origin, mechanism) = self.resolver.classify_alloc(&alloc.frames);
+            let group = by_origin.entry(origin).or_default();
+            group.total_bytes += alloc.size as u64;
+            group.total_count += 1;
+            let mech_key = mechanism.unwrap_or_else(|| "(direct)".to_string());
+            let mech = group.by_mechanism.entry(mech_key).or_insert((0, 0));
+            mech.0 += alloc.size as u64;
+            mech.1 += 1;
         }
 
         let mut sorted: Vec<_> = by_origin.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        sorted.sort_by(|a, b| b.1.total_bytes.cmp(&a.1.total_bytes));
 
-        for (origin, (bytes, count)) in sorted.iter().take(self.top) {
-            writeln!(out, "  {} ({} allocs)  {}", fmt_num(*bytes), count, origin).unwrap();
+        for (origin, group) in sorted.iter().take(self.top) {
+            writeln!(
+                out,
+                "  {} ({} allocs)  {}",
+                fmt_num(group.total_bytes),
+                group.total_count,
+                origin
+            )
+            .unwrap();
+
+            if group.by_mechanism.len() > 1 || !group.by_mechanism.contains_key("(direct)") {
+                let mut mechs: Vec<_> = group.by_mechanism.iter().collect();
+                mechs.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+                for (mech, (bytes, count)) in &mechs {
+                    writeln!(
+                        out,
+                        "    {} ({} allocs)  via {}",
+                        fmt_num(*bytes),
+                        count,
+                        mech
+                    )
+                    .unwrap();
+                }
+            }
         }
         writeln!(out).unwrap();
     }
@@ -286,6 +275,14 @@ impl Report {
             writeln!(out, "  {}  {}", fmt_num(**bytes), name).unwrap();
         }
     }
+}
+
+#[derive(Default)]
+struct OriginGroup {
+    total_bytes: u64,
+    total_count: usize,
+    /// mechanism name -> (bytes, count)
+    by_mechanism: HashMap<String, (u64, usize)>,
 }
 
 fn fmt_num(n: u64) -> String {

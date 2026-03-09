@@ -77,32 +77,6 @@ impl SymbolResolver {
             .join(" <- ")
     }
 
-    /// Walk frames (skipping frame 0 which is the TrackingAllocator) and return
-    /// the first caller that isn't a known infrastructure/generic function.
-    /// Falls back to the immediate caller if every frame is infra.
-    pub fn resolve_past_infra(&self, frames: &[u32]) -> &str {
-        let callers = if frames.len() > 1 {
-            &frames[1..]
-        } else {
-            return self.resolve_first(frames);
-        };
-        for &addr in callers {
-            let name = self.resolve(addr);
-            if !Self::is_infra(name) {
-                return name;
-            }
-        }
-        self.resolve(callers[0])
-    }
-
-    fn resolve_first(&self, frames: &[u32]) -> &str {
-        if frames.is_empty() {
-            "???"
-        } else {
-            self.resolve(frames[0])
-        }
-    }
-
     fn is_infra(name: &str) -> bool {
         const INFRA_PREFIXES: &[&str] = &[
             "RawVecInner<",
@@ -122,6 +96,50 @@ impl SymbolResolver {
             "hashbrown::",
         ];
         INFRA_PREFIXES.iter().any(|p| name.starts_with(p))
+    }
+
+    /// Resolve an address, stripping the monomorphization hash suffix.
+    /// E.g. "RawVecInner<A>::finish_grow::h8ca052343ac882a5" -> "RawVecInner<A>::finish_grow"
+    pub fn resolve_no_hash(&self, addr: u32) -> String {
+        Self::strip_hash(self.resolve(addr))
+    }
+
+    /// Strip trailing ::h<hex> hash from a symbol name.
+    pub fn strip_hash(name: &str) -> String {
+        if let Some(pos) = name.rfind("::h") {
+            let suffix = &name[pos + 3..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+                return name[..pos].to_string();
+            }
+        }
+        name.to_string()
+    }
+
+    /// Walk frames (skipping frame 0) and return (origin, mechanism):
+    /// - origin: first non-infra caller (hash-stripped for grouping)
+    /// - mechanism: the infra caller chain leading to it (e.g. "RawVecInner::finish_grow")
+    pub fn classify_alloc(&self, frames: &[u32]) -> (String, Option<String>) {
+        let callers = if frames.len() > 1 {
+            &frames[1..]
+        } else if !frames.is_empty() {
+            return (self.resolve_no_hash(frames[0]), None);
+        } else {
+            return ("???".to_string(), None);
+        };
+
+        let mut mechanism: Option<String> = None;
+        for &addr in callers {
+            let name = self.resolve(addr);
+            if Self::is_infra(name) {
+                if mechanism.is_none() {
+                    mechanism = Some(Self::strip_hash(name));
+                }
+            } else {
+                return (Self::strip_hash(name), mechanism);
+            }
+        }
+        // All frames were infra -- use the immediate caller as origin
+        (self.resolve_no_hash(callers[0]), None)
     }
 
     fn shorten_name(name: &str) -> String {
