@@ -11,7 +11,7 @@ test_usb = []
 
 [dependencies]
 hashbrown = { workspace = true }
-lp-client = { path = "../../lp-core/lp-client", features = ["serial"] }
+lp-client = { path = "../../lp-core/lp-client", features = ["serial", "emu"] }
 lp-engine-client = { path = "../../lp-core/lp-engine-client" }
 lp-model = { path = "../../lp-core/lp-model" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
@@ -28,6 +28,7 @@ serialport = "4.8"
 test-log = { workspace = true }
 env_logger = { workspace = true }
 serial_test = "3.0"
+tempfile = "3"
 
 [lints]
 workspace = true

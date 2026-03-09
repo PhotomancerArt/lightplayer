@@ -12,9 +12,9 @@ use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_riscv_emu_shared::{
-    SERIAL_ERROR_INVALID_POINTER, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA,
-    SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
-    syscall_to_level,
+    SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_LOG, SYSCALL_PANIC,
+    SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
+    SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
 use lp_riscv_inst::Gpr;
 
@@ -399,6 +399,59 @@ impl Riscv32Emulator {
             {
                 self.regs[Gpr::A0.num() as usize] = 0;
             }
+            Ok(StepResult::Continue)
+        } else if syscall_info.number == SYSCALL_ALLOC_TRACE {
+            #[cfg(feature = "std")]
+            {
+                if self.alloc_tracer.is_some() {
+                    let event_type = syscall_info.args[0];
+                    let frames = self.unwind_backtrace(self.pc, &self.regs);
+                    let ic = self.instruction_count;
+
+                    let event = match event_type {
+                        lp_riscv_emu_shared::ALLOC_TRACE_ALLOC => crate::alloc_trace::AllocEvent {
+                            t: "A",
+                            ptr: syscall_info.args[1] as u32,
+                            sz: syscall_info.args[2] as u32,
+                            ic,
+                            frames,
+                            free: syscall_info.args[3] as u32,
+                            old_ptr: None,
+                            old_sz: None,
+                        },
+                        lp_riscv_emu_shared::ALLOC_TRACE_DEALLOC => {
+                            crate::alloc_trace::AllocEvent {
+                                t: "D",
+                                ptr: syscall_info.args[1] as u32,
+                                sz: syscall_info.args[2] as u32,
+                                ic,
+                                frames,
+                                free: syscall_info.args[3] as u32,
+                                old_ptr: None,
+                                old_sz: None,
+                            }
+                        }
+                        lp_riscv_emu_shared::ALLOC_TRACE_REALLOC => {
+                            crate::alloc_trace::AllocEvent {
+                                t: "R",
+                                ptr: syscall_info.args[2] as u32,
+                                sz: syscall_info.args[4] as u32,
+                                ic,
+                                frames,
+                                free: syscall_info.args[5] as u32,
+                                old_ptr: Some(syscall_info.args[1] as u32),
+                                old_sz: Some(syscall_info.args[3] as u32),
+                            }
+                        }
+                        _ => {
+                            self.regs[Gpr::A0.num() as usize] = 0;
+                            return Ok(StepResult::Continue);
+                        }
+                    };
+                    self.alloc_tracer.as_mut().unwrap().record_event(&event);
+                }
+            }
+            self.regs[Gpr::A0.num() as usize] = 0;
             Ok(StepResult::Continue)
         } else {
             Ok(StepResult::Syscall(syscall_info))

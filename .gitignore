@@ -32,3 +32,4 @@ perf.data*
 .cursor
 .DS_Store
 .builtins-source-hash
+traces/

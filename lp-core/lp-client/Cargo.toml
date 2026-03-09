@@ -24,6 +24,7 @@ hashbrown = { workspace = true, optional = true }
 [features]
 default = []
 serial = ["lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown", "serialport"]
+emu = ["lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown"]
 ws = ["tokio-tungstenite"]
 
 [dev-dependencies]

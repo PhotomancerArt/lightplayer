@@ -16,6 +16,7 @@ object = { version = "0.37.3", features = ["write"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 rustc-demangle = "0.1"
+serde = { version = "1", features = ["derive"] }
 
 [features]
 std = ["log/std"]  # This crate always requires std, but feature flag for consistency

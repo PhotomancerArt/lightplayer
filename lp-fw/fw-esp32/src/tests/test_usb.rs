@@ -16,7 +16,7 @@ use esp_hal::{rmt::Rmt, time::Rate, usb_serial_jtag::UsbSerialJtag};
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;
 use fw_core::message_router::MessageRouter;
-use fw_core::test_messages::{deserialize_command, serialize_response, TestCommand, TestResponse};
+use fw_core::test_messages::{TestCommand, TestResponse, deserialize_command, serialize_response};
 
 /// Frame counter (atomic, incremented each main loop iteration)
 static FRAME_COUNT: AtomicU32 = AtomicU32::new(0);

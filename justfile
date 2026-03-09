@@ -330,3 +330,13 @@ decode-backtrace *addrs:
     else
         addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a $ADDRS
     fi
+
+# ============================================================================
+# Allocation tracing
+# ============================================================================
+
+# Run a project in the emulator with allocation tracing.
+# Outputs path to trace directory.
+# Usage: just emu-trace path/to/project [frames]
+emu-trace project_dir frames="30":
+    cargo run -p lp-cli -- emu-trace {{ project_dir }} --frames {{ frames }}

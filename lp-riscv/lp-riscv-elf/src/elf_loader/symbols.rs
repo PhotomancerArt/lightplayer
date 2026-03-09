@@ -1,4 +1,4 @@
-//! Symbol map building for relocations.
+//! Symbol map building for relocations and trace metadata.
 
 use super::memory::is_ram_address;
 use alloc::format;
@@ -6,6 +6,64 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 use object::{Object, ObjectSymbol, SymbolSection};
+
+/// Symbol information with address and size, for allocation trace metadata.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SymbolInfo {
+    pub addr: u32,
+    pub size: u32,
+    pub name: String,
+}
+
+/// Build a sorted list of code symbols with addresses and sizes.
+///
+/// Used for allocation trace metadata so the trace file is self-contained.
+/// Only includes defined, non-RAM symbols. Sorted by address.
+pub fn build_symbol_list(obj: &object::File, text_base: u64) -> Vec<SymbolInfo> {
+    let mut symbols: Vec<SymbolInfo> = obj
+        .symbols()
+        .filter_map(|sym| {
+            let name = sym.name().ok()?;
+            if name.is_empty() {
+                return None;
+            }
+            if sym.section() == SymbolSection::Undefined {
+                return None;
+            }
+            if is_linker_noise(name) {
+                return None;
+            }
+            let addr = sym.address();
+            if is_ram_address(addr) {
+                return None;
+            }
+            let size = sym.size() as u32;
+            let offset = if addr >= text_base {
+                (addr - text_base) as u32
+            } else {
+                addr as u32
+            };
+            // Skip zero-address zero-size symbols (compilation unit labels, etc.)
+            if offset == 0 && size == 0 {
+                return None;
+            }
+            Some(SymbolInfo {
+                addr: offset,
+                size,
+                name: name.to_string(),
+            })
+        })
+        .collect();
+    symbols.sort_by_key(|s| s.addr);
+    symbols
+}
+
+fn is_linker_noise(name: &str) -> bool {
+    name.starts_with(".L")
+        || name.starts_with("$x")
+        || name.starts_with("$d")
+        || name.contains("-cgu.")
+}
 
 /// Build a comprehensive symbol map for relocations.
 ///

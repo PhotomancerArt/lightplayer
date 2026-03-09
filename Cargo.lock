@@ -2523,6 +2523,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "serialport",
+ "tempfile",
  "test-log",
  "tokio",
 ]
@@ -3292,6 +3293,7 @@ version = "40.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
  "dialoguer",
  "eframe",
@@ -3521,6 +3523,7 @@ dependencies = [
  "lp-riscv-inst",
  "object",
  "rustc-demangle",
+ "serde",
  "target-lexicon",
 ]
 
@@ -3537,6 +3540,8 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu-shared",
  "lp-riscv-inst",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,6 +7,8 @@ pub mod client;
 pub mod local;
 pub mod specifier;
 pub mod transport;
+#[cfg(feature = "emu")]
+pub mod transport_emu_serial;
 pub mod transport_serial;
 #[cfg(feature = "ws")]
 pub mod transport_ws;

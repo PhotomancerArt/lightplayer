@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, serve, upload};
+use commands::{create, dev, emu_trace, serve, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -56,6 +56,14 @@ enum Cli {
         #[arg(long)]
         uid: Option<String>,
     },
+    /// Run a project in the emulator with allocation tracing
+    EmuTrace {
+        /// Project directory
+        dir: std::path::PathBuf,
+        /// Number of frames to run (default: 30)
+        #[arg(long, default_value = "30")]
+        frames: u32,
+    },
 }
 
 fn main() -> Result<()> {
@@ -79,6 +87,9 @@ fn main() -> Result<()> {
         Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
         Cli::Create { dir, name, uid } => {
             create::handle_create(create::CreateArgs { dir, name, uid })
+        }
+        Cli::EmuTrace { dir, frames } => {
+            emu_trace::handle_emu_trace(emu_trace::EmuTraceArgs { dir, frames })
         }
     }
 }

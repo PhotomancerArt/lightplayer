@@ -1,15 +1,18 @@
 //! Global allocator setup for emulator guest code
 //!
-//! Initializes a global allocator using the heap section defined in the linker script.
+//! When the `alloc-trace` feature is enabled, wraps the allocator with a
+//! `TrackingAllocator` that emits a syscall on every alloc/dealloc/realloc.
+//! The host emulator captures these events for offline analysis.
 
 use linked_list_allocator::LockedHeap;
 
-/// Heap allocator instance
-///
-/// This will be initialized by `init_heap()` using the heap section
-/// from the linker script (__heap_start to __heap_end).
+#[cfg(not(feature = "alloc-trace"))]
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
+
+#[cfg(feature = "alloc-trace")]
+#[global_allocator]
+static HEAP_ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
 
 /// Initialize the global heap allocator
 ///
@@ -33,6 +36,136 @@ pub unsafe fn init_heap() {
     let heap_start = heap_start_addr as *mut u8;
 
     unsafe {
+        #[cfg(not(feature = "alloc-trace"))]
         HEAP_ALLOCATOR.lock().init(heap_start, heap_size);
+
+        #[cfg(feature = "alloc-trace")]
+        HEAP_ALLOCATOR.inner.lock().init(heap_start, heap_size);
     }
 }
+
+// --- TrackingAllocator (only when alloc-trace feature is enabled) ---
+
+#[cfg(feature = "alloc-trace")]
+pub struct TrackingAllocator {
+    inner: LockedHeap,
+}
+
+#[cfg(feature = "alloc-trace")]
+impl TrackingAllocator {
+    const fn new() -> Self {
+        Self {
+            inner: LockedHeap::empty(),
+        }
+    }
+
+    #[inline(never)]
+    fn trace_event(&self, event_type: i32, ptr: i32, size: i32, free: i32) {
+        use crate::syscall::{SYSCALL_ALLOC_TRACE, SYSCALL_ARGS, syscall};
+        let mut args = [0i32; SYSCALL_ARGS];
+        args[0] = event_type;
+        args[1] = ptr;
+        args[2] = size;
+        args[3] = free;
+        syscall(SYSCALL_ALLOC_TRACE, &args);
+    }
+
+    #[inline(never)]
+    fn trace_realloc_event(
+        &self,
+        old_ptr: i32,
+        new_ptr: i32,
+        old_size: i32,
+        new_size: i32,
+        free: i32,
+    ) {
+        use crate::syscall::{SYSCALL_ALLOC_TRACE, SYSCALL_ARGS, syscall};
+        let mut args = [0i32; SYSCALL_ARGS];
+        args[0] = crate::syscall::ALLOC_TRACE_REALLOC;
+        args[1] = old_ptr;
+        args[2] = new_ptr;
+        args[3] = old_size;
+        args[4] = new_size;
+        args[5] = free;
+        syscall(SYSCALL_ALLOC_TRACE, &args);
+    }
+}
+
+#[cfg(feature = "alloc-trace")]
+unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        let (ptr, free) = {
+            let mut heap = self.inner.lock();
+            let ptr = heap
+                .allocate_first_fit(layout)
+                .ok()
+                .map_or(core::ptr::null_mut(), |nn| nn.as_ptr());
+            let free = heap.free();
+            (ptr, free)
+        };
+        if !ptr.is_null() {
+            self.trace_event(
+                crate::syscall::ALLOC_TRACE_ALLOC,
+                ptr as i32,
+                layout.size() as i32,
+                free as i32,
+            );
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        let free = {
+            let mut heap = self.inner.lock();
+            unsafe {
+                heap.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout);
+            }
+            heap.free()
+        };
+        self.trace_event(
+            crate::syscall::ALLOC_TRACE_DEALLOC,
+            ptr as i32,
+            layout.size() as i32,
+            free as i32,
+        );
+    }
+
+    unsafe fn realloc(
+        &self,
+        ptr: *mut u8,
+        layout: core::alloc::Layout,
+        new_size: usize,
+    ) -> *mut u8 {
+        let new_layout =
+            unsafe { core::alloc::Layout::from_size_align_unchecked(new_size, layout.align()) };
+        let (new_ptr, free) = {
+            let mut heap = self.inner.lock();
+            let new_ptr = heap
+                .allocate_first_fit(new_layout)
+                .ok()
+                .map_or(core::ptr::null_mut(), |nn| nn.as_ptr());
+            if !new_ptr.is_null() {
+                let copy_size = layout.size().min(new_size);
+                unsafe {
+                    core::ptr::copy_nonoverlapping(ptr, new_ptr, copy_size);
+                    heap.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout);
+                }
+            }
+            let free = heap.free();
+            (new_ptr, free)
+        };
+        if !new_ptr.is_null() {
+            self.trace_realloc_event(
+                ptr as i32,
+                new_ptr as i32,
+                layout.size() as i32,
+                new_size as i32,
+                free as i32,
+            );
+        }
+        new_ptr
+    }
+}
+
+#[cfg(feature = "alloc-trace")]
+unsafe impl Sync for TrackingAllocator {}

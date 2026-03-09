@@ -24,6 +24,18 @@ pub const SYSCALL_SERIAL_HAS_DATA: i32 = 7;
 /// Syscall number for time_ms (get elapsed milliseconds since emulator start)
 pub const SYSCALL_TIME_MS: i32 = 8;
 
+/// Syscall number for allocation tracing (alloc/dealloc/realloc events)
+///
+/// Args for alloc:   a0=0, a1=ptr, a2=size, a3=free_bytes
+/// Args for dealloc: a0=1, a1=ptr, a2=size, a3=free_bytes
+/// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size, a5=free_bytes
+pub const SYSCALL_ALLOC_TRACE: i32 = 9;
+
+/// Allocation event type constants
+pub const ALLOC_TRACE_ALLOC: i32 = 0;
+pub const ALLOC_TRACE_DEALLOC: i32 = 1;
+pub const ALLOC_TRACE_REALLOC: i32 = 2;
+
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
 

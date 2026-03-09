@@ -219,7 +219,7 @@ impl SerialEmuClientTransport {
 }
 
 #[async_trait]
-impl lp_client::transport::ClientTransport for SerialEmuClientTransport {
+impl crate::transport::ClientTransport for SerialEmuClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         // Serialize message to JSON (M! prefix per protocol)
         let json = json::to_string(&msg)
