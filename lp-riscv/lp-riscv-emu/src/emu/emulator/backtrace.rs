@@ -33,35 +33,44 @@ impl Riscv32Emulator {
         let mem = self.memory();
         let ram_end = mem.ram_end();
 
-        // Frame 0: faulting PC
+        // Frame 0: current PC
         addrs.push(pc);
 
-        // Frame 1: ra (return address of caller - we are in the callee)
+        // Frame 1: ra register (return address into our caller).
+        // The current frame's prologue saved this same value at [fp-4], so we
+        // skip [fp-4] below to avoid a duplicate.
         let ra = regs[1] as u32;
         if is_valid_code_address(ra, mem) {
             addrs.push(ra);
         }
 
-        // Walk fp chain: s0 (x8) is frame pointer
+        // Advance past the current frame: read prev_fp from [fp-8] to start
+        // the walk at the caller's frame.  The saved ra in the current frame
+        // ([fp-4]) is the same as the ra register we already captured.
         let mut fp = regs[8] as u32;
+        if fp >= RAM_START && fp < ram_end && fp % 4 == 0 {
+            match mem.read_word(fp.wrapping_sub(8)) {
+                Ok(pfp) if (pfp as u32) >= RAM_START => fp = pfp as u32,
+                _ => return addrs,
+            }
+        } else {
+            return addrs;
+        }
+
+        // Walk remaining frames via the fp chain
         let mut frame_count = addrs.len();
-
         while frame_count < MAX_FRAMES {
-            // Validate fp is in RAM (stack)
-            if fp < RAM_START || fp >= ram_end {
-                break;
-            }
-            // Require fp to be 4-byte aligned for reading two words
-            if fp % 4 != 0 {
+            if fp < RAM_START || fp >= ram_end || fp % 4 != 0 {
                 break;
             }
 
-            // RISC-V psabi: saved ra at [fp], previous fp at [fp-4]
-            let saved_ra = match mem.read_word(fp) {
+            // RISC-V psabi: saved ra at [fp-4], previous fp at [fp-8]
+            // (prologue: sw ra,N-4(sp); sw s0,N-8(sp); addi s0,sp,N)
+            let saved_ra = match mem.read_word(fp.wrapping_sub(4)) {
                 Ok(v) => v as u32,
                 Err(_) => break,
             };
-            let prev_fp = match mem.read_word(fp.wrapping_sub(4)) {
+            let prev_fp = match mem.read_word(fp.wrapping_sub(8)) {
                 Ok(v) => v,
                 Err(_) => break,
             };
