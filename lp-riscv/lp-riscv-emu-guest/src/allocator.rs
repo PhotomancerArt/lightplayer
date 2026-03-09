@@ -94,39 +94,35 @@ impl TrackingAllocator {
 #[cfg(feature = "alloc-trace")]
 unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        let (ptr, free) = {
+        let ptr = {
             let mut heap = self.inner.lock();
-            let ptr = heap
-                .allocate_first_fit(layout)
+            heap.allocate_first_fit(layout)
                 .ok()
-                .map_or(core::ptr::null_mut(), |nn| nn.as_ptr());
-            let free = heap.free();
-            (ptr, free)
+                .map_or(core::ptr::null_mut(), |nn| nn.as_ptr())
         };
         if !ptr.is_null() {
             self.trace_event(
                 crate::syscall::ALLOC_TRACE_ALLOC,
                 ptr as i32,
                 layout.size() as i32,
-                free as i32,
+                0,
             );
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        let free = {
+        {
             let mut heap = self.inner.lock();
             unsafe {
                 heap.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout);
             }
-            heap.free()
-        };
+        }
         self.trace_event(
             crate::syscall::ALLOC_TRACE_DEALLOC,
             ptr as i32,
             layout.size() as i32,
-            free as i32,
+            0,
         );
     }
 
@@ -138,7 +134,7 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
     ) -> *mut u8 {
         let new_layout =
             unsafe { core::alloc::Layout::from_size_align_unchecked(new_size, layout.align()) };
-        let (new_ptr, free) = {
+        let new_ptr = {
             let mut heap = self.inner.lock();
             let new_ptr = heap
                 .allocate_first_fit(new_layout)
@@ -151,8 +147,7 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
                     heap.deallocate(core::ptr::NonNull::new_unchecked(ptr), layout);
                 }
             }
-            let free = heap.free();
-            (new_ptr, free)
+            new_ptr
         };
         if !new_ptr.is_null() {
             self.trace_realloc_event(
@@ -160,7 +155,7 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
                 new_ptr as i32,
                 layout.size() as i32,
                 new_size as i32,
-                free as i32,
+                0,
             );
         }
         new_ptr

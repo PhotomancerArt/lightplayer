@@ -51,10 +51,16 @@ async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
     let elf_data = std::fs::read(&fw_emu_path).context("Failed to read fw-emu ELF")?;
     let load_info = load_elf(&elf_data).map_err(|e| anyhow::anyhow!("Failed to load ELF: {e}"))?;
 
-    // Build trace directory path: traces/YYYY-MM-DD-HHmmss-<project>/
-    let timestamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
-    let sanitized_uid = project_uid.replace(|c: char| !c.is_alphanumeric() && c != '-', "_");
-    let trace_dir_name = format!("{timestamp}-{sanitized_uid}");
+    // Build trace directory: traces/YYYY-MM-DDTHH-MM-SS--<dir>--<note>/
+    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
+    let dir_label = kebab_case(&args.dir.to_string_lossy());
+    let mut trace_dir_name = format!("{timestamp}--{dir_label}");
+    if let Some(note) = &args.note {
+        let note_kebab = kebab_case(note);
+        if !note_kebab.is_empty() {
+            trace_dir_name = format!("{trace_dir_name}--{note_kebab}");
+        }
+    }
     let trace_dir = std::path::PathBuf::from("traces").join(&trace_dir_name);
 
     let metadata = TraceMetadata {
@@ -136,6 +142,19 @@ async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
     };
 
     eprintln!("Trace complete: {event_count} events");
+
+    // Generate report
+    eprintln!("Analyzing trace...");
+    let report = crate::commands::heap_summary::analyze_trace_dir(&trace_dir, 20)?;
+    let rendered = report.render();
+
+    print!("{rendered}");
+
+    let report_path = trace_dir.join("report.txt");
+    std::fs::write(&report_path, &rendered)
+        .with_context(|| format!("Failed to write {}", report_path.display()))?;
+    eprintln!("Report written to {}", report_path.display());
+
     println!("{}", trace_dir.display());
 
     Ok(())
@@ -186,4 +205,22 @@ async fn push_project_files(
             .with_context(|| format!("Failed to write {full_path}"))?;
     }
     Ok(())
+}
+
+fn kebab_case(s: &str) -> String {
+    let kebab: String = s
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    // Collapse runs of dashes and trim edges
+    let mut result = String::new();
+    for c in kebab.chars() {
+        if c == '-' && result.ends_with('-') {
+            continue;
+        }
+        result.push(c);
+    }
+    result.trim_matches('-').to_string()
 }

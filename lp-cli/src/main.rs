@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, emu_trace, serve, upload};
+use commands::{create, dev, emu_trace, heap_summary, serve, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -60,9 +60,20 @@ enum Cli {
     EmuTrace {
         /// Project directory
         dir: std::path::PathBuf,
-        /// Number of frames to run (default: 30)
-        #[arg(long, default_value = "30")]
+        /// Number of frames to run
+        #[arg(long, default_value = "10")]
         frames: u32,
+        /// Short note appended to trace directory name (kebab-cased)
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Summarize heap allocations from an emu-trace output directory
+    HeapSummary {
+        /// Trace directory (e.g. traces/2026-03-08-185520-simple-test)
+        trace_dir: std::path::PathBuf,
+        /// Number of top entries to show in live/hotspot sections (default: 20)
+        #[arg(long, default_value = "20")]
+        top: usize,
     },
 }
 
@@ -88,8 +99,11 @@ fn main() -> Result<()> {
         Cli::Create { dir, name, uid } => {
             create::handle_create(create::CreateArgs { dir, name, uid })
         }
-        Cli::EmuTrace { dir, frames } => {
-            emu_trace::handle_emu_trace(emu_trace::EmuTraceArgs { dir, frames })
+        Cli::EmuTrace { dir, frames, note } => {
+            emu_trace::handle_emu_trace(emu_trace::EmuTraceArgs { dir, frames, note })
+        }
+        Cli::HeapSummary { trace_dir, top } => {
+            heap_summary::handle_heap_summary(&heap_summary::HeapSummaryArgs { trace_dir, top })
         }
     }
 }

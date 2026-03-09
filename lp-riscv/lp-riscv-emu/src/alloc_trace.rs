@@ -43,12 +43,17 @@ pub struct AllocEvent {
     pub ic: u64,
     /// Stack frame addresses (return addresses, outermost last)
     pub frames: Vec<u32>,
-    /// Total free heap bytes after the operation
+    /// Free heap bytes after the operation (0 if not reported by guest)
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub free: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_ptr: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_sz: Option<u32>,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 /// Writes allocation trace events to disk.
