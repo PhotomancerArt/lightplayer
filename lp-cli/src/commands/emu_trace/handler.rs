@@ -69,7 +69,7 @@ async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
         project: project_uid.clone(),
         frames_requested: args.frames,
         heap_start: 0x80000000,
-        heap_size: 256 * 1024,
+        heap_size: 320 * 1024,
         symbols: load_info
             .symbol_list
             .iter()
@@ -101,12 +101,55 @@ async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
 
     let client = LpClient::new(Box::new(transport));
 
-    // Push project files
-    eprintln!("Syncing project files...");
-    let local_fs = LpFsStd::new(dir);
-    push_project_files(&client, &local_fs, &project_uid).await?;
+    // Run the workload, capturing any error so we can still flush + report
+    let run_err = run_workload(&client, &emulator_arc, &dir, args.frames, &project_uid)
+        .await
+        .err();
 
-    // Load project
+    if let Some(ref e) = run_err {
+        eprintln!("Workload stopped early: {e:#}");
+    }
+
+    // Always flush trace
+    let event_count = {
+        let mut emu = emulator_arc.lock().unwrap();
+        emu.finish_alloc_trace()
+            .context("Failed to flush trace")
+            .unwrap_or(0)
+    };
+
+    eprintln!("Trace complete: {event_count} events");
+
+    // Always generate report
+    if event_count > 0 {
+        eprintln!("Analyzing trace...");
+        let report = crate::commands::heap_summary::analyze_trace_dir(&trace_dir, 20)?;
+        let rendered = report.render();
+
+        print!("{rendered}");
+
+        let report_path = trace_dir.join("report.txt");
+        std::fs::write(&report_path, &rendered)
+            .with_context(|| format!("Failed to write {}", report_path.display()))?;
+        eprintln!("Report written to {}", report_path.display());
+    }
+
+    println!("{}", trace_dir.display());
+
+    Ok(())
+}
+
+async fn run_workload(
+    client: &LpClient,
+    emulator_arc: &Arc<Mutex<Riscv32Emulator>>,
+    dir: &std::path::Path,
+    frames: u32,
+    project_uid: &str,
+) -> Result<()> {
+    eprintln!("Syncing project files...");
+    let local_fs = LpFsStd::new(dir.to_path_buf());
+    push_project_files(client, &local_fs, project_uid).await?;
+
     eprintln!("Loading project...");
     let project_path = format!("projects/{project_uid}");
     client
@@ -114,48 +157,24 @@ async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
         .await
         .context("Failed to load project")?;
 
-    // Tick N frames
-    eprintln!("Running {} frames...", args.frames);
-    for i in 0..args.frames {
+    eprintln!("Running {frames} frames...");
+    for i in 0..frames {
         {
             let mut emu = emulator_arc.lock().unwrap();
-            emu.advance_time(40); // ~25fps
+            emu.advance_time(40);
         }
 
-        if (i + 1) % 10 == 0 || i + 1 == args.frames {
-            eprint!("\r  frame {}/{}", i + 1, args.frames);
+        if (i + 1) % 10 == 0 || i + 1 == frames {
+            eprint!("\r  frame {}/{frames}", i + 1);
         }
     }
     eprintln!();
 
-    // Stop
     eprintln!("Stopping project...");
     client
         .stop_all_projects()
         .await
         .context("Failed to stop projects")?;
-
-    // Flush trace
-    let event_count = {
-        let mut emu = emulator_arc.lock().unwrap();
-        emu.finish_alloc_trace().context("Failed to flush trace")?
-    };
-
-    eprintln!("Trace complete: {event_count} events");
-
-    // Generate report
-    eprintln!("Analyzing trace...");
-    let report = crate::commands::heap_summary::analyze_trace_dir(&trace_dir, 20)?;
-    let rendered = report.render();
-
-    print!("{rendered}");
-
-    let report_path = trace_dir.join("report.txt");
-    std::fs::write(&report_path, &rendered)
-        .with_context(|| format!("Failed to write {}", report_path.display()))?;
-    eprintln!("Report written to {}", report_path.display());
-
-    println!("{}", trace_dir.display());
 
     Ok(())
 }

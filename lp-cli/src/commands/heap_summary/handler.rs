@@ -28,6 +28,12 @@ pub(crate) struct LiveAllocation {
     pub frames: Vec<u32>,
 }
 
+pub(crate) struct OomEvent {
+    pub size: u32,
+    pub ic: u64,
+    pub frames: Vec<u32>,
+}
+
 #[derive(Clone)]
 pub(crate) struct RunningStats {
     pub heap_size: u64,
@@ -147,6 +153,7 @@ pub fn analyze_trace_dir(trace_dir: &std::path::Path, top: usize) -> Result<Repo
     let mut live: HashMap<u32, LiveAllocation> = HashMap::new();
     let mut peak_snapshot: HashMap<u32, LiveAllocation> = HashMap::new();
     let mut event_count: u64 = 0;
+    let mut oom: Option<OomEvent> = None;
 
     for line in lines {
         let line = line.context("Failed to read trace line")?;
@@ -186,6 +193,13 @@ pub fn analyze_trace_dir(trace_dir: &std::path::Path, top: usize) -> Result<Repo
                     },
                 );
             }
+            "O" => {
+                oom = Some(OomEvent {
+                    size: event.sz,
+                    ic: event.ic,
+                    frames: event.frames,
+                });
+            }
             _ => {}
         }
 
@@ -203,6 +217,7 @@ pub fn analyze_trace_dir(trace_dir: &std::path::Path, top: usize) -> Result<Repo
         &stats,
         live,
         peak_snapshot,
+        oom,
         resolver,
     )
     .with_top(top))

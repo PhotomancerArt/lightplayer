@@ -22,9 +22,8 @@ struct SymbolEntry {
 
 /// Resolves frame addresses to symbol names using a sorted symbol table.
 pub struct SymbolResolver {
-    /// Sorted by addr ascending: (addr, end_addr, display_name)
-    /// end_addr = addr + size for range check
-    symbols: Vec<(u32, u32, String)>,
+    /// Sorted by addr ascending: (addr, end_addr, full_demangled, display_name)
+    symbols: Vec<(u32, u32, String, String)>,
 }
 
 impl SymbolResolver {
@@ -35,36 +34,52 @@ impl SymbolResolver {
         let meta: TraceMetaFile =
             serde_json::from_str(&content).context("Failed to parse meta.json")?;
 
-        let mut symbols: Vec<(u32, u32, String)> = meta
+        let mut symbols: Vec<(u32, u32, String, String)> = meta
             .symbols
             .into_iter()
             .filter(|s| s.size > 0)
             .map(|s| {
                 let end = s.addr.saturating_add(s.size);
-                let display = Self::shorten_name(&s.name);
-                (s.addr, end, display)
+                let full = Self::demangle_name(&s.name);
+                let display = Self::shorten_demangled(&full);
+                (s.addr, end, full, display)
             })
             .collect();
 
-        symbols.sort_by_key(|(addr, _, _)| *addr);
+        symbols.sort_by_key(|(addr, _, _, _)| *addr);
 
         Ok(Self { symbols })
     }
 
-    /// Resolve an address to its containing symbol.
-    /// Returns "???" if not found (e.g. RAM address or outside code).
+    /// Resolve an address to its display (shortened) name.
     pub fn resolve(&self, addr: u32) -> &str {
-        if self.symbols.is_empty() {
-            return "???";
-        }
+        self.lookup(addr)
+            .map(|(_, display)| display.as_str())
+            .unwrap_or("???")
+    }
 
-        let idx = match self.symbols.binary_search_by_key(&addr, |(a, _, _)| *a) {
+    /// Resolve an address to its full demangled name.
+    fn resolve_full(&self, addr: u32) -> &str {
+        self.lookup(addr)
+            .map(|(full, _)| full.as_str())
+            .unwrap_or("???")
+    }
+
+    fn lookup(&self, addr: u32) -> Option<(&String, &String)> {
+        if self.symbols.is_empty() {
+            return None;
+        }
+        let idx = match self.symbols.binary_search_by_key(&addr, |(a, _, _, _)| *a) {
             Ok(i) => i,
-            Err(0) => return "???",
+            Err(0) => return None,
             Err(i) => i - 1,
         };
-        let (_start, end, name) = &self.symbols[idx];
-        if addr < *end { name.as_str() } else { "???" }
+        let (_start, end, full, display) = &self.symbols[idx];
+        if addr < *end {
+            Some((full, display))
+        } else {
+            None
+        }
     }
 
     /// Format a callstack: innermost first, joined by " <- "
@@ -77,29 +92,26 @@ impl SymbolResolver {
             .join(" <- ")
     }
 
-    fn is_infra(name: &str) -> bool {
-        const INFRA_PREFIXES: &[&str] = &[
+    /// Check infra status using the full demangled name, which preserves
+    /// trait impl structure like `<String as Clone>::clone`.
+    fn is_infra(full_name: &str) -> bool {
+        const INFRA_FRAGMENTS: &[&str] = &[
             "RawVecInner<",
             "RawVec<",
             "RawTable<",
-            "Clone>::clone",
+            "as core::clone::Clone>::clone",
+            "as core::fmt::Write>::write",
             "SmallVec<",
-            "Vec<",
-            "HashMap<",
-            "HashSet<",
-            "BTreeMap<",
-            "BTreeSet<",
-            "String>::",
-            "Write>::write",
+            "alloc::vec::Vec<",
+            "alloc::string::String>::",
             "alloc::vec::",
             "alloc::string::",
             "hashbrown::",
         ];
-        INFRA_PREFIXES.iter().any(|p| name.starts_with(p))
+        INFRA_FRAGMENTS.iter().any(|p| full_name.contains(p))
     }
 
     /// Resolve an address, stripping the monomorphization hash suffix.
-    /// E.g. "RawVecInner<A>::finish_grow::h8ca052343ac882a5" -> "RawVecInner<A>::finish_grow"
     pub fn resolve_no_hash(&self, addr: u32) -> String {
         Self::strip_hash(self.resolve(addr))
     }
@@ -116,8 +128,8 @@ impl SymbolResolver {
     }
 
     /// Walk frames (skipping frame 0) and return (origin, mechanism):
-    /// - origin: first non-infra caller (hash-stripped for grouping)
-    /// - mechanism: the infra caller chain leading to it (e.g. "RawVecInner::finish_grow")
+    /// - origin: first non-infra caller (display name, hash-stripped)
+    /// - mechanism: the infra function (display name, hash-stripped), if any
     pub fn classify_alloc(&self, frames: &[u32]) -> (String, Option<String>) {
         let callers = if frames.len() > 1 {
             &frames[1..]
@@ -129,30 +141,149 @@ impl SymbolResolver {
 
         let mut mechanism: Option<String> = None;
         for &addr in callers {
-            let name = self.resolve(addr);
-            if Self::is_infra(name) {
+            let full = self.resolve_full(addr);
+            if Self::is_infra(full) {
                 if mechanism.is_none() {
-                    mechanism = Some(Self::strip_hash(name));
+                    mechanism = Some(Self::strip_hash(self.resolve(addr)));
                 }
             } else {
-                return (Self::strip_hash(name), mechanism);
+                return (Self::strip_hash(self.resolve(addr)), mechanism);
             }
         }
-        // All frames were infra -- use the immediate caller as origin
         (self.resolve_no_hash(callers[0]), None)
     }
 
-    fn shorten_name(name: &str) -> String {
-        let demangled = if name.starts_with("_Z") {
-            format!("{}", demangle(name))
+    fn demangle_name(raw: &str) -> String {
+        if raw.starts_with("_Z") {
+            format!("{}", demangle(raw))
         } else {
-            name.to_string()
-        };
-
-        let parts: Vec<&str> = demangled.split("::").collect();
-        if parts.len() <= 3 {
-            return demangled;
+            raw.to_string()
         }
-        parts[parts.len().saturating_sub(3)..].join("::")
     }
+
+    /// Shorten a demangled name for display.
+    /// Handles trait impls: `<path::Type as path::Trait>::method` → `Type::method`
+    /// Regular paths: take last 2 meaningful components.
+    fn shorten_demangled(demangled: &str) -> String {
+        if demangled.starts_with('<') {
+            if let Some(short) = Self::shorten_trait_impl(demangled) {
+                return short;
+            }
+        }
+        Self::shorten_path(demangled)
+    }
+
+    /// `<alloc::string::String as core::clone::Clone>::clone::h...`
+    /// → `String::clone::h...`
+    fn shorten_trait_impl(s: &str) -> Option<String> {
+        let close = find_matching_close(s, 0)?;
+        let inner = &s[1..close];
+        let rest = s[close + 1..].strip_prefix("::")?;
+
+        // Find " as " at bracket depth 0 within `inner`
+        let as_pos = find_as_at_depth0(inner)?;
+        let self_type = inner[..as_pos].trim();
+
+        let short_self = last_path_component(self_type);
+        Some(format!("{short_self}::{rest}"))
+    }
+
+    /// Take the last 3 `::` segments, but respect `<>` nesting.
+    fn shorten_path(s: &str) -> String {
+        let components = split_path(s);
+        if components.len() <= 3 {
+            return s.to_string();
+        }
+        components[components.len() - 3..].join("::")
+    }
+}
+
+/// Find the index of the `>` that matches the `<` at `s[start]`.
+fn find_matching_close(s: &str, start: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (i, c) in s[start..].char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find ` as ` within a string at angle-bracket depth 0.
+fn find_as_at_depth0(s: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let bytes = s.as_bytes();
+    for i in 0..s.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b' ' if depth == 0 => {
+                if s[i..].starts_with(" as ") {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Extract the last path component, preserving generics.
+/// `alloc::string::String` → `String`
+/// `alloc::vec::Vec<T,A>` → `Vec<T,A>`
+fn last_path_component(path: &str) -> &str {
+    let mut depth: i32 = 0;
+    let bytes = path.as_bytes();
+    let mut last_sep = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
+                last_sep = Some(i);
+                i += 1; // skip second ':'
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    match last_sep {
+        Some(pos) => &path[pos + 2..],
+        None => path,
+    }
+}
+
+/// Split a path by `::` respecting `<>` nesting.
+fn split_path(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth: i32 = 0;
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
+                parts.push(&s[start..i]);
+                i += 2;
+                start = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if start < s.len() {
+        parts.push(&s[start..]);
+    }
+    parts
 }

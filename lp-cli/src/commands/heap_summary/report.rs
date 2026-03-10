@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use super::handler::{LiveAllocation, RunningStats};
+use super::handler::{LiveAllocation, OomEvent, RunningStats};
 use super::resolver::SymbolResolver;
 
 pub struct Report {
@@ -15,6 +15,7 @@ pub struct Report {
     stats: RunningStats,
     live: HashMap<u32, LiveAllocation>,
     peak_live: HashMap<u32, LiveAllocation>,
+    oom: Option<OomEvent>,
     resolver: SymbolResolver,
     top: usize,
 }
@@ -29,6 +30,7 @@ impl Report {
         stats: &RunningStats,
         live: HashMap<u32, LiveAllocation>,
         peak_live: HashMap<u32, LiveAllocation>,
+        oom: Option<OomEvent>,
         resolver: SymbolResolver,
     ) -> Self {
         Self {
@@ -40,6 +42,7 @@ impl Report {
             stats: stats.clone(),
             live,
             peak_live,
+            oom,
             resolver,
             top: 20,
         }
@@ -57,6 +60,7 @@ impl Report {
     pub fn render(&self) -> String {
         let mut out = String::new();
         self.write_header(&mut out);
+        self.write_oom(&mut out);
         self.write_overview(&mut out);
         self.write_peak(&mut out);
         self.write_peak_breakdown(&mut out);
@@ -76,6 +80,32 @@ impl Report {
         )
         .unwrap();
         writeln!(out, "Heap: {} KB starting at {}", heap_kb, heap_hex).unwrap();
+        writeln!(out).unwrap();
+    }
+
+    fn write_oom(&self, out: &mut String) {
+        let Some(oom) = &self.oom else { return };
+        writeln!(out, "*** OUT OF MEMORY ***").unwrap();
+        writeln!(
+            out,
+            "  Failed allocation: {} bytes at ic={}",
+            fmt_num(oom.size as u64),
+            fmt_num(oom.ic)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  Free at time of OOM: {} bytes (derived)",
+            fmt_num(self.stats.derived_free())
+        )
+        .unwrap();
+        let stack = self.resolver.format_callstack(&oom.frames, 6);
+        writeln!(
+            out,
+            "  Stack: {}",
+            if stack.is_empty() { "???" } else { &stack }
+        )
+        .unwrap();
         writeln!(out).unwrap();
     }
 
@@ -178,13 +208,17 @@ impl Report {
         let mut sorted: Vec<_> = by_origin.into_iter().collect();
         sorted.sort_by(|a, b| b.1.total_bytes.cmp(&a.1.total_bytes));
 
+        let max_bytes = sorted.iter().map(|(_, g)| g.total_bytes).max().unwrap_or(0);
+        let bytes_width = fmt_num(max_bytes).len();
+
         for (origin, group) in sorted.iter().take(self.top) {
             writeln!(
                 out,
-                "  {} ({} allocs)  {}",
+                "  {:>bw$}  {:>4} allocs  {}",
                 fmt_num(group.total_bytes),
                 group.total_count,
-                origin
+                origin,
+                bw = bytes_width,
             )
             .unwrap();
 
@@ -194,10 +228,11 @@ impl Report {
                 for (mech, (bytes, count)) in &mechs {
                     writeln!(
                         out,
-                        "    {} ({} allocs)  via {}",
+                        "    {:>bw$}  {:>4} allocs  via {}",
                         fmt_num(*bytes),
                         count,
-                        mech
+                        mech,
+                        bw = bytes_width,
                     )
                     .unwrap();
                 }
@@ -240,21 +275,17 @@ impl Report {
         let mut sorted: Vec<_> = by_callsite.into_iter().collect();
         sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
 
-        for (i, (callsite, (bytes, count))) in sorted.iter().take(self.top).enumerate() {
-            if i > 0 {
-                writeln!(out).unwrap();
-            }
-            let display = if callsite.is_empty() {
-                "???".to_string()
-            } else {
-                callsite.clone()
-            };
+        let max_bytes = sorted.iter().map(|(_, (b, _))| *b).max().unwrap_or(0);
+        let bw = fmt_num(max_bytes).len();
+
+        for (callsite, (bytes, count)) in sorted.iter().take(self.top) {
+            let display = if callsite.is_empty() { "???" } else { callsite };
             writeln!(
                 out,
-                "  {} bytes ({} allocs)  {}",
+                "  {:>bw$}  {:>4} allocs  {}",
                 fmt_num(*bytes),
                 count,
-                display
+                display,
             )
             .unwrap();
         }
@@ -271,8 +302,11 @@ impl Report {
         let mut sorted: Vec<_> = self.stats.hotspot_bytes.iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(a.1));
 
+        let max_bytes = sorted.iter().map(|(_, b)| **b).max().unwrap_or(0);
+        let bw = fmt_num(max_bytes).len();
+
         for (name, bytes) in sorted.iter().take(self.top) {
-            writeln!(out, "  {}  {}", fmt_num(**bytes), name).unwrap();
+            writeln!(out, "  {:>bw$}  {}", fmt_num(**bytes), name).unwrap();
         }
     }
 }
