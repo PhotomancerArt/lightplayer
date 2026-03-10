@@ -68,6 +68,11 @@ pub enum EmulatorError {
         pc: u32,
         regs: [i32; 32],
     },
+    /// Guest ran out of memory.
+    Oom {
+        info: super::OomInfo,
+        regs: [i32; 32],
+    },
 }
 
 /// Convert a TrapCode to a human-readable string.
@@ -102,6 +107,7 @@ impl EmulatorError {
             EmulatorError::InvalidRegister { pc, .. } => *pc,
             EmulatorError::Trap { pc, .. } => *pc,
             EmulatorError::Panic { pc, .. } => *pc,
+            EmulatorError::Oom { info, .. } => info.pc,
         }
     }
 
@@ -116,6 +122,7 @@ impl EmulatorError {
             EmulatorError::InvalidRegister { .. } => None,
             EmulatorError::Trap { regs, .. } => Some(regs),
             EmulatorError::Panic { regs, .. } => Some(regs),
+            EmulatorError::Oom { regs, .. } => Some(regs),
         }
     }
 }
@@ -196,6 +203,13 @@ impl core::fmt::Display for EmulatorError {
                     write!(f, "\n  at line {line}")?;
                 }
                 Ok(())
+            }
+            EmulatorError::Oom { info, .. } => {
+                write!(
+                    f,
+                    "Out of memory at PC 0x{:08x}: allocation of {} bytes failed",
+                    info.pc, info.size
+                )
             }
         }
     }

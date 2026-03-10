@@ -6,6 +6,8 @@ mod executor;
 pub mod logging;
 mod memory;
 
-pub use emulator::{DEFAULT_RAM_START, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo};
+pub use emulator::{
+    DEFAULT_RAM_START, OomInfo, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo,
+};
 pub use error::{EmulatorError, MemoryAccessKind, trap_code_to_string};
 pub use logging::{InstLog, LogLevel};

@@ -28,8 +28,8 @@ pub mod test_util;
 
 // Re-exports for convenience
 pub use emu::{
-    EmulatorError, InstLog, LogLevel, MemoryAccessKind, PanicInfo, Riscv32Emulator, StepResult,
-    SyscallInfo, trap_code_to_string,
+    EmulatorError, InstLog, LogLevel, MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator,
+    StepResult, SyscallInfo, trap_code_to_string,
 };
 pub use time::TimeMode;
 

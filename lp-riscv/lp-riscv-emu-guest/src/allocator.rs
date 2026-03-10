@@ -100,7 +100,9 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
                 .ok()
                 .map_or(core::ptr::null_mut(), |nn| nn.as_ptr())
         };
-        if !ptr.is_null() {
+        if ptr.is_null() {
+            self.trace_event(crate::syscall::ALLOC_TRACE_OOM, 0, layout.size() as i32, 0);
+        } else {
             self.trace_event(
                 crate::syscall::ALLOC_TRACE_ALLOC,
                 ptr as i32,
@@ -149,7 +151,9 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
             }
             new_ptr
         };
-        if !new_ptr.is_null() {
+        if new_ptr.is_null() {
+            self.trace_event(crate::syscall::ALLOC_TRACE_OOM, 0, new_size as i32, 0);
+        } else {
             self.trace_realloc_event(
                 ptr as i32,
                 new_ptr as i32,

@@ -35,6 +35,8 @@ pub const SYSCALL_ALLOC_TRACE: i32 = 9;
 pub const ALLOC_TRACE_ALLOC: i32 = 0;
 pub const ALLOC_TRACE_DEALLOC: i32 = 1;
 pub const ALLOC_TRACE_REALLOC: i32 = 2;
+/// OOM: a0=3, a1=0, a2=requested_size (uses trace_event layout: event_type, ptr, size, free)
+pub const ALLOC_TRACE_OOM: i32 = 3;
 
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
