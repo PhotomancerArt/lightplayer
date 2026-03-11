@@ -30,7 +30,6 @@ unsafe impl Sync for FunctionPtr {}
 /// Shader node runtime
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
-    glsl_source: Option<String>, // Stored for state extraction
     executable: Option<Box<dyn GlslExecutable + Send + Sync>>, // Compiled shader (must be Send + Sync for NodeRuntime)
     texture_handle: Option<TextureHandle>,                     // Resolved texture handle
     compilation_error: Option<String>,                         // Compilation error if any
@@ -47,7 +46,6 @@ impl ShaderRuntime {
     pub fn new(node_handle: NodeHandle) -> Self {
         Self {
             config: None,
-            glsl_source: None,
             executable: None,
             texture_handle: None,
             compilation_error: None,
@@ -208,7 +206,6 @@ impl NodeRuntime for ShaderRuntime {
         _output_provider: Option<&dyn OutputProvider>,
     ) -> Result<(), Error> {
         self.executable = None;
-        self.glsl_source = None;
         self.direct_func_ptr = None;
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
@@ -310,7 +307,6 @@ impl NodeRuntime for ShaderRuntime {
                 lp_shared::fs::fs_event::ChangeType::Delete => {
                     // Clear shader executable
                     self.executable = None;
-                    self.glsl_source = None;
                     self.direct_func_ptr = None;
                     self.direct_call_conv = None;
                     self.direct_pointer_type = None;
@@ -485,13 +481,6 @@ impl ShaderRuntime {
                 error: format!("Invalid UTF-8 in GLSL file: {e}"),
             })?;
 
-        // Store source for state extraction
-        self.glsl_source = Some(glsl_source.clone());
-
-        // Update state
-        let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
-        self.state.glsl_code.set(frame_id, glsl_source.clone());
-
         Ok(glsl_source)
     }
 
@@ -596,7 +585,11 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
-        self.compile_shader(&glsl_source)
+        self.compile_shader(glsl_source.as_str())?;
+        // Store source in state (single copy; compile_shader no longer needs it)
+        let frame_id = FrameId::default();
+        self.state.glsl_code.set(frame_id, glsl_source);
+        Ok(())
     }
 }
 
