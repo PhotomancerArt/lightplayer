@@ -491,7 +491,19 @@ impl ShaderRuntime {
             self.node_handle.as_i32(),
             glsl_source.len()
         );
-        log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
+        // Avoid allocating full shader source for trace: truncate to first 120 chars
+        if log::log_enabled!(log::Level::Trace) {
+            let preview = if glsl_source.len() > 120 {
+                format!(
+                    "{}... ({} bytes total)",
+                    &glsl_source[..120],
+                    glsl_source.len()
+                )
+            } else {
+                glsl_source.to_string()
+            };
+            log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{preview}");
+        }
 
         use lp_glsl_compiler::Q32Options;
 
