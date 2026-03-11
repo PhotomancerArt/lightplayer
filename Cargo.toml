@@ -195,5 +195,5 @@ esp-println = { path = "lp-fw/esp-println-fork" }
 
 # lp-collection (lp-common): same path/git toggle pattern as cranelift
 # Path for local dev; comment out to use published (git) lp-common
-# [patch."https://github.com/light-player/lp-common"]
-# lp-collection = { path = "../lp-common/lp-collection" }
+[patch."https://github.com/light-player/lp-common"]
+lp-collection = { path = "../lp-common/lp-collection" }

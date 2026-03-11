@@ -3310,6 +3310,7 @@ dependencies = [
  "lp-server",
  "lp-shared",
  "notify",
+ "rustc-demangle",
  "serde",
  "serde_json",
  "serialport",
@@ -3344,7 +3345,6 @@ dependencies = [
 [[package]]
 name = "lp-collection"
 version = "1.0.0"
-source = "git+https://github.com/light-player/lp-common?branch=main#7463cb468d321f611150358355132b1a110d7b53"
 dependencies = [
  "rustc-hash 2.1.1",
 ]

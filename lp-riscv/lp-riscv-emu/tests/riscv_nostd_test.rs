@@ -200,6 +200,9 @@ fn run_nostd_test() -> Result<(), String> {
                 println!("   ✓ Program halted (EBREAK)");
                 break;
             }
+            Ok(StepResult::Oom(info)) => {
+                return Err(format!("Guest OOM: {} bytes at pc=0x{:x}", info.size, info.pc));
+            }
             Err(e) => {
                 return Err(format!("Emulator error: {e:?}"));
             }
