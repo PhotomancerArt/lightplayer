@@ -174,7 +174,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
         // Arithmetic operators - dispatch based on type
         Add => match operand_ty {
             GlslType::Int | GlslType::UInt => ctx.builder.ins().iadd(lhs, rhs),
-            GlslType::Float => ctx.builder.ins().fadd(lhs, rhs),
+            GlslType::Float => ctx.emit_float_add(lhs, rhs),
             _ => {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -184,7 +184,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
         },
         Sub => match operand_ty {
             GlslType::Int | GlslType::UInt => ctx.builder.ins().isub(lhs, rhs),
-            GlslType::Float => ctx.builder.ins().fsub(lhs, rhs),
+            GlslType::Float => ctx.emit_float_sub(lhs, rhs),
             _ => {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -194,7 +194,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
         },
         Mult => match operand_ty {
             GlslType::Int | GlslType::UInt => ctx.builder.ins().imul(lhs, rhs),
-            GlslType::Float => ctx.builder.ins().fmul(lhs, rhs),
+            GlslType::Float => ctx.emit_float_mul(lhs, rhs),
             _ => {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -209,7 +209,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
             match operand_ty {
                 GlslType::Int => ctx.builder.ins().sdiv(lhs, rhs),
                 GlslType::UInt => ctx.builder.ins().udiv(lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fdiv(lhs, rhs),
+                GlslType::Float => ctx.emit_float_div(lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -243,7 +243,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
                     ctx.builder.ins().icmp(IntCC::Equal, lhs, rhs)
                 }
                 GlslType::Int | GlslType::UInt => ctx.builder.ins().icmp(IntCC::Equal, lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fcmp(FloatCC::Equal, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::Equal, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -263,7 +263,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
                     ctx.builder.ins().icmp(IntCC::NotEqual, lhs, rhs)
                 }
                 GlslType::Int | GlslType::UInt => ctx.builder.ins().icmp(IntCC::NotEqual, lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::NotEqual, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -279,7 +279,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
             let cmp_result = match operand_ty {
                 GlslType::Int => ctx.builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs),
                 GlslType::UInt => ctx.builder.ins().icmp(IntCC::UnsignedLessThan, lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fcmp(FloatCC::LessThan, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::LessThan, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -295,7 +295,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
             let cmp_result = match operand_ty {
                 GlslType::Int => ctx.builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs),
                 GlslType::UInt => ctx.builder.ins().icmp(IntCC::UnsignedGreaterThan, lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::GreaterThan, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -317,7 +317,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
                     .builder
                     .ins()
                     .icmp(IntCC::UnsignedLessThanOrEqual, lhs, rhs),
-                GlslType::Float => ctx.builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::LessThanOrEqual, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,
@@ -340,10 +340,7 @@ fn emit_scalar_binary_op<M: cranelift_module::Module>(
                         .ins()
                         .icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs)
                 }
-                GlslType::Float => ctx
-                    .builder
-                    .ins()
-                    .fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs),
+                GlslType::Float => ctx.emit_float_cmp(FloatCC::GreaterThanOrEqual, lhs, rhs),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,

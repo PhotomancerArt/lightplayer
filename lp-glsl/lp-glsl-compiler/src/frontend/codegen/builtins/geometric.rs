@@ -3,7 +3,7 @@
 use crate::error::{ErrorCode, GlslError};
 use crate::frontend::codegen::context::CodegenContext;
 use crate::semantic::types::Type;
-use cranelift_codegen::ir::{InstBuilder, Value};
+use cranelift_codegen::ir::Value;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -24,10 +24,10 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             ));
         }
 
-        let mut sum = self.builder.ins().fmul(x_vals[0], y_vals[0]);
+        let mut sum = self.emit_float_mul(x_vals[0], y_vals[0]);
         for i in 1..x_vals.len() {
-            let product = self.builder.ins().fmul(x_vals[i], y_vals[i]);
-            sum = self.builder.ins().fadd(sum, product);
+            let product = self.emit_float_mul(x_vals[i], y_vals[i]);
+            sum = self.emit_float_add(sum, product);
         }
 
         Ok((vec![sum], Type::Float))
@@ -57,19 +57,19 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let y2 = y_vals[2];
 
         let r0 = {
-            let a = self.builder.ins().fmul(x1, y2);
-            let b = self.builder.ins().fmul(x2, y1);
-            self.builder.ins().fsub(a, b)
+            let a = self.emit_float_mul(x1, y2);
+            let b = self.emit_float_mul(x2, y1);
+            self.emit_float_sub(a, b)
         };
         let r1 = {
-            let a = self.builder.ins().fmul(x2, y0);
-            let b = self.builder.ins().fmul(x0, y2);
-            self.builder.ins().fsub(a, b)
+            let a = self.emit_float_mul(x2, y0);
+            let b = self.emit_float_mul(x0, y2);
+            self.emit_float_sub(a, b)
         };
         let r2 = {
-            let a = self.builder.ins().fmul(x0, y1);
-            let b = self.builder.ins().fmul(x1, y0);
-            self.builder.ins().fsub(a, b)
+            let a = self.emit_float_mul(x0, y1);
+            let b = self.emit_float_mul(x1, y0);
+            self.emit_float_sub(a, b)
         };
 
         Ok((vec![r0, r1, r2], Type::Vec3))
@@ -83,14 +83,14 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let (x_vals, _) = &args[0];
 
         // Compute dot product with self
-        let mut sum_sq = self.builder.ins().fmul(x_vals[0], x_vals[0]);
+        let mut sum_sq = self.emit_float_mul(x_vals[0], x_vals[0]);
         for i in 1..x_vals.len() {
-            let sq = self.builder.ins().fmul(x_vals[i], x_vals[i]);
-            sum_sq = self.builder.ins().fadd(sum_sq, sq);
+            let sq = self.emit_float_mul(x_vals[i], x_vals[i]);
+            sum_sq = self.emit_float_add(sum_sq, sq);
         }
 
         // Square root
-        let result = self.builder.ins().sqrt(sum_sq);
+        let result = self.emit_float_sqrt(sum_sq);
 
         Ok((vec![result], Type::Float))
     }
@@ -109,7 +109,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         // Divide each component by length
         let mut result_vals = Vec::new();
         for &val in x_vals {
-            result_vals.push(self.builder.ins().fdiv(val, len));
+            result_vals.push(self.emit_float_div(val, len));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -133,7 +133,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         // Compute p0 - p1
         let mut diff_vals = Vec::new();
         for i in 0..p0_vals.len() {
-            diff_vals.push(self.builder.ins().fsub(p0_vals[i], p1_vals[i]));
+            diff_vals.push(self.emit_float_sub(p0_vals[i], p1_vals[i]));
         }
 
         // Compute length of difference

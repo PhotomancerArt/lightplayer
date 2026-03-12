@@ -21,7 +21,7 @@ pub fn emit_literal_rvalue<M: cranelift_module::Module>(
             Ok(RValue::from_scalar(val, GlslType::UInt))
         }
         Expr::FloatConst(f, _) => {
-            let val = ctx.builder.ins().f32const(*f);
+            let val = ctx.emit_float_const(*f);
             Ok(RValue::from_scalar(val, GlslType::Float))
         }
         Expr::BoolConst(b, _) => {

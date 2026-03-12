@@ -91,7 +91,7 @@ fn emit_unary_op<M: cranelift_module::Module>(
             };
             match base_ty {
                 GlslType::Int => ctx.builder.ins().ineg(val),
-                GlslType::Float => ctx.builder.ins().fneg(val),
+                GlslType::Float => ctx.emit_float_neg(val),
                 _ => {
                     return Err(GlslError::new(
                         ErrorCode::E0400,

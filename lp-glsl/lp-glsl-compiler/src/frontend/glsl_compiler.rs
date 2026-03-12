@@ -3,6 +3,7 @@
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
 use crate::error::{GlslDiagnostics, GlslError};
+use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode};
 use crate::frontend::pipeline::CompilationPipeline;
 use crate::frontend::src_loc::GlSourceMap;
 use cranelift_codegen::ir::Function;
@@ -473,7 +474,11 @@ impl GlslCompiler {
         let entry_block = Self::setup_function_builder(&mut builder);
 
         let mut codegen_ctx = crate::frontend::codegen::context::CodegenContext::new(
-            builder, gl_module, source_map, file_id,
+            builder,
+            gl_module,
+            source_map,
+            file_id,
+            NumericMode::Float(FloatStrategy),
         );
         codegen_ctx.set_function_ids(func_ids);
         codegen_ctx.set_function_registry(func_registry);

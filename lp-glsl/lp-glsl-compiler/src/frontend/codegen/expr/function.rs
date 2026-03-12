@@ -740,7 +740,7 @@ fn copy_back_out_parameters<M: cranelift_module::Module>(
                     )
                 })?
         } else if arg_info.param_ty.is_matrix() {
-            cranelift_codegen::ir::types::F32
+            ctx.float_type()
         } else {
             arg_info.param_ty.to_cranelift_type().map_err(|e| {
                 GlslError::new(

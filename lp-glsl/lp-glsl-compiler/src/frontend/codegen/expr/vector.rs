@@ -117,7 +117,7 @@ pub fn emit_vector_binary<M: cranelift_module::Module>(
                     rhs_comp,
                 )
             } else {
-                ctx.builder.ins().fcmp(
+                ctx.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::Equal,
                     lhs_comp,
                     rhs_comp,

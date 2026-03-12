@@ -98,7 +98,7 @@ pub fn read_lvalue<M: cranelift_module::Module>(
                                 )
                             })?
                     } else if base_ty.is_matrix() {
-                        cranelift_codegen::ir::types::F32
+                        ctx.float_type()
                     } else {
                         base_ty.to_cranelift_type().map_err(|e| {
                             GlslError::new(
@@ -187,7 +187,7 @@ pub fn read_lvalue<M: cranelift_module::Module>(
                             )
                         })?
                     } else if element_ty.is_matrix() {
-                        cranelift_codegen::ir::types::F32
+                        ctx.float_type()
                     } else {
                         element_ty.to_cranelift_type().map_err(|e| {
                             GlslError::new(
@@ -338,7 +338,7 @@ pub fn read_lvalue<M: cranelift_module::Module>(
                 })?
             } else if element_ty.is_matrix() {
                 // Matrices are always float
-                cranelift_codegen::ir::types::F32
+                ctx.float_type()
             } else {
                 // Scalar
                 element_ty.to_cranelift_type().map_err(|e| {

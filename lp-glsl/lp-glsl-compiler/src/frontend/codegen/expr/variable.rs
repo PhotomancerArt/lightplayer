@@ -92,22 +92,19 @@ fn emit_const_value_rvalue<M: cranelift_module::Module>(
     let vals = match val {
         ConstValue::Int(n) => vec![ctx.builder.ins().iconst(types::I32, *n as i64)],
         ConstValue::UInt(n) => vec![ctx.builder.ins().iconst(types::I32, *n as i64)],
-        ConstValue::Float(f) => vec![ctx.builder.ins().f32const(*f)],
+        ConstValue::Float(f) => vec![ctx.emit_float_const(*f)],
         ConstValue::Bool(b) => vec![ctx.builder.ins().iconst(types::I8, if *b { 1 } else { 0 })],
-        ConstValue::Vec2(v) => vec![
-            ctx.builder.ins().f32const(v[0]),
-            ctx.builder.ins().f32const(v[1]),
-        ],
+        ConstValue::Vec2(v) => vec![ctx.emit_float_const(v[0]), ctx.emit_float_const(v[1])],
         ConstValue::Vec3(v) => vec![
-            ctx.builder.ins().f32const(v[0]),
-            ctx.builder.ins().f32const(v[1]),
-            ctx.builder.ins().f32const(v[2]),
+            ctx.emit_float_const(v[0]),
+            ctx.emit_float_const(v[1]),
+            ctx.emit_float_const(v[2]),
         ],
         ConstValue::Vec4(v) => vec![
-            ctx.builder.ins().f32const(v[0]),
-            ctx.builder.ins().f32const(v[1]),
-            ctx.builder.ins().f32const(v[2]),
-            ctx.builder.ins().f32const(v[3]),
+            ctx.emit_float_const(v[0]),
+            ctx.emit_float_const(v[1]),
+            ctx.emit_float_const(v[2]),
+            ctx.emit_float_const(v[3]),
         ],
         ConstValue::IVec2(v) => vec![
             ctx.builder.ins().iconst(types::I32, v[0] as i64),
@@ -173,10 +170,10 @@ fn emit_const_value_rvalue<M: cranelift_module::Module>(
                 .iconst(types::I8, if v[3] { 1 } else { 0 }),
         ],
         ConstValue::Mat2(m) => vec![
-            ctx.builder.ins().f32const(m[0][0]),
-            ctx.builder.ins().f32const(m[0][1]),
-            ctx.builder.ins().f32const(m[1][0]),
-            ctx.builder.ins().f32const(m[1][1]),
+            ctx.emit_float_const(m[0][0]),
+            ctx.emit_float_const(m[0][1]),
+            ctx.emit_float_const(m[1][0]),
+            ctx.emit_float_const(m[1][1]),
         ],
     };
     Ok(RValue::from_aggregate(vals, val.glsl_type()))

@@ -30,7 +30,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             let y_scalar = y_vals[0];
             for &x in x_vals {
                 let min_val = match base_ty {
-                    Type::Float => self.builder.ins().fmin(x, y_scalar),
+                    Type::Float => self.emit_float_min(x, y_scalar),
                     Type::Int => {
                         let cmp = self.builder.ins().icmp(IntCC::SignedLessThan, x, y_scalar);
                         self.builder.ins().select(cmp, x, y_scalar)
@@ -55,7 +55,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             // Component-wise min
             for i in 0..x_vals.len() {
                 let min_val = match base_ty {
-                    Type::Float => self.builder.ins().fmin(x_vals[i], y_vals[i]),
+                    Type::Float => self.emit_float_min(x_vals[i], y_vals[i]),
                     Type::Int => {
                         let cmp =
                             self.builder
@@ -106,7 +106,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             let y_scalar = y_vals[0];
             for &x in x_vals {
                 let max_val = match base_ty {
-                    Type::Float => self.builder.ins().fmax(x, y_scalar),
+                    Type::Float => self.emit_float_max(x, y_scalar),
                     Type::Int => {
                         let cmp = self
                             .builder
@@ -134,7 +134,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             // Component-wise max
             for i in 0..x_vals.len() {
                 let max_val = match base_ty {
-                    Type::Float => self.builder.ins().fmax(x_vals[i], y_vals[i]),
+                    Type::Float => self.emit_float_max(x_vals[i], y_vals[i]),
                     Type::Int => {
                         let cmp =
                             self.builder
@@ -196,7 +196,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let mut result_vals = Vec::new();
         for &val in x_vals {
             let abs_val = match base_ty {
-                Type::Float => self.builder.ins().fabs(val),
+                Type::Float => self.emit_float_abs(val),
                 Type::Int => {
                     // abs for int: (x < 0) ? -x : x
                     let zero = self.builder.ins().iconst(types::I32, 0);
@@ -226,7 +226,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         let mut result_vals = Vec::new();
         for &val in x_vals {
-            result_vals.push(self.builder.ins().sqrt(val));
+            result_vals.push(self.emit_float_sqrt(val));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -260,7 +260,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         let mut result_vals = Vec::new();
         for &val in x_vals {
-            result_vals.push(self.builder.ins().floor(val));
+            result_vals.push(self.emit_float_floor(val));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -275,7 +275,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         let mut result_vals = Vec::new();
         for &val in x_vals {
-            result_vals.push(self.builder.ins().ceil(val));
+            result_vals.push(self.emit_float_ceil(val));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -424,8 +424,8 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         let mut result_vals = Vec::new();
         for &val in x_vals {
-            let floored = self.builder.ins().floor(val);
-            result_vals.push(self.builder.ins().fsub(val, floored));
+            let floored = self.emit_float_floor(val);
+            result_vals.push(self.emit_float_sub(val, floored));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -480,19 +480,19 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         match base_ty {
             Type::Float => {
-                let zero = self.builder.ins().f32const(0.0);
-                let one = self.builder.ins().f32const(1.0);
-                let minus_one = self.builder.ins().f32const(-1.0);
+                let zero = self.emit_float_const(0.0);
+                let one = self.emit_float_const(1.0);
+                let minus_one = self.emit_float_const(-1.0);
 
                 for &val in x_vals {
                     // Check if x > 0
-                    let gt_zero = self.builder.ins().fcmp(
+                    let gt_zero = self.emit_float_cmp(
                         cranelift_codegen::ir::condcodes::FloatCC::GreaterThan,
                         val,
                         zero,
                     );
                     // Check if x < 0
-                    let lt_zero = self.builder.ins().fcmp(
+                    let lt_zero = self.emit_float_cmp(
                         cranelift_codegen::ir::condcodes::FloatCC::LessThan,
                         val,
                         zero,
@@ -566,7 +566,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         use cranelift_codegen::ir::{AbiParam, ExtFuncData, Signature};
         use cranelift_codegen::isa::CallConv;
         let mut sig = Signature::new(CallConv::SystemV);
-        sig.params.push(AbiParam::new(types::F32));
+        sig.params.push(AbiParam::new(self.float_type()));
         sig.returns.push(AbiParam::new(types::I8));
         let sig_ref = self.builder.func.import_signature(sig);
         let ext_name = cranelift_codegen::ir::ExternalName::testcase("isinff".as_bytes());
@@ -617,7 +617,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         use cranelift_codegen::ir::{AbiParam, ExtFuncData, Signature};
         use cranelift_codegen::isa::CallConv;
         let mut sig = Signature::new(CallConv::SystemV);
-        sig.params.push(AbiParam::new(types::F32));
+        sig.params.push(AbiParam::new(self.float_type()));
         sig.returns.push(AbiParam::new(types::I8));
         let sig_ref = self.builder.func.import_signature(sig);
         let ext_name = cranelift_codegen::ir::ExternalName::testcase("isnanf".as_bytes());

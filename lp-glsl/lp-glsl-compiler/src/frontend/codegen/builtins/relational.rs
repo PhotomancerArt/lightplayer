@@ -111,7 +111,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             let cmp = if base_ty == Type::Bool || base_ty == Type::Int || base_ty == Type::UInt {
                 self.builder.ins().icmp(IntCC::Equal, x_vals[i], y_vals[i])
             } else {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::Equal,
                     x_vals[i],
                     y_vals[i],
@@ -159,7 +159,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     .ins()
                     .icmp(IntCC::NotEqual, x_vals[i], y_vals[i])
             } else {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::NotEqual,
                     x_vals[i],
                     y_vals[i],
@@ -203,7 +203,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let mut result_vals = Vec::new();
         for i in 0..x_vals.len() {
             let cmp = if base_ty == Type::Float {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::GreaterThan,
                     x_vals[i],
                     y_vals[i],
@@ -252,7 +252,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let mut result_vals = Vec::new();
         for i in 0..x_vals.len() {
             let cmp = if base_ty == Type::Float {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::GreaterThanOrEqual,
                     x_vals[i],
                     y_vals[i],
@@ -301,7 +301,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let mut result_vals = Vec::new();
         for i in 0..x_vals.len() {
             let cmp = if base_ty == Type::Float {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::LessThan,
                     x_vals[i],
                     y_vals[i],
@@ -350,7 +350,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let mut result_vals = Vec::new();
         for i in 0..x_vals.len() {
             let cmp = if base_ty == Type::Float {
-                self.builder.ins().fcmp(
+                self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::LessThanOrEqual,
                     x_vals[i],
                     y_vals[i],

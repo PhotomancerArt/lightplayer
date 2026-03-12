@@ -2,7 +2,6 @@ use crate::error::{ErrorCode, GlslError, source_span_to_location};
 use crate::frontend::codegen::context::CodegenContext;
 use crate::semantic::type_check::{check_matrix_constructor, check_vector_constructor_with_span};
 use crate::semantic::types::Type as GlslType;
-use cranelift_codegen::ir::InstBuilder;
 use glsl::syntax::Expr;
 
 use super::coercion;
@@ -115,7 +114,7 @@ pub fn emit_matrix_constructor<M: cranelift_module::Module>(
     // Allocate temporary variables for matrix elements
     let mut matrix_vars = Vec::new();
     for _ in 0..element_count {
-        let var = ctx.builder.declare_var(cranelift_codegen::ir::types::F32);
+        let var = ctx.builder.declare_var(ctx.float_type());
         matrix_vars.push(var);
     }
 
@@ -123,7 +122,7 @@ pub fn emit_matrix_constructor<M: cranelift_module::Module>(
     if arg_types.len() == 1 && arg_types[0].is_scalar() {
         let scalar = arg_vals[0][0];
         let scalar_float = coercion::coerce_to_type(ctx, scalar, &arg_types[0], &GlslType::Float)?;
-        let zero = ctx.builder.ins().f32const(0.0);
+        let zero = ctx.emit_float_const(0.0);
 
         for row in 0..rows {
             for col in 0..cols {
@@ -158,10 +157,10 @@ pub fn emit_matrix_constructor<M: cranelift_module::Module>(
                     src_matrix_vals[src_idx]
                 } else if col == row {
                     // Identity padding (diagonal = 1.0)
-                    ctx.builder.ins().f32const(1.0)
+                    ctx.emit_float_const(1.0)
                 } else {
                     // Off-diagonal padding = 0.0
-                    ctx.builder.ins().f32const(0.0)
+                    ctx.emit_float_const(0.0)
                 };
                 let var_idx = col * rows + row;
                 ctx.builder.def_var(matrix_vars[var_idx], value);

@@ -33,7 +33,7 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
     match (from_ty, to_ty) {
         (GlslType::Int, GlslType::Float) => {
             // int → float: fcvt_from_sint
-            Ok(ctx.builder.ins().fcvt_from_sint(types::F32, val))
+            Ok(ctx.emit_float_from_sint(val))
         }
         // Boolean to numeric conversions
         (GlslType::Bool, GlslType::Int) => {
@@ -45,7 +45,7 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
             // bool → float: false → 0.0, true → 1.0
             // val is i8 (0 or 1), convert to i32 then to float
             let i32_val = ctx.builder.ins().uextend(types::I32, val);
-            let f32_val = ctx.builder.ins().fcvt_from_sint(types::F32, i32_val);
+            let f32_val = ctx.emit_float_from_sint(i32_val);
             Ok(f32_val)
         }
         // Boolean to uint conversion
@@ -67,8 +67,8 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
         (GlslType::Float, GlslType::Bool) => {
             // float → bool: 0.0 → false, non-zero → true
             // val is f32, compare with 0.0, convert result to i8
-            let zero = ctx.builder.ins().f32const(0.0);
-            let cmp = ctx.builder.ins().fcmp(FloatCC::NotEqual, val, zero);
+            let zero = ctx.emit_float_const(0.0);
+            let cmp = ctx.emit_float_cmp(FloatCC::NotEqual, val, zero);
             let one = ctx.builder.ins().iconst(types::I8, 1);
             let zero_i8 = ctx.builder.ins().iconst(types::I8, 0);
             Ok(ctx.builder.ins().select(cmp, one, zero_i8))
@@ -76,7 +76,7 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
         (GlslType::Float, GlslType::Int) => {
             // float → int: truncates fractional part toward zero
             // val is f32, convert to i32 using fcvt_to_sint
-            Ok(ctx.builder.ins().fcvt_to_sint(types::I32, val))
+            Ok(ctx.emit_float_to_sint(val))
         }
         // uint to boolean conversion
         (GlslType::UInt, GlslType::Bool) => {
@@ -98,12 +98,12 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
         (GlslType::Float, GlslType::UInt) => {
             // float → uint: truncates fractional part toward zero (undefined for negative)
             // val is f32, convert to i32 using fcvt_to_uint
-            Ok(ctx.builder.ins().fcvt_to_uint(types::I32, val))
+            Ok(ctx.emit_float_to_uint(val))
         }
         (GlslType::UInt, GlslType::Float) => {
             // uint → float: convert unsigned to float
             // val is i32 (treated as unsigned), convert to f32 using fcvt_from_uint
-            Ok(ctx.builder.ins().fcvt_from_uint(types::F32, val))
+            Ok(ctx.emit_float_from_uint(val))
         }
         _ => {
             let error_msg = format!("cannot implicitly convert {from_ty:?} to {to_ty:?}");

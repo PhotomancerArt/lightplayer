@@ -102,11 +102,11 @@ fn emit_incdec<M: cranelift_module::Module>(
                 ctx.builder.ins().iadd(*old_value, one)
             }
             GlslType::Float => {
-                let one = ctx.builder.ins().f32const(1.0);
+                let one = ctx.emit_float_const(1.0);
                 if is_increment {
-                    ctx.builder.ins().fadd(*old_value, one)
+                    ctx.emit_float_add(*old_value, one)
                 } else if is_decrement {
-                    ctx.builder.ins().fsub(*old_value, one)
+                    ctx.emit_float_sub(*old_value, one)
                 } else {
                     unreachable!()
                 }

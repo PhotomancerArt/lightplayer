@@ -74,7 +74,7 @@ pub fn extract_base_vars_and_ty<M: cranelift_module::Module>(
                         })?
                     } else {
                         // Matrix - always float
-                        cranelift_codegen::ir::types::F32
+                        ctx.float_type()
                     };
                     let mut vars = Vec::new();
                     for val in vals {

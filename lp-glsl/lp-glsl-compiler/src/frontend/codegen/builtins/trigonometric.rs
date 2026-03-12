@@ -14,11 +14,11 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         args: Vec<(Vec<Value>, Type)>,
     ) -> Result<(Vec<Value>, Type), GlslError> {
         let (deg_vals, deg_ty) = &args[0];
-        let pi_over_180 = self.builder.ins().f32const(0.017453292519943295); // π/180
+        let pi_over_180 = self.emit_float_const(0.017453292519943295); // π/180
         let mut result_vals = Vec::new();
 
         for &deg in deg_vals {
-            result_vals.push(self.builder.ins().fmul(deg, pi_over_180));
+            result_vals.push(self.emit_float_mul(deg, pi_over_180));
         }
 
         Ok((result_vals, deg_ty.clone()))
@@ -30,11 +30,11 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         args: Vec<(Vec<Value>, Type)>,
     ) -> Result<(Vec<Value>, Type), GlslError> {
         let (rad_vals, rad_ty) = &args[0];
-        let _180_over_pi = self.builder.ins().f32const(57.29577951308232); // 180/π
+        let _180_over_pi = self.emit_float_const(57.29577951308232); // 180/π
         let mut result_vals = Vec::new();
 
         for &rad in rad_vals {
-            result_vals.push(self.builder.ins().fmul(rad, _180_over_pi));
+            result_vals.push(self.emit_float_mul(rad, _180_over_pi));
         }
 
         Ok((result_vals, rad_ty.clone()))

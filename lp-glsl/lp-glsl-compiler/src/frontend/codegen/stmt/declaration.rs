@@ -169,7 +169,7 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                     .ins()
                                     .iconst(cranelift_codegen::ir::types::I32, 0),
                                 crate::frontend::semantic::types::Type::Float => {
-                                    ctx.builder.ins().f32const(0.0)
+                                    ctx.emit_float_const(0.0)
                                 }
                                 crate::frontend::semantic::types::Type::Bool => ctx
                                     .builder
@@ -411,7 +411,7 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                         .ins()
                                         .iconst(cranelift_codegen::ir::types::I32, 0),
                                     crate::frontend::semantic::types::Type::Float => {
-                                        ctx.builder.ins().f32const(0.0)
+                                        ctx.emit_float_const(0.0)
                                     }
                                     crate::frontend::semantic::types::Type::Bool => ctx
                                         .builder
@@ -612,7 +612,7 @@ fn zero_fill_array<M: cranelift_module::Module>(
     };
 
     let (component_size_bytes, zero_val) = match &base_ty {
-        Type::Float => (F32_SIZE_BYTES, ctx.builder.ins().f32const(0.0)),
+        Type::Float => (F32_SIZE_BYTES, ctx.emit_float_const(0.0)),
         Type::Int | Type::UInt => (
             4,
             ctx.builder
@@ -628,9 +628,7 @@ fn zero_fill_array<M: cranelift_module::Module>(
         _ => {
             return Err(GlslError::new(
                 ErrorCode::E0400,
-                format!(
-                    "unsupported array element type for zero initialization: {element_ty:?}"
-                ),
+                format!("unsupported array element type for zero initialization: {element_ty:?}"),
             ));
         }
     };
