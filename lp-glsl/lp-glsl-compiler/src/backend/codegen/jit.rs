@@ -3,6 +3,9 @@
 use crate::backend::module::gl_module::GlModule;
 use crate::error::{ErrorCode, GlslError};
 use crate::exec::jit::GlslJitModule;
+use crate::frontend::semantic::functions::FunctionRegistry;
+use crate::frontend::src_loc::GlSourceMap;
+use crate::frontend::src_loc_manager::SourceLocManager;
 use alloc::{format, string::String, vec::Vec};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
@@ -169,6 +172,15 @@ pub fn build_jit_executable_memory_optimized(
         .map(|(name, gl_func)| (name.clone(), gl_func.func_id, gl_func.clif_sig.clone()))
         .collect();
 
+    // 2b. Drop dead metadata before compilation loop. These fields are not used during
+    // define_function; they are only needed for gl_module.into_module() at the end,
+    // and we've already extracted what we need (signatures clone above).
+    let _ = core::mem::replace(&mut gl_module.function_registry, FunctionRegistry::new());
+    let _ = core::mem::replace(&mut gl_module.glsl_signatures, HashMap::new());
+    let _ = core::mem::replace(&mut gl_module.source_text, String::new());
+    let _ = core::mem::replace(&mut gl_module.source_loc_manager, SourceLocManager::new());
+    let _ = core::mem::replace(&mut gl_module.source_map, GlSourceMap::new());
+
     // 3. Build cranelift signatures map before freeing CLIF IR
     let mut cranelift_signatures = HashMap::new();
     for (name, _, sig) in &func_metadata {
@@ -277,6 +289,53 @@ pub fn build_jit_executable_memory_optimized(
     let jit_module = gl_module.into_module();
 
     // 8. Create GlslJitModule
+    Ok(GlslJitModule {
+        jit_module,
+        function_ptrs,
+        signatures,
+        cranelift_signatures,
+        call_conv,
+        pointer_type,
+    })
+}
+
+/// Build GlslJitModule from a JIT module that already has all functions defined.
+///
+/// Used by the streaming pipeline after the per-function compile loop.
+/// Takes explicit func_id_map and signature maps since the streaming path
+/// does not store function IR in GlModule.fns.
+pub fn build_jit_executable_streaming(
+    mut gl_module: GlModule<JITModule>,
+    func_id_map: &hashbrown::HashMap<String, cranelift_module::FuncId>,
+    signatures: hashbrown::HashMap<String, crate::frontend::semantic::functions::FunctionSignature>,
+    cranelift_signatures: hashbrown::HashMap<String, cranelift_codegen::ir::Signature>,
+) -> Result<GlslJitModule, GlslError> {
+    gl_module
+        .module_mut_internal()
+        .finalize_definitions()
+        .map_err(|e| {
+            GlslError::new(
+                ErrorCode::E0400,
+                format!("Failed to finalize definitions: {e}"),
+            )
+        })?;
+
+    let mut function_ptrs = HashMap::new();
+    for (name, func_id) in func_id_map {
+        let ptr = gl_module.module_internal().get_finalized_function(*func_id);
+        function_ptrs.insert(name.clone(), ptr);
+    }
+
+    let call_conv = gl_module
+        .target
+        .default_call_conv()
+        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("Failed to get call conv: {e}")))?;
+    let pointer_type = gl_module.target.pointer_type().map_err(|e| {
+        GlslError::new(ErrorCode::E0400, format!("Failed to get pointer type: {e}"))
+    })?;
+
+    let jit_module = gl_module.into_module();
+
     Ok(GlslJitModule {
         jit_module,
         function_ptrs,

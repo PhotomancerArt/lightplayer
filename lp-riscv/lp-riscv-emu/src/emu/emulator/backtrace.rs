@@ -56,8 +56,12 @@ impl Riscv32Emulator {
 
         addrs.push(pc);
         dbg_print!(_debug, "  bt[0] pc=0x{pc:08x}");
-        dbg_print!(_debug, "  ra=0x{:08x} s0/fp=0x{:08x} ram_end=0x{ram_end:08x}",
-            regs[1] as u32, regs[8] as u32);
+        dbg_print!(
+            _debug,
+            "  ra=0x{:08x} s0/fp=0x{:08x} ram_end=0x{ram_end:08x}",
+            regs[1] as u32,
+            regs[8] as u32
+        );
 
         let ra = regs[1] as u32;
         if is_valid_code_address(ra, mem) {
@@ -74,8 +78,12 @@ impl Riscv32Emulator {
         if fp >= RAM_START && fp <= ram_end && fp % 4 == 0 {
             match mem.read_word(fp.wrapping_sub(8)) {
                 Ok(pfp) => {
-                    dbg_print!(_debug, "  advance: [0x{:08x}]=0x{:08x}",
-                        fp.wrapping_sub(8), pfp as u32);
+                    dbg_print!(
+                        _debug,
+                        "  advance: [0x{:08x}]=0x{:08x}",
+                        fp.wrapping_sub(8),
+                        pfp as u32
+                    );
                     if (pfp as u32) >= RAM_START {
                         fp = pfp as u32;
                     } else {
@@ -84,12 +92,19 @@ impl Riscv32Emulator {
                     }
                 }
                 _ => {
-                    dbg_print!(_debug, "  STOP: read_word failed at 0x{:08x}", fp.wrapping_sub(8));
+                    dbg_print!(
+                        _debug,
+                        "  STOP: read_word failed at 0x{:08x}",
+                        fp.wrapping_sub(8)
+                    );
                     return addrs;
                 }
             }
         } else {
-            dbg_print!(_debug, "  STOP: initial fp=0x{fp:08x} invalid (ram_end=0x{ram_end:08x})");
+            dbg_print!(
+                _debug,
+                "  STOP: initial fp=0x{fp:08x} invalid (ram_end=0x{ram_end:08x})"
+            );
             return addrs;
         }
 
@@ -103,21 +118,37 @@ impl Riscv32Emulator {
             let saved_ra = match mem.read_word(fp.wrapping_sub(4)) {
                 Ok(v) => v as u32,
                 Err(_) => {
-                    dbg_print!(_debug, "  STOP: read_word failed for ra at 0x{:08x}", fp.wrapping_sub(4));
+                    dbg_print!(
+                        _debug,
+                        "  STOP: read_word failed for ra at 0x{:08x}",
+                        fp.wrapping_sub(4)
+                    );
                     break;
                 }
             };
             let prev_fp = match mem.read_word(fp.wrapping_sub(8)) {
                 Ok(v) => v,
                 Err(_) => {
-                    dbg_print!(_debug, "  STOP: read_word failed for fp at 0x{:08x}", fp.wrapping_sub(8));
+                    dbg_print!(
+                        _debug,
+                        "  STOP: read_word failed for fp at 0x{:08x}",
+                        fp.wrapping_sub(8)
+                    );
                     break;
                 }
             };
 
-            dbg_print!(_debug, "  bt[{}] fp=0x{fp:08x} [fp-4]=0x{saved_ra:08x} [fp-8]=0x{:08x}{}",
-                addrs.len(), prev_fp as u32,
-                if is_valid_code_address(saved_ra, mem) { "" } else { " (ra INVALID)" });
+            dbg_print!(
+                _debug,
+                "  bt[{}] fp=0x{fp:08x} [fp-4]=0x{saved_ra:08x} [fp-8]=0x{:08x}{}",
+                addrs.len(),
+                prev_fp as u32,
+                if is_valid_code_address(saved_ra, mem) {
+                    ""
+                } else {
+                    " (ra INVALID)"
+                }
+            );
 
             if is_valid_code_address(saved_ra, mem) {
                 addrs.push(saved_ra);
@@ -129,7 +160,10 @@ impl Riscv32Emulator {
             // higher addresses). Use unsigned comparison; RAM addresses
             // (0x80000000+) are negative as i32.
             if prev_fp_u32 < RAM_START || prev_fp_u32 <= fp {
-                dbg_print!(_debug, "  STOP: prev_fp=0x{prev_fp_u32:08x} (fp=0x{fp:08x})");
+                dbg_print!(
+                    _debug,
+                    "  STOP: prev_fp=0x{prev_fp_u32:08x} (fp=0x{fp:08x})"
+                );
                 break;
             }
             fp = prev_fp_u32;

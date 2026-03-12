@@ -328,6 +328,45 @@ impl GlslCompiler {
         Ok(gl_module)
     }
 
+    /// Compile a single function to CLIF IR. Used by the streaming pipeline.
+    pub(crate) fn compile_single_function_to_clif<M: Module>(
+        &mut self,
+        func: &crate::frontend::semantic::TypedFunction,
+        _func_id: FuncId,
+        func_ids: &HashMap<String, FuncId>,
+        func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
+        gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
+        isa: &dyn cranelift_codegen::isa::TargetIsa,
+        source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
+        source_map: &mut crate::frontend::src_loc::GlSourceMap,
+        file_id: crate::frontend::src_loc::GlFileId,
+        source_text_for_main: Option<&str>,
+    ) -> Result<Function, GlslError> {
+        let error_context = if func.name == "main" {
+            "main function"
+        } else {
+            "function"
+        };
+        let error_context = alloc::format!("{error_context} '{}'", func.name);
+        self.compile_function_to_clif_impl(
+            func,
+            func_ids,
+            func_registry,
+            global_constants,
+            gl_module,
+            isa,
+            source_text_for_main,
+            &error_context,
+            source_loc_manager,
+            source_map,
+            file_id,
+        )
+    }
+
     fn compile_function_to_clif<M: Module>(
         &mut self,
         func: &crate::frontend::semantic::TypedFunction,

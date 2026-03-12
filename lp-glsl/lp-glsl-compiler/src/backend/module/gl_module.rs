@@ -2,6 +2,7 @@
 
 use crate::backend::module::gl_func::GlFunc;
 use crate::backend::target::Target;
+use crate::backend::transform::pipeline::{Transform, TransformContext};
 use crate::error::{ErrorCode, GlslError};
 use crate::frontend::semantic::functions::{FunctionRegistry, FunctionSignature};
 use crate::frontend::src_loc::GlSourceMap;
@@ -9,11 +10,37 @@ use crate::frontend::src_loc_manager::SourceLocManager;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use cranelift_codegen::ir::{Function, UserFuncName};
 use cranelift_jit::JITModule;
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 #[cfg(feature = "emulator")]
 use cranelift_object::ObjectModule;
 use hashbrown::HashMap;
+
+/// Transform a single function from float types to the target representation.
+///
+/// Used by the streaming pipeline to transform one function at a time without
+/// needing to store all functions' IR simultaneously.
+pub fn transform_single_function<M: Module, T: Transform>(
+    float_func: &Function,
+    transform: &T,
+    q32_module: &mut GlModule<M>,
+    func_id_map: &HashMap<String, FuncId>,
+    old_func_id_map: &HashMap<FuncId, alloc::string::String>,
+    target_func_id: FuncId,
+) -> Result<Function, GlslError> {
+    let mut transform_ctx = TransformContext {
+        module: q32_module,
+        func_id_map: func_id_map.clone(),
+        old_func_id_map: old_func_id_map.clone(),
+    };
+
+    let mut transformed = transform.transform_function(float_func, &mut transform_ctx)?;
+
+    transformed.name = UserFuncName::user(0, target_func_id.as_u32());
+
+    Ok(transformed)
+}
 
 /// GLSL Module - owns the actual Cranelift Module
 pub struct GlModule<M: Module> {
@@ -669,6 +696,64 @@ impl GlModule<ObjectModule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::module::test_helpers::test_helpers::build_simple_function;
+    use crate::backend::transform::pipeline::Transform;
+    use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
+    use alloc::string::String;
+    use cranelift_codegen::ir::{AbiParam, InstBuilder, Signature, types};
+    use cranelift_codegen::isa::CallConv;
+    use cranelift_module::Linkage;
+    use hashbrown::HashMap;
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_transform_single_function() {
+        let target = Target::host_jit().unwrap();
+        let transform = Q32Transform::new(FixedPointFormat::Fixed16x16);
+
+        let mut float_module = GlModule::new_jit(target.clone()).unwrap();
+        let mut sig = Signature::new(CallConv::SystemV);
+        sig.params.push(AbiParam::new(types::F32));
+        sig.returns.push(AbiParam::new(types::F32));
+
+        let float_func_id = build_simple_function(
+            &mut float_module,
+            "test",
+            Linkage::Local,
+            sig.clone(),
+            |builder| {
+                let val = builder.ins().f32const(1.0);
+                builder.ins().return_(&[val]);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let float_func = float_module.get_func("test").unwrap().function.clone();
+
+        let mut q32_module = GlModule::new_jit(target).unwrap();
+        let q32_sig = transform.transform_signature(&sig);
+        let q32_func_id = q32_module
+            .declare_function("test", Linkage::Local, q32_sig.clone())
+            .unwrap();
+
+        let mut func_id_map = HashMap::new();
+        func_id_map.insert(String::from("test"), q32_func_id);
+        let mut old_func_id_map = HashMap::new();
+        old_func_id_map.insert(float_func_id, String::from("test"));
+
+        let result = transform_single_function(
+            &float_func,
+            &transform,
+            &mut q32_module,
+            &func_id_map,
+            &old_func_id_map,
+            q32_func_id,
+        )
+        .unwrap();
+
+        assert_eq!(result.signature, q32_sig);
+    }
 
     #[test]
     #[cfg(feature = "std")]

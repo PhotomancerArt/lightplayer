@@ -8,7 +8,7 @@ use alloc::{
     string::{String, ToString},
 };
 use log;
-use lp_glsl_compiler::glsl_jit;
+use lp_glsl_compiler::glsl_jit_streaming;
 use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
@@ -533,7 +533,7 @@ impl ShaderRuntime {
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
 
-        match glsl_jit(glsl_source, options) {
+        match glsl_jit_streaming(glsl_source, options) {
             Ok(executable) => {
                 // Extract function pointer and calling convention using trait method
                 // This allows us to make direct calls without the GlslValue conversion overhead

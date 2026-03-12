@@ -200,6 +200,22 @@ numerous.
 
 ---
 
+## GlModule Dead Metadata Drop (Fix 4)
+
+**Implemented:** Clear `function_registry`, `source_text`, `source_loc_manager`, `source_map`,
+and `glsl_signatures` at the start of `build_jit_executable_memory_optimized`, right after
+extracting what's needed (signatures clone, call_conv, pointer_type, func_metadata).
+These fields are not used during `define_function`; they are only needed for
+`gl_module.into_module()` at the end.
+
+**Before (glmodule-before):** Peak free 79,620 bytes at ic=111,029,133  
+**After (glmodule-after):**  Peak free 74,469 bytes at ic=100,487,926
+
+Trace variance (different peak ic) may obscure the effect. The change is low-risk;
+run multiple traces to confirm improvement.
+
+---
+
 ## Raw Data
 
 Trace: `traces/2026-03-10T16-08-06--examples-basic--bt-fix2/`

@@ -201,7 +201,10 @@ fn run_nostd_test() -> Result<(), String> {
                 break;
             }
             Ok(StepResult::Oom(info)) => {
-                return Err(format!("Guest OOM: {} bytes at pc=0x{:x}", info.size, info.pc));
+                return Err(format!(
+                    "Guest OOM: {} bytes at pc=0x{:x}",
+                    info.size, info.pc
+                ));
             }
             Err(e) => {
                 return Err(format!("Emulator error: {e:?}"));

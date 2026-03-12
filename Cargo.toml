@@ -182,16 +182,16 @@ esp-println = { path = "lp-fw/esp-println-fork" }
 # Patch cranelift for local development; comment out to use git
 # (Features from workspace deps apply; patch path uses crate defaults)
 # Uncomment and adjust path for local lp-cranelift testing (e.g. ../lp-cranelift-lp2025)
-# [patch."https://github.com/light-player/lp-cranelift"]
-# cranelift-codegen = { path = "../lp-cranelift-lp2025/cranelift/codegen" }
-# cranelift-frontend = { path = "../lp-cranelift-lp2025/cranelift/frontend" }
-# cranelift-module = { path = "../lp-cranelift-lp2025/cranelift/module" }
-# cranelift-jit = { path = "../lp-cranelift-lp2025/cranelift/jit" }
-# cranelift-native = { path = "../lp-cranelift-lp2025/cranelift/native" }
-# cranelift-object = { path = "../lp-cranelift-lp2025/cranelift/object" }
-# cranelift-reader = { path = "../lp-cranelift-lp2025/cranelift/reader" }
-# cranelift-control = { path = "../lp-cranelift-lp2025/cranelift/control" }
-# cranelift-interpreter = { path = "../lp-cranelift-lp2025/cranelift/interpreter" }
+[patch."https://github.com/light-player/lp-cranelift"]
+cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
+cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
+cranelift-module = { path = "../lp-cranelift/cranelift/module" }
+cranelift-jit = { path = "../lp-cranelift/cranelift/jit" }
+cranelift-native = { path = "../lp-cranelift/cranelift/native" }
+cranelift-object = { path = "../lp-cranelift/cranelift/object" }
+cranelift-reader = { path = "../lp-cranelift/cranelift/reader" }
+cranelift-control = { path = "../lp-cranelift/cranelift/control" }
+cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
 
 # lp-collection (lp-common): same path/git toggle pattern as cranelift
 # Path for local dev; comment out to use published (git) lp-common

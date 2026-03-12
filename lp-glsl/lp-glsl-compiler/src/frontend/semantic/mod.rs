@@ -34,6 +34,14 @@ pub struct TypedFunction {
     pub body: Vec<glsl::syntax::Statement>,
 }
 
+impl TypedFunction {
+    /// Recursive count of AST statement nodes. Used as a heuristic for
+    /// function size when ordering compilation (smallest first).
+    pub fn ast_node_count(&self) -> usize {
+        self.body.iter().map(count_statement_nodes).sum()
+    }
+}
+
 /// Semantic analyzer that orchestrates semantic analysis passes
 pub struct SemanticAnalyzer {
     #[allow(dead_code, reason = "Function registry stored for future use")]
@@ -108,4 +116,93 @@ pub fn analyze_with_source(
     max_errors: usize,
 ) -> Result<TypedShader, GlslDiagnostics> {
     SemanticAnalyzer::new().analyze(shader, source, max_errors)
+}
+
+// ---------------------------------------------------------------------------
+// AST node counting helpers (for streaming compilation order)
+// ---------------------------------------------------------------------------
+
+fn count_statement_nodes(stmt: &glsl::syntax::Statement) -> usize {
+    match stmt {
+        glsl::syntax::Statement::Simple(simple) => count_simple_statement_nodes(simple),
+        glsl::syntax::Statement::Compound(compound) => {
+            1 + compound
+                .statement_list
+                .iter()
+                .map(count_statement_nodes)
+                .sum::<usize>()
+        }
+    }
+}
+
+fn count_simple_statement_nodes(stmt: &glsl::syntax::SimpleStatement) -> usize {
+    match stmt {
+        glsl::syntax::SimpleStatement::Selection(sel) => 1 + count_selection_nodes(&sel.rest),
+        glsl::syntax::SimpleStatement::Iteration(iter) => 1 + count_iteration_nodes(iter),
+        _ => 1, // Declaration, Expression, Jump, etc.
+    }
+}
+
+fn count_selection_nodes(rest: &glsl::syntax::SelectionRestStatement) -> usize {
+    use glsl::syntax::SelectionRestStatement;
+    match rest {
+        SelectionRestStatement::Statement(then_stmt) => count_statement_nodes(then_stmt),
+        SelectionRestStatement::Else(then_stmt, else_stmt) => {
+            count_statement_nodes(then_stmt) + count_statement_nodes(else_stmt)
+        }
+    }
+}
+
+fn count_iteration_nodes(iteration: &glsl::syntax::IterationStatement) -> usize {
+    use glsl::syntax::IterationStatement;
+    match iteration {
+        IterationStatement::While(_condition, stmt) => count_statement_nodes(stmt),
+        IterationStatement::DoWhile(stmt, _cond_expr) => count_statement_nodes(stmt),
+        IterationStatement::For(_init, _rest, body) => count_statement_nodes(body),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_ast_node_count_simple() {
+        let func = TypedFunction {
+            name: alloc::string::String::from("test"),
+            return_type: types::Type::Void,
+            parameters: Vec::new(),
+            body: vec![glsl::syntax::Statement::Simple(alloc::boxed::Box::new(
+                glsl::syntax::SimpleStatement::Jump(glsl::syntax::JumpStatement::Return(None)),
+            ))],
+        };
+        assert_eq!(func.ast_node_count(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_ast_node_count_compound() {
+        // Compound with 2 simple statements inside: 1 (compound) + 2 (children) = 3
+        let func = TypedFunction {
+            name: alloc::string::String::from("test"),
+            return_type: types::Type::Void,
+            parameters: Vec::new(),
+            body: vec![glsl::syntax::Statement::Compound(alloc::boxed::Box::new(
+                glsl::syntax::CompoundStatement {
+                    statement_list: vec![
+                        glsl::syntax::Statement::Simple(alloc::boxed::Box::new(
+                            glsl::syntax::SimpleStatement::Expression(None),
+                        )),
+                        glsl::syntax::Statement::Simple(alloc::boxed::Box::new(
+                            glsl::syntax::SimpleStatement::Jump(
+                                glsl::syntax::JumpStatement::Return(None),
+                            ),
+                        )),
+                    ],
+                },
+            ))],
+        };
+        assert_eq!(func.ast_node_count(), 3);
+    }
 }
