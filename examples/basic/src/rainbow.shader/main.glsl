@@ -1,5 +1,7 @@
 // 0=heatmap, 1=rainbow, 2=fire, 3=cool, 4=warm (5s per palette, 1s lerp transition)
 
+const bool CYCLE_PALETTE = true;
+
 // Lygia heatmap: blue -> cyan -> green -> yellow -> red
 vec3 paletteHeatmap(float t) {
     vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
@@ -37,17 +39,20 @@ vec3 paletteWarm(float t) {
 }
 
 vec3 applyPalette(float t, float palette) {
-    if (palette < 0.5) return paletteHeatmap(t);
-    if (palette < 1.5) return paletteRainbow(t);
-    if (palette < 2.5) return paletteFire(t);
-    if (palette < 3.5) return paletteCool(t);
+    // Add small epsilon to avoid Q32 rounding errors at boundaries (e.g. 3.99999 -> 3)
+    float p = floor(palette + 0.001);
+    if (p < 0.5) return paletteHeatmap(t);
+    if (p < 1.5) return paletteRainbow(t);
+    if (p < 2.5) return paletteFire(t);
+    if (p < 3.5) return paletteCool(t);
     return paletteWarm(t);
 }
 
 vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     // Palette cycle: 5s per palette, 1s smooth transition to next
+    // Clamp palette to 4 to avoid Q32 edge case where floor(mod(...)) yields 5.0
     float cyclePhase = mod(time, 5.0);
-    float palette = floor(mod(time * 0.2, 5.0));
+    float palette = min(floor(mod(time * 0.2, 5.0)), 4.0);
     float nextPalette = mod(palette + 1.0, 5.0);
     float blend = smoothstep(4.0, 5.0, cyclePhase);
 
@@ -65,12 +70,15 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     //vec2 tv = fbm_demo(scaledCoord, time);
     //vec2 tv = worley_demo(scaledCoord, time);
 
-    vec3 rgb = mix(
-        applyPalette(tv.x, palette),
-        applyPalette(tv.x, nextPalette),
-        blend
-    ) * tv.y;
-    return vec4(rgb, 1.0);
+    if (CYCLE_PALETTE) {
+        return vec4(mix(
+            applyPalette(tv.x, palette),
+            applyPalette(tv.x, nextPalette),
+            blend
+        ) * tv.y, 1.0);
+    } else {
+        return vec4(applyPalette(tv.x, 0) * tv.y, 1.0);
+    }
 }
 
 vec2 worley_demo(vec2 scaledCoord, float time) {
