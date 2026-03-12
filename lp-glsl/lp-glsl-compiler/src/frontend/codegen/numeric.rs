@@ -19,6 +19,7 @@ const Q32_SHIFT: i64 = 16;
 ///
 /// Uses enum dispatch to avoid generic parameter propagation. Each method
 /// on NumericMode dispatches via match to the concrete strategy.
+#[derive(Clone)]
 pub enum NumericMode {
     Float(FloatStrategy),
     Q32(Q32Strategy),
@@ -28,6 +29,7 @@ pub enum NumericMode {
 ///
 /// Emits fixed-point equivalents of float operations. Saturating add/sub/mul/div
 /// and sqrt require builtin calls (Plan C) and use `todo!()` for now.
+#[derive(Clone)]
 pub struct Q32Strategy {
     pub opts: Q32Options,
 }
@@ -218,6 +220,7 @@ impl NumericMode {
 }
 
 /// Float strategy: emits standard CLIF float instructions.
+#[derive(Clone)]
 pub struct FloatStrategy;
 
 impl FloatStrategy {

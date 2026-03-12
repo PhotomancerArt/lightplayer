@@ -2,6 +2,7 @@
 
 use crate::error::{ErrorCode, GlslError};
 use crate::frontend::codegen::context::CodegenContext;
+use crate::semantic::types::Type as GlslType;
 use cranelift_codegen::ir::{InstBuilder, Value};
 
 use alloc::format;
@@ -29,7 +30,7 @@ pub fn write_lvalue<M: cranelift_module::Module>(
             let flags = cranelift_codegen::ir::MemFlags::trusted();
             match access_pattern {
                 PointerAccessPattern::Direct { component_count } => {
-                    // Store all components
+                    // Store all components; for arrays, use element type
                     if values.len() != *component_count {
                         return Err(GlslError::new(
                             ErrorCode::E0400,
@@ -40,21 +41,29 @@ pub fn write_lvalue<M: cranelift_module::Module>(
                             ),
                         ));
                     }
-                    let base_cranelift_ty = if base_ty.is_vector() {
-                        base_ty
-                            .vector_base_type()
-                            .unwrap()
-                            .to_cranelift_type()
-                            .map_err(|e| {
+                    let scalar_ty = if base_ty.is_array() {
+                        base_ty.array_element_type().unwrap()
+                    } else {
+                        base_ty.clone()
+                    };
+                    let base_cranelift_ty = if scalar_ty.is_vector() {
+                        let base = scalar_ty.vector_base_type().unwrap();
+                        if base == GlslType::Float {
+                            ctx.float_type()
+                        } else {
+                            base.to_cranelift_type().map_err(|e| {
                                 GlslError::new(
                                     ErrorCode::E0400,
                                     format!("Failed to convert type: {}", e.message),
                                 )
                             })?
-                    } else if base_ty.is_matrix() {
+                        }
+                    } else if scalar_ty.is_matrix() {
+                        ctx.float_type()
+                    } else if scalar_ty == GlslType::Float {
                         ctx.float_type()
                     } else {
-                        base_ty.to_cranelift_type().map_err(|e| {
+                        scalar_ty.to_cranelift_type().map_err(|e| {
                             GlslError::new(
                                 ErrorCode::E0400,
                                 format!("Failed to convert type: {}", e.message),
@@ -80,16 +89,17 @@ pub fn write_lvalue<M: cranelift_module::Module>(
                             ),
                         ));
                     }
-                    let base_cranelift_ty = base_ty
-                        .vector_base_type()
-                        .unwrap()
-                        .to_cranelift_type()
-                        .map_err(|e| {
+                    let base = base_ty.vector_base_type().unwrap();
+                    let base_cranelift_ty = if base == GlslType::Float {
+                        ctx.float_type()
+                    } else {
+                        base.to_cranelift_type().map_err(|e| {
                             GlslError::new(
                                 ErrorCode::E0400,
                                 format!("Failed to convert type: {}", e.message),
                             )
-                        })?;
+                        })?
+                    };
                     let component_size_bytes = base_cranelift_ty.bytes() as usize;
                     for (idx, val) in indices.iter().zip(values.iter()) {
                         let offset = (*idx * component_size_bytes) as i32;
@@ -134,13 +144,19 @@ pub fn write_lvalue<M: cranelift_module::Module>(
                     // Get base Cranelift type for storing
                     let base_cranelift_ty = if element_ty.is_vector() {
                         let base_ty = element_ty.vector_base_type().unwrap();
-                        base_ty.to_cranelift_type().map_err(|e| {
-                            GlslError::new(
-                                ErrorCode::E0400,
-                                format!("Failed to convert vector base type: {}", e.message),
-                            )
-                        })?
+                        if base_ty == GlslType::Float {
+                            ctx.float_type()
+                        } else {
+                            base_ty.to_cranelift_type().map_err(|e| {
+                                GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!("Failed to convert vector base type: {}", e.message),
+                                )
+                            })?
+                        }
                     } else if element_ty.is_matrix() {
+                        ctx.float_type()
+                    } else if *element_ty == GlslType::Float {
                         ctx.float_type()
                     } else {
                         element_ty.to_cranelift_type().map_err(|e| {
@@ -383,17 +399,21 @@ pub fn write_lvalue<M: cranelift_module::Module>(
             // Get base Cranelift type for storing (scalar component type)
             let base_cranelift_ty = if element_ty.is_vector() {
                 let base_ty = element_ty.vector_base_type().unwrap();
-                base_ty.to_cranelift_type().map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        format!("Failed to convert vector base type: {}", e.message),
-                    )
-                })?
+                if base_ty == GlslType::Float {
+                    ctx.float_type()
+                } else {
+                    base_ty.to_cranelift_type().map_err(|e| {
+                        GlslError::new(
+                            ErrorCode::E0400,
+                            format!("Failed to convert vector base type: {}", e.message),
+                        )
+                    })?
+                }
             } else if element_ty.is_matrix() {
-                // Matrices are always float
+                ctx.float_type()
+            } else if *element_ty == GlslType::Float {
                 ctx.float_type()
             } else {
-                // Scalar
                 element_ty.to_cranelift_type().map_err(|e| {
                     GlslError::new(
                         ErrorCode::E0400,

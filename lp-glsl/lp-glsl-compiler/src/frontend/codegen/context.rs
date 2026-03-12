@@ -308,12 +308,16 @@ impl<'a, M: Module> CodegenContext<'a, M> {
             glsl_ty.clone()
         };
 
-        let cranelift_ty = base_ty.to_cranelift_type().map_err(|e| {
-            crate::error::GlslError::new(
-                crate::error::ErrorCode::E0400,
-                format!("Failed to convert type to Cranelift type: {}", e.message),
-            )
-        })?;
+        let cranelift_ty = if base_ty == GlslType::Float {
+            self.numeric.scalar_type()
+        } else {
+            base_ty.to_cranelift_type().map_err(|e| {
+                crate::error::GlslError::new(
+                    crate::error::ErrorCode::E0400,
+                    format!("Failed to convert type to Cranelift type: {}", e.message),
+                )
+            })?
+        };
 
         let mut vars = Vec::new();
         for _ in 0..component_count {

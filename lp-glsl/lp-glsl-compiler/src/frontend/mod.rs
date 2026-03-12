@@ -28,7 +28,6 @@ pub use pipeline::{
 use crate::backend::codegen::emu::EmulatorOptions;
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
-use crate::backend::transform::pipeline::Transform;
 use crate::error::{ErrorCode, GlslDiagnostics, GlslError};
 use crate::exec::executable::{GlslExecutable, GlslOptions, RunMode};
 #[cfg(not(feature = "std"))]
@@ -118,26 +117,14 @@ pub fn compile_glsl_to_gl_module_jit(
 
     let target = build_target_for_jit(options)?;
 
-    // Compile to GlModule (works in both std and no_std)
+    use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
+    let numeric_mode = match options.decimal_format {
+        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
+    };
     let mut compiler = GlslCompiler::new();
-    let mut module = compiler.compile_to_gl_module_jit(source, target, options.max_errors)?;
-
-    // Apply transformations
-    match options.decimal_format {
-        DecimalFormat::Q32 => {
-            use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform =
-                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
-            module = module.apply_transform(transform)?;
-        }
-        DecimalFormat::Float => {
-            return Err(GlslDiagnostics::from(GlslError::new(
-                crate::error::ErrorCode::E0400,
-                "Float format is not yet supported. Only Q32 format is currently supported. \
-                 Float format will cause TestCase relocation errors. Use Q32 format instead.",
-            )));
-        }
-    }
+    let module =
+        compiler.compile_to_gl_module_jit(source, target, options.max_errors, numeric_mode)?;
 
     Ok(module)
 }
@@ -169,46 +156,20 @@ pub fn compile_glsl_to_gl_module_object(
         }
     };
 
-    // Compile to GlModule
-    let mut module = compiler.compile_to_gl_module_object(source, target, options.max_errors)?;
-
-    // Capture original CLIF IR before transformation (only in std builds)
-    #[cfg(feature = "std")]
-    let original_clif = format_clif_module(&module).ok();
-    #[cfg(not(feature = "std"))]
-    let original_clif = None;
-
-    // Apply transformations
-    let transformed_clif = match options.decimal_format {
-        DecimalFormat::Q32 => {
-            use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform =
-                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
-            module = module.apply_transform(transform)?;
-            // Capture transformed CLIF IR after transformation (only in std builds)
-            #[cfg(feature = "std")]
-            {
-                format_clif_module(&module).ok()
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                None
-            }
-        }
-        DecimalFormat::Float => {
-            // No transformation needed, so transformed_clif is same as original_clif
-            #[cfg(feature = "std")]
-            {
-                original_clif.clone()
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                None
-            }
-        }
+    use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
+    let numeric_mode = match options.decimal_format {
+        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
     };
+    let module =
+        compiler.compile_to_gl_module_object(source, target, options.max_errors, numeric_mode)?;
 
-    Ok((module, original_clif, transformed_clif))
+    #[cfg(feature = "std")]
+    let clif = format_clif_module(&module).ok();
+    #[cfg(not(feature = "std"))]
+    let clif = None;
+
+    Ok((module, clif.clone(), clif))
 }
 
 /// Compile and JIT execute GLSL
@@ -235,11 +196,12 @@ pub fn glsl_jit_streaming(
     source: &str,
     options: GlslOptions,
 ) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
+    use crate::backend::builtins::registry::BuiltinId;
     use crate::exec::executable::DecimalFormat;
+    use crate::frontend::codegen::numeric::{NumericMode, Q32Strategy};
+    use crate::frontend::codegen::signature::SignatureBuilder;
     use crate::frontend::semantic::MAIN_FUNCTION_NAME;
-    use cranelift_module::FuncId;
-    use cranelift_module::FuncOrDataId;
-    use cranelift_module::Linkage;
+    use cranelift_module::{FuncId, FuncOrDataId, Linkage};
     use hashbrown::HashMap;
 
     options.validate().map_err(GlslDiagnostics::from)?;
@@ -256,18 +218,14 @@ pub fn glsl_jit_streaming(
         )));
     }
 
+    let numeric_mode = NumericMode::Q32(Q32Strategy::new(options.q32_opts));
+
     let mut target_for_isa = target.clone();
     let isa_ref = target_for_isa.create_isa().map_err(GlslDiagnostics::from)?;
     let pointer_type = isa_ref.pointer_type();
     let triple = isa_ref.triple();
 
-    let float_module = GlModule::new_jit(target.clone()).map_err(GlslDiagnostics::from)?;
-    let mut q32_module = GlModule::new_jit(target).map_err(GlslDiagnostics::from)?;
-
-    use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-    use crate::frontend::codegen::signature::SignatureBuilder;
-
-    let transform = Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
+    let mut module = GlModule::new_jit(target).map_err(GlslDiagnostics::from)?;
 
     let mut sorted_names: Vec<String> = typed_ast
         .user_functions
@@ -280,27 +238,20 @@ pub fn glsl_jit_streaming(
     sorted_names.sort();
 
     let num_functions = sorted_names.len();
-    let num_builtins = crate::backend::builtins::registry::BuiltinId::all().len();
-    let total_capacity = num_functions + num_builtins;
-
-    let mut func_id_map: HashMap<String, FuncId> = HashMap::with_capacity(total_capacity);
-    let mut old_func_id_map: HashMap<FuncId, String> = HashMap::with_capacity(total_capacity);
-    let mut float_func_ids: HashMap<String, FuncId> = HashMap::with_capacity(num_functions);
+    let num_builtins = BuiltinId::all().len();
+    let mut func_ids: HashMap<String, FuncId> =
+        HashMap::with_capacity(num_functions + num_builtins);
     let mut jit_func_id_map: HashMap<String, FuncId> = HashMap::with_capacity(num_functions);
 
-    #[allow(dead_code)]
     struct StreamingFuncInfo<'a> {
         name: String,
         typed_function: &'a crate::frontend::semantic::TypedFunction,
-        float_func_id: FuncId,
-        q32_func_id: FuncId,
-        linkage: Linkage,
+        func_id: FuncId,
         ast_size: usize,
     }
 
     let mut sorted_functions: Vec<StreamingFuncInfo<'_>> = Vec::with_capacity(num_functions);
 
-    let mut float_module = float_module;
     for name in &sorted_names {
         let typed_func = typed_ast
             .user_functions
@@ -311,21 +262,21 @@ pub fn glsl_jit_streaming(
                     .main_function
                     .as_ref()
                     .filter(|_| *name == MAIN_FUNCTION_NAME)
-            });
-        let typed_func = typed_func.ok_or_else(|| {
-            GlslDiagnostics::from(GlslError::new(
-                ErrorCode::E0400,
-                alloc::format!("Function '{name}' not found"),
-            ))
-        })?;
+            })
+            .ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("Function '{name}' not found"),
+                ))
+            })?;
 
-        let float_sig = SignatureBuilder::build_with_triple(
+        let sig = SignatureBuilder::build_with_triple(
             &typed_func.return_type,
             &typed_func.parameters,
             pointer_type,
             triple,
+            numeric_mode.scalar_type(),
         );
-        let q32_sig = transform.transform_signature(&float_sig);
 
         let linkage = if *name == MAIN_FUNCTION_NAME {
             Linkage::Export
@@ -333,59 +284,37 @@ pub fn glsl_jit_streaming(
             Linkage::Local
         };
 
-        let float_func_id = float_module
+        let func_id = module
             .module_mut_internal()
-            .declare_function(name, linkage, &float_sig)
+            .declare_function(name, linkage, &sig)
             .map_err(|e| {
                 GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
-                    alloc::format!("Failed to declare '{name}' in float module: {e}"),
+                    alloc::format!("Failed to declare '{name}': {e}"),
                 ))
             })?;
 
-        let q32_func_id = q32_module
-            .module_mut_internal()
-            .declare_function(name, linkage, &q32_sig)
-            .map_err(|e| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    alloc::format!("Failed to declare '{name}' in Q32 module: {e}"),
-                ))
-            })?;
-
-        func_id_map.insert(name.clone(), q32_func_id);
-        old_func_id_map.insert(float_func_id, name.clone());
-        float_func_ids.insert(name.clone(), float_func_id);
-        jit_func_id_map.insert(name.clone(), q32_func_id);
+        func_ids.insert(name.clone(), func_id);
+        jit_func_id_map.insert(name.clone(), func_id);
 
         sorted_functions.push(StreamingFuncInfo {
             name: name.clone(),
             typed_function: typed_func,
-            float_func_id,
-            q32_func_id,
-            linkage,
+            func_id,
             ast_size: typed_func.ast_node_count(),
         });
     }
 
-    sorted_functions.sort_by_key(|f| f.ast_size);
-
-    {
-        use crate::backend::builtins::registry::BuiltinId;
-        for builtin in BuiltinId::all() {
-            let name = builtin.name();
-            if let Some(FuncOrDataId::Func(func_id)) =
-                q32_module.module_internal().declarations().get_name(name)
-            {
-                func_id_map.insert(String::from(name), func_id);
-            }
-            if let Some(FuncOrDataId::Func(old_id)) =
-                float_module.module_internal().declarations().get_name(name)
-            {
-                old_func_id_map.insert(old_id, String::from(name));
-            }
+    for builtin in BuiltinId::all() {
+        let name = builtin.name();
+        if let Some(FuncOrDataId::Func(func_id)) =
+            module.module_internal().declarations().get_name(name)
+        {
+            func_ids.insert(String::from(name), func_id);
         }
     }
+
+    sorted_functions.sort_by_key(|f| f.ast_size);
 
     use crate::frontend::src_loc::GlSourceMap;
     use crate::frontend::src_loc_manager::SourceLocManager;
@@ -397,11 +326,8 @@ pub fn glsl_jit_streaming(
         String::from(source),
     );
 
-    let mut collected_signatures: Vec<(
-        String,
-        cranelift_codegen::ir::Signature,
-        crate::frontend::semantic::functions::FunctionSignature,
-    )> = Vec::with_capacity(num_functions);
+    let mut glsl_signatures = HashMap::with_capacity(num_functions);
+    let mut cranelift_signatures = HashMap::with_capacity(num_functions);
 
     for func_info in &sorted_functions {
         let mut compiler = GlslCompiler::new();
@@ -411,46 +337,36 @@ pub fn glsl_jit_streaming(
             None
         };
 
-        let float_func = compiler
+        let func = compiler
             .compile_single_function_to_clif(
                 func_info.typed_function,
-                func_info.float_func_id,
-                &float_func_ids,
+                func_info.func_id,
+                &func_ids,
                 &typed_ast.function_registry,
                 &typed_ast.global_constants,
-                &mut float_module,
+                &mut module,
                 isa_ref.as_ref(),
                 &mut source_loc_manager,
                 &mut source_map,
                 main_file_id,
                 source_text_for_main,
+                numeric_mode.clone(),
             )
             .map_err(GlslDiagnostics::from)?;
 
-        let q32_func = crate::backend::module::gl_module::transform_single_function(
-            &float_func,
-            &transform,
-            &mut q32_module,
-            &func_id_map,
-            &old_func_id_map,
-            func_info.q32_func_id,
-        )
-        .map_err(GlslDiagnostics::from)?;
+        let sig = func.signature.clone();
 
-        let q32_sig = q32_func.signature.clone();
-        drop(float_func);
-
-        let mut ctx = q32_module.module_internal().make_context();
-        ctx.func = q32_func;
-        q32_module
+        let mut ctx = module.module_internal().make_context();
+        ctx.func = func;
+        module
             .module_mut_internal()
-            .define_function(func_info.q32_func_id, &mut ctx)
+            .define_function(func_info.func_id, &mut ctx)
             .map_err(|e| {
                 let error_str = alloc::format!("{e}");
                 let error_msg = if error_str.contains("Verifier errors") {
                     #[cfg(feature = "cranelift-verifier")]
                     {
-                        let module_ref = q32_module.module_internal();
+                        let module_ref = module.module_internal();
                         let isa = module_ref.isa();
                         use cranelift_codegen::verify_function;
                         if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
@@ -485,32 +401,23 @@ pub fn glsl_jit_streaming(
                 GlslDiagnostics::from(GlslError::new(ErrorCode::E0400, error_msg))
             })?;
         {
-            let module_ref = q32_module.module_internal();
+            let module_ref = module.module_internal();
             module_ref.clear_context(&mut ctx);
         }
 
-        collected_signatures.push((
+        cranelift_signatures.insert(func_info.name.clone(), sig);
+        glsl_signatures.insert(
             func_info.name.clone(),
-            q32_sig,
             crate::frontend::semantic::functions::FunctionSignature {
                 name: func_info.name.clone(),
                 return_type: func_info.typed_function.return_type.clone(),
                 parameters: func_info.typed_function.parameters.clone(),
             },
-        ));
-    }
-
-    drop(float_module);
-
-    let mut glsl_signatures = HashMap::with_capacity(num_functions);
-    let mut cranelift_signatures = HashMap::with_capacity(num_functions);
-    for (name, q32_sig, glsl_sig) in collected_signatures {
-        cranelift_signatures.insert(name.clone(), q32_sig);
-        glsl_signatures.insert(name, glsl_sig);
+        );
     }
 
     let jit = crate::backend::codegen::jit::build_jit_executable_streaming(
-        q32_module,
+        module,
         &jit_func_id_map,
         glsl_signatures,
         cranelift_signatures,
