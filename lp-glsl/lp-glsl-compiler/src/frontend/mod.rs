@@ -313,6 +313,24 @@ pub fn glsl_jit_streaming(
 
     sorted_functions.sort_by_key(|f| f.ast_size);
 
+    // Destructure typed_ast so each field is independently droppable.
+    // Functions are moved into a map and removed one-at-a-time in the loop,
+    // freeing each function's AST body before define_function (peak).
+    let crate::frontend::semantic::TypedShader {
+        user_functions,
+        main_function,
+        function_registry,
+        global_constants,
+    } = typed_ast;
+    let mut functions_by_name: HashMap<String, crate::frontend::semantic::TypedFunction> =
+        HashMap::with_capacity(num_functions);
+    for f in user_functions {
+        functions_by_name.insert(f.name.clone(), f);
+    }
+    if let Some(main_fn) = main_function {
+        functions_by_name.insert(String::from(MAIN_FUNCTION_NAME), main_fn);
+    }
+
     use crate::frontend::src_loc::GlSourceMap;
     use crate::frontend::src_loc_manager::SourceLocManager;
 
@@ -329,22 +347,12 @@ pub fn glsl_jit_streaming(
     let mut ctx = module.module_internal().make_context();
 
     for func_info in &sorted_functions {
-        let typed_func = typed_ast
-            .user_functions
-            .iter()
-            .find(|f| f.name == func_info.name)
-            .or_else(|| {
-                typed_ast
-                    .main_function
-                    .as_ref()
-                    .filter(|_| func_info.name == MAIN_FUNCTION_NAME)
-            })
-            .ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    alloc::format!("Function '{}' not found", func_info.name),
-                ))
-            })?;
+        let typed_func = functions_by_name.remove(&func_info.name).ok_or_else(|| {
+            GlslDiagnostics::from(GlslError::new(
+                ErrorCode::E0400,
+                alloc::format!("Function '{}' not found", func_info.name),
+            ))
+        })?;
 
         let source_text_for_main = if func_info.name == MAIN_FUNCTION_NAME {
             Some(source)
@@ -354,11 +362,11 @@ pub fn glsl_jit_streaming(
 
         let func = compiler
             .compile_single_function_to_clif(
-                typed_func,
+                &typed_func,
                 func_info.func_id,
                 &func_ids,
-                &typed_ast.function_registry,
-                &typed_ast.global_constants,
+                &function_registry,
+                &global_constants,
                 &mut module,
                 isa_ref.as_ref(),
                 &mut source_loc_manager,
@@ -371,6 +379,7 @@ pub fn glsl_jit_streaming(
 
         let return_type = typed_func.return_type.clone();
         let parameters = typed_func.parameters.clone();
+        drop(typed_func);
 
         ctx.func = func;
         module
