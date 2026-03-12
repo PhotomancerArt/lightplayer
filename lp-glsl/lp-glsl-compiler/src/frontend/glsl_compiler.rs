@@ -67,7 +67,7 @@ impl GlslCompiler {
             String::from(source),
         );
 
-        // 5. Declare all user functions with FLOAT signatures (no conversion)
+        // 5. Declare all user functions with numeric-mode-dependent signatures
         let mut func_ids: HashMap<String, FuncId> = HashMap::new();
 
         for user_func in &typed_ast.user_functions {
@@ -136,7 +136,7 @@ impl GlslCompiler {
             gl_module.glsl_signatures.insert(name, glsl_sig);
         }
 
-        // 8. Compile main function to CLIF with FLOAT types (if present)
+        // 8. Compile main function to CLIF (if present)
         if let Some(ref main_function) = typed_ast.main_function {
             let main_sig = SignatureBuilder::build_with_triple(
                 &main_function.return_type,
@@ -221,7 +221,7 @@ impl GlslCompiler {
             String::from(source),
         );
 
-        // 5. Declare all user functions with FLOAT signatures (no conversion)
+        // 5. Declare all user functions with numeric-mode-dependent signatures
         let mut func_ids: HashMap<String, FuncId> = HashMap::new();
 
         for user_func in &typed_ast.user_functions {
@@ -290,7 +290,7 @@ impl GlslCompiler {
             gl_module.glsl_signatures.insert(name, glsl_sig);
         }
 
-        // 8. Compile main function to CLIF with FLOAT types (if present)
+        // 8. Compile main function to CLIF (if present)
         if let Some(ref main_function) = typed_ast.main_function {
             let main_sig = SignatureBuilder::build_with_triple(
                 &main_function.return_type,

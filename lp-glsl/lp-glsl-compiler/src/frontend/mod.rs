@@ -445,7 +445,7 @@ pub fn glsl_emu_riscv32_with_metadata(
     options: GlslOptions,
     source_file_path: Option<String>,
 ) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
-    // Compile to GlModule (transformations already applied)
+    // Compile to GlModule (direct emission; single CLIF output)
     let (module, original_clif, transformed_clif) =
         compile_glsl_to_gl_module_object(source, &options)?;
 

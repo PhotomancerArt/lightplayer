@@ -1,8 +1,8 @@
-//! Q32 transform options: per-op control for speed vs accuracy.
+//! Q32 options: per-op control for speed vs accuracy.
 
 use lp_model::glsl_opts::{AddSubMode, DivMode, MulMode};
 
-/// Granular control over Q32 arithmetic transforms.
+/// Granular control over Q32 arithmetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Q32Options {
     pub add_sub: AddSubMode,

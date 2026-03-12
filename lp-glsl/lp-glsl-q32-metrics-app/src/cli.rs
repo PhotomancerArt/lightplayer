@@ -1,5 +1,5 @@
 use clap::Parser;
-use lp_glsl_compiler::backend::transform::q32::FixedPointFormat;
+use lp_glsl_compiler::backend::q32::FixedPointFormat;
 use std::path::PathBuf;
 
 #[derive(Parser)]

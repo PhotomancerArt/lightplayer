@@ -27,7 +27,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     /// Helper to declare and get FuncRef for external math library function
     ///
     /// In Q32 mode, returns Q32 builtin FuncRef directly. In float mode, creates
-    /// TestCase external calls (converted to q32 by transform when applicable).
+    /// TestCase external calls. Float mode only; Q32 uses builtins directly.
     pub fn get_math_libcall(&mut self, func_name: &str) -> Result<FuncRef, GlslError> {
         if self.is_q32() {
             return self.get_q32_math_builtin(func_name, 1);

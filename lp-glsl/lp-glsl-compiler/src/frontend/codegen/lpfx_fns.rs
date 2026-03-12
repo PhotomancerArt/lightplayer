@@ -225,14 +225,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         }
     }
 
-    /// Helper to declare and get FuncRef for LPFX function TestCase call.
-    ///
-    /// Creates external function calls using TestCase names based on builtin ID name
-    /// (e.g., "__lpfx_hsv2rgb_f32" or "__lpfx_hsv2rgb_vec4_f32").
-    /// These are converted to q32 builtins by the transform.
-    ///
-    /// Always uses float signature (f32 args, f32 return) - the transform will handle
-    /// conversion to q32 when processing the TestCase call.
+    /// Declare and get FuncRef for LPFX function via TestCase name. Float mode only; Q32 uses builtins directly.
     fn get_lpfx_testcase_call(
         &mut self,
         func: &'static crate::frontend::semantic::lpfx::lpfx_fn::LpfxFn,
@@ -250,8 +243,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             "get_lpfx_testcase_call: function={testcase_name}, pointer_type={pointer_type:?}"
         );
 
-        // Build signature with Float format (f32 args, f32 return)
-        // The transform will convert this to q32 when processing the call
+        // Build signature with Float format (f32 args, f32 return); float mode only
         let sig = build_call_signature(func, builtin_id, DecimalFormat::Float, pointer_type);
         if func.glsl_sig.return_type.is_vector() {
             let _result_ptr_param = sig

@@ -4,7 +4,7 @@
 //! controls how those semantics map to CLIF IR instructions. FloatStrategy
 //! emits standard float instructions; Q32Strategy (Plan B) emits Q16.16 fixed-point.
 
-use crate::backend::transform::q32::{Q32Options, float_to_fixed16x16};
+use crate::backend::q32::{Q32Options, float_to_fixed16x16};
 use cranelift_codegen::ir::{
     AbiParam, ArgumentPurpose, InstBuilder, Signature, Type, Value,
     condcodes::{FloatCC, IntCC},
@@ -28,7 +28,7 @@ pub enum NumericMode {
 /// Q16.16 fixed-point numeric strategy.
 ///
 /// Emits fixed-point equivalents of float operations. Saturating add/sub/mul/div
-/// and sqrt require builtin calls (Plan C) and use `todo!()` for now.
+/// and sqrt require builtin calls (Plan C); strategy methods use `unreachable!()` for those.
 #[derive(Clone)]
 pub struct Q32Strategy {
     pub opts: Q32Options,
@@ -40,6 +40,7 @@ impl Q32Strategy {
     }
 
     fn float_cc_to_int_cc(cc: FloatCC) -> IntCC {
+        // Ordered and Unordered are handled specially in emit_cmp (Q32 has no NaN)
         match cc {
             FloatCC::Equal => IntCC::Equal,
             FloatCC::NotEqual => IntCC::NotEqual,
@@ -47,8 +48,9 @@ impl Q32Strategy {
             FloatCC::LessThanOrEqual => IntCC::SignedLessThanOrEqual,
             FloatCC::GreaterThan => IntCC::SignedGreaterThan,
             FloatCC::GreaterThanOrEqual => IntCC::SignedGreaterThanOrEqual,
-            FloatCC::Ordered => IntCC::Equal,
-            FloatCC::Unordered => IntCC::NotEqual,
+            FloatCC::Ordered | FloatCC::Unordered => {
+                unreachable!("Ordered/Unordered handled in emit_cmp")
+            }
             FloatCC::OrderedNotEqual => IntCC::NotEqual,
             FloatCC::UnorderedOrEqual => IntCC::Equal,
             FloatCC::UnorderedOrLessThan => IntCC::SignedLessThan,
@@ -413,8 +415,20 @@ impl Q32Strategy {
         b: Value,
         builder: &mut FunctionBuilder,
     ) -> Value {
-        let int_cc = Self::float_cc_to_int_cc(cc);
-        builder.ins().icmp(int_cc, a, b)
+        match cc {
+            FloatCC::Ordered => {
+                // Q32 has no NaN, so "ordered" is always true
+                builder.ins().iconst(types::I8, 1)
+            }
+            FloatCC::Unordered => {
+                // Q32 has no NaN, so "unordered" is always false
+                builder.ins().iconst(types::I8, 0)
+            }
+            _ => {
+                let int_cc = Self::float_cc_to_int_cc(cc);
+                builder.ins().icmp(int_cc, a, b)
+            }
+        }
     }
 
     pub fn emit_min(&self, a: Value, b: Value, builder: &mut FunctionBuilder) -> Value {
@@ -544,7 +558,7 @@ impl Q32Strategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::transform::q32::{Q32Options, float_to_fixed16x16};
+    use crate::backend::q32::{Q32Options, float_to_fixed16x16};
     use cranelift_codegen::ir::{AbiParam, Function, InstBuilder};
     use cranelift_codegen::isa::CallConv;
     use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -618,6 +632,38 @@ mod tests {
             let v = s.emit_mul(a, b, builder);
             assert_eq!(builder.func.dfg.value_type(v), types::I32);
             builder.ins().return_(&[v]);
+        });
+    }
+
+    #[test]
+    fn q32_cmp_ordered_unordered() {
+        // Ordered is always true (Q32 has no NaN); Unordered is always false
+        let opts = Q32Options::default();
+        with_q32_builder(opts, |s, builder| {
+            let a = builder.ins().iconst(types::I32, 0x10000);
+            let b = builder.ins().iconst(types::I32, 0x20000);
+            let ordered = s.emit_cmp(FloatCC::Ordered, a, b, builder);
+            let unordered = s.emit_cmp(FloatCC::Unordered, a, b, builder);
+            assert_eq!(builder.func.dfg.value_type(ordered), types::I8);
+            assert_eq!(builder.func.dfg.value_type(unordered), types::I8);
+            // Verify we emit constants: Ordered -> 1, Unordered -> 0
+            use cranelift_codegen::ir::{ValueDef, instructions::InstructionData};
+            let ordered_def = builder.func.dfg.value_def(ordered);
+            let unordered_def = builder.func.dfg.value_def(unordered);
+            if let ValueDef::Result(inst, 0) = ordered_def {
+                let data = &builder.func.dfg.insts[inst];
+                if let InstructionData::UnaryImm { imm, .. } = data {
+                    assert_eq!(imm.bits(), 1, "Ordered should be constant 1");
+                }
+            }
+            if let ValueDef::Result(inst, 0) = unordered_def {
+                let data = &builder.func.dfg.insts[inst];
+                if let InstructionData::UnaryImm { imm, .. } = data {
+                    assert_eq!(imm.bits(), 0, "Unordered should be constant 0");
+                }
+            }
+            let v_i32 = builder.ins().sextend(types::I32, ordered);
+            builder.ins().return_(&[v_i32]);
         });
     }
 

@@ -2,7 +2,7 @@ use anyhow::Result;
 use cranelift_object::ObjectModule;
 use lp_glsl_compiler::backend::module::gl_module::GlModule;
 use lp_glsl_compiler::backend::target::Target;
-use lp_glsl_compiler::backend::transform::q32::{FixedPointFormat, Q32Options};
+use lp_glsl_compiler::backend::q32::{FixedPointFormat, Q32Options};
 use lp_glsl_compiler::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
 use lp_glsl_compiler::{DEFAULT_MAX_ERRORS, GlslCompiler};
 
