@@ -53,6 +53,20 @@ impl GlModule<JITModule> {
                                             return Some(ptr);
                                         }
                                     }
+                                    // Check TestCase names (atan2f, fmodf, etc.) mapped to Q32 builtins
+                                    for arg_count in [1, 2, 3] {
+                                        if let Some(builtin_id) =
+                                            crate::backend::builtins::map_testcase_to_builtin(
+                                                name, arg_count,
+                                            )
+                                        {
+                                            let ptr = get_function_pointer(builtin_id);
+                                            log::debug!(
+                                                "symbol_lookup_fn: TestCase '{name}' -> builtin {builtin_id:?} -> {ptr:p}"
+                                            );
+                                            return Some(ptr);
+                                        }
+                                    }
                                     // Check host functions (works in both std and no_std)
                                     for host in HostId::all() {
                                         if host.name() == name {
