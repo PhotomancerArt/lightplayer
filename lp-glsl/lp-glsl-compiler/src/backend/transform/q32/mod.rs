@@ -16,4 +16,4 @@ mod q32_test_util;
 
 pub use options::Q32Options;
 pub use transform::Q32Transform;
-pub use types::FixedPointFormat;
+pub use types::{FixedPointFormat, float_to_fixed16x16};
