@@ -84,8 +84,8 @@ impl LpFsFlash {
         let s = path.as_str();
         if s == "/" {
             ""
-        } else if s.starts_with('/') {
-            &s[1..]
+        } else if let Some(stripped) = s.strip_prefix('/') {
+            stripped
         } else {
             s
         }
@@ -114,8 +114,7 @@ impl LpFsFlash {
                     Err(LfsError::Exists) => {}
                     Err(e) => {
                         return Err(lp_shared::error::FsError::Filesystem(format!(
-                            "mkdir {}: {e}",
-                            current
+                            "mkdir {current}: {e}"
                         )));
                     }
                 }
@@ -279,12 +278,12 @@ impl LpFs for LpFsFlash {
                         format!("{}/{}", path, item.name)
                     };
                     let full_lp = if prefix == "/" {
-                        format!("/{}", full_lfs)
+                        format!("/{full_lfs}")
                     } else {
-                        format!("{}/{}", prefix.trim_end_matches('/'), full_lfs)
+                        format!("{}/{full_lfs}", prefix.trim_end_matches('/'))
                     };
                     let full_lp = if !full_lp.starts_with('/') {
-                        format!("/{}", full_lp)
+                        format!("/{full_lp}")
                     } else {
                         full_lp
                     };
@@ -309,7 +308,7 @@ impl LpFs for LpFsFlash {
                     format!("{}/{}", prefix, item.name)
                 };
                 let full_lp = if !full_lp.starts_with('/') {
-                    format!("/{}", full_lp)
+                    format!("/{full_lp}")
                 } else {
                     full_lp
                 };

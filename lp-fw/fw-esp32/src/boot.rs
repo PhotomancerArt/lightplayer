@@ -25,7 +25,7 @@ pub fn auto_load_project(server: &mut LpServer) {
     let base_dir = if raw_base.starts_with('/') {
         LpPathBuf::from(raw_base)
     } else {
-        LpPathBuf::from(alloc::format!("/{}", raw_base).as_str())
+        LpPathBuf::from(alloc::format!("/{raw_base}").as_str())
     };
     let base_path = base_dir.as_path();
     log::info!("Boot: scanning {} for projects", base_path.as_str());
@@ -39,10 +39,10 @@ pub fn auto_load_project(server: &mut LpServer) {
                 .unwrap_or(false)
                 || server.base_fs().is_dir(path.as_path()).unwrap_or(false)
             {
-                log::info!("Boot: found configured startup project: {}", name);
+                log::info!("Boot: found configured startup project: {name}");
                 Some(path)
             } else {
-                log::info!("Boot: configured startup project '{}' not found", name);
+                log::info!("Boot: configured startup project '{name}' not found");
                 None
             }
         } else {

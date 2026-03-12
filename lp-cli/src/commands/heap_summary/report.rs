@@ -79,7 +79,7 @@ impl Report {
             self.project, self.frames_requested, self.event_count
         )
         .unwrap();
-        writeln!(out, "Heap: {} KB starting at {}", heap_kb, heap_hex).unwrap();
+        writeln!(out, "Heap: {heap_kb} KB starting at {heap_hex}").unwrap();
         writeln!(out).unwrap();
     }
 
