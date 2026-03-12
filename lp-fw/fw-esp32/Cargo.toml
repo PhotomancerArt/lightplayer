@@ -66,7 +66,7 @@ log = { workspace = true, default-features = false }
 
 embedded-storage = "0.3"
 esp-storage = { version = "0.8", features = ["esp32c6"] }
-littlefs-rust = { path = "../../../littlefs-rust/littlefs-rust", default-features = false, features = ["alloc"] }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true

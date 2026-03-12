@@ -197,3 +197,7 @@ esp-println = { path = "lp-fw/esp-println-fork" }
 # Path for local dev; comment out to use published (git) lp-common
 # [patch."https://github.com/light-player/lp-common"]
 # lp-collection = { path = "../lp-common/lp-collection" }
+
+# littlefs-rust: uncomment for local dev; comment out to use crates.io 0.1.0
+# [patch.crates-io]
+# littlefs-rust = { path = "../littlefs-rust/littlefs-rust" }

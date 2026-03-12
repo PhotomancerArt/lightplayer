@@ -3263,6 +3263,8 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "littlefs-rust"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e7a9f7e3dda2cd9155bc34778ed42d33e7f8e7c2ff84ec71c200fda76f00394"
 dependencies = [
  "bitflags 2.10.0",
  "littlefs-rust-core",
@@ -3271,6 +3273,8 @@ dependencies = [
 [[package]]
 name = "littlefs-rust-core"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2d6b76e6d4cd1878ee2433fbe8c8933d4da0733496be7b4a838f14fc31cf14a"
 
 [[package]]
 name = "lock_api"
