@@ -279,9 +279,14 @@ pub fn glsl_jit_streaming(
     }
     sorted_names.sort();
 
-    let mut func_id_map: HashMap<String, FuncId> = HashMap::new();
-    let mut old_func_id_map: HashMap<FuncId, String> = HashMap::new();
-    let mut float_func_ids: HashMap<String, FuncId> = HashMap::new();
+    let num_functions = sorted_names.len();
+    let num_builtins = crate::backend::builtins::registry::BuiltinId::all().len();
+    let total_capacity = num_functions + num_builtins;
+
+    let mut func_id_map: HashMap<String, FuncId> = HashMap::with_capacity(total_capacity);
+    let mut old_func_id_map: HashMap<FuncId, String> = HashMap::with_capacity(total_capacity);
+    let mut float_func_ids: HashMap<String, FuncId> = HashMap::with_capacity(num_functions);
+    let mut jit_func_id_map: HashMap<String, FuncId> = HashMap::with_capacity(num_functions);
 
     #[allow(dead_code)]
     struct StreamingFuncInfo<'a> {
@@ -289,12 +294,11 @@ pub fn glsl_jit_streaming(
         typed_function: &'a crate::frontend::semantic::TypedFunction,
         float_func_id: FuncId,
         q32_func_id: FuncId,
-        float_sig: cranelift_codegen::ir::Signature,
         linkage: Linkage,
         ast_size: usize,
     }
 
-    let mut sorted_functions: Vec<StreamingFuncInfo<'_>> = Vec::new();
+    let mut sorted_functions: Vec<StreamingFuncInfo<'_>> = Vec::with_capacity(num_functions);
 
     let mut float_module = float_module;
     for name in &sorted_names {
@@ -352,13 +356,13 @@ pub fn glsl_jit_streaming(
         func_id_map.insert(name.clone(), q32_func_id);
         old_func_id_map.insert(float_func_id, name.clone());
         float_func_ids.insert(name.clone(), float_func_id);
+        jit_func_id_map.insert(name.clone(), q32_func_id);
 
         sorted_functions.push(StreamingFuncInfo {
             name: name.clone(),
             typed_function: typed_func,
             float_func_id,
             q32_func_id,
-            float_sig: float_sig.clone(),
             linkage,
             ast_size: typed_func.ast_node_count(),
         });
@@ -393,8 +397,11 @@ pub fn glsl_jit_streaming(
         String::from(source),
     );
 
-    let mut glsl_signatures = HashMap::new();
-    let mut cranelift_signatures = HashMap::new();
+    let mut collected_signatures: Vec<(
+        String,
+        cranelift_codegen::ir::Signature,
+        crate::frontend::semantic::functions::FunctionSignature,
+    )> = Vec::with_capacity(num_functions);
 
     for func_info in &sorted_functions {
         let mut compiler = GlslCompiler::new();
@@ -482,22 +489,24 @@ pub fn glsl_jit_streaming(
             module_ref.clear_context(&mut ctx);
         }
 
-        cranelift_signatures.insert(func_info.name.clone(), q32_sig);
-        glsl_signatures.insert(
+        collected_signatures.push((
             func_info.name.clone(),
+            q32_sig,
             crate::frontend::semantic::functions::FunctionSignature {
                 name: func_info.name.clone(),
                 return_type: func_info.typed_function.return_type.clone(),
                 parameters: func_info.typed_function.parameters.clone(),
             },
-        );
+        ));
     }
 
     drop(float_module);
 
-    let mut jit_func_id_map = HashMap::new();
-    for func_info in &sorted_functions {
-        jit_func_id_map.insert(func_info.name.clone(), func_info.q32_func_id);
+    let mut glsl_signatures = HashMap::with_capacity(num_functions);
+    let mut cranelift_signatures = HashMap::with_capacity(num_functions);
+    for (name, q32_sig, glsl_sig) in collected_signatures {
+        cranelift_signatures.insert(name.clone(), q32_sig);
+        glsl_signatures.insert(name, glsl_sig);
     }
 
     let jit = crate::backend::codegen::jit::build_jit_executable_streaming(
