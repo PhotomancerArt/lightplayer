@@ -198,13 +198,15 @@ async fn main(spawner: embassy_executor::Spawner) {
         #[cfg(feature = "memory_fs")]
         esp_println::println!("[INIT] In-memory filesystem created");
 
-        // Create server
+        // Create server (with time provider for shader comp timing)
         esp_println::println!("[INIT] Creating LpServer instance...");
+        let time_provider_rc = Rc::new(Esp32TimeProvider::new());
         let mut server = LpServer::new(
             output_provider,
             base_fs,
             "projects/".as_path(),
             Some(esp32_memory_stats),
+            Some(time_provider_rc),
         );
         esp_println::println!("[INIT] LpServer created");
 

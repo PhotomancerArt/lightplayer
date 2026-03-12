@@ -81,7 +81,13 @@ fn test_server_startup_with_memory_filesystem() {
     // Create server with memory filesystem
     let fs = LpFsMemory::new();
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let _server = LpServer::new(output_provider, Box::new(fs), "projects".as_path(), None);
+    let _server = LpServer::new(
+        output_provider,
+        Box::new(fs),
+        "projects".as_path(),
+        None,
+        None,
+    );
 
     // Server created successfully
     // (In a real test, we might verify it accepts connections, but with

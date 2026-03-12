@@ -87,6 +87,7 @@ fn test_server_tick_propagates_to_projects() {
         base_fs,
         "projects/".as_path(),
         None,
+        None,
     );
 
     // Load project
@@ -102,6 +103,7 @@ fn test_server_tick_propagates_to_projects() {
                 &"/".as_path_buf().join(project_name),
                 fs,
                 output_provider.clone(),
+                None,
                 None,
             )
             .expect("Failed to load project")

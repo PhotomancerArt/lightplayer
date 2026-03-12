@@ -9,6 +9,7 @@ use lp_engine::{MemoryStatsFn, ProjectRuntime};
 use lp_model::{LpPath, LpPathBuf};
 use lp_shared::fs::{FsVersion, LpFs};
 use lp_shared::output::OutputProvider;
+use lp_shared::time::TimeProvider;
 
 /// A project instance wrapping a ProjectRuntime
 pub struct Project {
@@ -33,8 +34,9 @@ impl Project {
         fs: Rc<RefCell<dyn LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
     ) -> Result<Self, ServerError> {
-        let runtime = ProjectRuntime::new(fs, output_provider, memory_stats)
+        let runtime = ProjectRuntime::new(fs, output_provider, memory_stats, time_provider)
             .map_err(|e| ServerError::Core(format!("{e}")))?;
 
         Ok(Self {

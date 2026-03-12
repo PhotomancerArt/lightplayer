@@ -47,6 +47,11 @@ pub trait NodeInitContext {
 
     /// Get output provider
     fn output_provider(&self) -> &dyn OutputProvider;
+
+    /// Get current time in milliseconds (for perf timing). Returns None when no time provider.
+    fn now_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 use lp_shared::Texture;

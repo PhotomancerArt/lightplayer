@@ -85,6 +85,7 @@ fn test_stop_all_projects() {
         base_fs,
         "projects/".as_path(),
         None,
+        None,
     );
 
     // Load project
@@ -97,6 +98,7 @@ fn test_stop_all_projects() {
                 &"/".as_path_buf().join(project_name),
                 fs,
                 output_provider.clone(),
+                None,
                 None,
             )
             .unwrap()
@@ -120,7 +122,7 @@ fn test_stop_all_projects() {
     let response = unsafe {
         let pm = (*server_ptr).project_manager_mut();
         let fs = (*server_ptr).base_fs_mut();
-        handle_client_message(pm, fs, &output_provider, None, request, None).unwrap()
+        handle_client_message(pm, fs, &output_provider, None, None, request, None).unwrap()
     };
 
     // Verify response is StopAllProjects

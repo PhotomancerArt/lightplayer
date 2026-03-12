@@ -12,6 +12,7 @@ use log;
 use lp_model::{LpPath, LpPathBuf, Message};
 use lp_shared::fs::{FsChange, LpFs};
 use lp_shared::output::OutputProvider;
+use lp_shared::time::TimeProvider;
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -33,6 +34,8 @@ pub struct LpServer {
     last_frame_time_us: RefCell<Option<u64>>,
     /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
     memory_stats: Option<MemoryStatsFn>,
+    /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
+    time_provider: Option<Rc<dyn TimeProvider>>,
 }
 
 impl LpServer {
@@ -57,13 +60,14 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
+    /// let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None, None);
     /// ```
     pub fn new(
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         base_fs: Box<dyn LpFs>,
         projects_base_dir: &LpPath,
         memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
     ) -> Self {
         let project_manager = ProjectManager::new(projects_base_dir);
         Self {
@@ -72,6 +76,7 @@ impl LpServer {
             base_fs,
             last_frame_time_us: RefCell::new(None),
             memory_stats,
+            time_provider,
         }
     }
 
@@ -103,7 +108,7 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsMemory::new());
-    /// let mut server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
+    /// let mut server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None, None);
     /// let incoming = vec![/* messages */];
     /// let responses = server.tick(16, incoming).unwrap();
     /// ```
@@ -247,6 +252,7 @@ impl LpServer {
                         &mut *self.base_fs,
                         &self.output_provider,
                         self.memory_stats.as_ref(),
+                        self.time_provider.clone(),
                         client_msg,
                         theoretical_fps,
                     ) {
@@ -322,6 +328,7 @@ impl LpServer {
             &mut *self.base_fs,
             self.output_provider.clone(),
             self.memory_stats,
+            self.time_provider.clone(),
         )
     }
 

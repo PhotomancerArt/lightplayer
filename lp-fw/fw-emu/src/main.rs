@@ -14,7 +14,7 @@ mod serial;
 mod server_loop;
 mod time;
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::rc::Rc;
 use core::cell::RefCell;
 
 use fw_core::log::init_emu_logger;
@@ -48,20 +48,27 @@ pub extern "C" fn _lp_main() -> ! {
     host_debug!("[fw-emu] Starting firmware emulator...");
 
     // Create filesystem (in-memory)
-    let base_fs = Box::new(LpFsMemory::new());
+    let base_fs = alloc::boxed::Box::new(LpFsMemory::new());
 
     // Create output provider
     let output_provider: Rc<RefCell<dyn OutputProvider>> =
         Rc::new(RefCell::new(SyscallOutputProvider::new()));
 
-    // Create server
-    let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None);
+    // Create server (with time provider for shader comp timing)
+    let time_provider_rc = Rc::new(SyscallTimeProvider::new());
+    let server = LpServer::new(
+        output_provider,
+        base_fs,
+        "projects/".as_path(),
+        None,
+        Some(time_provider_rc),
+    );
 
     // Create serial transport
     let serial_io = SyscallSerialIo::new();
     let transport = SerialTransport::new(serial_io);
 
-    // Create time provider
+    // Create time provider for server loop frame timing
     let time_provider = SyscallTimeProvider::new();
 
     // Run server loop (never returns)

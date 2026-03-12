@@ -208,8 +208,11 @@ test-glsl-filetests:
 [parallel]
 check: fmt-check clippy
 
+# Run build before test so lp-riscv-emu guest_app_tests can find the prebuilt binary.
+# (test would otherwise race with build and may fail with "Binary not found")
 [parallel]
-ci: check build test
+ci: check build-then-test
+build-then-test: build test
 
 # lp-app specific CI
 [parallel]

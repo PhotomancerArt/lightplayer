@@ -18,6 +18,7 @@ use lp_model::project::ProjectHandle;
 use lp_model::{LpPath, LpPathBuf};
 use lp_shared::fs::LpFs;
 use lp_shared::output::OutputProvider;
+use lp_shared::time::TimeProvider;
 
 /// Manages multiple project instances
 pub struct ProjectManager {
@@ -65,6 +66,7 @@ impl ProjectManager {
         base_fs: &mut dyn LpFs,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
     ) -> Result<ProjectHandle, ServerError> {
         // Extract project name from path
         let name = self.extract_project_name_from_path(path.as_str())?;
@@ -101,6 +103,7 @@ impl ProjectManager {
             project_fs,
             output_provider,
             memory_stats,
+            time_provider,
         )?;
 
         // Auto-initialize the project runtime

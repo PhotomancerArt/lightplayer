@@ -486,8 +486,8 @@ impl ShaderRuntime {
 
     /// Compile GLSL source into executable
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
-        log::debug!(
-            "ShaderRuntime::compile_shader: Compiling shader {} ({} bytes)",
+        log::info!(
+            "Shader {} compilation starting ({} bytes)",
             self.node_handle.as_i32(),
             glsl_source.len()
         );
@@ -559,10 +559,6 @@ impl ShaderRuntime {
                 let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
                 self.state.error.set(frame_id, None);
 
-                log::debug!(
-                    "ShaderRuntime::compile_shader: Shader {} compiled successfully",
-                    self.node_handle.as_i32()
-                );
                 Ok(())
             }
             Err(e) => {
@@ -578,7 +574,7 @@ impl ShaderRuntime {
                 self.state.error.set(frame_id, Some(error_msg.clone()));
 
                 log::warn!(
-                    "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
+                    "Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),
                     e
                 );
@@ -597,7 +593,21 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
-        self.compile_shader(glsl_source.as_str())?;
+        let start_ms = ctx.now_ms();
+        let result = self.compile_shader(glsl_source.as_str());
+        if result.is_ok() {
+            if let (Some(start), Some(end)) = (start_ms, ctx.now_ms()) {
+                let elapsed_ms = end.saturating_sub(start);
+                log::info!(
+                    "Shader {} compiled in {}ms",
+                    self.node_handle.as_i32(),
+                    elapsed_ms
+                );
+            } else {
+                log::info!("Shader {} compiled", self.node_handle.as_i32());
+            }
+        }
+        result?;
         // Store source in state (single copy; compile_shader no longer needs it)
         let frame_id = FrameId::default();
         self.state.glsl_code.set(frame_id, glsl_source);
