@@ -342,7 +342,8 @@ impl ShaderRuntime {
         const Q32_SCALE: i32 = 65536;
 
         // Convert time from f32 to Q32 format once (reused for all pixels)
-        let time_q32 = (time * 65536.0) as i32;
+        // Round instead of truncate to avoid single-frame palette index errors at boundaries
+        let time_q32 = (time * 65536.0 + 0.5) as i32;
 
         // Convert output_size to Q32 format once (reused for all pixels)
         let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
