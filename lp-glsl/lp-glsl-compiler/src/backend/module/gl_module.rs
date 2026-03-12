@@ -30,8 +30,12 @@ pub struct GlModule<M: Module> {
 
 // Separate constructors for each Module type (Rust needs concrete types)
 impl GlModule<JITModule> {
-    /// Create new GlModule with JITModule from HostJit target
-    pub fn new_jit(mut target: Target) -> Result<Self, GlslError> {
+    /// Create new GlModule with JITModule from HostJit target.
+    /// `decimal_format` filters builtin declarations (Q32 mode skips F32-only builtins).
+    pub fn new_jit(
+        mut target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
         match &target {
             Target::HostJit { .. } => {
                 let mut builder = target.create_module_builder()?;
@@ -103,11 +107,11 @@ impl GlModule<JITModule> {
                     }
                 };
 
-                // Declare builtin functions when module is created
+                // Declare builtin functions when module is created (format-aware: skip unused)
                 {
                     use crate::backend::builtins::declare_builtins;
                     let pointer_type = module.isa().pointer_type();
-                    declare_builtins(&mut module, pointer_type)?;
+                    declare_builtins(&mut module, pointer_type, decimal_format)?;
                 }
 
                 Ok(Self {
@@ -128,16 +132,24 @@ impl GlModule<JITModule> {
         }
     }
 
-    /// Create new GlModule with same target
-    pub fn new_with_target(target: Target) -> Result<Self, GlslError> {
-        Self::new_jit(target)
+    /// Create new GlModule with same target.
+    /// Uses Q32 format for builtin declarations (typical for tests).
+    pub fn new_with_target(
+        target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
+        Self::new_jit(target, decimal_format)
     }
 }
 
 #[cfg(feature = "emulator")]
 impl GlModule<ObjectModule> {
-    /// Create new GlModule with ObjectModule from Rv32Emu target
-    pub fn new_object(mut target: Target) -> Result<Self, GlslError> {
+    /// Create new GlModule with ObjectModule from Rv32Emu target.
+    /// `decimal_format` filters builtin declarations (Q32 mode skips F32-only builtins).
+    pub fn new_object(
+        mut target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
         match &target {
             Target::Rv32Emu { .. } => {
                 let builder = target.create_module_builder()?;
@@ -148,11 +160,11 @@ impl GlModule<ObjectModule> {
                     _ => return Err(GlslError::new(ErrorCode::E0400, "Expected Object builder")),
                 };
 
-                // Declare builtin functions when module is created
+                // Declare builtin functions when module is created (format-aware: skip unused)
                 {
                     use crate::backend::builtins::declare_builtins;
                     let pointer_type = module.isa().pointer_type();
-                    declare_builtins(&mut module, pointer_type)?;
+                    declare_builtins(&mut module, pointer_type, decimal_format)?;
                 }
 
                 // Declare host functions when module is created (for emulator)
@@ -185,9 +197,12 @@ impl GlModule<ObjectModule> {
         }
     }
 
-    /// Create new GlModule with same target
-    pub fn new_with_target(target: Target) -> Result<Self, GlslError> {
-        Self::new_object(target)
+    /// Create new GlModule with same target.
+    pub fn new_with_target(
+        target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
+        Self::new_object(target, decimal_format)
     }
 }
 
@@ -495,8 +510,9 @@ mod tests {
     #[test]
     #[cfg(feature = "std")]
     fn test_create_jit_module() {
+        use crate::DecimalFormat;
         let target = Target::host_jit().unwrap();
-        let gl_module = GlModule::new_jit(target);
+        let gl_module = GlModule::new_jit(target, DecimalFormat::Q32);
         assert!(gl_module.is_ok());
         let gl_module = gl_module.unwrap();
         assert_eq!(gl_module.fns.len(), 0);
@@ -505,8 +521,9 @@ mod tests {
     #[test]
     #[cfg(feature = "emulator")]
     fn test_create_object_module() {
+        use crate::DecimalFormat;
         let target = Target::riscv32_emulator().unwrap();
-        let gl_module = GlModule::new_object(target);
+        let gl_module = GlModule::new_object(target, DecimalFormat::Q32);
         assert!(gl_module.is_ok());
         let gl_module = gl_module.unwrap();
         assert_eq!(gl_module.fns.len(), 0);
@@ -515,8 +532,9 @@ mod tests {
     #[test]
     #[cfg(feature = "std")]
     fn test_get_func_nonexistent() {
+        use crate::DecimalFormat;
         let target = Target::host_jit().unwrap();
-        let gl_module = GlModule::new_jit(target).unwrap();
+        let gl_module = GlModule::new_jit(target, DecimalFormat::Q32).unwrap();
         assert!(gl_module.get_func("nonexistent").is_none());
     }
 }

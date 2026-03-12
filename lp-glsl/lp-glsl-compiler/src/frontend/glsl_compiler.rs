@@ -54,7 +54,11 @@ impl GlslCompiler {
         let triple = isa_ref.triple();
 
         // 3. Create GlModule
-        let mut gl_module = GlModule::new_jit(target)?;
+        let decimal_format = match &numeric_mode {
+            NumericMode::Q32(_) => crate::DecimalFormat::Q32,
+            NumericMode::Float(_) => crate::DecimalFormat::Float,
+        };
+        let mut gl_module = GlModule::new_jit(target, decimal_format)?;
 
         // 4. Create a shared source location manager for all functions
         use crate::frontend::src_loc_manager::SourceLocManager;
@@ -208,7 +212,11 @@ impl GlslCompiler {
         let triple = isa_ref.triple();
 
         // 3. Create GlModule
-        let mut gl_module = GlModule::new_object(target)?;
+        let decimal_format = match &numeric_mode {
+            NumericMode::Q32(_) => crate::DecimalFormat::Q32,
+            NumericMode::Float(_) => crate::DecimalFormat::Float,
+        };
+        let mut gl_module = GlModule::new_object(target, decimal_format)?;
 
         // 4. Create a shared source location manager for all functions
         use crate::frontend::src_loc_manager::SourceLocManager;

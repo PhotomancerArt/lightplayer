@@ -362,7 +362,7 @@ mod tests {
         use crate::exec::executable::GlslExecutable;
 
         let target = Target::host_jit().unwrap();
-        let mut gl_module = GlModule::new_jit(target).unwrap();
+        let mut gl_module = GlModule::new_jit(target, crate::DecimalFormat::Q32).unwrap();
 
         // Build a simple function that returns 42
         let mut sig = Signature::new(CallConv::SystemV);

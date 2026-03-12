@@ -515,7 +515,7 @@ mod tests {
         use crate::exec::executable::GlslExecutable;
 
         let target = Target::riscv32_emulator().unwrap();
-        let mut gl_module = GlModule::new_object(target).unwrap();
+        let mut gl_module = GlModule::new_object(target, crate::DecimalFormat::Q32).unwrap();
 
         // Build a simple function that returns 42
         let mut sig = Signature::new(CallConv::SystemV);

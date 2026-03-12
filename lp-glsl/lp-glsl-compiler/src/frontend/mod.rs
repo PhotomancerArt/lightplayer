@@ -225,7 +225,8 @@ pub fn glsl_jit_streaming(
     let pointer_type = isa_ref.pointer_type();
     let triple = isa_ref.triple();
 
-    let mut module = GlModule::new_jit(target).map_err(GlslDiagnostics::from)?;
+    let mut module =
+        GlModule::new_jit(target, DecimalFormat::Q32).map_err(GlslDiagnostics::from)?;
 
     let mut sorted_names: Vec<String> = typed_ast
         .user_functions
@@ -241,16 +242,14 @@ pub fn glsl_jit_streaming(
     let num_builtins = BuiltinId::all().len();
     let mut func_ids: HashMap<String, FuncId> =
         HashMap::with_capacity(num_functions + num_builtins);
-    let mut jit_func_id_map: HashMap<String, FuncId> = HashMap::with_capacity(num_functions);
 
-    struct StreamingFuncInfo<'a> {
+    struct StreamingFuncInfo {
         name: String,
-        typed_function: &'a crate::frontend::semantic::TypedFunction,
         func_id: FuncId,
         ast_size: usize,
     }
 
-    let mut sorted_functions: Vec<StreamingFuncInfo<'_>> = Vec::with_capacity(num_functions);
+    let mut sorted_functions: Vec<StreamingFuncInfo> = Vec::with_capacity(num_functions);
 
     for name in &sorted_names {
         let typed_func = typed_ast
@@ -295,11 +294,9 @@ pub fn glsl_jit_streaming(
             })?;
 
         func_ids.insert(name.clone(), func_id);
-        jit_func_id_map.insert(name.clone(), func_id);
 
         sorted_functions.push(StreamingFuncInfo {
             name: name.clone(),
-            typed_function: typed_func,
             func_id,
             ast_size: typed_func.ast_node_count(),
         });
@@ -327,10 +324,28 @@ pub fn glsl_jit_streaming(
     );
 
     let mut glsl_signatures = HashMap::with_capacity(num_functions);
-    let mut cranelift_signatures = HashMap::with_capacity(num_functions);
+
+    let mut compiler = GlslCompiler::new();
+    let mut ctx = module.module_internal().make_context();
 
     for func_info in &sorted_functions {
-        let mut compiler = GlslCompiler::new();
+        let typed_func = typed_ast
+            .user_functions
+            .iter()
+            .find(|f| f.name == func_info.name)
+            .or_else(|| {
+                typed_ast
+                    .main_function
+                    .as_ref()
+                    .filter(|_| func_info.name == MAIN_FUNCTION_NAME)
+            })
+            .ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("Function '{}' not found", func_info.name),
+                ))
+            })?;
+
         let source_text_for_main = if func_info.name == MAIN_FUNCTION_NAME {
             Some(source)
         } else {
@@ -339,7 +354,7 @@ pub fn glsl_jit_streaming(
 
         let func = compiler
             .compile_single_function_to_clif(
-                func_info.typed_function,
+                typed_func,
                 func_info.func_id,
                 &func_ids,
                 &typed_ast.function_registry,
@@ -354,9 +369,9 @@ pub fn glsl_jit_streaming(
             )
             .map_err(GlslDiagnostics::from)?;
 
-        let sig = func.signature.clone();
+        let return_type = typed_func.return_type.clone();
+        let parameters = typed_func.parameters.clone();
 
-        let mut ctx = module.module_internal().make_context();
         ctx.func = func;
         module
             .module_mut_internal()
@@ -405,16 +420,34 @@ pub fn glsl_jit_streaming(
             module_ref.clear_context(&mut ctx);
         }
 
-        cranelift_signatures.insert(func_info.name.clone(), sig);
         glsl_signatures.insert(
             func_info.name.clone(),
             crate::frontend::semantic::functions::FunctionSignature {
                 name: func_info.name.clone(),
-                return_type: func_info.typed_function.return_type.clone(),
-                parameters: func_info.typed_function.parameters.clone(),
+                return_type,
+                parameters,
             },
         );
     }
+
+    let cranelift_signatures: HashMap<String, cranelift_codegen::ir::Signature> = glsl_signatures
+        .iter()
+        .map(|(name, glsl_sig)| {
+            let sig = SignatureBuilder::build_with_triple(
+                &glsl_sig.return_type,
+                &glsl_sig.parameters,
+                pointer_type,
+                triple,
+                numeric_mode.scalar_type(),
+            );
+            (name.clone(), sig)
+        })
+        .collect();
+
+    let jit_func_id_map: HashMap<String, FuncId> = sorted_functions
+        .iter()
+        .map(|f| (f.name.clone(), f.func_id))
+        .collect();
 
     let jit = crate::backend::codegen::jit::build_jit_executable_streaming(
         module,

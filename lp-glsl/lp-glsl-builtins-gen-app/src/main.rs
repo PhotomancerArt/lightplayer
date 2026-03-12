@@ -407,6 +407,34 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("        }\n");
     output.push_str("    }\n\n");
 
+    // Generate format() method - which DecimalFormat this builtin belongs to (for format-aware declaration)
+    output.push_str(
+        "    /// Format affinity: Q32 builtins, Float (F32) builtins, or None (format-agnostic).\n",
+    );
+    output.push_str("    pub fn format(&self) -> Option<crate::DecimalFormat> {\n");
+    output.push_str("        match self {\n");
+    if builtins.is_empty() {
+        output.push_str("            BuiltinId::_Placeholder => None,\n");
+    } else {
+        for builtin in builtins {
+            let fmt = if builtin.enum_variant.starts_with("LpQ32")
+                || builtin.enum_variant.ends_with("Q32")
+            {
+                "Some(crate::DecimalFormat::Q32)"
+            } else if builtin.enum_variant.ends_with("F32") {
+                "Some(crate::DecimalFormat::Float)"
+            } else {
+                "None"
+            };
+            output.push_str(&format!(
+                "            BuiltinId::{} => {},\n",
+                builtin.enum_variant, fmt
+            ));
+        }
+    }
+    output.push_str("        }\n");
+    output.push_str("    }\n\n");
+
     // Generate builtin_id_from_name() method
     output.push_str("    /// Get the BuiltinId from its symbol name.\n");
     output.push_str("    ///\n");
@@ -909,10 +937,18 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str(
         "/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.\n",
     );
-    output.push_str(
-        "pub fn declare_builtins<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n",
-    );
+    output.push_str("/// `format` filters builtins: in Q32 mode, F32-only builtins are skipped; in Float mode, Q32 builtins are skipped.\n");
+    output.push_str("pub fn declare_builtins<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
     output.push_str("    for builtin in BuiltinId::all() {\n");
+    output.push_str("        if let Some(f) = builtin.format() {\n");
+    output.push_str("            if f != format {\n");
+    output.push_str("                continue;\n");
+    output.push_str("            }\n");
+    output.push_str("        }\n");
     output.push_str("        let name = builtin.name();\n");
     output.push_str("        let sig = builtin.signature(pointer_type);\n\n");
     output.push_str("        module\n");
@@ -936,9 +972,12 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     );
     output.push_str("///\n");
     output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output
-        .push_str("pub fn declare_for_jit<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n");
-    output.push_str("    declare_builtins(module, pointer_type)\n");
+    output.push_str("pub fn declare_for_jit<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
+    output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n\n");
 
     output.push_str("/// Declare builtin functions as external symbols for emulator mode.\n");
@@ -949,10 +988,12 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("/// be resolved by the linker when linking the static library.\n");
     output.push_str("///\n");
     output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str(
-        "pub fn declare_for_emulator<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n",
-    );
-    output.push_str("    declare_builtins(module, pointer_type)\n");
+    output.push_str("pub fn declare_for_emulator<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
+    output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n");
 
     fs::write(path, output).expect("Failed to write registry.rs");
