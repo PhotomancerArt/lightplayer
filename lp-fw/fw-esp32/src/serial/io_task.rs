@@ -32,10 +32,13 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lp_model::ServerMessage, 1> =
     Channel::new();
 
-/// Write timeout: if a serial write doesn't complete in this time, the host
-/// is likely gone. Short enough to not stall the loop, long enough for a
-/// healthy USB transfer of a few hundred bytes.
+/// Write timeout per chunk: if a chunk doesn't complete in this time, the host
+/// is likely gone. Short enough to detect disconnects, long enough for USB.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// Chunk size for large writes. Small enough to avoid timeout on slow USB,
+/// large enough to avoid excessive syscalls. GetChanges can be 10KB+.
+const WRITE_CHUNK_SIZE: usize = 256;
 
 /// Async write with timeout. Returns false if the write timed out or errored.
 async fn timed_write<W: Write>(tx: &mut W, data: &[u8]) -> bool {
@@ -44,6 +47,26 @@ async fn timed_write<W: Write>(tx: &mut W, data: &[u8]) -> bool {
         Either::First(_) => false,
         Either::Second(result) => result.is_ok(),
     }
+}
+
+/// Write all data in chunks with per-chunk timeout. Prevents large messages
+/// (e.g. GetChanges) from timing out mid-write and corrupting the stream
+/// by concatenating with the next message. Uses write_all per chunk to
+/// handle partial writes.
+async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
+    use embassy_futures::select::{Either, select};
+    let mut offset = 0;
+    while offset < data.len() {
+        let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
+        let chunk = &data[offset..chunk_end];
+        match select(Timer::after(WRITE_TIMEOUT), tx.write_all(chunk)).await {
+            Either::First(_) => return false,
+            Either::Second(Err(_)) => return false,
+            Either::Second(Ok(())) => {}
+        }
+        offset = chunk_end;
+    }
+    true
 }
 
 /// SerWrite impl that collects bytes into a Vec (for later timed async write).
@@ -152,7 +175,7 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
     buf.extend_from_slice(b"M!");
     if ser_write_json::ser::to_writer(&mut VecWriter(&mut buf), &msg).is_ok() {
         buf.push(b'\n');
-        timed_write(tx, &buf).await;
+        timed_write_all(tx, &buf).await;
     }
 }
 
