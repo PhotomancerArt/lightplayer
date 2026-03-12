@@ -3,14 +3,31 @@
 //! Core data structures for representing LPFX functions and their implementations.
 
 use crate::backend::builtins::BuiltinId;
-use crate::semantic::functions::FunctionSignature;
+use crate::semantic::functions::ParamQualifier;
+use crate::semantic::types::Type;
+
+/// Parameter with static references (used by LPFX registry)
+#[derive(Debug)]
+pub struct ParameterRef {
+    pub name: &'static str,
+    pub ty: Type,
+    pub qualifier: ParamQualifier,
+}
+
+/// Function signature with static references (used by LPFX registry)
+#[derive(Debug)]
+pub struct FunctionSignatureRef {
+    pub name: &'static str,
+    pub return_type: Type,
+    pub parameters: &'static [ParameterRef],
+}
 
 /// LPFX function definition
 ///
 /// Contains the GLSL signature and all available implementations for different decimal formats.
 pub struct LpfxFn {
     /// GLSL signature of the function (name, parameters, return type)
-    pub glsl_sig: FunctionSignature,
+    pub glsl_sig: FunctionSignatureRef,
 
     /// Available implementations for different decimal formats
     pub impls: LpfxFnImpl,
