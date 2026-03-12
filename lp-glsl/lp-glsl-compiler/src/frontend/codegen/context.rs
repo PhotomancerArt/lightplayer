@@ -5,6 +5,7 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_module::{FuncId, Module};
 use hashbrown::HashMap;
 
+use crate::backend::builtins::registry::BuiltinId;
 use crate::backend::module::gl_module::GlModule;
 use crate::error::{ErrorCode, GlslError};
 use crate::frontend::codegen::numeric::NumericMode;
@@ -12,6 +13,7 @@ use crate::frontend::src_loc::{GlFileId, GlSourceMap};
 use crate::frontend::src_loc_manager::SourceLocManager;
 use crate::semantic::functions::FunctionRegistry;
 use crate::semantic::types::Type as GlslType;
+use lp_model::glsl_opts::{AddSubMode, DivMode, MulMode};
 
 use alloc::string::String;
 use alloc::{format, vec, vec::Vec};
@@ -467,24 +469,85 @@ impl<'a, M: Module> CodegenContext<'a, M> {
         self.numeric.scalar_type()
     }
 
+    /// True when compiling for Q32 fixed-point (Q16.16).
+    pub fn is_q32(&self) -> bool {
+        matches!(self.numeric, NumericMode::Q32(_))
+    }
+
     pub fn emit_float_const(&mut self, val: f32) -> Value {
         self.numeric.emit_const(val, &mut self.builder)
     }
 
     pub fn emit_float_add(&mut self, a: Value, b: Value) -> Value {
-        self.numeric.emit_add(a, b, &mut self.builder)
+        match &self.numeric {
+            NumericMode::Float(s) => s.emit_add(a, b, &mut self.builder),
+            NumericMode::Q32(s) => {
+                if matches!(s.opts.add_sub, AddSubMode::Saturating) {
+                    let func_ref = self
+                        .gl_module
+                        .get_builtin_func_ref(BuiltinId::LpQ32Add, self.builder.func)
+                        .expect("Q32 add builtin declared");
+                    let call = self.builder.ins().call(func_ref, &[a, b]);
+                    self.builder.inst_results(call)[0]
+                } else {
+                    s.emit_add(a, b, &mut self.builder)
+                }
+            }
+        }
     }
 
     pub fn emit_float_sub(&mut self, a: Value, b: Value) -> Value {
-        self.numeric.emit_sub(a, b, &mut self.builder)
+        match &self.numeric {
+            NumericMode::Float(s) => s.emit_sub(a, b, &mut self.builder),
+            NumericMode::Q32(s) => {
+                if matches!(s.opts.add_sub, AddSubMode::Saturating) {
+                    let func_ref = self
+                        .gl_module
+                        .get_builtin_func_ref(BuiltinId::LpQ32Sub, self.builder.func)
+                        .expect("Q32 sub builtin declared");
+                    let call = self.builder.ins().call(func_ref, &[a, b]);
+                    self.builder.inst_results(call)[0]
+                } else {
+                    s.emit_sub(a, b, &mut self.builder)
+                }
+            }
+        }
     }
 
     pub fn emit_float_mul(&mut self, a: Value, b: Value) -> Value {
-        self.numeric.emit_mul(a, b, &mut self.builder)
+        match &self.numeric {
+            NumericMode::Float(s) => s.emit_mul(a, b, &mut self.builder),
+            NumericMode::Q32(s) => {
+                if matches!(s.opts.mul, MulMode::Saturating) {
+                    let func_ref = self
+                        .gl_module
+                        .get_builtin_func_ref(BuiltinId::LpQ32Mul, self.builder.func)
+                        .expect("Q32 mul builtin declared");
+                    let call = self.builder.ins().call(func_ref, &[a, b]);
+                    self.builder.inst_results(call)[0]
+                } else {
+                    s.emit_mul(a, b, &mut self.builder)
+                }
+            }
+        }
     }
 
     pub fn emit_float_div(&mut self, a: Value, b: Value) -> Value {
-        self.numeric.emit_div(a, b, &mut self.builder)
+        match &self.numeric {
+            NumericMode::Float(s) => s.emit_div(a, b, &mut self.builder),
+            NumericMode::Q32(s) => {
+                if matches!(s.opts.div, DivMode::Saturating) {
+                    let func_ref = self
+                        .gl_module
+                        .get_builtin_func_ref(BuiltinId::LpQ32Div, self.builder.func)
+                        .expect("Q32 div builtin declared");
+                    let call = self.builder.ins().call(func_ref, &[a, b]);
+                    self.builder.inst_results(call)[0]
+                } else {
+                    s.emit_div(a, b, &mut self.builder)
+                }
+            }
+        }
     }
 
     pub fn emit_float_neg(&mut self, a: Value) -> Value {
@@ -516,7 +579,17 @@ impl<'a, M: Module> CodegenContext<'a, M> {
     }
 
     pub fn emit_float_sqrt(&mut self, a: Value) -> Value {
-        self.numeric.emit_sqrt(a, &mut self.builder)
+        match &self.numeric {
+            NumericMode::Float(s) => s.emit_sqrt(a, &mut self.builder),
+            NumericMode::Q32(_) => {
+                let func_ref = self
+                    .gl_module
+                    .get_builtin_func_ref(BuiltinId::LpQ32Sqrt, self.builder.func)
+                    .expect("Q32 sqrt builtin declared");
+                let call = self.builder.ins().call(func_ref, &[a]);
+                self.builder.inst_results(call)[0]
+            }
+        }
     }
 
     pub fn emit_float_from_sint(&mut self, a: Value) -> Value {

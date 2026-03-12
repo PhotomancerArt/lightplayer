@@ -537,7 +537,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     }
 
     /// isinf(x) - returns true if x is positive or negative infinity
-    /// For fixed-point: will be converted inline in transform to detect overflow sentinel values
+    /// For Q32: inline expansion detecting overflow sentinel values (max/min fixed-point).
     pub fn builtin_isinf(
         &mut self,
         args: Vec<(Vec<Value>, Type)>,
@@ -562,7 +562,21 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             Type::Bool
         };
 
-        // Create signature: f32 -> i8 (bool)
+        let mut result_vals = Vec::new();
+
+        if self.is_q32() {
+            let max_fixed = self.builder.ins().iconst(types::I32, 0x7FFF_FFFFi64);
+            let min_fixed = self.builder.ins().iconst(types::I32, i32::MIN as i64);
+            for &val in x_vals {
+                let is_max = self.builder.ins().icmp(IntCC::Equal, val, max_fixed);
+                let is_min = self.builder.ins().icmp(IntCC::Equal, val, min_fixed);
+                let result = self.builder.ins().bor(is_max, is_min);
+                result_vals.push(result);
+            }
+            return Ok((result_vals, result_ty));
+        }
+
+        // Float path: TestCase call
         use cranelift_codegen::ir::{AbiParam, ExtFuncData, Signature};
         use cranelift_codegen::isa::CallConv;
         let mut sig = Signature::new(CallConv::SystemV);
@@ -577,7 +591,6 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         };
         let func_ref = self.builder.func.import_function(ext_func);
 
-        let mut result_vals = Vec::new();
         for &val in x_vals {
             let call_inst = self.builder.ins().call(func_ref, &[val]);
             result_vals.push(self.builder.inst_results(call_inst)[0]);
@@ -587,8 +600,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
     }
 
     /// isnan(x) - returns true if x is NaN
-    /// For fixed-point: will be converted inline in transform (always returns false)
-    /// Generate a function call using TestCase name so transform can detect and convert it inline
+    /// For Q32: fixed-point has no NaN, always returns false.
     pub fn builtin_isnan(
         &mut self,
         args: Vec<(Vec<Value>, Type)>,
@@ -613,7 +625,13 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             Type::Bool
         };
 
-        // Create signature: f32 -> i8 (bool)
+        if self.is_q32() {
+            let false_val = self.builder.ins().iconst(types::I8, 0);
+            let result_vals = vec![false_val; x_vals.len()];
+            return Ok((result_vals, result_ty));
+        }
+
+        // Float path: TestCase call
         use cranelift_codegen::ir::{AbiParam, ExtFuncData, Signature};
         use cranelift_codegen::isa::CallConv;
         let mut sig = Signature::new(CallConv::SystemV);

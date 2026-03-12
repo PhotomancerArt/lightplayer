@@ -1,7 +1,6 @@
 //! Function call conversion functions.
 
-use crate::backend::builtins::registry::BuiltinId;
-use crate::backend::transform::q32::converters::math::map_testcase_to_builtin;
+use crate::backend::builtins::{map_testcase_to_builtin, registry::BuiltinId};
 use crate::backend::transform::q32::converters::{get_first_result, map_value};
 use crate::backend::transform::q32::signature::convert_signature;
 use crate::backend::transform::q32::types::FixedPointFormat;
@@ -255,7 +254,7 @@ pub(crate) fn convert_call(
             let old_args = args.as_slice(&old_func.dfg.value_lists);
 
             // Try LPFX function lookup chain: name -> BuiltinId -> LpfxFn -> q32_impl
-            let q32_builtin_id =
+            let q32_builtin_id: Option<BuiltinId> =
                 if let Some(builtin_id) = BuiltinId::builtin_id_from_name(func_name) {
                     // Check if this is an LPFX function
                     if let Some(lpfx_fn) = find_lpfx_fn_by_builtin_id(builtin_id) {

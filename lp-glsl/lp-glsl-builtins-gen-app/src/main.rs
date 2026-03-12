@@ -69,16 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("mod.rs");
     generate_mod_rs(&mod_rs_path, &q32_builtins);
 
-    // Generate testcase mapping in math.rs
-    let math_rs_path = workspace_root
+    // Generate testcase mapping in backend/builtins/mapping.rs
+    let mapping_rs_path = workspace_root
         .join("lp-glsl-compiler")
         .join("src")
         .join("backend")
-        .join("transform")
-        .join("q32")
-        .join("converters")
-        .join("math.rs");
-    generate_testcase_mapping(&math_rs_path, &builtins);
+        .join("builtins")
+        .join("mapping.rs");
+    generate_testcase_mapping(&mapping_rs_path, &builtins);
 
     // Generate lpfx_fns.rs
     let lpfx_fns_path = workspace_root
@@ -101,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &registry_path,
             &builtin_refs_path,
             &mod_rs_path,
-            &math_rs_path,
+            &mapping_rs_path,
             &lpfx_fns_path,
         ],
     );
@@ -1127,7 +1125,7 @@ fn generate_mod_rs(path: &Path, builtins: &[BuiltinInfo]) {
 
 fn generate_testcase_mapping(path: &Path, builtins: &[BuiltinInfo]) {
     // Read existing file
-    let content = fs::read_to_string(path).expect("Failed to read math.rs");
+    let content = fs::read_to_string(path).expect("Failed to read mapping.rs");
 
     // Find the map_testcase_to_builtin function and replace it
     let start_marker = "/// Map TestCase function name and argument count to BuiltinId.";
@@ -1220,7 +1218,7 @@ fn generate_testcase_mapping(path: &Path, builtins: &[BuiltinInfo]) {
     new_function.push_str("}\n");
 
     let new_content = format!("{}{}{}", before, new_function, after);
-    fs::write(path, new_content).expect("Failed to write math.rs");
+    fs::write(path, new_content).expect("Failed to write mapping.rs");
 }
 
 fn format_generated_files(workspace_root: &Path, files: &[&Path]) {

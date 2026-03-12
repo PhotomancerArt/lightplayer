@@ -317,14 +317,14 @@ impl Q32Strategy {
     pub fn emit_add(&self, a: Value, b: Value, builder: &mut FunctionBuilder) -> Value {
         match self.opts.add_sub {
             AddSubMode::Wrapping => builder.ins().iadd(a, b),
-            AddSubMode::Saturating => todo!("saturating add requires builtin — Plan C"),
+            AddSubMode::Saturating => unreachable!("saturating add handled by CodegenContext"),
         }
     }
 
     pub fn emit_sub(&self, a: Value, b: Value, builder: &mut FunctionBuilder) -> Value {
         match self.opts.add_sub {
             AddSubMode::Wrapping => builder.ins().isub(a, b),
-            AddSubMode::Saturating => todo!("saturating sub requires builtin — Plan C"),
+            AddSubMode::Saturating => unreachable!("saturating sub handled by CodegenContext"),
         }
     }
 
@@ -337,14 +337,14 @@ impl Q32Strategy {
                 let hi_shifted = builder.ins().ishl_imm(product_hi, Q32_SHIFT);
                 builder.ins().bor(lo_shifted, hi_shifted)
             }
-            MulMode::Saturating => todo!("saturating mul requires builtin — Plan C"),
+            MulMode::Saturating => unreachable!("saturating mul handled by CodegenContext"),
         }
     }
 
     pub fn emit_div(&self, a: Value, b: Value, builder: &mut FunctionBuilder) -> Value {
         match self.opts.div {
             DivMode::Reciprocal => self.emit_div_reciprocal(a, b, builder),
-            DivMode::Saturating => todo!("saturating div requires builtin — Plan C"),
+            DivMode::Saturating => unreachable!("saturating div handled by CodegenContext"),
         }
     }
 
@@ -440,7 +440,7 @@ impl Q32Strategy {
     }
 
     pub fn emit_sqrt(&self, _a: Value, _builder: &mut FunctionBuilder) -> Value {
-        todo!("sqrt requires builtin — Plan C")
+        unreachable!("Q32 sqrt handled by CodegenContext")
     }
 
     pub fn emit_from_sint(&self, a: Value, builder: &mut FunctionBuilder) -> Value {
