@@ -1,4 +1,4 @@
-//! emu-trace command: load a project in the emulator with allocation tracing,
+//! mem-profile command: load a project in the emulator with allocation tracing,
 //! tick N frames, stop, and write the trace output.
 
 use anyhow::{Context, Result};
@@ -15,14 +15,14 @@ use lp_riscv_inst::Gpr;
 use lp_shared::fs::{LpFs, LpFsStd};
 use std::sync::{Arc, Mutex};
 
-use super::args::EmuTraceArgs;
+use super::args::MemProfileArgs;
 
-pub fn handle_emu_trace(args: EmuTraceArgs) -> Result<()> {
+pub fn handle_mem_profile(args: MemProfileArgs) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(handle_emu_trace_async(args))
+    runtime.block_on(handle_mem_profile_async(args))
 }
 
-async fn handle_emu_trace_async(args: EmuTraceArgs) -> Result<()> {
+async fn handle_mem_profile_async(args: MemProfileArgs) -> Result<()> {
     let dir = std::env::current_dir()
         .context("Failed to get current directory")?
         .join(&args.dir)

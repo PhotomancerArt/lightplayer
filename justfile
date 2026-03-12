@@ -340,11 +340,12 @@ decode-backtrace *addrs:
 
 # Run a project in the emulator with allocation tracing.
 # Outputs path to trace directory.
-# Usage: just emu-trace path/to/project [--frames N] [--note "description"]
-emu-trace project_dir *args:
-    cargo run -p lp-cli -- emu-trace {{ project_dir }} {{ args }}
+# Default project: examples/mem-profile
+# Usage: just mem-profile [path/to/project] [--frames N] [--note "description"]
+mem-profile *args:
+    cargo run -p lp-cli -- mem-profile {{ args }}
 
-# Summarize heap allocations from an emu-trace output directory.
+# Summarize heap allocations from a mem-profile output directory.
 # Usage: just heap-summary traces/2026-03-08-185520-simple-test [--top N]
 heap-summary trace_dir *args:
     cargo run -p lp-cli -- heap-summary {{ trace_dir }} {{ args }}
