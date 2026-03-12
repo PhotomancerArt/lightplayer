@@ -82,7 +82,8 @@ impl LpClient {
 
         // Wait for response with matching ID (with timeout to avoid deadlock if server
         // never receives our request, e.g. host->device serial direction broken)
-        const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+        // ESP32 compile and other heavy ops can take 30s+, so allow 60s
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
         let wait_response = async {
             loop {
