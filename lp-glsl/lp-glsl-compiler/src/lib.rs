@@ -19,7 +19,7 @@ pub mod backend;
 mod exec;
 
 // Re-exports
-pub use backend::transform::q32::Q32Options;
+pub use backend::q32::Q32Options;
 #[cfg(feature = "emulator")]
 pub use exec::GlslEmulatorModule;
 pub use exec::GlslJitModule;
@@ -41,6 +41,7 @@ pub use frontend::semantic::type_check::inference::infer_expr_type_in_context;
 
 // Public API functions
 pub use frontend::glsl_jit;
+pub use frontend::glsl_jit_streaming;
 
 #[cfg(feature = "emulator")]
 pub use frontend::{glsl_emu_riscv32, glsl_emu_riscv32_with_metadata};

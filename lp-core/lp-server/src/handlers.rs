@@ -13,6 +13,7 @@ use lp_model::{
 };
 use lp_shared::fs::LpFs;
 use lp_shared::output::OutputProvider;
+use lp_shared::time::TimeProvider;
 
 /// Log memory stats if callback is provided and returns values
 fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
@@ -34,6 +35,7 @@ pub fn handle_client_message(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessage, ServerError> {
@@ -48,6 +50,7 @@ pub fn handle_client_message(
             base_fs,
             output_provider,
             memory_stats,
+            time_provider,
             path.as_path(),
         )?,
         lp_model::ClientRequest::UnloadProject { handle } => {
@@ -127,6 +130,7 @@ fn handle_load_project(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
     log::info!("Loading project: {}", path.as_str());
@@ -136,6 +140,7 @@ fn handle_load_project(
         base_fs,
         output_provider.clone(),
         memory_stats.copied(),
+        time_provider,
     )?;
     log_memory(memory_stats, "load_project after");
     Ok(ServerMessagePayload::LoadProject { handle })

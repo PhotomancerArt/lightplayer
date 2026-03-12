@@ -19,7 +19,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn test_build_simple_function() {
         let target = Target::host_jit().unwrap();
-        let mut gl_module = GlModule::new_jit(target).unwrap();
+        let mut gl_module = GlModule::new_jit(target, crate::DecimalFormat::Q32).unwrap();
 
         let mut sig = Signature::new(CallConv::SystemV);
         sig.returns.push(AbiParam::new(types::I32));
@@ -40,7 +40,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn test_build_function_with_params() {
         let target = Target::host_jit().unwrap();
-        let mut gl_module = GlModule::new_jit(target).unwrap();
+        let mut gl_module = GlModule::new_jit(target, crate::DecimalFormat::Q32).unwrap();
 
         let mut sig = Signature::new(CallConv::SystemV);
         sig.params.push(AbiParam::new(types::I32));
@@ -63,7 +63,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn test_build_call_function() {
         let target = Target::host_jit().unwrap();
-        let mut gl_module = GlModule::new_jit(target).unwrap();
+        let mut gl_module = GlModule::new_jit(target, crate::DecimalFormat::Q32).unwrap();
 
         // First, build the callee
         let mut add_sig = Signature::new(CallConv::SystemV);
@@ -106,7 +106,7 @@ mod tests {
     #[cfg(feature = "std")]
     fn test_declare_function() {
         let target = Target::host_jit().unwrap();
-        let mut gl_module = GlModule::new_jit(target).unwrap();
+        let mut gl_module = GlModule::new_jit(target, crate::DecimalFormat::Q32).unwrap();
 
         let mut sig = Signature::new(CallConv::SystemV);
         sig.returns.push(AbiParam::new(types::I32));

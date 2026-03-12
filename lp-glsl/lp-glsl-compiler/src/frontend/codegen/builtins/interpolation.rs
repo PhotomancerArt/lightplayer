@@ -36,29 +36,29 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         if x_vals.len() > 1 && a_vals.len() == 1 {
             let a_scalar = a_vals[0];
             // Compute (1 - a)
-            let one = self.builder.ins().f32const(1.0);
-            let one_minus_a = self.builder.ins().fsub(one, a_scalar);
+            let one = self.emit_float_const(1.0);
+            let one_minus_a = self.emit_float_sub(one, a_scalar);
 
             for i in 0..x_vals.len() {
                 // x * (1-a)
-                let x_part = self.builder.ins().fmul(x_vals[i], one_minus_a);
+                let x_part = self.emit_float_mul(x_vals[i], one_minus_a);
                 // y * a
-                let y_part = self.builder.ins().fmul(y_vals[i], a_scalar);
+                let y_part = self.emit_float_mul(y_vals[i], a_scalar);
                 // x * (1-a) + y * a
-                result_vals.push(self.builder.ins().fadd(x_part, y_part));
+                result_vals.push(self.emit_float_add(x_part, y_part));
             }
         } else {
             // Component-wise mix
             for i in 0..x_vals.len() {
                 // (1 - a)
-                let one = self.builder.ins().f32const(1.0);
-                let one_minus_a = self.builder.ins().fsub(one, a_vals[i]);
+                let one = self.emit_float_const(1.0);
+                let one_minus_a = self.emit_float_sub(one, a_vals[i]);
                 // x * (1-a)
-                let x_part = self.builder.ins().fmul(x_vals[i], one_minus_a);
+                let x_part = self.emit_float_mul(x_vals[i], one_minus_a);
                 // y * a
-                let y_part = self.builder.ins().fmul(y_vals[i], a_vals[i]);
+                let y_part = self.emit_float_mul(y_vals[i], a_vals[i]);
                 // x * (1-a) + y * a
-                result_vals.push(self.builder.ins().fadd(x_part, y_part));
+                result_vals.push(self.emit_float_add(x_part, y_part));
             }
         }
 
@@ -74,15 +74,15 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let (x_vals, x_ty) = &args[1];
 
         let mut result_vals = Vec::new();
-        let zero = self.builder.ins().f32const(0.0);
-        let one = self.builder.ins().f32const(1.0);
+        let zero = self.emit_float_const(0.0);
+        let one = self.emit_float_const(1.0);
 
         // Handle scalar broadcast (step(float, vec3))
         if edge_vals.len() == 1 && x_vals.len() > 1 {
             let edge_scalar = edge_vals[0];
             for &x in x_vals {
                 // x < edge ? 0.0 : 1.0
-                let cmp = self.builder.ins().fcmp(
+                let cmp = self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::LessThan,
                     x,
                     edge_scalar,
@@ -92,7 +92,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         } else {
             // Component-wise step
             for i in 0..x_vals.len() {
-                let cmp = self.builder.ins().fcmp(
+                let cmp = self.emit_float_cmp(
                     cranelift_codegen::ir::condcodes::FloatCC::LessThan,
                     x_vals[i],
                     edge_vals[i],
@@ -115,10 +115,10 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let (x_vals, x_ty) = &args[2];
 
         let mut result_vals = Vec::new();
-        let zero = self.builder.ins().f32const(0.0);
-        let one = self.builder.ins().f32const(1.0);
-        let two = self.builder.ins().f32const(2.0);
-        let three = self.builder.ins().f32const(3.0);
+        let zero = self.emit_float_const(0.0);
+        let one = self.emit_float_const(1.0);
+        let two = self.emit_float_const(2.0);
+        let three = self.emit_float_const(3.0);
 
         // Handle scalar broadcast (smoothstep(float, float, vec3))
         if edge0_vals.len() == 1 && x_vals.len() > 1 {
@@ -127,19 +127,19 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
             for &x in x_vals {
                 // t = (x - edge0) / (edge1 - edge0)
-                let numerator = self.builder.ins().fsub(x, edge0_scalar);
-                let denominator = self.builder.ins().fsub(edge1_scalar, edge0_scalar);
-                let t_raw = self.builder.ins().fdiv(numerator, denominator);
+                let numerator = self.emit_float_sub(x, edge0_scalar);
+                let denominator = self.emit_float_sub(edge1_scalar, edge0_scalar);
+                let t_raw = self.emit_float_div(numerator, denominator);
 
                 // t = clamp(t, 0, 1)
-                let t_max = self.builder.ins().fmax(t_raw, zero);
-                let t_clamped = self.builder.ins().fmin(t_max, one);
+                let t_max = self.emit_float_max(t_raw, zero);
+                let t_clamped = self.emit_float_min(t_max, one);
 
                 // result = t * t * (3 - 2 * t)
-                let t_squared = self.builder.ins().fmul(t_clamped, t_clamped);
-                let two_t = self.builder.ins().fmul(two, t_clamped);
-                let three_minus_two_t = self.builder.ins().fsub(three, two_t);
-                let result = self.builder.ins().fmul(t_squared, three_minus_two_t);
+                let t_squared = self.emit_float_mul(t_clamped, t_clamped);
+                let two_t = self.emit_float_mul(two, t_clamped);
+                let three_minus_two_t = self.emit_float_sub(three, two_t);
+                let result = self.emit_float_mul(t_squared, three_minus_two_t);
 
                 result_vals.push(result);
             }
@@ -147,19 +147,19 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             // Component-wise smoothstep
             for i in 0..x_vals.len() {
                 // t = (x - edge0) / (edge1 - edge0)
-                let numerator = self.builder.ins().fsub(x_vals[i], edge0_vals[i]);
-                let denominator = self.builder.ins().fsub(edge1_vals[i], edge0_vals[i]);
-                let t_raw = self.builder.ins().fdiv(numerator, denominator);
+                let numerator = self.emit_float_sub(x_vals[i], edge0_vals[i]);
+                let denominator = self.emit_float_sub(edge1_vals[i], edge0_vals[i]);
+                let t_raw = self.emit_float_div(numerator, denominator);
 
                 // t = clamp(t, 0, 1)
-                let t_max = self.builder.ins().fmax(t_raw, zero);
-                let t_clamped = self.builder.ins().fmin(t_max, one);
+                let t_max = self.emit_float_max(t_raw, zero);
+                let t_clamped = self.emit_float_min(t_max, one);
 
                 // result = t * t * (3 - 2 * t)
-                let t_squared = self.builder.ins().fmul(t_clamped, t_clamped);
-                let two_t = self.builder.ins().fmul(two, t_clamped);
-                let three_minus_two_t = self.builder.ins().fsub(three, two_t);
-                let result = self.builder.ins().fmul(t_squared, three_minus_two_t);
+                let t_squared = self.emit_float_mul(t_clamped, t_clamped);
+                let two_t = self.emit_float_mul(two, t_clamped);
+                let three_minus_two_t = self.emit_float_sub(three, two_t);
+                let result = self.emit_float_mul(t_squared, three_minus_two_t);
 
                 result_vals.push(result);
             }

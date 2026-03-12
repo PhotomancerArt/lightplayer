@@ -150,7 +150,7 @@ pub fn emit_indexing<M: cranelift_module::Module>(
             })?
         } else if element_ty.is_matrix() {
             // Matrices are always float
-            cranelift_codegen::ir::types::F32
+            ctx.float_type()
         } else {
             // Scalar
             element_ty.to_cranelift_type().map_err(|e| {

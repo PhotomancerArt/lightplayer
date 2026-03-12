@@ -3,6 +3,7 @@
 use crate::backend::module::gl_module::GlModule;
 use crate::backend::target::Target;
 use crate::error::{GlslDiagnostics, GlslError};
+use crate::frontend::codegen::numeric::NumericMode;
 use crate::frontend::pipeline::CompilationPipeline;
 use crate::frontend::src_loc::GlSourceMap;
 use cranelift_codegen::ir::Function;
@@ -32,12 +33,12 @@ impl GlslCompiler {
     }
 
     /// Compile GLSL source to a GlModule<JITModule>
-    /// All functions are compiled with float types initially (no fixed-point conversion)
     pub fn compile_to_gl_module_jit(
         &mut self,
         source: &str,
         target: Target,
         max_errors: usize,
+        numeric_mode: NumericMode,
     ) -> Result<GlModule<JITModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
@@ -53,7 +54,11 @@ impl GlslCompiler {
         let triple = isa_ref.triple();
 
         // 3. Create GlModule
-        let mut gl_module = GlModule::new_jit(target)?;
+        let decimal_format = match &numeric_mode {
+            NumericMode::Q32(_) => crate::DecimalFormat::Q32,
+            NumericMode::Float(_) => crate::DecimalFormat::Float,
+        };
+        let mut gl_module = GlModule::new_jit(target, decimal_format)?;
 
         // 4. Create a shared source location manager for all functions
         use crate::frontend::src_loc_manager::SourceLocManager;
@@ -66,7 +71,7 @@ impl GlslCompiler {
             String::from(source),
         );
 
-        // 5. Declare all user functions with FLOAT signatures (no conversion)
+        // 5. Declare all user functions with numeric-mode-dependent signatures
         let mut func_ids: HashMap<String, FuncId> = HashMap::new();
 
         for user_func in &typed_ast.user_functions {
@@ -75,6 +80,7 @@ impl GlslCompiler {
                 &user_func.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let func_id = gl_module
                 .declare_function(&user_func.name, Linkage::Local, sig)
@@ -87,7 +93,7 @@ impl GlslCompiler {
             func_ids.insert(user_func.name.clone(), func_id);
         }
 
-        // 6. Compile all user functions to CLIF with FLOAT types
+        // 6. Compile all user functions to CLIF
         // Collect compiled functions first to avoid borrow conflicts
         let mut compiled_user_functions: Vec<(
             String,
@@ -102,6 +108,7 @@ impl GlslCompiler {
                 &user_func.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let func = {
                 // Pass gl_module directly
@@ -116,6 +123,7 @@ impl GlslCompiler {
                     &mut source_loc_manager,
                     &mut source_map,
                     main_file_id,
+                    numeric_mode.clone(),
                 )?
             };
             let glsl_sig = crate::frontend::semantic::functions::FunctionSignature {
@@ -132,13 +140,14 @@ impl GlslCompiler {
             gl_module.glsl_signatures.insert(name, glsl_sig);
         }
 
-        // 8. Compile main function to CLIF with FLOAT types (if present)
+        // 8. Compile main function to CLIF (if present)
         if let Some(ref main_function) = typed_ast.main_function {
             let main_sig = SignatureBuilder::build_with_triple(
                 &main_function.return_type,
                 &main_function.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let main_func = {
                 // Pass gl_module directly
@@ -153,6 +162,7 @@ impl GlslCompiler {
                     &mut source_loc_manager,
                     &mut source_map,
                     main_file_id,
+                    numeric_mode.clone(),
                 )?
             };
 
@@ -180,13 +190,13 @@ impl GlslCompiler {
     }
 
     /// Compile GLSL source to a GlModule<ObjectModule>
-    /// All functions are compiled with float types initially (no fixed-point conversion)
     #[cfg(feature = "emulator")]
     pub fn compile_to_gl_module_object(
         &mut self,
         source: &str,
         target: Target,
         max_errors: usize,
+        numeric_mode: NumericMode,
     ) -> Result<GlModule<ObjectModule>, GlslDiagnostics> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::signature::SignatureBuilder;
@@ -202,7 +212,11 @@ impl GlslCompiler {
         let triple = isa_ref.triple();
 
         // 3. Create GlModule
-        let mut gl_module = GlModule::new_object(target)?;
+        let decimal_format = match &numeric_mode {
+            NumericMode::Q32(_) => crate::DecimalFormat::Q32,
+            NumericMode::Float(_) => crate::DecimalFormat::Float,
+        };
+        let mut gl_module = GlModule::new_object(target, decimal_format)?;
 
         // 4. Create a shared source location manager for all functions
         use crate::frontend::src_loc_manager::SourceLocManager;
@@ -215,7 +229,7 @@ impl GlslCompiler {
             String::from(source),
         );
 
-        // 5. Declare all user functions with FLOAT signatures (no conversion)
+        // 5. Declare all user functions with numeric-mode-dependent signatures
         let mut func_ids: HashMap<String, FuncId> = HashMap::new();
 
         for user_func in &typed_ast.user_functions {
@@ -224,6 +238,7 @@ impl GlslCompiler {
                 &user_func.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let func_id = gl_module
                 .declare_function(&user_func.name, Linkage::Local, sig)
@@ -236,7 +251,7 @@ impl GlslCompiler {
             func_ids.insert(user_func.name.clone(), func_id);
         }
 
-        // 6. Compile all user functions to CLIF with FLOAT types
+        // 6. Compile all user functions to CLIF
         // Collect compiled functions first to avoid borrow conflicts
         let mut compiled_user_functions: Vec<(
             String,
@@ -251,6 +266,7 @@ impl GlslCompiler {
                 &user_func.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let func = {
                 // Pass gl_module directly
@@ -265,6 +281,7 @@ impl GlslCompiler {
                     &mut source_loc_manager,
                     &mut source_map,
                     main_file_id,
+                    numeric_mode.clone(),
                 )?
             };
             let glsl_sig = crate::frontend::semantic::functions::FunctionSignature {
@@ -281,13 +298,14 @@ impl GlslCompiler {
             gl_module.glsl_signatures.insert(name, glsl_sig);
         }
 
-        // 8. Compile main function to CLIF with FLOAT types (if present)
+        // 8. Compile main function to CLIF (if present)
         if let Some(ref main_function) = typed_ast.main_function {
             let main_sig = SignatureBuilder::build_with_triple(
                 &main_function.return_type,
                 &main_function.parameters,
                 pointer_type,
                 triple,
+                numeric_mode.scalar_type(),
             );
             let main_func = {
                 // Pass gl_module directly
@@ -302,6 +320,7 @@ impl GlslCompiler {
                     &mut source_loc_manager,
                     &mut source_map,
                     main_file_id,
+                    numeric_mode.clone(),
                 )?
             };
 
@@ -328,6 +347,47 @@ impl GlslCompiler {
         Ok(gl_module)
     }
 
+    /// Compile a single function to CLIF IR. Used by the streaming pipeline.
+    pub(crate) fn compile_single_function_to_clif<M: Module>(
+        &mut self,
+        func: &crate::frontend::semantic::TypedFunction,
+        _func_id: FuncId,
+        func_ids: &HashMap<String, FuncId>,
+        func_registry: &crate::frontend::semantic::functions::FunctionRegistry,
+        global_constants: &hashbrown::HashMap<
+            String,
+            crate::frontend::semantic::const_eval::ConstValue,
+        >,
+        gl_module: &mut crate::backend::module::gl_module::GlModule<M>,
+        isa: &dyn cranelift_codegen::isa::TargetIsa,
+        source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
+        source_map: &mut crate::frontend::src_loc::GlSourceMap,
+        file_id: crate::frontend::src_loc::GlFileId,
+        source_text_for_main: Option<&str>,
+        numeric_mode: NumericMode,
+    ) -> Result<Function, GlslError> {
+        let error_context = if func.name == "main" {
+            "main function"
+        } else {
+            "function"
+        };
+        let error_context = alloc::format!("{error_context} '{}'", func.name);
+        self.compile_function_to_clif_impl(
+            func,
+            func_ids,
+            func_registry,
+            global_constants,
+            gl_module,
+            isa,
+            source_text_for_main,
+            &error_context,
+            source_loc_manager,
+            source_map,
+            file_id,
+            numeric_mode,
+        )
+    }
+
     fn compile_function_to_clif<M: Module>(
         &mut self,
         func: &crate::frontend::semantic::TypedFunction,
@@ -343,6 +403,7 @@ impl GlslCompiler {
         source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
         source_map: &mut crate::frontend::src_loc::GlSourceMap,
         file_id: crate::frontend::src_loc::GlFileId,
+        numeric_mode: NumericMode,
     ) -> Result<Function, GlslError> {
         let error_context = format!("function '{}'", func.name);
         self.compile_function_to_clif_impl(
@@ -357,6 +418,7 @@ impl GlslCompiler {
             source_loc_manager,
             source_map,
             file_id,
+            numeric_mode,
         )
     }
 
@@ -375,6 +437,7 @@ impl GlslCompiler {
         source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
         source_map: &mut crate::frontend::src_loc::GlSourceMap,
         file_id: crate::frontend::src_loc::GlFileId,
+        numeric_mode: NumericMode,
     ) -> Result<Function, GlslError> {
         self.compile_function_to_clif_impl(
             main_func,
@@ -388,6 +451,7 @@ impl GlslCompiler {
             source_loc_manager,
             source_map,
             file_id,
+            numeric_mode,
         )
     }
 
@@ -407,6 +471,7 @@ impl GlslCompiler {
         source_loc_manager: &mut crate::frontend::src_loc_manager::SourceLocManager,
         source_map: &mut crate::frontend::src_loc::GlSourceMap,
         file_id: crate::frontend::src_loc::GlFileId,
+        numeric_mode: NumericMode,
     ) -> Result<Function, GlslError> {
         use crate::error::{ErrorCode, GlslError};
         use crate::frontend::codegen::context::VarInfo;
@@ -423,6 +488,7 @@ impl GlslCompiler {
             &func.parameters,
             pointer_type,
             triple,
+            numeric_mode.scalar_type(),
         );
         ctx.func.signature = sig.clone();
         use cranelift_codegen::ir::UserFuncName;
@@ -434,7 +500,11 @@ impl GlslCompiler {
         let entry_block = Self::setup_function_builder(&mut builder);
 
         let mut codegen_ctx = crate::frontend::codegen::context::CodegenContext::new(
-            builder, gl_module, source_map, file_id,
+            builder,
+            gl_module,
+            source_map,
+            file_id,
+            numeric_mode,
         );
         codegen_ctx.set_function_ids(func_ids);
         codegen_ctx.set_function_registry(func_registry);

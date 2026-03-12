@@ -8,7 +8,7 @@ use alloc::{
     string::{String, ToString},
 };
 use log;
-use lp_glsl_compiler::glsl_jit;
+use lp_glsl_compiler::glsl_jit_streaming;
 use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
@@ -30,7 +30,6 @@ unsafe impl Sync for FunctionPtr {}
 /// Shader node runtime
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
-    glsl_source: Option<String>, // Stored for state extraction
     executable: Option<Box<dyn GlslExecutable + Send + Sync>>, // Compiled shader (must be Send + Sync for NodeRuntime)
     texture_handle: Option<TextureHandle>,                     // Resolved texture handle
     compilation_error: Option<String>,                         // Compilation error if any
@@ -47,7 +46,6 @@ impl ShaderRuntime {
     pub fn new(node_handle: NodeHandle) -> Self {
         Self {
             config: None,
-            glsl_source: None,
             executable: None,
             texture_handle: None,
             compilation_error: None,
@@ -208,7 +206,6 @@ impl NodeRuntime for ShaderRuntime {
         _output_provider: Option<&dyn OutputProvider>,
     ) -> Result<(), Error> {
         self.executable = None;
-        self.glsl_source = None;
         self.direct_func_ptr = None;
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
@@ -310,7 +307,6 @@ impl NodeRuntime for ShaderRuntime {
                 lp_shared::fs::fs_event::ChangeType::Delete => {
                     // Clear shader executable
                     self.executable = None;
-                    self.glsl_source = None;
                     self.direct_func_ptr = None;
                     self.direct_call_conv = None;
                     self.direct_pointer_type = None;
@@ -485,24 +481,29 @@ impl ShaderRuntime {
                 error: format!("Invalid UTF-8 in GLSL file: {e}"),
             })?;
 
-        // Store source for state extraction
-        self.glsl_source = Some(glsl_source.clone());
-
-        // Update state
-        let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
-        self.state.glsl_code.set(frame_id, glsl_source.clone());
-
         Ok(glsl_source)
     }
 
     /// Compile GLSL source into executable
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
-        log::debug!(
-            "ShaderRuntime::compile_shader: Compiling shader {} ({} bytes)",
+        log::info!(
+            "Shader {} compilation starting ({} bytes)",
             self.node_handle.as_i32(),
             glsl_source.len()
         );
-        log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{glsl_source}");
+        // Avoid allocating full shader source for trace: truncate to first 120 chars
+        if log::log_enabled!(log::Level::Trace) {
+            let preview = if glsl_source.len() > 120 {
+                format!(
+                    "{}... ({} bytes total)",
+                    &glsl_source[..120],
+                    glsl_source.len()
+                )
+            } else {
+                glsl_source.to_string()
+            };
+            log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{preview}");
+        }
 
         use lp_glsl_compiler::Q32Options;
 
@@ -532,7 +533,7 @@ impl ShaderRuntime {
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
 
-        match glsl_jit(glsl_source, options) {
+        match glsl_jit_streaming(glsl_source, options) {
             Ok(executable) => {
                 // Extract function pointer and calling convention using trait method
                 // This allows us to make direct calls without the GlslValue conversion overhead
@@ -558,10 +559,6 @@ impl ShaderRuntime {
                 let frame_id = FrameId::default(); // NodeInitContext doesn't provide frame_id
                 self.state.error.set(frame_id, None);
 
-                log::debug!(
-                    "ShaderRuntime::compile_shader: Shader {} compiled successfully",
-                    self.node_handle.as_i32()
-                );
                 Ok(())
             }
             Err(e) => {
@@ -577,7 +574,7 @@ impl ShaderRuntime {
                 self.state.error.set(frame_id, Some(error_msg.clone()));
 
                 log::warn!(
-                    "ShaderRuntime::compile_shader: Shader {} compilation failed: {}",
+                    "Shader {} compilation failed: {}",
                     self.node_handle.as_i32(),
                     e
                 );
@@ -596,7 +593,25 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
-        self.compile_shader(&glsl_source)
+        let start_ms = ctx.now_ms();
+        let result = self.compile_shader(glsl_source.as_str());
+        if result.is_ok() {
+            if let (Some(start), Some(end)) = (start_ms, ctx.now_ms()) {
+                let elapsed_ms = end.saturating_sub(start);
+                log::info!(
+                    "Shader {} compiled in {}ms",
+                    self.node_handle.as_i32(),
+                    elapsed_ms
+                );
+            } else {
+                log::info!("Shader {} compiled", self.node_handle.as_i32());
+            }
+        }
+        result?;
+        // Store source in state (single copy; compile_shader no longer needs it)
+        let frame_id = FrameId::default();
+        self.state.glsl_code.set(frame_id, glsl_source);
+        Ok(())
     }
 }
 

@@ -33,38 +33,31 @@ use crate::exec::executable::{GlslExecutable, GlslOptions, RunMode};
 #[cfg(not(feature = "std"))]
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::JITModule;
+use cranelift_module::Module;
 #[cfg(feature = "emulator")]
 use cranelift_object::ObjectModule;
 
 use alloc::boxed::Box;
-#[cfg(feature = "emulator")]
 use alloc::string::String;
+use alloc::vec::Vec;
 
-/// Compile GLSL to GlModule<JITModule> (internal, reusable)
-/// This is the core compilation step for JIT execution
-pub fn compile_glsl_to_gl_module_jit(
-    source: &str,
-    options: &GlslOptions,
-) -> Result<GlModule<JITModule>, GlslDiagnostics> {
-    options.validate().map_err(GlslDiagnostics::from)?;
-    use crate::exec::executable::DecimalFormat;
-
-    // Use target override when set (e.g. embedded JIT); otherwise create from run_mode
-    let target = if let Some(ref t) = options.target_override {
-        t.clone()
-    } else {
-        #[cfg(feature = "std")]
+/// Build target for JIT compilation (shared by compile_glsl_to_gl_module_jit and glsl_jit_streaming)
+fn build_target_for_jit(options: &GlslOptions) -> Result<Target, GlslDiagnostics> {
+    if let Some(ref t) = options.target_override {
+        return Ok(t.clone());
+    }
+    #[cfg(feature = "std")]
+    {
         match &options.run_mode {
-            RunMode::HostJit => Target::host_jit()?,
-            RunMode::Emulator { .. } => {
-                return Err(GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "Emulator mode not supported for JIT compilation",
-                )));
-            }
+            RunMode::HostJit => Target::host_jit().map_err(GlslDiagnostics::from),
+            RunMode::Emulator { .. } => Err(GlslDiagnostics::from(GlslError::new(
+                ErrorCode::E0400,
+                "Emulator mode not supported for JIT compilation",
+            ))),
         }
-
-        #[cfg(not(feature = "std"))]
+    }
+    #[cfg(not(feature = "std"))]
+    {
         match &options.run_mode {
             RunMode::HostJit => {
                 let mut flag_builder = settings::builder();
@@ -99,41 +92,39 @@ pub fn compile_glsl_to_gl_module_jit(
                         )
                     })?;
                 let flags = settings::Flags::new(flag_builder);
-                Target::HostJit {
+                Ok(Target::HostJit {
                     arch: None,
                     flags,
                     isa: None,
-                }
+                })
             }
-            RunMode::Emulator { .. } => {
-                return Err(GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "Emulator mode not supported for JIT compilation",
-                )));
-            }
-        }
-    };
-
-    // Compile to GlModule (works in both std and no_std)
-    let mut compiler = GlslCompiler::new();
-    let mut module = compiler.compile_to_gl_module_jit(source, target, options.max_errors)?;
-
-    // Apply transformations
-    match options.decimal_format {
-        DecimalFormat::Q32 => {
-            use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform =
-                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
-            module = module.apply_transform(transform)?;
-        }
-        DecimalFormat::Float => {
-            return Err(GlslDiagnostics::from(GlslError::new(
-                crate::error::ErrorCode::E0400,
-                "Float format is not yet supported. Only Q32 format is currently supported. \
-                 Float format will cause TestCase relocation errors. Use Q32 format instead.",
-            )));
+            RunMode::Emulator { .. } => Err(GlslDiagnostics::from(GlslError::new(
+                ErrorCode::E0400,
+                "Emulator mode not supported for JIT compilation",
+            ))),
         }
     }
+}
+
+/// Compile GLSL to GlModule<JITModule> (internal, reusable)
+/// This is the core compilation step for JIT execution
+pub fn compile_glsl_to_gl_module_jit(
+    source: &str,
+    options: &GlslOptions,
+) -> Result<GlModule<JITModule>, GlslDiagnostics> {
+    options.validate().map_err(GlslDiagnostics::from)?;
+    use crate::exec::executable::DecimalFormat;
+
+    let target = build_target_for_jit(options)?;
+
+    use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
+    let numeric_mode = match options.decimal_format {
+        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
+    };
+    let mut compiler = GlslCompiler::new();
+    let module =
+        compiler.compile_to_gl_module_jit(source, target, options.max_errors, numeric_mode)?;
 
     Ok(module)
 }
@@ -165,46 +156,20 @@ pub fn compile_glsl_to_gl_module_object(
         }
     };
 
-    // Compile to GlModule
-    let mut module = compiler.compile_to_gl_module_object(source, target, options.max_errors)?;
-
-    // Capture original CLIF IR before transformation (only in std builds)
-    #[cfg(feature = "std")]
-    let original_clif = format_clif_module(&module).ok();
-    #[cfg(not(feature = "std"))]
-    let original_clif = None;
-
-    // Apply transformations
-    let transformed_clif = match options.decimal_format {
-        DecimalFormat::Q32 => {
-            use crate::backend::transform::q32::{FixedPointFormat, Q32Transform};
-            let transform =
-                Q32Transform::new(FixedPointFormat::Fixed16x16).with_q32_opts(options.q32_opts);
-            module = module.apply_transform(transform)?;
-            // Capture transformed CLIF IR after transformation (only in std builds)
-            #[cfg(feature = "std")]
-            {
-                format_clif_module(&module).ok()
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                None
-            }
-        }
-        DecimalFormat::Float => {
-            // No transformation needed, so transformed_clif is same as original_clif
-            #[cfg(feature = "std")]
-            {
-                original_clif.clone()
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                None
-            }
-        }
+    use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
+    let numeric_mode = match options.decimal_format {
+        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
     };
+    let module =
+        compiler.compile_to_gl_module_object(source, target, options.max_errors, numeric_mode)?;
 
-    Ok((module, original_clif, transformed_clif))
+    #[cfg(feature = "std")]
+    let clif = format_clif_module(&module).ok();
+    #[cfg(not(feature = "std"))]
+    let clif = None;
+
+    Ok((module, clif.clone(), clif))
 }
 
 /// Compile and JIT execute GLSL
@@ -219,6 +184,288 @@ pub fn glsl_jit(
     } else {
         crate::backend::codegen::jit::build_jit_executable(module)
     }?;
+    Ok(alloc::boxed::Box::new(jit))
+}
+
+/// Compile and JIT execute GLSL using streaming per-function pipeline.
+///
+/// Compiles functions one at a time (smallest AST first), freeing each function's
+/// IR before starting the next. Reduces peak heap usage on memory-constrained
+/// targets (e.g. ESP32). Uses Q32 fixed-point format.
+pub fn glsl_jit_streaming(
+    source: &str,
+    options: GlslOptions,
+) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
+    use crate::backend::builtins::registry::BuiltinId;
+    use crate::exec::executable::DecimalFormat;
+    use crate::frontend::codegen::numeric::{NumericMode, Q32Strategy};
+    use crate::frontend::codegen::signature::SignatureBuilder;
+    use crate::frontend::semantic::MAIN_FUNCTION_NAME;
+    use cranelift_module::{FuncId, FuncOrDataId, Linkage};
+    use hashbrown::HashMap;
+
+    options.validate().map_err(GlslDiagnostics::from)?;
+
+    let target = build_target_for_jit(&options)?;
+
+    let semantic_result = CompilationPipeline::parse_and_analyze(source, options.max_errors)?;
+    let typed_ast = semantic_result.typed_ast;
+
+    if options.decimal_format != DecimalFormat::Q32 {
+        return Err(GlslDiagnostics::from(GlslError::new(
+            ErrorCode::E0400,
+            "Streaming JIT only supports Q32 format",
+        )));
+    }
+
+    let numeric_mode = NumericMode::Q32(Q32Strategy::new(options.q32_opts));
+
+    let mut target_for_isa = target.clone();
+    let isa_ref = target_for_isa.create_isa().map_err(GlslDiagnostics::from)?;
+    let pointer_type = isa_ref.pointer_type();
+    let triple = isa_ref.triple();
+
+    let mut module =
+        GlModule::new_jit(target, DecimalFormat::Q32).map_err(GlslDiagnostics::from)?;
+
+    let mut sorted_names: Vec<String> = typed_ast
+        .user_functions
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+    if typed_ast.main_function.is_some() {
+        sorted_names.push(String::from(MAIN_FUNCTION_NAME));
+    }
+    sorted_names.sort();
+
+    let num_functions = sorted_names.len();
+    let num_builtins = BuiltinId::all().len();
+    let mut func_ids: HashMap<String, FuncId> =
+        HashMap::with_capacity(num_functions + num_builtins);
+
+    struct StreamingFuncInfo {
+        name: String,
+        func_id: FuncId,
+        ast_size: usize,
+    }
+
+    let mut sorted_functions: Vec<StreamingFuncInfo> = Vec::with_capacity(num_functions);
+
+    for name in &sorted_names {
+        let typed_func = typed_ast
+            .user_functions
+            .iter()
+            .find(|f| &f.name == name)
+            .or_else(|| {
+                typed_ast
+                    .main_function
+                    .as_ref()
+                    .filter(|_| *name == MAIN_FUNCTION_NAME)
+            })
+            .ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("Function '{name}' not found"),
+                ))
+            })?;
+
+        let sig = SignatureBuilder::build_with_triple(
+            &typed_func.return_type,
+            &typed_func.parameters,
+            pointer_type,
+            triple,
+            numeric_mode.scalar_type(),
+        );
+
+        let linkage = if *name == MAIN_FUNCTION_NAME {
+            Linkage::Export
+        } else {
+            Linkage::Local
+        };
+
+        let func_id = module
+            .module_mut_internal()
+            .declare_function(name, linkage, &sig)
+            .map_err(|e| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("Failed to declare '{name}': {e}"),
+                ))
+            })?;
+
+        func_ids.insert(name.clone(), func_id);
+
+        sorted_functions.push(StreamingFuncInfo {
+            name: name.clone(),
+            func_id,
+            ast_size: typed_func.ast_node_count(),
+        });
+    }
+
+    for builtin in BuiltinId::all() {
+        let name = builtin.name();
+        if let Some(FuncOrDataId::Func(func_id)) =
+            module.module_internal().declarations().get_name(name)
+        {
+            func_ids.insert(String::from(name), func_id);
+        }
+    }
+
+    sorted_functions.sort_by_key(|f| f.ast_size);
+
+    // Destructure typed_ast so each field is independently droppable.
+    // Functions are moved into a map and removed one-at-a-time in the loop,
+    // freeing each function's AST body before define_function (peak).
+    let crate::frontend::semantic::TypedShader {
+        user_functions,
+        main_function,
+        function_registry,
+        global_constants,
+    } = typed_ast;
+    let mut functions_by_name: HashMap<String, crate::frontend::semantic::TypedFunction> =
+        HashMap::with_capacity(num_functions);
+    for f in user_functions {
+        functions_by_name.insert(f.name.clone(), f);
+    }
+    if let Some(main_fn) = main_function {
+        functions_by_name.insert(String::from(MAIN_FUNCTION_NAME), main_fn);
+    }
+
+    use crate::frontend::src_loc::GlSourceMap;
+    use crate::frontend::src_loc_manager::SourceLocManager;
+
+    let mut source_loc_manager = SourceLocManager::new();
+    let mut source_map = GlSourceMap::new();
+    let main_file_id = source_map.add_file(
+        crate::frontend::src_loc::GlFileSource::Synthetic(String::from("main.glsl")),
+        String::from(source),
+    );
+
+    let mut glsl_signatures = HashMap::with_capacity(num_functions);
+
+    let mut compiler = GlslCompiler::new();
+    let mut ctx = module.module_internal().make_context();
+
+    for func_info in &sorted_functions {
+        let typed_func = functions_by_name.remove(&func_info.name).ok_or_else(|| {
+            GlslDiagnostics::from(GlslError::new(
+                ErrorCode::E0400,
+                alloc::format!("Function '{}' not found", func_info.name),
+            ))
+        })?;
+
+        let source_text_for_main = if func_info.name == MAIN_FUNCTION_NAME {
+            Some(source)
+        } else {
+            None
+        };
+
+        let func = compiler
+            .compile_single_function_to_clif(
+                &typed_func,
+                func_info.func_id,
+                &func_ids,
+                &function_registry,
+                &global_constants,
+                &mut module,
+                isa_ref.as_ref(),
+                &mut source_loc_manager,
+                &mut source_map,
+                main_file_id,
+                source_text_for_main,
+                numeric_mode.clone(),
+            )
+            .map_err(GlslDiagnostics::from)?;
+
+        let return_type = typed_func.return_type.clone();
+        let parameters = typed_func.parameters.clone();
+        drop(typed_func);
+
+        ctx.func = func;
+        module
+            .module_mut_internal()
+            .define_function(func_info.func_id, &mut ctx)
+            .map_err(|e| {
+                let error_str = alloc::format!("{e}");
+                let error_msg = if error_str.contains("Verifier errors") {
+                    #[cfg(feature = "cranelift-verifier")]
+                    {
+                        let module_ref = module.module_internal();
+                        let isa = module_ref.isa();
+                        use cranelift_codegen::verify_function;
+                        if let Err(verifier_errors) = verify_function(&ctx.func, isa) {
+                            #[cfg(feature = "std")]
+                            {
+                                use cranelift_codegen::print_errors::pretty_verifier_error;
+                                alloc::format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    func_info.name,
+                                    pretty_verifier_error(&ctx.func, None, verifier_errors)
+                                )
+                            }
+                            #[cfg(not(feature = "std"))]
+                            {
+                                alloc::format!(
+                                    "Failed to define function '{}': Verifier errors\n\n{}",
+                                    func_info.name,
+                                    verifier_errors
+                                )
+                            }
+                        } else {
+                            alloc::format!("Failed to define function '{}': {e}", func_info.name)
+                        }
+                    }
+                    #[cfg(not(feature = "cranelift-verifier"))]
+                    {
+                        alloc::format!("Failed to define function '{}': {e}", func_info.name)
+                    }
+                } else {
+                    alloc::format!("Failed to define function '{}': {e}", func_info.name)
+                };
+                GlslDiagnostics::from(GlslError::new(ErrorCode::E0400, error_msg))
+            })?;
+        {
+            let module_ref = module.module_internal();
+            module_ref.clear_context(&mut ctx);
+        }
+
+        glsl_signatures.insert(
+            func_info.name.clone(),
+            crate::frontend::semantic::functions::FunctionSignature {
+                name: func_info.name.clone(),
+                return_type,
+                parameters,
+            },
+        );
+    }
+
+    let cranelift_signatures: HashMap<String, cranelift_codegen::ir::Signature> = glsl_signatures
+        .iter()
+        .map(|(name, glsl_sig)| {
+            let sig = SignatureBuilder::build_with_triple(
+                &glsl_sig.return_type,
+                &glsl_sig.parameters,
+                pointer_type,
+                triple,
+                numeric_mode.scalar_type(),
+            );
+            (name.clone(), sig)
+        })
+        .collect();
+
+    let jit_func_id_map: HashMap<String, FuncId> = sorted_functions
+        .iter()
+        .map(|f| (f.name.clone(), f.func_id))
+        .collect();
+
+    let jit = crate::backend::codegen::jit::build_jit_executable_streaming(
+        module,
+        &jit_func_id_map,
+        glsl_signatures,
+        cranelift_signatures,
+    )
+    .map_err(GlslDiagnostics::from)?;
+
     Ok(alloc::boxed::Box::new(jit))
 }
 
@@ -240,7 +487,7 @@ pub fn glsl_emu_riscv32_with_metadata(
     options: GlslOptions,
     source_file_path: Option<String>,
 ) -> Result<Box<dyn GlslExecutable>, GlslDiagnostics> {
-    // Compile to GlModule (transformations already applied)
+    // Compile to GlModule (direct emission; single CLIF output)
     let (module, original_clif, transformed_clif) =
         compile_glsl_to_gl_module_object(source, &options)?;
 
@@ -274,4 +521,98 @@ pub fn glsl_emu_riscv32_with_metadata(
     module
         .build_executable(&emulator_options, original_clif, transformed_clif)
         .map_err(GlslDiagnostics::from)
+}
+
+#[cfg(test)]
+#[cfg(feature = "std")]
+mod tests {
+    use super::*;
+    use crate::exec::GlslValue;
+    use crate::exec::executable::{DecimalFormat, GlslOptions};
+    use crate::exec::execute_fn::execute_function;
+
+    fn q32_jit_options() -> GlslOptions {
+        let mut opts = GlslOptions::jit();
+        opts.decimal_format = DecimalFormat::Q32;
+        opts
+    }
+
+    #[test]
+    fn test_glsl_jit_streaming_basic() {
+        let source = r#"
+            vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                return vec4(1.0, 0.0, 0.0, 1.0);
+            }
+        "#;
+        let options = q32_jit_options();
+        let executable = glsl_jit_streaming(source, options).unwrap();
+        assert!(executable.get_direct_call_info("main").is_some());
+    }
+
+    #[test]
+    fn test_glsl_jit_streaming_multi_function() {
+        let source = r#"
+            float helper(float x) {
+                return x * 2.0;
+            }
+            vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                float v = helper(0.5);
+                return vec4(v, 0.0, 0.0, 1.0);
+            }
+        "#;
+        let options = q32_jit_options();
+        let executable = glsl_jit_streaming(source, options).unwrap();
+        assert!(executable.get_direct_call_info("main").is_some());
+    }
+
+    #[test]
+    fn test_streaming_returns_correct_value() {
+        let source = r#"
+            vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                return vec4(1.0, 0.0, 0.0, 1.0);
+            }
+        "#;
+        let options = q32_jit_options();
+        let args = [
+            GlslValue::Vec2([0.0, 0.0]),
+            GlslValue::Vec2([256.0, 256.0]),
+            GlslValue::F32(0.0),
+        ];
+        let mut streaming = glsl_jit_streaming(source, options.clone()).unwrap();
+        let mut batch = glsl_jit(source, options).unwrap();
+
+        let streaming_result = execute_function(&mut *streaming, "main", &args).unwrap();
+        let batch_result = execute_function(&mut *batch, "main", &args).unwrap();
+
+        assert!(streaming_result.approx_eq(&batch_result, 0.01));
+    }
+
+    #[test]
+    fn test_streaming_multi_function_cross_calls() {
+        let source = r#"
+            float double_it(float x) {
+                return x * 2.0;
+            }
+            float quad_it(float x) {
+                return double_it(double_it(x));
+            }
+            vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                float v = quad_it(0.25);
+                return vec4(v, 0.0, 0.0, 1.0);
+            }
+        "#;
+        let options = q32_jit_options();
+        let args = [
+            GlslValue::Vec2([0.0, 0.0]),
+            GlslValue::Vec2([256.0, 256.0]),
+            GlslValue::F32(0.0),
+        ];
+        let mut streaming = glsl_jit_streaming(source, options.clone()).unwrap();
+        let mut batch = glsl_jit(source, options).unwrap();
+
+        let streaming_result = execute_function(&mut *streaming, "main", &args).unwrap();
+        let batch_result = execute_function(&mut *batch, "main", &args).unwrap();
+
+        assert!(streaming_result.approx_eq(&batch_result, 0.01));
+    }
 }

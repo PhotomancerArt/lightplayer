@@ -3,7 +3,7 @@
 use crate::error::{ErrorCode, GlslError};
 use crate::frontend::codegen::context::CodegenContext;
 use crate::semantic::types::Type;
-use cranelift_codegen::ir::{InstBuilder, Value};
+use cranelift_codegen::ir::Value;
 
 use alloc::{format, vec, vec::Vec};
 #[allow(
@@ -28,7 +28,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
         let mut result_vals = Vec::new();
         for (x_val, y_val) in x_vals.iter().zip(y_vals.iter()) {
-            result_vals.push(self.builder.ins().fmul(*x_val, *y_val));
+            result_vals.push(self.emit_float_mul(*x_val, *y_val));
         }
 
         Ok((result_vals, x_ty.clone()))
@@ -76,7 +76,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             for row in 0..vec2_size {
                 // Rows come from vec2
                 // result[col][row] = c[col] * r[row]
-                let product = self.builder.ins().fmul(vec1_vals[col], vec2_vals[row]);
+                let product = self.emit_float_mul(vec1_vals[col], vec2_vals[row]);
                 result_vals.push(product);
             }
         }
@@ -135,9 +135,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let c = get(1, 0);
         let d = get(1, 1);
 
-        let ad = self.builder.ins().fmul(a, d);
-        let bc = self.builder.ins().fmul(b, c);
-        self.builder.ins().fsub(ad, bc)
+        let ad = self.emit_float_mul(a, d);
+        let bc = self.emit_float_mul(b, c);
+        self.emit_float_sub(ad, bc)
     }
 
     /// Helper to compute 3x3 determinant from column-major values
@@ -158,23 +158,23 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         let h = get(2, 1);
         let i = get(2, 2);
 
-        let ei = self.builder.ins().fmul(e, i);
-        let fh = self.builder.ins().fmul(f, h);
-        let ei_minus_fh = self.builder.ins().fsub(ei, fh);
-        let term1 = self.builder.ins().fmul(a, ei_minus_fh);
+        let ei = self.emit_float_mul(e, i);
+        let fh = self.emit_float_mul(f, h);
+        let ei_minus_fh = self.emit_float_sub(ei, fh);
+        let term1 = self.emit_float_mul(a, ei_minus_fh);
 
-        let di = self.builder.ins().fmul(d, i);
-        let fg = self.builder.ins().fmul(f, g);
-        let di_minus_fg = self.builder.ins().fsub(di, fg);
-        let term2 = self.builder.ins().fmul(b, di_minus_fg);
+        let di = self.emit_float_mul(d, i);
+        let fg = self.emit_float_mul(f, g);
+        let di_minus_fg = self.emit_float_sub(di, fg);
+        let term2 = self.emit_float_mul(b, di_minus_fg);
 
-        let dh = self.builder.ins().fmul(d, h);
-        let eg = self.builder.ins().fmul(e, g);
-        let dh_minus_eg = self.builder.ins().fsub(dh, eg);
-        let term3 = self.builder.ins().fmul(c, dh_minus_eg);
+        let dh = self.emit_float_mul(d, h);
+        let eg = self.emit_float_mul(e, g);
+        let dh_minus_eg = self.emit_float_sub(dh, eg);
+        let term3 = self.emit_float_mul(c, dh_minus_eg);
 
-        let term1_minus_term2 = self.builder.ins().fsub(term1, term2);
-        self.builder.ins().fadd(term1_minus_term2, term3)
+        let term1_minus_term2 = self.emit_float_sub(term1, term2);
+        self.emit_float_add(term1_minus_term2, term3)
     }
 
     /// Compute matrix determinant
@@ -211,9 +211,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                 let b = get(0, 1);
                 let c = get(1, 0);
                 let d = get(1, 1);
-                let ad = self.builder.ins().fmul(a, d);
-                let bc = self.builder.ins().fmul(b, c);
-                self.builder.ins().fsub(ad, bc)
+                let ad = self.emit_float_mul(a, d);
+                let bc = self.emit_float_mul(b, c);
+                self.emit_float_sub(ad, bc)
             }
             3 => {
                 // Sarrus rule for 3x3
@@ -228,30 +228,30 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                 let h = get(2, 1);
                 let i = get(2, 2);
 
-                let ei = self.builder.ins().fmul(e, i);
-                let fh = self.builder.ins().fmul(f, h);
-                let ei_minus_fh = self.builder.ins().fsub(ei, fh);
-                let term1 = self.builder.ins().fmul(a, ei_minus_fh);
+                let ei = self.emit_float_mul(e, i);
+                let fh = self.emit_float_mul(f, h);
+                let ei_minus_fh = self.emit_float_sub(ei, fh);
+                let term1 = self.emit_float_mul(a, ei_minus_fh);
 
-                let di = self.builder.ins().fmul(d, i);
-                let fg = self.builder.ins().fmul(f, g);
-                let di_minus_fg = self.builder.ins().fsub(di, fg);
-                let term2 = self.builder.ins().fmul(b, di_minus_fg);
+                let di = self.emit_float_mul(d, i);
+                let fg = self.emit_float_mul(f, g);
+                let di_minus_fg = self.emit_float_sub(di, fg);
+                let term2 = self.emit_float_mul(b, di_minus_fg);
 
-                let dh = self.builder.ins().fmul(d, h);
-                let eg = self.builder.ins().fmul(e, g);
-                let dh_minus_eg = self.builder.ins().fsub(dh, eg);
-                let term3 = self.builder.ins().fmul(c, dh_minus_eg);
+                let dh = self.emit_float_mul(d, h);
+                let eg = self.emit_float_mul(e, g);
+                let dh_minus_eg = self.emit_float_sub(dh, eg);
+                let term3 = self.emit_float_mul(c, dh_minus_eg);
 
-                let term1_minus_term2 = self.builder.ins().fsub(term1, term2);
-                self.builder.ins().fadd(term1_minus_term2, term3)
+                let term1_minus_term2 = self.emit_float_sub(term1, term2);
+                self.emit_float_add(term1_minus_term2, term3)
             }
             4 => {
                 // Cofactor expansion for 4x4 (using first row, 0-indexed)
                 // det(M) = Σ(-1)^(0+j) * M[0][j] * det(M_minor_j) = Σ(-1)^j * M[0][j] * det(M_minor_j)
                 // Where M_minor_j is the 3x3 matrix obtained by removing row 0 and column j
 
-                let zero = self.builder.ins().f32const(0.0);
+                let zero = self.emit_float_const(0.0);
                 let mut det = zero;
 
                 // Expand along first row (row 0)
@@ -261,9 +261,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
                     // Compute sign: (-1)^j = 1 if j is even, -1 if j is odd
                     let sign = if j % 2 == 0 {
-                        self.builder.ins().f32const(1.0)
+                        self.emit_float_const(1.0)
                     } else {
-                        self.builder.ins().f32const(-1.0)
+                        self.emit_float_const(-1.0)
                     };
 
                     // Extract 3x3 minor matrix by removing row 0 and column j
@@ -291,11 +291,11 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     let minor_det = self.compute_3x3_determinant(&minor_vals);
 
                     // Compute: sign * M[0][j] * det(minor)
-                    let m_times_det = self.builder.ins().fmul(m_0j, minor_det);
-                    let cofactor = self.builder.ins().fmul(sign, m_times_det);
+                    let m_times_det = self.emit_float_mul(m_0j, minor_det);
+                    let cofactor = self.emit_float_mul(sign, m_times_det);
 
                     // Accumulate: det += cofactor
-                    det = self.builder.ins().fadd(det, cofactor);
+                    det = self.emit_float_add(det, cofactor);
                 }
 
                 det
@@ -348,28 +348,28 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                 let d = get(1, 1);
 
                 // Compute determinant
-                let ad = self.builder.ins().fmul(a, d);
-                let bc = self.builder.ins().fmul(b, c);
-                let det = self.builder.ins().fsub(ad, bc);
+                let ad = self.emit_float_mul(a, d);
+                let bc = self.emit_float_mul(b, c);
+                let det = self.emit_float_sub(ad, bc);
 
                 // Compute 1/det
-                let one = self.builder.ins().f32const(1.0);
-                let inv_det = self.builder.ins().fdiv(one, det);
+                let one = self.emit_float_const(1.0);
+                let inv_det = self.emit_float_div(one, det);
 
                 // Compute inverse elements (stored column-major)
                 // result[0][0] = d * inv_det
                 // result[1][0] = -c * inv_det
                 // result[0][1] = -b * inv_det
                 // result[1][1] = a * inv_det
-                let zero = self.builder.ins().f32const(0.0);
-                let minus_c = self.builder.ins().fsub(zero, c);
-                let minus_b = self.builder.ins().fsub(zero, b);
+                let zero = self.emit_float_const(0.0);
+                let minus_c = self.emit_float_sub(zero, c);
+                let minus_b = self.emit_float_sub(zero, b);
 
                 let mut result_vals = Vec::new();
-                result_vals.push(self.builder.ins().fmul(d, inv_det)); // result[0][0]
-                result_vals.push(self.builder.ins().fmul(minus_c, inv_det)); // result[1][0]
-                result_vals.push(self.builder.ins().fmul(minus_b, inv_det)); // result[0][1]
-                result_vals.push(self.builder.ins().fmul(a, inv_det)); // result[1][1]
+                result_vals.push(self.emit_float_mul(d, inv_det)); // result[0][0]
+                result_vals.push(self.emit_float_mul(minus_c, inv_det)); // result[1][0]
+                result_vals.push(self.emit_float_mul(minus_b, inv_det)); // result[0][1]
+                result_vals.push(self.emit_float_mul(a, inv_det)); // result[1][1]
 
                 Ok((result_vals, m_ty.clone()))
             }
@@ -389,28 +389,28 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     let h = get(2, 1);
                     let i = get(2, 2);
 
-                    let ei = self.builder.ins().fmul(e, i);
-                    let fh = self.builder.ins().fmul(f, h);
-                    let ei_minus_fh = self.builder.ins().fsub(ei, fh);
-                    let term1 = self.builder.ins().fmul(a, ei_minus_fh);
+                    let ei = self.emit_float_mul(e, i);
+                    let fh = self.emit_float_mul(f, h);
+                    let ei_minus_fh = self.emit_float_sub(ei, fh);
+                    let term1 = self.emit_float_mul(a, ei_minus_fh);
 
-                    let di = self.builder.ins().fmul(d, i);
-                    let fg = self.builder.ins().fmul(f, g);
-                    let di_minus_fg = self.builder.ins().fsub(di, fg);
-                    let term2 = self.builder.ins().fmul(b, di_minus_fg);
+                    let di = self.emit_float_mul(d, i);
+                    let fg = self.emit_float_mul(f, g);
+                    let di_minus_fg = self.emit_float_sub(di, fg);
+                    let term2 = self.emit_float_mul(b, di_minus_fg);
 
-                    let dh = self.builder.ins().fmul(d, h);
-                    let eg = self.builder.ins().fmul(e, g);
-                    let dh_minus_eg = self.builder.ins().fsub(dh, eg);
-                    let term3 = self.builder.ins().fmul(c, dh_minus_eg);
+                    let dh = self.emit_float_mul(d, h);
+                    let eg = self.emit_float_mul(e, g);
+                    let dh_minus_eg = self.emit_float_sub(dh, eg);
+                    let term3 = self.emit_float_mul(c, dh_minus_eg);
 
-                    let term1_minus_term2 = self.builder.ins().fsub(term1, term2);
-                    self.builder.ins().fadd(term1_minus_term2, term3)
+                    let term1_minus_term2 = self.emit_float_sub(term1, term2);
+                    self.emit_float_add(term1_minus_term2, term3)
                 };
 
                 // Step 2: Compute 1/det
-                let one = self.builder.ins().f32const(1.0);
-                let inv_det = self.builder.ins().fdiv(one, det);
+                let one = self.emit_float_const(1.0);
+                let inv_det = self.emit_float_div(one, det);
 
                 // Step 3: Compute cofactor matrix
                 // Cofactor[i][j] = (-1)^(i+j) * det(minor_ij)
@@ -421,9 +421,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     for j in 0..3 {
                         // Compute sign: (-1)^(i+j)
                         let sign = if (i + j) % 2 == 0 {
-                            self.builder.ins().f32const(1.0)
+                            self.emit_float_const(1.0)
                         } else {
-                            self.builder.ins().f32const(-1.0)
+                            self.emit_float_const(-1.0)
                         };
 
                         // Extract 2x2 minor by removing row i and column j
@@ -450,7 +450,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         let minor_det = self.compute_2x2_determinant(&minor_vals);
 
                         // Cofactor = sign * det(minor)
-                        let cofactor = self.builder.ins().fmul(sign, minor_det);
+                        let cofactor = self.emit_float_mul(sign, minor_det);
                         cofactor_vals.push(cofactor);
                     }
                 }
@@ -466,7 +466,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         let adjugate_val = cofactor_vals[cofactor_idx];
 
                         // Step 5: Multiply by 1/det
-                        let inv_val = self.builder.ins().fmul(adjugate_val, inv_det);
+                        let inv_val = self.emit_float_mul(adjugate_val, inv_det);
                         result_vals.push(inv_val);
                     }
                 }
@@ -479,7 +479,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
 
                 // Step 1: Compute determinant
                 let det = {
-                    let zero = self.builder.ins().f32const(0.0);
+                    let zero = self.emit_float_const(0.0);
                     let mut det = zero;
 
                     // Expand along first row (row 0)
@@ -487,9 +487,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         let m_0j = get(0, j);
 
                         let sign = if j % 2 == 0 {
-                            self.builder.ins().f32const(1.0)
+                            self.emit_float_const(1.0)
                         } else {
-                            self.builder.ins().f32const(-1.0)
+                            self.emit_float_const(-1.0)
                         };
 
                         // Extract 3x3 minor matrix by removing row 0 and column j
@@ -507,16 +507,16 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         }
 
                         let minor_det = self.compute_3x3_determinant(&minor_vals);
-                        let m_times_det = self.builder.ins().fmul(m_0j, minor_det);
-                        let cofactor = self.builder.ins().fmul(sign, m_times_det);
-                        det = self.builder.ins().fadd(det, cofactor);
+                        let m_times_det = self.emit_float_mul(m_0j, minor_det);
+                        let cofactor = self.emit_float_mul(sign, m_times_det);
+                        det = self.emit_float_add(det, cofactor);
                     }
                     det
                 };
 
                 // Step 2: Compute 1/det
-                let one = self.builder.ins().f32const(1.0);
-                let inv_det = self.builder.ins().fdiv(one, det);
+                let one = self.emit_float_const(1.0);
+                let inv_det = self.emit_float_div(one, det);
 
                 // Step 3: Compute cofactor matrix
                 // Cofactor[i][j] = (-1)^(i+j) * det(minor_ij)
@@ -527,9 +527,9 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     for j in 0..4 {
                         // Compute sign: (-1)^(i+j)
                         let sign = if (i + j) % 2 == 0 {
-                            self.builder.ins().f32const(1.0)
+                            self.emit_float_const(1.0)
                         } else {
-                            self.builder.ins().f32const(-1.0)
+                            self.emit_float_const(-1.0)
                         };
 
                         // Extract 3x3 minor by removing row i and column j
@@ -556,7 +556,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         let minor_det = self.compute_3x3_determinant(&minor_vals);
 
                         // Cofactor = sign * det(minor)
-                        let cofactor = self.builder.ins().fmul(sign, minor_det);
+                        let cofactor = self.emit_float_mul(sign, minor_det);
                         cofactor_vals.push(cofactor);
                     }
                 }
@@ -572,7 +572,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                         let adjugate_val = cofactor_vals[cofactor_idx];
 
                         // Step 5: Multiply by 1/det
-                        let inv_val = self.builder.ins().fmul(adjugate_val, inv_det);
+                        let inv_val = self.emit_float_mul(adjugate_val, inv_det);
                         result_vals.push(inv_val);
                     }
                 }

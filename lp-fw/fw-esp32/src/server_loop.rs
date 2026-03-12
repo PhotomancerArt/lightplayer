@@ -4,7 +4,7 @@
 //!
 //! # Heartbeat Messages
 //!
-//! The server loop sends periodic heartbeat messages (every second) containing:
+//! The server loop sends periodic heartbeat messages (every 5 seconds) containing:
 //! - Current FPS (frames per second)
 //! - Total frame count since startup
 //! - List of loaded projects
@@ -39,7 +39,7 @@ use crate::time::Esp32TimeProvider;
 const FPS_LOG_INTERVAL: u32 = 60;
 
 /// Heartbeat message interval (send every N milliseconds)
-const HEARTBEAT_INTERVAL_MS: u64 = 1000; // Send every second
+const HEARTBEAT_INTERVAL_MS: u64 = 5000; // Send every 5 seconds
 
 /// FPS statistics window: stats are computed over samples from the last N milliseconds
 const FPS_STATS_WINDOW_MS: u64 = 5000;

@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, serve};
+use commands::{create, dev, emu_trace, heap_summary, serve, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -38,6 +38,13 @@ enum Cli {
         #[arg(long)]
         headless: bool,
     },
+    /// Upload project to host and exit (non-interactive)
+    Upload {
+        /// Project directory
+        dir: std::path::PathBuf,
+        /// Host to upload to (e.g. serial:auto, ws://localhost:2812/)
+        host: String,
+    },
     /// Create a new project
     Create {
         /// Project directory
@@ -48,6 +55,25 @@ enum Cli {
         /// Project UID (auto-generated if not provided)
         #[arg(long)]
         uid: Option<String>,
+    },
+    /// Run a project in the emulator with allocation tracing
+    EmuTrace {
+        /// Project directory
+        dir: std::path::PathBuf,
+        /// Number of frames to run
+        #[arg(long, default_value = "10")]
+        frames: u32,
+        /// Short note appended to trace directory name (kebab-cased)
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Summarize heap allocations from an emu-trace output directory
+    HeapSummary {
+        /// Trace directory (e.g. traces/2026-03-08-185520-simple-test)
+        trace_dir: std::path::PathBuf,
+        /// Number of top entries to show in live/hotspot sections (default: 20)
+        #[arg(long, default_value = "20")]
+        top: usize,
     },
 }
 
@@ -69,8 +95,15 @@ fn main() -> Result<()> {
             push_host: push,
             headless,
         }),
+        Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
         Cli::Create { dir, name, uid } => {
             create::handle_create(create::CreateArgs { dir, name, uid })
+        }
+        Cli::EmuTrace { dir, frames, note } => {
+            emu_trace::handle_emu_trace(emu_trace::EmuTraceArgs { dir, frames, note })
+        }
+        Cli::HeapSummary { trace_dir, top } => {
+            heap_summary::handle_heap_summary(&heap_summary::HeapSummaryArgs { trace_dir, top })
         }
     }
 }

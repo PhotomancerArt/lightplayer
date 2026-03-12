@@ -18,6 +18,7 @@ use lp_model::{
     },
 };
 use lp_shared::fs::{LpFs, fs_event::FsChange};
+use lp_shared::time::TimeProvider;
 
 /// Optional callback for memory stats (free_bytes, used_bytes). Used for shed logging on ESP32.
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
@@ -38,6 +39,8 @@ pub struct ProjectRuntime {
     pub next_handle: i32,
     /// Optional memory stats for shed logging (ESP32 passes, others None)
     pub memory_stats: Option<MemoryStatsFn>,
+    /// Optional time provider for perf timing (e.g. shader comp duration). ESP32/emu pass, others None.
+    pub time_provider: Option<Rc<dyn TimeProvider>>,
 }
 
 /// Node entry in runtime
@@ -81,6 +84,7 @@ impl ProjectRuntime {
         fs: Rc<RefCell<dyn LpFs>>,
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
     ) -> Result<Self, Error> {
         let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
 
@@ -92,6 +96,7 @@ impl ProjectRuntime {
             nodes: BTreeMap::new(),
             next_handle: 1,
             memory_stats,
+            time_provider,
         })
     }
 
@@ -667,22 +672,23 @@ impl ProjectRuntime {
 
     /// Handle a modify change
     fn handle_modify_change(&mut self, change: &FsChange) -> Result<(), Error> {
-        // Find which node this file belongs to - collect handle and path first
+        // Find which node this file belongs to - collect handle, path, and kind
         let mut target_handle: Option<NodeHandle> = None;
         let mut target_path: Option<LpPathBuf> = None;
+        let mut target_kind: Option<NodeKind> = None;
 
         for (handle, entry) in &self.nodes {
             if self.file_belongs_to_node(change.path.as_path(), entry.path.as_path()) {
                 target_handle = Some(*handle);
                 target_path = Some(entry.path.clone());
+                target_kind = Some(entry.kind);
                 break;
             }
         }
 
-        if let (Some(handle), Some(path)) = (target_handle, target_path) {
+        if let (Some(handle), Some(path), Some(kind)) = (target_handle, target_path, target_kind) {
             // Check if it's node.json
             if change.path.has_suffix("/node.json") {
-                log::info!("Node config changed: {} (updating)", path.as_str());
                 // Reload config
                 let (_, config_for_update) =
                     crate::project::loader::load_node(&*self.fs.borrow(), &path)?;
@@ -716,6 +722,7 @@ impl ProjectRuntime {
                         }
                     }
                 }
+                log::info!("Node {} [{:?}] config reloaded", path.as_str(), kind);
             } else {
                 // Other file change - call handle_fs_change on the node runtime
                 // Convert full path to relative path (node directory is chrooted in InitContext)
@@ -1339,6 +1346,10 @@ impl<'a> crate::runtime::contexts::NodeInitContext for InitContext<'a> {
         // SAFETY: This is safe because the trait only allows immutable access
         // and we're not holding the borrow across any potential panics
         unsafe { &*self.runtime.output_provider.as_ptr() }
+    }
+
+    fn now_ms(&self) -> Option<u64> {
+        self.runtime.time_provider.as_ref().map(|t| t.now_ms())
     }
 }
 

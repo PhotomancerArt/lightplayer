@@ -18,9 +18,20 @@ pub enum StepResult {
     Trap(TrapCode),
     /// Panic occurred, panic information available
     Panic(PanicInfo),
+    /// Out of memory — guest allocation failed
+    Oom(OomInfo),
     /// Fuel exhausted during run (instructions executed in this run)
     /// Only returned by run() functions, never by step()
     FuelExhausted(u64),
+}
+
+/// Information about an out-of-memory condition.
+#[derive(Debug, Clone)]
+pub struct OomInfo {
+    /// Size of the allocation that failed
+    pub size: u32,
+    /// Program counter where OOM occurred
+    pub pc: u32,
 }
 
 /// Information about a syscall (ECALL).

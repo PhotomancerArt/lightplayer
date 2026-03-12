@@ -18,7 +18,7 @@ mod symbols;
 // Re-export functions from submodules
 pub use backtrace::{format_backtrace, resolve_address};
 pub use object_file::load_object_file;
-pub use symbols::find_symbol_address;
+pub use symbols::{SymbolInfo, find_symbol_address};
 
 /// Information extracted from an ELF file for emulator loading.
 pub struct ElfLoadInfo {
@@ -30,6 +30,8 @@ pub struct ElfLoadInfo {
     pub entry_point: u32,
     /// Symbol map (symbol name -> address)
     pub symbol_map: HashMap<String, u32>,
+    /// Sorted list of symbols with sizes (for trace metadata)
+    pub symbol_list: Vec<SymbolInfo>,
     /// End address of code/ROM sections (where code sections end)
     pub code_end: u32,
     /// End offset of RAM sections (relative to RAM_START, where RAM sections end)
@@ -78,6 +80,7 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
         }
     }
     let symbol_map = symbols::build_symbol_map(&obj, text_base);
+    let symbol_list = symbols::build_symbol_list(&obj, text_base);
 
     // Step 8: Apply relocations
     relocations::apply_relocations(&obj, &mut code, &mut ram, &symbol_map)?;
@@ -136,6 +139,7 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
         ram,
         entry_point,
         symbol_map,
+        symbol_list,
         code_end,
         ram_end,
     })

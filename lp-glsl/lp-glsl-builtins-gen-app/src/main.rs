@@ -69,16 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("mod.rs");
     generate_mod_rs(&mod_rs_path, &q32_builtins);
 
-    // Generate testcase mapping in math.rs
-    let math_rs_path = workspace_root
+    // Generate testcase mapping in backend/builtins/mapping.rs
+    let mapping_rs_path = workspace_root
         .join("lp-glsl-compiler")
         .join("src")
         .join("backend")
-        .join("transform")
-        .join("q32")
-        .join("converters")
-        .join("math.rs");
-    generate_testcase_mapping(&math_rs_path, &builtins);
+        .join("builtins")
+        .join("mapping.rs");
+    generate_testcase_mapping(&mapping_rs_path, &builtins);
 
     // Generate lpfx_fns.rs
     let lpfx_fns_path = workspace_root
@@ -101,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &registry_path,
             &builtin_refs_path,
             &mod_rs_path,
-            &math_rs_path,
+            &mapping_rs_path,
             &lpfx_fns_path,
         ],
     );
@@ -403,6 +401,34 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
             output.push_str(&format!(
                 "            BuiltinId::{} => \"{}\",\n",
                 builtin.enum_variant, builtin.symbol_name
+            ));
+        }
+    }
+    output.push_str("        }\n");
+    output.push_str("    }\n\n");
+
+    // Generate format() method - which DecimalFormat this builtin belongs to (for format-aware declaration)
+    output.push_str(
+        "    /// Format affinity: Q32 builtins, Float (F32) builtins, or None (format-agnostic).\n",
+    );
+    output.push_str("    pub fn format(&self) -> Option<crate::DecimalFormat> {\n");
+    output.push_str("        match self {\n");
+    if builtins.is_empty() {
+        output.push_str("            BuiltinId::_Placeholder => None,\n");
+    } else {
+        for builtin in builtins {
+            let fmt = if builtin.enum_variant.starts_with("LpQ32")
+                || builtin.enum_variant.ends_with("Q32")
+            {
+                "Some(crate::DecimalFormat::Q32)"
+            } else if builtin.enum_variant.ends_with("F32") {
+                "Some(crate::DecimalFormat::Float)"
+            } else {
+                "None"
+            };
+            output.push_str(&format!(
+                "            BuiltinId::{} => {},\n",
+                builtin.enum_variant, fmt
             ));
         }
     }
@@ -911,10 +937,18 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str(
         "/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.\n",
     );
-    output.push_str(
-        "pub fn declare_builtins<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n",
-    );
+    output.push_str("/// `format` filters builtins: in Q32 mode, F32-only builtins are skipped; in Float mode, Q32 builtins are skipped.\n");
+    output.push_str("pub fn declare_builtins<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
     output.push_str("    for builtin in BuiltinId::all() {\n");
+    output.push_str("        if let Some(f) = builtin.format() {\n");
+    output.push_str("            if f != format {\n");
+    output.push_str("                continue;\n");
+    output.push_str("            }\n");
+    output.push_str("        }\n");
     output.push_str("        let name = builtin.name();\n");
     output.push_str("        let sig = builtin.signature(pointer_type);\n\n");
     output.push_str("        module\n");
@@ -938,9 +972,12 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     );
     output.push_str("///\n");
     output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output
-        .push_str("pub fn declare_for_jit<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n");
-    output.push_str("    declare_builtins(module, pointer_type)\n");
+    output.push_str("pub fn declare_for_jit<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
+    output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n\n");
 
     output.push_str("/// Declare builtin functions as external symbols for emulator mode.\n");
@@ -951,10 +988,12 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("/// be resolved by the linker when linking the static library.\n");
     output.push_str("///\n");
     output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str(
-        "pub fn declare_for_emulator<M: Module>(module: &mut M, pointer_type: types::Type) -> Result<(), GlslError> {\n",
-    );
-    output.push_str("    declare_builtins(module, pointer_type)\n");
+    output.push_str("pub fn declare_for_emulator<M: Module>(\n");
+    output.push_str("    module: &mut M,\n");
+    output.push_str("    pointer_type: types::Type,\n");
+    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str(") -> Result<(), GlslError> {\n");
+    output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n");
 
     fs::write(path, output).expect("Failed to write registry.rs");
@@ -1127,7 +1166,7 @@ fn generate_mod_rs(path: &Path, builtins: &[BuiltinInfo]) {
 
 fn generate_testcase_mapping(path: &Path, builtins: &[BuiltinInfo]) {
     // Read existing file
-    let content = fs::read_to_string(path).expect("Failed to read math.rs");
+    let content = fs::read_to_string(path).expect("Failed to read mapping.rs");
 
     // Find the map_testcase_to_builtin function and replace it
     let start_marker = "/// Map TestCase function name and argument count to BuiltinId.";
@@ -1220,7 +1259,7 @@ fn generate_testcase_mapping(path: &Path, builtins: &[BuiltinInfo]) {
     new_function.push_str("}\n");
 
     let new_content = format!("{}{}{}", before, new_function, after);
-    fs::write(path, new_content).expect("Failed to write math.rs");
+    fs::write(path, new_content).expect("Failed to write mapping.rs");
 }
 
 fn format_generated_files(workspace_root: &Path, files: &[&Path]) {

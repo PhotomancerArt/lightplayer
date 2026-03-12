@@ -7,15 +7,15 @@
 //! Pin 12 is excluded as it crashes the device.
 
 extern crate alloc;
+#[macro_use]
+extern crate log;
 
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use embassy_time::{Duration, Instant};
 use esp_hal::gpio::Level;
-#[macro_use]
-extern crate log;
 
-use crate::board::{init_board, start_runtime};
+use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
 use crate::serial::Esp32UsbSerialIo;
 

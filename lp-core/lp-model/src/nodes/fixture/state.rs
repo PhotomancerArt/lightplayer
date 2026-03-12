@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
 use crate::nodes::handle::NodeHandle;
@@ -72,7 +72,7 @@ impl FixtureState {
 
 impl_state_serialization! {
     FixtureState => SerializableFixtureState {
-        lamp_colors: Vec<u8>,
+        #[base64] lamp_colors: Vec<u8>,
         mapping_cells: Vec<MappingCell>,
         texture_handle: Option<NodeHandle>,
         output_handle: Option<NodeHandle>,

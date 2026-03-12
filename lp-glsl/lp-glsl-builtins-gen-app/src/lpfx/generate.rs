@@ -24,45 +24,15 @@ pub fn generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String {
     output.push_str("//!     scripts/build-builtins.sh\n\n");
 
     // Imports
-    output.push_str("use super::lpfx_fn::{LpfxFn, LpfxFnImpl};\n");
-    output.push_str("use crate::backend::builtins::registry::BuiltinId;\n");
     output.push_str(
-        "use crate::semantic::functions::{FunctionSignature, ParamQualifier, Parameter};\n",
+        "use super::lpfx_fn::{FunctionSignatureRef, LpfxFn, LpfxFnImpl, ParameterRef};\n",
     );
-    output.push_str("use crate::semantic::types::Type;\n");
-    output.push_str("use alloc::{boxed::Box, string::String, vec, vec::Vec};\n\n");
+    output.push_str("use crate::backend::builtins::registry::BuiltinId;\n");
+    output.push_str("use crate::semantic::functions::ParamQualifier;\n");
+    output.push_str("use crate::semantic::types::Type;\n\n");
 
-    // lpfx_fns() function
-    output.push_str("/// Registry of all LPFX functions\n");
-    output.push_str("///\n");
-    output.push_str("/// This is the single source of truth for all LPFX function definitions.\n");
-    output.push_str("/// Functions are looked up by name from this array.\n");
-    output.push_str("///\n");
-    output.push_str("/// Returns a static reference to avoid recreating the Vec on every call.\n");
-    output.push_str("pub fn lpfx_fns() -> &'static [LpfxFn] {\n");
-    output.push_str("    #[cfg(feature = \"std\")]\n");
-    output.push_str("    {\n");
-    output.push_str("        static FUNCTIONS: std::sync::OnceLock<&'static [LpfxFn]> = std::sync::OnceLock::new();\n");
-    output.push_str("        *FUNCTIONS.get_or_init(|| init_functions())\n");
-    output.push_str("    }\n");
-    output.push_str("    #[cfg(not(feature = \"std\"))]\n");
-    output.push_str("    {\n");
-    output.push_str("        // In no_std, use a static initialized on first access\n");
-    output.push_str("        // This is safe because the data is immutable after initialization\n");
-    output.push_str("        static mut FUNCTIONS: Option<&'static [LpfxFn]> = None;\n");
-    output.push_str("        unsafe {\n");
-    output.push_str("            let ptr = core::ptr::addr_of_mut!(FUNCTIONS);\n");
-    output.push_str("            if (*ptr).is_none() {\n");
-    output.push_str("                *ptr = Some(init_functions());\n");
-    output.push_str("            }\n");
-    output.push_str("            (*ptr).unwrap_unchecked()\n");
-    output.push_str("        }\n");
-    output.push_str("    }\n");
-    output.push_str("}\n\n");
-
-    // init_functions() function
-    output.push_str("fn init_functions() -> &'static [LpfxFn] {\n");
-    output.push_str("    let vec: Vec<LpfxFn> = vec![\n");
+    // Static array
+    output.push_str("static LPFX_FNS: &[LpfxFn] = &[\n");
 
     // Group functions by GLSL name for overload support
     let grouped = group_functions_by_name(parsed_functions);
@@ -115,8 +85,18 @@ pub fn generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String {
         }
     }
 
-    output.push_str("    ];\n");
-    output.push_str("    Box::leak(vec.into_boxed_slice())\n");
+    output.push_str("];\n\n");
+
+    // lpfx_fns() function
+    output.push_str("/// Registry of all LPFX functions\n");
+    output.push_str("///\n");
+    output.push_str("/// This is the single source of truth for all LPFX function definitions.\n");
+    output.push_str("/// Functions are looked up by name from this array.\n");
+    output.push_str("///\n");
+    output
+        .push_str("/// Returns a static reference. Data lives in .rodata (no heap allocations).\n");
+    output.push_str("pub fn lpfx_fns() -> &'static [LpfxFn] {\n");
+    output.push_str("    LPFX_FNS\n");
     output.push_str("}\n");
 
     output
@@ -136,18 +116,18 @@ fn group_functions_by_name(
     grouped
 }
 
-/// Format a FunctionSignature as Rust code
+/// Format a FunctionSignature as Rust code (emits FunctionSignatureRef with &'static str)
 fn format_function_signature(sig: &FunctionSignature) -> String {
     let mut output = String::new();
-    output.push_str("FunctionSignature {\n");
+    output.push_str("FunctionSignatureRef {\n");
     output.push_str(&format!(
-        "                name: String::from(\"{}\"),\n",
-        sig.name
+        "                name: \"{}\",\n",
+        sig.name.replace('\\', "\\\\").replace('"', "\\\"")
     ));
     output.push_str("                return_type: ");
     output.push_str(&format_type(&sig.return_type));
     output.push_str(",\n");
-    output.push_str("                parameters: vec![\n");
+    output.push_str("                parameters: &[\n");
 
     for param in &sig.parameters {
         output.push_str("                    ");
@@ -160,11 +140,12 @@ fn format_function_signature(sig: &FunctionSignature) -> String {
     output
 }
 
-/// Format a Parameter as Rust code
+/// Format a Parameter as Rust code (emits ParameterRef with &'static str)
 fn format_parameter(param: &Parameter) -> String {
+    let escaped_name = param.name.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
-        "Parameter {{\n                        name: String::from(\"{}\"),\n                        ty: {},\n                        qualifier: {},\n                    }}",
-        param.name,
+        "ParameterRef {{ name: \"{}\", ty: {}, qualifier: {} }}",
+        escaped_name,
         format_type(&param.ty),
         format_param_qualifier(&param.qualifier)
     )

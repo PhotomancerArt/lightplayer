@@ -25,8 +25,8 @@ test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
 test_usb = []  # Test USB serial communication
-demo_project = []  # Embed demo project and auto-load on boot (off by default; use for standalone runs)
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
+memory_fs = []  # Use in-memory filesystem instead of persistent flash
 
 [dependencies]
 embassy-executor = "0.9.1"
@@ -63,6 +63,10 @@ smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
+
+embedded-storage = "0.3"
+esp-storage = { version = "0.8", features = ["esp32c6"] }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true

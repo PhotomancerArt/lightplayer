@@ -4,7 +4,7 @@
 
 use super::lpfx_fn::LpfxFn;
 use crate::semantic::types::Type;
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String};
 
 /// Check if a function name is an LPFX function
 ///
@@ -34,38 +34,25 @@ fn get_cached_functions() -> &'static [LpfxFn] {
 /// * `Some(function)` if exactly one matching overload is found
 /// * `None` if no match or ambiguous (multiple exact matches)
 pub fn find_lpfx_fn(name: &str, arg_types: &[Type]) -> Option<&'static LpfxFn> {
-    // Find all functions with matching name
-    let candidates: Vec<&LpfxFn> = get_cached_functions()
-        .iter()
-        .filter(|f| f.glsl_sig.name == name)
-        .collect();
+    let functions = get_cached_functions();
+    let mut exact_match: Option<&'static LpfxFn> = None;
 
-    if candidates.is_empty() {
-        return None;
+    for func in functions.iter() {
+        if func.glsl_sig.name != name {
+            continue;
+        }
+        if func.glsl_sig.parameters.len() != arg_types.len() {
+            continue;
+        }
+        if !matches_signature(func, arg_types) {
+            continue;
+        }
+        if exact_match.is_some() {
+            return None; // Ambiguous: multiple matches
+        }
+        exact_match = Some(func);
     }
-
-    // Filter to functions with matching parameter count
-    let matching_count: Vec<&LpfxFn> = candidates
-        .into_iter()
-        .filter(|f| f.glsl_sig.parameters.len() == arg_types.len())
-        .collect();
-
-    if matching_count.is_empty() {
-        return None;
-    }
-
-    // Find exact type matches
-    let exact_matches: Vec<&LpfxFn> = matching_count
-        .into_iter()
-        .filter(|f| matches_signature(f, arg_types))
-        .collect();
-
-    // Return first match, or None if ambiguous (multiple matches) or no match
-    if exact_matches.len() == 1 {
-        Some(exact_matches[0])
-    } else {
-        None
-    }
+    exact_match
 }
 
 /// Check if a function signature matches the given argument types

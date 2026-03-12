@@ -68,13 +68,7 @@ pub extern "C" fn __lp_q32_log(x: i32) -> i32 {
 
         // It's unlikely that logarithm is very large, so avoid overshooting.
         // libfixmath clamps to fix16_from_int(3) which is 3 << 16
-        let delta_clamped = if delta > (3 << 16) {
-            3 << 16
-        } else if delta < -(3 << 16) {
-            -(3 << 16)
-        } else {
-            delta
-        };
+        let delta_clamped = delta.clamp(-(3 << 16), 3 << 16);
 
         guess += delta_clamped;
 

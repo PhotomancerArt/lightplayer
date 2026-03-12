@@ -197,7 +197,7 @@ pub fn build_call_signature(
 
     // Add parameters, handling out/inout as pointers
     use crate::semantic::functions::ParamQualifier;
-    for param in &func.glsl_sig.parameters {
+    for param in func.glsl_sig.parameters {
         match param.qualifier {
             ParamQualifier::Out | ParamQualifier::InOut => {
                 // Out/inout parameters: pass as single pointer

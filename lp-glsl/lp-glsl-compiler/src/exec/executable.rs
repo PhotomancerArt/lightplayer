@@ -178,7 +178,7 @@ pub const DEFAULT_MAX_ERRORS: usize = 20;
 pub struct GlslOptions {
     pub run_mode: RunMode,
     pub decimal_format: DecimalFormat,
-    pub q32_opts: crate::backend::transform::q32::Q32Options,
+    pub q32_opts: crate::backend::q32::Q32Options,
     /// Use memory-optimized JIT path that frees CLIF IR after each function.
     /// Reduces OOM risk on embedded (no_std). Default: true when `std` is disabled.
     pub memory_optimized: bool,
@@ -244,7 +244,7 @@ impl GlslOptions {
         Self {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Float,
-            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: Self::default_memory_optimized(),
             target_override: None,
             max_errors: DEFAULT_MAX_ERRORS,
@@ -262,7 +262,7 @@ impl GlslOptions {
                 log_level: None,
             },
             decimal_format: DecimalFormat::Q32,
-            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
             max_errors: DEFAULT_MAX_ERRORS,
@@ -281,7 +281,7 @@ impl GlslOptions {
                 max_instructions: 10_000,
             },
             decimal_format: DecimalFormat::Q32,
-            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
             max_errors: DEFAULT_MAX_ERRORS,
@@ -301,7 +301,7 @@ impl GlslOptions {
         Ok(Self {
             run_mode: RunMode::HostJit,
             decimal_format: DecimalFormat::Q32,
-            q32_opts: crate::backend::transform::q32::Q32Options::default(),
+            q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: true,
             target_override: Some(target),
             max_errors: DEFAULT_MAX_ERRORS,

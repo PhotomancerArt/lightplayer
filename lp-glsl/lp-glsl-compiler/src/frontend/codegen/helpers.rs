@@ -33,7 +33,7 @@ fn generate_default_scalar_return<M: cranelift_module::Module>(
 ) -> Result<(), GlslError> {
     let return_val = match return_type {
         Type::Int | Type::UInt => ctx.builder.ins().iconst(types::I32, 0),
-        Type::Float => ctx.builder.ins().f32const(0.0),
+        Type::Float => ctx.emit_float_const(0.0),
         Type::Bool => ctx.builder.ins().iconst(types::I8, 0),
         _ => {
             return Err(GlslError::new(
@@ -70,7 +70,7 @@ fn write_zeros_to_structreturn_buffer<M: cranelift_module::Module>(
     element_count: usize,
 ) {
     for i in 0..element_count {
-        let zero_val = ctx.builder.ins().f32const(0.0);
+        let zero_val = ctx.emit_float_const(0.0);
         let offset = (i * crate::frontend::codegen::constants::F32_SIZE_BYTES) as i32;
         ctx.builder
             .ins()
@@ -84,7 +84,7 @@ fn create_zero_value<M: cranelift_module::Module>(
     base_ty: &Type,
 ) -> Result<cranelift_codegen::ir::Value, GlslError> {
     match base_ty {
-        Type::Float => Ok(ctx.builder.ins().f32const(0.0)),
+        Type::Float => Ok(ctx.emit_float_const(0.0)),
         Type::Int | Type::UInt => Ok(ctx.builder.ins().iconst(types::I32, 0)),
         Type::Bool => Ok(ctx.builder.ins().iconst(types::I8, 0)),
         _ => Err(GlslError::new(
@@ -177,7 +177,7 @@ fn generate_default_matrix_return<M: cranelift_module::Module>(
         let mut vals = Vec::new();
         // Matrices are always float-based, return zero matrix
         for _ in 0..element_count {
-            vals.push(ctx.builder.ins().f32const(0.0));
+            vals.push(ctx.emit_float_const(0.0));
         }
         ctx.builder.ins().return_(&vals);
     }

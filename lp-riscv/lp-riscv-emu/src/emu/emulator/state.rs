@@ -30,6 +30,9 @@ pub struct Riscv32Emulator {
     pub(super) start_time: Option<Instant>,
     /// Time mode for controlling time advancement
     pub(super) time_mode: TimeMode,
+    /// Allocation tracer for memory debugging (only when std feature enabled)
+    #[cfg(feature = "std")]
+    pub(super) alloc_tracer: Option<crate::alloc_trace::AllocTracer>,
 }
 
 impl Riscv32Emulator {
@@ -57,6 +60,8 @@ impl Riscv32Emulator {
             #[cfg(feature = "std")]
             start_time: None,
             time_mode: TimeMode::RealTime,
+            #[cfg(feature = "std")]
+            alloc_tracer: None,
         }
     }
 
@@ -80,6 +85,27 @@ impl Riscv32Emulator {
     pub fn with_allow_unaligned_access(mut self, allow: bool) -> Self {
         self.memory.set_allow_unaligned_access(allow);
         self
+    }
+
+    /// Enable allocation tracing. Events are written to `heap-trace.jsonl` in `trace_dir`.
+    #[cfg(feature = "std")]
+    pub fn with_alloc_trace(
+        mut self,
+        trace_dir: &std::path::Path,
+        metadata: &crate::alloc_trace::TraceMetadata,
+    ) -> Result<Self, std::io::Error> {
+        self.alloc_tracer = Some(crate::alloc_trace::AllocTracer::new(trace_dir, metadata)?);
+        Ok(self)
+    }
+
+    /// Flush and close the allocation tracer, returning the event count.
+    #[cfg(feature = "std")]
+    pub fn finish_alloc_trace(&mut self) -> Result<u64, std::io::Error> {
+        if let Some(ref mut tracer) = self.alloc_tracer {
+            tracer.finish()
+        } else {
+            Ok(0)
+        }
     }
 
     /// Get the number of instructions executed so far.

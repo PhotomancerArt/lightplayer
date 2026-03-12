@@ -7,6 +7,7 @@ pub mod expr;
 pub mod helpers;
 pub mod lpfx_fns;
 pub mod lvalue;
+pub mod numeric;
 pub mod rvalue;
 pub mod signature;
 pub mod stmt;

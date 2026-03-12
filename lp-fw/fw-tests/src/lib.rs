@@ -1,6 +1,8 @@
 //! Firmware integration tests
 
-pub mod transport_emu_serial;
+pub mod transport_emu_serial {
+    pub use lp_client::transport_emu_serial::SerialEmuClientTransport;
+}
 
 #[cfg(feature = "test_usb")]
 pub mod test_output;

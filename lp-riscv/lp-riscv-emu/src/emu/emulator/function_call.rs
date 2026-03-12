@@ -141,6 +141,12 @@ impl Riscv32Emulator {
                         regs: self.regs,
                     });
                 }
+                StepResult::Oom(info) => {
+                    return Err(EmulatorError::Oom {
+                        info,
+                        regs: self.regs,
+                    });
+                }
                 StepResult::Continue => {
                     // Continue execution
                 }
@@ -153,7 +159,6 @@ impl Riscv32Emulator {
                     });
                 }
                 StepResult::FuelExhausted(_) => {
-                    // step() never returns FuelExhausted
                     unreachable!("step() should never return FuelExhausted");
                 }
             }
@@ -291,6 +296,12 @@ impl Riscv32Emulator {
                         regs: self.regs,
                     });
                 }
+                StepResult::Oom(info) => {
+                    return Err(EmulatorError::Oom {
+                        info,
+                        regs: self.regs,
+                    });
+                }
                 StepResult::Continue => {
                     // Continue execution
                 }
@@ -303,7 +314,6 @@ impl Riscv32Emulator {
                     });
                 }
                 StepResult::FuelExhausted(_) => {
-                    // step() never returns FuelExhausted
                     unreachable!("step() should never return FuelExhausted");
                 }
             }

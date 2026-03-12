@@ -23,48 +23,62 @@ impl SignatureBuilder {
 
     /// Build a complete signature from GLSL return type and parameters.
     /// `pointer_type` is required when the return type is a composite type (vector or matrix).
-    ///
-    /// Note: StructReturn parameter is added FIRST (before regular params) to match ABI requirements.
-    pub fn build(return_type: &Type, parameters: &[Parameter], pointer_type: IrType) -> Signature {
+    /// `scalar_float_type` is F32 for float mode, I32 for Q32 fixed-point mode.
+    pub fn build(
+        return_type: &Type,
+        parameters: &[Parameter],
+        pointer_type: IrType,
+        scalar_float_type: IrType,
+    ) -> Signature {
         let mut sig = Self::new();
-        // Add StructReturn FIRST if needed (before regular params, like cranelift-examples)
-        Self::add_return_type(&mut sig, return_type, pointer_type);
-        // Then add regular parameters
-        Self::add_parameters(&mut sig, parameters, pointer_type);
+        Self::add_return_type(&mut sig, return_type, pointer_type, scalar_float_type);
+        Self::add_parameters(&mut sig, parameters, pointer_type, scalar_float_type);
         sig
     }
 
     /// Build a complete signature from GLSL return type and parameters with ISA-specific calling convention.
     /// `pointer_type` is required when the return type is a composite type (vector or matrix).
-    /// `triple` is used to determine the correct calling convention for the target ISA.
-    ///
-    /// Note: StructReturn parameter is added FIRST (before regular params) to match ABI requirements.
+    /// `scalar_float_type` is F32 for float mode, I32 for Q32 fixed-point mode.
     pub fn build_with_triple(
         return_type: &Type,
         parameters: &[Parameter],
         pointer_type: IrType,
         triple: &Triple,
+        scalar_float_type: IrType,
     ) -> Signature {
         let mut sig = Self::new_with_triple(triple);
-        // Add StructReturn FIRST if needed (before regular params, like cranelift-examples)
-        Self::add_return_type(&mut sig, return_type, pointer_type);
-        // Then add regular parameters
-        Self::add_parameters(&mut sig, parameters, pointer_type);
+        Self::add_return_type(&mut sig, return_type, pointer_type, scalar_float_type);
+        Self::add_parameters(&mut sig, parameters, pointer_type, scalar_float_type);
         sig
     }
 
     /// Add parameters to a signature from GLSL parameters.
-    pub fn add_parameters(sig: &mut Signature, parameters: &[Parameter], pointer_type: IrType) {
+    pub fn add_parameters(
+        sig: &mut Signature,
+        parameters: &[Parameter],
+        pointer_type: IrType,
+        scalar_float_type: IrType,
+    ) {
         for param in parameters {
-            Self::add_type_as_params(sig, &param.ty, param.qualifier, pointer_type);
+            Self::add_type_as_params(
+                sig,
+                &param.ty,
+                param.qualifier,
+                pointer_type,
+                scalar_float_type,
+            );
         }
     }
 
     /// Add return type to a signature.
-    /// `pointer_type` is required when the return type is a composite type (vector or matrix).
-    pub fn add_return_type(sig: &mut Signature, return_type: &Type, pointer_type: IrType) {
+    pub fn add_return_type(
+        sig: &mut Signature,
+        return_type: &Type,
+        pointer_type: IrType,
+        scalar_float_type: IrType,
+    ) {
         if *return_type != Type::Void {
-            Self::add_type_as_returns(sig, return_type, pointer_type);
+            Self::add_type_as_returns(sig, return_type, pointer_type, scalar_float_type);
         }
     }
 
@@ -75,44 +89,41 @@ impl SignatureBuilder {
         ty: &Type,
         qualifier: crate::semantic::functions::ParamQualifier,
         pointer_type: IrType,
+        scalar_float_type: IrType,
     ) {
         use crate::semantic::functions::ParamQualifier;
 
         match qualifier {
             ParamQualifier::Out | ParamQualifier::InOut => {
-                // Out/inout parameters: pass as single pointer (regardless of type)
-                // For vectors/matrices, pointer points to first element
                 sig.params.push(AbiParam::new(pointer_type));
             }
             ParamQualifier::In => {
-                // In parameters: expand to components, or pass pointer for arrays
                 if ty.is_array() {
-                    // Array: pass as pointer (arrays decay to pointer in GLSL)
                     sig.params.push(AbiParam::new(pointer_type));
                 } else if ty.is_vector() {
-                    // Vector: pass each component as separate parameter
                     let base_ty = ty.vector_base_type().unwrap();
-                    let cranelift_ty = base_ty
-                        .to_cranelift_type()
-                        .expect("vector base type should be convertible");
+                    let cranelift_ty = if base_ty == Type::Float {
+                        scalar_float_type
+                    } else {
+                        base_ty
+                            .to_cranelift_type()
+                            .expect("vector base type should be convertible")
+                    };
                     let count = ty.component_count().unwrap();
                     for _ in 0..count {
                         sig.params.push(AbiParam::new(cranelift_ty));
                     }
                 } else if ty.is_matrix() {
-                    // Matrix: pass each element as separate parameter (column-major)
-                    let element_count = ty.matrix_element_count().unwrap();
-                    let cranelift_ty = Type::Float
-                        .to_cranelift_type()
-                        .expect("Float type should be convertible");
-                    for _ in 0..element_count {
-                        sig.params.push(AbiParam::new(cranelift_ty));
+                    for _ in 0..ty.matrix_element_count().unwrap() {
+                        sig.params.push(AbiParam::new(scalar_float_type));
                     }
                 } else {
-                    // Scalar: single parameter
-                    let cranelift_ty = ty
-                        .to_cranelift_type()
-                        .expect("scalar type should be convertible");
+                    let cranelift_ty = if *ty == Type::Float {
+                        scalar_float_type
+                    } else {
+                        ty.to_cranelift_type()
+                            .expect("scalar type should be convertible")
+                    };
                     sig.params.push(AbiParam::new(cranelift_ty));
                 }
             }
@@ -120,32 +131,31 @@ impl SignatureBuilder {
     }
 
     /// Add a GLSL type as return values.
-    /// For composite types (vectors and matrices), uses StructReturn parameter instead.
-    /// StructReturn parameter is added FIRST in the params list (before regular params).
-    fn add_type_as_returns(sig: &mut Signature, ty: &Type, pointer_type: IrType) {
+    fn add_type_as_returns(
+        sig: &mut Signature,
+        ty: &Type,
+        pointer_type: IrType,
+        scalar_float_type: IrType,
+    ) {
         if ty.is_vector() {
-            // Vector: use StructReturn parameter instead of multiple return values
-            // Add StructReturn parameter FIRST (like cranelift-examples)
             sig.params.insert(
                 0,
                 AbiParam::special(pointer_type, ArgumentPurpose::StructReturn),
             );
-            // StructReturn functions return void
             sig.returns.clear();
         } else if ty.is_matrix() {
-            // Matrix: use StructReturn parameter instead of multiple return values
-            // Add StructReturn parameter FIRST (like cranelift-examples)
             sig.params.insert(
                 0,
                 AbiParam::special(pointer_type, ArgumentPurpose::StructReturn),
             );
-            // StructReturn functions return void
             sig.returns.clear();
         } else {
-            // Scalar: single return value (no StructReturn)
-            let cranelift_ty = ty
-                .to_cranelift_type()
-                .expect("scalar return type should be convertible");
+            let cranelift_ty = if *ty == Type::Float {
+                scalar_float_type
+            } else {
+                ty.to_cranelift_type()
+                    .expect("scalar return type should be convertible")
+            };
             sig.returns.push(AbiParam::new(cranelift_ty));
         }
     }

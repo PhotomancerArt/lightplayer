@@ -6,6 +6,7 @@ mod std_impl {
     use std::path::PathBuf;
     use std::string::{String, ToString};
     use std::sync::Mutex;
+    use std::vec::Vec;
 
     /// Configuration for building a RISC-V binary
     #[derive(Debug, Clone)]
@@ -18,6 +19,8 @@ mod std_impl {
         pub rustflags: Option<String>,
         /// Build profile ("debug" or "release")
         pub profile: String,
+        /// Cargo features to enable
+        pub features: Vec<String>,
     }
 
     impl BinaryBuildConfig {
@@ -28,6 +31,7 @@ mod std_impl {
                 target: "riscv32imac-unknown-none-elf".to_string(),
                 rustflags: Some("-C target-feature=-c".to_string()),
                 profile: "release".to_string(),
+                features: Vec::new(),
             }
         }
 
@@ -59,6 +63,12 @@ mod std_impl {
             }
             self
         }
+
+        /// Add cargo features to enable when building.
+        pub fn with_features(mut self, features: &[&str]) -> Self {
+            self.features = features.iter().map(|s| s.to_string()).collect();
+            self
+        }
     }
 
     /// Cache for built binary paths (cache_key -> path)
@@ -81,12 +91,14 @@ mod std_impl {
     /// * `Err(String)` - Error message if build failed
     pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String> {
         let rustflags_part = config.rustflags.as_deref().unwrap_or("");
+        let features_part = config.features.join(",");
         let cache_key = std::format!(
-            "{}-{}-{}-{}",
+            "{}-{}-{}-{}-{}",
             config.package,
             config.target,
             config.profile,
-            rustflags_part.replace(' ', "_")
+            rustflags_part.replace(' ', "_"),
+            features_part
         );
 
         // Check cache first
@@ -124,6 +136,10 @@ mod std_impl {
             cmd.arg("--release");
         } else if config.profile != "debug" {
             cmd.args(["--profile", &config.profile]);
+        }
+
+        if !config.features.is_empty() {
+            cmd.args(["--features", &config.features.join(",")]);
         }
 
         let output = cmd

@@ -3,10 +3,14 @@ use glsl::syntax::Declaration;
 use alloc::{boxed::Box, format, vec::Vec};
 use hashbrown::HashMap;
 
+use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::MemFlags;
+
 use crate::error::{ErrorCode, GlslError, extract_span_from_expr};
+use crate::frontend::codegen::constants::F32_SIZE_BYTES;
 use crate::frontend::codegen::context::CodegenContext;
 use crate::frontend::semantic::const_eval;
-use cranelift_codegen::ir::InstBuilder;
+use crate::frontend::semantic::types::Type;
 use glsl::syntax::{StorageQualifier, TypeQualifierSpec};
 
 fn has_const_qualifier(ty: &glsl::syntax::FullySpecifiedType) -> bool {
@@ -165,7 +169,7 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                     .ins()
                                     .iconst(cranelift_codegen::ir::types::I32, 0),
                                 crate::frontend::semantic::types::Type::Float => {
-                                    ctx.builder.ins().f32const(0.0)
+                                    ctx.emit_float_const(0.0)
                                 }
                                 crate::frontend::semantic::types::Type::Bool => ctx
                                     .builder
@@ -186,6 +190,24 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                 ctx.builder.ins().store(flags, zero_val, array_ptr, offset);
                             }
                         }
+                    } else {
+                        // Uninitialized array: zero-fill all elements
+                        ctx.ensure_block()?;
+                        let var_info = ctx.lookup_var_info(&name.name).ok_or_else(|| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("array variable '{}' not found", name.name),
+                            )
+                        })?;
+                        let array_ptr = var_info.array_ptr.ok_or_else(|| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!("variable '{}' is not an array", name.name),
+                            )
+                        })?;
+                        let element_ty = ty.array_element_type().unwrap();
+                        let array_size = ty.array_dimensions()[0];
+                        zero_fill_array(ctx, array_ptr, &element_ty, array_size)?;
                     }
                 } else if !is_const && list.head.initializer.is_some() {
                     let init = list.head.initializer.as_ref().unwrap();
@@ -389,7 +411,7 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                         .ins()
                                         .iconst(cranelift_codegen::ir::types::I32, 0),
                                     crate::frontend::semantic::types::Type::Float => {
-                                        ctx.builder.ins().f32const(0.0)
+                                        ctx.emit_float_const(0.0)
                                     }
                                     crate::frontend::semantic::types::Type::Bool => ctx
                                         .builder
@@ -410,6 +432,32 @@ pub fn emit_declaration<M: cranelift_module::Module>(
                                     ctx.builder.ins().store(flags, zero_val, array_ptr, offset);
                                 }
                             }
+                        } else {
+                            // Uninitialized array: zero-fill all elements
+                            ctx.ensure_block()?;
+                            let var_info = ctx
+                                .lookup_var_info(&declarator.ident.ident.name)
+                                .ok_or_else(|| {
+                                    GlslError::new(
+                                        ErrorCode::E0400,
+                                        format!(
+                                            "array variable '{}' not found",
+                                            declarator.ident.ident.name
+                                        ),
+                                    )
+                                })?;
+                            let array_ptr = var_info.array_ptr.ok_or_else(|| {
+                                GlslError::new(
+                                    ErrorCode::E0400,
+                                    format!(
+                                        "variable '{}' is not an array",
+                                        declarator.ident.ident.name
+                                    ),
+                                )
+                            })?;
+                            let element_ty = declarator_ty.array_element_type().unwrap();
+                            let array_size = declarator_ty.array_dimensions()[0];
+                            zero_fill_array(ctx, array_ptr, &element_ty, array_size)?;
                         }
                     } else if !is_const && declarator.initializer.is_some() {
                         let init = declarator.initializer.as_ref().unwrap();
@@ -540,4 +588,58 @@ pub fn emit_initializer<M: cranelift_module::Module>(
             Ok((values, element_ty))
         }
     }
+}
+
+/// Zero-initialize all elements of an array. Used for uninitialized array declarations.
+fn zero_fill_array<M: cranelift_module::Module>(
+    ctx: &mut CodegenContext<'_, M>,
+    array_ptr: cranelift_codegen::ir::Value,
+    element_ty: &Type,
+    array_size: usize,
+) -> Result<(), GlslError> {
+    let element_size_bytes = ctx.calculate_array_element_size_bytes(element_ty)?;
+    let flags = MemFlags::trusted();
+
+    let (component_count, base_ty) = if element_ty.is_vector() {
+        (
+            element_ty.component_count().unwrap(),
+            element_ty.vector_base_type().unwrap(),
+        )
+    } else if element_ty.is_matrix() {
+        (element_ty.matrix_element_count().unwrap(), Type::Float)
+    } else {
+        (1, element_ty.clone())
+    };
+
+    let (component_size_bytes, zero_val) = match &base_ty {
+        Type::Float => (F32_SIZE_BYTES, ctx.emit_float_const(0.0)),
+        Type::Int | Type::UInt => (
+            4,
+            ctx.builder
+                .ins()
+                .iconst(cranelift_codegen::ir::types::I32, 0),
+        ),
+        Type::Bool => (
+            1,
+            ctx.builder
+                .ins()
+                .iconst(cranelift_codegen::ir::types::I8, 0),
+        ),
+        _ => {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!("unsupported array element type for zero initialization: {element_ty:?}"),
+            ));
+        }
+    };
+
+    for index in 0..array_size {
+        let base_offset = index * element_size_bytes;
+        for comp in 0..component_count {
+            let offset = (base_offset + comp * component_size_bytes) as i32;
+            ctx.builder.ins().store(flags, zero_val, array_ptr, offset);
+        }
+    }
+
+    Ok(())
 }

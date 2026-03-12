@@ -46,7 +46,7 @@ pub fn resolve_nested_array_indexing<M: cranelift_module::Module>(
         })?
     } else {
         // Matrix - always float
-        cranelift_codegen::ir::types::F32
+        ctx.float_type()
     };
     let mut vars = Vec::new();
     for val in vals {

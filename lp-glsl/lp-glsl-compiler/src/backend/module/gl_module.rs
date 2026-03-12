@@ -30,8 +30,12 @@ pub struct GlModule<M: Module> {
 
 // Separate constructors for each Module type (Rust needs concrete types)
 impl GlModule<JITModule> {
-    /// Create new GlModule with JITModule from HostJit target
-    pub fn new_jit(mut target: Target) -> Result<Self, GlslError> {
+    /// Create new GlModule with JITModule from HostJit target.
+    /// `decimal_format` filters builtin declarations (Q32 mode skips F32-only builtins).
+    pub fn new_jit(
+        mut target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
         match &target {
             Target::HostJit { .. } => {
                 let mut builder = target.create_module_builder()?;
@@ -50,6 +54,20 @@ impl GlModule<JITModule> {
                                         if builtin.name() == name {
                                             let ptr = get_function_pointer(*builtin);
                                             log::debug!("symbol_lookup_fn: Found builtin '{name}' -> {ptr:p}");
+                                            return Some(ptr);
+                                        }
+                                    }
+                                    // Check TestCase names (atan2f, fmodf, etc.) mapped to Q32 builtins
+                                    for arg_count in [1, 2, 3] {
+                                        if let Some(builtin_id) =
+                                            crate::backend::builtins::map_testcase_to_builtin(
+                                                name, arg_count,
+                                            )
+                                        {
+                                            let ptr = get_function_pointer(builtin_id);
+                                            log::debug!(
+                                                "symbol_lookup_fn: TestCase '{name}' -> builtin {builtin_id:?} -> {ptr:p}"
+                                            );
                                             return Some(ptr);
                                         }
                                     }
@@ -89,11 +107,11 @@ impl GlModule<JITModule> {
                     }
                 };
 
-                // Declare builtin functions when module is created
+                // Declare builtin functions when module is created (format-aware: skip unused)
                 {
                     use crate::backend::builtins::declare_builtins;
                     let pointer_type = module.isa().pointer_type();
-                    declare_builtins(&mut module, pointer_type)?;
+                    declare_builtins(&mut module, pointer_type, decimal_format)?;
                 }
 
                 Ok(Self {
@@ -114,16 +132,24 @@ impl GlModule<JITModule> {
         }
     }
 
-    /// Create new GlModule with same target (for transformations)
-    pub fn new_with_target(target: Target) -> Result<Self, GlslError> {
-        Self::new_jit(target)
+    /// Create new GlModule with same target.
+    /// Uses Q32 format for builtin declarations (typical for tests).
+    pub fn new_with_target(
+        target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
+        Self::new_jit(target, decimal_format)
     }
 }
 
 #[cfg(feature = "emulator")]
 impl GlModule<ObjectModule> {
-    /// Create new GlModule with ObjectModule from Rv32Emu target
-    pub fn new_object(mut target: Target) -> Result<Self, GlslError> {
+    /// Create new GlModule with ObjectModule from Rv32Emu target.
+    /// `decimal_format` filters builtin declarations (Q32 mode skips F32-only builtins).
+    pub fn new_object(
+        mut target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
         match &target {
             Target::Rv32Emu { .. } => {
                 let builder = target.create_module_builder()?;
@@ -134,11 +160,11 @@ impl GlModule<ObjectModule> {
                     _ => return Err(GlslError::new(ErrorCode::E0400, "Expected Object builder")),
                 };
 
-                // Declare builtin functions when module is created
+                // Declare builtin functions when module is created (format-aware: skip unused)
                 {
                     use crate::backend::builtins::declare_builtins;
                     let pointer_type = module.isa().pointer_type();
-                    declare_builtins(&mut module, pointer_type)?;
+                    declare_builtins(&mut module, pointer_type, decimal_format)?;
                 }
 
                 // Declare host functions when module is created (for emulator)
@@ -171,9 +197,12 @@ impl GlModule<ObjectModule> {
         }
     }
 
-    /// Create new GlModule with same target (for transformations)
-    pub fn new_with_target(target: Target) -> Result<Self, GlslError> {
-        Self::new_object(target)
+    /// Create new GlModule with same target.
+    pub fn new_with_target(
+        target: Target,
+        decimal_format: crate::exec::executable::DecimalFormat,
+    ) -> Result<Self, GlslError> {
+        Self::new_object(target, decimal_format)
     }
 }
 
@@ -222,10 +251,9 @@ impl<M: Module> GlModule<M> {
         Ok(self.module.declare_func_in_func(func_id, func))
     }
 
-    /// Get a FuncRef for a builtin function by FuncId (for use during transformations).
+    /// Get a FuncRef for a builtin function by FuncId.
     ///
-    /// This is a lower-level version that takes a FuncId directly, useful when you
-    /// already have the FuncId from func_id_map during transformations.
+    /// This is a lower-level version that takes a FuncId directly.
     ///
     /// This handles the differences between JIT and ObjectModule correctly.
     pub fn get_builtin_func_ref_by_id(
@@ -362,117 +390,6 @@ impl<M: Module> GlModule<M> {
     pub(crate) fn module_internal(&self) -> &M {
         &self.module
     }
-
-    /// Internal helper for apply_transform - contains common logic
-    fn apply_transform_impl<T: crate::backend::transform::pipeline::Transform>(
-        old_module_builtins: &HashMap<cranelift_module::FuncId, alloc::string::String>,
-        fns: HashMap<String, GlFunc>,
-        transform: T,
-        mut new_module: Self,
-    ) -> Result<Self, GlslError> {
-        use crate::backend::transform::pipeline::TransformContext;
-        use cranelift_module::Linkage;
-
-        // 1. Transform all function signatures and create FuncId mappings
-        // IMPORTANT: Iterate in sorted order to ensure consistent FuncId assignment.
-        // Cranelift's ObjectModule maps FuncIds to symbol names based on declaration order,
-        // so we must declare functions in a deterministic order.
-        let mut func_id_map = hashbrown::HashMap::new();
-        let mut old_func_id_map = hashbrown::HashMap::new();
-        use alloc::vec::Vec;
-        let mut sorted_fns: Vec<_> = fns.iter().collect();
-        sorted_fns.sort_by_key(|(name, _)| *name);
-        for (name, gl_func) in sorted_fns {
-            let new_sig = transform.transform_signature(&gl_func.clif_sig);
-            // Determine linkage - for now, use Local (can be enhanced later)
-            let linkage = Linkage::Local;
-            let func_id = new_module
-                .module_mut_internal()
-                .declare_function(name, linkage, &new_sig)
-                .map_err(|e| {
-                    GlslError::new(
-                        ErrorCode::E0400,
-                        format!("Failed to declare function '{name}' in transformed module: {e}"),
-                    )
-                })?;
-            func_id_map.insert(name.clone(), func_id);
-            // Build reverse mapping: old FuncId -> function name
-            old_func_id_map.insert(gl_func.func_id, name.clone());
-        }
-
-        // 1.5. Add builtin function FuncIds to func_id_map and old_func_id_map
-        // Builtins are declared when the module is created, so they should always be available
-        {
-            use crate::backend::builtins::registry::BuiltinId;
-            use cranelift_module::FuncOrDataId;
-            for builtin in BuiltinId::all() {
-                let name = builtin.name();
-                // Get FuncId from NEW module declarations
-                if let Some(FuncOrDataId::Func(func_id)) =
-                    new_module.module_internal().declarations().get_name(name)
-                {
-                    func_id_map.insert(alloc::string::String::from(name), func_id);
-                }
-                // Get FuncId from OLD module builtins map and add to old_func_id_map
-                // Find the FuncId for this builtin name in the old module
-                for (old_func_id, builtin_name) in old_module_builtins.iter() {
-                    if builtin_name == name {
-                        old_func_id_map.insert(*old_func_id, alloc::string::String::from(name));
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 2. Transform function bodies
-        // IMPORTANT: Transform in the SAME sorted order as declaration to ensure FuncId consistency
-        let mut sorted_fns_for_transform: Vec<_> = fns.into_iter().collect();
-        sorted_fns_for_transform.sort_by_key(|(name, _)| name.clone());
-        for (name, gl_func) in sorted_fns_for_transform {
-            let mut transform_ctx = TransformContext {
-                module: &mut new_module,
-                func_id_map: func_id_map.clone(),
-                old_func_id_map: old_func_id_map.clone(),
-            };
-            let transformed_func =
-                transform.transform_function(&gl_func.function, &mut transform_ctx)?;
-
-            // Get the FuncId that was assigned during declaration (step 1)
-            let func_id = *func_id_map.get(&name).ok_or_else(|| {
-                GlslError::new(
-                    ErrorCode::E0400,
-                    format!("Function '{name}' not found in func_id_map"),
-                )
-            })?;
-
-            // Update the function in place using the FuncId from declaration
-            // This ensures we use the same FuncId that was assigned during declaration
-            let new_sig = transform.transform_signature(&gl_func.clif_sig);
-
-            // IMPORTANT: Update the function's name to match the FuncId
-            // Cranelift uses the function name to match it with the FuncId during define_function
-            use cranelift_codegen::ir::UserFuncName;
-            let mut transformed_func_with_name = transformed_func;
-            transformed_func_with_name.name = UserFuncName::user(0, func_id.as_u32());
-
-            // Remove the placeholder that was created during declaration
-            new_module.fns.remove(&name);
-
-            // Store the transformed function with the correct FuncId
-            // Note: The function is already declared in the module, so we just update our internal state
-            new_module.fns.insert(
-                name.clone(),
-                GlFunc {
-                    name: name.clone(),
-                    clif_sig: new_sig,
-                    func_id,
-                    function: transformed_func_with_name,
-                },
-            );
-        }
-
-        Ok(new_module)
-    }
 }
 
 // Specific implementations for each Module type
@@ -493,46 +410,6 @@ impl GlModule<JITModule> {
     /// Internal use only - for codegen
     pub(crate) fn into_module(self) -> JITModule {
         self.module
-    }
-
-    /// Apply a transform to all functions in this module
-    ///
-    /// Consumes this GlModule and produces a new GlModule with transformed functions.
-    /// Neither module has functions defined (compiled) yet.
-    pub fn apply_transform<T: crate::backend::transform::pipeline::Transform>(
-        self,
-        transform: T,
-    ) -> Result<Self, GlslError> {
-        // Extract old module's builtin FuncIds before moving self
-        let old_module_builtins: HashMap<_, _> = {
-            use crate::backend::builtins::registry::BuiltinId;
-            use cranelift_module::FuncOrDataId;
-            let mut map = HashMap::new();
-            for builtin in BuiltinId::all() {
-                let name = builtin.name();
-                if let Some(FuncOrDataId::Func(func_id)) =
-                    self.module_internal().declarations().get_name(name)
-                {
-                    map.insert(func_id, alloc::string::String::from(name));
-                }
-            }
-            map
-        };
-        let target = self.target.clone();
-        let function_registry = self.function_registry;
-        let glsl_signatures = self.glsl_signatures;
-        let source_text = self.source_text;
-        let source_loc_manager = self.source_loc_manager;
-        let source_map = self.source_map;
-        let fns = self.fns;
-        let mut new_module = Self::new_with_target(target)?;
-        // Preserve metadata
-        new_module.function_registry = function_registry;
-        new_module.glsl_signatures = glsl_signatures;
-        new_module.source_text = source_text;
-        new_module.source_loc_manager = source_loc_manager;
-        new_module.source_map = source_map;
-        Self::apply_transform_impl(&old_module_builtins, fns, transform, new_module)
     }
 }
 
@@ -563,46 +440,6 @@ impl GlModule<ObjectModule> {
     /// Internal use only - for codegen
     pub(crate) fn into_module(self) -> ObjectModule {
         self.module
-    }
-
-    /// Apply a transform to all functions in this module
-    ///
-    /// Consumes this GlModule and produces a new GlModule with transformed functions.
-    /// Neither module has functions defined (compiled) yet.
-    pub fn apply_transform<T: crate::backend::transform::pipeline::Transform>(
-        self,
-        transform: T,
-    ) -> Result<Self, GlslError> {
-        // Extract old module's builtin FuncIds before moving self
-        let old_module_builtins: HashMap<_, _> = {
-            use crate::backend::builtins::registry::BuiltinId;
-            use cranelift_module::FuncOrDataId;
-            let mut map = hashbrown::HashMap::new();
-            for builtin in BuiltinId::all() {
-                let name = builtin.name();
-                if let Some(FuncOrDataId::Func(func_id)) =
-                    self.module_internal().declarations().get_name(name)
-                {
-                    map.insert(func_id, alloc::string::String::from(name));
-                }
-            }
-            map
-        };
-        let target = self.target.clone();
-        let function_registry = self.function_registry;
-        let glsl_signatures = self.glsl_signatures;
-        let source_text = self.source_text;
-        let source_loc_manager = self.source_loc_manager;
-        let source_map = self.source_map;
-        let fns = self.fns;
-        let mut new_module = Self::new_with_target(target)?;
-        // Preserve metadata
-        new_module.function_registry = function_registry;
-        new_module.glsl_signatures = glsl_signatures;
-        new_module.source_text = source_text;
-        new_module.source_loc_manager = source_loc_manager;
-        new_module.source_map = source_map;
-        Self::apply_transform_impl(&old_module_builtins, fns, transform, new_module)
     }
 
     /// Compile a function and extract vcode and assembly
@@ -673,8 +510,9 @@ mod tests {
     #[test]
     #[cfg(feature = "std")]
     fn test_create_jit_module() {
+        use crate::DecimalFormat;
         let target = Target::host_jit().unwrap();
-        let gl_module = GlModule::new_jit(target);
+        let gl_module = GlModule::new_jit(target, DecimalFormat::Q32);
         assert!(gl_module.is_ok());
         let gl_module = gl_module.unwrap();
         assert_eq!(gl_module.fns.len(), 0);
@@ -683,8 +521,9 @@ mod tests {
     #[test]
     #[cfg(feature = "emulator")]
     fn test_create_object_module() {
+        use crate::DecimalFormat;
         let target = Target::riscv32_emulator().unwrap();
-        let gl_module = GlModule::new_object(target);
+        let gl_module = GlModule::new_object(target, DecimalFormat::Q32);
         assert!(gl_module.is_ok());
         let gl_module = gl_module.unwrap();
         assert_eq!(gl_module.fns.len(), 0);
@@ -693,8 +532,9 @@ mod tests {
     #[test]
     #[cfg(feature = "std")]
     fn test_get_func_nonexistent() {
+        use crate::DecimalFormat;
         let target = Target::host_jit().unwrap();
-        let gl_module = GlModule::new_jit(target).unwrap();
+        let gl_module = GlModule::new_jit(target, DecimalFormat::Q32).unwrap();
         assert!(gl_module.get_func("nonexistent").is_none());
     }
 }

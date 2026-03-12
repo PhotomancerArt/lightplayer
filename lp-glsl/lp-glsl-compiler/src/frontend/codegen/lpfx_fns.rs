@@ -100,11 +100,15 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         // Handle Decimal vs NonDecimal implementations
         match &func.impls {
             crate::frontend::semantic::lpfx::lpfx_fn::LpfxFnImpl::Decimal {
-                float_impl, ..
+                float_impl,
+                q32_impl,
             } => {
-                // Always use float implementation in frontend - transform will convert to q32
-                // Generate TestCase call with float signature (f32 args, f32 return)
-                let func_ref = self.get_lpfx_testcase_call(func, *float_impl, &param_types)?;
+                let func_ref = if self.is_q32() {
+                    self.gl_module
+                        .get_builtin_func_ref(*q32_impl, self.builder.func)?
+                } else {
+                    self.get_lpfx_testcase_call(func, *float_impl, &param_types)?
+                };
 
                 // Emit call instruction
                 self.ensure_block()?;
@@ -115,15 +119,26 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
                     // Vector return: load values from buffer (written by function via result pointer)
                     let element_count = return_type.component_count().unwrap();
                     let base_type = return_type.vector_base_type().unwrap();
-                    let cranelift_ty = base_type.to_cranelift_type().map_err(|e| {
-                        GlslError::new(
+                    let cranelift_ty = if self.is_q32() && base_type == Type::Float {
+                        self.numeric.scalar_type()
+                    } else if self.is_q32() {
+                        return Err(GlslError::new(
                             ErrorCode::E0400,
                             format!(
-                                "Failed to convert return type to Cranelift type: {}",
-                                e.message
+                                "Q32 LPFX vector return with non-float base type: {base_type:?}"
                             ),
-                        )
-                    })?;
+                        ));
+                    } else {
+                        base_type.to_cranelift_type().map_err(|e| {
+                            GlslError::new(
+                                ErrorCode::E0400,
+                                format!(
+                                    "Failed to convert return type to Cranelift type: {}",
+                                    e.message
+                                ),
+                            )
+                        })?
+                    };
 
                     let mut loaded_vals = Vec::new();
                     for i in 0..element_count {
@@ -210,14 +225,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         }
     }
 
-    /// Helper to declare and get FuncRef for LPFX function TestCase call.
-    ///
-    /// Creates external function calls using TestCase names based on builtin ID name
-    /// (e.g., "__lpfx_hsv2rgb_f32" or "__lpfx_hsv2rgb_vec4_f32").
-    /// These are converted to q32 builtins by the transform.
-    ///
-    /// Always uses float signature (f32 args, f32 return) - the transform will handle
-    /// conversion to q32 when processing the TestCase call.
+    /// Declare and get FuncRef for LPFX function via TestCase name. Float mode only; Q32 uses builtins directly.
     fn get_lpfx_testcase_call(
         &mut self,
         func: &'static crate::frontend::semantic::lpfx::lpfx_fn::LpfxFn,
@@ -235,8 +243,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
             "get_lpfx_testcase_call: function={testcase_name}, pointer_type={pointer_type:?}"
         );
 
-        // Build signature with Float format (f32 args, f32 return)
-        // The transform will convert this to q32 when processing the call
+        // Build signature with Float format (f32 args, f32 return); float mode only
         let sig = build_call_signature(func, builtin_id, DecimalFormat::Float, pointer_type);
         if func.glsl_sig.return_type.is_vector() {
             let _result_ptr_param = sig

@@ -13,7 +13,7 @@ scans `lp-glsl/lp-glsl-builtins/src/q32/` for function definitions and generates
 - **builtin_refs.rs**: Function references to prevent dead code elimination in
   `lp-glsl-builtins-emu-app`
 - **mod.rs**: Module declarations and `pub use` statements for all builtin functions
-- **math.rs**: `map_testcase_to_builtin()` function mapping testcase names to `BuiltinId`
+- **mapping.rs**: `map_testcase_to_builtin()` function mapping testcase names to `BuiltinId` (in `backend/builtins/`)
 
 All generated files include clear headers indicating they are auto-generated and how to regenerate
 them.

@@ -728,19 +728,21 @@ fn copy_back_out_parameters<M: cranelift_module::Module>(
         };
 
         let base_cranelift_ty = if arg_info.param_ty.is_vector() {
-            arg_info
-                .param_ty
-                .vector_base_type()
-                .unwrap()
-                .to_cranelift_type()
-                .map_err(|e| {
+            let base = arg_info.param_ty.vector_base_type().unwrap();
+            if base == crate::semantic::types::Type::Float {
+                ctx.float_type()
+            } else {
+                base.to_cranelift_type().map_err(|e| {
                     GlslError::new(
                         ErrorCode::E0400,
                         format!("Failed to convert type: {}", e.message),
                     )
                 })?
+            }
         } else if arg_info.param_ty.is_matrix() {
-            cranelift_codegen::ir::types::F32
+            ctx.float_type()
+        } else if arg_info.param_ty == crate::semantic::types::Type::Float {
+            ctx.float_type()
         } else {
             arg_info.param_ty.to_cranelift_type().map_err(|e| {
                 GlslError::new(
@@ -799,15 +801,19 @@ fn execute_function_call<M: cranelift_module::Module>(
             crate::frontend::semantic::types::Type::Float
         };
 
-        let cranelift_ty = base_type.to_cranelift_type().map_err(|e| {
-            GlslError::new(
-                ErrorCode::E0400,
-                format!(
-                    "Failed to convert return type to Cranelift type: {}",
-                    e.message
-                ),
-            )
-        })?;
+        let cranelift_ty = if base_type == crate::semantic::types::Type::Float {
+            ctx.float_type()
+        } else {
+            base_type.to_cranelift_type().map_err(|e| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "Failed to convert return type to Cranelift type: {}",
+                        e.message
+                    ),
+                )
+            })?
+        };
 
         log::trace!(
             "execute_function_call: loading {element_count} elements of type {base_type:?} (cranelift_ty={cranelift_ty:?})"

@@ -34,7 +34,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
             }
             let mut result_vals = Vec::new();
             for (lhs_val, rhs_val) in lhs_vals.iter().zip(rhs_vals.iter()) {
-                let result = ctx.builder.ins().fadd(*lhs_val, *rhs_val);
+                let result = ctx.emit_float_add(*lhs_val, *rhs_val);
                 result_vals.push(result);
             }
             Ok((result_vals, result_ty))
@@ -51,7 +51,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
             }
             let mut result_vals = Vec::new();
             for (lhs_val, rhs_val) in lhs_vals.iter().zip(rhs_vals.iter()) {
-                result_vals.push(ctx.builder.ins().fsub(*lhs_val, *rhs_val));
+                result_vals.push(ctx.emit_float_sub(*lhs_val, *rhs_val));
             }
             Ok((result_vals, result_ty))
         }
@@ -64,7 +64,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                 let scalar_float = coercion::coerce_to_type(ctx, scalar, rhs_ty, &GlslType::Float)?;
                 let mut result_vals = Vec::new();
                 for &lhs_val in &lhs_vals {
-                    result_vals.push(ctx.builder.ins().fmul(lhs_val, scalar_float));
+                    result_vals.push(ctx.emit_float_mul(lhs_val, scalar_float));
                 }
                 return Ok((result_vals, result_ty));
             }
@@ -75,7 +75,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                 let scalar_float = coercion::coerce_to_type(ctx, scalar, lhs_ty, &GlslType::Float)?;
                 let mut result_vals = Vec::new();
                 for &rhs_val in &rhs_vals {
-                    result_vals.push(ctx.builder.ins().fmul(scalar_float, rhs_val));
+                    result_vals.push(ctx.emit_float_mul(scalar_float, rhs_val));
                 }
                 return Ok((result_vals, result_ty));
             }
@@ -95,16 +95,16 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                 // For each row i: result[i] = dot(row i of matrix, vector)
                 let mut result_vals = Vec::new();
                 for row in 0..rows {
-                    let mut sum = ctx.builder.ins().fmul(
+                    let mut sum = ctx.emit_float_mul(
                         lhs_vals[0 * rows + row], // First element of row
                         rhs_vals[0],
                     );
                     for col in 1..cols {
-                        let product = ctx.builder.ins().fmul(
+                        let product = ctx.emit_float_mul(
                             lhs_vals[col * rows + row], // Element at (row, col)
                             rhs_vals[col],
                         );
-                        sum = ctx.builder.ins().fadd(sum, product);
+                        sum = ctx.emit_float_add(sum, product);
                     }
                     result_vals.push(sum);
                 }
@@ -126,16 +126,16 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                 // For each column j: result[j] = dot(vector, column j of matrix)
                 let mut result_vals = Vec::new();
                 for col in 0..cols {
-                    let mut sum = ctx.builder.ins().fmul(
+                    let mut sum = ctx.emit_float_mul(
                         lhs_vals[0],
                         rhs_vals[col * rows + 0], // First element of column
                     );
                     for row in 1..rows {
-                        let product = ctx.builder.ins().fmul(
+                        let product = ctx.emit_float_mul(
                             lhs_vals[row],
                             rhs_vals[col * rows + row], // Element at (row, col)
                         );
-                        sum = ctx.builder.ins().fadd(sum, product);
+                        sum = ctx.emit_float_add(sum, product);
                     }
                     result_vals.push(sum);
                 }
@@ -170,16 +170,16 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                         // Dot product of row i of lhs with column j of rhs
                         // lhs element (i, k): lhs_vals[k * lhs_rows + i]
                         // rhs element (k, j): rhs_vals[j * rhs_rows + k]
-                        let mut sum = ctx.builder.ins().fmul(
+                        let mut sum = ctx.emit_float_mul(
                             lhs_vals[0 * lhs_rows + i], // Element at (i, 0) of lhs
                             rhs_vals[j * rhs_rows + 0], // Element at (0, j) of rhs
                         );
                         for k in 1..lhs_cols {
-                            let product = ctx.builder.ins().fmul(
+                            let product = ctx.emit_float_mul(
                                 lhs_vals[k * lhs_rows + i], // Element at (i, k) of lhs
                                 rhs_vals[j * rhs_rows + k], // Element at (k, j) of rhs
                             );
-                            sum = ctx.builder.ins().fadd(sum, product);
+                            sum = ctx.emit_float_add(sum, product);
                         }
                         result_vals.push(sum);
                     }
@@ -201,7 +201,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                 let scalar_float = coercion::coerce_to_type(ctx, scalar, rhs_ty, &GlslType::Float)?;
                 let mut result_vals = Vec::new();
                 for &lhs_val in &lhs_vals {
-                    result_vals.push(ctx.builder.ins().fdiv(lhs_val, scalar_float));
+                    result_vals.push(ctx.emit_float_div(lhs_val, scalar_float));
                 }
                 return Ok((result_vals, result_ty));
             }
@@ -239,7 +239,7 @@ pub fn emit_matrix_binary<M: cranelift_module::Module>(
                     let lhs_comp = lhs_vals[i];
                     let rhs_comp = rhs_vals[i];
                     // Compare components (returns I1) - matrices are always float-based
-                    let cmp = ctx.builder.ins().fcmp(
+                    let cmp = ctx.emit_float_cmp(
                         cranelift_codegen::ir::condcodes::FloatCC::Equal,
                         lhs_comp,
                         rhs_comp,

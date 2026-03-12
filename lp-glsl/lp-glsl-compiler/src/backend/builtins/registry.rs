@@ -223,6 +223,108 @@ impl BuiltinId {
         }
     }
 
+    /// Format affinity: Q32 builtins, Float (F32) builtins, or None (format-agnostic).
+    pub fn format(&self) -> Option<crate::DecimalFormat> {
+        match self {
+            BuiltinId::LpQ32Acos => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Acosh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Add => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Asin => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Asinh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Atan => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Atan2 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Atanh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Cos => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Cosh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Div => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Exp => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Exp2 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Fma => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Inversesqrt => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Ldexp => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Log => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Log2 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Mod => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Mul => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Pow => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Round => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Roundeven => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Sin => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Sinh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Sqrt => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Sub => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Tan => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpQ32Tanh => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxFbm2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxFbm2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxFbm3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxFbm3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxFbm3TileF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxFbm3TileQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxGnoise1F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxGnoise1Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxGnoise2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxGnoise2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxGnoise3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxGnoise3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxGnoise3TileF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxGnoise3TileQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxHash1 => None,
+            BuiltinId::LpfxHash2 => None,
+            BuiltinId::LpfxHash3 => None,
+            BuiltinId::LpfxHsv2rgbF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxHsv2rgbQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxHsv2rgbVec4F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxHsv2rgbVec4Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxHue2rgbF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxHue2rgbQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxPsrdnoise2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxPsrdnoise2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxPsrdnoise3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxPsrdnoise3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxRandom1F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxRandom1Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxRandom2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxRandom2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxRandom3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxRandom3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxRgb2hsvF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxRgb2hsvQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxRgb2hsvVec4F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxRgb2hsvVec4Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSaturateF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSaturateQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSaturateVec3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSaturateVec3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSaturateVec4F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSaturateVec4Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSnoise1F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSnoise1Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSnoise2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSnoise2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSnoise3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSnoise3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSrandom1F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSrandom1Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSrandom2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSrandom2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSrandom3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSrandom3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSrandom3TileF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSrandom3TileQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxSrandom3VecF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxSrandom3VecQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxWorley2F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxWorley2Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxWorley2ValueF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxWorley2ValueQ32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxWorley3F32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxWorley3Q32 => Some(crate::DecimalFormat::Q32),
+            BuiltinId::LpfxWorley3ValueF32 => Some(crate::DecimalFormat::Float),
+            BuiltinId::LpfxWorley3ValueQ32 => Some(crate::DecimalFormat::Q32),
+        }
+    }
+
     /// Get the BuiltinId from its symbol name.
     ///
     /// Returns `None` if the name is not a known builtin function.
@@ -336,10 +438,8 @@ impl BuiltinId {
     pub fn signature(&self, pointer_type: types::Type) -> Signature {
         let mut sig = Signature::new(CallConv::SystemV);
         match self {
-            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
-                // Out parameter function: (7 i32 params, pointer_type) -> i32
-                sig.params.push(AbiParam::new(types::I32));
-                sig.params.push(AbiParam::new(types::I32));
+            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
+                // Out parameter function: (5 i32 params, pointer_type) -> i32
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
@@ -348,8 +448,10 @@ impl BuiltinId {
                 sig.params.push(AbiParam::new(pointer_type));
                 sig.returns.push(AbiParam::new(types::I32));
             }
-            BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
-                // Out parameter function: (5 i32 params, pointer_type) -> i32
+            BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
+                // Out parameter function: (7 i32 params, pointer_type) -> i32
+                sig.params.push(AbiParam::new(types::I32));
+                sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
                 sig.params.push(AbiParam::new(types::I32));
@@ -833,11 +935,18 @@ pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
 /// `pointer_type` is the native pointer type for the target architecture.
 /// For RISC-V 32-bit, this should be `types::I32`.
 /// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.
+/// `format` filters builtins: in Q32 mode, F32-only builtins are skipped; in Float mode, Q32 builtins are skipped.
 pub fn declare_builtins<M: Module>(
     module: &mut M,
     pointer_type: types::Type,
+    format: crate::DecimalFormat,
 ) -> Result<(), GlslError> {
     for builtin in BuiltinId::all() {
+        if let Some(f) = builtin.format() {
+            if f != format {
+                continue;
+            }
+        }
         let name = builtin.name();
         let sig = builtin.signature(pointer_type);
 
@@ -863,8 +972,9 @@ pub fn declare_builtins<M: Module>(
 pub fn declare_for_jit<M: Module>(
     module: &mut M,
     pointer_type: types::Type,
+    format: crate::DecimalFormat,
 ) -> Result<(), GlslError> {
-    declare_builtins(module, pointer_type)
+    declare_builtins(module, pointer_type, format)
 }
 
 /// Declare builtin functions as external symbols for emulator mode.
@@ -876,6 +986,7 @@ pub fn declare_for_jit<M: Module>(
 pub fn declare_for_emulator<M: Module>(
     module: &mut M,
     pointer_type: types::Type,
+    format: crate::DecimalFormat,
 ) -> Result<(), GlslError> {
-    declare_builtins(module, pointer_type)
+    declare_builtins(module, pointer_type, format)
 }

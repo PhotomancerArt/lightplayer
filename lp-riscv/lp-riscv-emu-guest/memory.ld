@@ -1,11 +1,11 @@
 ENTRY(_entry)
 
-/* Emulator provides 512KB RAM - balance for Cranelift */
+/* Emulator provides 576KB RAM */
 STACK_SIZE = 0x30000;  /* 192KB stack */
 
 MEMORY {
     ROM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x80000000 /* Set to maximum possible length */
-    RAM (wrx) : ORIGIN = 0x80000000, LENGTH = 0x00080000 /* 512KB RAM to match emulator */
+    RAM (wrx) : ORIGIN = 0x80000000, LENGTH = 0x00090000 /* 576KB RAM */
 }
 
 SECTIONS {
@@ -78,7 +78,7 @@ SECTIONS {
     /* NOLOAD means this section won't be loaded from the ELF, but space is reserved */
     .heap (NOLOAD) : ALIGN(16) {
         __heap_start = .;
-        . += 256 * 1024; /* 256KB heap */
+        . += 320 * 1024; /* 320KB heap to match ESP32 */
         . = ALIGN(16);
         __heap_end = .;
     } > RAM

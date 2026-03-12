@@ -9,11 +9,10 @@
 
 extern crate alloc;
 
-use esp_backtrace as _; // Import to activate panic handler
+use esp_backtrace as _; // panic handler
 
 mod board;
-#[cfg(feature = "demo_project")]
-mod demo_project;
+mod boot;
 mod jit_fns;
 mod logger;
 mod output;
@@ -23,20 +22,22 @@ mod time;
 #[cfg(feature = "server")]
 mod transport;
 
+#[cfg(not(feature = "memory_fs"))]
+mod flash_storage;
+#[cfg(not(feature = "memory_fs"))]
+mod lp_fs_flash;
+
 use alloc::{boxed::Box, rc::Rc};
 use core::cell::RefCell;
 
-use board::{init_board, start_runtime};
-use fw_core::message_router::MessageRouter;
+use board::esp32c6::init::{init_board, start_runtime};
 use lp_model::path::AsLpPath;
-#[cfg(feature = "demo_project")]
-use lp_model::{ClientMessage, ClientRequest, json};
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
 use output::Esp32OutputProvider;
-use serial::{get_message_channels, io_task};
+use serial::io_task;
 use server_loop::run_server_loop;
 use time::Esp32TimeProvider;
 
@@ -114,9 +115,13 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_json"
     )))]
     {
+        // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
+        // io_task's connection monitor. May block if no USB host is connected during
+        // boot. Hasn't been observed yet but worth investigating if boot hangs occur.
+
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash) = init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
@@ -126,14 +131,6 @@ async fn main(spawner: embassy_executor::Spawner) {
         // or can be disabled if USB host is not connected
         esp_println::println!("[INIT] fw-esp32 starting...");
 
-        // Create message router with static channels (used for demo_project send_incoming)
-        let (incoming_channel, outgoing_channel) = get_message_channels();
-        #[allow(
-            unused_variables,
-            reason = "router used only in demo_project feature block"
-        )]
-        let router = MessageRouter::new(incoming_channel, outgoing_channel);
-
         // Spawn I/O task (handles serial communication)
         esp_println::println!("[INIT] Spawning I/O task...");
         spawner.spawn(io_task(usb_device)).ok();
@@ -141,22 +138,6 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize log crate to write to outgoing serial (host will see these)
         crate::logger::init(serial::io_task::log_write_to_outgoing);
-
-        #[cfg(feature = "demo_project")]
-        {
-            // Queue LoadProject message to auto-load the demo project
-            esp_println::println!("[INIT] Queueing LoadProject message...");
-            let load_msg = ClientMessage {
-                id: 1,
-                msg: ClientRequest::LoadProject {
-                    path: alloc::string::String::from("test-project"),
-                },
-            };
-            let json = json::to_string(&load_msg).unwrap();
-            let message = alloc::format!("M!{json}\n");
-            router.send_incoming(message).ok(); // Non-blocking, ignore if queue full
-            esp_println::println!("[INIT] LoadProject message queued");
-        }
 
         // Create streaming transport (serializes in io_task, never buffers full JSON)
         esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
@@ -189,31 +170,48 @@ async fn main(spawner: embassy_executor::Spawner) {
             Rc::new(RefCell::new(output_provider));
         esp_println::println!("[INIT] Output provider created");
 
-        // Create filesystem (in-memory for now)
-        esp_println::println!("[INIT] Creating in-memory filesystem...");
-        #[allow(unused_mut, reason = "base_fs mutated when populating demo_project")]
-        let mut base_fs = Box::new(LpFsMemory::new());
+        // Create filesystem: in-memory when memory_fs enabled, else flash-backed
+        let base_fs: Box<dyn lp_shared::fs::LpFs> = {
+            #[cfg(not(feature = "memory_fs"))]
+            {
+                let flash_storage = esp_storage::FlashStorage::new(flash);
+                match lp_fs_flash::LpFsFlash::init(flash_storage) {
+                    Ok(fs) => {
+                        esp_println::println!("[INIT] Flash filesystem mounted");
+                        Box::new(fs)
+                    }
+                    Err(e) => {
+                        esp_println::println!(
+                            "[WARN] Flash FS failed: {e}, falling back to memory"
+                        );
+                        Box::new(LpFsMemory::new())
+                    }
+                }
+            }
+            #[cfg(feature = "memory_fs")]
+            {
+                let _ = flash;
+                esp_println::println!("[INIT] Creating in-memory filesystem...");
+                Box::new(LpFsMemory::new())
+            }
+        };
+        #[cfg(feature = "memory_fs")]
         esp_println::println!("[INIT] In-memory filesystem created");
 
-        #[cfg(feature = "demo_project")]
-        {
-            esp_println::println!("[INIT] Populating filesystem with basic test project...");
-            if let Err(e) = demo_project::write_basic_project(&mut base_fs) {
-                esp_println::println!("[WARN] Failed to populate test project: {:?}", e);
-            } else {
-                esp_println::println!("[INIT] Populated filesystem with basic test project");
-            }
-        }
-
-        // Create server
+        // Create server (with time provider for shader comp timing)
         esp_println::println!("[INIT] Creating LpServer instance...");
-        let server = LpServer::new(
+        let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+        let mut server = LpServer::new(
             output_provider,
             base_fs,
             "projects/".as_path(),
             Some(esp32_memory_stats),
+            Some(time_provider_rc),
         );
         esp_println::println!("[INIT] LpServer created");
+
+        // Auto-load project at boot (from config or lexical-first)
+        boot::auto_load_project(&mut server);
 
         // Create time provider
         esp_println::println!("[INIT] Creating time provider...");
