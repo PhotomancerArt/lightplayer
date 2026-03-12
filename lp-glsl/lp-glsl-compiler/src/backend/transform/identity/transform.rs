@@ -22,9 +22,9 @@ impl Transform for IdentityTransform {
         // Get transformed signature
         let new_sig = self.transform_signature(&old_func.signature);
 
-        // Capture func_id_map and old_func_id_map for FuncId remapping
-        let func_id_map = ctx.func_id_map.clone();
-        let old_func_id_map = ctx.old_func_id_map.clone();
+        // Borrow func_id_map and old_func_id_map for FuncId remapping
+        let func_id_map = ctx.func_id_map;
+        let old_func_id_map = ctx.old_func_id_map;
 
         transform_function_body(
             old_func,

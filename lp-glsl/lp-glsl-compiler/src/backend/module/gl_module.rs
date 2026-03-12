@@ -31,8 +31,8 @@ pub fn transform_single_function<M: Module, T: Transform>(
 ) -> Result<Function, GlslError> {
     let mut transform_ctx = TransformContext {
         module: q32_module,
-        func_id_map: func_id_map.clone(),
-        old_func_id_map: old_func_id_map.clone(),
+        func_id_map,
+        old_func_id_map,
     };
 
     let mut transformed = transform.transform_function(float_func, &mut transform_ctx)?;
@@ -458,8 +458,8 @@ impl<M: Module> GlModule<M> {
         for (name, gl_func) in sorted_fns_for_transform {
             let mut transform_ctx = TransformContext {
                 module: &mut new_module,
-                func_id_map: func_id_map.clone(),
-                old_func_id_map: old_func_id_map.clone(),
+                func_id_map: &func_id_map,
+                old_func_id_map: &old_func_id_map,
             };
             let transformed_func =
                 transform.transform_function(&gl_func.function, &mut transform_ctx)?;

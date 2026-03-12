@@ -54,9 +54,9 @@ impl Transform for Q32Transform {
         // 2. Get pointer type from module ISA (needed for builtin signatures)
         let pointer_type = ctx.module.module_internal().isa().pointer_type();
 
-        // 3. Capture func_id_map and old_func_id_map from context
-        let func_id_map = ctx.func_id_map.clone();
-        let old_func_id_map = ctx.old_func_id_map.clone();
+        // 3. Borrow func_id_map and old_func_id_map from context
+        let func_id_map = ctx.func_id_map;
+        let old_func_id_map = ctx.old_func_id_map;
         // We need module access for declare_func_in_func, but we can't capture mutable references
         // So we'll pass the module through a different mechanism - store it in a way that can be accessed
         // For now, we'll handle colocated functions differently in the converter

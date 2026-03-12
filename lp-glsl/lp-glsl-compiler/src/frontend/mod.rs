@@ -330,7 +330,8 @@ pub fn glsl_jit_streaming(
         };
 
         let float_func_id = float_module
-            .declare_function(name, linkage, float_sig.clone())
+            .module_mut_internal()
+            .declare_function(name, linkage, &float_sig)
             .map_err(|e| {
                 GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
@@ -339,7 +340,8 @@ pub fn glsl_jit_streaming(
             })?;
 
         let q32_func_id = q32_module
-            .declare_function(name, linkage, q32_sig)
+            .module_mut_internal()
+            .declare_function(name, linkage, &q32_sig)
             .map_err(|e| {
                 GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
@@ -393,9 +395,9 @@ pub fn glsl_jit_streaming(
 
     let mut glsl_signatures = HashMap::new();
     let mut cranelift_signatures = HashMap::new();
-    let mut compiler = GlslCompiler::new();
 
     for func_info in &sorted_functions {
+        let mut compiler = GlslCompiler::new();
         let source_text_for_main = if func_info.name == MAIN_FUNCTION_NAME {
             Some(source)
         } else {

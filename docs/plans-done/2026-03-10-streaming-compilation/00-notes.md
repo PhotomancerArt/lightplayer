@@ -215,3 +215,16 @@ declaration order.
 - `CodegenContext` takes `&mut GlModule<M>` mainly for `get_builtin_func_ref`
   (calls `module.declare_func_in_func`). This is the main dependency on having
   a live module during CLIF generation.
+
+## Follow-up: Streaming GLSL Improvements (2026-03-11)
+
+Phase 1: Bypass `GlModule::declare_function` in streaming — use
+`module_mut_internal().declare_function()` to skip creating placeholder GlFunc
+entries (~22 KB savings).
+
+Phase 2: Borrow `func_id_map` and `old_func_id_map` in `TransformContext` instead
+of cloning per function (~10–15 KB savings).
+
+Phase 3: Move `GlslCompiler::new()` inside the per-function loop to force cleanup
+each iteration. T::clone_one (Expr/Declaration AST clones) remains for future
+investigation — likely from type/const resolution cloning through AST nodes.
