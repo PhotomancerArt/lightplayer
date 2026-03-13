@@ -555,3 +555,9 @@ Not needed — minor issue during dev, existing flow skips `state_ver` update.
 
 ### Q7: Error message format
 `"panic: <msg> (at <file>:<line>) [0x..., 0x...]"` in `NodeStatus::Error`.
+
+## Implementation notes (2026-03-13)
+
+- Added `features = ["panic"]` to lp-engine's unwinding dep (required for catch_unwind)
+- PanicPayload passed as `Box<dyn Any + Send>` for begin_panic compatibility
+- fw-esp32: lp-shared only with `server` feature; ZST payload when server off
