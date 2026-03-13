@@ -99,31 +99,21 @@ mod std_impl {
         CACHE.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
-    /// Ensure a binary is built and return its path
+    /// Ensure a binary is built and return a stable cached copy of it.
     ///
-    /// Builds the binary if not already built (or if cached path doesn't exist).
-    /// Caches the result to avoid rebuilding on subsequent calls.
-    ///
-    /// # Arguments
-    /// * `config` - Build configuration
-    ///
-    /// # Returns
-    /// * `Ok(PathBuf)` - Path to built binary
-    /// * `Err(String)` - Error message if build failed
+    /// Uses a cross-process file lock to serialize builds, then copies the
+    /// output to a feature-keyed cache path so concurrent builds with different
+    /// feature sets don't stomp each other's binaries.
     pub fn ensure_binary_built(config: BinaryBuildConfig) -> Result<PathBuf, String> {
-        let rustflags_part = config.rustflags.as_deref().unwrap_or("");
-        let features_part = config.features.join(",");
-        let cache_key = std::format!(
-            "{}-{}-{}-{}-{}-build_std={}",
-            config.package,
-            config.target,
-            config.profile,
-            rustflags_part.replace(' ', "_"),
-            features_part,
-            config.build_std
-        );
+        let cache_key = build_cache_key(&config);
 
-        // Check cache first
+        let workspace_root =
+            find_workspace_root().ok_or_else(|| "Failed to find workspace root".to_string())?;
+
+        let cache_dir = workspace_root.join("target").join(".lp-test-cache");
+        let cached_path = cache_dir.join(&cache_key);
+
+        // Fast path: in-process cache hit
         {
             let cache = get_cache().lock().unwrap();
             if let Some(Some(path)) = cache.get(&cache_key) {
@@ -133,14 +123,77 @@ mod std_impl {
             }
         }
 
-        // Find workspace root
-        let workspace_root =
-            find_workspace_root().ok_or_else(|| "Failed to find workspace root".to_string())?;
+        // Cross-process file lock to serialize all test builds
+        let lock_path = workspace_root.join("target").join(".lp-build.lock");
+        std::fs::create_dir_all(lock_path.parent().unwrap()).ok();
+        let lock_file = std::fs::File::create(&lock_path)
+            .map_err(|e| std::format!("Failed to create lock file: {e}"))?;
+        lock_exclusive(&lock_file)
+            .map_err(|e| std::format!("Failed to acquire build lock: {e}"))?;
+
+        // Re-check after acquiring lock (another process may have built it)
+        if cached_path.exists() {
+            let mut cache = get_cache().lock().unwrap();
+            cache.insert(cache_key, Some(cached_path.clone()));
+            return Ok(cached_path);
+        }
 
         // Build binary
         std::println!("Building {} for {}...", config.package, config.target);
+        run_cargo_build(&config, &workspace_root)?;
+
+        // Copy to stable cache path
+        let cargo_output = cargo_output_path(&config, &workspace_root);
+        if !cargo_output.exists() {
+            return Err(std::format!(
+                "Binary not found at: {}",
+                cargo_output.display()
+            ));
+        }
+
+        std::fs::create_dir_all(&cache_dir)
+            .map_err(|e| std::format!("Failed to create cache dir: {e}"))?;
+        std::fs::copy(&cargo_output, &cached_path)
+            .map_err(|e| std::format!("Failed to cache binary: {e}"))?;
+
+        // Update in-process cache
+        {
+            let mut cache = get_cache().lock().unwrap();
+            cache.insert(cache_key, Some(cached_path.clone()));
+        }
+
+        Ok(cached_path)
+        // lock_file dropped here, releasing flock
+    }
+
+    fn build_cache_key(config: &BinaryBuildConfig) -> String {
+        let rustflags_part = config.rustflags.as_deref().unwrap_or("");
+        let features_part = config.features.join(",");
+        std::format!(
+            "{}-{}-{}-{}-{}-build_std={}",
+            config.package,
+            config.target,
+            config.profile,
+            rustflags_part.replace(' ', "_"),
+            features_part,
+            config.build_std
+        )
+    }
+
+    fn cargo_output_path(config: &BinaryBuildConfig, workspace_root: &std::path::Path) -> PathBuf {
+        workspace_root
+            .join("target")
+            .join(&config.target)
+            .join(&config.profile)
+            .join(&config.package)
+    }
+
+    fn run_cargo_build(
+        config: &BinaryBuildConfig,
+        workspace_root: &std::path::Path,
+    ) -> Result<(), String> {
         let mut cmd = std::process::Command::new("cargo");
-        cmd.current_dir(&workspace_root);
+        cmd.current_dir(workspace_root);
 
         if let Some(ref rustflags) = config.rustflags {
             cmd.env("RUSTFLAGS", rustflags);
@@ -176,7 +229,6 @@ mod std_impl {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
 
-            // Print errors directly to stderr for better visibility
             std::eprintln!("=== Build failed for {} ===", config.package);
             if !stdout.is_empty() {
                 std::eprintln!("--- stdout ---");
@@ -194,30 +246,22 @@ mod std_impl {
             ));
         }
 
-        // Determine expected binary path
-        let exe_name = config.package.clone();
-        let exe_path = workspace_root
-            .join("target")
-            .join(&config.target)
-            .join(&config.profile)
-            .join(&exe_name);
+        Ok(())
+    }
 
-        if !exe_path.exists() {
-            return Err(std::format!("Binary not found at: {}", exe_path.display()));
+    #[cfg(unix)]
+    fn lock_exclusive(file: &std::fs::File) -> std::io::Result<()> {
+        use std::os::unix::io::AsRawFd;
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
         }
+        Ok(())
+    }
 
-        // Canonicalize the path to ensure it's absolute and resolve any symlinks
-        let exe_path = exe_path
-            .canonicalize()
-            .map_err(|e| std::format!("Failed to canonicalize binary path: {e}"))?;
-
-        // Cache the path
-        {
-            let mut cache = get_cache().lock().unwrap();
-            cache.insert(cache_key, Some(exe_path.clone()));
-        }
-
-        Ok(exe_path)
+    #[cfg(not(unix))]
+    fn lock_exclusive(_file: &std::fs::File) -> std::io::Result<()> {
+        Ok(())
     }
 
     /// Find workspace root by looking for Cargo.toml with [workspace]
