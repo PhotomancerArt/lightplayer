@@ -931,7 +931,6 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
@@ -939,7 +938,6 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64-meta"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-srcgen",
 ]
@@ -947,7 +945,6 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-entity",
 ]
@@ -955,12 +952,10 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 
 [[package]]
 name = "cranelift-codegen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "bumpalo",
@@ -988,7 +983,6 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -999,17 +993,14 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 
 [[package]]
 name = "cranelift-control"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 
 [[package]]
 name = "cranelift-entity"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-bitset",
 ]
@@ -1017,7 +1008,6 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.15.5",
@@ -1029,7 +1019,6 @@ dependencies = [
 [[package]]
 name = "cranelift-interpreter"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -1042,12 +1031,10 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 
 [[package]]
 name = "cranelift-jit"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1067,7 +1054,6 @@ dependencies = [
 [[package]]
 name = "cranelift-module"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1078,7 +1064,6 @@ dependencies = [
 [[package]]
 name = "cranelift-native"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -1088,7 +1073,6 @@ dependencies = [
 [[package]]
 name = "cranelift-object"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1102,7 +1086,6 @@ dependencies = [
 [[package]]
 name = "cranelift-reader"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1113,7 +1096,6 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 
 [[package]]
 name = "crc32fast"
@@ -2768,7 +2750,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "foldhash",
- "rustc-std-workspace-alloc",
 ]
 
 [[package]]
@@ -3431,7 +3412,6 @@ dependencies = [
 [[package]]
 name = "lp-collection"
 version = "1.0.0"
-source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
 ]
@@ -3639,6 +3619,7 @@ dependencies = [
  "linked_list_allocator",
  "log",
  "lp-riscv-emu-shared",
+ "unwinding",
 ]
 
 [[package]]
@@ -4715,7 +4696,6 @@ dependencies = [
 [[package]]
 name = "regalloc2"
 version = "0.13.6"
-source = "git+https://github.com/light-player/lp-regalloc2?branch=main#1e9e59a59b7eeaaca2ebd83a8fc4ea97eef106ff"
 dependencies = [
  "allocator-api2 0.2.21",
  "bumpalo",
@@ -4858,12 +4838,6 @@ name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
-
-[[package]]
-name = "rustc-std-workspace-alloc"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d441c3b2ebf55cebf796bfdc265d67fa09db17b7bb6bd4be75c509e1e8fec3"
 
 [[package]]
 name = "rustc_version"
@@ -6108,7 +6082,6 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
 version = "40.0.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -6119,7 +6092,6 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-math"
 version = "40.0.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#6a6960f03460c43f7a4061beb4bfad4a1b55d3c4"
 dependencies = [
  "libm",
 ]

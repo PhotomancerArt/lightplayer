@@ -450,3 +450,11 @@ the firmware continues to boot normally.
    `panic = "unwind"` in `[profile.release-esp32]` has no effect on
    `riscv32imac-unknown-none-elf` because the target spec hardcodes `abort`. Only
    `-C panic=unwind` in rustflags actually forces unwind mode. There is no warning.
+
+7. **Pre-built core sysroot blocks unwinding through `panic!()`.** The pre-built
+   `core` for `riscv32imac-unknown-none-elf` is compiled with `panic=abort`, so
+   `core::panicking::panic()` and related functions lack proper unwind info for the
+   unwinder to walk through. Direct calls to `unwinding::panic::begin_panic()` work
+   because the entire call chain stays in user crates compiled with `panic=unwind`.
+   To unwind through `panic!()`, `-Z build-std=core,alloc` is needed to rebuild core
+   with unwind support.

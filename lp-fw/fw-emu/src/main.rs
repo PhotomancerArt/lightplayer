@@ -48,6 +48,47 @@ pub extern "C" fn _lp_main() -> ! {
 
     host_debug!("[fw-emu] Starting firmware emulator...");
 
+    // Create serial I/O first (needed for test_unwind check)
+    let serial_io = SyscallSerialIo::new();
+
+    #[cfg(feature = "test_unwind")]
+    {
+        use lp_riscv_emu_guest::{
+            sys_serial_has_data, sys_serial_read, sys_serial_write, sys_yield,
+        };
+
+        // Check for __test_unwind command from host before entering server loop.
+        // Host sends "__test_unwind\n", we run catch_unwind test and write result.
+        if sys_serial_has_data() {
+            let mut line = alloc::string::String::new();
+            let mut buf = [0u8; 1];
+            while sys_serial_has_data() {
+                let n = sys_serial_read(&mut buf);
+                if n <= 0 {
+                    break;
+                }
+                if buf[0] == b'\n' {
+                    break;
+                }
+                line.push(buf[0] as char);
+            }
+            if line == "__test_unwind" {
+                #[inline(never)]
+                fn trigger_unwind() {
+                    panic!("unwind test");
+                }
+                let result = unwinding::panic::catch_unwind(trigger_unwind);
+                let msg = match result {
+                    Err(_) => "unwind: ok",
+                    Ok(_) => "unwind: fail",
+                };
+                let _ = sys_serial_write(msg.as_bytes());
+                let _ = sys_serial_write(b"\n");
+                sys_yield();
+            }
+        }
+    }
+
     // Create filesystem (in-memory)
     let base_fs = alloc::boxed::Box::new(LpFsMemory::new());
 
@@ -65,8 +106,6 @@ pub extern "C" fn _lp_main() -> ! {
         Some(time_provider_rc),
     );
 
-    // Create serial transport
-    let serial_io = SyscallSerialIo::new();
     let transport = SerialTransport::new(serial_io);
 
     // Create time provider for server loop frame timing

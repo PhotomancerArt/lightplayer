@@ -21,6 +21,8 @@ mod std_impl {
         pub profile: String,
         /// Cargo features to enable
         pub features: Vec<String>,
+        /// Use -Z build-std=core,alloc (needed for panic=unwind on bare-metal)
+        pub build_std: bool,
     }
 
     impl BinaryBuildConfig {
@@ -32,6 +34,7 @@ mod std_impl {
                 rustflags: Some("-C target-feature=-c".to_string()),
                 profile: "release".to_string(),
                 features: Vec::new(),
+                build_std: false,
             }
         }
 
@@ -64,6 +67,24 @@ mod std_impl {
             self
         }
 
+        /// Enable full unwinding support (catch_unwind, .eh_frame, landing pads).
+        ///
+        /// Adds -C panic=unwind (overrides target's abort), -C force-unwind-tables=yes,
+        /// and -C force-frame-pointers=yes. Required for fw-emu unwind tests.
+        pub fn with_unwind_support(mut self, enable: bool) -> Self {
+            if enable {
+                let extra = " -C panic=unwind -C force-unwind-tables=yes";
+                self.rustflags = Some(self.rustflags.unwrap_or_default() + extra);
+            }
+            self
+        }
+
+        /// Use -Z build-std=core,alloc (required for panic=unwind on bare-metal targets).
+        pub fn with_build_std(mut self, enable: bool) -> Self {
+            self.build_std = enable;
+            self
+        }
+
         /// Add cargo features to enable when building.
         pub fn with_features(mut self, features: &[&str]) -> Self {
             self.features = features.iter().map(|s| s.to_string()).collect();
@@ -93,12 +114,13 @@ mod std_impl {
         let rustflags_part = config.rustflags.as_deref().unwrap_or("");
         let features_part = config.features.join(",");
         let cache_key = std::format!(
-            "{}-{}-{}-{}-{}",
+            "{}-{}-{}-{}-{}-build_std={}",
             config.package,
             config.target,
             config.profile,
             rustflags_part.replace(' ', "_"),
-            features_part
+            features_part,
+            config.build_std
         );
 
         // Check cache first
@@ -140,6 +162,10 @@ mod std_impl {
 
         if !config.features.is_empty() {
             cmd.args(["--features", &config.features.join(",")]);
+        }
+
+        if config.build_std {
+            cmd.args(["-Z", "build-std=core,alloc"]);
         }
 
         let output = cmd

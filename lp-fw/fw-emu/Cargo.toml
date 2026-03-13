@@ -13,7 +13,7 @@ lp-server = { path = "../../lp-core/lp-server", default-features = false, featur
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }
-lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
+lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest", features = ["unwinding"] }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
@@ -21,6 +21,8 @@ log = { workspace = true, default-features = false }
 
 [features]
 alloc-trace = ["lp-riscv-emu-guest/alloc-trace"]
+# Test command __test_unwind: runs catch_unwind test before server loop (for CI)
+test_unwind = []
 
 [build-dependencies]
 
