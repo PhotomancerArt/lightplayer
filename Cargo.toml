@@ -115,7 +115,7 @@ regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "li
 
 # Common dependencies
 target-lexicon = "0.13.0"
-hashbrown = { version = "0.15", default-features = false, features = ["alloc", "default-hasher"] }
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher"] }
 anyhow = { version = "1.0.100", default-features = false }
 log = { version = "0.4", default-features = false }
 regex = "1.9.1"
@@ -131,6 +131,7 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 lto = true
 opt-level = "z"
 codegen-units = 1
+panic = "unwind"
 
 # ESP32 app release profile optimizations (embedded target)
 [profile.release.package.esp32-glsl-jit]
@@ -140,19 +141,24 @@ strip = "debuginfo"
 [profile.release.package.fw-emu]
 debug = 1
 
+# ESP32: panic=unwind for OOM recovery via unwinding crate
+[profile.release-esp32]
+inherits = "release"
+panic = "unwind"
+
+[profile.release-esp32.package.fw-esp32]
+strip = "debuginfo"
+
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).
 [profile.release-emu]
 inherits = "release"
 opt-level = 3
 codegen-units = 4
+# panic = "unwind" inherited from release
 
 [profile.release-emu.package.fw-emu]
 debug = 1
-
-# ESP32 firmware release profile optimizations (embedded target)
-[profile.release.package.fw-esp32]
-strip = "debuginfo"
 
 # Hot-path crates: optimize for speed instead of size
 # These crates are in the critical rendering path and benefit from speed optimizations
@@ -174,12 +180,11 @@ codegen-units = 4
 [patch.crates-io]
 esp-println = { path = "lp-fw/esp-println-fork" }
 
-# Patch regalloc2 for local lp-regalloc2 development
-# Uncomment for local dev; comment out to use git
+# Patch regalloc2 for local lp-regalloc2
 # [patch."https://github.com/light-player/lp-regalloc2"]
 # regalloc2 = { path = "../lp-regalloc2" }
 
-# Patch cranelift for local development; comment out to use git main
+# Patch cranelift for local development
 # [patch."https://github.com/light-player/lp-cranelift"]
 # cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
 # cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
@@ -191,8 +196,7 @@ esp-println = { path = "lp-fw/esp-println-fork" }
 # cranelift-control = { path = "../lp-cranelift/cranelift/control" }
 # cranelift-interpreter = { path = "../lp-cranelift/cranelift/interpreter" }
 
-# lp-collection (lp-common): same path/git toggle pattern as cranelift
-# Path for local dev; comment out to use published (git) lp-common
+# lp-collection (lp-common): path for local dev
 # [patch."https://github.com/light-player/lp-common"]
 # lp-collection = { path = "../lp-common/lp-collection" }
 

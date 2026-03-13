@@ -8,6 +8,7 @@
 #![no_main]
 
 extern crate alloc;
+extern crate unwinding;
 
 mod output;
 mod serial;

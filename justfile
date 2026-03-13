@@ -5,6 +5,8 @@
 rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "esp32-glsl-jit lp-glsl-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32"
+# fw-esp32 uses release-esp32 (panic=unwind, nightly) for OOM recovery
+fw_esp32_profile := "release-esp32"
 lp_glsl_dir := "lp-glsl"
 
 # Default recipe - show available commands
@@ -47,9 +49,9 @@ build-rv32-jit-test: install-rv32-target
     cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
     cd lp-glsl/esp32-glsl-jit && cargo build --target {{ rv32_target }} --release --features esp32c6
 
-# riscv32: fw-esp32
+# riscv32: fw-esp32 (uses release-esp32 profile: nightly + panic=unwind for OOM recovery)
 build-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
@@ -57,7 +59,7 @@ build-rv32-emu-guest-test-app: install-rv32-target
 
 # riscv32: fw-emu (firmware that runs in RISC-V emulator)
 build-fw-emu: install-rv32-target
-    cargo build --target {{ rv32_target }} -p fw-emu
+    cargo build --target {{ rv32_target }} -p fw-emu --release
 
 # CI build: host + rv32 builtins + emu-guest. Skips esp32-glsl-jit and fw-esp32
 
@@ -122,7 +124,7 @@ clippy-rv32-jit-test: install-rv32-target
 
 # riscv32: fw-esp32 clippy
 clippy-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --release --features esp32c6 -- --no-deps -D warnings
+    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6 -- --no-deps -D warnings
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
@@ -275,27 +277,34 @@ demo example="basic":
 
 # Run firmware on ESP32-C6 device
 
+# Path to fw-esp32 ELF (release-esp32 profile)
+fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
+
 # Requires: ESP32-C6 device connected via USB
 demo-esp32c6-host: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --release --features esp32c6
-    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
+    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
+    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
-demo-esp32c6-standalone: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo espflash flash --target {{ rv32_target }} --release --features esp32c6 --partition-table partitions.csv
+demo-esp32c6-standalone: build-fw-esp32
+    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 # Run firmware on ESP32-C6 device using the test_dither feature
 fwtest-dithering-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --release
+    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
+# Run firmware with test_oom: allocates until OOM, verifies catch_unwind recovers
+fwtest-oom-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
@@ -318,7 +327,7 @@ cargo-update:
 decode-backtrace *addrs:
     #!/usr/bin/env bash
     set -e
-    test -f target/{{ rv32_target }}/release/fw-esp32
+    test -f target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
     if [ -n "{{ addrs }}" ]; then
         ADDRS="{{ addrs }}"
     else
@@ -329,9 +338,9 @@ decode-backtrace *addrs:
         exit 1
     fi
     if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then
-        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/release/fw-esp32 $ADDRS
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 $ADDRS
     else
-        addr2line -e target/{{ rv32_target }}/release/fw-esp32 -f -a $ADDRS
+        addr2line -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 -f -a $ADDRS
     fi
 
 # ============================================================================

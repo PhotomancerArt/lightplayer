@@ -9,6 +9,9 @@ MEMORY {
 }
 
 SECTIONS {
+    /* Unwinding (fde-static) needs these symbols */
+    PROVIDE(__executable_start = ORIGIN(ROM));
+
     .text : ALIGN(4) {
         KEEP (*(.text.init.entry))
         KEEP (*(.text.init.*))
@@ -43,6 +46,12 @@ SECTIONS {
         KEEP(*(.fini_array*));
         __fini_array_end = .;
     } > ROM
+
+    /* Exception unwinding: keep .eh_frame in ROM for catch_unwind */
+    . = ALIGN(8);
+    PROVIDE(__etext = .);
+    PROVIDE(__eh_frame = .);
+    .eh_frame : { KEEP (*(.eh_frame)) *(.eh_frame.*) } > ROM
 
     .bss (NOLOAD) : ALIGN(4) {
         __bss_target_start = .;
@@ -93,9 +102,5 @@ SECTIONS {
 
     _ram  = ORIGIN(RAM);
     _eram = ORIGIN(RAM) + LENGTH(RAM);
-
-    /DISCARD/ : {
-        *(.eh_frame .eh_frame.*)
-    }
 }
 

@@ -7,6 +7,8 @@ use alloc::{
     format,
     string::{String, ToString},
 };
+#[cfg(feature = "oom-recovery")]
+use core::panic::AssertUnwindSafe;
 use log;
 use lp_glsl_compiler::glsl_jit_streaming;
 use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
@@ -17,6 +19,8 @@ use lp_model::{
     project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
+#[cfg(feature = "oom-recovery")]
+use unwinding::panic::catch_unwind;
 
 /// Wrapper for function pointer that implements Send + Sync
 /// Function pointers are safe to share between threads (they're just addresses)
@@ -534,7 +538,25 @@ impl ShaderRuntime {
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
 
-        match glsl_jit_streaming(glsl_source, options) {
+        #[cfg(feature = "oom-recovery")]
+        let compile_result: Result<
+            alloc::boxed::Box<dyn GlslExecutable>,
+            lp_glsl_compiler::GlslDiagnostics,
+        > = match catch_unwind(AssertUnwindSafe(|| {
+            glsl_jit_streaming(glsl_source, options)
+        })) {
+            Ok(inner) => inner,
+            Err(_) => Err(lp_glsl_compiler::GlslDiagnostics::from(
+                lp_glsl_compiler::GlslError::new(
+                    lp_glsl_compiler::ErrorCode::E0400,
+                    "OOM during shader compilation",
+                ),
+            )),
+        };
+        #[cfg(not(feature = "oom-recovery"))]
+        let compile_result = glsl_jit_streaming(glsl_source, options);
+
+        match compile_result {
             Ok(executable) => {
                 // Extract function pointer and calling convention using trait method
                 // This allows us to make direct calls without the GlslValue conversion overhead

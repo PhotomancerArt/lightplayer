@@ -6,10 +6,44 @@
 
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
 
 extern crate alloc;
+#[allow(unused_extern_crates)]
+extern crate unwinding;
 
-use esp_backtrace as _; // panic handler
+use core::alloc::Layout;
+use core::panic::PanicInfo;
+
+/// Custom panic handler that starts stack unwinding via the `unwinding` crate.
+///
+/// In no_std, `panic!()` routes directly to `#[panic_handler]` — there is no automatic
+/// unwinding step. We must explicitly call `begin_panic` to start unwinding so that
+/// `catch_unwind` (used in shader compilation for OOM recovery) can catch panics.
+///
+/// If no `catch_unwind` exists on the call stack, the unwinder reaches the top and aborts.
+#[panic_handler]
+fn panic_handler(info: &PanicInfo) -> ! {
+    esp_println::println!("\n\n====================== PANIC ======================");
+    esp_println::println!("{info}");
+    esp_println::println!();
+
+    // ZST payload avoids heap allocation — safe to use during OOM.
+    // The panic info is already printed above; catch_unwind callers don't inspect the payload.
+    struct PanicPayload;
+    let code = unwinding::panic::begin_panic(alloc::boxed::Box::new(PanicPayload));
+
+    // begin_panic returns if no catch_unwind was found on the stack.
+    esp_println::println!("unwinding failed: code={}", code.0);
+    loop {}
+}
+
+/// Custom OOM handler that panics normally so catch_unwind can recover.
+/// The default alloc_error_handler uses nounwind panic and cannot be caught.
+#[alloc_error_handler]
+fn on_alloc_error(layout: Layout) -> ! {
+    panic!("memory allocation of {} bytes failed", layout.size());
+}
 
 mod board;
 mod boot;
@@ -138,6 +172,34 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize log crate to write to outgoing serial (host will see these)
         crate::logger::init(serial::io_task::log_write_to_outgoing);
+
+        #[cfg(feature = "test_oom")]
+        {
+            // Test 1: simple panic (not OOM) — validates basic unwinding
+            esp_println::println!("[test_oom] Test 1: catching simple panic...");
+            let r1 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                panic!("test panic");
+            }));
+            match r1 {
+                Ok(_) => esp_println::println!("[test_oom] Test 1 FAIL: panic was not caught"),
+                Err(_) => esp_println::println!("[test_oom] Test 1 OK: simple panic caught"),
+            }
+
+            // Test 2: OOM inside catch_unwind
+            esp_println::println!("[test_oom] Test 2: catching OOM...");
+            let r2 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+                let mut vecs: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
+                loop {
+                    vecs.push(alloc::vec![0u8; 64 * 1024]);
+                }
+            }));
+            match r2 {
+                Ok(_) => esp_println::println!("[test_oom] Test 2 FAIL: did not OOM"),
+                Err(_) => esp_println::println!("[test_oom] Test 2 OK: OOM caught, recovery works"),
+            }
+
+            esp_println::println!("[test_oom] Tests complete, continuing boot...");
+        }
 
         // Create streaming transport (serializes in io_task, never buffers full JSON)
         esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
