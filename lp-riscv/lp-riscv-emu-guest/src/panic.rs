@@ -84,19 +84,33 @@ fn report_panic_to_host(info: &core::panic::PanicInfo) -> ! {
     panic_syscall(panic_msg_buf.as_ptr(), cursor, file_ptr, file_len, line);
 }
 
-/// Panic handler (default: no unwinding)
-#[cfg(not(feature = "unwinding"))]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    report_panic_to_host(info);
-}
-
-/// Panic handler (with unwinding: call begin_panic for catch_unwind, fall back to report on failure)
-#[cfg(feature = "unwinding")]
+/// Panic handler: build PanicPayload, attempt unwinding, fall back to host report.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     extern crate alloc;
-    struct PanicPayload;
-    let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(PanicPayload));
+    use core::fmt::Write;
+
+    let message = {
+        let mut buf = alloc::string::String::new();
+        let _ = write!(buf, "{}", info.message());
+        if buf.is_empty() {
+            alloc::string::String::from("panic occurred (no message)")
+        } else {
+            buf
+        }
+    };
+    let (file, line) = if let Some(loc) = info.location() {
+        (
+            Some(alloc::string::String::from(loc.file())),
+            Some(loc.line()),
+        )
+    } else {
+        (None, None)
+    };
+
+    let payload = lp_shared::backtrace::PanicPayload::new(message, file, line);
+    let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(payload));
+
+    // begin_panic returned — no catch_unwind on stack. Fall back to host report.
     report_panic_to_host(info);
 }

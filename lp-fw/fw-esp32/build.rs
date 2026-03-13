@@ -52,7 +52,8 @@ SECTIONS {
                     }
                     let eh_frame_x = out_path.join("eh_frame.x");
                     if eh_frame_x.exists() {
-                        let _ = std::fs::write(&eh_frame_x, "/* patched: .eh_frame is in text.x */\n");
+                        let _ =
+                            std::fs::write(&eh_frame_x, "/* patched: .eh_frame is in text.x */\n");
                     }
                 }
             }

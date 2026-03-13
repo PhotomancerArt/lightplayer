@@ -7,9 +7,16 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
+#![allow(
+    unstable_features,
+    reason = "alloc_error_handler required for custom OOM handler in no_std"
+)]
 
 extern crate alloc;
-#[allow(unused_extern_crates)]
+#[allow(
+    unused_extern_crates,
+    reason = "unwinding is used for panic recovery; extern crate needed for no_std"
+)]
 extern crate unwinding;
 
 use core::alloc::Layout;
@@ -19,7 +26,7 @@ use core::panic::PanicInfo;
 ///
 /// In no_std, `panic!()` routes directly to `#[panic_handler]` — there is no automatic
 /// unwinding step. We must explicitly call `begin_panic` to start unwinding so that
-/// `catch_unwind` (used in shader compilation for OOM recovery) can catch panics.
+/// `catch_unwind` (used for panic recovery in node render) can catch panics.
 ///
 /// If no `catch_unwind` exists on the call stack, the unwinder reaches the top and aborts.
 #[panic_handler]
@@ -28,10 +35,36 @@ fn panic_handler(info: &PanicInfo) -> ! {
     esp_println::println!("{info}");
     esp_println::println!();
 
-    // ZST payload avoids heap allocation — safe to use during OOM.
-    // The panic info is already printed above; catch_unwind callers don't inspect the payload.
-    struct PanicPayload;
-    let code = unwinding::panic::begin_panic(alloc::boxed::Box::new(PanicPayload));
+    let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
+        #[cfg(feature = "server")]
+        {
+            use core::fmt::Write;
+            let message = {
+                let mut buf = alloc::string::String::new();
+                let _ = write!(buf, "{}", info.message());
+                if buf.is_empty() {
+                    alloc::string::String::from("panic occurred (no message)")
+                } else {
+                    buf
+                }
+            };
+            let (file, line) = if let Some(loc) = info.location() {
+                (
+                    Some(alloc::string::String::from(loc.file())),
+                    Some(loc.line()),
+                )
+            } else {
+                (None, None)
+            };
+            alloc::boxed::Box::new(lp_shared::backtrace::PanicPayload::new(message, file, line))
+        }
+        #[cfg(not(feature = "server"))]
+        {
+            struct Dummy;
+            alloc::boxed::Box::new(Dummy)
+        }
+    };
+    let code = unwinding::panic::begin_panic(payload);
 
     // begin_panic returns if no catch_unwind was found on the stack.
     esp_println::println!("unwinding failed: code={}", code.0);
