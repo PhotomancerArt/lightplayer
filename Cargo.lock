@@ -222,7 +222,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -233,7 +233,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -931,6 +931,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
@@ -938,6 +939,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64-meta"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-srcgen",
 ]
@@ -945,6 +947,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-entity",
 ]
@@ -952,10 +955,12 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 
 [[package]]
 name = "cranelift-codegen"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "bumpalo",
@@ -983,6 +988,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -993,14 +999,17 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 
 [[package]]
 name = "cranelift-control"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 
 [[package]]
 name = "cranelift-entity"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-bitset",
 ]
@@ -1008,6 +1017,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.15.5",
@@ -1019,6 +1029,7 @@ dependencies = [
 [[package]]
 name = "cranelift-interpreter"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -1031,10 +1042,12 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 
 [[package]]
 name = "cranelift-jit"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1054,6 +1067,7 @@ dependencies = [
 [[package]]
 name = "cranelift-module"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1064,6 +1078,7 @@ dependencies = [
 [[package]]
 name = "cranelift-native"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -1073,6 +1088,7 @@ dependencies = [
 [[package]]
 name = "cranelift-object"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1086,6 +1102,7 @@ dependencies = [
 [[package]]
 name = "cranelift-reader"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -1096,6 +1113,7 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.127.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 
 [[package]]
 name = "crc32fast"
@@ -1821,7 +1839,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3057,7 +3075,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3412,6 +3430,7 @@ dependencies = [
 [[package]]
 name = "lp-collection"
 version = "1.0.0"
+source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
 ]
@@ -3604,6 +3623,7 @@ dependencies = [
  "cranelift-module",
  "env_logger 0.11.9",
  "hashbrown 0.15.5",
+ "libc",
  "log",
  "lp-riscv-elf",
  "lp-riscv-emu-shared",
@@ -3619,6 +3639,7 @@ dependencies = [
  "linked_list_allocator",
  "log",
  "lp-riscv-emu-shared",
+ "lp-shared",
  "unwinding",
 ]
 
@@ -3959,7 +3980,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4696,6 +4717,7 @@ dependencies = [
 [[package]]
 name = "regalloc2"
 version = "0.13.6"
+source = "git+https://github.com/light-player/lp-regalloc2?branch=main#1e9e59a59b7eeaaca2ebd83a8fc4ea97eef106ff"
 dependencies = [
  "allocator-api2 0.2.21",
  "bumpalo",
@@ -4871,7 +4893,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5340,7 +5362,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5459,7 +5481,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5819,7 +5841,7 @@ checksum = "51b70b87d15e91f553711b40df3048faf27a7a04e01e0ddc0cf9309f0af7c2ca"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6082,6 +6104,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
 version = "40.0.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -6092,6 +6115,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-math"
 version = "40.0.0"
+source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
  "libm",
 ]
@@ -6389,7 +6413,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

@@ -9,8 +9,8 @@ workspace = true
 
 [features]
 default = ["std", "cranelift-optimizer", "cranelift-verifier"]
-# OOM recovery via catch_unwind (embedded targets)
-oom-recovery = ["dep:unwinding"]
+# Panic recovery via catch_unwind (embedded targets)
+panic-recovery = ["dep:unwinding"]
 # Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
 cranelift-optimizer = ["lp-glsl-compiler/cranelift-optimizer"]
 # Enable Cranelift verifier (function verification) - saves ~19 KB when disabled
@@ -21,7 +21,7 @@ std = [
 ]
 
 [dependencies]
-unwinding = { version = "0.2", optional = true, default-features = false }
+unwinding = { version = "0.2", optional = true, default-features = false, features = ["panic"] }
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
 lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false }

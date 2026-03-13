@@ -20,6 +20,13 @@ use lp_model::{
 use lp_shared::fs::{LpFs, fs_event::FsChange};
 use lp_shared::time::TimeProvider;
 
+#[cfg(feature = "panic-recovery")]
+use core::panic::AssertUnwindSafe;
+#[cfg(feature = "panic-recovery")]
+use lp_shared::backtrace::PanicPayload;
+#[cfg(feature = "panic-recovery")]
+use unwinding::panic::catch_unwind;
+
 /// Optional callback for memory stats (free_bytes, used_bytes). Used for shed logging on ESP32.
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 
@@ -491,7 +498,7 @@ impl ProjectRuntime {
             // The issue: runtime.render() needs &mut runtime and &mut ctx
             // But runtime is inside ctx.nodes, so we can't have both borrows
             // Solution: use a helper that takes nodes and handle, does everything internally
-            let render_result = {
+            let render_result = catch_node_panic(|| {
                 // Create context
                 let mut ctx = RenderContextImpl {
                     nodes: &mut self.nodes,
@@ -524,7 +531,7 @@ impl ProjectRuntime {
                 } else {
                     Ok(())
                 }
-            };
+            });
 
             // Update status based on render result
             if let Some(entry) = self.nodes.get_mut(&handle) {
@@ -549,7 +556,7 @@ impl ProjectRuntime {
             .collect();
 
         for handle in output_handles {
-            let render_result = {
+            let render_result = catch_node_panic(|| {
                 let mut ctx = RenderContextImpl {
                     nodes: &mut self.nodes,
                     frame_id: self.frame_id,
@@ -567,7 +574,7 @@ impl ProjectRuntime {
                 } else {
                     Ok(())
                 }
-            };
+            });
 
             if let Err(e) = render_result {
                 if let Some(entry) = self.nodes.get_mut(&handle) {
@@ -1608,7 +1615,7 @@ impl<'a> RenderContextImpl<'a> {
 
             // Get shader runtime and render
             // Use unsafe to work around borrow checker (same pattern as fixture rendering)
-            let render_result = {
+            let render_result = catch_node_panic(|| {
                 if let Some(entry) = ctx.nodes.get_mut(&shader_handle) {
                     if let Some(runtime) = entry.runtime.as_mut() {
                         // runtime is &mut Box<dyn NodeRuntime>
@@ -1625,7 +1632,7 @@ impl<'a> RenderContextImpl<'a> {
                 } else {
                     Ok(())
                 }
-            };
+            });
 
             // Handle render errors - if shader execution fails, update shader status
             match render_result {
@@ -1656,4 +1663,29 @@ impl<'a> RenderContextImpl<'a> {
 
         Ok(())
     }
+}
+
+/// Wrap a render call in catch_unwind, converting panics to Error.
+///
+/// If the closure panics and panic-recovery is enabled, catches the panic
+/// and returns an Err with the formatted panic info. Without panic-recovery,
+/// this is a direct call (panics propagate normally).
+#[cfg(feature = "panic-recovery")]
+fn catch_node_panic(f: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let msg = if let Some(p) = payload.downcast_ref::<PanicPayload>() {
+                p.format_error()
+            } else {
+                alloc::string::String::from("panic: unknown (no payload)")
+            };
+            Err(Error::Other { message: msg })
+        }
+    }
+}
+
+#[cfg(not(feature = "panic-recovery"))]
+fn catch_node_panic(f: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    f()
 }

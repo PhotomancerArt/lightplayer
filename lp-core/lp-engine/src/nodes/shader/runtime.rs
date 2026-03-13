@@ -7,7 +7,7 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-#[cfg(feature = "oom-recovery")]
+#[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
 use log;
 use lp_glsl_compiler::glsl_jit_streaming;
@@ -19,7 +19,7 @@ use lp_model::{
     project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
-#[cfg(feature = "oom-recovery")]
+#[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
 /// Wrapper for function pointer that implements Send + Sync
@@ -538,7 +538,7 @@ impl ShaderRuntime {
         self.direct_call_conv = None;
         self.direct_pointer_type = None;
 
-        #[cfg(feature = "oom-recovery")]
+        #[cfg(feature = "panic-recovery")]
         let compile_result: Result<
             alloc::boxed::Box<dyn GlslExecutable>,
             lp_glsl_compiler::GlslDiagnostics,
@@ -553,7 +553,7 @@ impl ShaderRuntime {
                 ),
             )),
         };
-        #[cfg(not(feature = "oom-recovery"))]
+        #[cfg(not(feature = "panic-recovery"))]
         let compile_result = glsl_jit_streaming(glsl_source, options);
 
         match compile_result {
