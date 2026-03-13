@@ -5,7 +5,7 @@
 rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "esp32-glsl-jit lp-glsl-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32"
-# fw-esp32 uses release-esp32 (panic=unwind, nightly) for OOM recovery
+# fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
 fw_esp32_profile := "release-esp32"
 lp_glsl_dir := "lp-glsl"
 
