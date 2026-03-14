@@ -9,6 +9,8 @@ on:
 env:
   RUST_BACKTRACE: 1
   RISC_V_TARGET: riscv32imac-unknown-none-elf
+  # Work around rustup rename failures on overlay/cross-device filesystems (ARM runners, Docker)
+  RUSTUP_PERMIT_COPY_RENAME: 1
 
 jobs:
   validate-x64:
@@ -33,6 +35,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: nightly
           components: rustfmt, clippy
 
       - name: Install RISC-V target
@@ -79,6 +82,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: nightly
           components: rustfmt, clippy
 
       - name: Install RISC-V target
