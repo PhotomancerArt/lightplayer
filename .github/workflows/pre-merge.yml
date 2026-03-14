@@ -36,7 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-src
 
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
@@ -83,7 +83,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-src
 
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
