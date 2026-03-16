@@ -3,7 +3,7 @@ name = "lp-glsl-filetests-gen-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Generator for lp-glsl-compiler vector and matrix test files"
+description = "Generator for lp-glsl vector and matrix test files"
 publish = false
 
 [lints]

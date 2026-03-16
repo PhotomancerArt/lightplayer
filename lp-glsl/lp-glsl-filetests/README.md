@@ -2,15 +2,15 @@
 
 Cranelift-style filetest infrastructure for validating GLSL compilation and execution.
 
-**Location:** `lightplayer/crates/lp-glsl-filetests/` (this is the canonical test suite)
+**Location:** `lp-glsl/lp-glsl-filetests/` (this is the canonical test suite)
 
 ## Running Tests
 
 ### From Lightplayer Workspace
 
 ```bash
-# Navigate to lightplayer workspace
-cd lightplayer
+# Navigate to workspace root
+cd lp2025
 
 # Run all tests
 cargo test -p lp-glsl-filetests --test filetests
@@ -31,7 +31,7 @@ TEST_FILE=math/float-add.glsl cargo test -p lp-glsl-filetests --test filetests -
 ### From Crate Directory
 
 ```bash
-cd lightplayer/crates/lp-glsl-filetests
+cd lp-glsl/lp-glsl-filetests
 cargo test --test filetests
 ```
 
@@ -107,8 +107,8 @@ Our implementation matches Cranelift's filetests semantics:
 Automatically update test expectations when they don't match actual results:
 
 ```bash
-# From lightplayer workspace
-cd lightplayer
+# From workspace root
+cd lp2025
 
 # Update all test expectations
 CRANELIFT_TEST_BLESS=1 cargo test -p lp-glsl-filetests --test filetests
@@ -169,7 +169,7 @@ Tests are organized in the `filetests/` directory:
 
 ### Test passes when it should fail
 
-- Verify you're running tests from the correct location: `lightplayer/crates/lp-glsl-filetests/`
+- Verify you're running tests from the correct location: `lp-glsl/lp-glsl-filetests/`
 - Check that the test file has `// test run` directive
 - Verify the comparison operator matches the value type (`==` for int/bool, `~=` for float)
 - Run with `--nocapture` to see detailed output

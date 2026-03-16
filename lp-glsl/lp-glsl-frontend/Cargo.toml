@@ -1,0 +1,19 @@
+[package]
+name = "lp-glsl-frontend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false }
+hashbrown = { workspace = true }
+log = { workspace = true, default-features = false }
+libm = "0.2"
+lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+
+[features]
+default = []
+std = ["glsl/std"]

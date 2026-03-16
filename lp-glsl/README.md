@@ -7,16 +7,23 @@ platforms.
 
 ## Project Structure
 
-- **`apps/`** - Executable applications
-    - `esp32-glsl-jit/` - ESP32 GLSL JIT compiler and runtime
-    - `embive-program/` - Demo program for the embive VM
-    - `lp-glsl-filetests-app/` - Command-line tool for running GLSL filetests
+- **Compiler crates**
+    - `lp-glsl-frontend/` - GLSL parsing, semantic analysis, error handling (target-independent)
+    - `lp-glsl-builtin-ids/` - Builtin function ID enum (generated)
+    - `lp-glsl-cranelift/` - Cranelift-backed codegen, JIT, and runtime
 
-- **`crates/`** - Core library components
-    - `lp-glsl-compiler/` - GLSL compiler and runtime
+- **Supporting crates**
+    - `lp-glsl-builtins/` - Implementations of builtin functions (fixed-point math, etc.)
     - `lp-glsl-filetests/` - Filetest infrastructure for GLSL
     - `lp-glsl-jit-util/` - JIT compilation utilities
-    - `lp-riscv-tools/` - RISC-V instruction encoding and utilities
+    - `lpfx-impl-macro/` - Macros for builtin implementations
+
+- **Applications**
+    - `esp32-glsl-jit/` - ESP32 GLSL JIT compiler and runtime
+    - `lp-glsl-filetests-app/` - Command-line tool for running GLSL filetests
+    - `lp-glsl-builtins-gen-app/` - Code generator for builtin boilerplate
+    - `lp-glsl-builtins-emu-app/` - RISC-V guest for builtin tests
+    - `lp-glsl-q32-metrics-app/` - Metrics tool for fixed-point math
 
 ## Running Filetests
 

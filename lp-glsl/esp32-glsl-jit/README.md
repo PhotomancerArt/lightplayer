@@ -31,7 +31,7 @@ The test compiles this at runtime and executes it to get `42`.
 ## Building
 
 ```bash
-cd apps/esp32c6-glsl-jit
+cd lp-glsl/esp32-glsl-jit
 cargo build --release
 ```
 

@@ -96,10 +96,11 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 
 ## GLSL Compiler (`lp-glsl/`)
 
-- **`lp-glsl-compiler`** Main GLSL compiler that parses, transforms, and codegens to various ISAs,
-  handles JIT and ELF linking
+- **`lp-glsl-frontend`** Target-independent GLSL parsing, semantic analysis, and error handling
+- **`lp-glsl-builtin-ids`** Generated enum of builtin function IDs
+- **`lp-glsl-cranelift`** Cranelift-backed codegen, JIT, and ELF linking
 - **`lp-glsl-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
-  lygia-inspired libary of native glsl functions
+  lygia-inspired library of native glsl functions
 - **`lp-glsl-builtins-emu-app`** RISC-V guest for running tests linked against builtins
 - **`lp-glsl-builtins-gen-app`** Code generator for builtin function boilerplate
 - **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctnees
