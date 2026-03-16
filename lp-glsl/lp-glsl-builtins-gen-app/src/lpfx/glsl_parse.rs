@@ -3,8 +3,8 @@
 use crate::lpfx::errors::LpfxCodegenError;
 use glsl::parser::Parse;
 use glsl::syntax::{ExternalDeclaration, TranslationUnit};
-use lp_glsl_compiler::frontend::semantic::functions::FunctionSignature;
-use lp_glsl_compiler::frontend::semantic::passes::function_signature::extract_function_signature;
+use lp_glsl_frontend::semantic::functions::FunctionSignature;
+use lp_glsl_frontend::semantic::passes::function_signature::extract_function_signature;
 
 /// Parse a GLSL function signature string into a FunctionSignature
 pub fn parse_glsl_signature(

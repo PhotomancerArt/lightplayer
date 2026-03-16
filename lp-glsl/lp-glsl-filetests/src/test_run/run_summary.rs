@@ -6,9 +6,11 @@ use crate::test_run::execution;
 use crate::test_run::parse_assert;
 use crate::test_run::record_failure;
 use crate::test_run::target;
+use crate::test_run::wasm_runner;
 use anyhow::Result;
-use lp_glsl_compiler::glsl_emu_riscv32_with_metadata;
-use lp_glsl_compiler::{GlslOptions, RunMode};
+use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
+use lp_glsl_cranelift::{GlslOptions, RunMode};
+use lp_glsl_wasm::WasmOptions;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
@@ -31,24 +33,7 @@ pub fn run(
 
     // Determine target and options
     let target_str = test_file.target.as_deref().unwrap_or("riscv32.q32");
-    let (mut run_mode, decimal_format) = target::parse_target(target_str)?;
-
-    // Set log level to None for summary mode (no logging)
-    if let RunMode::Emulator {
-        ref mut log_level, ..
-    } = run_mode
-    {
-        *log_level = Some(LogLevel::None);
-    }
-
-    let options = GlslOptions {
-        run_mode,
-        decimal_format,
-        q32_opts: lp_glsl_compiler::Q32Options::default(),
-        memory_optimized: false,
-        target_override: None,
-        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
-    };
+    let filetest_target = target::parse_target(target_str)?;
 
     // Count total test cases before compilation (so we can show counts even if compilation fails)
     let mut stats = TestCaseStats::default();
@@ -62,45 +47,96 @@ pub fn run(
     }
 
     // Compile all functions from the test file once (no test glsl filtering)
-    let mut executable = match glsl_emu_riscv32_with_metadata(
-        &test_file.glsl_source,
-        options.clone(),
-        Some(relative_path.clone()),
-    ) {
-        Ok(exec) => exec,
-        Err(e) => {
-            // Compilation failed - categorize directives based on whether they're marked [expect-fail]
-            // Only unmarked directives should go into failed_lines (for bless)
-            // Marked directives should be counted as expect_fail
-            let mut failed_lines = Vec::new();
-            let mut expect_fail_count = 0;
-
-            for directive in &test_file.run_directives {
-                // Respect line filter if present
-                if let Some(filter_line) = line_filter {
-                    if directive.line_number != filter_line {
-                        continue;
+    let mut executable: Box<dyn lp_glsl_cranelift::GlslExecutable> = match &filetest_target {
+        target::FiletestTarget::Cranelift {
+            run_mode,
+            decimal_format,
+        } => {
+            let mut run_mode = run_mode.clone();
+            if let RunMode::Emulator {
+                ref mut log_level, ..
+            } = run_mode
+            {
+                *log_level = Some(LogLevel::None);
+            }
+            let options = GlslOptions {
+                run_mode,
+                decimal_format: decimal_format.clone(),
+                q32_opts: lp_glsl_cranelift::Q32Options::default(),
+                memory_optimized: false,
+                target_override: None,
+                max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+            };
+            match glsl_emu_riscv32_with_metadata(
+                &test_file.glsl_source,
+                options,
+                Some(relative_path.clone()),
+            ) {
+                Ok(exec) => exec,
+                Err(e) => {
+                    let mut failed_lines = Vec::new();
+                    let mut expect_fail_count = 0;
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        if directive.expect_fail {
+                            expect_fail_count += 1;
+                        } else {
+                            failed_lines.push(directive.line_number);
+                        }
                     }
-                }
-
-                if directive.expect_fail {
-                    expect_fail_count += 1;
-                } else {
-                    failed_lines.push(directive.line_number);
+                    stats.failed = failed_lines.len();
+                    stats.expect_fail = expect_fail_count;
+                    stats.passed = 0;
+                    return Ok((
+                        Err(anyhow::anyhow!(
+                            "Compilation failed for test file {relative_path}:\n\n{e}"
+                        )),
+                        stats,
+                        Vec::new(),
+                        failed_lines,
+                    ));
                 }
             }
-
-            stats.failed = failed_lines.len();
-            stats.expect_fail = expect_fail_count;
-            stats.passed = 0;
-            return Ok((
-                Err(anyhow::anyhow!(
-                    "Compilation failed for test file {relative_path}:\n\n{e}"
-                )),
-                stats,
-                Vec::new(),
-                failed_lines,
-            ));
+        }
+        target::FiletestTarget::Wasm { decimal_format } => {
+            let options = WasmOptions {
+                decimal_format: decimal_format.clone(),
+                max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+            };
+            match wasm_runner::WasmExecutable::from_source(&test_file.glsl_source, options) {
+                Ok(exec) => Box::new(exec),
+                Err(e) => {
+                    let mut failed_lines = Vec::new();
+                    let mut expect_fail_count = 0;
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        if directive.expect_fail {
+                            expect_fail_count += 1;
+                        } else {
+                            failed_lines.push(directive.line_number);
+                        }
+                    }
+                    stats.failed = failed_lines.len();
+                    stats.expect_fail = expect_fail_count;
+                    stats.passed = 0;
+                    return Ok((
+                        Err(anyhow::anyhow!(
+                            "Compilation failed for test file {relative_path}:\n\n{e}"
+                        )),
+                        stats,
+                        Vec::new(),
+                        failed_lines,
+                    ));
+                }
+            }
         }
     };
 

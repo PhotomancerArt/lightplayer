@@ -2,8 +2,8 @@ use anyhow::Result;
 use cranelift_codegen::ir::Function;
 use cranelift_object::ObjectModule;
 use hashbrown::HashMap;
-use lp_glsl_compiler::backend::module::gl_module::GlModule;
-use lp_glsl_compiler::backend::util::clif_format::format_function;
+use lp_glsl_cranelift::backend::module::gl_module::GlModule;
+use lp_glsl_cranelift::backend::util::clif_format::format_function;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FunctionStats {

@@ -1,4 +1,4 @@
-//! Generator for lp-glsl-compiler vector and matrix test files.
+//! Generator for lp-glsl vector and matrix test files.
 
 use anyhow::Result;
 

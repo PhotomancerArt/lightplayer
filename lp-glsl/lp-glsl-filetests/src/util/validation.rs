@@ -5,7 +5,7 @@ use cranelift_codegen::isa::TargetIsa;
 use cranelift_codegen::print_errors::pretty_verifier_error;
 use cranelift_codegen::verify_function;
 use cranelift_object::ObjectModule;
-use lp_glsl_compiler::backend::module::gl_module::GlModule;
+use lp_glsl_cranelift::backend::module::gl_module::GlModule;
 
 /// Validate all functions in a GlModule
 pub fn validate_clif_module(module: &GlModule<ObjectModule>, isa: &dyn TargetIsa) -> Result<()> {

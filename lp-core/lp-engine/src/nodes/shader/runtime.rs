@@ -10,8 +10,8 @@ use alloc::{
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
 use log;
-use lp_glsl_compiler::glsl_jit_streaming;
-use lp_glsl_compiler::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
+use lp_glsl_cranelift::glsl_jit_streaming;
+use lp_glsl_cranelift::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
     LpPathBuf, NodeHandle,
@@ -168,9 +168,9 @@ impl NodeRuntime for ShaderRuntime {
                         .call_vec(
                             "main",
                             &[
-                                lp_glsl_compiler::GlslValue::Vec2(frag_coord),
-                                lp_glsl_compiler::GlslValue::Vec2(output_size),
-                                lp_glsl_compiler::GlslValue::F32(time),
+                                lp_glsl_cranelift::GlslValue::Vec2(frag_coord),
+                                lp_glsl_cranelift::GlslValue::Vec2(output_size),
+                                lp_glsl_cranelift::GlslValue::F32(time),
                             ],
                             4,
                         )
@@ -510,7 +510,7 @@ impl ShaderRuntime {
             log::trace!("ShaderRuntime::compile_shader: GLSL source:\n{preview}");
         }
 
-        use lp_glsl_compiler::Q32Options;
+        use lp_glsl_cranelift::Q32Options;
 
         let q32_opts = self
             .config
@@ -528,7 +528,7 @@ impl ShaderRuntime {
             q32_opts,
             memory_optimized: GlslOptions::default_memory_optimized(),
             target_override: None,
-            max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
+            max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
         };
 
         // Drop old executable before compiling to free memory for recompilation.
@@ -541,14 +541,14 @@ impl ShaderRuntime {
         #[cfg(feature = "panic-recovery")]
         let compile_result: Result<
             alloc::boxed::Box<dyn GlslExecutable>,
-            lp_glsl_compiler::GlslDiagnostics,
+            lp_glsl_cranelift::GlslDiagnostics,
         > = match catch_unwind(AssertUnwindSafe(|| {
             glsl_jit_streaming(glsl_source, options)
         })) {
             Ok(inner) => inner,
-            Err(_) => Err(lp_glsl_compiler::GlslDiagnostics::from(
-                lp_glsl_compiler::GlslError::new(
-                    lp_glsl_compiler::ErrorCode::E0400,
+            Err(_) => Err(lp_glsl_cranelift::GlslDiagnostics::from(
+                lp_glsl_cranelift::GlslError::new(
+                    lp_glsl_cranelift::ErrorCode::E0400,
                     "OOM during shader compilation",
                 ),
             )),

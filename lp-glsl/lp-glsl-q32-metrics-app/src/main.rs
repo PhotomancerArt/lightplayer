@@ -103,10 +103,10 @@ fn find_glsl_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
 fn process_test(
     test_name: &str,
     test_dir: &Path,
-    module_before: &mut lp_glsl_compiler::backend::module::gl_module::GlModule<
+    module_before: &mut lp_glsl_cranelift::backend::module::gl_module::GlModule<
         cranelift_object::ObjectModule,
     >,
-    module_after: &mut lp_glsl_compiler::backend::module::gl_module::GlModule<
+    module_after: &mut lp_glsl_cranelift::backend::module::gl_module::GlModule<
         cranelift_object::ObjectModule,
     >,
     _glsl_source: &str,

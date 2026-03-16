@@ -18,5 +18,6 @@ quote = "1.0"
 walkdir = "2.5"
 proc-macro2 = "1.0"
 glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false }
-lp-glsl-compiler = { path = "../lp-glsl-compiler" }
+lp-glsl-cranelift = { path = "../lp-glsl-cranelift" }
+lp-glsl-frontend = { path = "../lp-glsl-frontend" }
 

@@ -17,7 +17,7 @@ use alloc::{boxed::Box, vec::Vec};
 ///
 /// # Note
 /// This wrapper is provided as a convenience API for users who want a higher-level
-/// interface to StructReturn functions. The main `lp-glsl-compiler` crate uses the lower-level
+/// interface to StructReturn functions. The main `lp-glsl-cranelift` crate uses the lower-level
 /// `call_structreturn` function directly for performance reasons, but this wrapper
 /// can be useful for applications that prefer a simpler API.
 pub struct StructReturnWrapper<T> {
@@ -111,7 +111,7 @@ impl<T> Clone for StructReturnWrapper<T> {
 /// - `buffer_size` must be correct for the return type `T`
 ///
 /// # Note
-/// This function is provided as a convenience API. The main `lp-glsl-compiler` crate uses
+/// This function is provided as a convenience API. The main `lp-glsl-cranelift` crate uses
 /// `call_structreturn` directly for performance, but this wrapper can be useful
 /// for applications that prefer a simpler, higher-level interface.
 pub unsafe fn wrap_structreturn_function<T>(

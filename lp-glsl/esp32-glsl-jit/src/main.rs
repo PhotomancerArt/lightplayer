@@ -20,7 +20,7 @@ use esp_hal::{interrupt::software::SoftwareInterruptControl, timer::timg::TimerG
 use hashbrown::HashMap;
 
 use lp_glsl_builtins::glsl::q32::types::q32::Q32;
-use lp_glsl_compiler::{GlslOptions, glsl_jit};
+use lp_glsl_cranelift::{GlslOptions, glsl_jit};
 
 use esp_println::println;
 

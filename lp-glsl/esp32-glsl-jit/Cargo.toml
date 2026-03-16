@@ -18,7 +18,7 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 hashbrown = { workspace = true }
 
-lp-glsl-compiler = { path = "../lp-glsl-compiler", default-features = false, features = ["core"] }
+lp-glsl-cranelift = { path = "../lp-glsl-cranelift", default-features = false, features = ["core"] }
 lp-glsl-jit-util = { path = "../lp-glsl-jit-util", default-features = false }
 lp-glsl-builtins = { path = "../lp-glsl-builtins" }
 

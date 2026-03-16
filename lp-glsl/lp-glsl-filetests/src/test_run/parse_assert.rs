@@ -2,7 +2,7 @@
 
 use crate::parse::test_type::ComparisonOp;
 use anyhow::Result;
-use lp_glsl_compiler::GlslValue;
+use lp_glsl_cranelift::GlslValue;
 
 /// Parse a GLSL value from a string.
 /// Supports scalars, vectors, and matrices.
@@ -179,7 +179,7 @@ pub fn compare_results(
 mod tests {
     use super::*;
     use crate::parse::test_type::ComparisonOp;
-    use lp_glsl_compiler::GlslValue;
+    use lp_glsl_cranelift::GlslValue;
 
     #[test]
     fn test_parse_glsl_value_int() {

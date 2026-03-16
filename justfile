@@ -92,10 +92,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-cranelift --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 build-glsl-release:
-    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-cranelift --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 # ============================================================================
 # Formatting
@@ -168,10 +168,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app -- --no-deps -D warnings
+    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-cranelift --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-cranelift --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -198,7 +198,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-compiler --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
+    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lp-glsl-cranelift --package lp-glsl-filetests --package lp-glsl-jit-util --package lp-riscv-emu-shared --package lp-riscv-tools --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-q32-metrics-app
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh

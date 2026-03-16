@@ -8,9 +8,11 @@ use crate::test_run::parse_assert;
 use crate::test_run::record_failure;
 use crate::test_run::target;
 use crate::test_run::test_glsl;
+use crate::test_run::wasm_runner;
 use anyhow::Result;
-use lp_glsl_compiler::glsl_emu_riscv32_with_metadata;
-use lp_glsl_compiler::{GlslOptions, RunMode};
+use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
+use lp_glsl_cranelift::{GlslOptions, RunMode};
+use lp_glsl_wasm::WasmOptions;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
@@ -41,30 +43,9 @@ pub fn run(
     // Use provided line filter
     let test_line_filter = line_filter;
 
-    // Determine target and options
+    // Determine target
     let target_str = test_file.target.as_deref().unwrap_or("riscv32.q32");
-    let (mut run_mode, decimal_format) = target::parse_target(target_str)?;
-
-    // Set log level based on output mode: Instructions for detail mode, None for summary
-    if let RunMode::Emulator {
-        ref mut log_level, ..
-    } = run_mode
-    {
-        *log_level = Some(if output_mode.show_full_output() {
-            LogLevel::Instructions
-        } else {
-            LogLevel::None
-        });
-    }
-
-    let options = GlslOptions {
-        run_mode,
-        decimal_format,
-        q32_opts: lp_glsl_compiler::Q32Options::default(),
-        memory_optimized: false,
-        target_override: None,
-        max_errors: lp_glsl_compiler::DEFAULT_MAX_ERRORS,
-    };
+    let filetest_target = target::parse_target(target_str)?;
 
     // TODO: Implement bless mode when needed
     // let bless_enabled = env::var("CRANELIFT_TEST_BLESS").unwrap_or_default() == "1";
@@ -103,26 +84,74 @@ pub fn run(
 
         // Compile and execute
         // Note: test_glsl_result.source now contains ONLY the function being tested
-        let mut executable = match glsl_emu_riscv32_with_metadata(
-            &test_glsl_result.source,
-            options.clone(),
-            Some(relative_path.clone()),
-        ) {
-            Ok(exec) => exec,
-            Err(e) => {
-                // Compilation failed - check if this is an expected failure
-                record_failure(directive, &mut stats, &mut failed_lines);
-                let formatted_error = format_compilation_error(
-                    e,
-                    &test_glsl_result,
-                    directive.line_number,
-                    &directive.expression_str,
-                    &relative_path,
-                    output_mode,
-                );
-                eprintln!("{formatted_error}");
-                errors.push(anyhow::anyhow!("{formatted_error}"));
-                continue;
+        let mut executable: Box<dyn lp_glsl_cranelift::GlslExecutable> = match &filetest_target {
+            target::FiletestTarget::Cranelift {
+                run_mode,
+                decimal_format,
+            } => {
+                let mut run_mode = run_mode.clone();
+                if let RunMode::Emulator {
+                    ref mut log_level, ..
+                } = run_mode
+                {
+                    *log_level = Some(if output_mode.show_full_output() {
+                        LogLevel::Instructions
+                    } else {
+                        LogLevel::None
+                    });
+                }
+                let options = GlslOptions {
+                    run_mode,
+                    decimal_format: decimal_format.clone(),
+                    q32_opts: lp_glsl_cranelift::Q32Options::default(),
+                    memory_optimized: false,
+                    target_override: None,
+                    max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+                };
+                match glsl_emu_riscv32_with_metadata(
+                    &test_glsl_result.source,
+                    options,
+                    Some(relative_path.clone()),
+                ) {
+                    Ok(exec) => exec,
+                    Err(e) => {
+                        record_failure(directive, &mut stats, &mut failed_lines);
+                        let formatted_error = format_compilation_error(
+                            e,
+                            &test_glsl_result,
+                            directive.line_number,
+                            &directive.expression_str,
+                            &relative_path,
+                            output_mode,
+                        );
+                        eprintln!("{formatted_error}");
+                        errors.push(anyhow::anyhow!("{formatted_error}"));
+                        continue;
+                    }
+                }
+            }
+            target::FiletestTarget::Wasm { decimal_format } => {
+                let options = WasmOptions {
+                    decimal_format: decimal_format.clone(),
+                    max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+                };
+                match wasm_runner::WasmExecutable::from_source(&test_glsl_result.source, options) {
+                    Ok(exec) => Box::new(exec),
+                    Err(e) => {
+                        record_failure(directive, &mut stats, &mut failed_lines);
+                        let formatted_error = format_compilation_error(
+                            e,
+                            &test_glsl_result,
+                            directive.line_number,
+                            &directive.expression_str,
+                            &relative_path,
+                            output_mode,
+                        );
+                        eprintln!("{formatted_error}");
+                        errors.push(anyhow::anyhow!("{formatted_error}"));
+                        continue;
+                    }
+                }
             }
         };
 
@@ -466,7 +495,7 @@ enum ErrorType {
 
 /// Format a compilation error with test GLSL code context.
 fn format_compilation_error(
-    error: lp_glsl_compiler::GlslDiagnostics,
+    error: lp_glsl_cranelift::GlslDiagnostics,
     test_glsl: &test_glsl::TestGlslResult,
     directive_line: usize,
     expression: &str,
@@ -505,7 +534,7 @@ fn format_error(
     filename: &str,
     line_number: usize,
     test_glsl: Option<&str>,
-    executable: Option<&dyn lp_glsl_compiler::GlslExecutable>,
+    executable: Option<&dyn lp_glsl_cranelift::GlslExecutable>,
     output_mode: OutputMode,
     _test_expression: Option<&str>,
 ) -> String {

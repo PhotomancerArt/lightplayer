@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-/// lp-glsl-compiler filetest utility.
+/// lp-glsl filetest utility.
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]

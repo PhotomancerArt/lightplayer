@@ -7,6 +7,7 @@ pub mod run_detail;
 pub mod run_summary;
 pub mod target;
 pub mod test_glsl;
+pub mod wasm_runner;
 
 // Re-exports
 pub use run::{run_test_file, run_test_file_with_line_filter};

@@ -4,7 +4,7 @@ use crate::discovery::LpfxFunctionInfo;
 use crate::lpfx::errors::LpfxCodegenError;
 use crate::lpfx::errors::Variant;
 use crate::lpfx::parse::LpfxAttribute;
-use lp_glsl_compiler::frontend::semantic::functions::FunctionSignature;
+use lp_glsl_frontend::semantic::functions::FunctionSignature;
 use std::collections::HashMap;
 
 /// Complete information about a parsed LPFX function

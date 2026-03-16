@@ -1,10 +1,8 @@
 //! Generate lpfx_fns.rs code
 
 use crate::lpfx::validate::ParsedLpfxFunction;
-use lp_glsl_compiler::frontend::semantic::functions::{
-    FunctionSignature, ParamQualifier, Parameter,
-};
-use lp_glsl_compiler::frontend::semantic::types::Type;
+use lp_glsl_frontend::semantic::functions::{FunctionSignature, ParamQualifier, Parameter};
+use lp_glsl_frontend::semantic::types::Type;
 use std::collections::HashMap;
 
 /// Generate the complete lpfx_fns.rs source code
@@ -27,7 +25,7 @@ pub fn generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String {
     output.push_str(
         "use super::lpfx_fn::{FunctionSignatureRef, LpfxFn, LpfxFnImpl, ParameterRef};\n",
     );
-    output.push_str("use crate::backend::builtins::registry::BuiltinId;\n");
+    output.push_str("use lp_glsl_builtin_ids::BuiltinId;\n");
     output.push_str("use crate::semantic::functions::ParamQualifier;\n");
     output.push_str("use crate::semantic::types::Type;\n\n");
 

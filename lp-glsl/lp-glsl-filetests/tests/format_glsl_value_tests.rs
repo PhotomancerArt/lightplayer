@@ -1,6 +1,6 @@
 //! Unit tests for format_glsl_value() matrix display formatting
 
-use lp_glsl_compiler::GlslValue;
+use lp_glsl_cranelift::GlslValue;
 use lp_glsl_filetests::util::format_glsl_value;
 
 #[test]

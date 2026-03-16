@@ -25,15 +25,35 @@ Rejected alternatives:
 - **React/TS hybrid**: Mature UI ecosystem but ongoing cross-language boundary cost (type systems, build systems, API glue). Not justified given the team's Rust focus.
 - **Makepad**: Good cross-platform story, built-in code editor, but tiny community and bus-factor risk. Canvas-rendered like egui.
 
-## JIT Constraint
+## GLSL in the Browser
 
-lp-server depends on lp-engine which uses Cranelift JIT. WASM cannot do runtime native code generation. lp-server will never run in the browser.
+WASM cannot do runtime native code generation, but it CAN dynamically
+compile and instantiate new WASM modules via WebAssembly.instantiate().
 
-Implications for simulated device:
+The GLSL compiler is being split into:
+- **lp-glsl-frontend**: shared parser + semantic analysis (no_std, WASM-compatible)
+- **lp-glsl-cranelift**: Cranelift backend (native/rv32, not WASM-compatible)
+- **lp-glsl-wasm**: WASM codegen backend (TypedShader → WASM bytes)
+
+The WASM backend walks the same TypedShader AST but emits WASM bytecode
+(via wasm-encoder) instead of CLIF. Builtins (lp-glsl-builtins) compile
+to a separate .wasm module and are linked via WASM imports at
+instantiation time.
+
+This enables fully in-browser shader compilation and execution with no
+server dependency. Same Q32 fixed-point math, same builtins.
+
+See: `docs/roadmaps/2026-03-13-glsl-wasm-playground/`
+
+## Device Simulation Constraint
+
+lp-server depends on lp-engine which uses Cranelift JIT for the full
+rendering pipeline. lp-server will not run in the browser.
+
+Implications for simulated device in the app:
 - **Short term**: Web app connects to `lp-cli serve` over WebSocket (companion process)
 - **Hosted demo**: Server-side lp-server instances per session
 - **Desktop (Tauri)**: lp-server runs natively as backend
-- **Long term possibility**: WASM-based GLSL interpreter (major investment, not planned now)
 - **Onboarding**: Pre-recorded demo mode for zero-install first impression
 
 ## WASM Compatibility of Existing Crates

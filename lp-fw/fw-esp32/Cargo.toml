@@ -53,7 +53,7 @@ serde = { workspace = true, default-features = false, features = ["alloc", "deri
 hashbrown = { workspace = true }
 
 # Dependencies for optional GLSL compilation features
-lp-glsl-compiler = { path = "../../lp-glsl/lp-glsl-compiler", default-features = false, features = ["core"], optional = true }
+lp-glsl-cranelift = { path = "../../lp-glsl/lp-glsl-cranelift", default-features = false, features = ["core"], optional = true }
 lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }
 cranelift-codegen = { workspace = true, features = ["riscv32"], optional = true }
