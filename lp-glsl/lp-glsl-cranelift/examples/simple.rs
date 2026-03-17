@@ -1,11 +1,11 @@
 //! Simple example of compiling and executing GLSL code
 
-use lp_glsl_cranelift::{DecimalFormat, GlslOptions, RunMode, glsl_jit};
+use lp_glsl_cranelift::{glsl_jit, FloatMode, GlslOptions, RunMode};
 
 fn main() {
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Float,
+        float_mode: FloatMode::Float,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,

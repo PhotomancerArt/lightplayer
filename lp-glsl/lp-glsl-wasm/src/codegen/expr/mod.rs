@@ -31,7 +31,7 @@ pub fn emit_rvalue(
         Expr::Binary(op, lhs, rhs, _) => {
             emit_rvalue(ctx, sink, lhs.as_ref(), options)?;
             emit_rvalue(ctx, sink, rhs.as_ref(), options)?;
-            let numeric = crate::codegen::numeric::WasmNumericMode::from(options.decimal_format);
+            let numeric = crate::codegen::numeric::WasmNumericMode::from(options.float_mode);
             crate::codegen::expr::binary::emit_binary_op(sink, op, numeric)?;
         }
         Expr::Unary(op, operand, _) => {

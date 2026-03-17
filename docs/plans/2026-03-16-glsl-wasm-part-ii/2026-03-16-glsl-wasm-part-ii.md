@@ -45,7 +45,7 @@ lp-glsl/lp-glsl-wasm/
 ├── Cargo.toml
 └── src/
     ├── lib.rs              # Public API: glsl_wasm(source, options) → WasmModule
-    ├── options.rs           # WasmOptions (decimal_format, max_errors)
+    ├── options.rs           # WasmOptions (float_mode, max_errors)
     ├── module.rs            # WasmModule: holds compiled WASM bytes + metadata
     ├── types.rs             # GLSL Type → WASM ValType mapping
     └── codegen/
@@ -192,6 +192,7 @@ The filetest runner currently hardcodes the Cranelift/rv32-emulator path.
 We need to make it runtime-pluggable.
 
 **Current flow:**
+
 ```
 parse_target("riscv32.q32") → (RunMode::Emulator, DecimalFormat::Q32)
                              → glsl_emu_riscv32_with_metadata()
@@ -200,6 +201,7 @@ parse_target("riscv32.q32") → (RunMode::Emulator, DecimalFormat::Q32)
 ```
 
 **New flow:**
+
 ```
 parse_target("riscv32.q32") → CraneliftRunner
 parse_target("wasm32.q32")  → WasmRunner
@@ -222,10 +224,10 @@ Changes:
 
 3. **Implement `GlslExecutable` for WASM modules** (via wasmtime).
    This is a `WasmExecutable` struct in `lp-glsl-filetests` that:
-   - Takes `WasmModule` bytes from `lp-glsl-wasm`
-   - Instantiates via wasmtime
-   - Implements `call_i32`, `call_f32`, etc. by calling exported WASM
-     functions and converting results
+    - Takes `WasmModule` bytes from `lp-glsl-wasm`
+    - Instantiates via wasmtime
+    - Implements `call_i32`, `call_f32`, etc. by calling exported WASM
+      functions and converting results
 
 4. **Add `wasmtime` as a dependency of `lp-glsl-filetests`.**
 
@@ -312,25 +314,25 @@ int test_add_params(int a, int b) {
 1. Add `wasmtime` as a dependency of `lp-glsl-filetests`.
 2. Add `lp-glsl-wasm` as a dependency of `lp-glsl-filetests`.
 3. Create `test_run/wasm_runner.rs` in filetests:
-   - `WasmExecutable` struct wrapping a wasmtime `Instance`
-   - Implement `GlslExecutable` trait (`call_i32`, `call_f32`, etc.)
-   - Handle WASM multi-value results for future vector support
+    - `WasmExecutable` struct wrapping a wasmtime `Instance`
+    - Implement `GlslExecutable` trait (`call_i32`, `call_f32`, etc.)
+    - Handle WASM multi-value results for future vector support
 4. Extend `target.rs`: `parse_target("wasm32.q32")` returns a marker
    that causes the runner to use the WASM compilation path.
 5. Refactor `run_detail.rs` to dispatch compilation by target:
-   - `riscv32.*` → existing `glsl_emu_riscv32_with_metadata` path
-   - `wasm32.*` → `glsl_wasm()` + `WasmExecutable`
+    - `riscv32.*` → existing `glsl_emu_riscv32_with_metadata` path
+    - `wasm32.*` → `glsl_wasm()` + `WasmExecutable`
 6. Verify: `cargo build -p lp-glsl-filetests` compiles.
 
 ### Phase 5: First filetests passing on WASM
 
 1. Create a few filetest files under `filetests/wasm/` (or add
    `// target wasm32.q32` variants) that exercise:
-   - Integer addition, subtraction
-   - Variable declarations
-   - Function parameters
-   - Return values
-   - Float literals (Q32 encoding)
+    - Integer addition, subtraction
+    - Variable declarations
+    - Function parameters
+    - Return values
+    - Float literals (Q32 encoding)
 2. Run the WASM filetests: verify they pass via wasmtime.
 3. Try running existing simple filetests (those that only use scalars
    and basic arithmetic) with `// target wasm32.q32`. Note which pass
@@ -346,11 +348,11 @@ int test_add_params(int a, int b) {
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-   - `lp-glsl/README.md`: add lp-glsl-wasm to the crate table.
-   - `lp-glsl/lp-glsl-wasm/README.md`: create with purpose, usage,
-     and relationship to lp-glsl-frontend and lp-glsl-cranelift.
-   - `lp-glsl/lp-glsl-filetests/README.md`: document the new
-     `wasm32.q32` target and wasmtime runner.
+    - `lp-glsl/README.md`: add lp-glsl-wasm to the crate table.
+    - `lp-glsl/lp-glsl-wasm/README.md`: create with purpose, usage,
+      and relationship to lp-glsl-frontend and lp-glsl-cranelift.
+    - `lp-glsl/lp-glsl-filetests/README.md`: document the new
+      `wasm32.q32` target and wasmtime runner.
 
 ## Validate
 

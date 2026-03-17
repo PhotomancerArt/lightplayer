@@ -2,13 +2,13 @@
 
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
-use crate::test_run::TestCaseStats;
 use crate::test_run::execution;
 use crate::test_run::parse_assert;
 use crate::test_run::record_failure;
 use crate::test_run::target;
 use crate::test_run::test_glsl;
 use crate::test_run::wasm_runner;
+use crate::test_run::TestCaseStats;
 use anyhow::Result;
 use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
 use lp_glsl_cranelift::{GlslOptions, RunMode};
@@ -87,7 +87,7 @@ pub fn run(
         let mut executable: Box<dyn lp_glsl_cranelift::GlslExecutable> = match &filetest_target {
             target::FiletestTarget::Cranelift {
                 run_mode,
-                decimal_format,
+                float_mode,
             } => {
                 let mut run_mode = run_mode.clone();
                 if let RunMode::Emulator {
@@ -102,7 +102,7 @@ pub fn run(
                 }
                 let options = GlslOptions {
                     run_mode,
-                    decimal_format: decimal_format.clone(),
+                    float_mode: float_mode.clone(),
                     q32_opts: lp_glsl_cranelift::Q32Options::default(),
                     memory_optimized: false,
                     target_override: None,
@@ -130,9 +130,9 @@ pub fn run(
                     }
                 }
             }
-            target::FiletestTarget::Wasm { decimal_format } => {
+            target::FiletestTarget::Wasm { float_mode } => {
                 let options = WasmOptions {
-                    decimal_format: decimal_format.clone(),
+                    float_mode: float_mode.clone(),
                     max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
                 };
                 match wasm_runner::WasmExecutable::from_source(&test_glsl_result.source, options) {

@@ -1,7 +1,7 @@
-//! Target value parsing (riscv32.q32, wasm32.q32 -> RunMode/DecimalFormat or Wasm).
+//! Target value parsing (riscv32.q32, wasm32.q32 -> RunMode/FloatMode or Wasm).
 
 use anyhow::Result;
-use lp_glsl_cranelift::{DecimalFormat, RunMode};
+use lp_glsl_cranelift::{FloatMode, RunMode};
 
 /// Default maximum memory for emulator (in bytes).
 const DEFAULT_MAX_MEMORY: usize = 1024 * 1024; // 1MB
@@ -20,12 +20,12 @@ pub enum FiletestTarget {
         /// Run mode (emulator config).
         run_mode: RunMode,
         /// Numeric format (Q32 or Float).
-        decimal_format: DecimalFormat,
+        float_mode: FloatMode,
     },
     /// WASM via wasmtime.
     Wasm {
         /// Numeric format (Q32 or Float).
-        decimal_format: DecimalFormat,
+        float_mode: FloatMode,
     },
 }
 
@@ -39,9 +39,9 @@ pub fn parse_target(target: &str) -> Result<FiletestTarget> {
     let arch = parts[0];
     let format = parts[1];
 
-    let decimal_format = match format {
-        "q32" => DecimalFormat::Q32,
-        "float" => DecimalFormat::Float,
+    let float_mode = match format {
+        "q32" => FloatMode::Q32,
+        "float" => FloatMode::Float,
         _ => anyhow::bail!("unsupported format: {format}"),
     };
 
@@ -53,9 +53,9 @@ pub fn parse_target(target: &str) -> Result<FiletestTarget> {
                 max_instructions: DEFAULT_MAX_INSTRUCTIONS,
                 log_level: None, // Will be set by caller based on output mode
             },
-            decimal_format,
+            float_mode,
         },
-        "wasm32" => FiletestTarget::Wasm { decimal_format },
+        "wasm32" => FiletestTarget::Wasm { float_mode },
         _ => anyhow::bail!("unsupported architecture: {arch}"),
     };
 
@@ -72,10 +72,10 @@ mod tests {
         match &target {
             FiletestTarget::Cranelift {
                 run_mode,
-                decimal_format,
+                float_mode,
             } => {
                 assert!(matches!(run_mode, RunMode::Emulator { .. }));
-                assert_eq!(*decimal_format, DecimalFormat::Q32);
+                assert_eq!(*float_mode, FloatMode::Q32);
             }
             _ => panic!("expected Cranelift"),
         }
@@ -87,10 +87,10 @@ mod tests {
         match &target {
             FiletestTarget::Cranelift {
                 run_mode,
-                decimal_format,
+                float_mode,
             } => {
                 assert!(matches!(run_mode, RunMode::Emulator { .. }));
-                assert_eq!(*decimal_format, DecimalFormat::Float);
+                assert_eq!(*float_mode, FloatMode::Float);
             }
             _ => panic!("expected Cranelift"),
         }
@@ -100,8 +100,8 @@ mod tests {
     fn test_parse_target_wasm32_q32() {
         let target = parse_target("wasm32.q32").unwrap();
         match &target {
-            FiletestTarget::Wasm { decimal_format } => {
-                assert_eq!(*decimal_format, DecimalFormat::Q32);
+            FiletestTarget::Wasm { float_mode } => {
+                assert_eq!(*float_mode, FloatMode::Q32);
             }
             _ => panic!("expected Wasm"),
         }

@@ -3,7 +3,7 @@
 //! Converts GLSL types to Cranelift types and builds call signatures.
 //! Moved from semantic/lpfx to codegen (Cranelift-specific).
 
-use crate::DecimalFormat;
+use crate::FloatMode;
 use crate::semantic::functions::ParamQualifier;
 use crate::semantic::types::Type;
 use alloc::vec::Vec;
@@ -80,7 +80,7 @@ pub fn expand_vector_args(param_types: &[Type], values: &[Value]) -> Vec<Value> 
 ///
 /// # Panics
 /// Panics if unsupported types are encountered.
-pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -> Vec<IrType> {
+pub fn convert_to_cranelift_types(param_types: &[Type], format: FloatMode) -> Vec<IrType> {
     let mut cranelift_types = Vec::new();
 
     for param_ty in param_types {
@@ -88,11 +88,11 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -
             Type::Vec2 | Type::IVec2 | Type::UVec2 => {
                 // Vec2 expands to 2 components
                 match format {
-                    DecimalFormat::Q32 => {
+                    FloatMode::Q32 => {
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    DecimalFormat::Float => {
+                    FloatMode::Float => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                     }
@@ -101,12 +101,12 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -
             Type::Vec3 | Type::IVec3 | Type::UVec3 => {
                 // Vec3 expands to 3 components
                 match format {
-                    DecimalFormat::Q32 => {
+                    FloatMode::Q32 => {
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    DecimalFormat::Float => {
+                    FloatMode::Float => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
@@ -116,13 +116,13 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -
             Type::Vec4 | Type::IVec4 | Type::UVec4 => {
                 // Vec4 expands to 4 components
                 match format {
-                    DecimalFormat::Q32 => {
+                    FloatMode::Q32 => {
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    DecimalFormat::Float => {
+                    FloatMode::Float => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
@@ -131,8 +131,8 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -
                 }
             }
             Type::Float => match format {
-                DecimalFormat::Q32 => cranelift_types.push(types::I32),
-                DecimalFormat::Float => cranelift_types.push(types::F32),
+                FloatMode::Q32 => cranelift_types.push(types::I32),
+                FloatMode::Float => cranelift_types.push(types::F32),
             },
             Type::UInt | Type::Int => {
                 // UInt and Int both map to I32 in Cranelift
@@ -160,7 +160,7 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: DecimalFormat) -
 pub fn build_call_signature(
     func: &LpfxFn,
     _builtin_id: crate::backend::builtins::registry::BuiltinId,
-    format: DecimalFormat,
+    format: FloatMode,
     pointer_type: IrType,
 ) -> Signature {
     let mut sig = Signature::new(CallConv::SystemV);
@@ -177,8 +177,8 @@ pub fn build_call_signature(
         // Scalar return: add return value
         match return_type {
             Type::Float => match format {
-                DecimalFormat::Q32 => sig.returns.push(AbiParam::new(types::I32)),
-                DecimalFormat::Float => sig.returns.push(AbiParam::new(types::F32)),
+                FloatMode::Q32 => sig.returns.push(AbiParam::new(types::I32)),
+                FloatMode::Float => sig.returns.push(AbiParam::new(types::F32)),
             },
             Type::UInt | Type::Int => {
                 sig.returns.push(AbiParam::new(types::I32));

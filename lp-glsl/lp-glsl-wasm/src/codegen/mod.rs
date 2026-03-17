@@ -37,7 +37,7 @@ pub fn compile_to_wasm(
         let params: Vec<_> = func
             .parameters
             .iter()
-            .map(|p| glsl_type_to_wasm(&p.ty, options.decimal_format))
+            .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
             .collect();
         let results: Vec<_> = if matches!(
             func.return_type,
@@ -45,7 +45,7 @@ pub fn compile_to_wasm(
         ) {
             Vec::new()
         } else {
-            alloc::vec![glsl_type_to_wasm(&func.return_type, options.decimal_format)]
+            alloc::vec![glsl_type_to_wasm(&func.return_type, options.float_mode)]
         };
         types.ty().function(params, results);
     }

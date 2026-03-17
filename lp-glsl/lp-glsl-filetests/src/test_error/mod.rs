@@ -2,9 +2,9 @@
 
 use crate::parse::{ErrorExpectation, TestFile};
 use crate::test_run::TestCaseStats;
-use anyhow::{Result, anyhow};
-use lp_glsl_cranelift::GlslOptions;
+use anyhow::{anyhow, Result};
 use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
+use lp_glsl_cranelift::GlslOptions;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
@@ -43,10 +43,10 @@ pub fn run_error_test(
     let target_str = test_file.target.as_deref().unwrap_or("riscv32.q32");
     let filetest_target = target::parse_target(target_str)?;
 
-    let (run_mode, decimal_format) = match &filetest_target {
+    let (run_mode, float_mode) = match &filetest_target {
         target::FiletestTarget::Cranelift {
             run_mode,
-            decimal_format,
+            float_mode,
         } => {
             let mut run_mode = run_mode.clone();
             if let lp_glsl_cranelift::RunMode::Emulator {
@@ -55,7 +55,7 @@ pub fn run_error_test(
             {
                 *log_level = Some(LogLevel::None);
             }
-            (run_mode, decimal_format.clone())
+            (run_mode, float_mode.clone())
         }
         target::FiletestTarget::Wasm { .. } => {
             anyhow::bail!("error-test mode not yet supported for wasm32 target");
@@ -64,7 +64,7 @@ pub fn run_error_test(
 
     let options = GlslOptions {
         run_mode,
-        decimal_format,
+        float_mode,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,

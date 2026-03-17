@@ -21,7 +21,7 @@
 //! the old `Value` if not found, instead of returning an error. This should be fixed to match
 //! the behavior of `map_value()` in `instruction_copy.rs`.
 
-use lp_glsl_cranelift::{DecimalFormat, GlslOptions, RunMode, glsl_jit};
+use lp_glsl_cranelift::{glsl_jit, FloatMode, GlslOptions, RunMode};
 
 #[test]
 fn test_minimal_ssa_dominance_violation() {
@@ -50,7 +50,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -94,7 +94,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -132,7 +132,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -189,7 +189,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -233,7 +233,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -282,7 +282,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -341,7 +341,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -417,7 +417,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,

@@ -5,7 +5,7 @@
 ```rust
 // compile_glsl_to_gl_module_jit:
 let mut module = compiler.compile_to_gl_module_jit(source, target, max_errors)?;
-match options.decimal_format {
+match options.float_mode {
     DecimalFormat::Q32 => {
         let transform = Q32Transform::new(...);
         module = module.apply_transform(transform)?;
@@ -24,7 +24,7 @@ rewrites all the IR.
 
 ```rust
 // compile_glsl_to_gl_module_jit:
-let numeric_mode = match options.decimal_format {
+let numeric_mode = match options.float_mode {
     DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
     DecimalFormat::Float => NumericMode::Float(FloatStrategy),
 };
@@ -58,7 +58,7 @@ start. No `transform.transform_signature()` needed.
 
 ## Remove apply_transform call
 
-Delete the `match options.decimal_format` block in
+Delete the `match options.float_mode` block in
 `compile_glsl_to_gl_module_jit` that calls `apply_transform`. The module
 produced by `compile_to_gl_module_jit` is already in Q32 form.
 

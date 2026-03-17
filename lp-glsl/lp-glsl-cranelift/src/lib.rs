@@ -32,7 +32,7 @@ pub use lp_glsl_frontend::pipeline::{
     parse_program_with_registry,
 };
 pub use lp_glsl_frontend::semantic;
-pub use lp_glsl_frontend::{DEFAULT_MAX_ERRORS, DecimalFormat};
+pub use lp_glsl_frontend::{DEFAULT_MAX_ERRORS, FloatMode};
 
 /// Type alias for convenience
 pub type Compiler = GlslCompiler;

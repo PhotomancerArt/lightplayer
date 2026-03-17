@@ -6,7 +6,7 @@
 // compile_glsl_to_gl_module_object:
 let mut module = compiler.compile_to_gl_module_object(source, target, max_errors)?;
 let original_clif = format_clif_module(&module).ok();
-match options.decimal_format {
+match options.float_mode {
     DecimalFormat::Q32 => {
         module = module.apply_transform(transform)?;
         let transformed_clif = format_clif_module(&module).ok();
@@ -19,7 +19,7 @@ Ok((module, original_clif, transformed_clif))
 ## New flow
 
 ```rust
-let numeric_mode = match options.decimal_format {
+let numeric_mode = match options.float_mode {
     DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
     DecimalFormat::Float => NumericMode::Float(FloatStrategy),
 };

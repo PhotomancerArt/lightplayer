@@ -5,7 +5,7 @@
 //! TestCase relocation handling.
 
 use lp_glsl_cranelift::{
-    DEFAULT_MAX_ERRORS, DecimalFormat, GlslOptions, Q32Options, RunMode, glsl_jit,
+    glsl_jit, FloatMode, GlslOptions, Q32Options, RunMode, DEFAULT_MAX_ERRORS,
 };
 
 #[test]
@@ -59,7 +59,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     // Test with Q32 format (the only supported format)
     let options_q32 = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -91,7 +91,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     // fix was that Q32 no longer panics on TestCase relocations.
     let options_float = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Float,
+        float_mode: FloatMode::Float,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,

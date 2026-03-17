@@ -12,7 +12,7 @@ pub mod module;
 pub mod options;
 pub mod types;
 
-pub use lp_glsl_frontend::{CompilationPipeline, DEFAULT_MAX_ERRORS, DecimalFormat};
+pub use lp_glsl_frontend::{CompilationPipeline, FloatMode, DEFAULT_MAX_ERRORS};
 pub use module::{WasmExport, WasmModule, WasmValType};
 pub use options::WasmOptions;
 
@@ -46,7 +46,7 @@ fn collect_exports(
             params: main
                 .parameters
                 .iter()
-                .map(|p| glsl_type_to_wasm(&p.ty, options.decimal_format))
+                .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
                 .collect(),
             results: if matches!(
                 main.return_type,
@@ -54,7 +54,7 @@ fn collect_exports(
             ) {
                 Vec::new()
             } else {
-                alloc::vec![glsl_type_to_wasm(&main.return_type, options.decimal_format)]
+                alloc::vec![glsl_type_to_wasm(&main.return_type, options.float_mode)]
             },
             signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
                 name: main.name.clone(),
@@ -70,12 +70,12 @@ fn collect_exports(
             params: f
                 .parameters
                 .iter()
-                .map(|p| glsl_type_to_wasm(&p.ty, options.decimal_format))
+                .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
                 .collect(),
             results: if matches!(f.return_type, Type::Void) {
                 Vec::new()
             } else {
-                alloc::vec![glsl_type_to_wasm(&f.return_type, options.decimal_format)]
+                alloc::vec![glsl_type_to_wasm(&f.return_type, options.float_mode)]
             },
             signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
                 name: f.name.clone(),

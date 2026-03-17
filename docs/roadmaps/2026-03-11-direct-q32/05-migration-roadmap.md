@@ -7,10 +7,12 @@ complete, at which point it can be removed.
 ## Plan A: NumericStrategy trait + FloatStrategy (no behavioral change)
 
 ### Goal
+
 Introduce the abstraction without changing any output. The compiler produces
 identical IR to today. This is the structural refactor.
 
 ### Work
+
 1. Define the `NumericStrategy` trait (or enum) with all methods.
 2. Implement `FloatStrategy` — each method delegates to the corresponding
    CLIF instruction (fadd, fmul, f32const, etc.). This is trivial.
@@ -21,10 +23,12 @@ identical IR to today. This is the structural refactor.
 6. Run the full test suite. Output must be bit-identical.
 
 ### Risk
+
 Low. Each call site change is mechanical. The FloatStrategy produces exactly
 the same instructions as the hardcoded calls.
 
 ### Estimated scope
+
 ~50 lines of new code (trait + FloatStrategy), ~25 call site edits.
 
 ---
@@ -32,30 +36,34 @@ the same instructions as the hardcoded calls.
 ## Plan B: Q32Strategy for inline operations
 
 ### Goal
+
 Implement the Q32 numeric strategy for arithmetic, comparisons, constants,
 conversions, and rounding. This is the core math logic, extracted from the
 existing Q32 transform.
 
 ### Work
+
 1. Implement `Q32Strategy` with `Q32Options` for configurable behavior
    (saturating vs wrapping add/sub, multiply modes, etc.).
 2. Each method's logic is extracted from the existing transform code:
-   - `emit_add` ← `convert_fadd` in `instructions.rs`
-   - `emit_mul` ← `convert_fmul` in `instructions.rs`
-   - `emit_const` ← `convert_f32const` in `instructions.rs`
-   - `emit_cmp` ← `convert_fcmp` in `instructions.rs`
-   - etc.
+    - `emit_add` ← `convert_fadd` in `instructions.rs`
+    - `emit_mul` ← `convert_fmul` in `instructions.rs`
+    - `emit_const` ← `convert_f32const` in `instructions.rs`
+    - `emit_cmp` ← `convert_fcmp` in `instructions.rs`
+    - etc.
 3. Unit-test each method independently: given known Q32 inputs, verify the
    emitted instruction sequence is correct.
 4. Cross-validate against the transform: compile a function with both paths,
    compare the CLIF IR output instruction by instruction.
 
 ### Risk
+
 Medium. The Q32 math logic is well-understood (it exists in the transform),
 but re-expressing it in the emission context may surface edge cases. The
 cross-validation against the transform mitigates this.
 
 ### Estimated scope
+
 ~200 lines of Q32Strategy implementation, ~100 lines of tests.
 
 ---
@@ -63,10 +71,12 @@ cross-validation against the transform mitigates this.
 ## Plan C: Numeric-aware builtin dispatch
 
 ### Goal
+
 Make the builtin function call paths (math libcalls, LPFX functions, inline
 expansions) select the right implementation based on numeric mode.
 
 ### Work
+
 1. Refactor `get_math_libcall` / `get_math_libcall_2arg` in
    `builtins/helpers.rs` to accept numeric mode. For Q32, look up the
    corresponding BuiltinId instead of creating a TestCase name.
@@ -81,12 +91,14 @@ expansions) select the right implementation based on numeric mode.
    calls in the output IR.
 
 ### Risk
+
 Medium. The builtin ecosystem has many functions. The LPFX dispatch in
 particular has complex argument handling (vector flattening, out/inout
 parameters, struct returns). However, the call mechanics don't change —
 only which function is called.
 
 ### Estimated scope
+
 ~150 lines of dispatch changes, ~50 lines of inline expansion additions.
 
 ---
@@ -94,12 +106,14 @@ only which function is called.
 ## Plan D: Wire up the pipeline
 
 ### Goal
+
 Connect the direct Q32 emission to the compilation pipeline. A shader
 compiled with `DecimalFormat::Q32` uses the Q32Strategy directly, bypassing
 the transform entirely.
 
 ### Work
-1. In `glsl_jit` / `glsl_jit_streaming`: when `decimal_format == Q32`,
+
+1. In `glsl_jit` / `glsl_jit_streaming`: when `float_mode == Q32`,
    pass `Q32Strategy` as the numeric mode to the codegen.
 2. Build signatures using `strategy.map_signature()` instead of calling
    `transform.transform_signature()` separately.
@@ -114,11 +128,13 @@ the transform entirely.
    compare output values against the transform-based path.
 
 ### Risk
+
 Low-medium. The individual components are validated in plans B and C. This
 is plumbing. The main risk is missing a codegen path that still emits float
 operations without going through the strategy.
 
 ### Estimated scope
+
 ~100 lines of pipeline changes, removal of ~50 lines of transform plumbing.
 
 ---
@@ -126,31 +142,35 @@ operations without going through the strategy.
 ## Plan E: Validation and cleanup
 
 ### Goal
+
 Verify correctness, measure memory improvement, remove the transform path.
 
 ### Work
+
 1. Run the full shader test suite with both paths. Compare output values
    at sufficient precision (Q32 has inherent precision differences vs float,
    but the two Q32 paths should be identical).
 2. Run ESP32 heap traces. Verify memory improvement.
 3. Benchmark compilation time (direct emission should be faster).
 4. Once validated, remove:
-   - `backend/transform/q32/` (the entire transform)
-   - `apply_transform` from `GlModule`
-   - `TransformContext`, `transform_single_function`
-   - The `Transform` trait (unless the identity transform is still used)
-   - The float module creation in the streaming path
-   - `func_id_map` / `old_func_id_map` machinery
+    - `backend/transform/q32/` (the entire transform)
+    - `apply_transform` from `GlModule`
+    - `TransformContext`, `transform_single_function`
+    - The `Transform` trait (unless the identity transform is still used)
+    - The float module creation in the streaming path
+    - `func_id_map` / `old_func_id_map` machinery
 5. Simplify the JIT build paths: with no transform, `build_jit_executable`,
    `build_jit_executable_memory_optimized`, and
    `build_jit_executable_streaming` can likely be consolidated.
 6. Update documentation and configuration.
 
 ### Risk
+
 Low. This is cleanup after validation. The transform code is retained in
 git history.
 
 ### Decision point
+
 If direct emission doesn't match the transform output, investigate and fix
 before removing the transform. The transform can remain as a fallback or
 test reference indefinitely.

@@ -8,8 +8,8 @@ pub(crate) mod glsl_compiler;
 
 // Re-export pipeline types from frontend
 pub use lp_glsl_frontend::pipeline::{
-    Backend, CompilationPipeline, CompiledShader, ParseResult, SemanticResult, TransformationPass,
-    parse_program_with_registry,
+    parse_program_with_registry, Backend, CompilationPipeline, CompiledShader, ParseResult, SemanticResult,
+    TransformationPass,
 };
 
 // Re-exports used by crate root; suppress unused warnings within this module.
@@ -109,14 +109,14 @@ pub fn compile_glsl_to_gl_module_jit(
     options: &GlslOptions,
 ) -> Result<GlModule<JITModule>, GlslDiagnostics> {
     options.validate().map_err(GlslDiagnostics::from)?;
-    use lp_glsl_frontend::DecimalFormat;
+    use lp_glsl_frontend::FloatMode;
 
     let target = build_target_for_jit(options)?;
 
     use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
-    let numeric_mode = match options.decimal_format {
-        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
-        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
+    let numeric_mode = match options.float_mode {
+        FloatMode::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        FloatMode::Float => NumericMode::Float(FloatStrategy),
     };
     let mut compiler = GlslCompiler::new();
     let module =
@@ -135,7 +135,7 @@ pub fn compile_glsl_to_gl_module_object(
 ) -> Result<(GlModule<ObjectModule>, Option<String>, Option<String>), GlslDiagnostics> {
     #[cfg(feature = "std")]
     use crate::backend::util::clif_format::format_clif_module;
-    use lp_glsl_frontend::DecimalFormat;
+    use lp_glsl_frontend::FloatMode;
 
     options.validate().map_err(GlslDiagnostics::from)?;
 
@@ -153,9 +153,9 @@ pub fn compile_glsl_to_gl_module_object(
     };
 
     use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
-    let numeric_mode = match options.decimal_format {
-        DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
-        DecimalFormat::Float => NumericMode::Float(FloatStrategy),
+    let numeric_mode = match options.float_mode {
+        FloatMode::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
+        FloatMode::Float => NumericMode::Float(FloatStrategy),
     };
     let module =
         compiler.compile_to_gl_module_object(source, target, options.max_errors, numeric_mode)?;
@@ -197,7 +197,7 @@ pub fn glsl_jit_streaming(
     use crate::frontend::codegen::signature::SignatureBuilder;
     use cranelift_module::{FuncId, FuncOrDataId, Linkage};
     use hashbrown::HashMap;
-    use lp_glsl_frontend::DecimalFormat;
+    use lp_glsl_frontend::FloatMode;
     use lp_glsl_frontend::semantic::MAIN_FUNCTION_NAME;
 
     options.validate().map_err(GlslDiagnostics::from)?;
@@ -207,7 +207,7 @@ pub fn glsl_jit_streaming(
     let semantic_result = CompilationPipeline::parse_and_analyze(source, options.max_errors)?;
     let typed_ast = semantic_result.typed_ast;
 
-    if options.decimal_format != DecimalFormat::Q32 {
+    if options.float_mode != FloatMode::Q32 {
         return Err(GlslDiagnostics::from(GlslError::new(
             ErrorCode::E0400,
             "Streaming JIT only supports Q32 format",
@@ -221,8 +221,7 @@ pub fn glsl_jit_streaming(
     let pointer_type = isa_ref.pointer_type();
     let triple = isa_ref.triple();
 
-    let mut module =
-        GlModule::new_jit(target, DecimalFormat::Q32).map_err(GlslDiagnostics::from)?;
+    let mut module = GlModule::new_jit(target, FloatMode::Q32).map_err(GlslDiagnostics::from)?;
 
     let mut sorted_names: Vec<String> = typed_ast
         .user_functions
@@ -523,13 +522,13 @@ pub fn glsl_emu_riscv32_with_metadata(
 #[cfg(feature = "std")]
 mod tests {
     use super::*;
-    use crate::exec::GlslValue;
-    use crate::exec::executable::{DecimalFormat, GlslOptions};
+    use crate::exec::executable::{FloatMode, GlslOptions};
     use crate::exec::execute_fn::execute_function;
+    use crate::exec::GlslValue;
 
     fn q32_jit_options() -> GlslOptions {
         let mut opts = GlslOptions::jit();
-        opts.decimal_format = DecimalFormat::Q32;
+        opts.float_mode = FloatMode::Q32;
         opts
     }
 

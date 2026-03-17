@@ -3,7 +3,7 @@
 use lp_glsl_cranelift::semantic::functions::FunctionSignature;
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
-use lp_glsl_wasm::{WasmOptions, glsl_wasm};
+use lp_glsl_wasm::{glsl_wasm, WasmOptions};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Engine, Instance, Module, Store};
@@ -16,7 +16,7 @@ pub struct WasmExecutable {
     store: Store<()>,
     instance: Instance,
     exports: HashMap<String, FunctionSignature>,
-    decimal_format: lp_glsl_wasm::DecimalFormat,
+    float_mode: lp_glsl_wasm::FloatMode,
 }
 
 impl WasmExecutable {
@@ -48,7 +48,7 @@ impl WasmExecutable {
             store,
             instance,
             exports,
-            decimal_format: options.decimal_format,
+            float_mode: options.float_mode,
         })
     }
 }
@@ -56,7 +56,7 @@ impl WasmExecutable {
 fn glsl_value_to_wasm(
     v: &GlslValue,
     expected: WasmValType,
-    decimal_format: lp_glsl_wasm::DecimalFormat,
+    float_mode: lp_glsl_wasm::FloatMode,
 ) -> Result<wasmtime::Val, GlslError> {
     use wasmtime::Val;
 
@@ -66,7 +66,7 @@ fn glsl_value_to_wasm(
             GlslValue::U32(x) => Ok(Val::I32(*x as i32)),
             GlslValue::Bool(b) => Ok(Val::I32(if *b { 1 } else { 0 })),
             GlslValue::F32(f) => {
-                if matches!(decimal_format, lp_glsl_wasm::DecimalFormat::Q32) {
+                if matches!(float_mode, lp_glsl_wasm::FloatMode::Q32) {
                     Ok(Val::I32((*f * Q16_16_SCALE) as i32))
                 } else {
                     Err(GlslError::new(
@@ -109,11 +109,11 @@ impl GlslExecutable for WasmExecutable {
         let param_types: Vec<WasmValType> = sig
             .parameters
             .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.decimal_format))
+            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
             .collect();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.decimal_format)?);
+            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
         func.call(&mut self.store, &wasm_args, &mut [])
@@ -135,11 +135,11 @@ impl GlslExecutable for WasmExecutable {
         let param_types: Vec<WasmValType> = sig
             .parameters
             .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.decimal_format))
+            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
             .collect();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.decimal_format)?);
+            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
         let mut results = [wasmtime::Val::I32(0)];
@@ -170,11 +170,11 @@ impl GlslExecutable for WasmExecutable {
         let param_types: Vec<WasmValType> = sig
             .parameters
             .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.decimal_format))
+            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
             .collect();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.decimal_format)?);
+            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
         let mut results = [wasmtime::Val::F32(0f32.to_bits())];
@@ -266,12 +266,12 @@ impl GlslExecutable for WasmExecutable {
     }
 }
 
-fn glsl_param_to_wasm(ty: &Type, decimal_format: lp_glsl_wasm::DecimalFormat) -> WasmValType {
+fn glsl_param_to_wasm(ty: &Type, float_mode: lp_glsl_wasm::FloatMode) -> WasmValType {
     match ty {
         Type::Int | Type::UInt | Type::Bool => WasmValType::I32,
-        Type::Float => match decimal_format {
-            lp_glsl_wasm::DecimalFormat::Q32 => WasmValType::I32,
-            lp_glsl_wasm::DecimalFormat::Float => WasmValType::F32,
+        Type::Float => match float_mode {
+            lp_glsl_wasm::FloatMode::Q32 => WasmValType::I32,
+            lp_glsl_wasm::FloatMode::Float => WasmValType::F32,
         },
         _ => panic!("WASM: unsupported param type {:?}", ty),
     }

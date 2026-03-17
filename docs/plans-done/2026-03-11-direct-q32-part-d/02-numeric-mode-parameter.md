@@ -64,11 +64,11 @@ Q32Strategy when appropriate.
 
 ## NumericMode construction
 
-The pipeline knows `GlslOptions` which has `decimal_format` and
+The pipeline knows `GlslOptions` which has `float_mode` and
 `q32_opts`. Constructing the mode:
 
 ```rust
-let numeric_mode = match options.decimal_format {
+let numeric_mode = match options.float_mode {
     DecimalFormat::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
     DecimalFormat::Float => NumericMode::Float(FloatStrategy),
 };

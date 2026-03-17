@@ -79,7 +79,7 @@ The LPFX dispatch already knows both variants. Change the selection from
 let func_ref = get_lpfx_testcase_call(name, ...);  // always float
 
 // After:
-let func_ref = match ctx.decimal_format {
+let func_ref = match ctx.float_mode {
     DecimalFormat::Float => get_lpfx_testcase_call(name, ...),
     DecimalFormat::Q32 => get_lpfx_q32_call(name, ...),
 };

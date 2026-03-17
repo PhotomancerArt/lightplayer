@@ -1,18 +1,18 @@
 //! GLSL type to WASM ValType mapping.
 
-use lp_glsl_frontend::{DecimalFormat, semantic::types::Type};
+use lp_glsl_frontend::{semantic::types::Type, FloatMode};
 use wasm_encoder::ValType;
 
 /// Map GLSL type to WASM value type.
 ///
 /// Phase ii supports scalars only: int, uint, float (Q32→i32), bool.
 /// Vectors and matrices are out of scope.
-pub fn glsl_type_to_wasm(ty: &Type, decimal_format: DecimalFormat) -> ValType {
+pub fn glsl_type_to_wasm(ty: &Type, float_mode: FloatMode) -> ValType {
     match ty {
         Type::Int | Type::UInt | Type::Bool => ValType::I32,
-        Type::Float => match decimal_format {
-            DecimalFormat::Q32 => ValType::I32, // Q16.16
-            DecimalFormat::Float => ValType::F32,
+        Type::Float => match float_mode {
+            FloatMode::Q32 => ValType::I32, // Q16.16
+            FloatMode::Float => ValType::F32,
         },
         Type::Void => {
             unreachable!("void has no WASM value type")

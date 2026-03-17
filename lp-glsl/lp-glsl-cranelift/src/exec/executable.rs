@@ -161,13 +161,13 @@ pub enum RunMode {
     },
 }
 
-pub use lp_glsl_frontend::{DEFAULT_MAX_ERRORS, DecimalFormat};
+pub use lp_glsl_frontend::{FloatMode, DEFAULT_MAX_ERRORS};
 
 /// Compilation options
 #[derive(Clone)]
 pub struct GlslOptions {
     pub run_mode: RunMode,
-    pub decimal_format: DecimalFormat,
+    pub float_mode: FloatMode,
     pub q32_opts: crate::backend::q32::Q32Options,
     /// Use memory-optimized JIT path that frees CLIF IR after each function.
     /// Reduces OOM risk on embedded (no_std). Default: true when `std` is disabled.
@@ -183,7 +183,7 @@ impl core::fmt::Debug for GlslOptions {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("GlslOptions")
             .field("run_mode", &self.run_mode)
-            .field("decimal_format", &self.decimal_format)
+            .field("float_mode", &self.float_mode)
             .field("q32_opts", &self.q32_opts)
             .field("memory_optimized", &self.memory_optimized)
             .field("target_override", &self.target_override.is_some())
@@ -198,15 +198,15 @@ impl GlslOptions {
         use target_lexicon::Triple;
 
         // Validate option combinations
-        match (&self.run_mode, self.decimal_format) {
-            (RunMode::Emulator { .. }, DecimalFormat::Float) => {
+        match (&self.run_mode, self.float_mode) {
+            (RunMode::Emulator { .. }, FloatMode::Float) => {
                 // TODO: Float support will be added for riscv32_imafc in the future
                 Err(GlslError::new(
                     ErrorCode::E0400,
                     "Float format not yet supported in emulator mode (will be supported for riscv32_imafc)",
                 ))
             }
-            (RunMode::HostJit, DecimalFormat::Float) => {
+            (RunMode::HostJit, FloatMode::Float) => {
                 // Check if host supports float by checking triple string
                 let triple = Triple::host();
                 let arch_str = format!("{:?}", triple.architecture);
@@ -233,7 +233,7 @@ impl GlslOptions {
     pub fn jit() -> Self {
         Self {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Float,
+            float_mode: FloatMode::Float,
             q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: Self::default_memory_optimized(),
             target_override: None,
@@ -251,7 +251,7 @@ impl GlslOptions {
                 #[cfg(feature = "emulator")]
                 log_level: None,
             },
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
@@ -270,7 +270,7 @@ impl GlslOptions {
                 log_level: None,
                 max_instructions: 10_000,
             },
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
@@ -282,7 +282,7 @@ impl GlslOptions {
     /// Uses memory-optimized path, Q32 format, and embedded-appropriate ISA flags.
     #[cfg(not(feature = "std"))]
     pub fn host_jit_embedded_riscv32() -> Result<Self, GlslError> {
-        use crate::backend::target::{Target, default_riscv32_embedded_jit_flags};
+        use crate::backend::target::{default_riscv32_embedded_jit_flags, Target};
         use target_lexicon::Riscv32Architecture;
 
         let flags = default_riscv32_embedded_jit_flags()?;
@@ -290,7 +290,7 @@ impl GlslOptions {
 
         Ok(Self {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: true,
             target_override: Some(target),

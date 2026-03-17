@@ -4,7 +4,7 @@
 
 The codegen needs to know whether it's compiling for float or Q32 to
 dispatch builtin calls correctly. Rather than adding a separate
-`decimal_format: DecimalFormat` field, we derive everything from the
+`float_mode: DecimalFormat` field, we derive everything from the
 existing `numeric: NumericMode` field — one source of truth.
 
 ## Changes

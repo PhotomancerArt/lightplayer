@@ -5,19 +5,19 @@ Depends on Plan B (Q32Strategy) and Plan C (builtin dispatch).
 
 ## Goal
 
-Connect Q32Strategy to the compilation pipeline. When `decimal_format
+Connect Q32Strategy to the compilation pipeline. When `float_mode
 == Q32`, the codegen emits Q32 IR directly — no float module, no
 transform. The existing transform path is removed (not kept as fallback).
 
 ## Scope
 
-| Path | Changes |
-|------|---------|
-| Batch JIT (`compile_glsl_to_gl_module_jit`) | Use Q32Strategy directly, remove `apply_transform` |
-| Streaming JIT (`glsl_jit_streaming`) | Single module, no float module/transform/func_id_map |
-| Object/emulator (`compile_glsl_to_gl_module_object`) | Same as batch, update CLIF capture |
-| `SignatureBuilder` | Accept numeric mode, emit I32 directly for Q32 |
-| `compile_function_to_clif_impl` | Accept `NumericMode` parameter |
+| Path                                                 | Changes                                              |
+|------------------------------------------------------|------------------------------------------------------|
+| Batch JIT (`compile_glsl_to_gl_module_jit`)          | Use Q32Strategy directly, remove `apply_transform`   |
+| Streaming JIT (`glsl_jit_streaming`)                 | Single module, no float module/transform/func_id_map |
+| Object/emulator (`compile_glsl_to_gl_module_object`) | Same as batch, update CLIF capture                   |
+| `SignatureBuilder`                                   | Accept numeric mode, emit I32 directly for Q32       |
+| `compile_function_to_clif_impl`                      | Accept `NumericMode` parameter                       |
 
 ## Phases
 

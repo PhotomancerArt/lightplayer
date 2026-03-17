@@ -120,7 +120,7 @@ pub fn check_lpfx_fn_call(name: &str, arg_types: &[Type]) -> Result<Type, String
 /// Returns `None` if no implementation exists for the given format.
 pub fn get_builtin_id_for_format(
     func: &'static LpfxFn,
-    format: crate::DecimalFormat,
+    format: crate::FloatMode,
 ) -> Option<lp_glsl_builtin_ids::BuiltinId> {
     match &func.impls {
         super::lpfx_fn::LpfxFnImpl::NonDecimal(builtin_id) => Some(*builtin_id),
@@ -128,8 +128,8 @@ pub fn get_builtin_id_for_format(
             float_impl,
             q32_impl,
         } => match format {
-            crate::DecimalFormat::Float => Some(*float_impl),
-            crate::DecimalFormat::Q32 => Some(*q32_impl),
+            crate::FloatMode::Float => Some(*float_impl),
+            crate::FloatMode::Q32 => Some(*q32_impl),
         },
     }
 }

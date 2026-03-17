@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_ERRORS: usize = 20;
 
 /// Decimal format for floating-point operations (used by LPFX for overload resolution).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DecimalFormat {
+pub enum FloatMode {
     /// Native floating-point (f32/f64)
     Float,
     /// Fixed-point 32-bit (Q format)

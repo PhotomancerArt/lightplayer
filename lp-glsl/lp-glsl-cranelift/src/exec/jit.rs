@@ -1463,7 +1463,7 @@ impl GlslExecutable for GlslJitModule {
 #[cfg(test)]
 #[cfg(feature = "std")]
 mod tests {
-    use crate::{DecimalFormat, GlslOptions, Q32Options, RunMode, glsl_jit};
+    use crate::{glsl_jit, FloatMode, GlslOptions, Q32Options, RunMode};
 
     #[test]
     fn test_jit_int_literal() {
@@ -1475,7 +1475,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: Q32Options::default(),
             memory_optimized: false,
             target_override: None,
@@ -1499,7 +1499,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
@@ -1521,7 +1521,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,
@@ -1544,7 +1544,7 @@ mod tests {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts: crate::Q32Options::default(),
             memory_optimized: false,
             target_override: None,

@@ -16,7 +16,7 @@ codegen time. The transform rewrites the float call to the Q32 variant.
 
 ## Proposed change
 
-Branch on `decimal_format`:
+Branch on `float_mode`:
 
 ```rust
 LpfxFnImpl::Decimal { float_impl, q32_impl } => {

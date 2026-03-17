@@ -11,12 +11,12 @@ use alloc::{
 use core::panic::AssertUnwindSafe;
 use log;
 use lp_glsl_cranelift::glsl_jit_streaming;
-use lp_glsl_cranelift::{DecimalFormat, GlslExecutable, GlslOptions, RunMode};
+use lp_glsl_cranelift::{FloatMode, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
-    LpPathBuf, NodeHandle,
-    nodes::shader::{ShaderConfig, ShaderState},
-    project::FrameId,
+    nodes::shader::{ShaderConfig, ShaderState}, project::FrameId,
+    LpPathBuf,
+    NodeHandle,
 };
 use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]
@@ -524,7 +524,7 @@ impl ShaderRuntime {
 
         let options = GlslOptions {
             run_mode: RunMode::HostJit,
-            decimal_format: DecimalFormat::Q32,
+            float_mode: FloatMode::Q32,
             q32_opts,
             memory_optimized: GlslOptions::default_memory_optimized(),
             target_override: None,

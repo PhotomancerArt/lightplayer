@@ -15,7 +15,7 @@ pub(crate) mod jit;
 pub use emu::GlslEmulatorModule;
 #[allow(unused_imports, reason = "Re-exports for crate public API")]
 pub use executable::{
-    DEFAULT_MAX_ERRORS, DecimalFormat, DirectCallInfo, GlslExecutable, GlslOptions, RunMode,
+    DirectCallInfo, FloatMode, GlslExecutable, GlslOptions, RunMode, DEFAULT_MAX_ERRORS,
 };
 pub use glsl_value::GlslValue;
 pub use jit::GlslJitModule;

@@ -43,7 +43,7 @@ impl WasmCodegenContext {
         Self {
             locals,
             next_local_idx: params.len() as u32,
-            numeric: options.decimal_format.into(),
+            numeric: options.float_mode.into(),
             local_types: alloc::vec::Vec::new(),
         }
     }
@@ -62,8 +62,8 @@ impl WasmCodegenContext {
         self.local_types.push(crate::types::glsl_type_to_wasm(
             &ty,
             match self.numeric {
-                WasmNumericMode::Q32 => lp_glsl_frontend::DecimalFormat::Q32,
-                WasmNumericMode::Float => lp_glsl_frontend::DecimalFormat::Float,
+                WasmNumericMode::Q32 => lp_glsl_frontend::FloatMode::Q32,
+                WasmNumericMode::Float => lp_glsl_frontend::FloatMode::Float,
             },
         ));
         idx

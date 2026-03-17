@@ -463,10 +463,10 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
         "/// Format affinity for builtins (Cranelift-specific, format-aware declaration).\n",
     );
     output.push_str("trait BuiltinIdFormat {\n");
-    output.push_str("    fn format(&self) -> Option<crate::DecimalFormat>;\n");
+    output.push_str("    fn format(&self) -> Option<crate::FloatMode>;\n");
     output.push_str("}\n\n");
     output.push_str("impl BuiltinIdFormat for BuiltinId {\n");
-    output.push_str("    fn format(&self) -> Option<crate::DecimalFormat> {\n");
+    output.push_str("    fn format(&self) -> Option<crate::FloatMode> {\n");
     output.push_str("        match self {\n");
     if builtins.is_empty() {
         output.push_str("            BuiltinId::_Placeholder => None,\n");
@@ -475,9 +475,9 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
             let fmt = if builtin.enum_variant.starts_with("LpQ32")
                 || builtin.enum_variant.ends_with("Q32")
             {
-                "Some(crate::DecimalFormat::Q32)"
+                "Some(crate::FloatMode::Q32)"
             } else if builtin.enum_variant.ends_with("F32") {
-                "Some(crate::DecimalFormat::Float)"
+                "Some(crate::FloatMode::Float)"
             } else {
                 "None"
             };
@@ -957,7 +957,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("pub fn declare_builtins<M: Module>(\n");
     output.push_str("    module: &mut M,\n");
     output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str("    format: crate::FloatMode,\n");
     output.push_str(") -> Result<(), GlslError> {\n");
     output.push_str("    for builtin in BuiltinId::all() {\n");
     output.push_str("        if let Some(f) = builtin.format() {\n");
@@ -991,7 +991,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("pub fn declare_for_jit<M: Module>(\n");
     output.push_str("    module: &mut M,\n");
     output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str("    format: crate::FloatMode,\n");
     output.push_str(") -> Result<(), GlslError> {\n");
     output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n\n");
@@ -1007,7 +1007,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("pub fn declare_for_emulator<M: Module>(\n");
     output.push_str("    module: &mut M,\n");
     output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::DecimalFormat,\n");
+    output.push_str("    format: crate::FloatMode,\n");
     output.push_str(") -> Result<(), GlslError> {\n");
     output.push_str("    declare_builtins(module, pointer_type, format)\n");
     output.push_str("}\n");

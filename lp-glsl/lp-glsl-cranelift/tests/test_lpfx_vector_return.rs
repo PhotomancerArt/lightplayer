@@ -7,7 +7,7 @@
 #[cfg(feature = "emulator")]
 use lp_glsl_cranelift::glsl_emu_riscv32;
 use lp_glsl_cranelift::{
-    DEFAULT_MAX_ERRORS, DecimalFormat, GlslOptions, GlslValue, Q32Options, RunMode, glsl_jit,
+    glsl_jit, FloatMode, GlslOptions, GlslValue, Q32Options, RunMode, DEFAULT_MAX_ERRORS,
 };
 
 /// Test lpfx_hsv2rgb with vec3 return (result pointer parameter) in JIT mode
@@ -24,7 +24,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -114,7 +114,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
             max_instructions: 1000000,
             log_level: None,
         },
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,
@@ -196,7 +196,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
 
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
-        decimal_format: DecimalFormat::Q32,
+        float_mode: FloatMode::Q32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
