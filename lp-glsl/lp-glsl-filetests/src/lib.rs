@@ -20,6 +20,7 @@ pub mod util;
 use anyhow::Result;
 use glob::{MatchOptions, glob_with};
 use output_mode::OutputMode;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
@@ -29,7 +30,7 @@ use crate::target::{DEFAULT_TARGETS, Target};
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
     let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
-    let (result, _stats, _, _) =
+    let (result, _, _, _, _) =
         run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets)?;
     result
 }
@@ -62,13 +63,19 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 }
 
 /// Run a single filetest with optional line number filtering.
-/// Returns the result, test case statistics, and line numbers with unexpected passes.
+/// Returns the result, per-target stats, combined stats, and line numbers with unexpected passes.
 pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
     targets: &[&Target],
-) -> Result<(Result<()>, test_run::TestCaseStats, Vec<usize>, Vec<usize>)> {
+) -> Result<(
+    Result<()>,
+    test_run::PerTargetStats,
+    test_run::TestCaseStats,
+    Vec<usize>,
+    Vec<usize>,
+)> {
     // Count test cases early, even if parsing fails later
     let early_stats = count_test_cases(path, line_filter);
 
@@ -76,7 +83,7 @@ pub fn run_filetest_with_line_filter(
         Ok(tf) => tf,
         Err(e) => {
             // Return error but preserve the test case count we already computed
-            return Ok((Err(e), early_stats, Vec::new(), Vec::new()));
+            return Ok((Err(e), BTreeMap::new(), early_stats, Vec::new(), Vec::new()));
         }
     };
 
@@ -110,7 +117,15 @@ pub fn run_filetest_with_line_filter(
 
     // Run error test if requested
     if test_file.test_types.contains(&parse::TestType::Error) {
-        return test_error::run_error_test(&test_file, path);
+        let (result, stats, unexpected_pass_lines, failed_lines) =
+            test_error::run_error_test(&test_file, path)?;
+        return Ok((
+            result,
+            BTreeMap::new(),
+            stats,
+            unexpected_pass_lines,
+            failed_lines,
+        ));
     }
 
     // Run execution tests if requested
@@ -119,7 +134,7 @@ pub fn run_filetest_with_line_filter(
         .iter()
         .any(|t| matches!(t, parse::TestType::Run))
     {
-        let (result, stats, unexpected_pass_lines, failed_lines) =
+        let (result, per_target, stats, unexpected_pass_lines, failed_lines) =
             test_run::run_test_file_with_line_filter(
                 &test_file,
                 path,
@@ -127,10 +142,17 @@ pub fn run_filetest_with_line_filter(
                 output_mode,
                 targets,
             )?;
-        Ok((result, stats, unexpected_pass_lines, failed_lines))
+        Ok((
+            result,
+            per_target,
+            stats,
+            unexpected_pass_lines,
+            failed_lines,
+        ))
     } else {
         Ok((
             Ok(()),
+            BTreeMap::new(),
             test_run::TestCaseStats::default(),
             Vec::new(),
             Vec::new(),
@@ -290,7 +312,7 @@ pub fn run(
             relative_path_str
         };
 
-        let (_result, stats, unexpected_pass_lines, _failed_lines) =
+        let (_result, per_target, stats, unexpected_pass_lines, _failed_lines) =
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_filetest_with_line_filter(
                     &spec.path,
@@ -299,11 +321,10 @@ pub fn run(
                     &active_targets,
                 )
             })) {
-                Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {
-                    (inner_result, inner_stats, unexpected_lines, failed_lines)
-                }
+                Ok(Ok((r, pt, s, up, fl))) => (r, pt, s, up, fl),
                 Ok(Err(e)) => (
                     Err(e),
+                    BTreeMap::new(),
                     test_run::TestCaseStats::default(),
                     Vec::new(),
                     Vec::new(),
@@ -318,6 +339,7 @@ pub fn run(
                     };
                     (
                         Err(anyhow::anyhow!("panicked: {panic_msg}")),
+                        BTreeMap::new(),
                         test_run::TestCaseStats::default(),
                         Vec::new(),
                         Vec::new(),
@@ -343,9 +365,10 @@ pub fn run(
                     1,
                     0,
                     elapsed,
-                    stats.expected_failure,
+                    stats.expected_failure(),
                     stats.unexpected_pass,
                     fix_xfail,
+                    &per_target,
                 )
             );
 
@@ -378,9 +401,10 @@ pub fn run(
                     0,
                     1,
                     elapsed,
-                    stats.expected_failure,
+                    stats.expected_failure(),
                     stats.unexpected_pass,
                     fix_xfail,
+                    &per_target,
                 )
             );
 
@@ -418,6 +442,7 @@ pub fn run(
     struct TestEntry {
         spec: FileSpec,
         state: TestState,
+        per_target: test_run::PerTargetStats,
         stats: test_run::TestCaseStats,
         unexpected_pass_lines: Vec<usize>,
         failed_lines: Vec<usize>,
@@ -433,12 +458,14 @@ pub fn run(
         .map(|spec| TestEntry {
             spec,
             state: TestState::New,
+            per_target: BTreeMap::new(),
             stats: test_run::TestCaseStats::default(),
             unexpected_pass_lines: Vec::new(),
             failed_lines: Vec::new(),
         })
         .collect();
 
+    let mut per_target_aggregate: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
     let mut concurrent_runner = ConcurrentRunner::new();
     let mut next_test = 0;
     let mut reported_tests = 0;
@@ -469,19 +496,21 @@ pub fn run(
     while reported_tests < tests.len() {
         // Check for completed jobs
         while let Some(reply) = concurrent_runner.try_get() {
-            match reply {
-                runner::concurrent::Reply::Done {
-                    jobid,
-                    result: _result,
-                    stats,
-                    unexpected_pass_lines,
-                    failed_lines,
-                } => {
-                    tests[jobid].stats = stats;
-                    tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-                    tests[jobid].failed_lines = failed_lines;
-                    tests[jobid].state = TestState::Done;
-                }
+            let runner::concurrent::Reply::Done {
+                jobid,
+                per_target,
+                stats,
+                unexpected_pass_lines,
+                failed_lines,
+                ..
+            } = reply;
+            tests[jobid].per_target = per_target.clone();
+            tests[jobid].stats = stats;
+            tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+            tests[jobid].failed_lines = failed_lines;
+            tests[jobid].state = TestState::Done;
+            for (name, s) in per_target {
+                per_target_aggregate.entry(name).or_default().add(s);
             }
         }
 
@@ -500,7 +529,7 @@ pub fn run(
                 total_test_cases += stats.total;
                 passed_test_cases += stats.passed;
                 failed_test_cases += stats.failed;
-                expect_fail_test_cases += stats.expected_failure;
+                expect_fail_test_cases += stats.expected_failure();
                 unexpected_pass_test_cases += stats.unexpected_pass;
 
                 // Determine color for counts based on pass/fail ratio
@@ -592,38 +621,42 @@ pub fn run(
         let mut got_reply = false;
         while let Some(reply) = concurrent_runner.try_get() {
             got_reply = true;
-            match reply {
-                runner::concurrent::Reply::Done {
-                    jobid,
-                    result: _result,
-                    stats,
-                    unexpected_pass_lines,
-                    failed_lines,
-                } => {
-                    tests[jobid].stats = stats;
-                    tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-                    tests[jobid].failed_lines = failed_lines;
-                    tests[jobid].state = TestState::Done;
-                }
+            let runner::concurrent::Reply::Done {
+                jobid,
+                per_target,
+                stats,
+                unexpected_pass_lines,
+                failed_lines,
+                ..
+            } = reply;
+            tests[jobid].per_target = per_target.clone();
+            tests[jobid].stats = stats;
+            tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+            tests[jobid].failed_lines = failed_lines;
+            tests[jobid].state = TestState::Done;
+            for (name, s) in per_target {
+                per_target_aggregate.entry(name).or_default().add(s);
             }
         }
 
         // Only block if we didn't get any replies and the next test isn't done
         if !got_reply {
-            if let Some(reply) = concurrent_runner.get() {
-                match reply {
-                    runner::concurrent::Reply::Done {
-                        jobid,
-                        result: _result,
-                        stats,
-                        unexpected_pass_lines,
-                        failed_lines,
-                    } => {
-                        tests[jobid].stats = stats;
-                        tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-                        tests[jobid].failed_lines = failed_lines;
-                        tests[jobid].state = TestState::Done;
-                    }
+            if let Some(runner::concurrent::Reply::Done {
+                jobid,
+                per_target,
+                stats,
+                unexpected_pass_lines,
+                failed_lines,
+                ..
+            }) = concurrent_runner.get()
+            {
+                tests[jobid].per_target = per_target.clone();
+                tests[jobid].stats = stats;
+                tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
+                tests[jobid].failed_lines = failed_lines;
+                tests[jobid].state = TestState::Done;
+                for (name, s) in per_target {
+                    per_target_aggregate.entry(name).or_default().add(s);
                 }
             }
         }
@@ -742,6 +775,7 @@ pub fn run(
             expect_fail_test_cases,
             unexpected_pass_test_cases,
             fix_xfail,
+            &per_target_aggregate,
         )
     );
 
@@ -886,8 +920,8 @@ fn format_file_counts(
 
     // Build suffix with expected-fail/unexpected info, with colors
     let mut suffix_parts = Vec::new();
-    if !has_unexpected_failures && stats.expected_failure > 0 {
-        suffix_parts.push(format!("({} expected-failure)", stats.expected_failure));
+    if !has_unexpected_failures && stats.expected_failure() > 0 {
+        suffix_parts.push(format!("({} expected-failure)", stats.expected_failure()));
     }
     if stats.skipped > 0 {
         suffix_parts.push(format!("({} skipped)", stats.skipped));
@@ -920,17 +954,88 @@ fn format_file_counts(
     (counts_str, parentheticals)
 }
 
-/// Format results summary with colors and timing.
+/// Format per-target table for summary. Returns empty string if no per-target data.
+fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -> String {
+    if per_target.is_empty() {
+        return String::new();
+    }
+
+    let with_color = colors::should_color();
+
+    let w_name = per_target
+        .keys()
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(12)
+        .max(14);
+    let col_pass = 6;
+    let col_fail = 6;
+    let col_unimpl = 7;
+    let col_broken = 7;
+
+    let mut out = String::new();
+
+    // Header
+    let header = format!(
+        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_broken$}",
+        "", "pass", "fail", "unimpl", "broken"
+    );
+    if with_color {
+        out.push_str(&format!("{}{}{}\n", colors::DIM, header, colors::RESET));
+    } else {
+        out.push_str(&format!("{header}\n"));
+    }
+
+    for (name, s) in per_target {
+        let pass_pad = format!("{:>col_pass$}", s.passed);
+        let fail_pad = format!("{:>col_fail$}", s.failed);
+        let unimpl_pad = format!("{:>col_unimpl$}", s.unimplemented);
+        let broken_pad = format!("{:>col_broken$}", s.broken);
+
+        let pass_cell = if with_color {
+            format!("{}{pass_pad}{}", colors::GREEN, colors::RESET)
+        } else {
+            pass_pad
+        };
+
+        let fail_cell = if s.failed > 0 && with_color {
+            format!("{}{fail_pad}{}", colors::RED, colors::RESET)
+        } else {
+            fail_pad
+        };
+
+        let unimpl_cell = if s.unimplemented > 0 && with_color {
+            format!("{}{unimpl_pad}{}", colors::YELLOW, colors::RESET)
+        } else {
+            unimpl_pad
+        };
+
+        let broken_cell = if s.broken > 0 && with_color {
+            format!("{}{broken_pad}{}", colors::YELLOW, colors::RESET)
+        } else {
+            broken_pad
+        };
+
+        out.push_str(&format!(
+            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {broken_cell}\n"
+        ));
+    }
+
+    out
+}
+
+/// Format results summary with per-target table, file counts, and timing.
 fn format_results_summary(
     passed_test_cases: usize,
     failed_test_cases: usize,
-    _total_test_cases: usize, // Kept for API compatibility but not used (denominator excludes expect-fail)
+    _total_test_cases: usize,
     passed_files: usize,
     failed_files: usize,
     elapsed: std::time::Duration,
     expect_fail_count: usize,
     unexpected_pass_count: usize,
     fix_enabled: bool,
+    per_target: &BTreeMap<String, test_run::TestCaseStats>,
 ) -> String {
     let seconds = elapsed.as_secs_f64();
     let time_str = if seconds < 1.0 {
@@ -951,6 +1056,13 @@ fn format_results_summary(
     } else {
         passed_test_cases
     };
+
+    let mut result = String::new();
+
+    if !per_target.is_empty() {
+        result.push_str(&format_target_table(per_target));
+        result.push('\n');
+    }
 
     if colors::should_color() {
         // Use red if there are failures, green if all passed
@@ -988,16 +1100,16 @@ fn format_results_summary(
         parts.push(time_str.to_string());
 
         let summary = parts.join(", ");
+        result.push_str(&summary);
         if unexpected_pass_count > 0 {
             let removal_msg = if fix_enabled {
-                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] removed.")
+                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented removed.")
             } else {
-                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] not removed.")
+                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented not removed.")
             };
-            format!("{summary}{removal_msg}")
-        } else {
-            summary
+            result.push_str(&removal_msg);
         }
+        result
     } else {
         let mut parts = Vec::new();
         if denominator > 0 {
@@ -1014,15 +1126,15 @@ fn format_results_summary(
         parts.push(format!("in {time_str}"));
 
         let summary = parts.join(", ");
+        result.push_str(&summary);
         if unexpected_pass_count > 0 {
             let removal_msg = if fix_enabled {
-                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] removed.")
+                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented removed.")
             } else {
-                format!("\n{unexpected_pass_count} tests newly pass. [expect-fail] not removed.")
+                format!("\n{unexpected_pass_count} tests newly pass. @unimplemented not removed.")
             };
-            format!("{summary}{removal_msg}")
-        } else {
-            summary
+            result.push_str(&removal_msg);
         }
+        result
     }
 }

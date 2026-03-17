@@ -5,8 +5,9 @@
 
 use crate::output_mode::OutputMode;
 use crate::target::Target;
-use crate::test_run::TestCaseStats;
+use crate::test_run::{PerTargetStats, TestCaseStats};
 use anyhow::Result;
+use std::collections::BTreeMap;
 use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -30,11 +31,13 @@ pub enum Reply {
         jobid: usize,
         /// Test execution result.
         result: Result<()>,
-        /// Test case statistics.
+        /// Per-target stats for summary table.
+        per_target: PerTargetStats,
+        /// Test case statistics (aggregated).
         stats: TestCaseStats,
-        /// Line numbers with unexpected passes (tests marked [expect-fail] that passed).
+        /// Line numbers with unexpected passes.
         unexpected_pass_lines: Vec<usize>,
-        /// Line numbers that failed (tests not marked [expect-fail] that failed).
+        /// Line numbers that failed.
         failed_lines: Vec<usize>,
     },
 }
@@ -156,7 +159,7 @@ fn worker_thread(
                 };
 
                 // Use AssertUnwindSafe to allow catching panics from code that isn't unwind-safe
-                let (result, stats, unexpected_pass_lines, failed_lines) =
+                let (result, per_target, stats, unexpected_pass_lines, failed_lines) =
                     match catch_unwind(std::panic::AssertUnwindSafe(|| {
                         crate::run_filetest_with_line_filter(
                             path.as_path(),
@@ -165,14 +168,10 @@ fn worker_thread(
                             &targets,
                         )
                     })) {
-                        Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {
-                            (inner_result, inner_stats, unexpected_lines, failed_lines)
-                        }
+                        Ok(Ok((r, pt, s, up, fl))) => (r, pt, s, up, fl),
                         Ok(Err(e)) => {
-                            // Error occurred, but try to preserve test case count
-                            // Count test cases even on error so we can show stats
                             let error_stats = crate::count_test_cases(path.as_path(), line_filter);
-                            (Err(e), error_stats, Vec::new(), Vec::new())
+                            (Err(e), BTreeMap::new(), error_stats, Vec::new(), Vec::new())
                         }
                         Err(e) => {
                             // The test panicked, leaving us a `Box<Any>`.
@@ -194,6 +193,7 @@ fn worker_thread(
 
                             (
                                 Err(anyhow::anyhow!("panicked: {short_msg}")),
+                                BTreeMap::new(),
                                 panic_stats,
                                 Vec::new(),
                                 Vec::new(),
@@ -205,6 +205,7 @@ fn worker_thread(
                     .send(Reply::Done {
                         jobid,
                         result,
+                        per_target,
                         stats,
                         unexpected_pass_lines,
                         failed_lines,

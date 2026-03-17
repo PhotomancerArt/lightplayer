@@ -1,7 +1,7 @@
 //! Summary mode: compile once, reuse emulator.
 
 use crate::parse::TestFile;
-use crate::target::{Disposition, Target, directive_disposition};
+use crate::target::{AnnotationKind, Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
 use crate::test_run::compile;
 use crate::test_run::execution;
@@ -40,7 +40,8 @@ pub fn run(
         Ok(exec) => exec,
         Err(e) => {
             let mut failed_lines = Vec::new();
-            let mut expect_fail_count = 0;
+            let mut unimplemented_count = 0;
+            let mut broken_count = 0;
             let mut skipped_count = 0;
             for directive in &test_file.run_directives {
                 if let Some(filter_line) = line_filter {
@@ -50,14 +51,20 @@ pub fn run(
                 }
                 let disposition =
                     directive_disposition(&test_file.annotations, &directive.annotations, target);
-                match disposition {
+                match &disposition {
                     Disposition::Skip => skipped_count += 1,
-                    Disposition::ExpectFailure => expect_fail_count += 1,
+                    Disposition::ExpectFailure(AnnotationKind::Unimplemented) => {
+                        unimplemented_count += 1;
+                    }
+                    Disposition::ExpectFailure(AnnotationKind::Broken | AnnotationKind::Ignore) => {
+                        broken_count += 1;
+                    }
                     Disposition::ExpectSuccess => failed_lines.push(directive.line_number),
                 }
             }
             stats.failed = failed_lines.len();
-            stats.expected_failure = expect_fail_count;
+            stats.unimplemented = unimplemented_count;
+            stats.broken = broken_count;
             stats.skipped = skipped_count;
             stats.passed = 0;
             return Ok((
