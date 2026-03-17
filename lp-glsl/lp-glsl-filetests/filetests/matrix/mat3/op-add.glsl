@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add: mat3 + mat3 -> mat3 (component-wise)

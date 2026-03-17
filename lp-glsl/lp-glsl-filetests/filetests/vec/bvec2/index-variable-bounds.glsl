@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Variable Indexing: Out-of-bounds indices (should trap)

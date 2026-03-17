@@ -12,7 +12,7 @@ pub mod module;
 pub mod options;
 pub mod types;
 
-pub use lp_glsl_frontend::{CompilationPipeline, FloatMode, DEFAULT_MAX_ERRORS};
+pub use lp_glsl_frontend::{CompilationPipeline, DEFAULT_MAX_ERRORS, FloatMode};
 pub use module::{WasmExport, WasmModule, WasmValType};
 pub use options::WasmOptions;
 

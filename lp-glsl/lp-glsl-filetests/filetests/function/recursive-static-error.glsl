@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Static Recursion Detection: Should produce compile errors
@@ -17,7 +17,8 @@ float test_recursive_direct() {
     return factorial(5);
 }
 
-// run: test_recursive_direct() ~= 120.0 [expect-fail]
+// @unimplemented()
+// run: test_recursive_direct() ~= 120.0
 */
 
 /*
@@ -35,7 +36,8 @@ float test_recursive_indirect() {
     return func_a(3);
 }
 
-// run: test_recursive_indirect() ~= 3.0 [expect-fail]
+// @unimplemented()
+// run: test_recursive_indirect() ~= 3.0
 */
 
 /*
@@ -54,7 +56,8 @@ float test_recursive_mutual() {
     return even(4);
 }
 
-// run: test_recursive_mutual() ~= 1.0 [expect-fail]
+// @unimplemented()
+// run: test_recursive_mutual() ~= 1.0
 */
 
 float fibonacci_iterative(int n) {
@@ -94,7 +97,8 @@ float test_recursive_deep() {
     return level1(2);
 }
 
-// run: test_recursive_deep() ~= 1.0 [expect-fail]
+// @unimplemented()
+// run: test_recursive_deep() ~= 1.0
 */
 
 float double_it(float x) {

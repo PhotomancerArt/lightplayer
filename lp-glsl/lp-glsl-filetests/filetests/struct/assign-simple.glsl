@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Simple Whole Struct Assignment
@@ -17,7 +17,8 @@ float test_assign_simple_point() {
     return p1.x; // Should be 3.0
 }
 
-// run: test_assign_simple_point() ~= 3.0 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_point() ~= 3.0
 
 float test_assign_simple_point_y() {
     Point p1 = Point(5.0, 6.0);
@@ -26,7 +27,8 @@ float test_assign_simple_point_y() {
     return p1.y; // Should be 8.0
 }
 
-// run: test_assign_simple_point_y() ~= 8.0 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_point_y() ~= 8.0
 
 struct Color {
     float r;
@@ -41,7 +43,8 @@ float test_assign_simple_color() {
     return c1.g; // Should be 0.5
 }
 
-// run: test_assign_simple_color() ~= 0.5 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_color() ~= 0.5
 
 struct Transform {
     vec3 position;
@@ -55,7 +58,8 @@ vec3 test_assign_simple_transform_position() {
     return t1.position; // Should be vec3(7.0, 8.0, 9.0)
 }
 
-// run: test_assign_simple_transform_position() ~= vec3(7.0, 8.0, 9.0) [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_transform_position() ~= vec3(7.0, 8.0, 9.0)
 
 vec3 test_assign_simple_transform_rotation() {
     Transform t1 = Transform(vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
@@ -64,7 +68,8 @@ vec3 test_assign_simple_transform_rotation() {
     return t1.rotation; // Should be vec3(0.1, 0.2, 0.3)
 }
 
-// run: test_assign_simple_transform_rotation() ~= vec3(0.1, 0.2, 0.3) [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_transform_rotation() ~= vec3(0.1, 0.2, 0.3)
 
 struct Person {
     int age;
@@ -79,7 +84,8 @@ int test_assign_simple_person_age() {
     return p1.age; // Should be 30
 }
 
-// run: test_assign_simple_person_age() == 30 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_person_age() == 30
 
 float test_assign_simple_person_height() {
     Person p1 = Person(20, 165.0, true);
@@ -88,7 +94,8 @@ float test_assign_simple_person_height() {
     return p1.height; // Should be 190.0
 }
 
-// run: test_assign_simple_person_height() ~= 190.0 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_person_height() ~= 190.0
 
 bool test_assign_simple_person_student() {
     Person p1 = Person(22, 170.0, true);
@@ -97,7 +104,8 @@ bool test_assign_simple_person_student() {
     return p1.isStudent; // Should be false
 }
 
-// run: test_assign_simple_person_student() == false [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_person_student() == false
 
 struct Line {
     Point start;
@@ -111,7 +119,8 @@ float test_assign_simple_line_nested() {
     return l1.start.x; // Should be 5.0
 }
 
-// run: test_assign_simple_line_nested() ~= 5.0 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_line_nested() ~= 5.0
 
 float test_assign_simple_line_nested_end_y() {
     Line l1 = Line(Point(0.0, 0.0), Point(1.0, 1.0));
@@ -120,7 +129,8 @@ float test_assign_simple_line_nested_end_y() {
     return l1.end.y; // Should be 40.0
 }
 
-// run: test_assign_simple_line_nested_end_y() ~= 40.0 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_line_nested_end_y() ~= 40.0
 
 struct EmptyData {
     int id;
@@ -133,4 +143,5 @@ int test_assign_simple_empty_data() {
     return d1.id; // Should be 99
 }
 
-// run: test_assign_simple_empty_data() == 99 [expect-fail]
+// @unimplemented()
+// run: test_assign_simple_empty_data() == 99

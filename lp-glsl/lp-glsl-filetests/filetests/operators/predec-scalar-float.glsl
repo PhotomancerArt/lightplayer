@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 float test_predec_scalar_float() {
     float x = 5.5;

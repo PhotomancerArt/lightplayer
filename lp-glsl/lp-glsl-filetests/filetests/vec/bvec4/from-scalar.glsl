@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Scalar: bvec4(bool) - broadcast single bool to all components

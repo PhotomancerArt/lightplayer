@@ -1,6 +1,6 @@
 //! Simple example of compiling and executing GLSL code
 
-use lp_glsl_cranelift::{glsl_jit, FloatMode, GlslOptions, RunMode};
+use lp_glsl_cranelift::{FloatMode, GlslOptions, RunMode, glsl_jit};
 
 fn main() {
     let options = GlslOptions {

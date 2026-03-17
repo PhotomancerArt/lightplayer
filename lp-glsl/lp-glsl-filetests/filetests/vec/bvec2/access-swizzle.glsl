@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Access Swizzle: bvec2.xy, bvec2.yx, bvec2.xx, etc. - component swizzling

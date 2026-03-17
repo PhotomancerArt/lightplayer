@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply Assign: mat3 *= mat3 (matrix multiplication) or mat3 *= float (component-wise)
@@ -36,7 +36,8 @@ mat3 test_mat3_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// run: test_mat3_multiply_assign_matrix_expressions() ~= mat3(2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_multiply_assign_matrix_expressions() ~= mat3(2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0)
 
 mat3 test_mat3_multiply_assign_scalar() {
     mat3 result = mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);

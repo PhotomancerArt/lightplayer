@@ -21,7 +21,7 @@
 //! the old `Value` if not found, instead of returning an error. This should be fixed to match
 //! the behavior of `map_value()` in `instruction_copy.rs`.
 
-use lp_glsl_cranelift::{glsl_jit, FloatMode, GlslOptions, RunMode};
+use lp_glsl_cranelift::{FloatMode, GlslOptions, RunMode, glsl_jit};
 
 #[test]
 fn test_minimal_ssa_dominance_violation() {

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @ignore(backend=wasm)
 
 // ============================================================================
 // Control flow: for (init; bool; update) - condition must evaluate to bool

@@ -18,7 +18,7 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// target riscv32.q32\n");
+    content.push_str("// @unimplemented(backend=wasm)\n");
     content.push_str("\n");
 
     // Add section comment
@@ -453,7 +453,7 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
         Dimension::D4 => vec![2, 3, 5, 6],
     };
     let expected: Vec<bool> = match dimension {
-        Dimension::D2 => vec![false, false],
+        Dimension::D2 => vec![false, true], // equal((true,false), (false,false)) = (false,true)
         Dimension::D3 => vec![false, true, true], // equal((true,false,true), (false,false,true)) = (false,true,true)
         Dimension::D4 => vec![false, true, true, false],
     };
@@ -462,6 +462,11 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
     let c_constructor = format_vector_constructor(vec_type, dimension, &c_values);
 
+    let run_line = format!(
+        "// run: test_{}_equal_function_in_expression() == {}\n",
+        type_name,
+        format_bvec_expected(expected.clone())
+    );
     format!(
         "{} test_{}_equal_function_in_expression() {{\n\
          {} a = {};\n\
@@ -470,11 +475,11 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
          // Use equal() for component-wise comparison of {} values\n\
          // equal(a, b) = {}\n\
          // equal(b, c) = {}\n\
-         // equal(equal(a, b), equal(b, c)) = {}\n\
+         // equal(equal(a,b), equal(b,c)) = {}\n\
          return equal(equal(a, b), equal(b, c));\n\
          }}\n\
          \n\
-         // run: test_{}_equal_function_in_expression() == {}\n",
+         {}",
         bvec_type_name,
         type_name,
         type_name,
@@ -495,7 +500,6 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
             Dimension::D4 => vec![false, false, true, false],
         }),
         format_bvec_comment(expected.clone()),
-        type_name,
-        format_bvec_expected(expected)
+        run_line
     )
 }

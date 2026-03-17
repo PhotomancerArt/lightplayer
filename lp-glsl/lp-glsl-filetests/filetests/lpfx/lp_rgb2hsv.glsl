@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // lpfx_rgb2hsv(): Convert RGB color space to HSV

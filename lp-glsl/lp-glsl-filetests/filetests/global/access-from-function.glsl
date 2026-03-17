@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Global Variable Access from Functions: Accessing globals from user-defined functions
@@ -26,7 +26,8 @@ float test_access_from_function_read() {
     return read_counter() + read_position().x + read_position().y;
 }
 
-// run: test_access_from_function_read() ~= 72.0 [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_read() ~= 72.0
 
 void test_access_from_function_write() {
     // Function writing to global variables
@@ -46,7 +47,8 @@ void test_access_from_function_write() {
     update_position(vec2(3.0, 4.0));
 }
 
-// run: test_access_from_function_write() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_write() == 0.0
 
 float test_access_from_function_verify_write() {
     // Verify writes from previous test
@@ -54,7 +56,8 @@ float test_access_from_function_verify_write() {
     return global_counter + global_position.x + global_position.y;
 }
 
-// run: test_access_from_function_verify_write() ~= 15.0 [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_verify_write() ~= 15.0
 
 bool test_access_from_function_flag() {
     // Function manipulating boolean global
@@ -71,7 +74,8 @@ bool test_access_from_function_flag() {
     return get_flag();
 }
 
-// run: test_access_from_function_flag() == false [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_flag() == false
 
 mat4 test_access_from_function_matrix() {
     // Function working with matrix global
@@ -88,7 +92,8 @@ mat4 test_access_from_function_matrix() {
     return get_transform();
 }
 
-// run: test_access_from_function_matrix() ~= mat4(6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0) [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_matrix() ~= mat4(6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0)
 
 float test_access_from_function_nested() {
     // Nested functions accessing globals
@@ -106,7 +111,8 @@ float test_access_from_function_nested() {
     return global_counter;
 }
 
-// run: test_access_from_function_nested() ~= 20.0 [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_nested() ~= 20.0
 
 vec2 test_access_from_function_multiple() {
     // Multiple functions accessing same globals
@@ -130,4 +136,5 @@ vec2 test_access_from_function_multiple() {
     return get_position();
 }
 
-// run: test_access_from_function_multiple() ~= vec2(8.0, 10.0) [expect-fail]
+// @unimplemented()
+// run: test_access_from_function_multiple() ~= vec2(8.0, 10.0)

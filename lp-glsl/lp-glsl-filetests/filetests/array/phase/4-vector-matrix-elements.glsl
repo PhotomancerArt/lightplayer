@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // Phase 4: Vector/Matrix Element Arrays - Arrays of vectors and matrices with component access
 

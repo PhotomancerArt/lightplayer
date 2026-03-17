@@ -13,20 +13,24 @@ pub fn parse_run_directive_line(line: &str) -> Option<&str> {
 }
 
 /// Parse a single `// run:` line into a `RunDirective`.
-pub fn parse_run_directive(line: &str, line_number: usize) -> Result<RunDirective> {
-    // Check for [expect-fail] marker at the end and strip it first
-    let (line_without_marker, expect_fail) = if line.trim_end().ends_with("[expect-fail]") {
-        let without_marker = line
-            .trim_end()
+/// Note: [expect-fail] is no longer parsed here; use directive-level annotations instead.
+/// The caller may pass legacy_expect_fail if parsing old format for backward compatibility.
+pub fn parse_run_directive(
+    line: &str,
+    line_number: usize,
+    legacy_expect_fail: bool,
+) -> Result<RunDirective> {
+    // Parse format: <expression> == <expected> or <expression> ~= <expected> [ (tolerance: <value>) ]
+    // Strip legacy [expect-fail] if present (backward compat during migration)
+    let line_without_marker = if line.trim_end().ends_with("[expect-fail]") {
+        line.trim_end()
             .strip_suffix("[expect-fail]")
             .unwrap()
-            .trim_end();
-        (without_marker, true)
+            .trim_end()
     } else {
-        (line, false)
+        line
     };
 
-    // Parse format: <expression> == <expected> or <expression> ~= <expected> [ (tolerance: <value>) ]
     let (comparison, expr, expected_with_tolerance) = if let Some(pos) =
         line_without_marker.rfind(" == ")
     {
@@ -70,13 +74,23 @@ pub fn parse_run_directive(line: &str, line_number: usize) -> Result<RunDirectiv
             (expected_with_tolerance, None)
         };
 
+    let mut annotations = Vec::new();
+    if legacy_expect_fail {
+        annotations.push(crate::target::Annotation {
+            kind: crate::target::AnnotationKind::Unimplemented,
+            filter: crate::target::TargetFilter::default(),
+            reason: None,
+            line_number,
+        });
+    }
+
     Ok(RunDirective {
         expression_str: expr.to_string(),
         comparison,
         expected_str: expected.to_string(),
         tolerance,
         line_number,
-        expect_fail,
+        annotations,
     })
 }
 
@@ -105,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_directive_exact() {
-        let dir = parse_run_directive("add_int(0, 0) == 0", 1).unwrap();
+        let dir = parse_run_directive("add_int(0, 0) == 0", 1, false).unwrap();
         assert_eq!(dir.expression_str, "add_int(0, 0)");
         assert_eq!(dir.comparison, ComparisonOp::Exact);
         assert_eq!(dir.expected_str, "0");
@@ -115,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_directive_approx() {
-        let dir = parse_run_directive("add_float(1.5, 2.5) ~= 4.0", 2).unwrap();
+        let dir = parse_run_directive("add_float(1.5, 2.5) ~= 4.0", 2, false).unwrap();
         assert_eq!(dir.expression_str, "add_float(1.5, 2.5)");
         assert_eq!(dir.comparison, ComparisonOp::Approx);
         assert_eq!(dir.expected_str, "4.0");
@@ -125,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_directive_with_tolerance() {
-        let dir = parse_run_directive("test() ~= 1.0 (tolerance: 0.001)", 3).unwrap();
+        let dir = parse_run_directive("test() ~= 1.0 (tolerance: 0.001)", 3, false).unwrap();
         assert_eq!(dir.expression_str, "test()");
         assert_eq!(dir.comparison, ComparisonOp::Approx);
         assert_eq!(dir.expected_str, "1.0");
@@ -135,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_parse_run_directive_with_comment() {
-        let dir = parse_run_directive("test() == 1 // comment", 4).unwrap();
+        let dir = parse_run_directive("test() == 1 // comment", 4, false).unwrap();
         assert_eq!(dir.expression_str, "test()");
         assert_eq!(dir.comparison, ComparisonOp::Exact);
         assert_eq!(dir.expected_str, "1");
@@ -144,45 +158,26 @@ mod tests {
 
     #[test]
     fn test_parse_run_directive_invalid() {
-        assert!(parse_run_directive("test()", 1).is_err());
-        assert!(parse_run_directive("test() = 1", 1).is_err());
-        assert!(parse_run_directive("", 1).is_err());
+        assert!(parse_run_directive("test()", 1, false).is_err());
+        assert!(parse_run_directive("test() = 1", 1, false).is_err());
+        assert!(parse_run_directive("", 1, false).is_err());
     }
 
     #[test]
-    fn test_parse_run_directive_with_expect_fail() {
-        let dir = parse_run_directive("test() == 1 [expect-fail]", 5).unwrap();
+    fn test_parse_run_directive_with_legacy_expect_fail() {
+        let dir = parse_run_directive("test() == 1 [expect-fail]", 5, true).unwrap();
         assert_eq!(dir.expression_str, "test()");
-        assert_eq!(dir.comparison, ComparisonOp::Exact);
         assert_eq!(dir.expected_str, "1");
-        assert_eq!(dir.expect_fail, true);
-        assert_eq!(dir.line_number, 5);
+        assert_eq!(dir.annotations.len(), 1);
+        assert!(matches!(
+            dir.annotations[0].kind,
+            crate::target::AnnotationKind::Unimplemented
+        ));
     }
 
     #[test]
-    fn test_parse_run_directive_with_expect_fail_and_tolerance() {
-        let dir = parse_run_directive("test() ~= 1.0 (tolerance: 0.001) [expect-fail]", 6).unwrap();
-        assert_eq!(dir.expression_str, "test()");
-        assert_eq!(dir.comparison, ComparisonOp::Approx);
-        assert_eq!(dir.expected_str, "1.0");
-        assert_eq!(dir.tolerance, Some(0.001));
-        assert_eq!(dir.expect_fail, true);
-        assert_eq!(dir.line_number, 6);
-    }
-
-    #[test]
-    fn test_parse_run_directive_with_expect_fail_and_comment() {
-        let dir = parse_run_directive("test() == 1 // comment [expect-fail]", 7).unwrap();
-        assert_eq!(dir.expression_str, "test()");
-        assert_eq!(dir.comparison, ComparisonOp::Exact);
-        assert_eq!(dir.expected_str, "1");
-        assert_eq!(dir.expect_fail, true);
-        assert_eq!(dir.line_number, 7);
-    }
-
-    #[test]
-    fn test_parse_run_directive_without_expect_fail() {
-        let dir = parse_run_directive("test() == 1", 8).unwrap();
-        assert_eq!(dir.expect_fail, false);
+    fn test_parse_run_directive_without_annotations() {
+        let dir = parse_run_directive("test() == 1", 8, false).unwrap();
+        assert!(dir.annotations.is_empty());
     }
 }

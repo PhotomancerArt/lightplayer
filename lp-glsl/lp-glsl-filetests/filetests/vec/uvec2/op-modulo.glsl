@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Modulo: uvec2 % uvec2 -> uvec2 (component-wise)

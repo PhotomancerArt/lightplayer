@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Void Functions Cannot Return Values: void functions have no return value
@@ -44,7 +44,8 @@ void test_edge_void_return_value_error() {
     bad_void();
 }
 
-// run: test_edge_void_return_value_error() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_edge_void_return_value_error() == 0.0
 */
 
 void conditional_returns() {
@@ -88,7 +89,8 @@ void test_edge_void_in_expression() {
     get_void();
 }
 
-// run: test_edge_void_in_expression() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_edge_void_in_expression() == 0.0
 */
 
 float helper() {
@@ -156,7 +158,8 @@ void test_edge_void_wrong_return_type() {
     wrong_return();
 }
 
-// run: test_edge_void_wrong_return_type() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_edge_void_wrong_return_type() == 0.0
 */
 
 void process_data(float x, float y) {

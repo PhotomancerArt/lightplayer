@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @ignore(backend=wasm)
 
 // ============================================================================
 // Basic for loops with increment

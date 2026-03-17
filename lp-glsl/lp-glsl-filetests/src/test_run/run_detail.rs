@@ -2,17 +2,14 @@
 
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
+use crate::target::{Disposition, Target, directive_disposition};
+use crate::test_run::TestCaseStats;
+use crate::test_run::compile;
 use crate::test_run::execution;
 use crate::test_run::parse_assert;
-use crate::test_run::record_failure;
-use crate::test_run::target;
+use crate::test_run::record_result;
 use crate::test_run::test_glsl;
-use crate::test_run::wasm_runner;
-use crate::test_run::TestCaseStats;
 use anyhow::Result;
-use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
-use lp_glsl_cranelift::{GlslOptions, RunMode};
-use lp_glsl_wasm::WasmOptions;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
@@ -26,6 +23,7 @@ pub fn run(
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
+    target: &Target,
 ) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>)> {
     // Read the original file lines to pass to test glsl generation
     let file_contents = std::fs::read_to_string(path)
@@ -40,12 +38,12 @@ pub fn run(
         .to_string_lossy()
         .to_string();
 
-    // Use provided line filter
     let test_line_filter = line_filter;
-
-    // Determine target
-    let target_str = test_file.target.as_deref().unwrap_or("riscv32.q32");
-    let filetest_target = target::parse_target(target_str)?;
+    let log_level = if output_mode.show_full_output() {
+        LogLevel::Instructions
+    } else {
+        LogLevel::None
+    };
 
     // TODO: Implement bless mode when needed
     // let bless_enabled = env::var("CRANELIFT_TEST_BLESS").unwrap_or_default() == "1";
@@ -66,6 +64,20 @@ pub fn run(
         }
 
         stats.total += 1;
+        let disposition =
+            directive_disposition(&test_file.annotations, &directive.annotations, target);
+        if disposition == Disposition::Skip {
+            record_result(
+                disposition,
+                false,
+                &mut stats,
+                &mut failed_lines,
+                &mut unexpected_pass_lines,
+                directive.line_number,
+            );
+            continue;
+        }
+
         // Generate test GLSL code with span information
         let test_glsl_result = match test_glsl::generate_test_glsl(
             &file_lines,
@@ -74,7 +86,14 @@ pub fn run(
         ) {
             Ok(result) => result,
             Err(e) => {
-                record_failure(directive, &mut stats, &mut failed_lines);
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
                 let error_msg = format!("failed to generate test GLSL: {e}");
                 eprintln!("{error_msg}");
                 errors.push(e.context(error_msg));
@@ -82,78 +101,37 @@ pub fn run(
             }
         };
 
-        // Compile and execute
-        // Note: test_glsl_result.source now contains ONLY the function being tested
-        let mut executable: Box<dyn lp_glsl_cranelift::GlslExecutable> = match &filetest_target {
-            target::FiletestTarget::Cranelift {
-                run_mode,
-                float_mode,
-            } => {
-                let mut run_mode = run_mode.clone();
-                if let RunMode::Emulator {
-                    ref mut log_level, ..
-                } = run_mode
-                {
-                    *log_level = Some(if output_mode.show_full_output() {
-                        LogLevel::Instructions
-                    } else {
-                        LogLevel::None
-                    });
-                }
-                let options = GlslOptions {
-                    run_mode,
-                    float_mode: float_mode.clone(),
-                    q32_opts: lp_glsl_cranelift::Q32Options::default(),
-                    memory_optimized: false,
-                    target_override: None,
-                    max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
-                };
-                match glsl_emu_riscv32_with_metadata(
-                    &test_glsl_result.source,
-                    options,
-                    Some(relative_path.clone()),
-                ) {
-                    Ok(exec) => exec,
-                    Err(e) => {
-                        record_failure(directive, &mut stats, &mut failed_lines);
-                        let formatted_error = format_compilation_error(
-                            e,
-                            &test_glsl_result,
-                            directive.line_number,
-                            &directive.expression_str,
-                            &relative_path,
-                            output_mode,
-                        );
-                        eprintln!("{formatted_error}");
-                        errors.push(anyhow::anyhow!("{formatted_error}"));
-                        continue;
-                    }
-                }
-            }
-            target::FiletestTarget::Wasm { float_mode } => {
-                let options = WasmOptions {
-                    float_mode: float_mode.clone(),
-                    max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
-                };
-                match wasm_runner::WasmExecutable::from_source(&test_glsl_result.source, options) {
-                    Ok(exec) => Box::new(exec),
-                    Err(e) => {
-                        record_failure(directive, &mut stats, &mut failed_lines);
-                        let formatted_error = format_compilation_error(
-                            e,
-                            &test_glsl_result,
-                            directive.line_number,
-                            &directive.expression_str,
-                            &relative_path,
-                            output_mode,
-                        );
-                        eprintln!("{formatted_error}");
-                        errors.push(anyhow::anyhow!("{formatted_error}"));
-                        continue;
-                    }
-                }
+        let executable = match compile::compile_for_target(
+            &test_glsl_result.source,
+            target,
+            &relative_path,
+            log_level,
+        ) {
+            Ok(exec) => exec,
+            Err(e) => {
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
+                let formatted_error = format_compilation_error(
+                    e,
+                    &test_glsl_result,
+                    directive.line_number,
+                    &directive.expression_str,
+                    &relative_path,
+                    output_mode,
+                );
+                eprintln!("{formatted_error}");
+                errors.push(anyhow::anyhow!("{formatted_error}"));
+                continue;
             }
         };
+
+        let mut executable = executable;
 
         // Check if this test expects a trap
         // Trap expectations can be on the same line or the immediately following line
@@ -166,7 +144,14 @@ pub fn run(
             match parse_assert::parse_function_call(&directive.expression_str) {
                 Ok(result) => result,
                 Err(e) => {
-                    record_failure(directive, &mut stats, &mut failed_lines);
+                    record_result(
+                        disposition,
+                        false,
+                        &mut stats,
+                        &mut failed_lines,
+                        &mut unexpected_pass_lines,
+                        directive.line_number,
+                    );
                     let error_msg = format!(
                         "failed to parse function call: {}",
                         directive.expression_str
@@ -181,7 +166,14 @@ pub fn run(
         let args = match parse_assert::parse_function_arguments(&arg_strings) {
             Ok(result) => result,
             Err(e) => {
-                record_failure(directive, &mut stats, &mut failed_lines);
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
                 let error_msg = format!("failed to parse function arguments: {arg_strings:?}");
                 eprintln!("{error_msg}");
                 errors.push(e.context(error_msg));
@@ -196,7 +188,14 @@ pub fn run(
         match (execution_result, trap_expectation) {
             (Ok(actual_value), Some(exp)) => {
                 // Expected a trap but got a value
-                record_failure(directive, &mut stats, &mut failed_lines);
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
                 let error_msg = format_error(
                     ErrorType::ExpectedTrapGotValue,
                     &format!(
@@ -230,7 +229,14 @@ pub fn run(
 
                 if is_trap {
                     // Unexpected trap
-                    record_failure(directive, &mut stats, &mut failed_lines);
+                    record_result(
+                        disposition,
+                        false,
+                        &mut stats,
+                        &mut failed_lines,
+                        &mut unexpected_pass_lines,
+                        directive.line_number,
+                    );
                     // Extract just the error message (before emulator state)
                     let error_msg = extract_error_message(&error_str);
                     let formatted_error = format_error(
@@ -252,7 +258,14 @@ pub fn run(
                     // Other error - format through unified formatter
                     // Extract just the error message (before emulator state)
                     let error_msg = extract_error_message(&error_str);
-                    record_failure(directive, &mut stats, &mut failed_lines);
+                    record_result(
+                        disposition,
+                        false,
+                        &mut stats,
+                        &mut failed_lines,
+                        &mut unexpected_pass_lines,
+                        directive.line_number,
+                    );
                     let formatted_error = format_error(
                         ErrorType::ExecutionTrap,
                         &error_msg,
@@ -276,7 +289,14 @@ pub fn run(
                 // Check trap code if specified
                 if let Some(expected_code) = exp.trap_code {
                     if !error_str.contains(&format!("user{expected_code}")) {
-                        record_failure(directive, &mut stats, &mut failed_lines);
+                        record_result(
+                            disposition,
+                            false,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
                         let formatted_error = format_error(
                             ErrorType::TrapMismatch,
                             &format!(
@@ -298,7 +318,14 @@ pub fn run(
                 // Check trap message if specified
                 if let Some(ref expected_msg) = exp.trap_message {
                     if !error_str.contains(expected_msg) {
-                        record_failure(directive, &mut stats, &mut failed_lines);
+                        record_result(
+                            disposition,
+                            false,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
                         let formatted_error = format_error(
                             ErrorType::TrapMismatch,
                             &format!(
@@ -318,12 +345,14 @@ pub fn run(
                 }
 
                 // Trap matches expectation - test passes
-                if directive.expect_fail {
-                    stats.unexpected_pass += 1;
-                    unexpected_pass_lines.push(directive.line_number);
-                } else {
-                    stats.passed += 1;
-                }
+                record_result(
+                    disposition,
+                    true,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
                 continue;
             }
             (Ok(actual_value), None) => {
@@ -332,7 +361,14 @@ pub fn run(
                 let expected_value = match parse_assert::parse_glsl_value(&directive.expected_str) {
                     Ok(value) => value,
                     Err(e) => {
-                        record_failure(directive, &mut stats, &mut failed_lines);
+                        record_result(
+                            disposition,
+                            false,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
                         let error_msg =
                             format!("failed to parse expected value: {}", directive.expected_str);
                         eprintln!("{error_msg}");
@@ -349,13 +385,14 @@ pub fn run(
                     directive.tolerance,
                 ) {
                     Ok(()) => {
-                        // Test passed
-                        if directive.expect_fail {
-                            stats.unexpected_pass += 1;
-                            unexpected_pass_lines.push(directive.line_number);
-                        } else {
-                            stats.passed += 1;
-                        }
+                        record_result(
+                            disposition,
+                            true,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
                         // Print success message in detailed mode
                         if output_mode.show_full_output() {
                             use crate::{colors, colors::should_color};
@@ -394,7 +431,14 @@ pub fn run(
                         //     file_update.update_run_expectation(...)?;
                         //     stats.passed += 1;
                         // } else {
-                        record_failure(directive, &mut stats, &mut failed_lines);
+                        record_result(
+                            disposition,
+                            false,
+                            &mut stats,
+                            &mut failed_lines,
+                            &mut unexpected_pass_lines,
+                            directive.line_number,
+                        );
                         // Format the // run: line
                         let op_str = match directive.comparison {
                             crate::parse::test_type::ComparisonOp::Exact => "==",
@@ -495,7 +539,7 @@ enum ErrorType {
 
 /// Format a compilation error with test GLSL code context.
 fn format_compilation_error(
-    error: lp_glsl_cranelift::GlslDiagnostics,
+    error: impl std::fmt::Display,
     test_glsl: &test_glsl::TestGlslResult,
     directive_line: usize,
     expression: &str,

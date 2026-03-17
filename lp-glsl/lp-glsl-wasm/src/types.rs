@@ -1,6 +1,6 @@
 //! GLSL type to WASM ValType mapping.
 
-use lp_glsl_frontend::{semantic::types::Type, FloatMode};
+use lp_glsl_frontend::{FloatMode, semantic::types::Type};
 use wasm_encoder::ValType;
 
 /// Map GLSL type to WASM value type.

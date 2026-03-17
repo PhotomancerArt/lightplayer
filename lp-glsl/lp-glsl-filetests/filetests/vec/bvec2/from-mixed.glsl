@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: bvec2(int, float) - type conversions (0/0.0 -> false, non-zero -> true)

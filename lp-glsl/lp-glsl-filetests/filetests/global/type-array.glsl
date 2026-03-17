@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Global Types: Global variables of array types
@@ -22,7 +22,8 @@ float test_type_array_float() {
            global_float_array[3] + global_float_array[4];
 }
 
-// run: test_type_array_float() ~= 15.0 [expect-fail]
+// @unimplemented()
+// run: test_type_array_float() ~= 15.0
 
 vec2 test_type_array_vec2() {
     // Global vec2 array
@@ -33,7 +34,8 @@ vec2 test_type_array_vec2() {
     return global_vec2_array[0] + global_vec2_array[1] + global_vec2_array[2];
 }
 
-// run: test_type_array_vec2() ~= vec2(9.0, 12.0) [expect-fail]
+// @unimplemented()
+// run: test_type_array_vec2() ~= vec2(9.0, 12.0)
 
 int test_type_array_int() {
     // Global int array
@@ -45,7 +47,8 @@ int test_type_array_int() {
     return global_int_array[0] + global_int_array[1] + global_int_array[2] + global_int_array[3];
 }
 
-// run: test_type_array_int() == 100 [expect-fail]
+// @unimplemented()
+// run: test_type_array_int() == 100
 
 bool test_type_array_bool() {
     // Global bool array
@@ -56,7 +59,8 @@ bool test_type_array_bool() {
     return global_bool_array[0] && global_bool_array[2] && !global_bool_array[1];
 }
 
-// run: test_type_array_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_type_array_bool() == true
 
 float test_type_array_indexing() {
     // Array indexing operations
@@ -69,7 +73,8 @@ float test_type_array_indexing() {
     return global_float_array[0] + global_float_array[index] + global_float_array[4];
 }
 
-// run: test_type_array_indexing() ~= 350.0 [expect-fail]
+// @unimplemented()
+// run: test_type_array_indexing() ~= 350.0
 
 vec2 test_type_array_loop() {
     // Loop over array elements
@@ -83,7 +88,8 @@ vec2 test_type_array_loop() {
     return sum;
 }
 
-// run: test_type_array_loop() ~= vec2(6.0, 12.0) [expect-fail]
+// @unimplemented()
+// run: test_type_array_loop() ~= vec2(6.0, 12.0)
 
 int test_type_array_length() {
     // Array length property
@@ -95,7 +101,8 @@ int test_type_array_length() {
     return global_int_array.length();
 }
 
-// run: test_type_array_length() == 4 [expect-fail]
+// @unimplemented()
+// run: test_type_array_length() == 4
 
 float test_type_array_multidimensional() {
     // Multi-dimensional array (array of arrays)
@@ -111,4 +118,5 @@ float test_type_array_multidimensional() {
     return array_of_arrays[0][0].x + array_of_arrays[1][2].y;
 }
 
-// run: test_type_array_multidimensional() ~= 13.0 [expect-fail]
+// @unimplemented()
+// run: test_type_array_multidimensional() ~= 13.0

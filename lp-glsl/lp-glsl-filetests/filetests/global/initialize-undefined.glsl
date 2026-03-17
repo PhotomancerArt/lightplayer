@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Undefined Global Initialization: Global variables without initialization
@@ -20,56 +20,64 @@ float test_initialize_undefined_float() {
     return undefined_float + 1.0;
 }
 
-// run: test_initialize_undefined_float() ~= 1.0 [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_float() ~= 1.0
 
 int test_initialize_undefined_int() {
     // Undefined global int - has undefined value
     return undefined_int + 10;
 }
 
-// run: test_initialize_undefined_int() == 10 [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_int() == 10
 
 uint test_initialize_undefined_uint() {
     // Undefined global uint - has undefined value
     return int(undefined_uint + 1u);
 }
 
-// run: test_initialize_undefined_uint() == 1 [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_uint() == 1
 
 bool test_initialize_undefined_bool() {
     // Undefined global bool - has undefined value
     return undefined_bool || true;
 }
 
-// run: test_initialize_undefined_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_bool() == true
 
 vec2 test_initialize_undefined_vec2() {
     // Undefined global vec2 - has undefined values
     return undefined_vec2 + vec2(1.0, 1.0);
 }
 
-// run: test_initialize_undefined_vec2() ~= vec2(1.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_initialize_undefined_vec3() {
     // Undefined global vec3 - has undefined values
     return undefined_vec3 + vec3(1.0, 1.0, 1.0);
 }
 
-// run: test_initialize_undefined_vec3() ~= vec3(1.0, 1.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_vec3() ~= vec3(1.0, 1.0, 1.0)
 
 vec4 test_initialize_undefined_vec4() {
     // Undefined global vec4 - has undefined values
     return undefined_vec4 + vec4(1.0, 1.0, 1.0, 1.0);
 }
 
-// run: test_initialize_undefined_vec4() ~= vec4(1.0, 1.0, 1.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_vec4() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 mat2 test_initialize_undefined_mat2() {
     // Undefined global mat2 - has undefined values
     return undefined_mat2 + mat2(1.0);
 }
 
-// run: test_initialize_undefined_mat2() ~= mat2(1.0, 1.0, 1.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_mat2() ~= mat2(1.0, 1.0, 1.0, 1.0)
 
 void test_initialize_undefined_assign() {
     // Assign to undefined globals to give them defined values
@@ -83,7 +91,8 @@ void test_initialize_undefined_assign() {
     undefined_mat2 = mat2(1.0, 2.0, 3.0, 4.0);
 }
 
-// run: test_initialize_undefined_assign() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_assign() == 0.0
 
 float test_initialize_undefined_after_assign() {
     // Test values after assignment
@@ -91,4 +100,5 @@ float test_initialize_undefined_after_assign() {
     return undefined_float + float(undefined_int);
 }
 
-// run: test_initialize_undefined_after_assign() ~= 165.0 [expect-fail]
+// @unimplemented()
+// run: test_initialize_undefined_after_assign() ~= 165.0

@@ -3,7 +3,7 @@
 use lp_glsl_cranelift::semantic::functions::FunctionSignature;
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
-use lp_glsl_wasm::{glsl_wasm, WasmOptions};
+use lp_glsl_wasm::{WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Engine, Instance, Module, Store};
@@ -77,19 +77,19 @@ fn glsl_value_to_wasm(
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
-                format!("unsupported GlslValue {:?} for i32 param", v),
+                format!("unsupported GlslValue {v:?} for i32 param"),
             )),
         },
         WasmValType::F32 => match v {
             GlslValue::F32(f) => Ok(Val::F32(f.to_bits())),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
-                format!("expected f32, got {:?}", v),
+                format!("expected f32, got {v:?}"),
             )),
         },
         _ => Err(GlslError::new(
             ErrorCode::E0400,
-            format!("unsupported WASM param type {:?}", expected),
+            format!("unsupported WASM param type {expected:?}"),
         )),
     }
 }
@@ -273,6 +273,6 @@ fn glsl_param_to_wasm(ty: &Type, float_mode: lp_glsl_wasm::FloatMode) -> WasmVal
             lp_glsl_wasm::FloatMode::Q32 => WasmValType::I32,
             lp_glsl_wasm::FloatMode::Float => WasmValType::F32,
         },
-        _ => panic!("WASM: unsupported param type {:?}", ty),
+        _ => panic!("WASM: unsupported param type {ty:?}"),
     }
 }

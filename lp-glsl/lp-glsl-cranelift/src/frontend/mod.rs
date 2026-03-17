@@ -8,8 +8,8 @@ pub(crate) mod glsl_compiler;
 
 // Re-export pipeline types from frontend
 pub use lp_glsl_frontend::pipeline::{
-    parse_program_with_registry, Backend, CompilationPipeline, CompiledShader, ParseResult, SemanticResult,
-    TransformationPass,
+    Backend, CompilationPipeline, CompiledShader, ParseResult, SemanticResult, TransformationPass,
+    parse_program_with_registry,
 };
 
 // Re-exports used by crate root; suppress unused warnings within this module.
@@ -522,9 +522,9 @@ pub fn glsl_emu_riscv32_with_metadata(
 #[cfg(feature = "std")]
 mod tests {
     use super::*;
+    use crate::exec::GlslValue;
     use crate::exec::executable::{FloatMode, GlslOptions};
     use crate::exec::execute_fn::execute_function;
-    use crate::exec::GlslValue;
 
     fn q32_jit_options() -> GlslOptions {
         let mut opts = GlslOptions::jit();

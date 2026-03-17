@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply Vec: mat2 * vec2 -> vec2 (matrix-vector multiplication)
@@ -30,7 +30,8 @@ vec2 test_mat2_multiply_vec2_rotation() {
     return m * v;
 }
 
-// run: test_mat2_multiply_vec2_rotation() ~= vec2(0.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_mat2_multiply_vec2_rotation() ~= vec2(0.0, 1.0)
 
 vec2 test_mat2_multiply_vec2_simple() {
     mat2 m = mat2(1.0, 2.0, 3.0, 4.0);
@@ -39,7 +40,8 @@ vec2 test_mat2_multiply_vec2_simple() {
     return m * v;
 }
 
-// run: test_mat2_multiply_vec2_simple() ~= vec2(17.0, 39.0) [expect-fail]
+// @unimplemented()
+// run: test_mat2_multiply_vec2_simple() ~= vec2(17.0, 39.0)
 
 vec2 test_mat2_multiply_vec2_variables() {
     mat2 m = mat2(1.0, 0.0, 0.0, 1.0);
@@ -53,7 +55,8 @@ vec2 test_mat2_multiply_vec2_expressions() {
     return mat2(1.0, 1.0, 0.0, 1.0) * vec2(2.0, 3.0);
 }
 
-// run: test_mat2_multiply_vec2_expressions() ~= vec2(5.0, 3.0) [expect-fail]
+// @unimplemented()
+// run: test_mat2_multiply_vec2_expressions() ~= vec2(5.0, 3.0)
 
 vec2 test_mat2_multiply_vec2_in_assignment() {
     vec2 result;

@@ -1,5 +1,7 @@
 //! Test type enum and related types.
 
+use crate::target::Annotation;
+
 /// Test type directive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestType {
@@ -44,8 +46,8 @@ pub struct RunDirective {
     pub tolerance: Option<f32>,
     /// Line number for bless mode updates.
     pub line_number: usize,
-    /// Whether this test is marked as expected to fail with `[expect-fail]`.
-    pub expect_fail: bool,
+    /// Annotations attached to this directive.
+    pub annotations: Vec<Annotation>,
 }
 
 /// An error expectation parsed from `// expected-error {{...}}` and optional `// expected-error-code: E0xxx`.
@@ -78,12 +80,10 @@ pub struct TestFile {
     pub run_directives: Vec<RunDirective>,
     /// All trap expectations found in the file.
     pub trap_expectations: Vec<TrapExpectation>,
-    /// Target specification (e.g., "riscv32.q32").
-    pub target: Option<String>,
-    /// Whether this is a "test run" file.
-    pub is_test_run: bool,
     /// Test types requested in this file.
     pub test_types: Vec<TestType>,
+    /// File-level annotations (between // test and first GLSL code).
+    pub annotations: Vec<Annotation>,
     /// CLIF expectations extracted from comments.
     pub clif_expectations: ClifExpectations,
     /// Error expectations for `test error` files (inline `expected-error` / `expected-error-code`).

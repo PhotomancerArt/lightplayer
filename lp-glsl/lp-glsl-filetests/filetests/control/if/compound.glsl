@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @ignore(backend=wasm)
 
 // ============================================================================
 // If statements with compound statements (braces)

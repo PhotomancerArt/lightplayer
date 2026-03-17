@@ -2,15 +2,14 @@
 
 use crate::parse::{ErrorExpectation, TestFile};
 use crate::test_run::TestCaseStats;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
-use lp_glsl_cranelift::GlslOptions;
+use lp_glsl_cranelift::{GlslOptions, RunMode};
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
 
-use crate::test_run::target;
-
 /// Run an error test: compile, expect failure, match diagnostics to expectations.
+/// Error tests run once regardless of target (frontend is shared).
 pub fn run_error_test(
     test_file: &TestFile,
     path: &Path,
@@ -40,31 +39,20 @@ pub fn run_error_test(
         }
     }
 
-    let target_str = test_file.target.as_deref().unwrap_or("riscv32.q32");
-    let filetest_target = target::parse_target(target_str)?;
+    const DEFAULT_MAX_MEMORY: usize = 1024 * 1024;
+    const DEFAULT_STACK_SIZE: usize = 64 * 1024;
+    const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
 
-    let (run_mode, float_mode) = match &filetest_target {
-        target::FiletestTarget::Cranelift {
-            run_mode,
-            float_mode,
-        } => {
-            let mut run_mode = run_mode.clone();
-            if let lp_glsl_cranelift::RunMode::Emulator {
-                ref mut log_level, ..
-            } = run_mode
-            {
-                *log_level = Some(LogLevel::None);
-            }
-            (run_mode, float_mode.clone())
-        }
-        target::FiletestTarget::Wasm { .. } => {
-            anyhow::bail!("error-test mode not yet supported for wasm32 target");
-        }
+    let run_mode = RunMode::Emulator {
+        max_memory: DEFAULT_MAX_MEMORY,
+        stack_size: DEFAULT_STACK_SIZE,
+        max_instructions: DEFAULT_MAX_INSTRUCTIONS,
+        log_level: Some(LogLevel::None),
     };
 
     let options = GlslOptions {
         run_mode,
-        float_mode,
+        float_mode: lp_glsl_cranelift::FloatMode::Q32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,

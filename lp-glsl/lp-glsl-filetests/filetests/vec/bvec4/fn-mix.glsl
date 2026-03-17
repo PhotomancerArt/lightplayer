@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Mix: mix(bvec4, bvec4, bvec4) -> bvec4 (component-wise selection)

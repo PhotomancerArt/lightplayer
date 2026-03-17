@@ -99,12 +99,29 @@ fn format_type_name(vec_type: VecType, dimension: Dimension) -> String {
 
 /// Find the filetests directory.
 fn find_filetests_dir() -> Result<PathBuf> {
+    // Try relative to this crate's manifest (lp-glsl-filetests is sibling)
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let manifest_path = PathBuf::from(&manifest_dir);
+        // From lp-glsl/lp-glsl-filetests-gen-app, go to lp-glsl/lp-glsl-filetests/filetests
+        let filetests = manifest_path
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|lp_glsl| lp_glsl.join("lp-glsl-filetests").join("filetests"));
+        if let Some(ref p) = filetests {
+            if p.exists() && p.is_dir() {
+                return Ok(p.clone());
+            }
+        }
+    }
+
     // Look for filetests directory relative to current working directory
-    // Try common locations
     let candidates = vec![
+        PathBuf::from("lp-glsl/lp-glsl-filetests/filetests"),
+        PathBuf::from("../lp-glsl/lp-glsl-filetests/filetests"),
+        PathBuf::from("lp-glsl-filetests/filetests"),
+        PathBuf::from("../lp-glsl-filetests/filetests"),
         PathBuf::from("lightplayer/crates/lp-glsl-filetests/filetests"),
         PathBuf::from("crates/lp-glsl-filetests/filetests"),
-        PathBuf::from("../lp-glsl-filetests/filetests"),
     ];
 
     for candidate in candidates {
@@ -118,7 +135,13 @@ fn find_filetests_dir() -> Result<PathBuf> {
     let mut search_dir = current_dir.as_path();
 
     loop {
-        let candidate = search_dir.join("lightplayer/crates/lp-glsl-filetests/filetests");
+        let candidate = search_dir.join("lp-glsl/lp-glsl-filetests/filetests");
+        if !candidate.exists() {
+            let alt = search_dir.join("lightplayer/crates/lp-glsl-filetests/filetests");
+            if alt.exists() && alt.is_dir() {
+                return Ok(alt);
+            }
+        }
         if candidate.exists() && candidate.is_dir() {
             return Ok(candidate);
         }

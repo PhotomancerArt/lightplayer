@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 float test_predec_vec2() {
     vec2 v = vec2(3.0, 4.0);

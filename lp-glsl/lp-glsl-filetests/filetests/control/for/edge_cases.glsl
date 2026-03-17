@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @ignore(backend=wasm)
 
 // ============================================================================
 // Break and continue edge cases for for loops

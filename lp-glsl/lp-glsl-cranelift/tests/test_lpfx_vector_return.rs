@@ -7,7 +7,7 @@
 #[cfg(feature = "emulator")]
 use lp_glsl_cranelift::glsl_emu_riscv32;
 use lp_glsl_cranelift::{
-    glsl_jit, FloatMode, GlslOptions, GlslValue, Q32Options, RunMode, DEFAULT_MAX_ERRORS,
+    DEFAULT_MAX_ERRORS, FloatMode, GlslOptions, GlslValue, Q32Options, RunMode, glsl_jit,
 };
 
 /// Test lpfx_hsv2rgb with vec3 return (result pointer parameter) in JIT mode

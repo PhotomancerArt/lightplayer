@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Default Parameter Qualifier: 'in' is the default
@@ -14,7 +14,8 @@ float test_param_default_explicit_in() {
     return add_explicit(2.0, 3.0);
 }
 
-// run: test_param_default_explicit_in() ~= 5.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_explicit_in() ~= 5.0
 
 float add_implicit(float a, float b) {
     return a + b;
@@ -25,7 +26,8 @@ float test_param_default_implicit_in() {
     return add_implicit(2.0, 3.0);
 }
 
-// run: test_param_default_implicit_in() ~= 5.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_implicit_in() ~= 5.0
 
 float process(in float a, float b, in float c) {
     return a + b + c;
@@ -36,7 +38,8 @@ float test_param_default_mixed() {
     return process(1.0, 2.0, 3.0);
 }
 
-// run: test_param_default_mixed() ~= 6.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_mixed() ~= 6.0
 
 vec2 combine_vectors(vec2 a, vec2 b) {
     return a + b;
@@ -47,7 +50,8 @@ float test_param_default_vector() {
     return length(combine_vectors(vec2(1.0, 2.0), vec2(3.0, 4.0)));
 }
 
-// run: test_param_default_vector() ~= 10.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_vector() ~= 10.0
 
 int multiply(int x, int y) {
     return x * y;
@@ -58,7 +62,8 @@ int test_param_default_int() {
     return multiply(6, 7);
 }
 
-// run: test_param_default_int() == 42 [expect-fail]
+// @unimplemented()
+// run: test_param_default_int() == 42
 
 bool logical_and(bool a, bool b) {
     return a && b;
@@ -69,7 +74,8 @@ bool test_param_default_bool() {
     return logical_and(true, true);
 }
 
-// run: test_param_default_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_param_default_bool() == true
 
 float modify_local(float x) {
     x = x + 10.0; // Modifies local copy only
@@ -83,7 +89,8 @@ float test_param_default_modification() {
     return result; // Should be 15.0, original unchanged
 }
 
-// run: test_param_default_modification() ~= 15.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_modification() ~= 15.0
 
 mat2 multiply_matrices(mat2 a, mat2 b) {
     return a * b;
@@ -97,7 +104,8 @@ mat2 test_param_default_matrix() {
     return result;
 }
 
-// run: test_param_default_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0) [expect-fail]
+// @unimplemented()
+// run: test_param_default_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 float sum_elements(float[3] arr) {
     return arr[0] + arr[1] + arr[2];
@@ -109,7 +117,8 @@ float test_param_default_array() {
     return sum_elements(data);
 }
 
-// run: test_param_default_array() ~= 6.0 [expect-fail]
+// @unimplemented()
+// run: test_param_default_array() ~= 6.0
 
 struct Point {
     float x, y;
@@ -125,4 +134,5 @@ Point test_param_default_struct() {
     return move_point(p, 3.0, 4.0);
 }
 
-// run: test_param_default_struct() ~= Point(4.0, 6.0) [expect-fail]
+// @unimplemented()
+// run: test_param_default_struct() ~= Point(4.0, 6.0)

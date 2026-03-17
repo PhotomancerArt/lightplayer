@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Local Variable Scope: Variables declared in functions
@@ -17,7 +17,8 @@ float test_scope_local_simple() {
     return local_func();
 }
 
-// run: test_scope_local_simple() ~= 42.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_simple() ~= 42.0
 
 float access_global() {
     float global_value = 200.0; // Shadows global
@@ -29,7 +30,8 @@ float test_scope_local_shadow_global() {
     return access_global();
 }
 
-// run: test_scope_local_shadow_global() ~= 200.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_shadow_global() ~= 200.0
 
 float process_locals() {
     float a = 1.0;
@@ -43,7 +45,8 @@ float test_scope_local_multiple() {
     return process_locals();
 }
 
-// run: test_scope_local_multiple() ~= 3.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_multiple() ~= 3.0
 
 float sum_loop(int n) {
     float sum = 0.0;
@@ -59,7 +62,8 @@ float test_scope_local_in_loop() {
     return sum_loop(5);
 }
 
-// run: test_scope_local_in_loop() ~= 10.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_in_loop() ~= 10.0
 
 float inner_func() {
     float inner_var = 20.0;
@@ -76,7 +80,8 @@ float test_scope_local_nested() {
     return outer_func();
 }
 
-// run: test_scope_local_nested() ~= 30.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_nested() ~= 30.0
 
 float use_params(float param1, float param2) {
     float local_calc = param1 * 2.0 + param2 * 3.0;
@@ -88,7 +93,8 @@ float test_scope_local_parameters() {
     return use_params(2.0, 3.0);
 }
 
-// run: test_scope_local_parameters() ~= 13.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_parameters() ~= 13.0
 
 float mixed_types() {
     int int_var = 5;
@@ -104,7 +110,8 @@ float test_scope_local_types() {
     return mixed_types();
 }
 
-// run: test_scope_local_types() ~= 12.14 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_types() ~= 12.14
 
 float sum_local_array() {
     float[3] local_arr = float[3](1.0, 2.0, 3.0);
@@ -116,7 +123,8 @@ float test_scope_local_arrays() {
     return sum_local_array();
 }
 
-// run: test_scope_local_arrays() ~= 6.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_arrays() ~= 6.0
 
 struct LocalStruct {
     float x, y;
@@ -132,7 +140,8 @@ LocalStruct test_scope_local_struct() {
     return create_local_struct();
 }
 
-// run: test_scope_local_struct() ~= LocalStruct(5.0, 10.0) [expect-fail]
+// @unimplemented()
+// run: test_scope_local_struct() ~= LocalStruct(5.0, 10.0)
 
 float modify_local() {
     float value = 5.0;
@@ -146,4 +155,5 @@ float test_scope_local_modification() {
     return modify_local();
 }
 
-// run: test_scope_local_modification() ~= 13.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_local_modification() ~= 13.0

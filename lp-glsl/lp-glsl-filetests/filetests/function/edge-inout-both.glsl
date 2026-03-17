@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Inout Parameters Both Ways: Copied in and copied out
@@ -85,7 +85,8 @@ float test_edge_inout_multiple_operations() {
     return x; // ((6*2)+5)/3 = 17/3 = 5.666...
 }
 
-// run: test_edge_inout_multiple_operations() ~= 5.666 [expect-fail]
+// @unimplemented()
+// run: test_edge_inout_multiple_operations() ~= 5.666
 
 void no_modify(inout float value) {
     float local = value; // Read input

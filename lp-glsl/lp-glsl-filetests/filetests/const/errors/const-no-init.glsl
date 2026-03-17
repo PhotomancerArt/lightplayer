@@ -1,5 +1,4 @@
 // test error
-// target riscv32.q32
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Const must be initialized at declaration.

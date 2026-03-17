@@ -5,7 +5,7 @@
 //! TestCase relocation handling.
 
 use lp_glsl_cranelift::{
-    glsl_jit, FloatMode, GlslOptions, Q32Options, RunMode, DEFAULT_MAX_ERRORS,
+    DEFAULT_MAX_ERRORS, FloatMode, GlslOptions, Q32Options, RunMode, glsl_jit,
 };
 
 #[test]

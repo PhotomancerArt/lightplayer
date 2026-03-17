@@ -10,6 +10,7 @@ pub mod discovery;
 pub mod output_mode;
 pub mod parse;
 pub mod runner;
+pub mod target;
 pub mod test_compile;
 pub mod test_error;
 pub mod test_run;
@@ -23,9 +24,13 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
+use crate::target::{DEFAULT_TARGETS, Target};
+
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
-    let (result, _stats, _, _) = run_filetest_with_line_filter(path, None, OutputMode::Detail)?;
+    let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
+    let (result, _stats, _, _) =
+        run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets)?;
     result
 }
 
@@ -62,6 +67,7 @@ pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
+    targets: &[&Target],
 ) -> Result<(Result<()>, test_run::TestCaseStats, Vec<usize>, Vec<usize>)> {
     // Count test cases early, even if parsing fails later
     let early_stats = count_test_cases(path, line_filter);
@@ -114,7 +120,13 @@ pub fn run_filetest_with_line_filter(
         .any(|t| matches!(t, parse::TestType::Run))
     {
         let (result, stats, unexpected_pass_lines, failed_lines) =
-            test_run::run_test_file_with_line_filter(&test_file, path, line_filter, output_mode)?;
+            test_run::run_test_file_with_line_filter(
+                &test_file,
+                path,
+                line_filter,
+                output_mode,
+                targets,
+            )?;
         Ok((result, stats, unexpected_pass_lines, failed_lines))
     } else {
         Ok((
@@ -149,7 +161,11 @@ struct FileSpec {
 ///
 /// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
-pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
+pub fn run(
+    files: &[String],
+    fix_xfail: bool,
+    target_filter: Option<&'static Target>,
+) -> anyhow::Result<()> {
     // Check environment variable if flag not provided
     let fix_xfail = fix_xfail
         || std::env::var("LP_FIX_XFAIL")
@@ -166,7 +182,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
         println!(
             "\n{}",
             colors::colorize(
-                "WARNING: This will mark ALL currently failing tests with [expect-fail] markers.",
+                "WARNING: This will mark ALL currently failing tests with @unimplemented() annotations.",
                 colors::RED
             )
         );
@@ -197,6 +213,12 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
             anyhow::bail!("Baseline marking cancelled. Type 'yes' exactly to confirm.");
         }
     }
+    let active_targets: Vec<&Target> = if let Some(t) = target_filter {
+        vec![t]
+    } else {
+        DEFAULT_TARGETS.iter().collect()
+    };
+
     let filetests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let mut test_specs = Vec::new();
 
@@ -270,7 +292,12 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
 
         let (_result, stats, unexpected_pass_lines, _failed_lines) =
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_filetest_with_line_filter(&spec.path, spec.line_number, output_mode)
+                run_filetest_with_line_filter(
+                    &spec.path,
+                    spec.line_number,
+                    output_mode,
+                    &active_targets,
+                )
             })) {
                 Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {
                     (inner_result, inner_stats, unexpected_lines, failed_lines)
@@ -316,7 +343,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                     1,
                     0,
                     elapsed,
-                    stats.expect_fail,
+                    stats.expected_failure,
                     stats.unexpected_pass,
                     fix_xfail,
                 )
@@ -326,9 +353,9 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
             if fix_xfail && !unexpected_pass_lines.is_empty() {
                 let file_update = util::file_update::FileUpdate::new(&spec.path);
                 for line_number in unexpected_pass_lines {
-                    if let Err(e) = file_update.remove_expect_fail_marker(line_number) {
+                    if let Err(e) = file_update.remove_annotation(line_number) {
                         eprintln!(
-                            "Warning: failed to remove [expect-fail] marker from line {line_number}: {e}"
+                            "Warning: failed to remove annotation from line {line_number}: {e}"
                         );
                     }
                 }
@@ -351,7 +378,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                     0,
                     1,
                     elapsed,
-                    stats.expect_fail,
+                    stats.expected_failure,
                     stats.unexpected_pass,
                     fix_xfail,
                 )
@@ -433,6 +460,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
             &tests[jobid].spec.path,
             tests[jobid].spec.line_number,
             output_mode,
+            &active_targets,
         );
         next_test += 1;
     }
@@ -472,7 +500,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                 total_test_cases += stats.total;
                 passed_test_cases += stats.passed;
                 failed_test_cases += stats.failed;
-                expect_fail_test_cases += stats.expect_fail;
+                expect_fail_test_cases += stats.expected_failure;
                 unexpected_pass_test_cases += stats.unexpected_pass;
 
                 // Determine color for counts based on pass/fail ratio
@@ -648,9 +676,9 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
             let file_update = file_updates
                 .entry(path.clone())
                 .or_insert_with(|| util::file_update::FileUpdate::new(path));
-            if let Err(e) = file_update.remove_expect_fail_marker(*line_number) {
+            if let Err(e) = file_update.remove_annotation(*line_number) {
                 eprintln!(
-                    "Warning: failed to remove [expect-fail] marker from {}:{}: {}",
+                    "Warning: failed to remove annotation from {}:{}: {}",
                     path.display(),
                     line_number,
                     e
@@ -671,7 +699,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
 
         if !failing_directives.is_empty() {
             println!(
-                "\nMarking {} failing test directive(s) with [expect-fail]...",
+                "\nMarking {} failing test directive(s) with @unimplemented()...",
                 failing_directives.len()
             );
             use std::collections::HashMap;
@@ -684,9 +712,9 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                     .or_insert_with(|| util::file_update::FileUpdate::new(file_path));
 
                 // Mark this specific directive that failed
-                if let Err(e) = file_update.add_expect_fail_marker(*line_number) {
+                if let Err(e) = file_update.add_annotation(*line_number, "// @unimplemented()") {
                     eprintln!(
-                        "Warning: failed to add [expect-fail] marker to {}:{}: {}",
+                        "Warning: failed to add @unimplemented() annotation to {}:{}: {}",
                         file_path.display(),
                         line_number,
                         e
@@ -696,7 +724,7 @@ pub fn run(files: &[String], fix_xfail: bool) -> anyhow::Result<()> {
                 }
             }
 
-            println!("Marked {total_marked} test directive(s) with [expect-fail]");
+            println!("Marked {total_marked} test directive(s) with @unimplemented()");
         } else {
             println!("\nNo failing tests to mark.");
         }
@@ -858,9 +886,11 @@ fn format_file_counts(
 
     // Build suffix with expected-fail/unexpected info, with colors
     let mut suffix_parts = Vec::new();
-    if !has_unexpected_failures && stats.expect_fail > 0 {
-        // Show expected-fail count if no unexpected failures (grey/default)
-        suffix_parts.push(format!("({} expect-fail)", stats.expect_fail));
+    if !has_unexpected_failures && stats.expected_failure > 0 {
+        suffix_parts.push(format!("({} expected-failure)", stats.expected_failure));
+    }
+    if stats.skipped > 0 {
+        suffix_parts.push(format!("({} skipped)", stats.skipped));
     }
     if stats.failed > 0 {
         // Show unexpected failure count (red)
@@ -946,7 +976,7 @@ fn format_results_summary(
             ));
         }
         if expect_fail_count > 0 {
-            parts.push(format!("{expect_fail_count} expect-fail"));
+            parts.push(format!("{expect_fail_count} expected-failure"));
         }
         parts.push(format!(
             "{}{}/{} files passed{}",
@@ -974,7 +1004,7 @@ fn format_results_summary(
             parts.push(format!("{numerator}/{denominator} tests passed"));
         }
         if expect_fail_count > 0 {
-            parts.push(format!("{expect_fail_count} expect-fail"));
+            parts.push(format!("{expect_fail_count} expected-failure"));
         }
         parts.push(format!(
             "{}/{} files passed",

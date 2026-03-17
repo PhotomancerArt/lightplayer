@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Subtract: ivec3 - ivec3 -> ivec3 (component-wise)

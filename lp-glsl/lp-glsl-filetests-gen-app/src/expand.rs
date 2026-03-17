@@ -304,12 +304,12 @@ fn generate_all_specs_for_type_and_dimension(
 
 /// Find the filetests directory.
 fn find_filetests_dir() -> Result<PathBuf> {
-    // Look for filetests directory relative to current working directory
-    // Try common locations
     let candidates = vec![
+        PathBuf::from("lp-glsl/lp-glsl-filetests/filetests"),
+        PathBuf::from("lp-glsl-filetests/filetests"),
+        PathBuf::from("../lp-glsl-filetests/filetests"),
         PathBuf::from("lightplayer/crates/lp-glsl-filetests/filetests"),
         PathBuf::from("crates/lp-glsl-filetests/filetests"),
-        PathBuf::from("../lp-glsl-filetests/filetests"),
     ];
 
     for candidate in candidates {
@@ -318,14 +318,19 @@ fn find_filetests_dir() -> Result<PathBuf> {
         }
     }
 
-    // Try to find it from current directory
     let current_dir = std::env::current_dir()?;
     let mut search_dir = current_dir.as_path();
 
     loop {
-        let candidate = search_dir.join("lightplayer/crates/lp-glsl-filetests/filetests");
-        if candidate.exists() && candidate.is_dir() {
-            return Ok(candidate);
+        for subpath in [
+            "lp-glsl/lp-glsl-filetests/filetests",
+            "lp-glsl-filetests/filetests",
+            "lightplayer/crates/lp-glsl-filetests/filetests",
+        ] {
+            let candidate = search_dir.join(subpath);
+            if candidate.exists() && candidate.is_dir() {
+                return Ok(candidate);
+            }
         }
 
         if let Some(parent) = search_dir.parent() {

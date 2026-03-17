@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Not: not(bvec4) -> bvec4 (component-wise logical NOT)

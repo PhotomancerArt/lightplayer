@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // frexp(): Extract mantissa and exponent function
@@ -14,7 +14,8 @@ vec2 test_frexp_one() {
     return vec2(mant, float(exp));
 }
 
-// run: test_frexp_one() ~= vec2(0.5, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_one() ~= vec2(0.5, 1.0)
 
 vec2 test_frexp_two() {
     // frexp(2.0) should return (0.5, 2) since 2.0 = 0.5 * 2^2
@@ -23,7 +24,8 @@ vec2 test_frexp_two() {
     return vec2(mant, float(exp));
 }
 
-// run: test_frexp_two() ~= vec2(0.5, 2.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_two() ~= vec2(0.5, 2.0)
 
 vec2 test_frexp_half() {
     // frexp(0.5) should return (0.5, 0) since 0.5 = 0.5 * 2^0
@@ -32,7 +34,8 @@ vec2 test_frexp_half() {
     return vec2(mant, float(exp));
 }
 
-// run: test_frexp_half() ~= vec2(0.5, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_half() ~= vec2(0.5, 0.0)
 
 vec2 test_frexp_four() {
     // frexp(4.0) should return (0.5, 3) since 4.0 = 0.5 * 2^3
@@ -41,7 +44,8 @@ vec2 test_frexp_four() {
     return vec2(mant, float(exp));
 }
 
-// run: test_frexp_four() ~= vec2(0.5, 3.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_four() ~= vec2(0.5, 3.0)
 
 vec2 test_frexp_eight() {
     // frexp(8.0) should return (0.5, 4) since 8.0 = 0.5 * 2^4
@@ -50,7 +54,8 @@ vec2 test_frexp_eight() {
     return vec2(mant, float(exp));
 }
 
-// run: test_frexp_eight() ~= vec2(0.5, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_eight() ~= vec2(0.5, 4.0)
 
 vec4 test_frexp_vec2() {
     // Test with vec2
@@ -59,7 +64,8 @@ vec4 test_frexp_vec2() {
     return vec4(mant.x, mant.y, float(exp.x), float(exp.y));
 }
 
-// run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0) [expect-fail]
+// @unimplemented()
+// run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0)
 
 
 

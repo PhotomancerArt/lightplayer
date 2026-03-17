@@ -42,6 +42,7 @@ fi
 SHOW_HELP=false
 SHOW_LIST=false
 REGEN_GEN_FILES=false
+TARGET_ARG=()
 TEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +58,10 @@ while [[ $# -gt 0 ]]; do
   -g)
     REGEN_GEN_FILES=true
     shift
+    ;;
+  --target)
+    TARGET_ARG=("--target" "$2")
+    shift 2
     ;;
   *)
     TEST_ARGS+=("$1")
@@ -79,6 +84,7 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
+    --target NAME       Run only the specified target (cranelift.q32, wasm.q32)
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.
@@ -213,4 +219,4 @@ fi
 # This ensures cargo run picks up all compilation changes in the lp-glsl workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
-cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TEST_ARGS[@]}"
+cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"

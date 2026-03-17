@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @ignore(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant integral expression"
 // Const in multi-dimensional array dimensions.

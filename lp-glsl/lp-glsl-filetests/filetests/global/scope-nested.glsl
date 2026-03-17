@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Nested Scopes and Globals: Global variables accessible from nested scopes
@@ -25,7 +25,8 @@ float test_scope_nested_access() {
     return global_counter;
 }
 
-// run: test_scope_nested_access() ~= 6.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_access() ~= 6.0
 
 vec2 test_scope_nested_vector() {
     // Global vector accessible from nested scopes
@@ -42,7 +43,8 @@ vec2 test_scope_nested_vector() {
     return global_position;
 }
 
-// run: test_scope_nested_vector() ~= vec2(10.0, 20.0) [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_nested_bool() {
     // Global bool accessible from nested scopes
@@ -59,7 +61,8 @@ bool test_scope_nested_bool() {
     return global_flag;
 }
 
-// run: test_scope_nested_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_bool() == true
 
 int test_scope_nested_depth() {
     // Tracking nesting depth with global
@@ -83,7 +86,8 @@ int test_scope_nested_depth() {
     return global_depth;
 }
 
-// run: test_scope_nested_depth() == 0 [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_depth() == 0
 
 float test_scope_nested_mixed() {
     // Mixed local and global access in nested scopes
@@ -103,7 +107,8 @@ float test_scope_nested_mixed() {
     return global_counter + local_var;  // Uses outer local
 }
 
-// run: test_scope_nested_mixed() ~= 65.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_mixed() ~= 65.0
 
 vec2 test_scope_nested_functions() {
     // Global access from nested function scopes
@@ -128,7 +133,8 @@ vec2 test_scope_nested_functions() {
     return global_position;
 }
 
-// run: test_scope_nested_functions() ~= vec2(4.0, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_functions() ~= vec2(4.0, 4.0)
 
 float test_scope_nested_complex() {
     // Complex nesting with multiple global accesses
@@ -152,4 +158,5 @@ float test_scope_nested_complex() {
     return global_counter;
 }
 
-// run: test_scope_nested_complex() ~= 5.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_nested_complex() ~= 5.0

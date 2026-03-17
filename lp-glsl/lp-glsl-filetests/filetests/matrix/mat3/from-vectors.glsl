@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Vectors: mat3(vec3, vec3, vec3) - construct matrix from column vectors

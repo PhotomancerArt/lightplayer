@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From uvec: uvec2(uvec2) - identity constructor, uvec2(uvec3), uvec2(uvec4) - shortening constructors

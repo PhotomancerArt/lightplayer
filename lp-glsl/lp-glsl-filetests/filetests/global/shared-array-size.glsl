@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Shared Array Size: Shared global arrays must have same size across shaders
@@ -23,7 +23,8 @@ vec4 test_shared_array_size_colors() {
     return sum;
 }
 
-// run: test_shared_array_size_colors() ~= vec4(0.0, 0.0, 0.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_shared_array_size_colors() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_shared_array_size_transforms() {
     // Access shared transform array
@@ -34,7 +35,8 @@ mat3 test_shared_array_size_transforms() {
     return combined;
 }
 
-// run: test_shared_array_size_transforms() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_shared_array_size_transforms() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_shared_array_size_weights() {
     // Access shared weights array
@@ -45,7 +47,8 @@ float test_shared_array_size_weights() {
     return total;
 }
 
-// run: test_shared_array_size_weights() ~= 0.0 [expect-fail]
+// @unimplemented()
+// run: test_shared_array_size_weights() ~= 0.0
 
 int test_shared_array_size_indices() {
     // Access shared indices array
@@ -58,7 +61,8 @@ int test_shared_array_size_indices() {
     return max_index;
 }
 
-// run: test_shared_array_size_indices() == 0 [expect-fail]
+// @unimplemented()
+// run: test_shared_array_size_indices() == 0
 
 float test_shared_array_size_combined() {
     // Combined access to shared arrays
@@ -73,4 +77,5 @@ float test_shared_array_size_combined() {
     return result;
 }
 
-// run: test_shared_array_size_combined() ~= 0.0 [expect-fail]
+// @unimplemented()
+// run: test_shared_array_size_combined() ~= 0.0

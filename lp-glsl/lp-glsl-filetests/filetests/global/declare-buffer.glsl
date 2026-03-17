@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Buffer Global Declarations: Global variables with buffer qualifier
@@ -29,7 +29,8 @@ float test_declare_buffer_array() {
     return data_array[0] + data_array[1];
 }
 
-// run: test_declare_buffer_array() ~= 66.0 [expect-fail]
+// @unimplemented()
+// run: test_declare_buffer_array() ~= 66.0
 
 vec4 test_declare_buffer_structured() {
     // Buffer global structured data
@@ -41,7 +42,8 @@ vec4 test_declare_buffer_structured() {
     return colors[0] + colors[1] + colors[2] + colors[3];
 }
 
-// run: test_declare_buffer_structured() ~= vec4(2.0, 2.0, 2.0, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_buffer_structured() ~= vec4(2.0, 2.0, 2.0, 4.0)
 
 mat4 test_declare_buffer_matrix() {
     // Buffer global matrix array
@@ -51,7 +53,8 @@ mat4 test_declare_buffer_matrix() {
     return transforms[0] * transforms[1];
 }
 
-// run: test_declare_buffer_matrix() ~= mat4(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_buffer_matrix() ~= mat4(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
 
 int test_declare_buffer_int_array() {
     // Buffer global int array
@@ -62,7 +65,8 @@ int test_declare_buffer_int_array() {
     return counts[0] + counts[1] + counts[2];
 }
 
-// run: test_declare_buffer_int_array() == 60 [expect-fail]
+// @unimplemented()
+// run: test_declare_buffer_int_array() == 60
 
 float test_declare_buffer_single() {
     // Buffer global single values
@@ -73,4 +77,5 @@ float test_declare_buffer_single() {
     return single_float + single_vec3.x + single_mat2[0][0];
 }
 
-// run: test_declare_buffer_single() ~= 5.14 [expect-fail]
+// @unimplemented()
+// run: test_declare_buffer_single() ~= 5.14

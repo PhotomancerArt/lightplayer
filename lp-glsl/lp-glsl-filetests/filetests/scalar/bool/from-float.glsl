@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constructor: bool(float) - converts float to bool (0.0 -> false, non-zero -> true)

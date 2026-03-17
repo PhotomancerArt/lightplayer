@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // To ivec: ivec2(bvec2) - component-wise conversion (false -> 0, true -> 1)

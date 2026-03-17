@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Return Types: Arrays must be explicitly sized
@@ -14,7 +14,8 @@ float[3] test_return_array_float() {
     return get_float_array();
 }
 
-// run: test_return_array_float() ~= float[3](1.0, 2.0, 3.0) [expect-fail]
+// @unimplemented()
+// run: test_return_array_float() ~= float[3](1.0, 2.0, 3.0)
 
 int[2] get_int_array() {
     return int[2](10, 20);
@@ -25,7 +26,8 @@ int[2] test_return_array_int() {
     return get_int_array();
 }
 
-// run: test_return_array_int() == int[2](10, 20) [expect-fail]
+// @unimplemented()
+// run: test_return_array_int() == int[2](10, 20)
 
 vec2[2] get_vector_array() {
     return vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0));
@@ -36,7 +38,8 @@ vec2[2] test_return_array_vector() {
     return get_vector_array();
 }
 
-// run: test_return_array_vector() ~= vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0)) [expect-fail]
+// @unimplemented()
+// run: test_return_array_vector() ~= vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))
 
 float[4] generate_sequence(float start, float step) {
     return float[4](start, start + step, start + 2.0 * step, start + 3.0 * step);
@@ -47,7 +50,8 @@ float[4] test_return_array_calculated() {
     return generate_sequence(1.0, 0.5);
 }
 
-// run: test_return_array_calculated() ~= float[4](1.0, 1.5, 2.0, 2.5) [expect-fail]
+// @unimplemented()
+// run: test_return_array_calculated() ~= float[4](1.0, 1.5, 2.0, 2.5)
 
 int[3] double_values(int[3] arr) {
     return int[3](arr[0] * 2, arr[1] * 2, arr[2] * 2);
@@ -59,7 +63,8 @@ int[3] test_return_array_processed() {
     return double_values(input);
 }
 
-// run: test_return_array_processed() == int[3](2, 4, 6) [expect-fail]
+// @unimplemented()
+// run: test_return_array_processed() == int[3](2, 4, 6)
 
 float[5] reverse_array(float[5] arr) {
     return float[5](arr[4], arr[3], arr[2], arr[1], arr[0]);
@@ -71,7 +76,8 @@ float[5] test_return_array_reverse() {
     return reverse_array(input);
 }
 
-// run: test_return_array_reverse() ~= float[5](5.0, 4.0, 3.0, 2.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_return_array_reverse() ~= float[5](5.0, 4.0, 3.0, 2.0, 1.0)
 
 bool[3] get_bool_array() {
     return bool[3](true, false, true);
@@ -82,7 +88,8 @@ bool[3] test_return_array_bool() {
     return get_bool_array();
 }
 
-// run: test_return_array_bool() == bool[3](true, false, true) [expect-fail]
+// @unimplemented()
+// run: test_return_array_bool() == bool[3](true, false, true)
 
 float[2] sum_arrays(float[2] a, float[2] b) {
     return float[2](a[0] + b[0], a[1] + b[1]);
@@ -95,7 +102,8 @@ float[2] test_return_array_sum() {
     return sum_arrays(arr1, arr2);
 }
 
-// run: test_return_array_sum() ~= float[2](4.0, 6.0) [expect-fail]
+// @unimplemented()
+// run: test_return_array_sum() ~= float[2](4.0, 6.0)
 
 mat2[2] get_matrix_array() {
     return mat2[2](mat2(1.0), mat2(2.0));
@@ -106,4 +114,5 @@ mat2[2] test_return_array_matrix() {
     return get_matrix_array();
 }
 
-// run: test_return_array_matrix() ~= mat2[2](mat2(1.0), mat2(2.0)) [expect-fail]
+// @unimplemented()
+// run: test_return_array_matrix() ~= mat2[2](mat2(1.0), mat2(2.0))

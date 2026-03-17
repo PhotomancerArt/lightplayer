@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Overload Resolution: Choosing the best matching overload
@@ -20,7 +20,8 @@ float test_overload_resolution_exact_match() {
     return float(process_float(5.0)) + float(process_int(5)); // Should be 10.0 + 15 = 25.0
 }
 
-// run: test_overload_resolution_exact_match() ~= 25.0 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_exact_match() ~= 25.0
 
 float accept_float(float x) {
     return x;
@@ -36,7 +37,8 @@ float test_overload_resolution_conversions() {
     return accept_float(5) + accept_int(3); // 5.0 + (3.0 + 0.5) = 8.5
 }
 
-// run: test_overload_resolution_conversions() ~= 8.5 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_conversions() ~= 8.5
 
 float length_func_vec2(vec2 v) {
     return length(v) + 10.0;
@@ -56,7 +58,8 @@ float test_overload_resolution_vector_promotion() {
     return length_func_vec3(vec3(1.0, 0.0, 0.0)); // Should match vec3 overload
 }
 
-// run: test_overload_resolution_vector_promotion() ~= 21.0 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_vector_promotion() ~= 21.0
 
 float mix_func_float(float a, float b) {
     return a + b;
@@ -72,7 +75,8 @@ float test_overload_resolution_mixed_precision() {
     return mix_func_float(1.0, 2) + mix_func_int(3, 4); // 3.0 + 7.1 = 10.1
 }
 
-// run: test_overload_resolution_mixed_precision() ~= 10.1 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_mixed_precision() ~= 10.1
 
 vec2 make_vec2_xy(float x, float y) {
     return vec2(x, y) * 2.0;
@@ -89,7 +93,8 @@ vec2 test_overload_resolution_vector_construction() {
     return make_vec2_v(input); // Should be vec2(3.0, 6.0)
 }
 
-// run: test_overload_resolution_vector_construction() ~= vec2(3.0, 6.0) [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_vector_construction() ~= vec2(3.0, 6.0)
 
 mat2 transform_mat2(mat2 m) {
     return m * 2.0;
@@ -107,7 +112,8 @@ float test_overload_resolution_matrix_ops() {
     return result[0][0] + result[1][1]; // Should be 4.0
 }
 
-// run: test_overload_resolution_matrix_ops() ~= 4.0 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_matrix_ops() ~= 4.0
 
 float sum_elements_arr2(float[2] arr) {
     return arr[0] + arr[1] + 1.0;
@@ -125,7 +131,8 @@ float test_overload_resolution_array_sizes() {
     return sum_elements_arr2(arr2) + sum_elements_arr3(arr3); // 4.0 + 8.0 = 12.0
 }
 
-// run: test_overload_resolution_array_sizes() ~= 12.0 [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_array_sizes() ~= 12.0
 
 bool check_value_bool(bool b) {
     return b;
@@ -145,4 +152,5 @@ bool test_overload_resolution_bool_conversions() {
     return check_value_bool(true) && check_value_int(1) && check_value_float(1.0);
 }
 
-// run: test_overload_resolution_bool_conversions() == true [expect-fail]
+// @unimplemented()
+// run: test_overload_resolution_bool_conversions() == true

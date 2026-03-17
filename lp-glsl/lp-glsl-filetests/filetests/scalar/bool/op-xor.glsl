@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Logical XOR: ^^ operator - logical exclusive or on scalar boolean expressions

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply Vec: mat3 * vec3 -> vec3 (matrix-vector multiplication)
@@ -30,7 +30,8 @@ vec3 test_mat3_multiply_vec3_simple() {
     return m * v;
 }
 
-// run: test_mat3_multiply_vec3_simple() ~= vec3(14.0, 32.0, 50.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_multiply_vec3_simple() ~= vec3(14.0, 32.0, 50.0)
 
 vec3 test_mat3_multiply_vec3_rotation_x() {
     // Rotation around X axis by 90 degrees (counterclockwise when looking along +X)
@@ -39,7 +40,8 @@ vec3 test_mat3_multiply_vec3_rotation_x() {
     return m * v;
 }
 
-// run: test_mat3_multiply_vec3_rotation_x() ~= vec3(0.0, 0.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_multiply_vec3_rotation_x() ~= vec3(0.0, 0.0, 1.0)
 
 vec3 test_mat3_multiply_vec3_variables() {
     mat3 m = mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
@@ -53,7 +55,8 @@ vec3 test_mat3_multiply_vec3_expressions() {
     return mat3(1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0) * vec3(2.0, 3.0, 4.0);
 }
 
-// run: test_mat3_multiply_vec3_expressions() ~= vec3(5.0, 7.0, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_multiply_vec3_expressions() ~= vec3(5.0, 7.0, 4.0)
 
 vec3 test_mat3_multiply_vec3_in_assignment() {
     vec3 result;
@@ -79,4 +82,5 @@ vec3 test_mat3_multiply_vec3_translation_like() {
     return m * v;
 }
 
-// run: test_mat3_multiply_vec3_translation_like() ~= vec3(4.0, 6.0, 1.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_multiply_vec3_translation_like() ~= vec3(4.0, 6.0, 1.0)

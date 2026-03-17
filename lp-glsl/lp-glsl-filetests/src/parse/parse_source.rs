@@ -54,6 +54,7 @@ pub fn find_section_boundaries(lines: &[String]) -> SectionBoundaries {
             && !trimmed.starts_with("// test")
             && !trimmed.starts_with("// target")
             && !trimmed.starts_with("// run:")
+            && !trimmed.starts_with("// @")
         {
             glsl_end = i + 1;
         }
@@ -93,8 +94,13 @@ pub fn extract_source_and_expectations(
     let skip_directives = !test_types.contains(&TestType::Error);
     for line in lines.iter().take(glsl_end) {
         let trimmed = line.trim();
-        if skip_directives && (trimmed.starts_with("// test") || trimmed.starts_with("// target")) {
-            continue;
+        if skip_directives {
+            if trimmed.starts_with("// test") || trimmed.starts_with("// target") {
+                continue;
+            }
+            if trimmed.starts_with("// @") {
+                continue;
+            }
         }
         glsl_source.push_str(line);
         glsl_source.push('\n');

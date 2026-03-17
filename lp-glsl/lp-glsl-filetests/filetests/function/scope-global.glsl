@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Global Variable Access: Functions can access global variables
@@ -19,7 +19,8 @@ float test_scope_global_read() {
     return get_counter();
 }
 
-// run: test_scope_global_read() ~= 42.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_read() ~= 42.0
 
 void increment_counter() {
     global_counter = global_counter + 1.0;
@@ -33,7 +34,8 @@ void test_scope_global_write() {
     // global_counter should now be 7.0
 }
 
-// run: test_scope_global_write() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_write() == 0.0
 
 void scale_position(float factor) {
     global_position = global_position * factor;
@@ -46,7 +48,8 @@ float test_scope_global_modify() {
     return global_position.x + global_position.y;
 }
 
-// run: test_scope_global_modify() ~= 10.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_modify() ~= 10.0
 
 void toggle_flag() {
     global_flag = !global_flag;
@@ -63,7 +66,8 @@ bool test_scope_global_flag() {
     return get_flag();
 }
 
-// run: test_scope_global_flag() == false [expect-fail]
+// @unimplemented()
+// run: test_scope_global_flag() == false
 
 void add_to_counter(float value) {
     global_counter = global_counter + value;
@@ -85,7 +89,8 @@ float test_scope_global_multiple() {
     return get_counter_multiple();
 }
 
-// run: test_scope_global_multiple() ~= 10.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_multiple() ~= 10.0
 
 void move_position(vec2 delta) {
     global_position = global_position + delta;
@@ -102,7 +107,8 @@ vec2 test_scope_global_vector() {
     return get_position();
 }
 
-// run: test_scope_global_vector() ~= vec2(15.0, 17.0) [expect-fail]
+// @unimplemented()
+// run: test_scope_global_vector() ~= vec2(15.0, 17.0)
 
 float use_local_counter() {
     float global_counter = 99.0; // Shadows global
@@ -116,7 +122,8 @@ float test_scope_global_local_shadow() {
     return result;
 }
 
-// run: test_scope_global_local_shadow() ~= 99.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_local_shadow() ~= 99.0
 
 void accumulate(float value) {
     global_counter = global_counter + value;
@@ -131,7 +138,8 @@ float test_scope_global_preserve_global() {
     return global_counter;
 }
 
-// run: test_scope_global_preserve_global() ~= 30.0 [expect-fail]
+// @unimplemented()
+// run: test_scope_global_preserve_global() ~= 30.0
 
 void set_state(bool new_state) {
     global_flag = new_state;
@@ -151,4 +159,5 @@ bool test_scope_global_state_machine() {
     return first_check && !second_check && global_flag;
 }
 
-// run: test_scope_global_state_machine() == true [expect-fail]
+// @unimplemented()
+// run: test_scope_global_state_machine() == true

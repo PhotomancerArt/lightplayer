@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 float test_preinc_component() {
     vec2 v = vec2(1.0, 2.0);

@@ -1463,7 +1463,7 @@ impl GlslExecutable for GlslJitModule {
 #[cfg(test)]
 #[cfg(feature = "std")]
 mod tests {
-    use crate::{glsl_jit, FloatMode, GlslOptions, Q32Options, RunMode};
+    use crate::{FloatMode, GlslOptions, Q32Options, RunMode, glsl_jit};
 
     #[test]
     fn test_jit_int_literal() {

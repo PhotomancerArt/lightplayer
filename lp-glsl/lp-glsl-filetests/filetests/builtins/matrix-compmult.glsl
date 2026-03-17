@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // matrixCompMult(): Matrix component-wise multiply function
@@ -40,7 +40,8 @@ mat4 test_matrixcompmult_mat4() {
     return matrixCompMult(a, b);
 }
 
-// run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0) [expect-fail]
+// @unimplemented()
+// run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0)
 
 mat2 test_matrixcompmult_mat2_zeros() {
     // matrixCompMult resulting in zeros

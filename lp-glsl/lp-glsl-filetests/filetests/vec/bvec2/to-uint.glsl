@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // To Uint: uint(bvec2) - converts first component (false -> 0u, true -> 1u)

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Access Array: bvec3[0], bvec3[1], bvec3[2] - array-style indexing

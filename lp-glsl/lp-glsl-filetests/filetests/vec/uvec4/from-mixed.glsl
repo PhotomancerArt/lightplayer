@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: uvec4(int, float, bool, ivec4, bvec4, vec4) - type conversions

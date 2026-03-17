@@ -4,6 +4,7 @@
 //! concurrently.
 
 use crate::output_mode::OutputMode;
+use crate::target::Target;
 use crate::test_run::TestCaseStats;
 use anyhow::Result;
 use std::panic::catch_unwind;
@@ -12,12 +13,13 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-/// Request sent to worker threads contains jobid, path, line filter, and output mode.
+/// Request sent to worker threads.
 struct Request {
     jobid: usize,
     path: PathBuf,
     line_filter: Option<usize>,
     output_mode: OutputMode,
+    targets: Vec<&'static Target>,
 }
 
 /// Reply from worker thread.
@@ -99,6 +101,7 @@ impl ConcurrentRunner {
         path: &Path,
         line_filter: Option<usize>,
         output_mode: OutputMode,
+        targets: &[&'static Target],
     ) {
         self.request_tx
             .as_ref()
@@ -108,6 +111,7 @@ impl ConcurrentRunner {
                 path: path.to_owned(),
                 line_filter,
                 output_mode,
+                targets: targets.to_vec(),
             })
             .expect("all the worker threads are gone");
     }
@@ -145,6 +149,7 @@ fn worker_thread(
                     path,
                     line_filter,
                     output_mode,
+                    targets,
                 } = match requests.lock().unwrap().recv() {
                     Err(..) => break, // TX end shut down. exit thread.
                     Ok(req) => req,
@@ -157,6 +162,7 @@ fn worker_thread(
                             path.as_path(),
                             line_filter,
                             output_mode,
+                            &targets,
                         )
                     })) {
                         Ok(Ok((inner_result, inner_stats, unexpected_lines, failed_lines))) => {

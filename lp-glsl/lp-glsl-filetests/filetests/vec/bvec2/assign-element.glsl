@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Assign Element: bvec2.x = bool, bvec2[0] = bool - single component assignment

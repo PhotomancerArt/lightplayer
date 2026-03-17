@@ -41,8 +41,8 @@ impl GlModule<JITModule> {
                 let mut builder = target.create_module_builder()?;
                 // Add builtin and host symbol lookup function before creating module
                 {
-                    use crate::backend::builtins::registry::{get_function_pointer, BuiltinId};
-                    use crate::backend::host::{get_host_function_pointer, HostId};
+                    use crate::backend::builtins::registry::{BuiltinId, get_function_pointer};
+                    use crate::backend::host::{HostId, get_host_function_pointer};
                     match &mut builder {
                         crate::backend::target::builder::ModuleBuilder::JIT(jit_builder) => {
                             // Create lookup function that returns builtin and host function pointers

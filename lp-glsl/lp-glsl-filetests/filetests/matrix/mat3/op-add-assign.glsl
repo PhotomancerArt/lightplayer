@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add Assign: mat3 += mat3 (component-wise addition)
@@ -62,7 +62,8 @@ mat3 test_mat3_add_assign_chained() {
     return b;
 }
 
-// run: test_mat3_add_assign_chained() ~= mat3(5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0) [expect-fail]
+// @unimplemented()
+// run: test_mat3_add_assign_chained() ~= mat3(5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0)
 
 mat3 test_mat3_add_assign_large_values() {
     mat3 result = mat3(1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000.0, 9000.0);

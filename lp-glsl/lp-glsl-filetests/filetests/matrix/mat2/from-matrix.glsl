@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Matrix: mat2(mat3) or mat2(mat4) - construct from larger matrix

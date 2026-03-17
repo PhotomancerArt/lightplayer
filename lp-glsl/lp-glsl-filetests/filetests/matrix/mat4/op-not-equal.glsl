@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Not Equal: mat4 != mat4 -> bool (aggregate inequality)

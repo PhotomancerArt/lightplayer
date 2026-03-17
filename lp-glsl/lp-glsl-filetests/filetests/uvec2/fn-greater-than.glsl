@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Greater Than: greaterThan(uvec2, uvec2) -> bvec2 (component-wise)

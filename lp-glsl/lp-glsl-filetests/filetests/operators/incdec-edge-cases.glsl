@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 int test_incdec_edge_cases() {
     int x = 5;

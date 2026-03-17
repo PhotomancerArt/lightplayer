@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Conversion: int(bool) - converts bool to int (false -> 0, true -> 1)

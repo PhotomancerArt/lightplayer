@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Simple Global Declarations: Global variables without storage qualifiers
@@ -16,7 +16,8 @@ float test_declare_simple_float() {
     return global_float;
 }
 
-// run: test_declare_simple_float() ~= 42.0 [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_float() ~= 42.0
 
 int test_declare_simple_int() {
     // Simple global int declaration
@@ -24,7 +25,8 @@ int test_declare_simple_int() {
     return global_int;
 }
 
-// run: test_declare_simple_int() == -123 [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_int() == -123
 
 uint test_declare_simple_uint() {
     // Simple global uint declaration
@@ -32,7 +34,8 @@ uint test_declare_simple_uint() {
     return int(global_uint);
 }
 
-// run: test_declare_simple_uint() == 987 [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_uint() == 987
 
 bool test_declare_simple_bool() {
     // Simple global bool declaration
@@ -40,7 +43,8 @@ bool test_declare_simple_bool() {
     return global_bool;
 }
 
-// run: test_declare_simple_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_bool() == true
 
 vec2 test_declare_simple_vec2() {
     // Simple global vec2 declaration
@@ -49,7 +53,8 @@ vec2 test_declare_simple_vec2() {
     return global_vec2;
 }
 
-// run: test_declare_simple_vec2() ~= vec2(1.0, 2.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_declare_simple_vec3() {
     // Simple global vec3 declaration
@@ -58,7 +63,8 @@ vec3 test_declare_simple_vec3() {
     return global_vec3;
 }
 
-// run: test_declare_simple_vec3() ~= vec3(1.0, 2.0, 3.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_declare_simple_vec4() {
     // Simple global vec4 declaration
@@ -67,7 +73,8 @@ vec4 test_declare_simple_vec4() {
     return global_vec4;
 }
 
-// run: test_declare_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_declare_simple_mat2() {
     // Simple global mat2 declaration
@@ -76,7 +83,8 @@ mat2 test_declare_simple_mat2() {
     return global_mat2;
 }
 
-// run: test_declare_simple_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0) [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_declare_simple_multiple() {
     // Multiple simple global declarations
@@ -89,4 +97,5 @@ float test_declare_simple_multiple() {
     return a + b + c;
 }
 
-// run: test_declare_simple_multiple() ~= 60.0 [expect-fail]
+// @unimplemented()
+// run: test_declare_simple_multiple() ~= 60.0

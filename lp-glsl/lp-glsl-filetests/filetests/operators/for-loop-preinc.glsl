@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 int test_for_loop_preinc() {
     int sum = 0;

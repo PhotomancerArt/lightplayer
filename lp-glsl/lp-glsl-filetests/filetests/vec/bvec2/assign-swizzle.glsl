@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Assign Swizzle: bvec2.xy = bvec2 - multi-component swizzle assignment

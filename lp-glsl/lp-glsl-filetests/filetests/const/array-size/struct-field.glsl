@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant integral expression"
 // Const in struct array field sizes.
@@ -23,4 +23,5 @@ float test_struct_field_access() {
     return s.values[0];
 }
 
-// run: test_struct_field_access() == 1.0 [expect-fail]
+// @unimplemented()
+// run: test_struct_field_access() == 1.0

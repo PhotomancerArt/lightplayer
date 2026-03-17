@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // Phase 2: Bounds Checking - Runtime bounds checking for array reads and writes
 

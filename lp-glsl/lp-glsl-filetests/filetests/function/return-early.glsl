@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Early Return Statements: Return before end of function
@@ -17,7 +17,8 @@ float test_return_early_simple() {
     return absolute_value(-5.0);
 }
 
-// run: test_return_early_simple() ~= 5.0 [expect-fail]
+// @unimplemented()
+// run: test_return_early_simple() ~= 5.0
 
 int find_first_positive(int[5] arr) {
     for (int i = 0; i < 5; i++) {
@@ -34,7 +35,8 @@ int test_return_early_loop() {
     return find_first_positive(data);
 }
 
-// run: test_return_early_loop() == 3 [expect-fail]
+// @unimplemented()
+// run: test_return_early_loop() == 3
 
 float process_value(float x) {
     if (x > 10.0) {
@@ -51,7 +53,8 @@ float test_return_early_nested() {
     return process_value(25.0);
 }
 
-// run: test_return_early_nested() ~= 50.0 [expect-fail]
+// @unimplemented()
+// run: test_return_early_nested() ~= 50.0
 
 bool contains_negative(float[3] arr) {
     if (arr[0] < 0.0) return true;
@@ -66,7 +69,8 @@ bool test_return_early_bool() {
     return contains_negative(values);
 }
 
-// run: test_return_early_bool() == true [expect-fail]
+// @unimplemented()
+// run: test_return_early_bool() == true
 
 float safe_divide(float a, float b) {
     if (b == 0.0) {
@@ -80,7 +84,8 @@ float test_return_early_math() {
     return safe_divide(10.0, 0.0);
 }
 
-// run: test_return_early_math() ~= 0.0 [expect-fail]
+// @unimplemented()
+// run: test_return_early_math() ~= 0.0
 
 vec2 clamp_vector(vec2 v, float max_len) {
     float len = length(v);
@@ -96,7 +101,8 @@ vec2 test_return_early_vector() {
     return clamp_vector(long_vector, 5.0);
 }
 
-// run: test_return_early_vector() ~= vec2(5.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_return_early_vector() ~= vec2(5.0, 0.0)
 
 int index_of(int[4] arr, int target) {
     if (arr[0] == target) return 0;
@@ -112,7 +118,8 @@ int test_return_early_search() {
     return index_of(data, 30);
 }
 
-// run: test_return_early_search() == 2 [expect-fail]
+// @unimplemented()
+// run: test_return_early_search() == 2
 
 float complex_calculation(float x, float y, bool use_addition) {
     if (x < 0.0) {
@@ -137,7 +144,8 @@ float test_return_early_complex() {
     return complex_calculation(10.0, 15.0, true);
 }
 
-// run: test_return_early_complex() ~= 25.0 [expect-fail]
+// @unimplemented()
+// run: test_return_early_complex() ~= 25.0
 
 void process_until_negative(float[4] arr) {
     // Process elements until we find a negative
@@ -159,4 +167,5 @@ void test_return_early_void() {
     process_until_negative(data);
 }
 
-// run: test_return_early_void() == 0.0 [expect-fail]
+// @unimplemented()
+// run: test_return_early_void() == 0.0

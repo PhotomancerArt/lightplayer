@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // Exponential builtins: pow, exp, log, sqrt, inversesqrt.

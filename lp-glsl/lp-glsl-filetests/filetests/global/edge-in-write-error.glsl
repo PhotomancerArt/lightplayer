@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Edge In Write Error: Writing to input globals is a compile error
@@ -24,35 +24,40 @@ float test_edge_in_write_error_read() {
     return vertex_time + 1.0;
 }
 
-// run: test_edge_in_write_error_read() ~= 1.0 [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
     // Reading input int is allowed
     return vertex_id + 10;
 }
 
-// run: test_edge_in_write_error_int() == 10 [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
     // Reading input vec2 is allowed
     return tex_coord * 2.0;
 }
 
-// run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
     // Reading input vec3 is allowed
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
     // Reading input vec4 is allowed
     return vertex_color;
 }
 
-// run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
     // Complex calculations using input values
@@ -64,7 +69,8 @@ float test_edge_in_write_error_calculations() {
            elevated_position.x + elevated_position.y + elevated_position.z;
 }
 
-// run: test_edge_in_write_error_calculations() ~= 7.2 [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
     // Vertex processing using input values
@@ -79,4 +85,5 @@ vec4 test_edge_in_write_error_vertex_processing() {
     return processed_color;
 }
 
-// run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0) [expect-fail]
+// @unimplemented()
+// run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

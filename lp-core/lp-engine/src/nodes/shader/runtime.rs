@@ -14,9 +14,9 @@ use lp_glsl_cranelift::glsl_jit_streaming;
 use lp_glsl_cranelift::{FloatMode, GlslExecutable, GlslOptions, RunMode};
 use lp_glsl_jit_util::call_structreturn_with_args;
 use lp_model::{
-    nodes::shader::{ShaderConfig, ShaderState}, project::FrameId,
-    LpPathBuf,
-    NodeHandle,
+    LpPathBuf, NodeHandle,
+    nodes::shader::{ShaderConfig, ShaderState},
+    project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]

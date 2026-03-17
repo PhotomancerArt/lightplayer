@@ -3,7 +3,7 @@
 //! Verifies that glsl_jit_streaming produces the same results as glsl_jit
 //! for real-world shaders.
 
-use lp_glsl_cranelift::{execute_function, glsl_jit, glsl_jit_streaming, GlslOptions, GlslValue};
+use lp_glsl_cranelift::{GlslOptions, GlslValue, execute_function, glsl_jit, glsl_jit_streaming};
 
 fn q32_jit_options() -> GlslOptions {
     let mut opts = GlslOptions::jit();

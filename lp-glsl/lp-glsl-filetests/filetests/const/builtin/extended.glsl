@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // Extended builtins: trunc, round, ceil, mod, exp, log, exp2, log2, degrees, asin, acos.

@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: mat4 constructors with mixed types - must provide exactly 16 components

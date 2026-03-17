@@ -161,7 +161,7 @@ pub enum RunMode {
     },
 }
 
-pub use lp_glsl_frontend::{FloatMode, DEFAULT_MAX_ERRORS};
+pub use lp_glsl_frontend::{DEFAULT_MAX_ERRORS, FloatMode};
 
 /// Compilation options
 #[derive(Clone)]
@@ -282,7 +282,7 @@ impl GlslOptions {
     /// Uses memory-optimized path, Q32 format, and embedded-appropriate ISA flags.
     #[cfg(not(feature = "std"))]
     pub fn host_jit_embedded_riscv32() -> Result<Self, GlslError> {
-        use crate::backend::target::{default_riscv32_embedded_jit_flags, Target};
+        use crate::backend::target::{Target, default_riscv32_embedded_jit_flags};
         use target_lexicon::Riscv32Architecture;
 
         let flags = default_riscv32_embedded_jit_flags()?;

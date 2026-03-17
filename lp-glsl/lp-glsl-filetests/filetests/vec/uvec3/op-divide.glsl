@@ -1,5 +1,5 @@
 // test run
-// target riscv32.q32
+// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Divide: uvec3 / uvec3 -> uvec3 (component-wise, truncates toward zero)
