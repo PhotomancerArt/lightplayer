@@ -34,7 +34,7 @@ fn collect_exports(
     shader: &lp_glsl_frontend::semantic::TypedShader,
     options: &WasmOptions,
 ) -> alloc::vec::Vec<WasmExport> {
-    use crate::types::glsl_type_to_wasm;
+    use crate::types::glsl_type_to_wasm_components;
     use alloc::vec::Vec;
     use lp_glsl_frontend::semantic::types::Type;
 
@@ -46,7 +46,7 @@ fn collect_exports(
             params: main
                 .parameters
                 .iter()
-                .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
+                .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
                 .collect(),
             results: if matches!(
                 main.return_type,
@@ -54,7 +54,7 @@ fn collect_exports(
             ) {
                 Vec::new()
             } else {
-                alloc::vec![glsl_type_to_wasm(&main.return_type, options.float_mode)]
+                glsl_type_to_wasm_components(&main.return_type, options.float_mode)
             },
             signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
                 name: main.name.clone(),
@@ -70,12 +70,12 @@ fn collect_exports(
             params: f
                 .parameters
                 .iter()
-                .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
+                .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
                 .collect(),
             results: if matches!(f.return_type, Type::Void) {
                 Vec::new()
             } else {
-                alloc::vec![glsl_type_to_wasm(&f.return_type, options.float_mode)]
+                glsl_type_to_wasm_components(&f.return_type, options.float_mode)
             },
             signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
                 name: f.name.clone(),

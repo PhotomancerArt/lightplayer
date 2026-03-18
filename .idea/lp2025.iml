@@ -60,6 +60,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-frontend/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/examples" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/target" />
     </content>

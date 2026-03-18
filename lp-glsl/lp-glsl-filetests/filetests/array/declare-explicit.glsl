@@ -10,6 +10,7 @@ float test_declare_float_array() {
     return 1.0; // Declaration test - no runtime behavior
 }
 
+// @ignore(backend=wasm) // scalar return passes but does not test array support
 // run: test_declare_float_array() == 1.0
 
 int test_declare_int_array() {
@@ -17,6 +18,7 @@ int test_declare_int_array() {
     return 1; // Declaration test
 }
 
+// @ignore(backend=wasm) // scalar return passes but does not test array support
 // run: test_declare_int_array() == 1
 
 uint test_declare_uint_array() {
@@ -24,6 +26,7 @@ uint test_declare_uint_array() {
     return 1u; // Declaration test
 }
 
+// @ignore(backend=wasm) // scalar return passes but does not test array support
 // run: test_declare_uint_array() == 1u
 
 bool test_declare_bool_array() {
@@ -31,6 +34,7 @@ bool test_declare_bool_array() {
     return true; // Declaration test
 }
 
+// @ignore(backend=wasm) // scalar return passes but does not test array support
 // run: test_declare_bool_array() == true
 
 vec2 test_declare_vec2_array() {

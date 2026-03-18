@@ -3,13 +3,14 @@
 pub mod context;
 pub mod expr;
 pub mod numeric;
+pub mod rvalue;
 pub mod stmt;
 
 use alloc::vec::Vec;
 use wasm_encoder::{CodeSection, ExportKind, ExportSection, FunctionSection, Module, TypeSection};
 
 use crate::options::WasmOptions;
-use crate::types::glsl_type_to_wasm;
+use crate::types::glsl_type_to_wasm_components;
 use lp_glsl_frontend::semantic::{TypedFunction, TypedShader};
 
 /// Compile typed shader to WASM bytes.
@@ -37,7 +38,7 @@ pub fn compile_to_wasm(
         let params: Vec<_> = func
             .parameters
             .iter()
-            .map(|p| glsl_type_to_wasm(&p.ty, options.float_mode))
+            .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
             .collect();
         let results: Vec<_> = if matches!(
             func.return_type,
@@ -45,7 +46,7 @@ pub fn compile_to_wasm(
         ) {
             Vec::new()
         } else {
-            alloc::vec![glsl_type_to_wasm(&func.return_type, options.float_mode)]
+            glsl_type_to_wasm_components(&func.return_type, options.float_mode)
         };
         types.ty().function(params, results);
     }
@@ -65,10 +66,16 @@ pub fn compile_to_wasm(
     }
     module.section(&exports);
 
-    // Code section: function bodies
+    let mut func_index_map = hashbrown::HashMap::new();
+    let mut func_return_type = hashbrown::HashMap::new();
+    for (i, f) in functions.iter().enumerate() {
+        func_index_map.insert(f.name.clone(), i as u32);
+        func_return_type.insert(f.name.clone(), f.return_type.clone());
+    }
+
     let mut codes = CodeSection::new();
     for func in &functions {
-        let body = stmt::emit_function(func, options)?;
+        let body = stmt::emit_function(func, options, &func_index_map, &func_return_type)?;
         codes.function(&body);
     }
     module.section(&codes);

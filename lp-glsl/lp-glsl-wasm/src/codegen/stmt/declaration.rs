@@ -13,7 +13,7 @@ pub fn allocate_local_from_decl(ctx: &mut WasmCodegenContext, decl: &Declaration
     if let Declaration::InitDeclaratorList(list) = decl {
         if let Some(ref name) = list.head.name {
             if let Ok(ty) = type_resolver::parse_head_declarator_type(list, &name.span, None) {
-                if ty.is_scalar() && !ty.is_error() {
+                if (ty.is_scalar() || ty.is_vector()) && !ty.is_error() {
                     let _ = ctx.add_local(name.name.clone(), ty);
                 }
             }
@@ -43,22 +43,24 @@ pub fn emit_declaration_to_sink(
         if let Some(ref name) = list.head.name {
             let ty = type_resolver::parse_head_declarator_type(list, &name.span, None)
                 .map_err(|e| GlslDiagnostics::from(e))?;
-            if !ty.is_scalar() || ty.is_error() {
+            if (!ty.is_scalar() && !ty.is_vector()) || ty.is_error() {
                 return Ok(());
             }
-            let idx = ctx
-                .lookup_local(&name.name)
-                .map(|i| i.index)
-                .ok_or_else(|| {
+            let (base_index, component_count) = {
+                let info = ctx.lookup_local(&name.name).ok_or_else(|| {
                     GlslDiagnostics::from(lp_glsl_frontend::error::GlslError::new(
                         lp_glsl_frontend::error::ErrorCode::E0400,
                         alloc::format!("variable {} not in scope", name.name),
                     ))
                 })?;
+                (info.base_index, info.component_count)
+            };
             if let Some(ref init) = list.head.initializer {
                 if let glsl::syntax::Initializer::Simple(expr) = init {
-                    expr::emit_rvalue(ctx, instr, expr.as_ref(), options)?;
-                    instr.local_set(idx);
+                    let _ = expr::emit_rvalue(ctx, instr, expr.as_ref(), options)?;
+                    for i in (0..component_count).rev() {
+                        instr.local_set(base_index + i);
+                    }
                 }
             }
         }

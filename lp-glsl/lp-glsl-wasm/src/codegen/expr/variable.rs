@@ -4,13 +4,14 @@ use wasm_encoder::InstructionSink;
 
 use crate::codegen::context::WasmCodegenContext;
 use lp_glsl_frontend::error::{GlslDiagnostics, GlslError};
+use lp_glsl_frontend::semantic::types::Type;
 
-/// Emit variable load (local.get).
+/// Emit variable load (local.get). Returns the variable's type.
 pub fn emit_variable(
     ctx: &WasmCodegenContext,
     sink: &mut InstructionSink,
     expr: &glsl::syntax::Expr,
-) -> Result<(), GlslDiagnostics> {
+) -> Result<Type, GlslDiagnostics> {
     let name = match expr {
         glsl::syntax::Expr::Variable(ident, _) => &ident.name,
         _ => {
@@ -29,6 +30,8 @@ pub fn emit_variable(
         ))
     })?;
 
-    sink.local_get(info.index);
-    Ok(())
+    for i in 0..info.component_count {
+        sink.local_get(info.base_index + i);
+    }
+    Ok(info.ty.clone())
 }

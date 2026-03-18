@@ -2,6 +2,11 @@
 
 mod declaration;
 mod expr_stmt;
+mod if_stmt;
+mod iteration;
+mod loop_do_while;
+mod loop_for;
+mod loop_while;
 mod return_;
 
 use wasm_encoder::Function;
@@ -20,12 +25,46 @@ pub use return_::emit_return;
 pub fn emit_function(
     func: &TypedFunction,
     options: &WasmOptions,
+    func_index_map: &hashbrown::HashMap<alloc::string::String, u32>,
+    func_return_type: &hashbrown::HashMap<
+        alloc::string::String,
+        lp_glsl_frontend::semantic::types::Type,
+    >,
 ) -> Result<Function, GlslDiagnostics> {
-    let mut ctx = WasmCodegenContext::new(&func.parameters, options);
+    let mut ctx =
+        WasmCodegenContext::new(&func.parameters, options, func_index_map, func_return_type);
 
     // First pass: allocate locals for declarations
     for stmt in &func.body {
         walk_for_declarations(&mut ctx, stmt);
+    }
+
+    // Pre-allocate temps for vector constructors (broadcast, vector conversion)
+    ctx.broadcast_temp_f32 = Some(ctx.next_local_idx);
+    ctx.local_types.push(wasm_encoder::ValType::F32);
+    ctx.next_local_idx += 1;
+    ctx.broadcast_temp_i32 = Some(ctx.next_local_idx);
+    ctx.local_types.push(wasm_encoder::ValType::I32);
+    ctx.next_local_idx += 1;
+    ctx.vector_conv_f32_base = Some(ctx.next_local_idx);
+    for _ in 0..4 {
+        ctx.local_types.push(wasm_encoder::ValType::F32);
+        ctx.next_local_idx += 1;
+    }
+    ctx.vector_conv_i32_base = Some(ctx.next_local_idx);
+    for _ in 0..4 {
+        ctx.local_types.push(wasm_encoder::ValType::I32);
+        ctx.next_local_idx += 1;
+    }
+    ctx.binary_op_f32_base = Some(ctx.next_local_idx);
+    for _ in 0..8 {
+        ctx.local_types.push(wasm_encoder::ValType::F32);
+        ctx.next_local_idx += 1;
+    }
+    ctx.binary_op_i32_base = Some(ctx.next_local_idx);
+    for _ in 0..8 {
+        ctx.local_types.push(wasm_encoder::ValType::I32);
+        ctx.next_local_idx += 1;
     }
 
     let locals: alloc::vec::Vec<(u32, wasm_encoder::ValType)> =
@@ -44,11 +83,35 @@ pub fn emit_function(
 
 fn walk_for_declarations(ctx: &mut WasmCodegenContext, stmt: &glsl::syntax::Statement) {
     match stmt {
-        glsl::syntax::Statement::Simple(simple) => {
-            if let glsl::syntax::SimpleStatement::Declaration(decl) = &**simple {
+        glsl::syntax::Statement::Simple(simple) => match &**simple {
+            glsl::syntax::SimpleStatement::Declaration(decl) => {
                 declaration::allocate_local_from_decl(ctx, decl);
             }
-        }
+            glsl::syntax::SimpleStatement::Selection(sel) => match &sel.rest {
+                glsl::syntax::SelectionRestStatement::Statement(s) => {
+                    walk_for_declarations(ctx, s);
+                }
+                glsl::syntax::SelectionRestStatement::Else(then_s, else_s) => {
+                    walk_for_declarations(ctx, then_s);
+                    walk_for_declarations(ctx, else_s);
+                }
+            },
+            glsl::syntax::SimpleStatement::Iteration(iter) => match iter {
+                glsl::syntax::IterationStatement::While(_, body) => {
+                    walk_for_declarations(ctx, body);
+                }
+                glsl::syntax::IterationStatement::DoWhile(body, _) => {
+                    walk_for_declarations(ctx, body);
+                }
+                glsl::syntax::IterationStatement::For(init, _, body) => {
+                    if let glsl::syntax::ForInitStatement::Declaration(decl) = init {
+                        declaration::allocate_local_from_decl(ctx, decl);
+                    }
+                    walk_for_declarations(ctx, body);
+                }
+            },
+            _ => {}
+        },
         glsl::syntax::Statement::Compound(compound) => {
             for s in &compound.statement_list {
                 walk_for_declarations(ctx, s);
@@ -94,12 +157,42 @@ fn emit_simple_statement_to_sink(
         glsl::syntax::SimpleStatement::Jump(jump) => {
             emit_jump_to_sink(ctx, instr, jump, options, return_type)?;
         }
-        glsl::syntax::SimpleStatement::Expression(None)
-        | glsl::syntax::SimpleStatement::Selection(_)
-        | glsl::syntax::SimpleStatement::Iteration(_)
-        | glsl::syntax::SimpleStatement::Switch(_)
-        | glsl::syntax::SimpleStatement::CaseLabel(_) => {
-            // Phase ii: not implemented
+        glsl::syntax::SimpleStatement::Expression(None) => {}
+        glsl::syntax::SimpleStatement::Selection(sel) => {
+            if_stmt::emit_if_stmt_to_sink(ctx, instr, &sel.cond, &sel.rest, options, return_type)?;
+        }
+        glsl::syntax::SimpleStatement::Iteration(iter) => match iter {
+            glsl::syntax::IterationStatement::While(cond, body) => {
+                loop_while::emit_while_loop_to_sink(ctx, instr, cond, body, options, return_type)?;
+            }
+            glsl::syntax::IterationStatement::DoWhile(body, cond) => {
+                loop_do_while::emit_do_while_loop_to_sink(
+                    ctx,
+                    instr,
+                    body,
+                    cond,
+                    options,
+                    return_type,
+                )?;
+            }
+            glsl::syntax::IterationStatement::For(init, rest, body) => {
+                loop_for::emit_for_loop_to_sink(
+                    ctx,
+                    instr,
+                    init,
+                    rest,
+                    body,
+                    options,
+                    return_type,
+                )?;
+            }
+        },
+        glsl::syntax::SimpleStatement::Switch(_) | glsl::syntax::SimpleStatement::CaseLabel(_) => {
+            return Err(lp_glsl_frontend::error::GlslError::new(
+                lp_glsl_frontend::error::ErrorCode::E0400,
+                alloc::format!("statement {:?} not supported", simple),
+            )
+            .into());
         }
     }
     Ok(())
@@ -119,10 +212,38 @@ fn emit_jump_to_sink(
         glsl::syntax::JumpStatement::Return(None) => {
             instr.return_();
         }
-        glsl::syntax::JumpStatement::Break
-        | glsl::syntax::JumpStatement::Continue
-        | glsl::syntax::JumpStatement::Discard => {
-            // Phase ii: not implemented
+        glsl::syntax::JumpStatement::Break => {
+            let target = ctx
+                .loop_stack
+                .last()
+                .ok_or_else(|| {
+                    GlslDiagnostics::from(lp_glsl_frontend::error::GlslError::new(
+                        lp_glsl_frontend::error::ErrorCode::E0400,
+                        "break outside loop",
+                    ))
+                })?
+                .break_target_block_depth;
+            instr.br(ctx.block_depth.saturating_sub(target));
+        }
+        glsl::syntax::JumpStatement::Continue => {
+            let loop_d = ctx
+                .loop_stack
+                .last()
+                .ok_or_else(|| {
+                    GlslDiagnostics::from(lp_glsl_frontend::error::GlslError::new(
+                        lp_glsl_frontend::error::ErrorCode::E0400,
+                        "continue outside loop",
+                    ))
+                })?
+                .loop_block_depth;
+            instr.br(ctx.block_depth.saturating_sub(loop_d));
+        }
+        glsl::syntax::JumpStatement::Discard => {
+            return Err(lp_glsl_frontend::error::GlslError::new(
+                lp_glsl_frontend::error::ErrorCode::E0400,
+                "discard not supported in WASM backend",
+            )
+            .into());
         }
     }
     Ok(())

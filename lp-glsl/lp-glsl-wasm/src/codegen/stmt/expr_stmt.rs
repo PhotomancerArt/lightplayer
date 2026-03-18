@@ -23,7 +23,9 @@ pub fn emit_expr_stmt_to_sink(
     expr: &glsl::syntax::Expr,
     options: &WasmOptions,
 ) -> Result<(), GlslDiagnostics> {
-    expr::emit_rvalue(ctx, instr, expr, options)?;
-    instr.drop();
+    let rv = expr::emit_rvalue(ctx, instr, expr, options)?;
+    if rv.stack_count > 0 {
+        instr.drop();
+    }
     Ok(())
 }
