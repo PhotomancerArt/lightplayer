@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constructor: uint(int) - preserves value if non-negative (undefined for negative)

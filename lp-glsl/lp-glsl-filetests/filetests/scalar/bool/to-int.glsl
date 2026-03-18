@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Conversion: int(bool) - converts bool to int (false -> 0, true -> 1)

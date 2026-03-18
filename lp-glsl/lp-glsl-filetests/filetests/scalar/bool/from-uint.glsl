@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constructor: bool(uint) - converts uint to bool (0u -> false, non-zero -> true)

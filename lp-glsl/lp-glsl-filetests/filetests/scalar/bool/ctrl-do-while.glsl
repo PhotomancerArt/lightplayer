@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Control flow: do { } while (bool) - condition must evaluate to bool

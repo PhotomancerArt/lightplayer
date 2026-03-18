@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Ambiguous Overloads: Cases that should produce compile errors
@@ -25,7 +24,6 @@ float test_overload_ambiguous_return_type() {
     return func_float(5); // Error: ambiguous call
 }
 
-// @unimplemented()
 // run: test_overload_ambiguous_return_type() ~= 5.0
 */
 

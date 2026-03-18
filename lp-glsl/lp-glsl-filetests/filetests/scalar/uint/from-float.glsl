@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constructor: uint(float) - truncates fractional part toward zero (undefined for negative)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constructor: bool(float) - converts float to bool (0.0 -> false, non-zero -> true)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Logical NOT: ! operator - operates on scalar boolean expressions

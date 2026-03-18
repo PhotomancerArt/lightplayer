@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Logical XOR: ^^ operator - logical exclusive or on scalar boolean expressions
