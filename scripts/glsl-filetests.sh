@@ -85,6 +85,11 @@ OPTIONS:
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
     --target NAME       Run only the specified target (cranelift.q32, wasm.q32)
+    --fix               Remove @unimplemented annotations from tests that now pass
+
+ENVIRONMENT:
+    DEBUG=1             Show debug output (CLIF, WAT) when a test fails
+    LP_FIX_XFAIL=1      Same as --fix; remove annotations from newly passing tests
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.
@@ -111,6 +116,9 @@ EXAMPLES:
 
     # Regenerate .gen.glsl file before running tests
     glsl-filetests.sh vec/vec4/fn-equal.gen.glsl -g
+
+    # Fix unexpected passes: remove @unimplemented from tests that now pass
+    glsl-filetests.sh --target wasm.q32 --fix
 
 PATTERN SYNTAX:
     *         Matches any sequence of characters

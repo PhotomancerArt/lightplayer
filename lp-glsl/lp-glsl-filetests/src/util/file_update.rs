@@ -3,12 +3,15 @@
 //! This module provides a helper struct to update test files in-place when
 //! expectations don't match, matching Cranelift's FileUpdate semantics.
 
+use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
 use anyhow::{Result, bail};
 use lp_glsl_cranelift::GlslValue;
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::target::Target;
 
 /// A helper struct to update a file in-place as test expectations are
 /// automatically updated.
@@ -243,6 +246,41 @@ impl FileUpdate {
     /// Deprecated: use remove_annotation instead.
     pub fn remove_expect_fail_marker(&self, line_number: usize) -> Result<()> {
         self.remove_annotation(line_number)
+    }
+
+    /// Remove file-level annotations (at top of file, before first run directive)
+    /// that match the target. Used when tests with file-level @unimplemented(backend=wasm)
+    /// now pass. Updates line_diff so subsequent remove_annotation calls use correct indices.
+    pub fn remove_file_level_annotations_matching(&self, target: &Target) -> Result<()> {
+        let old_test = fs::read_to_string(&self.path)?;
+        let all_lines: Vec<&str> = old_test.lines().collect();
+        let mut indices_to_remove: Vec<usize> = Vec::new();
+        for (i, line) in all_lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("// run:") {
+                break;
+            }
+            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, i + 1) {
+                if ann.filter.matches(target) {
+                    indices_to_remove.push(i);
+                }
+            }
+        }
+        if indices_to_remove.is_empty() {
+            return Ok(());
+        }
+        let mut new_test = String::new();
+        for (i, line) in all_lines.iter().enumerate() {
+            if indices_to_remove.contains(&i) {
+                continue;
+            }
+            new_test.push_str(line);
+            new_test.push('\n');
+        }
+        let removed = indices_to_remove.len() as isize;
+        self.line_diff.set(self.line_diff.get() - removed);
+        fs::write(&self.path, new_test)?;
+        Ok(())
     }
 
     /// Update CLIF expectations for a test type (compile or transform.q32).

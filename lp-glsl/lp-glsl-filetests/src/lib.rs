@@ -374,8 +374,14 @@ pub fn run(
 
             // Remove markers if fix is enabled
             if fix_xfail && !unexpected_pass_lines.is_empty() {
+                let target = active_targets.first().expect("active_targets non-empty");
                 let file_update = util::file_update::FileUpdate::new(&spec.path);
-                for line_number in unexpected_pass_lines {
+                if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
+                    eprintln!("Warning: failed to remove file-level annotations: {e}");
+                }
+                let mut sorted = unexpected_pass_lines.clone();
+                sorted.sort_unstable();
+                for line_number in sorted {
                     if let Err(e) = file_update.remove_annotation(line_number) {
                         eprintln!(
                             "Warning: failed to remove annotation from line {line_number}: {e}"
@@ -414,6 +420,16 @@ pub fn run(
             }
             if stats.unexpected_pass > 0 {
                 if fix_xfail {
+                    let target = active_targets.first().expect("active_targets non-empty");
+                    let file_update = util::file_update::FileUpdate::new(&spec.path);
+                    if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
+                        eprintln!("Warning: failed to remove file-level annotations: {e}");
+                    }
+                    let mut sorted = unexpected_pass_lines.clone();
+                    sorted.sort_unstable();
+                    for line_number in sorted {
+                        let _ = file_update.remove_annotation(line_number);
+                    }
                     anyhow::bail!(
                         "{} test case(s) marked [expect-fail] are now passing. Markers removed.",
                         stats.unexpected_pass
@@ -702,20 +718,41 @@ pub fn run(
 
     // Remove markers if fix is enabled
     if fix_xfail && !all_unexpected_passes.is_empty() {
-        // Group by file to create FileUpdate instances
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
+        let unique_paths: HashSet<&PathBuf> =
+            all_unexpected_passes.iter().map(|(p, _)| p).collect();
+        let target = active_targets.first().expect("active_targets non-empty");
+
         let mut file_updates: HashMap<PathBuf, util::file_update::FileUpdate> = HashMap::new();
-        for (path, line_number) in &all_unexpected_passes {
+        for path in unique_paths {
             let file_update = file_updates
                 .entry(path.clone())
                 .or_insert_with(|| util::file_update::FileUpdate::new(path));
-            if let Err(e) = file_update.remove_annotation(*line_number) {
+            if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
                 eprintln!(
-                    "Warning: failed to remove annotation from {}:{}: {}",
+                    "Warning: failed to remove file-level annotations from {}: {}",
                     path.display(),
-                    line_number,
                     e
                 );
+            }
+        }
+
+        let mut by_path: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+        for (path, line_number) in &all_unexpected_passes {
+            by_path.entry(path.clone()).or_default().push(*line_number);
+        }
+        for (path, mut line_numbers) in by_path {
+            line_numbers.sort_unstable();
+            let file_update = file_updates.get(&path).expect("FileUpdate exists");
+            for line_number in line_numbers {
+                if let Err(e) = file_update.remove_annotation(line_number) {
+                    eprintln!(
+                        "Warning: failed to remove annotation from {}:{}: {}",
+                        path.display(),
+                        line_number,
+                        e
+                    );
+                }
             }
         }
     }
