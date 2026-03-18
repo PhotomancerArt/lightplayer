@@ -1,12 +1,13 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
+use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
 use lp_glsl_cranelift::semantic::functions::FunctionSignature;
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
 use lp_glsl_wasm::{WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
-use wasmtime::{Engine, Instance, Module, Store};
+use wasmtime::{Config, Engine, Instance, Module, Store};
 
 /// Q16.16 fixed-point scale factor.
 const Q16_16_SCALE: f32 = 65536.0;
@@ -17,15 +18,25 @@ pub struct WasmExecutable {
     instance: Instance,
     exports: HashMap<String, FunctionSignature>,
     float_mode: lp_glsl_wasm::FloatMode,
+    wasm_bytes: Vec<u8>,
 }
 
 impl WasmExecutable {
     /// Compile GLSL source to WASM and create an executable.
     pub fn from_source(source: &str, options: WasmOptions) -> Result<Self, GlslDiagnostics> {
         let module = glsl_wasm(source, options.clone())?;
-        let engine = Engine::default();
+        let wasm_bytes = module.bytes.clone();
+
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config).map_err(|e| {
+            GlslDiagnostics::from(GlslError::new(
+                ErrorCode::E0400,
+                format!("failed to create WASM engine: {e}"),
+            ))
+        })?;
         let mut store = Store::new(&engine, ());
-        let wasm_module = Module::new(&engine, &module.bytes).map_err(|e| {
+        let wasm_module = Module::new(&engine, &wasm_bytes).map_err(|e| {
             GlslDiagnostics::from(GlslError::new(
                 ErrorCode::E0400,
                 format!("failed to load WASM module: {e}"),
@@ -49,7 +60,15 @@ impl WasmExecutable {
             instance,
             exports,
             float_mode: options.float_mode,
+            wasm_bytes,
         })
+    }
+
+    /// Set fuel before each call so execution does not hang on infinite loops.
+    fn prepare_call(&mut self) -> Result<(), GlslError> {
+        self.store
+            .set_fuel(DEFAULT_MAX_INSTRUCTIONS)
+            .map_err(|e| GlslError::new(ErrorCode::E0400, format!("failed to set fuel: {e}")))
     }
 }
 
@@ -116,6 +135,7 @@ impl GlslExecutable for WasmExecutable {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
+        self.prepare_call()?;
         func.call(&mut self.store, &wasm_args, &mut [])
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM trap: {e}")))?;
         Ok(())
@@ -142,6 +162,7 @@ impl GlslExecutable for WasmExecutable {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
+        self.prepare_call()?;
         let mut results = [wasmtime::Val::I32(0)];
         func.call(&mut self.store, &wasm_args, &mut results)
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM trap: {e}")))?;
@@ -177,6 +198,7 @@ impl GlslExecutable for WasmExecutable {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
+        self.prepare_call()?;
         let mut results = [wasmtime::Val::F32(0f32.to_bits())];
         func.call(&mut self.store, &wasm_args, &mut results)
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM trap: {e}")))?;
@@ -263,6 +285,10 @@ impl GlslExecutable for WasmExecutable {
 
     fn list_functions(&self) -> Vec<String> {
         self.exports.keys().cloned().collect()
+    }
+
+    fn format_disassembly(&self) -> Option<String> {
+        wasmprinter::print_bytes(&self.wasm_bytes).ok()
     }
 }
 

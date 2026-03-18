@@ -592,6 +592,11 @@ fn format_error(
                 parts.push(emulator_state.clone());
             }
 
+            // Disassembly (machine code for Cranelift, WAT for WASM)
+            if let Some(ref disasm) = exec.format_disassembly() {
+                parts.push(format!("=== Disassembly ===\n{disasm}"));
+            }
+
             // V-code
             if let Some(ref vcode) = exec.format_vcode() {
                 parts.push(format!("=== VCode ===\n{vcode}"));

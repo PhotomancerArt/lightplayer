@@ -12,6 +12,7 @@ lp-glsl-cranelift = { path = "../lp-glsl-cranelift", features = ["std", "emulato
 lp-glsl-wasm = { path = "../lp-glsl-wasm" }
 wasmtime = "42"
 wasm-encoder = "0.245"
+wasmprinter = "0.245"
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }

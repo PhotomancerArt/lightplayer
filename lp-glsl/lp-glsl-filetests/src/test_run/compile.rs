@@ -8,7 +8,9 @@ use lp_riscv_emu::LogLevel;
 
 const DEFAULT_MAX_MEMORY: usize = 1024 * 1024;
 const DEFAULT_STACK_SIZE: usize = 64 * 1024;
-const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
+
+/// Maximum execution steps before timeout. Used by both emulator and WASM backends.
+pub(crate) const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
 
 /// Map filetest FloatMode to cranelift FloatMode.
 fn to_cranelift_float_mode(fm: FloatMode) -> lp_glsl_cranelift::FloatMode {
