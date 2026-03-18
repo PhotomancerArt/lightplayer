@@ -6,7 +6,7 @@ use crate::codegen::context::WasmCodegenContext;
 use crate::codegen::expr::{self, infer_expr_type};
 use crate::codegen::rvalue::WasmRValue;
 use crate::options::WasmOptions;
-use lp_glsl_frontend::error::{extract_span_from_expr, GlslDiagnostics};
+use lp_glsl_frontend::error::{GlslDiagnostics, extract_span_from_expr};
 
 /// Emit assignment expression. Returns WasmRValue with lhs type.
 pub fn emit_assignment(
@@ -120,25 +120,13 @@ fn emit_compound_assignment(
         }
         expr::emit_rvalue(ctx, sink, rhs, options)?;
         let numeric = crate::codegen::numeric::WasmNumericMode::from(options.float_mode);
-        crate::codegen::expr::binary::emit_binary_op(
-            sink,
-            &binary_op,
-            &ty,
-            &rhs_ty,
-            numeric,
-        )?;
+        crate::codegen::expr::binary::emit_binary_op(sink, &binary_op, &ty, &rhs_ty, numeric)?;
         sink.local_tee(base_index);
         Ok(WasmRValue::from_type(ty))
     } else {
         let span = extract_span_from_expr(lhs);
         let _ = crate::codegen::expr::binary::emit_binary(
-            ctx,
-            sink,
-            &binary_op,
-            lhs,
-            rhs,
-            options,
-            &span,
+            ctx, sink, &binary_op, lhs, rhs, options, &span,
         )?;
         for i in (0..component_count).rev() {
             sink.local_set(base_index + i);

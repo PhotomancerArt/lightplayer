@@ -24,6 +24,7 @@ float test_overload_ambiguous_return_type() {
     return func_float(5); // Error: ambiguous call
 }
 
+// @unimplemented(backend=wasm)  // function in commented block
 // run: test_overload_ambiguous_return_type() ~= 5.0
 */
 
@@ -61,6 +62,7 @@ float test_overload_ambiguous_conversions() {
 }
 
 // @unimplemented()
+// @unimplemented(backend=wasm)  // function in commented block
 // run: test_overload_ambiguous_conversions() ~= 3.0
 */
 
@@ -98,6 +100,7 @@ float test_overload_ambiguous_array_sizes() {
 }
 
 // @unimplemented()
+// @unimplemented(backend=wasm)  // function in commented block
 // run: test_overload_ambiguous_array_sizes() ~= 9.0
 */
 
@@ -138,5 +141,6 @@ float test_overload_ambiguous_promotions() {
 }
 
 // @unimplemented()
+// @unimplemented(backend=wasm)  // function in commented block
 // run: test_overload_ambiguous_promotions() ~= 5.0
 */

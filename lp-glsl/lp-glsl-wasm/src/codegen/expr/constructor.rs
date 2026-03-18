@@ -1,6 +1,6 @@
 //! Scalar and vector type constructor code generation.
 
-use wasm_encoder::InstructionSink;
+use wasm_encoder::{BlockType, InstructionSink};
 
 use crate::codegen::context::WasmCodegenContext;
 use crate::codegen::expr;
@@ -49,7 +49,7 @@ pub fn emit_scalar_constructor(
         }
     };
 
-    emit_coercion(sink, &arg_rv.ty, &result_ty, ctx.numeric);
+    emit_coercion(ctx, sink, &arg_rv.ty, &result_ty);
     Ok(WasmRValue::scalar(result_ty))
 }
 
@@ -106,7 +106,7 @@ pub fn emit_vector_constructor(
             sink.local_tee(temp_idx);
             for _ in 0..component_count {
                 sink.local_get(temp_idx);
-                emit_coercion(sink, &arg_rv.ty, &base_ty, ctx.numeric);
+                emit_coercion(ctx, sink, &arg_rv.ty, &base_ty);
             }
         } else {
             // Vector source: store in pre-allocated temp, then load and coerce each component
@@ -117,7 +117,7 @@ pub fn emit_vector_constructor(
             }
             for i in 0..component_count {
                 sink.local_get(temp_base + i as u32);
-                emit_coercion(sink, &src_base, &base_ty, ctx.numeric);
+                emit_coercion(ctx, sink, &src_base, &base_ty);
             }
         }
     } else {
@@ -130,25 +130,68 @@ pub fn emit_vector_constructor(
                 arg_rv.ty.vector_base_type().unwrap()
             };
             for _ in 0..arg_rv.stack_count {
-                emit_coercion(sink, &from_ty, &base_ty, ctx.numeric);
+                emit_coercion(ctx, sink, &from_ty, &base_ty);
             }
         }
     }
     Ok(WasmRValue::from_type(result_ty))
 }
 
-fn emit_coercion(
-    sink: &mut InstructionSink,
-    from: &Type,
-    to: &Type,
-    numeric: crate::codegen::numeric::WasmNumericMode,
-) {
+fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Type, to: &Type) {
     if from == to {
         return;
     }
 
+    let numeric = ctx.numeric;
+
     match (from, to) {
-        (Type::Int | Type::UInt | Type::Bool, Type::Float) => {
+        (Type::Int, Type::Float) => {
+            if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
+                let temp = ctx
+                    .binary_op_i32_base
+                    .expect("binary_op temps not allocated");
+                sink.local_tee(temp);
+                sink.i32_const(-32768);
+                sink.i32_lt_s();
+                sink.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                sink.i32_const(-32768);
+                sink.else_();
+                sink.local_get(temp);
+                sink.end();
+                sink.local_tee(temp);
+                sink.i32_const(32767);
+                sink.i32_gt_s();
+                sink.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                sink.i32_const(32767);
+                sink.else_();
+                sink.local_get(temp);
+                sink.end();
+                sink.i32_const(16);
+                sink.i32_shl();
+            } else {
+                sink.f32_convert_i32_s();
+            }
+        }
+        (Type::UInt, Type::Float) => {
+            if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
+                let temp = ctx
+                    .binary_op_i32_base
+                    .expect("binary_op temps not allocated");
+                sink.local_tee(temp);
+                sink.i32_const(32767);
+                sink.i32_gt_u();
+                sink.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                sink.i32_const(32767);
+                sink.else_();
+                sink.local_get(temp);
+                sink.end();
+                sink.i32_const(16);
+                sink.i32_shl();
+            } else {
+                sink.f32_convert_i32_s();
+            }
+        }
+        (Type::Bool, Type::Float) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
                 sink.i32_const(16);
                 sink.i32_shl();
@@ -158,16 +201,46 @@ fn emit_coercion(
         }
         (Type::Float, Type::Int) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
+                let temp = ctx
+                    .binary_op_i32_base
+                    .expect("binary_op temps not allocated");
+                sink.local_tee(temp);
+                sink.i32_const(0);
+                sink.i32_lt_s();
+                sink.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                sink.local_get(temp);
+                sink.i32_const((1 << 16) - 1);
+                sink.i32_add();
                 sink.i32_const(16);
                 sink.i32_shr_s();
+                sink.else_();
+                sink.local_get(temp);
+                sink.i32_const(16);
+                sink.i32_shr_s();
+                sink.end();
             } else {
                 sink.i32_trunc_f32_s();
             }
         }
         (Type::Float, Type::UInt) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
+                let temp = ctx
+                    .binary_op_i32_base
+                    .expect("binary_op temps not allocated");
+                sink.local_tee(temp);
+                sink.i32_const(0);
+                sink.i32_lt_s();
+                sink.if_(BlockType::Result(wasm_encoder::ValType::I32));
+                sink.local_get(temp);
+                sink.i32_const((1 << 16) - 1);
+                sink.i32_add();
                 sink.i32_const(16);
                 sink.i32_shr_s();
+                sink.else_();
+                sink.local_get(temp);
+                sink.i32_const(16);
+                sink.i32_shr_s();
+                sink.end();
             } else {
                 sink.i32_trunc_f32_u();
             }

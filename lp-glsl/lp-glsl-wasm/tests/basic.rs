@@ -723,9 +723,7 @@ fn test_vec2_compound_assignment() {
         .expect("get_func")
         .typed::<(f32, f32, f32, f32), (f32, f32)>(&store)
         .expect("typed");
-    let (x, y) = func
-        .call(&mut store, (1.0, 2.0, 3.0, 4.0))
-        .expect("call");
+    let (x, y) = func.call(&mut store, (1.0, 2.0, 3.0, 4.0)).expect("call");
     assert!((x - 4.0).abs() < 1e-5);
     assert!((y - 6.0).abs() < 1e-5);
 }
