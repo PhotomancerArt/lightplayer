@@ -4,6 +4,9 @@ Issues and future work to track for the lp-glsl-wasm backend.
 
 ## Known Issues (tests ignored)
 
+### Q32 float add/sub saturation
+- **Status:** Implemented. Add and subtract use i32 overflow detection (a>0&&b>0&&result<0 → max, a<0&&b<0&&result>=0 → min). Nested expressions work via a `drop` after `local_tee(base+2)` so the overflow-check if/else replaces the raw sum rather than stacking on top of it.
+
 ### Q32 float multiplication
 - **Test:** `test_q32_float_mul`
 - **Problem:** WASM validation error — expected i32, found i64. The inline i64 sequence for Q32 mul triggers validation failure.

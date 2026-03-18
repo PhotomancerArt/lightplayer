@@ -39,7 +39,7 @@ pub fn emit_binary(
         let lhs_rv = expr::emit_rvalue(ctx, sink, lhs, options)?;
         let rhs_rv = expr::emit_rvalue(ctx, sink, rhs, options)?;
         let numeric = WasmNumericMode::from(options.float_mode);
-        emit_binary_op(sink, op, &lhs_rv.ty, &rhs_rv.ty, numeric)?;
+        emit_binary_op(ctx, sink, op, &lhs_rv.ty, &rhs_rv.ty, numeric)?;
         let result_ty = infer_binary_result_type(op, &lhs_rv.ty, &rhs_rv.ty, span.clone())
             .map_err(lp_glsl_frontend::error::GlslDiagnostics::from)?;
         Ok(WasmRValue::scalar(result_ty))
@@ -100,7 +100,7 @@ fn emit_vector_binary(
         for i in 0..component_count {
             sink.local_get(scalar_temp);
             sink.local_get(rhs_base + i as u32);
-            emit_single_binary_op(sink, op, &base_ty, numeric)?;
+            emit_single_binary_op(ctx, sink, op, &base_ty, numeric)?;
         }
         return Ok(WasmRValue::from_type(result_ty));
     } else if lhs_ty.is_vector() && rhs_ty.is_scalar() {
@@ -115,7 +115,7 @@ fn emit_vector_binary(
         for i in 0..component_count {
             sink.local_get(lhs_base + i as u32);
             sink.local_get(scalar_temp);
-            emit_single_binary_op(sink, op, &base_ty, numeric)?;
+            emit_single_binary_op(ctx, sink, op, &base_ty, numeric)?;
         }
         return Ok(WasmRValue::from_type(result_ty));
     } else {
@@ -134,7 +134,7 @@ fn emit_vector_binary(
     for i in 0..component_count {
         sink.local_get(lhs_base + i as u32);
         sink.local_get(rhs_base + i as u32);
-        emit_single_binary_op(sink, op, &base_ty, numeric)?;
+        emit_single_binary_op(ctx, sink, op, &base_ty, numeric)?;
     }
     Ok(WasmRValue::from_type(result_ty))
 }
@@ -196,20 +196,26 @@ fn emit_vector_equality(
 }
 
 fn emit_single_binary_op(
+    ctx: &WasmCodegenContext,
     sink: &mut InstructionSink,
     op: &glsl::syntax::BinaryOp,
     base_ty: &Type,
     numeric: WasmNumericMode,
 ) -> Result<(), lp_glsl_frontend::error::GlslDiagnostics> {
-    emit_binary_op(sink, op, base_ty, base_ty, numeric)
+    emit_binary_op(ctx, sink, op, base_ty, base_ty, numeric)
 }
 
 fn is_integer_like(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::UInt | Type::Bool)
 }
 
+/// Q32 fixed-point range: [MIN_FIXED, MAX_FIXED].
+const Q32_MAX_FIXED: i32 = 0x7FFF_FFFF;
+const Q32_MIN_FIXED: i32 = i32::MIN;
+
 /// Emit binary op with type-aware dispatch.
 pub fn emit_binary_op(
+    ctx: &WasmCodegenContext,
     sink: &mut InstructionSink,
     op: &glsl::syntax::BinaryOp,
     lhs_ty: &Type,
@@ -224,13 +230,21 @@ pub fn emit_binary_op(
     match op {
         Add => {
             match (both_int, either_float, numeric) {
-                (true, _, _) | (_, false, _) | (_, true, WasmNumericMode::Q32) => sink.i32_add(),
+                (true, _, _) | (_, false, _) => sink.i32_add(),
+                (_, true, WasmNumericMode::Q32) => {
+                    emit_q32_add_sat(ctx, sink);
+                    sink
+                }
                 (_, true, WasmNumericMode::Float) => sink.f32_add(),
             };
         }
         Sub => {
             match (both_int, either_float, numeric) {
-                (true, _, _) | (_, false, _) | (_, true, WasmNumericMode::Q32) => sink.i32_sub(),
+                (true, _, _) | (_, false, _) => sink.i32_sub(),
+                (_, true, WasmNumericMode::Q32) => {
+                    emit_q32_sub_sat(ctx, sink);
+                    sink
+                }
                 (_, true, WasmNumericMode::Float) => sink.f32_sub(),
             };
         }
@@ -356,6 +370,92 @@ pub fn emit_binary_op(
         }
     };
     Ok(())
+}
+
+fn emit_q32_add_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
+    let base = ctx
+        .binary_op_i32_base
+        .expect("binary_op temps not allocated");
+    sink.local_set(base + 1);
+    sink.local_tee(base);
+    sink.local_get(base + 1);
+    sink.i32_add();
+    sink.local_tee(base + 2);
+    sink.drop(); // consume sum; if/else will produce final result
+    sink.local_get(base);
+    sink.i32_const(0);
+    sink.i32_gt_s();
+    sink.local_get(base + 1);
+    sink.i32_const(0);
+    sink.i32_gt_s();
+    sink.i32_and();
+    sink.local_get(base + 2);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.i32_and();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MAX_FIXED);
+    sink.else_();
+    sink.local_get(base);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.local_get(base + 1);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.i32_and();
+    sink.local_get(base + 2);
+    sink.i32_const(0);
+    sink.i32_ge_s();
+    sink.i32_and();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MIN_FIXED);
+    sink.else_();
+    sink.local_get(base + 2);
+    sink.end();
+    sink.end();
+}
+
+fn emit_q32_sub_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
+    let base = ctx
+        .binary_op_i32_base
+        .expect("binary_op temps not allocated");
+    sink.local_set(base + 1);
+    sink.local_tee(base);
+    sink.local_get(base + 1);
+    sink.i32_sub();
+    sink.local_tee(base + 2);
+    sink.drop(); // consume difference; if/else will produce final result
+    sink.local_get(base);
+    sink.i32_const(0);
+    sink.i32_gt_s();
+    sink.local_get(base + 1);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.i32_and();
+    sink.local_get(base + 2);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.i32_and();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MAX_FIXED);
+    sink.else_();
+    sink.local_get(base);
+    sink.i32_const(0);
+    sink.i32_lt_s();
+    sink.local_get(base + 1);
+    sink.i32_const(0);
+    sink.i32_gt_s();
+    sink.i32_and();
+    sink.local_get(base + 2);
+    sink.i32_const(0);
+    sink.i32_gt_s();
+    sink.i32_and();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MIN_FIXED);
+    sink.else_();
+    sink.local_get(base + 2);
+    sink.end();
+    sink.end();
 }
 
 fn emit_q32_mul(sink: &mut InstructionSink) {

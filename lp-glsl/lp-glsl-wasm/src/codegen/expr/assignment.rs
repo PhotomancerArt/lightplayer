@@ -120,7 +120,7 @@ fn emit_compound_assignment(
         }
         expr::emit_rvalue(ctx, sink, rhs, options)?;
         let numeric = crate::codegen::numeric::WasmNumericMode::from(options.float_mode);
-        crate::codegen::expr::binary::emit_binary_op(sink, &binary_op, &ty, &rhs_ty, numeric)?;
+        crate::codegen::expr::binary::emit_binary_op(ctx, sink, &binary_op, &ty, &rhs_ty, numeric)?;
         sink.local_tee(base_index);
         Ok(WasmRValue::from_type(ty))
     } else {

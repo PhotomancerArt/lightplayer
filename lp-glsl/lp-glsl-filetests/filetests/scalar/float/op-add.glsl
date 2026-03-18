@@ -63,5 +63,4 @@ float test_float_add_large_numbers() {
     return 1000000.0 + 2000000.0;
 }
 
-// @unimplemented(backend=wasm)  // Q32 add saturation not implemented
 // run: test_float_add_large_numbers() ~= 32768.0

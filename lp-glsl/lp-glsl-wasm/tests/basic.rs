@@ -151,6 +151,29 @@ fn test_q32_float_add() {
 }
 
 #[test]
+fn test_q32_float_add_nested() {
+    let source = r#"
+        float main() {
+            return (2.0 + 3.0) + (4.0 + 5.0);
+        }
+    "#;
+    let options = WasmOptions::default();
+    let module = glsl_wasm(source, options).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let module = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &module, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "main")
+        .expect("get_func")
+        .typed::<(), i32>(&store)
+        .expect("typed");
+    let result = func.call(&mut store, ()).expect("call");
+    let expected: i32 = 14 * 65536;
+    assert_eq!(result, expected, "nested add (2+3)+(4+5) should be 14");
+}
+
+#[test]
 fn test_scalar_constructor_int() {
     let source = r#"
         int test_int() {
