@@ -86,3 +86,15 @@ LP_SYMBOLS=$(nm "$BINARY" 2>/dev/null | grep "__lp_" | wc -l | xargs)
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 echo -e "${GREEN}lp-glsl-builtins-emu-app:${NC} built with $LP_SYMBOLS built-ins"
+
+# WASM builtins module (imported memory; same artifact for tests + browser)
+WASM_TARGET="wasm32-unknown-unknown"
+WASM_OUT="$WORKSPACE_ROOT/target/$WASM_TARGET/release/lp_glsl_builtins_wasm.wasm"
+if ! rustup target list --installed | grep -q "^${WASM_TARGET}\$"; then
+  echo "Installing target $WASM_TARGET..."
+  rustup target add "$WASM_TARGET"
+fi
+cd "$WORKSPACE_ROOT"
+cargo build -p lp-glsl-builtins-wasm --target "$WASM_TARGET" --release
+WASM_EXPORTS=$(strings "$WASM_OUT" 2>/dev/null | grep -c '^__lp_' || true)
+echo -e "${GREEN}lp-glsl-builtins-wasm:${NC} $WASM_OUT ($WASM_EXPORTS __lp_* strings)"

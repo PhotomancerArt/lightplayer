@@ -373,9 +373,11 @@ pub fn emit_binary_op(
 }
 
 fn emit_q32_add_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
+    // Use vector conv scratch — must not alias `binary_op_i32_base`, which holds
+    // per-component operands during vector binops and inline builtins like `mix`.
     let base = ctx
-        .binary_op_i32_base
-        .expect("binary_op temps not allocated");
+        .vector_conv_i32_base
+        .expect("vector_conv i32 temps not allocated");
     sink.local_set(base + 1);
     sink.local_tee(base);
     sink.local_get(base + 1);
@@ -417,8 +419,8 @@ fn emit_q32_add_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
 
 fn emit_q32_sub_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
     let base = ctx
-        .binary_op_i32_base
-        .expect("binary_op temps not allocated");
+        .vector_conv_i32_base
+        .expect("vector_conv i32 temps not allocated");
     sink.local_set(base + 1);
     sink.local_tee(base);
     sink.local_get(base + 1);
@@ -460,8 +462,8 @@ fn emit_q32_sub_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
 
 fn emit_q32_mul(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
     let tmp = ctx
-        .binary_op_i32_base
-        .expect("binary_op temps not allocated");
+        .broadcast_temp_i32
+        .expect("broadcast i32 temp not allocated");
     sink.local_set(tmp);
     sink.i64_extend_i32_s();
     sink.local_get(tmp);
@@ -511,8 +513,8 @@ pub fn emit_logical_or(
 
 fn emit_q32_div(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
     let tmp = ctx
-        .binary_op_i32_base
-        .expect("binary_op temps not allocated");
+        .broadcast_temp_i32
+        .expect("broadcast i32 temp not allocated");
     sink.local_set(tmp);
     sink.i64_extend_i32_s();
     sink.i64_const(16);

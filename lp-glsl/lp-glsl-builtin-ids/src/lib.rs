@@ -412,3 +412,9 @@ impl BuiltinId {
         ]
     }
 }
+
+mod glsl_builtin_mapping;
+
+pub use glsl_builtin_mapping::GlslParamKind;
+pub use glsl_builtin_mapping::glsl_lpfx_q32_builtin_id;
+pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;

@@ -1,6 +1,7 @@
 //! WASM codegen context: locals, types, builder state.
 
 use hashbrown::HashMap;
+use lp_glsl_builtin_ids::BuiltinId;
 
 use crate::codegen::numeric::WasmNumericMode;
 use crate::options::WasmOptions;
@@ -42,6 +43,8 @@ pub struct WasmCodegenContext<'a> {
     pub loop_stack: alloc::vec::Vec<LoopContext>,
     /// Maps function name -> WASM function index (for user function calls).
     pub func_index_map: &'a hashbrown::HashMap<alloc::string::String, u32>,
+    /// Maps `BuiltinId` -> WASM function import index (Q32 builtins).
+    pub builtin_func_index: &'a HashMap<BuiltinId, u32>,
     /// Maps function name -> return type (for FunCall result type).
     pub func_return_type:
         &'a hashbrown::HashMap<alloc::string::String, lp_glsl_frontend::semantic::types::Type>,
@@ -54,6 +57,8 @@ pub struct WasmCodegenContext<'a> {
     /// Pre-allocated 8-slot temps for vector binary op (4 lhs + 4 rhs).
     pub binary_op_f32_base: Option<u32>,
     pub binary_op_i32_base: Option<u32>,
+    /// Two i32 locals for inline `min`/`max`/`abs` lowering (when stack temps are exhausted).
+    pub minmax_scratch_i32: Option<(u32, u32)>,
     /// Block nesting depth. Increment on block/loop/if, decrement on end.
     /// Used to adjust br target for break/continue when inside nested blocks (e.g. break inside if).
     pub block_depth: u32,
@@ -64,6 +69,7 @@ impl<'a> WasmCodegenContext<'a> {
         params: &[lp_glsl_frontend::semantic::functions::Parameter],
         options: &WasmOptions,
         func_index_map: &'a hashbrown::HashMap<alloc::string::String, u32>,
+        builtin_func_index: &'a HashMap<BuiltinId, u32>,
         func_return_type: &'a hashbrown::HashMap<
             alloc::string::String,
             lp_glsl_frontend::semantic::types::Type,
@@ -94,6 +100,7 @@ impl<'a> WasmCodegenContext<'a> {
             local_types: alloc::vec::Vec::new(),
             loop_stack: alloc::vec::Vec::new(),
             func_index_map,
+            builtin_func_index,
             func_return_type,
             broadcast_temp_f32: None,
             broadcast_temp_i32: None,
@@ -101,6 +108,7 @@ impl<'a> WasmCodegenContext<'a> {
             vector_conv_i32_base: None,
             binary_op_f32_base: None,
             binary_op_i32_base: None,
+            minmax_scratch_i32: None,
             block_depth: 0,
         }
     }

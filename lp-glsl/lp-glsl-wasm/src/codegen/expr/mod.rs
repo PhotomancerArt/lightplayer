@@ -2,6 +2,8 @@
 
 mod assignment;
 mod binary;
+mod builtin_call;
+pub(crate) mod builtin_inline;
 mod component;
 mod constructor;
 mod literal;
@@ -17,7 +19,10 @@ pub use variable::emit_variable;
 use crate::codegen::context::WasmCodegenContext;
 use crate::codegen::rvalue::WasmRValue;
 use crate::options::WasmOptions;
+use lp_glsl_builtin_ids::glsl_q32_math_builtin_id;
+use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::GlslDiagnostics;
+use lp_glsl_frontend::semantic::builtins;
 use lp_glsl_frontend::semantic::type_check::{is_scalar_type_name, is_vector_type_name};
 
 /// Emit rvalue - expression that produces a value on the stack.
@@ -70,6 +75,15 @@ pub fn emit_rvalue(
                         WasmRValue::from_type(return_ty)
                     },
                 )
+            } else if let Some(out) =
+                builtin_inline::try_emit_inline_builtin(ctx, sink, expr, name, args, options)
+            {
+                out
+            } else if options.float_mode == FloatMode::Q32
+                && builtins::is_builtin_function(name)
+                && glsl_q32_math_builtin_id(name, args.len()).is_some()
+            {
+                builtin_call::emit_q32_math_libcall(ctx, sink, expr, name, args, options)
             } else {
                 Err(lp_glsl_frontend::error::GlslError::new(
                     lp_glsl_frontend::error::ErrorCode::E0400,

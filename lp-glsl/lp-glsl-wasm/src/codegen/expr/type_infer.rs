@@ -1,8 +1,14 @@
 //! Expression type inference for WASM codegen (uses ctx.locals, no SymbolTable).
 
 use crate::codegen::context::WasmCodegenContext;
-use lp_glsl_frontend::error::GlslDiagnostics;
-use lp_glsl_frontend::semantic::type_check::{infer_binary_result_type, parse_swizzle_length};
+use lp_glsl_frontend::error::{ErrorCode, GlslDiagnostics, GlslError};
+use lp_glsl_frontend::semantic::builtins;
+use lp_glsl_frontend::semantic::lpfx::lpfx_fn_registry;
+use lp_glsl_frontend::semantic::type_check::{
+    check_matrix_constructor, check_scalar_constructor_with_span,
+    check_vector_constructor_with_span, infer_binary_result_type, is_matrix_type_name,
+    is_scalar_type_name, is_vector_type_name, parse_swizzle_length,
+};
 use lp_glsl_frontend::semantic::types::Type;
 
 /// Infer the GLSL type of an expression using codegen context (locals only).
@@ -97,36 +103,44 @@ pub fn infer_expr_type(
                 })
             }
         }
-        Expr::FunCall(func_ident, _, _) => {
+        Expr::FunCall(func_ident, args, span) => {
             let name = match func_ident {
                 glsl::syntax::FunIdentifier::Identifier(ident) => ident.name.as_str(),
                 _ => "",
             };
-            match name {
-                "bool" => Ok(Type::Bool),
-                "int" => Ok(Type::Int),
-                "uint" => Ok(Type::UInt),
-                "float" => Ok(Type::Float),
-                "vec2" => Ok(Type::Vec2),
-                "vec3" => Ok(Type::Vec3),
-                "vec4" => Ok(Type::Vec4),
-                "ivec2" => Ok(Type::IVec2),
-                "ivec3" => Ok(Type::IVec3),
-                "ivec4" => Ok(Type::IVec4),
-                "uvec2" => Ok(Type::UVec2),
-                "uvec3" => Ok(Type::UVec3),
-                "uvec4" => Ok(Type::UVec4),
-                "bvec2" => Ok(Type::BVec2),
-                "bvec3" => Ok(Type::BVec3),
-                "bvec4" => Ok(Type::BVec4),
-                _ => ctx.func_return_type.get(name).cloned().ok_or_else(|| {
-                    lp_glsl_frontend::error::GlslError::new(
-                        lp_glsl_frontend::error::ErrorCode::E0400,
-                        alloc::format!("type inference not supported for call `{name}`"),
-                    )
-                    .into()
-                }),
+            let arg_types: alloc::vec::Vec<Type> = args
+                .iter()
+                .map(|a| infer_expr_type(ctx, a))
+                .collect::<Result<_, _>>()?;
+
+            if is_vector_type_name(name) {
+                return check_vector_constructor_with_span(name, &arg_types, Some(span.clone()))
+                    .map_err(GlslDiagnostics::from);
             }
+            if is_matrix_type_name(name) {
+                return check_matrix_constructor(name, &arg_types).map_err(GlslDiagnostics::from);
+            }
+            if is_scalar_type_name(name) {
+                return check_scalar_constructor_with_span(name, &arg_types, Some(span.clone()))
+                    .map_err(GlslDiagnostics::from);
+            }
+
+            if builtins::is_builtin_function(name) {
+                return builtins::check_builtin_call(name, &arg_types)
+                    .map_err(|msg| GlslDiagnostics::from(GlslError::new(ErrorCode::E0114, msg)));
+            }
+            if lpfx_fn_registry::is_lpfx_fn(name) {
+                return lpfx_fn_registry::check_lpfx_fn_call(name, &arg_types)
+                    .map_err(|msg| GlslDiagnostics::from(GlslError::new(ErrorCode::E0114, msg)));
+            }
+
+            ctx.func_return_type.get(name).cloned().ok_or_else(|| {
+                GlslError::new(
+                    ErrorCode::E0400,
+                    alloc::format!("type inference not supported for call `{name}`"),
+                )
+                .into()
+            })
         }
         _ => Err(lp_glsl_frontend::error::GlslError::new(
             lp_glsl_frontend::error::ErrorCode::E0400,

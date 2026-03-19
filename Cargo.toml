@@ -28,6 +28,7 @@ members = [
     "lp-riscv/lp-riscv-emu-guest-test-app",
     "lp-glsl/lp-glsl-builtins-gen-app",
     "lp-glsl/lp-glsl-builtins-emu-app",
+    "lp-glsl/lp-glsl-builtins-wasm",
     "lp-glsl/lp-glsl-filetests-app",
     "lp-glsl/esp32-glsl-jit",
     "lp-glsl/lp-glsl-q32-metrics-app",
@@ -35,7 +36,7 @@ members = [
 ]
 resolver = "2"
 
-# Exclude lp-glsl-builtins-emu-app, esp32-glsl-jit, and fw-esp32 from default workspace builds (they're no_std, only build for RISC-V)
+# Exclude lp-glsl-builtins-emu-app, lp-glsl-builtins-wasm, esp32-glsl-jit, and fw-esp32 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
 # Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [

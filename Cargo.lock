@@ -3850,6 +3850,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-glsl-builtins-wasm"
+version = "40.0.0"
+dependencies = [
+ "lp-glsl-builtins",
+]
+
+[[package]]
 name = "lp-glsl-cranelift"
 version = "40.0.0"
 dependencies = [
@@ -3964,6 +3971,7 @@ dependencies = [
 name = "lp-glsl-wasm"
 version = "40.0.0"
 dependencies = [
+ "anyhow",
  "glsl",
  "hashbrown 0.15.5",
  "log",

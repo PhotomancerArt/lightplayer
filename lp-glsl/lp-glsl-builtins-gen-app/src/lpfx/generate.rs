@@ -101,7 +101,7 @@ pub fn generate_lpfx_fns(parsed_functions: &[ParsedLpfxFunction]) -> String {
 }
 
 /// Group functions by GLSL function name
-fn group_functions_by_name(
+pub fn group_functions_by_name(
     parsed_functions: &[ParsedLpfxFunction],
 ) -> HashMap<String, Vec<&ParsedLpfxFunction>> {
     let mut grouped: HashMap<String, Vec<&ParsedLpfxFunction>> = HashMap::new();
@@ -191,7 +191,7 @@ fn format_param_qualifier(qualifier: &ParamQualifier) -> String {
 }
 
 /// Group functions by unique signature (name + return type + parameters)
-fn group_by_signature<'a>(
+pub fn group_by_signature<'a>(
     functions: &'a [&'a ParsedLpfxFunction],
 ) -> Vec<(Vec<&'a ParsedLpfxFunction>, &'a FunctionSignature)> {
     use std::collections::HashMap;

@@ -16,4 +16,5 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]
+anyhow = { workspace = true }
 wasmtime = "42"

@@ -13,6 +13,8 @@ use wasm_encoder::Function;
 
 use crate::codegen::context::WasmCodegenContext;
 use crate::options::WasmOptions;
+use hashbrown::HashMap;
+use lp_glsl_builtin_ids::BuiltinId;
 use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::semantic::TypedFunction;
 use lp_glsl_frontend::semantic::types::Type;
@@ -26,13 +28,19 @@ pub fn emit_function(
     func: &TypedFunction,
     options: &WasmOptions,
     func_index_map: &hashbrown::HashMap<alloc::string::String, u32>,
+    builtin_func_index: &HashMap<BuiltinId, u32>,
     func_return_type: &hashbrown::HashMap<
         alloc::string::String,
         lp_glsl_frontend::semantic::types::Type,
     >,
 ) -> Result<Function, GlslDiagnostics> {
-    let mut ctx =
-        WasmCodegenContext::new(&func.parameters, options, func_index_map, func_return_type);
+    let mut ctx = WasmCodegenContext::new(
+        &func.parameters,
+        options,
+        func_index_map,
+        builtin_func_index,
+        func_return_type,
+    );
 
     // First pass: allocate locals for declarations
     for stmt in &func.body {
@@ -66,6 +74,13 @@ pub fn emit_function(
         ctx.local_types.push(wasm_encoder::ValType::I32);
         ctx.next_local_idx += 1;
     }
+    let mm0 = ctx.next_local_idx;
+    ctx.local_types.push(wasm_encoder::ValType::I32);
+    ctx.next_local_idx += 1;
+    let mm1 = ctx.next_local_idx;
+    ctx.local_types.push(wasm_encoder::ValType::I32);
+    ctx.next_local_idx += 1;
+    ctx.minmax_scratch_i32 = Some((mm0, mm1));
 
     let locals: alloc::vec::Vec<(u32, wasm_encoder::ValType)> =
         ctx.local_types.iter().map(|t| (1u32, t.clone())).collect();
@@ -81,7 +96,7 @@ pub fn emit_function(
     Ok(f)
 }
 
-fn walk_for_declarations(ctx: &mut WasmCodegenContext, stmt: &glsl::syntax::Statement) {
+pub(crate) fn walk_for_declarations(ctx: &mut WasmCodegenContext, stmt: &glsl::syntax::Statement) {
     match stmt {
         glsl::syntax::Statement::Simple(simple) => match &**simple {
             glsl::syntax::SimpleStatement::Declaration(decl) => {
