@@ -100,7 +100,6 @@ fn test_int_mul_and_assignment() {
 }
 
 #[test]
-#[ignore = "Q32 mul: wasm validation error - expected i32 found i64; needs investigation"]
 fn test_q32_float_mul() {
     let source = r#"
         float main() {

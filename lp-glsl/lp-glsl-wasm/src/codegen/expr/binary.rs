@@ -252,7 +252,7 @@ pub fn emit_binary_op(
             match (both_int, either_float, numeric) {
                 (true, _, _) => sink.i32_mul(),
                 (_, true, WasmNumericMode::Q32) => {
-                    emit_q32_mul(sink);
+                    emit_q32_mul(ctx, sink);
                     sink
                 }
                 (_, true, WasmNumericMode::Float) => sink.f32_mul(),
@@ -269,7 +269,7 @@ pub fn emit_binary_op(
             match (both_int, either_float, numeric) {
                 (true, _, _) => sink.i32_div_s(),
                 (_, true, WasmNumericMode::Q32) => {
-                    emit_q32_div(sink);
+                    emit_q32_div(ctx, sink);
                     sink
                 }
                 (_, true, WasmNumericMode::Float) => sink.f32_div(),
@@ -458,8 +458,13 @@ fn emit_q32_sub_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
     sink.end();
 }
 
-fn emit_q32_mul(sink: &mut InstructionSink) {
+fn emit_q32_mul(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
+    let tmp = ctx
+        .binary_op_i32_base
+        .expect("binary_op temps not allocated");
+    sink.local_set(tmp);
     sink.i64_extend_i32_s();
+    sink.local_get(tmp);
     sink.i64_extend_i32_s();
     sink.i64_mul();
     sink.i64_const(16);
@@ -504,10 +509,15 @@ pub fn emit_logical_or(
     Ok(WasmRValue::scalar(Type::Bool))
 }
 
-fn emit_q32_div(sink: &mut InstructionSink) {
+fn emit_q32_div(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
+    let tmp = ctx
+        .binary_op_i32_base
+        .expect("binary_op temps not allocated");
+    sink.local_set(tmp);
     sink.i64_extend_i32_s();
     sink.i64_const(16);
     sink.i64_shl();
+    sink.local_get(tmp);
     sink.i64_extend_i32_s();
     sink.i64_div_s();
     sink.i32_wrap_i64();
