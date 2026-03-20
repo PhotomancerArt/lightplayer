@@ -61,3 +61,18 @@ ivec3 test_ivec3_from_scalar_computation() {
 }
 
 // run: test_ivec3_from_scalar_computation() == ivec3(7, 7, 7)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): ivec3(scalar) must contribute exactly 3 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+int ivec3_broadcast_sum_args(ivec3 a, ivec3 b) {
+    return a.x + a.y + a.z + b.x + b.y + b.z;
+}
+
+int test_ivec3_from_scalar_as_first_call_arg() {
+    return ivec3_broadcast_sum_args(ivec3(2), ivec3(10, 20, 30));
+}
+
+// run: test_ivec3_from_scalar_as_first_call_arg() == 66

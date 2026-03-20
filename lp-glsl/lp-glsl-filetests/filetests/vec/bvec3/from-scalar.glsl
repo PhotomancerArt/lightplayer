@@ -44,3 +44,25 @@ bvec3 test_bvec3_from_scalar_in_assignment() {
 }
 
 // run: test_bvec3_from_scalar_in_assignment() == bvec3(false, false, false)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): bvec3(scalar) must contribute exactly 3 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+int bvec3_true_count(bvec3 a, bvec3 b) {
+    int s = 0;
+    if (a.x) s = s + 1;
+    if (a.y) s = s + 1;
+    if (a.z) s = s + 1;
+    if (b.x) s = s + 1;
+    if (b.y) s = s + 1;
+    if (b.z) s = s + 1;
+    return s;
+}
+
+int test_bvec3_from_scalar_as_first_call_arg() {
+    return bvec3_true_count(bvec3(true), bvec3(true, false, true));
+}
+
+// run: test_bvec3_from_scalar_as_first_call_arg() == 5

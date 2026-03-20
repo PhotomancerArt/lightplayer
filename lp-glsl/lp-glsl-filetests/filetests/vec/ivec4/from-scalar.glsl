@@ -61,3 +61,18 @@ ivec4 test_ivec4_from_scalar_computation() {
 }
 
 // run: test_ivec4_from_scalar_computation() == ivec4(7, 7, 7, 7)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): ivec4(scalar) must contribute exactly 4 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+int ivec4_broadcast_sum_args(ivec4 a, ivec4 b) {
+    return a.x + a.y + a.z + a.w + b.x + b.y + b.z + b.w;
+}
+
+int test_ivec4_from_scalar_as_first_call_arg() {
+    return ivec4_broadcast_sum_args(ivec4(2), ivec4(1, 2, 3, 4));
+}
+
+// run: test_ivec4_from_scalar_as_first_call_arg() == 18

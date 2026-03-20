@@ -68,3 +68,18 @@ vec2 test_vec2_from_scalar_computation() {
 }
 
 // run: test_vec2_from_scalar_computation() ~= vec2(7.0, 7.0)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): vec2(scalar) must contribute exactly 2 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+float vec2_broadcast_sum_args(vec2 a, vec2 b) {
+    return a.x + a.y + b.x + b.y;
+}
+
+float test_vec2_from_scalar_as_first_call_arg() {
+    return vec2_broadcast_sum_args(vec2(1.0), vec2(2.0, 3.0));
+}
+
+// run: test_vec2_from_scalar_as_first_call_arg() ~= 7.0

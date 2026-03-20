@@ -68,3 +68,18 @@ vec3 test_vec3_from_scalar_computation() {
 }
 
 // run: test_vec3_from_scalar_computation() ~= vec3(7.0, 7.0, 7.0)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): vec3(scalar) must contribute exactly 3 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+float vec3_broadcast_sum_args(vec3 a, vec3 b) {
+    return a.x + a.y + a.z + b.x + b.y + b.z;
+}
+
+float test_vec3_from_scalar_as_first_call_arg() {
+    return vec3_broadcast_sum_args(vec3(1.0), vec3(2.0, 3.0, 4.0));
+}
+
+// run: test_vec3_from_scalar_as_first_call_arg() ~= 12.0

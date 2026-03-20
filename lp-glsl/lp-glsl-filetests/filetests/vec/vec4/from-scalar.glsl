@@ -68,3 +68,18 @@ vec4 test_vec4_from_scalar_computation() {
 }
 
 // run: test_vec4_from_scalar_computation() ~= vec4(7.0, 7.0, 7.0, 7.0)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): vec4(scalar) must contribute exactly 4 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+float vec4_broadcast_sum_args(vec4 a, vec4 b) {
+    return a.x + a.y + a.z + a.w + b.x + b.y + b.z + b.w;
+}
+
+float test_vec4_from_scalar_as_first_call_arg() {
+    return vec4_broadcast_sum_args(vec4(1.0), vec4(2.0, 3.0, 4.0, 5.0));
+}
+
+// run: test_vec4_from_scalar_as_first_call_arg() ~= 18.0

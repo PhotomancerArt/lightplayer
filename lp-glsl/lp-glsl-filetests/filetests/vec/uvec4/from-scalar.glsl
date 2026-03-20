@@ -61,3 +61,18 @@ uvec4 test_uvec4_from_scalar_computation() {
 }
 
 // run: test_uvec4_from_scalar_computation() == uvec4(7u, 7u, 7u, 7u)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): uvec4(scalar) must contribute exactly 4 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+uint uvec4_broadcast_sum_args(uvec4 a, uvec4 b) {
+    return a.x + a.y + a.z + a.w + b.x + b.y + b.z + b.w;
+}
+
+uint test_uvec4_from_scalar_as_first_call_arg() {
+    return uvec4_broadcast_sum_args(uvec4(2u), uvec4(1u, 2u, 3u, 4u));
+}
+
+// run: test_uvec4_from_scalar_as_first_call_arg() == 18u

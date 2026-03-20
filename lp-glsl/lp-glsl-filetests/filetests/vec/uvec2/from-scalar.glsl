@@ -61,3 +61,18 @@ uvec2 test_uvec2_from_scalar_computation() {
 }
 
 // run: test_uvec2_from_scalar_computation() == uvec2(7u, 7u)
+
+// ----------------------------------------------------------------------------
+// Call-argument stack (WASM): uvec2(scalar) must contribute exactly 2 values
+// before the next argument (lp-glsl-wasm broadcast / multi-arg calls).
+// ----------------------------------------------------------------------------
+
+uint uvec2_broadcast_sum_args(uvec2 a, uvec2 b) {
+    return a.x + a.y + b.x + b.y;
+}
+
+uint test_uvec2_from_scalar_as_first_call_arg() {
+    return uvec2_broadcast_sum_args(uvec2(2u), uvec2(10u, 20u));
+}
+
+// run: test_uvec2_from_scalar_as_first_call_arg() == 34u
