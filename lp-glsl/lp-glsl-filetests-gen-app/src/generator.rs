@@ -65,6 +65,7 @@ fn generate_test_file(spec: &TestSpec, write: bool) -> Result<()> {
         "op-add" => crate::vec::op_add::generate(spec.vec_type, spec.dimension),
         "op-equal" => crate::vec::op_equal::generate(spec.vec_type, spec.dimension),
         "op-multiply" => crate::vec::op_multiply::generate(spec.vec_type, spec.dimension),
+        "op-subtract" => crate::vec::op_subtract::generate(spec.vec_type, spec.dimension),
         _ => {
             return Err(anyhow::anyhow!("Unknown test category: {}", spec.category));
         }

@@ -35,6 +35,18 @@ cd lp-glsl/lp-glsl-filetests
 cargo test --test filetests
 ```
 
+## Skipped vs failed (especially `wasm.q32`)
+
+Summary lines like `0/10 … (10 skipped)` mean the file or directive has
+`// @ignore(backend=wasm)` (or another target filter), not that assertions failed.
+Those cases are usually **not implemented** on the WASM backend yet (e.g. some
+`bool` control-flow or float ordering tests). They are **expected** until the
+backend catches up.
+
+Failures are reported explicitly with expected vs actual values. Use
+`lp-glsl-filetests-app test --target wasm.q32` (or `cranelift.q32`) to focus one
+backend.
+
 ## Test File Format
 
 Test files use GLSL's native comment syntax with directives and expectations:

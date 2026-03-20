@@ -257,6 +257,7 @@ fn implemented_categories() -> Vec<&'static str> {
         "op-add",
         "op-equal",
         "op-multiply",
+        "op-subtract",
     ]
     // TODO: Add more as they're implemented:
 }
@@ -403,8 +404,8 @@ mod tests {
     fn test_expand_specifier_vec4() {
         // Test expanding "vec/vec4" - should generate all categories for vec4 only
         let specs = parse_specifier("vec/vec4").unwrap();
-        // Should have 10 categories × 1 vector type (vec4) = 10 specs
-        assert_eq!(specs.len(), 10);
+        // Should have 11 categories × 1 vector type (vec4) = 11 specs
+        assert_eq!(specs.len(), 11);
         assert!(specs.iter().all(|s| s.dimension == Dimension::D4));
         assert!(specs.iter().all(|s| s.vec_type == VecType::Vec));
     }
@@ -423,15 +424,15 @@ mod tests {
     fn test_expand_specifier_all_vec() {
         // Test expanding "vec" - should generate all tests
         let specs = parse_specifier("vec").unwrap();
-        // Should have 10 categories × 3 vector types × 3 dimensions = 90 specs
-        assert_eq!(specs.len(), 90);
+        // Should have 11 categories × 3 vector types × 3 dimensions = 99 specs
+        assert_eq!(specs.len(), 99);
     }
 
     #[test]
     fn test_expand_specifier_ivec3() {
         // Test expanding "vec/ivec3" - should generate all categories for ivec3
         let specs = parse_specifier("vec/ivec3").unwrap();
-        assert_eq!(specs.len(), 10); // 10 categories
+        assert_eq!(specs.len(), 11); // 11 categories
         assert!(specs.iter().all(|s| s.vec_type == VecType::IVec));
         assert!(specs.iter().all(|s| s.dimension == Dimension::D3));
     }

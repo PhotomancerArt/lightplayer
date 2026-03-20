@@ -10,4 +10,5 @@ pub mod fn_min;
 pub mod op_add;
 pub mod op_equal;
 pub mod op_multiply;
+pub mod op_subtract;
 pub mod util;
