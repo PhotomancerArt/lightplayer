@@ -101,9 +101,12 @@ pub fn emit_vector_constructor(
             arg_rv.ty.component_count().unwrap_or(1)
         };
         if arg_count == 1 {
-            // Broadcast: replicate scalar to all components (with coercion per component)
+            // Broadcast: replicate scalar to all components (with coercion per component).
+            // Store once then load N times — `local_tee` + N×`local_get` would leave N+1 values
+            // on the stack (tee already leaves one copy), which breaks multi-arg calls (e.g.
+            // lpfx_psrdnoise(..., vec2(0.0), ...) and vec2 returns.
             let temp_idx = ctx.get_broadcast_temp(arg_rv.ty.clone());
-            sink.local_tee(temp_idx);
+            sink.local_set(temp_idx);
             for _ in 0..component_count {
                 sink.local_get(temp_idx);
                 emit_coercion(ctx, sink, &arg_rv.ty, &base_ty);

@@ -25,6 +25,9 @@ pub fn infer_expr_type(
         Expr::FloatConst(_, _) => Ok(Type::Float),
         Expr::BoolConst(_, _) => Ok(Type::Bool),
         Expr::Variable(ident, _) => {
+            if let Some(val) = ctx.global_constants.get(&ident.name) {
+                return Ok(val.glsl_type());
+            }
             let info = ctx.lookup_local(&ident.name).ok_or_else(|| {
                 lp_glsl_frontend::error::GlslDiagnostics::from(
                     lp_glsl_frontend::error::GlslError::new(

@@ -168,6 +168,7 @@ pub fn compile_to_wasm(
             &builtin_func_index,
             &func_return_type,
             &all_user_fn_params,
+            &shader.global_constants,
         )?;
         codes.function(&body);
     }

@@ -1130,3 +1130,58 @@ fn test_q32_abs_of_subtraction_runs() {
         "abs(0.5 - 1.5) should be |-1.0| = 1.0 in Q16.16"
     );
 }
+
+#[test]
+fn test_main_vec2_param_fragcoord_x_varies() {
+    let source = r#"
+        vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+            return vec4(fragCoord.x, 0.0, 0.0, 1.0);
+        }
+    "#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let m = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &m, &[]).expect("instantiate");
+    let func = instance.get_func(&mut store, "main").expect("main");
+
+    let wx = 64i32 << 16;
+    let wy = 64i32 << 16;
+    let mut results = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    // Same fragCoord.y and outputSize/time; only fragCoord.x changes — catches
+    // accidental swap of vec2 parameter component order (would look like horizontal
+    // bands in the web demo: x never affects the shader).
+    let args0 = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(3 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(0),
+    ];
+    func.call(&mut store, &args0, &mut results).expect("call0");
+    let r0 = match results[0] {
+        wasmtime::Val::I32(i) => i,
+        _ => panic!("expected i32"),
+    };
+
+    let args1 = [
+        wasmtime::Val::I32(5 << 16),
+        wasmtime::Val::I32(3 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(0),
+    ];
+    func.call(&mut store, &args1, &mut results).expect("call1");
+    let r1 = match results[0] {
+        wasmtime::Val::I32(i) => i,
+        _ => panic!("expected i32"),
+    };
+
+    assert_eq!(r0, 0, "fragCoord.x=0 -> .r 0");
+    assert_eq!(r1, 5 << 16, "fragCoord.x=5 -> .r 5.0 in Q16.16");
+}

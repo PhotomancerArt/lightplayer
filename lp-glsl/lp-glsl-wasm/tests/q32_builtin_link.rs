@@ -205,11 +205,8 @@ fn test_rainbow_shader_main_linked() {
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/basic/src/rainbow.shader/main.glsl");
-    let mut src =
+    let src =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    // `glsl_wasm` does not yet resolve module-scope `const` the same as the Cranelift batch path.
-    src = src.replace("const bool CYCLE_PALETTE = true;\n\n", "");
-    src = src.replace("CYCLE_PALETTE", "true");
     let module = glsl_wasm(&src, WasmOptions::default()).expect("compile rainbow");
     let engine = Engine::default();
     let (mut store, instance) =
@@ -238,4 +235,150 @@ fn test_rainbow_shader_main_linked() {
         };
         assert!(v.abs() < 1_000_000_000, "result[{i}]={v} out of range");
     }
+}
+
+#[test]
+fn test_scaled_coord_differs_on_row_under_linker() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let source = r#"
+        vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+            vec2 center = outputSize * 0.5;
+            vec2 dir = fragCoord - center;
+            float scale = 0.05;
+            vec2 scaledCoord = center + dir * scale;
+            return vec4(scaledCoord.x, scaledCoord.y, 0.0, 1.0);
+        }
+    "#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let wx = 64i32 << 16;
+    let wy = 64i32 << 16;
+    let mut a = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let mut b = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let args_left = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(0),
+    ];
+    let args_right = [
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(0),
+    ];
+    func.call(&mut store, &args_left, &mut a).expect("call");
+    func.call(&mut store, &args_right, &mut b).expect("call");
+    let ax = match a[0] {
+        wasmtime::Val::I32(v) => v,
+        _ => panic!("r"),
+    };
+    let bx = match b[0] {
+        wasmtime::Val::I32(v) => v,
+        _ => panic!("r"),
+    };
+    assert_ne!(
+        ax, bx,
+        "scaledCoord.x at (0,32) vs (32,32): {ax} vs {bx} (vec2 fragCoord math broken?)"
+    );
+}
+
+#[test]
+fn test_rainbow_same_row_diff_x_differs() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/basic/src/rainbow.shader/main.glsl");
+    let src =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let module = glsl_wasm(&src, WasmOptions::default()).expect("compile rainbow");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link rainbow");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let wx = 64i32 << 16;
+    let wy = 64i32 << 16;
+    let t = q32_from_float(1.0);
+
+    let mut a = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let mut b = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+
+    let args_left = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(t),
+    ];
+    let args_right = [
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(t),
+    ];
+
+    func.call(&mut store, &args_left, &mut a)
+        .expect("main left pixel should not trap");
+    func.call(&mut store, &args_right, &mut b)
+        .expect("main right pixel should not trap");
+
+    let ai: Vec<i32> = a
+        .iter()
+        .map(|v| match v {
+            wasmtime::Val::I32(i) => *i,
+            _ => panic!("expected i32 results"),
+        })
+        .collect();
+    let bi: Vec<i32> = b
+        .iter()
+        .map(|v| match v {
+            wasmtime::Val::I32(i) => *i,
+            _ => panic!("expected i32 results"),
+        })
+        .collect();
+    assert_ne!(
+        ai, bi,
+        "rainbow output at (0,32) vs (32,32) must differ; if equal, fragCoord.x is not affecting the shader (web demo horizontal bands)"
+    );
 }

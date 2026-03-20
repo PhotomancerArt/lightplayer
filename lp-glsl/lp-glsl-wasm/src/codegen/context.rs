@@ -6,6 +6,7 @@ use lp_glsl_builtin_ids::BuiltinId;
 
 use crate::codegen::numeric::WasmNumericMode;
 use crate::options::WasmOptions;
+use lp_glsl_frontend::semantic::const_eval::ConstValue;
 use lp_glsl_frontend::semantic::functions::Parameter;
 use lp_glsl_frontend::semantic::types::Type;
 
@@ -54,6 +55,8 @@ pub struct WasmCodegenContext<'a> {
     pub fn_params: &'a [Parameter],
     /// All user functions' parameters by name (`inout` writeback at call sites).
     pub all_user_fn_params: &'a hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
+    /// Module-scope `const` values (from `GlobalConstPass`).
+    pub global_constants: &'a hashbrown::HashMap<alloc::string::String, ConstValue>,
     /// Pre-allocated temps for vector constructor broadcast (index for F32, I32).
     pub broadcast_temp_f32: Option<u32>,
     pub broadcast_temp_i32: Option<u32>,
@@ -83,6 +86,7 @@ impl<'a> WasmCodegenContext<'a> {
             lp_glsl_frontend::semantic::types::Type,
         >,
         all_user_fn_params: &'a hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
+        global_constants: &'a hashbrown::HashMap<alloc::string::String, ConstValue>,
     ) -> Self {
         let mut locals = HashMap::new();
         let mut next_idx: u32 = 0;
@@ -113,6 +117,7 @@ impl<'a> WasmCodegenContext<'a> {
             func_return_type,
             fn_params: params,
             all_user_fn_params,
+            global_constants,
             broadcast_temp_f32: None,
             broadcast_temp_i32: None,
             vector_conv_f32_base: None,

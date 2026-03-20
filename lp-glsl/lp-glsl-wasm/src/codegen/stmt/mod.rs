@@ -20,6 +20,7 @@ use lp_glsl_builtin_ids::BuiltinId;
 use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::semantic::TypedFunction;
+use lp_glsl_frontend::semantic::const_eval::ConstValue;
 use lp_glsl_frontend::semantic::functions::Parameter;
 use lp_glsl_frontend::semantic::types::Type;
 
@@ -38,6 +39,7 @@ pub fn emit_function(
         lp_glsl_frontend::semantic::types::Type,
     >,
     all_user_fn_params: &hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
+    global_constants: &hashbrown::HashMap<alloc::string::String, ConstValue>,
 ) -> Result<Function, GlslDiagnostics> {
     let mut ctx = WasmCodegenContext::new(
         &func.parameters,
@@ -46,6 +48,7 @@ pub fn emit_function(
         builtin_func_index,
         func_return_type,
         all_user_fn_params,
+        global_constants,
     );
 
     // First pass: allocate locals for declarations

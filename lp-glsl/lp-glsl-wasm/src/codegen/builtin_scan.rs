@@ -19,6 +19,7 @@ use lp_glsl_builtin_ids::{
 use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::{GlslDiagnostics, GlslError};
 use lp_glsl_frontend::semantic::builtins;
+use lp_glsl_frontend::semantic::const_eval::ConstValue;
 use lp_glsl_frontend::semantic::lpfx::lpfx_fn_registry;
 use lp_glsl_frontend::semantic::type_check::{
     is_matrix_type_name, is_scalar_type_name, is_vector_type_name,
@@ -245,6 +246,7 @@ fn scan_function(
     options: &WasmOptions,
     func_index_map: &HashMap<alloc::string::String, u32>,
     func_return_type: &HashMap<alloc::string::String, Type>,
+    global_constants: &HashMap<alloc::string::String, ConstValue>,
 ) -> Result<HashSet<BuiltinId>, GlslDiagnostics> {
     let mut used = HashSet::new();
     if options.float_mode != FloatMode::Q32 {
@@ -263,6 +265,7 @@ fn scan_function(
         &no_builtin_idx,
         func_return_type,
         &empty_user_fn_params,
+        global_constants,
     );
     for stmt in &func.body {
         stmt::walk_for_declarations(&mut ctx, stmt);
@@ -285,12 +288,24 @@ pub fn scan_shader_for_builtin_imports(
         return Ok(all);
     }
     if let Some(ref main) = shader.main_function {
-        for id in scan_function(main, options, func_index_map, func_return_type)? {
+        for id in scan_function(
+            main,
+            options,
+            func_index_map,
+            func_return_type,
+            &shader.global_constants,
+        )? {
             all.insert(id);
         }
     }
     for f in &shader.user_functions {
-        for id in scan_function(f, options, func_index_map, func_return_type)? {
+        for id in scan_function(
+            f,
+            options,
+            func_index_map,
+            func_return_type,
+            &shader.global_constants,
+        )? {
             all.insert(id);
         }
     }
