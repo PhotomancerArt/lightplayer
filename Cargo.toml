@@ -33,6 +33,7 @@ members = [
     "lp-glsl/esp32-glsl-jit",
     "lp-glsl/lp-glsl-q32-metrics-app",
     "lp-glsl/lp-glsl-wasm",
+    "lp-app/web-demo",
 ]
 resolver = "2"
 

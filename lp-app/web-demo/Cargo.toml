@@ -1,0 +1,19 @@
+[package]
+name = "web-demo"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "GLSL → WASM browser demo (compiler runs in-browser)"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lp-glsl-wasm = { path = "../../lp-glsl/lp-glsl-wasm" }
+wasm-bindgen = "0.2"

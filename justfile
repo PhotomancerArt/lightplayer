@@ -30,6 +30,52 @@ install-rv32-target:
 generate-builtins:
     cargo run --bin lp-glsl-builtins-gen-app -p lp-glsl-builtins-gen-app
 
+# Ensure wasm32-unknown-unknown target is installed (web-demo, builtins wasm)
+wasm32_target := "wasm32-unknown-unknown"
+
+install-wasm32-target:
+    @if ! rustup target list --installed | grep -q "^{{ wasm32_target }}$"; then \
+        echo "Installing target {{ wasm32_target }}..."; \
+        rustup target add {{ wasm32_target }}; \
+    else \
+        echo "Target {{ wasm32_target }} already installed"; \
+    fi
+
+# ============================================================================
+# Web demo (GLSL compiler in browser)
+# ============================================================================
+
+# Build compiler WASM (wasm-bindgen), builtins WASM, copy artifacts into www/
+web-demo-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building builtins WASM..."
+    cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release
+    echo "Building web-demo (compiler) for wasm32..."
+    cargo build -p web-demo --target wasm32-unknown-unknown --release
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating JS glue (wasm-bindgen)..."
+    wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
+        --out-dir lp-app/web-demo/www/pkg --target web
+    mkdir -p lp-app/web-demo/www
+    cp target/wasm32-unknown-unknown/release/lp_glsl_builtins_wasm.wasm lp-app/web-demo/www/builtins.wasm
+    cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
+    echo "Artifacts: lp-app/web-demo/www/ (index.html, builtins.wasm, pkg/)"
+
+# Build and serve the web demo (installs miniserve via cargo if missing)
+web-demo: web-demo-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v miniserve >/dev/null 2>&1; then
+        echo "miniserve not found; installing with cargo install miniserve..."
+        cargo install miniserve
+    fi
+    echo "Serving http://127.0.0.1:2812 (Ctrl+C to stop)"
+    miniserve --index index.html -p 2812 lp-app/web-demo/www/
+
 # ============================================================================
 # Build commands - Workspace-wide
 # ============================================================================

@@ -18,6 +18,9 @@ platforms.
     - `lp-glsl-jit-util/` - JIT compilation utilities
     - `lpfx-impl-macro/` - Macros for builtin implementations
 
+- **Browser demo** (workspace root `lp-app/web-demo/`)
+    - In-browser GLSL → WASM compiler and canvas demo (`just web-demo` from repo root)
+
 - **Applications**
     - `esp32-glsl-jit/` - ESP32 GLSL JIT compiler and runtime
     - `lp-glsl-filetests-app/` - Command-line tool for running GLSL filetests

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GLSL → WASM demo</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 12px;
+            background: #111;
+            color: #e0e0e0;
+        }
+
+        #app {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        #editor-pane {
+            flex: 1 1 420px;
+            min-height: 400px;
+        }
+
+        #canvas-pane {
+            flex: 0 0 auto;
+        }
+
+        #source {
+            width: 100%;
+            height: 520px;
+            box-sizing: border-box;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            background: #1a1a1a;
+            color: #d4d4d4;
+            border: 1px solid #333;
+            padding: 8px;
+            resize: vertical;
+        }
+
+        #output {
+            width: 512px;
+            height: 512px;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            border: 1px solid #444;
+            background: #000;
+        }
+
+        #status {
+            font-size: 12px;
+            color: #888;
+            margin-top: 6px;
+        }
+
+        #errors {
+            margin-top: 12px;
+            padding: 8px;
+            background: #2a1515;
+            border: 1px solid #633;
+            color: #f88;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow: auto;
+        }
+
+        #errors:empty {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<h1>GLSL → WASM (Q32)</h1>
+<p style="font-size: 13px; color: #888;">Compiler runs in the browser. Edit GLSL; recompiles after a
+    short pause.</p>
+<div id="app">
+    <div id="editor-pane">
+        <textarea id="source" spellcheck="false" placeholder="Loading default shader…"></textarea>
+    </div>
+    <div id="canvas-pane">
+        <canvas id="output" width="64" height="64"></canvas>
+        <div id="status"></div>
+    </div>
+</div>
+<pre id="errors"></pre>
+
+<script type="module">
+  import init, {compile_glsl} from './pkg/web_demo.js';
+
+  const WIDTH = 64;
+  const HEIGHT = 64;
+  const canvas = document.getElementById('output');
+  // Default 2D backing store; avoid willReadFrequently — we only write via
+  // putImageData each frame, and "read-optimized" mode tanks compositing FPS.
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.createImageData(WIDTH, HEIGHT);
+  const data = imageData.data;
+  const sourceEl = document.getElementById('source');
+  const errorsEl = document.getElementById('errors');
+  const statusEl = document.getElementById('status');
+
+  /** Q16.16 component in [0,1] → 0–255 */
+  function q32ColorToU8(v) {
+    const n = (v * 255) / 65536;
+    if (n <= 0) return 0;
+    if (n >= 255) return 255;
+    return n | 0;
+  }
+
+  /** Multi-value vec4 from WASM `main` (array-like, length >= 4). No alloc. */
+  function assertVec4MainResult(r) {
+    if (r == null || typeof r !== 'object' || typeof r.length !== 'number' || r.length < 4) {
+      throw new Error('main() must return four i32 (vec4); got: ' + typeof r);
+    }
+  }
+
+  let sharedMemory = null;
+  let builtinsInstance = null;
+  let shaderInstance = null;
+  let compileTimeout = null;
+  let lastError = '';
+
+  async function loadDefaultSource() {
+    try {
+      const res = await fetch('rainbow-default.glsl');
+      if (res.ok) {
+        sourceEl.value = await res.text();
+        return;
+      }
+    } catch (_) { /* ignore */
+    }
+    sourceEl.value = 'vec4 main(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(1.0, 0.0, 1.0, 1.0);\n}\n';
+  }
+
+  function setError(msg) {
+    lastError = msg;
+    errorsEl.textContent = msg || '';
+  }
+
+  function compileShader(source) {
+    try {
+      const wasmBytes = compile_glsl(source);
+      const module = new WebAssembly.Module(wasmBytes);
+      const instance = new WebAssembly.Instance(module, {
+        builtins: builtinsInstance.exports,
+        env: {memory: sharedMemory},
+      });
+      shaderInstance = instance;
+      setError('');
+      return true;
+    } catch (e) {
+      setError(String(e));
+      return false;
+    }
+  }
+
+  function scheduleCompile() {
+    clearTimeout(compileTimeout);
+    compileTimeout = setTimeout(() => {
+      compileShader(sourceEl.value);
+    }, 300);
+  }
+
+  let frames = 0;
+  let lastFpsT = performance.now();
+
+  function render(timestamp) {
+    requestAnimationFrame(render);
+
+    if (!shaderInstance) return;
+    const mainFn = shaderInstance.exports.main;
+    if (typeof mainFn !== 'function') return;
+
+    const timeSec = timestamp / 1000;
+    const q32Time = Math.round(timeSec * 65536);
+    const q32W = WIDTH << 16;
+    const q32H = HEIGHT << 16;
+
+    try {
+      const probe = mainFn(0, 0, q32W, q32H, q32Time);
+      assertVec4MainResult(probe);
+      for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+          const raw = mainFn(x << 16, y << 16, q32W, q32H, q32Time);
+          const o = (y * WIDTH + x) * 4;
+          data[o] = q32ColorToU8(raw[0]);
+          data[o + 1] = q32ColorToU8(raw[1]);
+          data[o + 2] = q32ColorToU8(raw[2]);
+          data[o + 3] = q32ColorToU8(raw[3]);
+        }
+      }
+    } catch (e) {
+      setError('Runtime: ' + e);
+      return;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    frames++;
+    const now = performance.now();
+    if (now - lastFpsT >= 1000) {
+      const fps = (frames * 1000) / (now - lastFpsT);
+      statusEl.textContent = lastError
+        ? 'See error panel (previous successful shader may still be running).'
+        : `~${fps.toFixed(0)} fps · ${WIDTH}×${HEIGHT} · Q32`;
+      frames = 0;
+      lastFpsT = now;
+    }
+  }
+
+  async function main() {
+    await init();
+
+    const builtinsRes = await fetch('builtins.wasm');
+    if (!builtinsRes.ok) {
+      setError('Failed to fetch builtins.wasm. Run: just web-demo-build');
+      return;
+    }
+    const builtinsBytes = await builtinsRes.arrayBuffer();
+
+    // Must be >= builtins `env.memory` import minimum (currently 17 pages from
+    // `lp_glsl_builtins_wasm.wasm`; wasmtime tests use max(shader, builtins)).
+    sharedMemory = new WebAssembly.Memory({initial: 17});
+    const builtinsMod = await WebAssembly.instantiate(builtinsBytes, {
+      env: {memory: sharedMemory},
+    });
+    builtinsInstance = builtinsMod.instance;
+
+    await loadDefaultSource();
+    compileShader(sourceEl.value);
+    sourceEl.addEventListener('input', scheduleCompile);
+
+    requestAnimationFrame(render);
+  }
+
+  main().catch((e) => {
+    setError('Startup: ' + e);
+  });
+</script>
+</body>
+</html>

@@ -7166,6 +7166,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "web-demo"
+version = "40.0.0"
+dependencies = [
+ "lp-glsl-wasm",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "web-sys"
 version = "0.3.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
