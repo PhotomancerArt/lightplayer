@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Scalars: uvec4(uint, uint, uint, uint) - from 4 uint values

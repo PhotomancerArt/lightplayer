@@ -143,22 +143,30 @@ impl<'a> WasmCodegenContext<'a> {
     /// Use pre-allocated broadcast temp. Must call pre_allocate_broadcast_temps first.
     pub fn get_broadcast_temp(&self, ty: Type) -> u32 {
         match ty {
-            Type::Float => self
-                .broadcast_temp_f32
-                .expect("broadcast temps not pre-allocated"),
-            Type::Int | Type::UInt | Type::Bool => self
-                .broadcast_temp_i32
-                .expect("broadcast temps not pre-allocated"),
+            Type::Float => {
+                if self.numeric == WasmNumericMode::Q32 {
+                    self.broadcast_temp_i32
+                } else {
+                    self.broadcast_temp_f32
+                }
+            }
+            Type::Int | Type::UInt | Type::Bool => self.broadcast_temp_i32,
             _ => panic!("get_broadcast_temp requires scalar type, got {:?}", ty),
         }
+        .expect("broadcast temps not pre-allocated")
     }
 
     /// Base index for vector conversion temp (4 slots). For vec conversion store/load.
     pub fn vector_conv_temp(&self, ty: &Type, component_count: usize) -> u32 {
-        let base = if *ty == Type::Float {
-            self.vector_conv_f32_base
-        } else {
-            self.vector_conv_i32_base
+        let base = match *ty {
+            Type::Float => {
+                if self.numeric == WasmNumericMode::Q32 {
+                    self.vector_conv_i32_base
+                } else {
+                    self.vector_conv_f32_base
+                }
+            }
+            _ => self.vector_conv_i32_base,
         };
         let b = base.expect("vector conv temps not pre-allocated");
         assert!(component_count <= 4);
@@ -167,17 +175,20 @@ impl<'a> WasmCodegenContext<'a> {
 
     /// Base index for binary op temps (8 slots: 0-3 lhs, 4-7 rhs).
     pub fn binary_op_temp_base(&self, ty: &Type) -> u32 {
-        let base = if ty.is_vector() {
-            let b = ty.vector_base_type().unwrap();
-            if b == Type::Float {
-                self.binary_op_f32_base
-            } else {
-                self.binary_op_i32_base
-            }
-        } else if *ty == Type::Float {
-            self.binary_op_f32_base
+        let scalar = if ty.is_vector() {
+            ty.vector_base_type().unwrap()
         } else {
+            ty.clone()
+        };
+        let use_i32 = match scalar {
+            Type::Int | Type::UInt | Type::Bool => true,
+            Type::Float => self.numeric == WasmNumericMode::Q32,
+            _ => panic!("binary_op_temp_base: unsupported scalar {:?}", scalar),
+        };
+        let base = if use_i32 {
             self.binary_op_i32_base
+        } else {
+            self.binary_op_f32_base
         };
         base.expect("binary op temps not pre-allocated")
     }

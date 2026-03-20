@@ -99,7 +99,8 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
         scaledCoord,
         vec2(0.0),
         time,
-        gradient
+        gradient,
+        0u
     );
 
     float hue = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;

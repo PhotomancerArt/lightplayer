@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // lpfx_hue2rgb(): Convert hue value to RGB color

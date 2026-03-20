@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/uvec4/op-add --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add: uvec4 + uvec4 -> uvec4 (component-wise)

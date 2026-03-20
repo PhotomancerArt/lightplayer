@@ -115,6 +115,7 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
                 GlslParamKind::Vec2,
                 GlslParamKind::Float,
                 GlslParamKind::Vec2,
+                GlslParamKind::UInt,
             ],
         ) => Some(BuiltinId::LpfxPsrdnoise2Q32),
         (
@@ -124,6 +125,7 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
                 GlslParamKind::Vec3,
                 GlslParamKind::Float,
                 GlslParamKind::Vec3,
+                GlslParamKind::UInt,
             ],
         ) => Some(BuiltinId::LpfxPsrdnoise3Q32),
         ("lpfx_random", &[GlslParamKind::Float, GlslParamKind::UInt]) => {

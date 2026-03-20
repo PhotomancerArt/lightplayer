@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Subtract: uvec4 - uvec4 -> uvec4 (component-wise)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Scalar: uvec4(uint) - broadcast single uint to all components

@@ -136,3 +136,106 @@ fn test_q32_sin_linked_execution() {
         "sin(1.0) Q32: got {got} want ~{want} (float ref ±1 ulp slack)"
     );
 }
+
+fn q32_from_float(f: f64) -> i32 {
+    (f * 65536.0).round() as i32
+}
+
+#[test]
+fn test_lpfx_worley_linked() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let source = r#"
+        float main() {
+            return lpfx_worley(vec2(1.0, 2.0), 0u);
+        }
+    "#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let typed = func.typed::<(), i32>(&store).expect("sig");
+    let _ = typed.call(&mut store, ()).expect("call should not trap");
+}
+
+#[test]
+fn test_lpfx_psrdnoise_linked_writes_gradient() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let source = r#"
+        float main() {
+            vec2 g;
+            return lpfx_psrdnoise(vec2(0.5, 0.25), vec2(0.0), 0.0, g, 0u);
+        }
+    "#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let typed = func.typed::<(), i32>(&store).expect("sig");
+    let got = typed.call(&mut store, ()).expect("call");
+    assert!(got.abs() < 1_000_000, "psrdnoise scalar sanity, got {got}");
+}
+
+#[test]
+fn test_rainbow_shader_main_linked() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/basic/src/rainbow.shader/main.glsl");
+    let mut src =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    // `glsl_wasm` does not yet resolve module-scope `const` the same as the Cranelift batch path.
+    src = src.replace("const bool CYCLE_PALETTE = true;\n\n", "");
+    src = src.replace("CYCLE_PALETTE", "true");
+    let module = glsl_wasm(&src, WasmOptions::default()).expect("compile rainbow");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link rainbow");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let mut results = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let args = [
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(q32_from_float(200.0)),
+        wasmtime::Val::I32(q32_from_float(200.0)),
+        wasmtime::Val::I32(q32_from_float(1.0)),
+    ];
+    func.call(&mut store, &args, &mut results)
+        .expect("main(vec2, vec2, float) should not trap");
+
+    for (i, r) in results.iter().enumerate() {
+        let wasmtime::Val::I32(v) = r else {
+            panic!("result {i} not i32");
+        };
+        assert!(v.abs() < 1_000_000_000, "result[{i}]={v} out of range");
+    }
+}

@@ -958,3 +958,175 @@ fn test_vec2_not_equal() {
         1
     );
 }
+
+#[test]
+fn test_q32_floor_inline() {
+    let source = r#"
+        float main() {
+            return floor(1.7);
+        }
+    "#;
+    let options = WasmOptions::default();
+    let module = glsl_wasm(source, options).expect("compile floor");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let wasm_module = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &wasm_module, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "main")
+        .expect("get_func")
+        .typed::<(), i32>(&store)
+        .expect("typed");
+    assert_eq!(func.call(&mut store, ()).expect("call"), 65536);
+}
+
+#[test]
+fn test_q32_fract_inline() {
+    let source = r#"
+        float main() {
+            return fract(1.7);
+        }
+    "#;
+    let options = WasmOptions::default();
+    let module = glsl_wasm(source, options).expect("compile fract");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let wasm_module = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &wasm_module, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "main")
+        .expect("get_func")
+        .typed::<(), i32>(&store)
+        .expect("typed");
+    let got = func.call(&mut store, ()).expect("call");
+    let want = (0.7_f64 * 65536.0).round() as i32;
+    assert!(
+        (got - want).abs() <= 2,
+        "fract(1.7) Q32 got {got} want ~{want}"
+    );
+}
+
+#[test]
+fn test_q32_floor_vec3() {
+    let source = r#"
+        vec3 main() {
+            return floor(vec3(1.1, 2.9, -0.3));
+        }
+    "#;
+    let options = WasmOptions::default();
+    let module = glsl_wasm(source, options).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let wasm_module = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &wasm_module, &[]).expect("instantiate");
+    let func = instance.get_func(&mut store, "main").expect("get_func");
+    let mut results = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    func.call(&mut store, &[], &mut results).expect("call");
+    assert_eq!(results[0].unwrap_i32(), 65536);
+    let exp2 = (2.0_f64 * 65536.0).round() as i32;
+    assert_eq!(results[1].unwrap_i32(), exp2);
+    let exp3 = (-1.0_f64 * 65536.0).round() as i32;
+    assert_eq!(results[2].unwrap_i32(), exp3);
+}
+
+#[test]
+fn test_q32_atan2_compiles() {
+    let source = r#"
+        float main() {
+            return atan(1.0, 0.5);
+        }
+    "#;
+    let options = WasmOptions::default();
+    let m = glsl_wasm(source, options).expect("compile atan2");
+    assert!(!m.bytes.is_empty());
+}
+
+#[test]
+fn test_q32_cos_exp_compiles() {
+    let cos = glsl_wasm(
+        r#" float main() { return cos(1.0); } "#,
+        WasmOptions::default(),
+    )
+    .expect("cos");
+    let exp = glsl_wasm(
+        r#" float main() { return exp(1.0); } "#,
+        WasmOptions::default(),
+    )
+    .expect("exp");
+    assert!(!cos.bytes.is_empty() && !exp.bytes.is_empty());
+}
+
+#[test]
+fn test_lpfx_worley_compiles() {
+    let source = r#"
+        float main() {
+            return lpfx_worley(vec2(1.0, 2.0), 0u);
+        }
+    "#;
+    let m = glsl_wasm(source, WasmOptions::default()).expect("worley");
+    assert!(!m.bytes.is_empty());
+}
+
+#[test]
+fn test_lpfx_fbm_compiles() {
+    let source = r#"
+        float main() {
+            return lpfx_fbm(vec2(1.0, 2.0), 3, 0u);
+        }
+    "#;
+    let m = glsl_wasm(source, WasmOptions::default()).expect("fbm");
+    assert!(!m.bytes.is_empty());
+}
+
+#[test]
+fn test_lpfx_psrdnoise_compiles() {
+    let source = r#"
+        float main() {
+            vec2 g;
+            return lpfx_psrdnoise(vec2(1.0), vec2(0.0), 0.5, g, 0u);
+        }
+    "#;
+    let m = glsl_wasm(source, WasmOptions::default()).expect("psrdnoise");
+    assert!(!m.bytes.is_empty());
+}
+
+#[test]
+fn test_q32_abs_negative_literal_runs() {
+    let source = r#"float main() { return abs(-1.0); }"#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let m = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &m, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "main")
+        .expect("main")
+        .typed::<(), i32>(&store)
+        .expect("typed");
+    let got = func.call(&mut store, ()).expect("call");
+    assert_eq!(got, 65536, "abs(-1.0) should be 1.0 in Q16.16");
+}
+
+#[test]
+fn test_q32_abs_of_subtraction_runs() {
+    let source = r#"float main() { return abs(0.5 - 1.5); }"#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let m = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &m, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "main")
+        .expect("main")
+        .typed::<(), i32>(&store)
+        .expect("typed");
+    let got = func.call(&mut store, ()).expect("call");
+    assert_eq!(
+        got, 65536,
+        "abs(0.5 - 1.5) should be |-1.0| = 1.0 in Q16.16"
+    );
+}

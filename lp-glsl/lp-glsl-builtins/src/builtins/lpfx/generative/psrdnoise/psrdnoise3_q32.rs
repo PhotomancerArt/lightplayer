@@ -403,7 +403,7 @@ pub fn lpfx_psrdnoise3(
 /// Noise value as i32 (Q32 fixed-point format), approximately in range [-1, 1]
 #[lpfx_impl_macro::lpfx_impl(
     q32,
-    "float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient)"
+    "float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)"
 )]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]

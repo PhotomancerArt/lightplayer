@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Vectors: uvec3(uvec2, uint), uvec3(uint, uvec2) - vector combinations

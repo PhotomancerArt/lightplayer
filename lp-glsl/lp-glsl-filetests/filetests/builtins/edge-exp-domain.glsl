@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Exponential domain error tests
@@ -14,7 +13,6 @@ float test_pow_negative_base() {
     return pow(-2.0, 3.0);
 }
 
-// @unimplemented()
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {

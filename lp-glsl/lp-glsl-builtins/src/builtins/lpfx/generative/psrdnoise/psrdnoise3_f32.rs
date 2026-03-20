@@ -40,7 +40,7 @@ use crate::glsl::q32::types::q32::Q32;
 /// Noise value approximately in range [-1, 1] as f32
 #[lpfx_impl_macro::lpfx_impl(
     f32,
-    "float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient)"
+    "float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)"
 )]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]

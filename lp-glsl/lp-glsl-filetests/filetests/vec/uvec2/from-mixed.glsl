@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: uvec2(int, float, bool, ivec2, bvec2, vec2) - type conversions

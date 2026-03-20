@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // lpfx_fbm(): Fractional Brownian Motion noise functions

@@ -34,6 +34,8 @@ pub(crate) fn q32_builtin_import_suppressed(name: &str, argc: usize) -> bool {
             | ("sign", 1)
             | ("mod", 2)
             | ("smoothstep", 3)
+            | ("floor", 1)
+            | ("fract", 1)
     )
 }
 
@@ -62,6 +64,7 @@ pub fn try_emit_inline_builtin(
         )),
         ("step", 2) => Some(emit_step(ctx, sink, full_call, &args[0], &args[1], options)),
         ("sign", 1) => Some(emit_sign(ctx, sink, full_call, &args[0], options)),
+        ("floor", 1) => Some(emit_floor(ctx, sink, full_call, &args[0], options)),
         ("fract", 1) => Some(emit_fract(ctx, sink, full_call, &args[0], options)),
         ("mod", 2) => Some(emit_mod(ctx, sink, full_call, &args[0], &args[1], options)),
         ("smoothstep", 3) => Some(emit_smoothstep(
@@ -488,7 +491,6 @@ fn emit_i32_abs_from_stack(
 ) -> Result<(), GlslDiagnostics> {
     sink.local_tee(ta);
     sink.i32_const(0);
-    sink.local_get(ta);
     sink.i32_lt_s();
     sink.if_(BlockType::Result(ValType::I32));
     sink.i32_const(0);
@@ -841,6 +843,65 @@ fn emit_sign(
     Ok(WasmRValue::from_type(return_ty))
 }
 
+fn emit_floor_q32_on_stack(sink: &mut InstructionSink) {
+    sink.i32_const(16);
+    sink.i32_shr_s();
+    sink.i32_const(16);
+    sink.i32_shl();
+}
+
+fn emit_floor(
+    ctx: &mut WasmCodegenContext,
+    sink: &mut InstructionSink,
+    full_call: &Expr,
+    arg: &Expr,
+    options: &WasmOptions,
+) -> Result<WasmRValue, GlslDiagnostics> {
+    let return_ty = infer_expr_type(ctx, full_call)?;
+    let arg_ty = infer_expr_type(ctx, arg)?;
+    if !is_float_gentype(&arg_ty) {
+        return Err(GlslError::new(
+            ErrorCode::E0400,
+            alloc::format!("`floor` for WASM expects float genType, got {:?}", arg_ty),
+        )
+        .into());
+    }
+
+    let dim = if arg_ty.is_vector() {
+        arg_ty.component_count().unwrap() as u32
+    } else {
+        1
+    };
+
+    let numeric = WasmNumericMode::from(options.float_mode);
+    match numeric {
+        WasmNumericMode::Float => {
+            expr::emit_rvalue(ctx, sink, arg, options)?;
+            for _ in 0..dim {
+                sink.f32_floor();
+            }
+        }
+        WasmNumericMode::Q32 => {
+            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    "binary op scratch (i32) not allocated",
+                ))
+            })?;
+            if dim > 4 {
+                return Err(GlslError::new(ErrorCode::E0400, "`floor` dim too large").into());
+            }
+            store_q32_float_arg(ctx, sink, arg, &arg_ty, dim, ib, options)?;
+            for k in 0..dim {
+                sink.local_get(ib + lhs_offset(&arg_ty, k));
+                emit_floor_q32_on_stack(sink);
+            }
+        }
+    }
+
+    Ok(WasmRValue::from_type(return_ty))
+}
+
 fn emit_fract(
     ctx: &mut WasmCodegenContext,
     sink: &mut InstructionSink,
@@ -848,14 +909,6 @@ fn emit_fract(
     arg: &Expr,
     options: &WasmOptions,
 ) -> Result<WasmRValue, GlslDiagnostics> {
-    if options.float_mode != lp_glsl_frontend::FloatMode::Float {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            "`fract` for WASM is only implemented for Float mode (not Q32 fixed-point)",
-        )
-        .into());
-    }
-
     let return_ty = infer_expr_type(ctx, full_call)?;
     let arg_ty = infer_expr_type(ctx, arg)?;
     if !is_float_gentype(&arg_ty) {
@@ -872,25 +925,50 @@ fn emit_fract(
         1
     };
 
-    let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-        GlslDiagnostics::from(GlslError::new(
-            ErrorCode::E0400,
-            "binary op scratch (f32) not allocated",
-        ))
-    })?;
-    let tee_slot = fb + dim;
-    if tee_slot > fb + 7 {
-        return Err(GlslError::new(ErrorCode::E0400, "`fract` scratch overflow").into());
-    }
+    let numeric = WasmNumericMode::from(options.float_mode);
+    match numeric {
+        WasmNumericMode::Float => {
+            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    "binary op scratch (f32) not allocated",
+                ))
+            })?;
+            let tee_slot = fb + dim;
+            if tee_slot > fb + 7 {
+                return Err(GlslError::new(ErrorCode::E0400, "`fract` scratch overflow").into());
+            }
 
-    store_f32_arg(ctx, sink, arg, &arg_ty, dim, fb, options)?;
-    for k in 0..dim {
-        // `v - floor(v)`: stack must be `v`, `floor` (top) before `f32.sub`.
-        sink.local_get(fb + lhs_offset(&arg_ty, k));
-        sink.local_tee(tee_slot);
-        sink.local_get(tee_slot);
-        sink.f32_floor();
-        sink.f32_sub();
+            store_f32_arg(ctx, sink, arg, &arg_ty, dim, fb, options)?;
+            for k in 0..dim {
+                sink.local_get(fb + lhs_offset(&arg_ty, k));
+                sink.local_tee(tee_slot);
+                sink.local_get(tee_slot);
+                sink.f32_floor();
+                sink.f32_sub();
+            }
+        }
+        WasmNumericMode::Q32 => {
+            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
+                GlslDiagnostics::from(GlslError::new(
+                    ErrorCode::E0400,
+                    "binary op scratch (i32) not allocated",
+                ))
+            })?;
+            if dim > 4 {
+                return Err(GlslError::new(ErrorCode::E0400, "`fract` dim too large").into());
+            }
+            store_q32_float_arg(ctx, sink, arg, &arg_ty, dim, ib, options)?;
+            for k in 0..dim {
+                sink.local_get(ib + lhs_offset(&arg_ty, k));
+                sink.local_get(ib + lhs_offset(&arg_ty, k));
+                sink.i32_const(16);
+                sink.i32_shr_s();
+                sink.i32_const(16);
+                sink.i32_shl();
+                sink.i32_sub();
+            }
+        }
     }
 
     Ok(WasmRValue::from_type(return_ty))

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From uvec: uvec3(uvec3) - identity constructor, uvec3(uvec4) - shortening constructor, uvec3(uvec2, uint) - lengthening constructor

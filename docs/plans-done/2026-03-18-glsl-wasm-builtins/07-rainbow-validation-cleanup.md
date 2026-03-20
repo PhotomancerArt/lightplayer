@@ -31,7 +31,7 @@ just build-fw-esp32   # if applicable
 ## Plan cleanup
 
 - Add `summary.md` with completed items and follow-ups (e.g. texture upload offsets).
-- Move `docs/plans/2026-03-18-glsl-wasm-builtins/` → `docs/plans-done/` when work is finished.
+- Archived at `docs/plans-done/2026-03-18-glsl-wasm-builtins/`.
 
 ## Commit
 

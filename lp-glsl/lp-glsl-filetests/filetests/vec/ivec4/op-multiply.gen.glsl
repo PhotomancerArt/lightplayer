@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/ivec4/op-multiply --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply: ivec4 * ivec4 -> ivec4 (component-wise)

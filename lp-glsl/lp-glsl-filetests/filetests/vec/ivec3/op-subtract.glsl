@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Subtract: ivec3 - ivec3 -> ivec3 (component-wise)

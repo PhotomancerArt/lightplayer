@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Modulo: uvec2 % uvec2 -> uvec2 (component-wise)

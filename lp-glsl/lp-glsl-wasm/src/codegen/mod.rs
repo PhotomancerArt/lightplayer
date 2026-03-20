@@ -5,6 +5,7 @@ mod builtin_wasm_import_types;
 pub mod builtin_scan;
 pub mod context;
 pub mod expr;
+pub mod memory;
 pub mod numeric;
 pub mod rvalue;
 pub mod stmt;

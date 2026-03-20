@@ -4,10 +4,13 @@ use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
 use lp_glsl_cranelift::semantic::functions::FunctionSignature;
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
+use lp_glsl_wasm::types::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
-use wasmtime::{Config, Engine, Instance, Module, Store};
+use wasmtime::{Config, Engine, Instance, Store};
+
+use crate::test_run::wasm_link;
 
 /// Q16.16 fixed-point scale factor.
 const Q16_16_SCALE: f32 = 65536.0;
@@ -36,18 +39,8 @@ impl WasmExecutable {
             ))
         })?;
         let mut store = Store::new(&engine, ());
-        let wasm_module = Module::new(&engine, &wasm_bytes).map_err(|e| {
-            GlslDiagnostics::from(GlslError::new(
-                ErrorCode::E0400,
-                format!("failed to load WASM module: {e}"),
-            ))
-        })?;
-        let instance = wasmtime::Instance::new(&mut store, &wasm_module, &[]).map_err(|e| {
-            GlslDiagnostics::from(GlslError::new(
-                ErrorCode::E0400,
-                format!("failed to instantiate WASM: {e}"),
-            ))
-        })?;
+        let instance = wasm_link::instantiate_wasm_module(&engine, &mut store, &wasm_bytes)
+            .map_err(|e| GlslDiagnostics::from(e))?;
 
         let exports: HashMap<String, FunctionSignature> = module
             .exports
@@ -69,6 +62,48 @@ impl WasmExecutable {
         self.store
             .set_fuel(DEFAULT_MAX_INSTRUCTIONS)
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("failed to set fuel: {e}")))
+    }
+
+    fn call_wasm_multi(
+        &mut self,
+        name: &str,
+        args: &[GlslValue],
+    ) -> Result<Vec<wasmtime::Val>, GlslError> {
+        let sig = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+
+        let func = self
+            .instance
+            .get_func(&mut self.store, name)
+            .ok_or_else(|| {
+                GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+            })?;
+
+        let param_types: Vec<WasmValType> = sig
+            .parameters
+            .iter()
+            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
+            .collect();
+        let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
+        for (v, t) in args.iter().zip(param_types.iter()) {
+            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
+        }
+
+        let result_types = glsl_type_to_wasm_components(&sig.return_type, self.float_mode);
+        let mut results: Vec<wasmtime::Val> = result_types
+            .iter()
+            .map(|t| match t {
+                WasmValType::I32 => wasmtime::Val::I32(0),
+                WasmValType::F32 => wasmtime::Val::F32(0f32.to_bits()),
+                _ => wasmtime::Val::I32(0),
+            })
+            .collect();
+
+        self.prepare_call()?;
+        func.call(&mut self.store, &wasm_args, &mut results)
+            .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM trap: {e}")))?;
+        Ok(results)
     }
 }
 
@@ -220,50 +255,148 @@ impl GlslExecutable for WasmExecutable {
 
     fn call_bvec(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _dim: usize,
+        name: &str,
+        args: &[GlslValue],
+        dim: usize,
     ) -> Result<Vec<bool>, GlslError> {
-        Err(GlslError::new(
-            ErrorCode::E0400,
-            "WASM: vectors not yet supported",
-        ))
+        let sig = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+        let ok = matches!(
+            (&sig.return_type, dim),
+            (Type::BVec2, 2) | (Type::BVec3, 3) | (Type::BVec4, 4)
+        );
+        if !ok {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_bvec: function '{name}' returns {:?}, expected bvec{dim}",
+                    sig.return_type
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        results
+            .into_iter()
+            .map(|r| match r {
+                wasmtime::Val::I32(i) => Ok(i != 0),
+                _ => Err(GlslError::new(
+                    ErrorCode::E0400,
+                    "WASM: unexpected result type in bvec call",
+                )),
+            })
+            .collect()
     }
 
     fn call_ivec(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _dim: usize,
+        name: &str,
+        args: &[GlslValue],
+        dim: usize,
     ) -> Result<Vec<i32>, GlslError> {
-        Err(GlslError::new(
-            ErrorCode::E0400,
-            "WASM: vectors not yet supported",
-        ))
+        let sig = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+        let ok = matches!(
+            (&sig.return_type, dim),
+            (Type::IVec2, 2) | (Type::IVec3, 3) | (Type::IVec4, 4)
+        );
+        if !ok {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_ivec: function '{name}' returns {:?}, expected ivec{dim}",
+                    sig.return_type
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        results
+            .into_iter()
+            .map(|r| match r {
+                wasmtime::Val::I32(i) => Ok(i),
+                _ => Err(GlslError::new(
+                    ErrorCode::E0400,
+                    "WASM: unexpected result type in ivec call",
+                )),
+            })
+            .collect()
     }
 
     fn call_uvec(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _dim: usize,
+        name: &str,
+        args: &[GlslValue],
+        dim: usize,
     ) -> Result<Vec<u32>, GlslError> {
-        Err(GlslError::new(
-            ErrorCode::E0400,
-            "WASM: vectors not yet supported",
-        ))
+        let sig = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+        let ok = matches!(
+            (&sig.return_type, dim),
+            (Type::UVec2, 2) | (Type::UVec3, 3) | (Type::UVec4, 4)
+        );
+        if !ok {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_uvec: function '{name}' returns {:?}, expected uvec{dim}",
+                    sig.return_type
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        results
+            .into_iter()
+            .map(|r| match r {
+                wasmtime::Val::I32(i) => Ok(i as u32),
+                _ => Err(GlslError::new(
+                    ErrorCode::E0400,
+                    "WASM: unexpected result type in uvec call",
+                )),
+            })
+            .collect()
     }
 
     fn call_vec(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _dim: usize,
+        name: &str,
+        args: &[GlslValue],
+        dim: usize,
     ) -> Result<Vec<f32>, GlslError> {
-        Err(GlslError::new(
-            ErrorCode::E0400,
-            "WASM: vectors not yet supported",
-        ))
+        let sig = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+        let ok = matches!(
+            (&sig.return_type, dim),
+            (Type::Vec2, 2) | (Type::Vec3, 3) | (Type::Vec4, 4)
+        );
+        if !ok {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_vec: function '{name}' returns {:?}, expected vec{dim}",
+                    sig.return_type
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        let fm = self.float_mode;
+        results
+            .into_iter()
+            .map(|r| match (r, fm) {
+                (wasmtime::Val::I32(i), lp_glsl_wasm::FloatMode::Q32) => {
+                    Ok(i as f32 / Q16_16_SCALE)
+                }
+                (wasmtime::Val::F32(bits), lp_glsl_wasm::FloatMode::Float) => {
+                    Ok(f32::from_bits(bits))
+                }
+                _ => Err(GlslError::new(
+                    ErrorCode::E0400,
+                    format!("WASM: unexpected result type in vec call (float_mode={fm:?})"),
+                )),
+            })
+            .collect()
     }
 
     fn call_mat(

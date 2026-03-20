@@ -12,7 +12,7 @@ use lp_glsl_builtin_ids::BuiltinId;
 use wasm_encoder::ValType;
 
 /// Parameter and result WASM types for the imported builtin function.
-pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<ValType>) {
+pub(crate) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<ValType>) {
     match builtin {
         BuiltinId::LpQ32Acos => (vec![ValType::I32], vec![ValType::I32]),
         BuiltinId::LpQ32Acosh => (vec![ValType::I32], vec![ValType::I32]),

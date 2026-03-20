@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Explicitly-sized Array Declarations
@@ -10,7 +9,6 @@ float test_declare_float_array() {
     return 1.0; // Declaration test - no runtime behavior
 }
 
-// @ignore(backend=wasm) // scalar return passes but does not test array support
 // run: test_declare_float_array() == 1.0
 
 int test_declare_int_array() {

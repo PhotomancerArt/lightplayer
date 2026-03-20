@@ -7,6 +7,7 @@ pub mod run;
 pub mod run_detail;
 pub mod run_summary;
 pub mod test_glsl;
+pub mod wasm_link;
 pub mod wasm_runner;
 
 // Re-exports

@@ -321,6 +321,11 @@ static LPFX_FNS: &[LpfxFn] = &[
                     ty: Type::Vec2,
                     qualifier: ParamQualifier::Out,
                 },
+                ParameterRef {
+                    name: "seed",
+                    ty: Type::UInt,
+                    qualifier: ParamQualifier::In,
+                },
             ],
         },
         impls: LpfxFnImpl::Decimal {
@@ -352,6 +357,11 @@ static LPFX_FNS: &[LpfxFn] = &[
                     name: "gradient",
                     ty: Type::Vec3,
                     qualifier: ParamQualifier::Out,
+                },
+                ParameterRef {
+                    name: "seed",
+                    ty: Type::UInt,
+                    qualifier: ParamQualifier::In,
                 },
             ],
         },

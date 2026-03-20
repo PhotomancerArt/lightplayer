@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Divide: ivec3 / ivec3 -> ivec3 (component-wise, truncates toward zero)

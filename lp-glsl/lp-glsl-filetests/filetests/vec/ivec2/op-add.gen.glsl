@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/ivec2/op-add --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add: ivec2 + ivec2 -> ivec2 (component-wise)

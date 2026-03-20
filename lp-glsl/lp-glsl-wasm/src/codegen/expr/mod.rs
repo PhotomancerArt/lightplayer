@@ -7,6 +7,7 @@ pub(crate) mod builtin_inline;
 mod component;
 mod constructor;
 mod literal;
+mod lpfx_call;
 mod ternary;
 mod type_infer;
 mod variable;
@@ -23,6 +24,7 @@ use lp_glsl_builtin_ids::glsl_q32_math_builtin_id;
 use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::semantic::builtins;
+use lp_glsl_frontend::semantic::lpfx::lpfx_fn_registry;
 use lp_glsl_frontend::semantic::type_check::{is_scalar_type_name, is_vector_type_name};
 
 /// Emit rvalue - expression that produces a value on the stack.
@@ -84,6 +86,8 @@ pub fn emit_rvalue(
                 && glsl_q32_math_builtin_id(name, args.len()).is_some()
             {
                 builtin_call::emit_q32_math_libcall(ctx, sink, expr, name, args, options)
+            } else if options.float_mode == FloatMode::Q32 && lpfx_fn_registry::is_lpfx_fn(name) {
+                lpfx_call::emit_lpfx_call(ctx, sink, expr, name, args, options)
             } else {
                 Err(lp_glsl_frontend::error::GlslError::new(
                     lp_glsl_frontend::error::ErrorCode::E0400,

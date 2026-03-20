@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Modulo: ivec2 % ivec2 -> ivec2 (component-wise, sign follows dividend)
