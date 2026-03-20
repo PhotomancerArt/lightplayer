@@ -307,6 +307,90 @@ fn test_scaled_coord_differs_on_row_under_linker() {
 }
 
 #[test]
+fn test_psrdnoise_output_differs_for_adjacent_pixels() {
+    let builtins_path = builtins_wasm_path();
+    assert!(
+        builtins_path.is_file(),
+        "missing builtins wasm at {}",
+        builtins_path.display()
+    );
+    let builtins_bytes = std::fs::read(&builtins_path).expect("read builtins");
+
+    let source = r#"
+        vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+            vec2 center = outputSize * 0.5;
+            vec2 dir = fragCoord - center;
+            float scale = 0.04;
+            vec2 scaledCoord = center + dir * scale;
+            vec2 gradient;
+            float noiseValue = lpfx_psrdnoise(
+                scaledCoord,
+                vec2(0.0),
+                time,
+                gradient,
+                0u
+            );
+            return vec4(noiseValue, gradient.x, gradient.y, 65536);
+        }
+    "#;
+    let module = glsl_wasm(source, WasmOptions::default()).expect("compile");
+    let engine = Engine::default();
+    let (mut store, instance) =
+        link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link");
+
+    let func = instance.get_func(&mut store, "main").expect("main");
+    let wx = q32_from_float(200.0);
+    let wy = q32_from_float(200.0);
+    let t = q32_from_float(1.0);
+    let mut a = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let mut b = [
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+        wasmtime::Val::I32(0),
+    ];
+    let args_left = [
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(t),
+    ];
+    let args_right = [
+        wasmtime::Val::I32(q32_from_float(101.0)),
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(wx),
+        wasmtime::Val::I32(wy),
+        wasmtime::Val::I32(t),
+    ];
+    func.call(&mut store, &args_left, &mut a).expect("call");
+    func.call(&mut store, &args_right, &mut b).expect("call");
+    let ai: Vec<i32> = a
+        .iter()
+        .map(|v| match v {
+            wasmtime::Val::I32(i) => *i,
+            _ => panic!("expected i32"),
+        })
+        .collect();
+    let bi: Vec<i32> = b
+        .iter()
+        .map(|v| match v {
+            wasmtime::Val::I32(i) => *i,
+            _ => panic!("expected i32"),
+        })
+        .collect();
+    assert_ne!(
+        ai, bi,
+        "psrdnoise bundle (n, gx, gy) should differ when fragCoord.x differs"
+    );
+}
+
+#[test]
 fn test_rainbow_same_row_diff_x_differs() {
     let builtins_path = builtins_wasm_path();
     assert!(
@@ -326,9 +410,12 @@ fn test_rainbow_same_row_diff_x_differs() {
         link_q32_shader(&engine, &module.bytes, &builtins_bytes).expect("link rainbow");
 
     let func = instance.get_func(&mut store, "main").expect("main");
-    let wx = 64i32 << 16;
-    let wy = 64i32 << 16;
-    let t = q32_from_float(1.0);
+    // `time = 1.0` selects palette 0 (heatmap). Two pixels can share the same near-black
+    // heatmap color even when `prsd_demo`'s `tv` differs — the test would false-fail.
+    // `time = 6.0` keeps cyclePhase in [0,5) but moves `floor(mod(time*0.2,5))` to 1 (rainbow).
+    let wx = q32_from_float(200.0);
+    let wy = q32_from_float(200.0);
+    let t = q32_from_float(6.0);
 
     let mut a = [
         wasmtime::Val::I32(0),
@@ -344,15 +431,15 @@ fn test_rainbow_same_row_diff_x_differs() {
     ];
 
     let args_left = [
-        wasmtime::Val::I32(0),
-        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(q32_from_float(100.0)),
+        wasmtime::Val::I32(q32_from_float(100.0)),
         wasmtime::Val::I32(wx),
         wasmtime::Val::I32(wy),
         wasmtime::Val::I32(t),
     ];
     let args_right = [
-        wasmtime::Val::I32(32 << 16),
-        wasmtime::Val::I32(32 << 16),
+        wasmtime::Val::I32(q32_from_float(101.0)),
+        wasmtime::Val::I32(q32_from_float(100.0)),
         wasmtime::Val::I32(wx),
         wasmtime::Val::I32(wy),
         wasmtime::Val::I32(t),
@@ -379,6 +466,6 @@ fn test_rainbow_same_row_diff_x_differs() {
         .collect();
     assert_ne!(
         ai, bi,
-        "rainbow output at (0,32) vs (32,32) must differ; if equal, fragCoord.x is not affecting the shader (web demo horizontal bands)"
+        "rainbow output at two x positions on the same row must differ at this time/palette; if equal, fragCoord.x may be ignored (see test_psrdnoise_output_differs_for_adjacent_pixels)"
     );
 }

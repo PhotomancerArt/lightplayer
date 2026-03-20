@@ -76,9 +76,28 @@ fn emit_vector_binary(
         .expect("vector binary needs vector result");
     let base_ty = result_ty.vector_base_type().unwrap();
     let numeric = WasmNumericMode::from(options.float_mode);
-    let base = ctx.binary_op_temp_base(&result_ty);
-
-    let (lhs_base, rhs_base) = (base, base + 4);
+    let use_i32 = match &base_ty {
+        Type::Int | Type::UInt | Type::Bool => true,
+        Type::Float => numeric == WasmNumericMode::Q32,
+        _ => {
+            return Err(GlslError::new(
+                lp_glsl_frontend::error::ErrorCode::E0400,
+                alloc::format!("vector binary: unsupported base type {:?}", base_ty),
+            )
+            .into());
+        }
+    };
+    let dim_u32 = component_count as u32;
+    let lhs_base = if use_i32 {
+        ctx.alloc_i32(dim_u32)
+    } else {
+        ctx.alloc_f32(dim_u32)
+    };
+    let rhs_base = if use_i32 {
+        ctx.alloc_i32(dim_u32)
+    } else {
+        ctx.alloc_f32(dim_u32)
+    };
 
     if lhs_ty.is_vector() && rhs_ty.is_vector() {
         expr::emit_rvalue(ctx, sink, lhs, options)?;
@@ -155,8 +174,28 @@ fn emit_vector_equality(
     let component_count = vec_ty.component_count().unwrap();
     let base_ty = vec_ty.vector_base_type().unwrap();
     let numeric = WasmNumericMode::from(options.float_mode);
-    let base = ctx.binary_op_temp_base(vec_ty);
-    let (lhs_base, rhs_base) = (base, base + 4);
+    let use_i32 = match &base_ty {
+        Type::Int | Type::UInt | Type::Bool => true,
+        Type::Float => numeric == WasmNumericMode::Q32,
+        _ => {
+            return Err(GlslError::new(
+                lp_glsl_frontend::error::ErrorCode::E0400,
+                alloc::format!("vector equality: unsupported base type {:?}", base_ty),
+            )
+            .into());
+        }
+    };
+    let dim_u32 = component_count as u32;
+    let lhs_base = if use_i32 {
+        ctx.alloc_i32(dim_u32)
+    } else {
+        ctx.alloc_f32(dim_u32)
+    };
+    let rhs_base = if use_i32 {
+        ctx.alloc_i32(dim_u32)
+    } else {
+        ctx.alloc_f32(dim_u32)
+    };
 
     expr::emit_rvalue(ctx, sink, lhs, options)?;
     for i in (0..component_count).rev() {
@@ -375,8 +414,7 @@ pub fn emit_binary_op(
 }
 
 fn emit_q32_add_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
-    // Use vector conv scratch — must not alias `binary_op_i32_base`, which holds
-    // per-component operands during vector binops and inline builtins like `mix`.
+    // Dedicated 4-slot i32 scratch for saturating add (separate from bump-allocated temps).
     let base = ctx
         .vector_conv_i32_base
         .expect("vector_conv i32 temps not allocated");

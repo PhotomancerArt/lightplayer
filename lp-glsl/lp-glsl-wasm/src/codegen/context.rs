@@ -60,12 +60,8 @@ pub struct WasmCodegenContext<'a> {
     /// Pre-allocated temps for vector constructor broadcast (index for F32, I32).
     pub broadcast_temp_f32: Option<u32>,
     pub broadcast_temp_i32: Option<u32>,
-    /// Pre-allocated 4-slot temps for vector conversion (base index).
-    pub vector_conv_f32_base: Option<u32>,
+    /// Pre-allocated 4-slot i32 temps for Q32 add/sub sat leaf helpers (`emit_q32_add_sat` / `sub`).
     pub vector_conv_i32_base: Option<u32>,
-    /// Pre-allocated 8-slot temps for vector binary op (4 lhs + 4 rhs).
-    pub binary_op_f32_base: Option<u32>,
-    pub binary_op_i32_base: Option<u32>,
     /// Two i32 locals for inline `min`/`max`/`abs` lowering (when stack temps are exhausted).
     pub minmax_scratch_i32: Option<(u32, u32)>,
     /// Q32-only: `(lhs_i32, rhs_i32, product_i64)` temps for saturating float multiply.
@@ -73,6 +69,16 @@ pub struct WasmCodegenContext<'a> {
     /// Block nesting depth. Increment on block/loop/if, decrement on end.
     /// Used to adjust br target for break/continue when inside nested blocks (e.g. break inside if).
     pub block_depth: u32,
+    /// Bump sub-range inside pre-declared f32 locals (`emit_function` reserves the pool before `Function::new`).
+    pub scratch_f32_base: u32,
+    pub scratch_f32_next: u32,
+    pub scratch_f32_end: u32,
+    pub scratch_i32_base: u32,
+    pub scratch_i32_next: u32,
+    pub scratch_i32_end: u32,
+    pub scratch_i64_base: u32,
+    pub scratch_i64_next: u32,
+    pub scratch_i64_end: u32,
 }
 
 impl<'a> WasmCodegenContext<'a> {
@@ -120,13 +126,19 @@ impl<'a> WasmCodegenContext<'a> {
             global_constants,
             broadcast_temp_f32: None,
             broadcast_temp_i32: None,
-            vector_conv_f32_base: None,
             vector_conv_i32_base: None,
-            binary_op_f32_base: None,
-            binary_op_i32_base: None,
             minmax_scratch_i32: None,
             q32_mul_scratch: None,
             block_depth: 0,
+            scratch_f32_base: 0,
+            scratch_f32_next: 0,
+            scratch_f32_end: 0,
+            scratch_i32_base: 0,
+            scratch_i32_next: 0,
+            scratch_i32_end: 0,
+            scratch_i64_base: 0,
+            scratch_i64_next: 0,
+            scratch_i64_end: 0,
         }
     }
 
@@ -173,40 +185,46 @@ impl<'a> WasmCodegenContext<'a> {
         .expect("broadcast temps not pre-allocated")
     }
 
-    /// Base index for vector conversion temp (4 slots). For vec conversion store/load.
-    pub fn vector_conv_temp(&self, ty: &Type, component_count: usize) -> u32 {
-        let base = if matches!(ty, Type::Float) {
-            if self.numeric == WasmNumericMode::Q32 {
-                self.vector_conv_i32_base
-            } else {
-                self.vector_conv_f32_base
-            }
-        } else {
-            self.vector_conv_i32_base
-        };
-        let b = base.expect("vector conv temps not pre-allocated");
-        assert!(component_count <= 4);
-        b
+    /// Bump sub-allocate `count` consecutive f32 locals from the pre-reserved pool.
+    pub fn alloc_f32(&mut self, count: u32) -> u32 {
+        let base = self.scratch_f32_next;
+        let new_next = base.checked_add(count).expect("alloc_f32 count overflow");
+        assert!(
+            new_next <= self.scratch_f32_end,
+            "WASM f32 scratch pool exhausted (need {} slots at index {})",
+            count,
+            base
+        );
+        self.scratch_f32_next = new_next;
+        base
     }
 
-    /// Base index for binary op temps (8 slots: 0-3 lhs, 4-7 rhs).
-    pub fn binary_op_temp_base(&self, ty: &Type) -> u32 {
-        let scalar = if ty.is_vector() {
-            ty.vector_base_type().unwrap()
-        } else {
-            ty.clone()
-        };
-        let use_i32 = match scalar {
-            Type::Int | Type::UInt | Type::Bool => true,
-            Type::Float => self.numeric == WasmNumericMode::Q32,
-            _ => panic!("binary_op_temp_base: unsupported scalar {:?}", scalar),
-        };
-        let base = if use_i32 {
-            self.binary_op_i32_base
-        } else {
-            self.binary_op_f32_base
-        };
-        base.expect("binary op temps not pre-allocated")
+    /// Bump sub-allocate `count` consecutive i32 locals from the pre-reserved pool.
+    pub fn alloc_i32(&mut self, count: u32) -> u32 {
+        let base = self.scratch_i32_next;
+        let new_next = base.checked_add(count).expect("alloc_i32 count overflow");
+        assert!(
+            new_next <= self.scratch_i32_end,
+            "WASM i32 scratch pool exhausted (need {} slots at index {})",
+            count,
+            base
+        );
+        self.scratch_i32_next = new_next;
+        base
+    }
+
+    /// Bump sub-allocate `count` consecutive i64 locals from the pre-reserved pool.
+    pub fn alloc_i64(&mut self, count: u32) -> u32 {
+        let base = self.scratch_i64_next;
+        let new_next = base.checked_add(count).expect("alloc_i64 count overflow");
+        assert!(
+            new_next <= self.scratch_i64_end,
+            "WASM i64 scratch pool exhausted (need {} slots at index {})",
+            count,
+            base
+        );
+        self.scratch_i64_next = new_next;
+        base
     }
 
     pub fn lookup_local(&self, name: &str) -> Option<&LocalInfo> {

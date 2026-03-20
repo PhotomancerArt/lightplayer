@@ -115,12 +115,6 @@ fn emit_abs(
             }
         }
         WasmNumericMode::Q32 => {
-            let base = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
             if dim > 4 {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -128,6 +122,7 @@ fn emit_abs(
                 )
                 .into());
             }
+            let base = ctx.alloc_i32(dim);
             expr::emit_rvalue(ctx, sink, arg, options)?;
             for i in (0..dim as usize).rev() {
                 sink.local_set(base + i as u32);
@@ -169,17 +164,6 @@ fn emit_min_max(
 
     let dim = unify_two_float_gentype_dim(&lhs_ty, &rhs_ty)?;
     let slots = slot_span(&lhs_ty, dim) + slot_span(&rhs_ty, dim);
-    if slots > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!(
-                "`{}` operands too large for WASM scratch (dim {})",
-                if is_min { "min" } else { "max" },
-                dim
-            ),
-        )
-        .into());
-    }
 
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
@@ -189,12 +173,7 @@ fn emit_min_max(
             )?;
         }
         WasmNumericMode::Q32 => {
-            let base = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let base = ctx.alloc_i32(slots);
             // Evaluate rhs before lhs so nested min/max in rhs cannot clobber lhs scratch.
             let rhs_base = base + slot_span(&lhs_ty, dim);
             store_q32_float_arg(ctx, sink, rhs, &rhs_ty, dim, rhs_base, options)?;
@@ -236,28 +215,12 @@ fn emit_clamp(
     }
 
     let dim = unify_three_float_gentype_dim(&x_ty, &lo_ty, &hi_ty)?;
-    let total = slot_span(&x_ty, dim) + slot_span(&lo_ty, dim) + slot_span(&hi_ty, dim);
-    if total > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!(
-                "`clamp` operands need {} i32/f32 slots (max 8) for dim {}",
-                total,
-                dim
-            ),
-        )
-        .into());
-    }
+    let total_slots = slot_span(&x_ty, dim) + slot_span(&lo_ty, dim) + slot_span(&hi_ty, dim);
 
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let base = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let base = ctx.alloc_f32(total_slots);
             let lo_b = base + slot_span(&x_ty, dim);
             let hi_b = lo_b + slot_span(&lo_ty, dim);
             store_f32_arg(ctx, sink, hi, &hi_ty, dim, hi_b, options)?;
@@ -272,12 +235,7 @@ fn emit_clamp(
             }
         }
         WasmNumericMode::Q32 => {
-            let base = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let base = ctx.alloc_i32(total_slots);
             let lo_b = base + slot_span(&x_ty, dim);
             let hi_b = lo_b + slot_span(&lo_ty, dim);
             store_q32_float_arg(ctx, sink, hi, &hi_ty, dim, hi_b, options)?;
@@ -439,12 +397,8 @@ fn emit_vectorwise_binary_float(
     is_min: bool,
     options: &WasmOptions,
 ) -> Result<(), GlslDiagnostics> {
-    let base = ctx.binary_op_f32_base.ok_or_else(|| {
-        GlslDiagnostics::from(GlslError::new(
-            ErrorCode::E0400,
-            "binary op scratch (f32) not allocated",
-        ))
-    })?;
+    let total = slot_span(lhs_ty, dim) + slot_span(rhs_ty, dim);
+    let base = ctx.alloc_f32(total);
     let rhs_base = base + slot_span(lhs_ty, dim);
     store_f32_arg(ctx, sink, rhs, rhs_ty, dim, rhs_base, options)?;
     store_f32_arg(ctx, sink, lhs, lhs_ty, dim, base, options)?;
@@ -553,24 +507,12 @@ fn emit_mix(
     }
 
     let total = slot_span(&x_ty, dim) + slot_span(&y_ty, dim) + slot_span(&a_ty, dim);
-    if total > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!("`mix` needs {} scratch slots (max 8)", total),
-        )
-        .into());
-    }
 
     let numeric = WasmNumericMode::from(options.float_mode);
 
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let fb = ctx.alloc_f32(total);
             let tmp = ctx.broadcast_temp_f32.ok_or_else(|| {
                 GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
@@ -617,12 +559,7 @@ fn emit_mix(
         }
         WasmNumericMode::Q32 => {
             let (ta, _) = scratch_pair(ctx)?;
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let ib = ctx.alloc_i32(total);
             store_q32_float_arg(ctx, sink, x, &x_ty, dim, ib, options)?;
             let yb = ib + slot_span(&x_ty, dim);
             store_q32_float_arg(ctx, sink, y, &y_ty, dim, yb, options)?;
@@ -699,23 +636,11 @@ fn emit_step(
     };
 
     let total = slot_span(&e_ty, dim) + slot_span(&x_ty, dim);
-    if total > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!("`step` needs {} scratch slots (max 8)", total),
-        )
-        .into());
-    }
 
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let fb = ctx.alloc_f32(total);
             store_f32_arg(ctx, sink, edge, &e_ty, dim, fb, options)?;
             let xb = fb + slot_span(&e_ty, dim);
             store_f32_arg(ctx, sink, x, &x_ty, dim, xb, options)?;
@@ -731,12 +656,7 @@ fn emit_step(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let ib = ctx.alloc_i32(total);
             store_q32_float_arg(ctx, sink, edge, &e_ty, dim, ib, options)?;
             let xb = ib + slot_span(&e_ty, dim);
             store_q32_float_arg(ctx, sink, x, &x_ty, dim, xb, options)?;
@@ -782,15 +702,10 @@ fn emit_sign(
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
             if dim > 4 {
                 return Err(GlslError::new(ErrorCode::E0400, "`sign` dim too large").into());
             }
+            let fb = ctx.alloc_f32(dim);
             store_f32_arg(ctx, sink, arg, &arg_ty, dim, fb, options)?;
             for k in 0..dim {
                 sink.local_get(fb + lhs_offset(&arg_ty, k));
@@ -811,15 +726,10 @@ fn emit_sign(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
             if dim > 4 {
                 return Err(GlslError::new(ErrorCode::E0400, "`sign` dim too large").into());
             }
+            let ib = ctx.alloc_i32(dim);
             store_q32_float_arg(ctx, sink, arg, &arg_ty, dim, ib, options)?;
             for k in 0..dim {
                 sink.local_get(ib + lhs_offset(&arg_ty, k));
@@ -883,15 +793,10 @@ fn emit_floor(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
             if dim > 4 {
                 return Err(GlslError::new(ErrorCode::E0400, "`floor` dim too large").into());
             }
+            let ib = ctx.alloc_i32(dim);
             store_q32_float_arg(ctx, sink, arg, &arg_ty, dim, ib, options)?;
             for k in 0..dim {
                 sink.local_get(ib + lhs_offset(&arg_ty, k));
@@ -929,16 +834,8 @@ fn emit_fract(
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let fb = ctx.alloc_f32(dim + 1);
             let tee_slot = fb + dim;
-            if tee_slot > fb + 7 {
-                return Err(GlslError::new(ErrorCode::E0400, "`fract` scratch overflow").into());
-            }
 
             store_f32_arg(ctx, sink, arg, &arg_ty, dim, fb, options)?;
             for k in 0..dim {
@@ -950,15 +847,10 @@ fn emit_fract(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
             if dim > 4 {
                 return Err(GlslError::new(ErrorCode::E0400, "`fract` dim too large").into());
             }
+            let ib = ctx.alloc_i32(dim);
             store_q32_float_arg(ctx, sink, arg, &arg_ty, dim, ib, options)?;
             for k in 0..dim {
                 sink.local_get(ib + lhs_offset(&arg_ty, k));
@@ -996,23 +888,11 @@ fn emit_mod(
 
     let dim = unify_two_float_gentype_dim(&x_ty, &y_ty)?;
     let total = slot_span(&x_ty, dim) + slot_span(&y_ty, dim);
-    if total > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!("`mod` needs {} scratch slots (max 8)", total),
-        )
-        .into());
-    }
 
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let fb = ctx.alloc_f32(total);
             let tmp = ctx.broadcast_temp_f32.ok_or_else(|| {
                 GlslDiagnostics::from(GlslError::new(
                     ErrorCode::E0400,
@@ -1036,12 +916,7 @@ fn emit_mod(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let ib = ctx.alloc_i32(total);
             let (ta, _) = scratch_pair(ctx)?;
             let bt = ctx.broadcast_temp_i32.ok_or_else(|| {
                 GlslDiagnostics::from(GlslError::new(
@@ -1118,36 +993,18 @@ fn emit_smoothstep(
     }
 
     let dim = unify_three_float_gentype_dim(&e0_ty, &e1_ty, &x_ty)?;
-    let total = slot_span(&e0_ty, dim) + slot_span(&e1_ty, dim) + slot_span(&x_ty, dim);
-    if total > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!("`smoothstep` needs {} scratch slots (max 8)", total),
-        )
-        .into());
-    }
-
     let e0b_base = 0u32;
     let e1b_base = slot_span(&e0_ty, dim);
     let xb_base = e1b_base + slot_span(&e1_ty, dim);
     let temps_after = xb_base + slot_span(&x_ty, dim);
-    if temps_after + 2 > 8 {
-        return Err(
-            GlslError::new(ErrorCode::E0400, "`smoothstep` scratch layout overflow").into(),
-        );
-    }
     let scratch_t = temps_after;
     let scratch_tt = scratch_t + 1;
+    let layout_slots = temps_after + 2;
 
     let numeric = WasmNumericMode::from(options.float_mode);
     match numeric {
         WasmNumericMode::Float => {
-            let fb = ctx.binary_op_f32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (f32) not allocated",
-                ))
-            })?;
+            let fb = ctx.alloc_f32(layout_slots);
             store_f32_arg(ctx, sink, edge0, &e0_ty, dim, fb + e0b_base, options)?;
             store_f32_arg(ctx, sink, edge1, &e1_ty, dim, fb + e1b_base, options)?;
             store_f32_arg(ctx, sink, x, &x_ty, dim, fb + xb_base, options)?;
@@ -1165,7 +1022,7 @@ fn emit_smoothstep(
                 sink.f32_max();
                 sink.f32_const(1.0f32.into());
                 sink.f32_min();
-                sink.local_tee(fb + scratch_t);
+                sink.local_set(fb + scratch_t);
                 sink.local_get(fb + scratch_t);
                 sink.local_get(fb + scratch_t);
                 sink.f32_mul();
@@ -1180,12 +1037,7 @@ fn emit_smoothstep(
             }
         }
         WasmNumericMode::Q32 => {
-            let ib = ctx.binary_op_i32_base.ok_or_else(|| {
-                GlslDiagnostics::from(GlslError::new(
-                    ErrorCode::E0400,
-                    "binary op scratch (i32) not allocated",
-                ))
-            })?;
+            let ib = ctx.alloc_i32(layout_slots);
             let (ta, tb) = scratch_pair(ctx)?;
             let bt = ctx.broadcast_temp_i32.ok_or_else(|| {
                 GlslDiagnostics::from(GlslError::new(

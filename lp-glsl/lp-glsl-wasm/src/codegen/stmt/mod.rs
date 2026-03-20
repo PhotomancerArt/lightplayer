@@ -28,6 +28,15 @@ pub use declaration::{allocate_local_from_decl, emit_declaration};
 pub use expr_stmt::emit_expr_stmt;
 pub use return_::emit_return;
 
+/// Pre-reserved locals for `WasmCodegenContext::alloc_*` (must exist before `Function::new`).
+///
+/// **Temporary cap:** large fixed pools (e.g. 16k×2) make every function call pay for tens of
+/// thousands of WASM locals — catastrophic for per-pixel `main()` on the web demo. Replace with
+/// exact high-water sizing (second pass or post-pass trim) soon; see wasm bump-locals plan.
+const WASM_SCRATCH_F32_POOL: u32 = 1024;
+const WASM_SCRATCH_I32_POOL: u32 = 1024;
+const WASM_SCRATCH_I64_POOL: u32 = 32;
+
 /// Emit a complete function body.
 pub fn emit_function(
     func: &TypedFunction,
@@ -63,23 +72,8 @@ pub fn emit_function(
     ctx.broadcast_temp_i32 = Some(ctx.next_local_idx);
     ctx.local_types.push(wasm_encoder::ValType::I32);
     ctx.next_local_idx += 1;
-    ctx.vector_conv_f32_base = Some(ctx.next_local_idx);
-    for _ in 0..4 {
-        ctx.local_types.push(wasm_encoder::ValType::F32);
-        ctx.next_local_idx += 1;
-    }
     ctx.vector_conv_i32_base = Some(ctx.next_local_idx);
     for _ in 0..4 {
-        ctx.local_types.push(wasm_encoder::ValType::I32);
-        ctx.next_local_idx += 1;
-    }
-    ctx.binary_op_f32_base = Some(ctx.next_local_idx);
-    for _ in 0..8 {
-        ctx.local_types.push(wasm_encoder::ValType::F32);
-        ctx.next_local_idx += 1;
-    }
-    ctx.binary_op_i32_base = Some(ctx.next_local_idx);
-    for _ in 0..8 {
         ctx.local_types.push(wasm_encoder::ValType::I32);
         ctx.next_local_idx += 1;
     }
@@ -103,6 +97,30 @@ pub fn emit_function(
         ctx.next_local_idx += 1;
         ctx.q32_mul_scratch = Some((ma, mb, mw));
     }
+
+    ctx.scratch_f32_base = ctx.next_local_idx;
+    for _ in 0..WASM_SCRATCH_F32_POOL {
+        ctx.local_types.push(wasm_encoder::ValType::F32);
+        ctx.next_local_idx += 1;
+    }
+    ctx.scratch_f32_next = ctx.scratch_f32_base;
+    ctx.scratch_f32_end = ctx.next_local_idx;
+
+    ctx.scratch_i32_base = ctx.next_local_idx;
+    for _ in 0..WASM_SCRATCH_I32_POOL {
+        ctx.local_types.push(wasm_encoder::ValType::I32);
+        ctx.next_local_idx += 1;
+    }
+    ctx.scratch_i32_next = ctx.scratch_i32_base;
+    ctx.scratch_i32_end = ctx.next_local_idx;
+
+    ctx.scratch_i64_base = ctx.next_local_idx;
+    for _ in 0..WASM_SCRATCH_I64_POOL {
+        ctx.local_types.push(wasm_encoder::ValType::I64);
+        ctx.next_local_idx += 1;
+    }
+    ctx.scratch_i64_next = ctx.scratch_i64_base;
+    ctx.scratch_i64_end = ctx.next_local_idx;
 
     let locals: alloc::vec::Vec<(u32, wasm_encoder::ValType)> =
         ctx.local_types.iter().map(|t| (1u32, t.clone())).collect();

@@ -72,14 +72,9 @@ pub fn emit_q32_math_libcall(
         .map(|a| infer_expr_type(ctx, a))
         .collect::<Result<_, _>>()?;
 
-    let base = ctx.binary_op_i32_base.ok_or_else(|| {
-        GlslDiagnostics::from(GlslError::new(
-            ErrorCode::E0400,
-            "binary op scratch (i32) not allocated",
-        ))
-    })?;
-
     if id == BuiltinId::LpQ32Ldexp {
+        let dim = float_gentype_dim_only("ldexp", &arg_tys[0])?;
+        let base = ctx.alloc_i32(dim + 1);
         return emit_q32_ldexp(
             ctx, sink, return_ty, args, &arg_tys, func_idx, base, options,
         );
@@ -101,24 +96,8 @@ pub fn emit_q32_math_libcall(
         .into());
     }
 
-    if wasm_arity == 3 && dim > 1 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            "vector `fma` is not yet supported for WASM (needs >8 scratch slots)",
-        )
-        .into());
-    }
-
     let total_slots = (wasm_arity as u32).saturating_mul(dim);
-    if total_slots > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!(
-                "built-in `{name}` with vector size {dim} exceeds WASM scratch (arity {wasm_arity})",
-            ),
-        )
-        .into());
-    }
+    let base = ctx.alloc_i32(total_slots);
 
     store_flattened_q32_args(ctx, sink, args, &arg_tys, dim, base, options)?;
 
@@ -158,13 +137,6 @@ fn emit_q32_ldexp(
     }
 
     let dim = float_gentype_dim_only("ldexp", &arg_tys[0])?;
-    if dim + 1 > 8 {
-        return Err(GlslError::new(
-            ErrorCode::E0400,
-            alloc::format!("`ldexp` vector size {dim} exceeds scratch"),
-        )
-        .into());
-    }
 
     let t0 = &arg_tys[0];
     let slot_f = base;

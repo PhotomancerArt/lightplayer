@@ -4,6 +4,7 @@ use wasm_encoder::{BlockType, InstructionSink};
 
 use crate::codegen::context::WasmCodegenContext;
 use crate::codegen::expr;
+use crate::codegen::numeric::WasmNumericMode;
 use crate::codegen::rvalue::WasmRValue;
 use crate::options::WasmOptions;
 use lp_glsl_frontend::error::GlslDiagnostics;
@@ -117,7 +118,11 @@ pub fn emit_vector_constructor(
             let src_base = arg_rv.ty.vector_base_type().unwrap();
             let slots = arg_count.max(component_count);
             assert!(slots <= 4, "vector constructor temp overflow");
-            let temp_base = ctx.vector_conv_temp(&src_base, slots);
+            let temp_base = if src_base == Type::Float && ctx.numeric == WasmNumericMode::Float {
+                ctx.alloc_f32(slots as u32)
+            } else {
+                ctx.alloc_i32(slots as u32)
+            };
             for i in (0..arg_count).rev() {
                 sink.local_set(temp_base + i as u32);
             }
@@ -169,7 +174,7 @@ fn emit_default_vector_component(
     }
 }
 
-fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Type, to: &Type) {
+fn emit_coercion(ctx: &mut WasmCodegenContext, sink: &mut InstructionSink, from: &Type, to: &Type) {
     if from == to {
         return;
     }
@@ -179,9 +184,7 @@ fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Ty
     match (from, to) {
         (Type::Int, Type::Float) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
-                let temp = ctx
-                    .binary_op_i32_base
-                    .expect("binary_op temps not allocated");
+                let temp = ctx.alloc_i32(1);
                 sink.local_tee(temp);
                 sink.i32_const(-32768);
                 sink.i32_lt_s();
@@ -206,9 +209,7 @@ fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Ty
         }
         (Type::UInt, Type::Float) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
-                let temp = ctx
-                    .binary_op_i32_base
-                    .expect("binary_op temps not allocated");
+                let temp = ctx.alloc_i32(1);
                 sink.local_tee(temp);
                 sink.i32_const(32767);
                 sink.i32_gt_u();
@@ -233,9 +234,7 @@ fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Ty
         }
         (Type::Float, Type::Int) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
-                let temp = ctx
-                    .binary_op_i32_base
-                    .expect("binary_op temps not allocated");
+                let temp = ctx.alloc_i32(1);
                 sink.local_tee(temp);
                 sink.i32_const(0);
                 sink.i32_lt_s();
@@ -256,9 +255,7 @@ fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Ty
         }
         (Type::Float, Type::UInt) => {
             if numeric == crate::codegen::numeric::WasmNumericMode::Q32 {
-                let temp = ctx
-                    .binary_op_i32_base
-                    .expect("binary_op temps not allocated");
+                let temp = ctx.alloc_i32(1);
                 sink.local_tee(temp);
                 sink.i32_const(0);
                 sink.i32_lt_s();
