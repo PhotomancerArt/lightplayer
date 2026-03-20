@@ -15,6 +15,14 @@ const THREE_PI_DIV_4: i32 = 0x00025B2F; // 154415
 /// Returns angle in radians in range [-π, π].
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_q32_atan2(y: i32, x: i32) -> i32 {
+    // GLSL atan(y,x) is undefined at (0,0); our first-quadrant formula uses
+    // div(x - |y|, x + |y|) which hits div(0,0) when both are zero. Saturating
+    // div returns MAX_FIXED and the polynomial becomes garbage — visible as
+    // high-frequency "static" when shaders use atan2 on near-zero gradients.
+    if x == 0 && y == 0 {
+        return 0;
+    }
+
     // Compute absolute value of y
     let mask = y >> 31;
     let abs_y = (y + mask) ^ mask;
@@ -42,6 +50,11 @@ mod tests {
     #[cfg(test)]
     extern crate std;
     use super::*;
+
+    #[test]
+    fn test_atan2_origin_returns_zero() {
+        assert_eq!(__lp_q32_atan2(0, 0), 0);
+    }
 
     #[test]
     fn test_atan2_basic() {
