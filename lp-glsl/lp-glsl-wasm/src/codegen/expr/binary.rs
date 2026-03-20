@@ -7,6 +7,7 @@ use crate::codegen::expr;
 use crate::codegen::numeric::WasmNumericMode;
 use crate::codegen::rvalue::WasmRValue;
 use crate::options::WasmOptions;
+use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::error::GlslError;
 use lp_glsl_frontend::semantic::type_check::infer_binary_result_type;
 use lp_glsl_frontend::semantic::types::Type;
@@ -248,23 +249,24 @@ pub fn emit_binary_op(
                 (_, true, WasmNumericMode::Float) => sink.f32_sub(),
             };
         }
-        Mult => {
-            match (both_int, either_float, numeric) {
-                (true, _, _) => sink.i32_mul(),
-                (_, true, WasmNumericMode::Q32) => {
-                    emit_q32_mul(ctx, sink);
-                    sink
-                }
-                (_, true, WasmNumericMode::Float) => sink.f32_mul(),
-                _ => {
-                    return Err(GlslError::new(
-                        lp_glsl_frontend::error::ErrorCode::E0400,
-                        "Q32 multiplication requires float operands",
-                    )
-                    .into());
-                }
-            };
-        }
+        Mult => match (both_int, either_float, numeric) {
+            (true, _, _) => {
+                sink.i32_mul();
+            }
+            (_, true, WasmNumericMode::Q32) => {
+                emit_q32_mul_sat(ctx, sink)?;
+            }
+            (_, true, WasmNumericMode::Float) => {
+                sink.f32_mul();
+            }
+            _ => {
+                return Err(GlslError::new(
+                    lp_glsl_frontend::error::ErrorCode::E0400,
+                    "Q32 multiplication requires float operands",
+                )
+                .into());
+            }
+        },
         Div => {
             match (both_int, either_float, numeric) {
                 (true, _, _) => sink.i32_div_s(),
@@ -460,18 +462,57 @@ fn emit_q32_sub_sat(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
     sink.end();
 }
 
-fn emit_q32_mul(ctx: &WasmCodegenContext, sink: &mut InstructionSink) {
-    let tmp = ctx
-        .broadcast_temp_i32
-        .expect("broadcast i32 temp not allocated");
-    sink.local_set(tmp);
+/// Fixed-point multiply `(a*b)>>16` with saturation to match `__lp_q32_mul`.
+fn emit_q32_mul_sat(
+    ctx: &WasmCodegenContext,
+    sink: &mut InstructionSink,
+) -> Result<(), GlslDiagnostics> {
+    let (sa, sb, sw) = ctx.q32_mul_scratch.ok_or_else(|| {
+        GlslDiagnostics::from(GlslError::new(
+            lp_glsl_frontend::error::ErrorCode::E0400,
+            "Q32 mul scratch locals not allocated",
+        ))
+    })?;
+    // Stack: lhs, rhs (rhs on top).
+    sink.local_set(sb);
+    sink.local_set(sa);
+    sink.local_get(sa);
+    sink.i32_eqz();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(0);
+    sink.else_();
+    sink.local_get(sb);
+    sink.i32_eqz();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(0);
+    sink.else_();
+    sink.local_get(sa);
     sink.i64_extend_i32_s();
-    sink.local_get(tmp);
+    sink.local_get(sb);
     sink.i64_extend_i32_s();
     sink.i64_mul();
     sink.i64_const(16);
     sink.i64_shr_s();
+    sink.local_set(sw);
+    sink.local_get(sw);
+    sink.i64_const(i64::from(Q32_MAX_FIXED));
+    sink.i64_gt_s();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MAX_FIXED);
+    sink.else_();
+    sink.local_get(sw);
+    sink.i64_const(i64::from(Q32_MIN_FIXED));
+    sink.i64_lt_s();
+    sink.if_(BlockType::Result(ValType::I32));
+    sink.i32_const(Q32_MIN_FIXED);
+    sink.else_();
+    sink.local_get(sw);
     sink.i32_wrap_i64();
+    sink.end();
+    sink.end();
+    sink.end();
+    sink.end();
+    Ok(())
 }
 
 /// Emit short-circuit logical And: lhs && rhs.

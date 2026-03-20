@@ -1,5 +1,7 @@
 //! Statement code generation.
 
+use alloc::vec::Vec;
+
 mod declaration;
 mod expr_stmt;
 mod if_stmt;
@@ -15,8 +17,10 @@ use crate::codegen::context::WasmCodegenContext;
 use crate::options::WasmOptions;
 use hashbrown::HashMap;
 use lp_glsl_builtin_ids::BuiltinId;
+use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::semantic::TypedFunction;
+use lp_glsl_frontend::semantic::functions::Parameter;
 use lp_glsl_frontend::semantic::types::Type;
 
 pub use declaration::{allocate_local_from_decl, emit_declaration};
@@ -33,6 +37,7 @@ pub fn emit_function(
         alloc::string::String,
         lp_glsl_frontend::semantic::types::Type,
     >,
+    all_user_fn_params: &hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
 ) -> Result<Function, GlslDiagnostics> {
     let mut ctx = WasmCodegenContext::new(
         &func.parameters,
@@ -40,6 +45,7 @@ pub fn emit_function(
         func_index_map,
         builtin_func_index,
         func_return_type,
+        all_user_fn_params,
     );
 
     // First pass: allocate locals for declarations
@@ -82,6 +88,19 @@ pub fn emit_function(
     ctx.next_local_idx += 1;
     ctx.minmax_scratch_i32 = Some((mm0, mm1));
 
+    if options.float_mode == FloatMode::Q32 {
+        let ma = ctx.next_local_idx;
+        ctx.local_types.push(wasm_encoder::ValType::I32);
+        ctx.next_local_idx += 1;
+        let mb = ctx.next_local_idx;
+        ctx.local_types.push(wasm_encoder::ValType::I32);
+        ctx.next_local_idx += 1;
+        let mw = ctx.next_local_idx;
+        ctx.local_types.push(wasm_encoder::ValType::I64);
+        ctx.next_local_idx += 1;
+        ctx.q32_mul_scratch = Some((ma, mb, mw));
+    }
+
     let locals: alloc::vec::Vec<(u32, wasm_encoder::ValType)> =
         ctx.local_types.iter().map(|t| (1u32, t.clone())).collect();
     let mut f = Function::new(locals);
@@ -90,6 +109,7 @@ pub fn emit_function(
         for stmt in &func.body {
             emit_statement_to_sink(&mut ctx, &mut instr, stmt, options, &func.return_type)?;
         }
+        return_::emit_implicit_tail_return(&ctx, &mut instr, func)?;
         instr.end();
     }
 
@@ -225,6 +245,7 @@ fn emit_jump_to_sink(
             return_::emit_return_to_sink(ctx, instr, expr, options, return_type)?;
         }
         glsl::syntax::JumpStatement::Return(None) => {
+            return_::emit_fn_out_writebacks(ctx, instr);
             instr.return_();
         }
         glsl::syntax::JumpStatement::Break => {

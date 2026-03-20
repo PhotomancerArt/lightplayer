@@ -21,6 +21,7 @@ use crate::types::glsl_type_to_wasm_components;
 use hashbrown::HashMap;
 use lp_glsl_builtin_ids::BuiltinId;
 use lp_glsl_frontend::FloatMode;
+use lp_glsl_frontend::semantic::functions::ParamQualifier;
 use lp_glsl_frontend::semantic::{TypedFunction, TypedShader};
 
 /// Compile typed shader to WASM bytes.
@@ -70,13 +71,21 @@ pub fn compile_to_wasm(
 
     let builtin_type_count = builtin_order.len() as u32;
 
+    let mut all_user_fn_params: hashbrown::HashMap<
+        alloc::string::String,
+        alloc::vec::Vec<lp_glsl_frontend::semantic::functions::Parameter>,
+    > = hashbrown::HashMap::new();
+    for f in &functions {
+        all_user_fn_params.insert(f.name.clone(), f.parameters.clone());
+    }
+
     for func in &functions {
         let params: Vec<_> = func
             .parameters
             .iter()
             .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
             .collect();
-        let results: Vec<_> = if matches!(
+        let mut results: Vec<_> = if matches!(
             func.return_type,
             lp_glsl_frontend::semantic::types::Type::Void
         ) {
@@ -84,6 +93,11 @@ pub fn compile_to_wasm(
         } else {
             glsl_type_to_wasm_components(&func.return_type, options.float_mode)
         };
+        for p in &func.parameters {
+            if matches!(p.qualifier, ParamQualifier::InOut | ParamQualifier::Out) {
+                results.extend(glsl_type_to_wasm_components(&p.ty, options.float_mode));
+            }
+        }
         types.ty().function(params, results);
     }
     module.section(&types);
@@ -153,6 +167,7 @@ pub fn compile_to_wasm(
             &func_index_map,
             &builtin_func_index,
             &func_return_type,
+            &all_user_fn_params,
         )?;
         codes.function(&body);
     }

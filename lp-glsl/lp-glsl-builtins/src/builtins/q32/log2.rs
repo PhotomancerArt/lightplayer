@@ -5,8 +5,7 @@ use crate::builtins::q32::mul;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
-/// Overflow value (returned for invalid inputs)
-const FIX16_OVERFLOW: i32 = i32::MIN;
+const FIX16_ZERO: i32 = 0;
 
 /// Right shift with rounding
 #[inline]
@@ -75,7 +74,7 @@ pub extern "C" fn __lp_q32_log2(x: i32) -> i32 {
     // If x == 0, the limit of log2(x) as x -> 0 = -infinity.
     // log2(-ve) gives a complex result.
     if x <= 0 {
-        return FIX16_OVERFLOW;
+        return FIX16_ZERO;
     }
 
     // If the input is less than one, the result is -log2(1.0 / x)

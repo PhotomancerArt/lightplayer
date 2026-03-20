@@ -1,10 +1,12 @@
 //! WASM codegen context: locals, types, builder state.
 
+use alloc::vec::Vec;
 use hashbrown::HashMap;
 use lp_glsl_builtin_ids::BuiltinId;
 
 use crate::codegen::numeric::WasmNumericMode;
 use crate::options::WasmOptions;
+use lp_glsl_frontend::semantic::functions::Parameter;
 use lp_glsl_frontend::semantic::types::Type;
 
 /// Info for a local variable.
@@ -48,6 +50,10 @@ pub struct WasmCodegenContext<'a> {
     /// Maps function name -> return type (for FunCall result type).
     pub func_return_type:
         &'a hashbrown::HashMap<alloc::string::String, lp_glsl_frontend::semantic::types::Type>,
+    /// This function's parameters (for `inout`/`out` return values).
+    pub fn_params: &'a [Parameter],
+    /// All user functions' parameters by name (`inout` writeback at call sites).
+    pub all_user_fn_params: &'a hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
     /// Pre-allocated temps for vector constructor broadcast (index for F32, I32).
     pub broadcast_temp_f32: Option<u32>,
     pub broadcast_temp_i32: Option<u32>,
@@ -59,6 +65,8 @@ pub struct WasmCodegenContext<'a> {
     pub binary_op_i32_base: Option<u32>,
     /// Two i32 locals for inline `min`/`max`/`abs` lowering (when stack temps are exhausted).
     pub minmax_scratch_i32: Option<(u32, u32)>,
+    /// Q32-only: `(lhs_i32, rhs_i32, product_i64)` temps for saturating float multiply.
+    pub q32_mul_scratch: Option<(u32, u32, u32)>,
     /// Block nesting depth. Increment on block/loop/if, decrement on end.
     /// Used to adjust br target for break/continue when inside nested blocks (e.g. break inside if).
     pub block_depth: u32,
@@ -66,7 +74,7 @@ pub struct WasmCodegenContext<'a> {
 
 impl<'a> WasmCodegenContext<'a> {
     pub fn new(
-        params: &[lp_glsl_frontend::semantic::functions::Parameter],
+        params: &'a [Parameter],
         options: &WasmOptions,
         func_index_map: &'a hashbrown::HashMap<alloc::string::String, u32>,
         builtin_func_index: &'a HashMap<BuiltinId, u32>,
@@ -74,6 +82,7 @@ impl<'a> WasmCodegenContext<'a> {
             alloc::string::String,
             lp_glsl_frontend::semantic::types::Type,
         >,
+        all_user_fn_params: &'a hashbrown::HashMap<alloc::string::String, Vec<Parameter>>,
     ) -> Self {
         let mut locals = HashMap::new();
         let mut next_idx: u32 = 0;
@@ -102,6 +111,8 @@ impl<'a> WasmCodegenContext<'a> {
             func_index_map,
             builtin_func_index,
             func_return_type,
+            fn_params: params,
+            all_user_fn_params,
             broadcast_temp_f32: None,
             broadcast_temp_i32: None,
             vector_conv_f32_base: None,
@@ -109,6 +120,7 @@ impl<'a> WasmCodegenContext<'a> {
             binary_op_f32_base: None,
             binary_op_i32_base: None,
             minmax_scratch_i32: None,
+            q32_mul_scratch: None,
             block_depth: 0,
         }
     }
@@ -158,15 +170,14 @@ impl<'a> WasmCodegenContext<'a> {
 
     /// Base index for vector conversion temp (4 slots). For vec conversion store/load.
     pub fn vector_conv_temp(&self, ty: &Type, component_count: usize) -> u32 {
-        let base = match *ty {
-            Type::Float => {
-                if self.numeric == WasmNumericMode::Q32 {
-                    self.vector_conv_i32_base
-                } else {
-                    self.vector_conv_f32_base
-                }
+        let base = if matches!(ty, Type::Float) {
+            if self.numeric == WasmNumericMode::Q32 {
+                self.vector_conv_i32_base
+            } else {
+                self.vector_conv_f32_base
             }
-            _ => self.vector_conv_i32_base,
+        } else {
+            self.vector_conv_i32_base
         };
         let b = base.expect("vector conv temps not pre-allocated");
         assert!(component_count <= 4);

@@ -21,7 +21,12 @@ const FIX16_ZERO: i32 = 0;
 /// - pow(x, -y) = 1 / pow(x, y)
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
-    // Special case: pow(x, 0) = 1
+    // GLSL: 0^0 and related cases are undefined — match test/emu as 0.
+    if x == FIX16_ZERO && y == FIX16_ZERO {
+        return FIX16_ZERO;
+    }
+
+    // Special case: pow(x, 0) = 1 (after 0^0)
     if y == 0 {
         return FIX16_ONE;
     }
@@ -41,6 +46,10 @@ pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
     // Check if exponent is an integer (no fractional part)
     // In fixed point Q16.16, integer values have lower 16 bits = 0
     if (y & 0xFFFF) == 0 {
+        // GLSL: pow(x,y) for x < 0 is undefined — return 0 (see edge-exp-domain tests).
+        if x < 0 {
+            return FIX16_ZERO;
+        }
         // Integer exponent: use iterative multiplication
         let exp_int = y >> 16; // Extract integer part
         if exp_int == 0 {

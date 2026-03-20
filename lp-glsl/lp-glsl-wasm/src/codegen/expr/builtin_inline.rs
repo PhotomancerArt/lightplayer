@@ -195,9 +195,10 @@ fn emit_min_max(
                     "binary op scratch (i32) not allocated",
                 ))
             })?;
-            store_q32_float_arg(ctx, sink, lhs, &lhs_ty, dim, base, options)?;
+            // Evaluate rhs before lhs so nested min/max in rhs cannot clobber lhs scratch.
             let rhs_base = base + slot_span(&lhs_ty, dim);
             store_q32_float_arg(ctx, sink, rhs, &rhs_ty, dim, rhs_base, options)?;
+            store_q32_float_arg(ctx, sink, lhs, &lhs_ty, dim, base, options)?;
             for k in 0..dim {
                 sink.local_get(base + lhs_offset(&lhs_ty, k));
                 sink.local_get(rhs_base + lhs_offset(&rhs_ty, k));
@@ -257,11 +258,11 @@ fn emit_clamp(
                     "binary op scratch (f32) not allocated",
                 ))
             })?;
-            store_f32_arg(ctx, sink, x, &x_ty, dim, base, options)?;
             let lo_b = base + slot_span(&x_ty, dim);
-            store_f32_arg(ctx, sink, lo, &lo_ty, dim, lo_b, options)?;
             let hi_b = lo_b + slot_span(&lo_ty, dim);
             store_f32_arg(ctx, sink, hi, &hi_ty, dim, hi_b, options)?;
+            store_f32_arg(ctx, sink, lo, &lo_ty, dim, lo_b, options)?;
+            store_f32_arg(ctx, sink, x, &x_ty, dim, base, options)?;
             for k in 0..dim {
                 sink.local_get(base + lhs_offset(&x_ty, k));
                 sink.local_get(lo_b + lhs_offset(&lo_ty, k));
@@ -277,11 +278,11 @@ fn emit_clamp(
                     "binary op scratch (i32) not allocated",
                 ))
             })?;
-            store_q32_float_arg(ctx, sink, x, &x_ty, dim, base, options)?;
             let lo_b = base + slot_span(&x_ty, dim);
-            store_q32_float_arg(ctx, sink, lo, &lo_ty, dim, lo_b, options)?;
             let hi_b = lo_b + slot_span(&lo_ty, dim);
             store_q32_float_arg(ctx, sink, hi, &hi_ty, dim, hi_b, options)?;
+            store_q32_float_arg(ctx, sink, lo, &lo_ty, dim, lo_b, options)?;
+            store_q32_float_arg(ctx, sink, x, &x_ty, dim, base, options)?;
             for k in 0..dim {
                 sink.local_get(base + lhs_offset(&x_ty, k));
                 sink.local_get(lo_b + lhs_offset(&lo_ty, k));
@@ -444,9 +445,9 @@ fn emit_vectorwise_binary_float(
             "binary op scratch (f32) not allocated",
         ))
     })?;
-    store_f32_arg(ctx, sink, lhs, lhs_ty, dim, base, options)?;
     let rhs_base = base + slot_span(lhs_ty, dim);
     store_f32_arg(ctx, sink, rhs, rhs_ty, dim, rhs_base, options)?;
+    store_f32_arg(ctx, sink, lhs, lhs_ty, dim, base, options)?;
     for k in 0..dim {
         sink.local_get(base + lhs_offset(lhs_ty, k));
         sink.local_get(rhs_base + lhs_offset(rhs_ty, k));

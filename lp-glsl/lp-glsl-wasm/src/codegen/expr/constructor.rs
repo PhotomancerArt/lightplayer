@@ -109,15 +109,22 @@ pub fn emit_vector_constructor(
                 emit_coercion(ctx, sink, &arg_rv.ty, &base_ty);
             }
         } else {
-            // Vector source: store in pre-allocated temp, then load and coerce each component
+            // Vector source: spill all source components, then take the first `component_count`
+            // (shortening) or load all source components and pad with defaults (lengthening).
             let src_base = arg_rv.ty.vector_base_type().unwrap();
-            let temp_base = ctx.vector_conv_temp(&src_base, component_count);
-            for i in (0..component_count).rev() {
+            let slots = arg_count.max(component_count);
+            assert!(slots <= 4, "vector constructor temp overflow");
+            let temp_base = ctx.vector_conv_temp(&src_base, slots);
+            for i in (0..arg_count).rev() {
                 sink.local_set(temp_base + i as u32);
             }
             for i in 0..component_count {
-                sink.local_get(temp_base + i as u32);
-                emit_coercion(ctx, sink, &src_base, &base_ty);
+                if i < arg_count {
+                    sink.local_get(temp_base + i as u32);
+                    emit_coercion(ctx, sink, &src_base, &base_ty);
+                } else {
+                    emit_default_vector_component(ctx, sink, &base_ty);
+                }
             }
         }
     } else {
@@ -135,6 +142,28 @@ pub fn emit_vector_constructor(
         }
     }
     Ok(WasmRValue::from_type(result_ty))
+}
+
+/// GLSL default for missing vector components: 0 / 0.0 / false.
+fn emit_default_vector_component(
+    ctx: &WasmCodegenContext,
+    sink: &mut InstructionSink,
+    base_ty: &Type,
+) {
+    use crate::codegen::numeric::WasmNumericMode;
+    match base_ty {
+        Type::Float => {
+            if ctx.numeric == WasmNumericMode::Q32 {
+                sink.i32_const(0);
+            } else {
+                sink.f32_const(0.0f32.into());
+            }
+        }
+        Type::Int | Type::UInt | Type::Bool => {
+            sink.i32_const(0);
+        }
+        _ => panic!("emit_default_vector_component: {:?}", base_ty),
+    }
 }
 
 fn emit_coercion(ctx: &WasmCodegenContext, sink: &mut InstructionSink, from: &Type, to: &Type) {

@@ -13,10 +13,9 @@ const FIX16_ONE: i32 = 0x00010000; // 65536
 /// Uses sqrt builtin and div builtin.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_q32_inversesqrt(x: i32) -> i32 {
-    // Handle zero and negative inputs
+    // GLSL: inversesqrt(x) for x <= 0 is undefined — return 0 (edge-exp-domain).
     if x <= 0 {
-        // Return maximum value (approximation of infinity)
-        return 0x7FFF_FFFF;
+        return 0;
     }
 
     // Compute sqrt(x)

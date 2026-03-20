@@ -8,6 +8,43 @@ use crate::codegen::rvalue::WasmRValue;
 use crate::options::WasmOptions;
 use lp_glsl_frontend::error::{GlslDiagnostics, extract_span_from_expr};
 
+/// Store values popped from the operand stack into `lhs` (variable). For vectors, the top of
+/// stack is the last component; matches [`emit_simple_assignment`] ordering.
+pub(crate) fn emit_store_stack_into_lvalue(
+    ctx: &WasmCodegenContext,
+    sink: &mut wasm_encoder::InstructionSink,
+    lhs: &Expr,
+) -> Result<(), GlslDiagnostics> {
+    let (name, component_count) = match lhs {
+        Expr::Variable(ident, _) => {
+            let info = ctx.lookup_local(&ident.name).ok_or_else(|| {
+                GlslDiagnostics::from(lp_glsl_frontend::error::GlslError::new(
+                    lp_glsl_frontend::error::ErrorCode::E0100,
+                    alloc::format!("undefined variable `{}`", ident.name),
+                ))
+            })?;
+            (ident.name.clone(), info.component_count)
+        }
+        _ => {
+            return Err(lp_glsl_frontend::error::GlslError::new(
+                lp_glsl_frontend::error::ErrorCode::E0115,
+                "inout/out argument must be an assignable variable",
+            )
+            .into());
+        }
+    };
+    let info = ctx.lookup_local(&name).unwrap();
+    let base_index = info.base_index;
+    if component_count == 1 {
+        sink.local_set(base_index);
+    } else {
+        for i in (0..component_count).rev() {
+            sink.local_set(base_index + i);
+        }
+    }
+    Ok(())
+}
+
 /// Emit assignment expression. Returns WasmRValue with lhs type.
 pub fn emit_assignment(
     ctx: &mut WasmCodegenContext,

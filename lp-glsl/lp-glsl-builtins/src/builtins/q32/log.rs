@@ -6,8 +6,7 @@ use crate::builtins::q32::mul::__lp_q32_mul;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
-/// Minimum representable value (used for log(0) or negative)
-const FIX16_MINIMUM: i32 = i32::MIN;
+const FIX16_ZERO: i32 = 0;
 
 /// Compute log(x) using Newton-Raphson method.
 ///
@@ -15,8 +14,9 @@ const FIX16_MINIMUM: i32 = i32::MIN;
 /// Uses iterative refinement: solving e(guess) = x using Newton's method.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_q32_log(x: i32) -> i32 {
+    // GLSL: log(x) for x <= 0 is undefined — return 0 (edge-exp-domain).
     if x <= 0 {
-        return FIX16_MINIMUM;
+        return FIX16_ZERO;
     }
 
     // Special case: log(1) = 0

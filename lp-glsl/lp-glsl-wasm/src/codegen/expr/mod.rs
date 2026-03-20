@@ -24,6 +24,7 @@ use lp_glsl_builtin_ids::glsl_q32_math_builtin_id;
 use lp_glsl_frontend::FloatMode;
 use lp_glsl_frontend::error::GlslDiagnostics;
 use lp_glsl_frontend::semantic::builtins;
+use lp_glsl_frontend::semantic::functions::ParamQualifier;
 use lp_glsl_frontend::semantic::lpfx::lpfx_fn_registry;
 use lp_glsl_frontend::semantic::type_check::{is_scalar_type_name, is_vector_type_name};
 
@@ -61,10 +62,32 @@ pub fn emit_rvalue(
             } else if is_vector_type_name(name) {
                 constructor::emit_vector_constructor(ctx, sink, name, args, options)
             } else if let Some(&idx) = ctx.func_index_map.get(name) {
+                let callee_params = ctx.all_user_fn_params.get(name).ok_or_else(|| {
+                    lp_glsl_frontend::error::GlslError::new(
+                        lp_glsl_frontend::error::ErrorCode::E0400,
+                        alloc::format!("internal: missing signature for `{name}`"),
+                    )
+                })?;
+                if args.len() != callee_params.len() {
+                    return Err(lp_glsl_frontend::error::GlslError::new(
+                        lp_glsl_frontend::error::ErrorCode::E0400,
+                        alloc::format!(
+                            "internal: arg count mismatch for `{name}` (call {} vs sig {})",
+                            args.len(),
+                            callee_params.len(),
+                        ),
+                    )
+                    .into());
+                }
                 for arg in args.iter() {
                     emit_rvalue(ctx, sink, arg, options)?;
                 }
                 sink.call(idx);
+                for (arg, param) in args.iter().zip(callee_params.iter()).rev() {
+                    if matches!(param.qualifier, ParamQualifier::InOut | ParamQualifier::Out) {
+                        assignment::emit_store_stack_into_lvalue(ctx, sink, arg)?;
+                    }
+                }
                 let return_ty = ctx
                     .func_return_type
                     .get(name)

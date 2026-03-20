@@ -85,7 +85,8 @@ fn walk_expr(
         | Expr::Variable(_, _) => Ok(()),
         Binary(_, lhs, rhs, _) => {
             walk_expr(ctx, lhs.as_ref(), used, options)?;
-            walk_expr(ctx, rhs.as_ref(), used, options)
+            walk_expr(ctx, rhs.as_ref(), used, options)?;
+            Ok(())
         }
         Unary(_, operand, _) => walk_expr(ctx, operand.as_ref(), used, options),
         Ternary(c, t, e, _) => {
@@ -251,12 +252,17 @@ fn scan_function(
     }
 
     let no_builtin_idx: HashMap<BuiltinId, u32> = HashMap::new();
+    let empty_user_fn_params: HashMap<
+        alloc::string::String,
+        Vec<lp_glsl_frontend::semantic::functions::Parameter>,
+    > = HashMap::new();
     let mut ctx = WasmCodegenContext::new(
         &func.parameters,
         options,
         func_index_map,
         &no_builtin_idx,
         func_return_type,
+        &empty_user_fn_params,
     );
     for stmt in &func.body {
         stmt::walk_for_declarations(&mut ctx, stmt);
