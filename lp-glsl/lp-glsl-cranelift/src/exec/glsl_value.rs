@@ -673,11 +673,9 @@ fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, 
             }
             Expr::UIntConst(n, _) => components.push(*n),
             Expr::FloatConst(f, _) => {
-                // Convert float to uint: truncate towards zero, then cast to unsigned
-                // Negative values wrap around (e.g., -2.7 -> -2 -> 4294967294u)
+                // Match naga/WGSL: truncate toward zero; negative signed result → 0u.
                 let truncated = trunc_f32(*f) as i32;
-                let as_uint = truncated as u32;
-                components.push(as_uint);
+                components.push(if truncated < 0 { 0 } else { truncated as u32 });
             }
             Expr::BoolConst(b, _) => {
                 // Convert bool to uint: false → 0, true → 1
@@ -746,14 +744,8 @@ fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, 
                             components.push(n.wrapping_neg());
                         }
                         Expr::FloatConst(f, _) => {
-                            // Convert negative float to uint: -5.7 → 4294967291 (wrapping)
-                            let truncated = trunc_f32(-f);
-                            let wrapped = if truncated >= 0 {
-                                (truncated as u32).wrapping_neg()
-                            } else {
-                                (-truncated as u32).wrapping_neg()
-                            };
-                            components.push(wrapped);
+                            let truncated = trunc_f32(-f) as i32;
+                            components.push(if truncated < 0 { 0 } else { truncated as u32 });
                         }
                         _ => {
                             return Err(GlslError::new(

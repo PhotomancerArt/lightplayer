@@ -1048,6 +1048,18 @@ pub(crate) fn emit_cast(
         }
         (ScalarKind::Float, ScalarKind::Uint, FloatMode::Q32) => {
             emit_q32_fixed_trunc_toward_zero_to_i32(wasm_fn);
+            // Match naga/WGSL: negative floats convert to 0u (not signed-trunc then bitcast).
+            let scratch = alloc
+                .q32_scratch
+                .map(|(a, _)| a)
+                .ok_or_else(|| String::from("Q32 scratch missing"))?;
+            wasm_fn.instruction(&Instruction::LocalSet(scratch));
+            wasm_fn.instruction(&Instruction::I32Const(0));
+            wasm_fn.instruction(&Instruction::LocalGet(scratch));
+            wasm_fn.instruction(&Instruction::LocalGet(scratch));
+            wasm_fn.instruction(&Instruction::I32Const(0));
+            wasm_fn.instruction(&Instruction::I32LtS);
+            wasm_fn.instruction(&Instruction::Select);
         }
         (ScalarKind::Sint, ScalarKind::Float, FloatMode::Q32) => {
             emit_i32_clamp_then_q32_scale_sint(wasm_fn, alloc)?;

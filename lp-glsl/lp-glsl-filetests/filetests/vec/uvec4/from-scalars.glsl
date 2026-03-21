@@ -70,10 +70,10 @@ uvec4 test_uvec4_from_scalars_expressions() {
 // run: test_uvec4_from_scalars_expressions() == uvec4(15u, 40u, 25u, 40u)
 
 uvec4 test_uvec4_from_scalars_function_results() {
-    return uvec4(uint(7.8), uint(-3.2), uint(42.0), uint(15.9)); // float to uint conversion (truncates)
+    return uvec4(uint(7.8), uint(-3.2), uint(42.0), uint(15.9)); // naga/WGSL: negative float → 0u
 }
 
-// run: test_uvec4_from_scalars_function_results() == uvec4(7u, 4294967293u, 42u, 15u)
+// run: test_uvec4_from_scalars_function_results() == uvec4(7u, 0u, 42u, 15u)
 
 uvec4 test_uvec4_from_scalars_in_assignment() {
     uvec4 result;

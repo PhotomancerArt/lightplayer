@@ -56,10 +56,10 @@ uvec2 test_uvec2_from_scalars_expressions() {
 // run: test_uvec2_from_scalars_expressions() == uvec2(15u, 40u)
 
 uvec2 test_uvec2_from_scalars_function_results() {
-    return uvec2(uint(7.8), uint(-3.2)); // float to uint conversion (truncates)
+    return uvec2(uint(7.8), uint(-3.2)); // naga/WGSL: negative float → 0u
 }
 
-// run: test_uvec2_from_scalars_function_results() == uvec2(7u, 4294967293u)
+// run: test_uvec2_from_scalars_function_results() == uvec2(7u, 0u)
 
 uvec2 test_uvec2_from_scalars_in_assignment() {
     uvec2 result;

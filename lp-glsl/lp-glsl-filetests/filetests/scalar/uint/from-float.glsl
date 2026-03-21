@@ -1,7 +1,7 @@
 // test run
 
 // ============================================================================
-// Constructor: uint(float) - truncates fractional part toward zero (undefined for negative)
+// Constructor: uint(float) — naga/WGSL rules: truncate toward zero; negative result → 0u
 // ============================================================================
 
 uint test_uint_from_float_zero() {
@@ -72,22 +72,20 @@ uint test_uint_from_float_negative() {
     return uint(f);
 }
 
-// run: test_uint_from_float_negative() == 4294967295u
+// run: test_uint_from_float_negative() == 0u
 
 uint test_uint_from_float_negative_large() {
     float f = -100.5;
     return uint(f);
 }
 
-// run: test_uint_from_float_negative_large() == 4294967196u
+// run: test_uint_from_float_negative_large() == 0u
 
 uint test_uint_from_float_negative_literal() {
     return uint(-42.0);
 }
 
-// Naga constant-folds uint(negative float literal) to 0u; runtime uint(f) matches Cranelift.
-// @unimplemented(backend=wasm)
-// run: test_uint_from_float_negative_literal() == 4294967254u
+// run: test_uint_from_float_negative_literal() == 0u
 
 uint test_uint_from_float_negative_expression() {
     float a = 3.0;
@@ -95,5 +93,5 @@ uint test_uint_from_float_negative_expression() {
     return uint(a - b);
 }
 
-// run: test_uint_from_float_negative_expression() == 4294967294u
+// run: test_uint_from_float_negative_expression() == 0u
 

@@ -63,10 +63,10 @@ uvec3 test_uvec3_from_scalars_expressions() {
 // run: test_uvec3_from_scalars_expressions() == uvec3(15u, 40u, 25u)
 
 uvec3 test_uvec3_from_scalars_function_results() {
-    return uvec3(uint(7.8), uint(-3.2), uint(42.0)); // float to uint conversion (truncates)
+    return uvec3(uint(7.8), uint(-3.2), uint(42.0)); // naga/WGSL: negative float → 0u
 }
 
-// run: test_uvec3_from_scalars_function_results() == uvec3(7u, 4294967293u, 42u)
+// run: test_uvec3_from_scalars_function_results() == uvec3(7u, 0u, 42u)
 
 uvec3 test_uvec3_from_scalars_in_assignment() {
     uvec3 result;

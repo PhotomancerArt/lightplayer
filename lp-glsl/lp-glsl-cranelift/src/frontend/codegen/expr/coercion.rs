@@ -96,8 +96,7 @@ pub fn coerce_to_type_with_location<M: cranelift_module::Module>(
         }
         // float ↔ uint conversions
         (GlslType::Float, GlslType::UInt) => {
-            // float → uint: truncates fractional part toward zero (undefined for negative)
-            // val is f32, convert to i32 using fcvt_to_uint
+            // float → uint: naga/WGSL-style — truncate toward zero; negative result becomes 0u.
             Ok(ctx.emit_float_to_uint(val))
         }
         (GlslType::UInt, GlslType::Float) => {

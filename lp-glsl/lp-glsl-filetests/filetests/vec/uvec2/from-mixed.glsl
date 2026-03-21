@@ -48,7 +48,7 @@ uvec2 test_uvec2_from_mixed_vec2() {
     return uvec2(source);
 }
 
-// run: test_uvec2_from_mixed_vec2() == uvec2(1u, 4294967294u)
+// run: test_uvec2_from_mixed_vec2() == uvec2(1u, 0u)
 
 uvec2 test_uvec2_from_mixed_zero_values() {
     return uvec2(0, 0.0);
@@ -60,7 +60,7 @@ uvec2 test_uvec2_from_mixed_negative_values() {
     return uvec2(-1, -2.5);
 }
 
-// run: test_uvec2_from_mixed_negative_values() == uvec2(4294967295u, 4294967294u)
+// run: test_uvec2_from_mixed_negative_values() == uvec2(4294967295u, 0u)
 
 uvec2 test_uvec2_from_mixed_variables() {
     int x = 100;

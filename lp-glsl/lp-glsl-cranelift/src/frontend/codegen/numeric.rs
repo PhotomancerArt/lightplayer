@@ -511,17 +511,10 @@ impl Q32Strategy {
     }
 
     pub fn emit_to_uint(&self, a: Value, builder: &mut FunctionBuilder) -> Value {
-        let shift_const = builder.ins().iconst(types::I32, Q32_SHIFT);
+        let trunc = self.emit_to_sint(a, builder);
         let zero = builder.ins().iconst(types::I32, 0);
-        let is_negative = builder.ins().icmp(IntCC::SignedLessThan, a, zero);
-        let mask_value = (1u64 << Q32_SHIFT as u32) - 1;
-        let mask = builder.ins().iconst(types::I32, mask_value as i64);
-        let adjusted_negative = builder.ins().iadd(a, mask);
-        let shifted_negative = builder.ins().sshr(adjusted_negative, shift_const);
-        let shifted_positive = builder.ins().sshr(a, shift_const);
-        builder
-            .ins()
-            .select(is_negative, shifted_negative, shifted_positive)
+        let is_negative = builder.ins().icmp(IntCC::SignedLessThan, trunc, zero);
+        builder.ins().select(is_negative, zero, trunc)
     }
 
     pub fn map_signature(&self, sig: &Signature) -> Signature {
