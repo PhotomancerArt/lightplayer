@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Not: not(bvec4) -> bvec4 (component-wise logical NOT)

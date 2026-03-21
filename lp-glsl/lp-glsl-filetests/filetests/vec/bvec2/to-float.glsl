@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // To Float: float(bvec2) - converts first component (false -> 0.0, true -> 1.0)

@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod emit;
+mod emit_vec;
 mod locals;
 pub mod module;
 pub mod options;

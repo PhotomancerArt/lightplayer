@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/uvec2/fn-max --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Max: max(uvec2, uvec2) -> uvec2 (component-wise maximum)

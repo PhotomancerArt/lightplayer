@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/ivec2/fn-min --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Min: min(ivec2, ivec2) -> ivec2 (component-wise minimum)

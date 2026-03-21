@@ -1,13 +1,14 @@
 //! Lower `naga::Module` to a WASM binary via `wasm-encoder`.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lp_glsl_naga::{FloatMode, NagaModule};
 use naga::{
-    BinaryOperator, Block, Bytes, Expression, Function, Handle, Literal, Module, ScalarKind,
-    Statement, TypeInner, UnaryOperator,
+    BinaryOperator, Block, Bytes, Expression, Function, Handle, Literal, MathFunction, Module,
+    ScalarKind, Statement, TypeInner, UnaryOperator,
 };
 use wasm_encoder::{
     BlockType, CodeSection, ExportKind, ExportSection, Function as WasmFunction, FunctionSection,
@@ -16,9 +17,54 @@ use wasm_encoder::{
 
 use crate::locals::LocalAlloc;
 use crate::options::WasmOptions;
-use crate::types::glsl_type_to_wasm_components;
+use crate::types::{
+    glsl_type_to_wasm_components, type_handle_component_count, type_handle_element_scalar_kind,
+};
 
 const Q16_16_SCALE: f32 = 65536.0;
+
+/// WASM structured-control nesting depth (each `block` / `loop` / `if` adds one).
+struct EmitCtx {
+    depth: u32,
+    loop_stack: Vec<LoopFrame>,
+    /// Naga function handle → WASM function index (same order as [`emit_module`] exports).
+    func_indices: BTreeMap<Handle<Function>, u32>,
+}
+
+impl Default for EmitCtx {
+    fn default() -> Self {
+        Self {
+            depth: 0,
+            loop_stack: Vec::new(),
+            func_indices: BTreeMap::new(),
+        }
+    }
+}
+
+/// Labels for `break` / `continue` relative to [`EmitCtx::depth`].
+struct LoopFrame {
+    /// Depth after the loop’s outer `block` (first of the three constructs).
+    break_target_depth: u32,
+    /// Depth after the inner `block` wrapping the loop body (third construct).
+    body_entry_depth: u32,
+}
+
+impl EmitCtx {
+    fn br_depth_for_break(&self) -> Option<u32> {
+        let frame = self.loop_stack.last()?;
+        self.depth.checked_sub(frame.break_target_depth)
+    }
+
+    fn br_depth_for_continue(&self) -> Option<u32> {
+        let frame = self.loop_stack.last()?;
+        let rel = if self.depth < frame.body_entry_depth {
+            0
+        } else {
+            self.depth - frame.body_entry_depth
+        };
+        Some(rel)
+    }
+}
 
 pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Vec<u8>, String> {
     let module = &naga_module.module;
@@ -28,6 +74,13 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
     let mut func_sec = FunctionSection::new();
     let mut export_sec = ExportSection::new();
     let mut code_sec = CodeSection::new();
+
+    let func_indices: BTreeMap<Handle<Function>, u32> = naga_module
+        .functions
+        .iter()
+        .enumerate()
+        .map(|(i, (h, _))| (*h, i as u32))
+        .collect();
 
     for (func_i, (func_handle, fi)) in naga_module.functions.iter().enumerate() {
         let func = &module.functions[*func_handle];
@@ -51,7 +104,19 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
 
         emit_local_inits(module, func, &mut wasm_fn, mode, &alloc)?;
 
-        emit_block(module, func, &func.body, &mut wasm_fn, mode, &alloc)?;
+        let mut ctx = EmitCtx {
+            func_indices: func_indices.clone(),
+            ..Default::default()
+        };
+        emit_block(
+            module,
+            func,
+            &func.body,
+            &mut wasm_fn,
+            mode,
+            &alloc,
+            &mut ctx,
+        )?;
 
         wasm_fn.instruction(&Instruction::End);
         code_sec.function(&wasm_fn);
@@ -80,11 +145,26 @@ fn emit_local_inits(
         let Some(init_h) = lv.init else {
             continue;
         };
+        let dim = alloc.local_variable_slots(module, func, handle);
+        let actual = crate::emit_vec::expr_component_count(module, func, init_h)?;
         emit_expr(module, func, init_h, wasm_fn, mode, alloc)?;
+        if dim == 1 && actual > 1 {
+            let base = alloc.alloc_temp_n(actual)?;
+            for i in (0..actual).rev() {
+                wasm_fn.instruction(&Instruction::LocalSet(base + i));
+            }
+            wasm_fn.instruction(&Instruction::LocalGet(base));
+        } else if dim > 1 && dim != actual {
+            return Err(format!(
+                "WASM codegen: local init width {actual} vs local slots {dim}"
+            ));
+        }
         let idx = alloc
             .resolve_local_variable(handle)
             .ok_or_else(|| String::from("WASM codegen: init for unresolved local"))?;
-        wasm_fn.instruction(&Instruction::LocalSet(idx));
+        for off in (0..dim).rev() {
+            wasm_fn.instruction(&Instruction::LocalSet(idx + off));
+        }
     }
     Ok(())
 }
@@ -96,9 +176,10 @@ fn emit_block(
     wasm_fn: &mut WasmFunction,
     mode: FloatMode,
     alloc: &LocalAlloc,
+    ctx: &mut EmitCtx,
 ) -> Result<(), String> {
     for stmt in block.iter() {
-        emit_stmt(module, func, stmt, wasm_fn, mode, alloc)?;
+        emit_stmt(module, func, stmt, wasm_fn, mode, alloc, ctx)?;
     }
     Ok(())
 }
@@ -110,6 +191,7 @@ fn emit_stmt(
     wasm_fn: &mut WasmFunction,
     mode: FloatMode,
     alloc: &LocalAlloc,
+    ctx: &mut EmitCtx,
 ) -> Result<(), String> {
     match stmt {
         Statement::Emit(range) => {
@@ -119,7 +201,7 @@ fn emit_stmt(
             }
             Ok(())
         }
-        Statement::Block(inner) => emit_block(module, func, inner, wasm_fn, mode, alloc),
+        Statement::Block(inner) => emit_block(module, func, inner, wasm_fn, mode, alloc, ctx),
         Statement::If {
             condition,
             accept,
@@ -127,10 +209,12 @@ fn emit_stmt(
         } => {
             emit_expr(module, func, *condition, wasm_fn, mode, alloc)?;
             wasm_fn.instruction(&Instruction::If(BlockType::Empty));
-            emit_block(module, func, accept, wasm_fn, mode, alloc)?;
+            ctx.depth += 1;
+            emit_block(module, func, accept, wasm_fn, mode, alloc, ctx)?;
             wasm_fn.instruction(&Instruction::Else);
-            emit_block(module, func, reject, wasm_fn, mode, alloc)?;
+            emit_block(module, func, reject, wasm_fn, mode, alloc, ctx)?;
             wasm_fn.instruction(&Instruction::End);
+            ctx.depth -= 1;
             Ok(())
         }
         Statement::Loop {
@@ -138,39 +222,158 @@ fn emit_stmt(
             continuing,
             break_if,
         } => {
+            let break_target_depth = ctx.depth + 1;
+            let body_entry_depth = ctx.depth + 3;
+
             wasm_fn.instruction(&Instruction::Block(BlockType::Empty));
+            ctx.depth += 1;
             wasm_fn.instruction(&Instruction::Loop(BlockType::Empty));
+            ctx.depth += 1;
             wasm_fn.instruction(&Instruction::Block(BlockType::Empty));
-            emit_block(module, func, body, wasm_fn, mode, alloc)?;
+            ctx.depth += 1;
+
+            ctx.loop_stack.push(LoopFrame {
+                break_target_depth,
+                body_entry_depth,
+            });
+
+            let (head, tail) = split_do_while_trailing_guard(body, continuing, break_if);
+            emit_stmt_slice(module, func, head, wasm_fn, mode, alloc, ctx)?;
             wasm_fn.instruction(&Instruction::End);
-            emit_block(module, func, continuing, wasm_fn, mode, alloc)?;
+            ctx.depth -= 1;
+            if let Some(tail_stmts) = tail {
+                emit_stmt_slice(module, func, tail_stmts, wasm_fn, mode, alloc, ctx)?;
+            }
+
+            emit_block(module, func, continuing, wasm_fn, mode, alloc, ctx)?;
             if let Some(h) = break_if {
                 emit_expr(module, func, *h, wasm_fn, mode, alloc)?;
                 wasm_fn.instruction(&Instruction::BrIf(1));
             }
             wasm_fn.instruction(&Instruction::Br(0));
             wasm_fn.instruction(&Instruction::End);
+            ctx.depth -= 1;
             wasm_fn.instruction(&Instruction::End);
+            ctx.depth -= 1;
+
+            ctx.loop_stack.pop();
+
             Ok(())
         }
-        Statement::Break | Statement::Continue => Err(String::from(
-            "WASM codegen: break/continue not supported (unexpected in scalar filetests)",
-        )),
+        Statement::Break => {
+            let d = ctx
+                .br_depth_for_break()
+                .ok_or_else(|| String::from("WASM codegen: break outside of any loop"))?;
+            wasm_fn.instruction(&Instruction::Br(d));
+            Ok(())
+        }
+        Statement::Continue => {
+            let d = ctx
+                .br_depth_for_continue()
+                .ok_or_else(|| String::from("WASM codegen: continue outside of any loop"))?;
+            wasm_fn.instruction(&Instruction::Br(d));
+            Ok(())
+        }
         Statement::Return { value } => {
             match value {
-                Some(h) => emit_expr(module, func, *h, wasm_fn, mode, alloc)?,
+                Some(h) => {
+                    let ret_slots = func
+                        .result
+                        .as_ref()
+                        .map(|r| type_handle_component_count(module, r.ty))
+                        .unwrap_or(0);
+                    let actual = crate::emit_vec::expr_component_count(module, func, *h)?;
+                    emit_expr(module, func, *h, wasm_fn, mode, alloc)?;
+                    if ret_slots == 1 && actual > 1 {
+                        let base = alloc.alloc_temp_n(actual)?;
+                        for i in (0..actual).rev() {
+                            wasm_fn.instruction(&Instruction::LocalSet(base + i));
+                        }
+                        wasm_fn.instruction(&Instruction::LocalGet(base));
+                    } else if ret_slots > 1 && ret_slots != actual {
+                        return Err(format!(
+                            "WASM codegen: return value width {actual} vs expected {ret_slots}"
+                        ));
+                    }
+                }
                 None => {}
             }
             wasm_fn.instruction(&Instruction::Return);
             Ok(())
         }
         Statement::Store { pointer, value } => {
-            emit_expr(module, func, *value, wasm_fn, mode, alloc)?;
             let lv = store_pointer_local(func, *pointer)?;
             let idx = alloc
                 .resolve_local_variable(lv)
                 .ok_or_else(|| String::from("WASM codegen: store to unresolved local"))?;
-            wasm_fn.instruction(&Instruction::LocalSet(idx));
+            let dim = alloc.local_variable_slots(module, func, lv);
+            let actual = crate::emit_vec::expr_component_count(module, func, *value)?;
+            emit_expr(module, func, *value, wasm_fn, mode, alloc)?;
+            if dim == 1 && actual > 1 {
+                let base = alloc.alloc_temp_n(actual)?;
+                for i in (0..actual).rev() {
+                    wasm_fn.instruction(&Instruction::LocalSet(base + i));
+                }
+                wasm_fn.instruction(&Instruction::LocalGet(base));
+            } else if dim > 1 && dim != actual {
+                return Err(format!(
+                    "WASM codegen: store value width {actual} vs local slots {dim}"
+                ));
+            }
+            for off in (0..dim).rev() {
+                wasm_fn.instruction(&Instruction::LocalSet(idx + off));
+            }
+            Ok(())
+        }
+        Statement::Call {
+            function,
+            arguments,
+            result,
+        } => {
+            let callee = &module.functions[*function];
+            if arguments.len() != callee.arguments.len() {
+                return Err(format!(
+                    "WASM codegen: call argument count {} vs callee {}",
+                    arguments.len(),
+                    callee.arguments.len()
+                ));
+            }
+            for (&arg_h, arg_decl) in arguments.iter().zip(callee.arguments.iter()) {
+                let expected = type_handle_component_count(module, arg_decl.ty);
+                let actual = crate::emit_vec::expr_component_count(module, func, arg_h)?;
+                emit_expr(module, func, arg_h, wasm_fn, mode, alloc)?;
+                if expected == 1 && actual > 1 {
+                    let base = alloc.alloc_temp_n(actual)?;
+                    for i in (0..actual).rev() {
+                        wasm_fn.instruction(&Instruction::LocalSet(base + i));
+                    }
+                    wasm_fn.instruction(&Instruction::LocalGet(base));
+                } else if expected > 1 && expected != actual {
+                    return Err(format!(
+                        "WASM codegen: call arg width {actual} vs param slots {expected}"
+                    ));
+                }
+            }
+            let wasm_fidx = ctx
+                .func_indices
+                .get(function)
+                .copied()
+                .ok_or_else(|| format!("WASM codegen: unresolved call target {function:?}"))?;
+            wasm_fn.instruction(&Instruction::Call(wasm_fidx));
+            if let Some(res_h) = result {
+                let base = alloc.call_result_wasm_base(*res_h).ok_or_else(|| {
+                    format!("WASM codegen: missing CallResult locals for {res_h:?}")
+                })?;
+                let ret_ty = callee
+                    .result
+                    .as_ref()
+                    .ok_or_else(|| String::from("WASM codegen: call with result to void callee"))?
+                    .ty;
+                let dim = type_handle_component_count(module, ret_ty);
+                for off in (0..dim).rev() {
+                    wasm_fn.instruction(&Instruction::LocalSet(base + off));
+                }
+            }
             Ok(())
         }
         _ => Err(format!("WASM codegen: unsupported statement {stmt:?}")),
@@ -189,7 +392,7 @@ fn store_pointer_local(
     }
 }
 
-fn emit_expr(
+pub(crate) fn emit_expr(
     module: &Module,
     func: &Function,
     expr: Handle<Expression>,
@@ -197,10 +400,33 @@ fn emit_expr(
     mode: FloatMode,
     alloc: &LocalAlloc,
 ) -> Result<(), String> {
+    if let Expression::AccessIndex { base, .. } = &func.expressions[expr] {
+        if crate::emit_vec::expr_component_count(module, func, *base)? > 1 {
+            return crate::emit_vec::emit_vector_expr(module, func, expr, wasm_fn, mode, alloc);
+        }
+    }
+    let dim = crate::emit_vec::expr_component_count(module, func, expr)?;
+    if dim > 1 {
+        return crate::emit_vec::emit_vector_expr(module, func, expr, wasm_fn, mode, alloc);
+    }
     match &func.expressions[expr] {
         Expression::Literal(lit) => emit_literal(lit, wasm_fn, mode),
+        Expression::Constant(h) => {
+            let init = module.constants[*h].init;
+            emit_global_expression(module, init, wasm_fn, mode, alloc)
+        }
         Expression::FunctionArgument(i) => {
-            wasm_fn.instruction(&Instruction::LocalGet(*i));
+            let base = alloc
+                .function_argument_wasm_base(*i)
+                .ok_or_else(|| String::from("WASM codegen: bad function argument index"))?;
+            wasm_fn.instruction(&Instruction::LocalGet(base));
+            Ok(())
+        }
+        Expression::CallResult(_) => {
+            let base = alloc
+                .call_result_wasm_base(expr)
+                .ok_or_else(|| String::from("WASM codegen: CallResult local missing"))?;
+            wasm_fn.instruction(&Instruction::LocalGet(base));
             Ok(())
         }
         Expression::LocalVariable(_) => Err(String::from(
@@ -248,6 +474,19 @@ fn emit_expr(
             kind,
             convert,
         } => {
+            let inner_dim = crate::emit_vec::expr_component_count(module, func, *inner)?;
+            if inner_dim > 1 {
+                // GLSL scalar cast from `vecN`/`bvecN` uses the first component (`.x`).
+                let src_k = crate::emit_vec::vector_element_kind(module, func, *inner)?;
+                emit_expr(module, func, *inner, wasm_fn, mode, alloc)?;
+                let base = alloc.alloc_temp_n(inner_dim)?;
+                for i in (0..inner_dim).rev() {
+                    wasm_fn.instruction(&Instruction::LocalSet(base + i));
+                }
+                wasm_fn.instruction(&Instruction::LocalGet(base));
+                emit_cast(*kind, *convert, src_k, mode, wasm_fn, alloc)?;
+                return Ok(());
+            }
             let src_k = expr_scalar_kind(module, func, *inner)?;
             emit_expr(module, func, *inner, wasm_fn, mode, alloc)?;
             emit_cast(*kind, *convert, src_k, mode, wasm_fn, alloc)?;
@@ -257,6 +496,20 @@ fn emit_expr(
             let inner = &module.types[*ty_h].inner;
             emit_zero_value(inner, wasm_fn, mode)
         }
+        Expression::Math { fun, arg, arg1, .. } => match (fun, arg1.as_ref()) {
+            (MathFunction::Min | MathFunction::Max, Some(rhs)) => {
+                let is_max = matches!(fun, MathFunction::Max);
+                let k = expr_scalar_kind(module, func, *arg)?;
+                emit_expr(module, func, *arg, wasm_fn, mode, alloc)?;
+                emit_expr(module, func, *rhs, wasm_fn, mode, alloc)?;
+                emit_scalar_min_max(is_max, k, mode, wasm_fn, alloc)?;
+                Ok(())
+            }
+            _ => Err(format!(
+                "WASM codegen: unsupported expression {:?}",
+                func.expressions[expr]
+            )),
+        },
         _ => Err(format!(
             "WASM codegen: unsupported expression {:?}",
             func.expressions[expr]
@@ -265,6 +518,14 @@ fn emit_expr(
 }
 
 fn emit_zero_value(
+    inner: &TypeInner,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+) -> Result<(), String> {
+    emit_zero_value_inner(inner, wasm_fn, mode)
+}
+
+pub(crate) fn emit_zero_value_inner(
     inner: &TypeInner,
     wasm_fn: &mut WasmFunction,
     mode: FloatMode,
@@ -288,11 +549,46 @@ fn emit_zero_value(
         },
         _ => {
             return Err(String::from(
-                "WASM codegen: ZeroValue only for scalars in Phase I",
+                "WASM codegen: ZeroValue inner must be scalar here",
             ));
         }
     }
     Ok(())
+}
+
+pub(crate) fn emit_global_expression(
+    module: &Module,
+    expr: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    match &module.global_expressions[expr] {
+        Expression::Literal(lit) => emit_literal(lit, wasm_fn, mode),
+        Expression::Compose { components, .. } => {
+            for &c in components {
+                emit_global_expression(module, c, wasm_fn, mode, alloc)?;
+            }
+            Ok(())
+        }
+        Expression::Splat { size, value } => {
+            let dim = *size as u32;
+            emit_global_expression(module, *value, wasm_fn, mode, alloc)?;
+            if dim <= 1 {
+                return Ok(());
+            }
+            let s = alloc.splat_scratch;
+            wasm_fn.instruction(&Instruction::LocalSet(s));
+            for _ in 0..dim {
+                wasm_fn.instruction(&Instruction::LocalGet(s));
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "WASM codegen: unsupported global expression {:?}",
+            module.global_expressions[expr]
+        )),
+    }
 }
 
 /// Fixed16x16 values are clamped to approximately ±32768 (see filetests).
@@ -302,7 +598,11 @@ fn clamp_f32_to_q16_16_range(v: f32) -> f32 {
     v.clamp(LO, HI)
 }
 
-fn emit_literal(lit: &Literal, wasm_fn: &mut WasmFunction, mode: FloatMode) -> Result<(), String> {
+pub(crate) fn emit_literal(
+    lit: &Literal,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+) -> Result<(), String> {
     match *lit {
         Literal::F32(v) => match mode {
             FloatMode::Float => {
@@ -332,12 +632,14 @@ fn emit_literal(lit: &Literal, wasm_fn: &mut WasmFunction, mode: FloatMode) -> R
     }
 }
 
-fn expr_scalar_kind(
+pub(crate) fn expr_scalar_kind(
     module: &Module,
     func: &Function,
     expr: Handle<Expression>,
 ) -> Result<ScalarKind, String> {
     match &func.expressions[expr] {
+        Expression::Constant(h) => type_handle_element_scalar_kind(module, module.constants[*h].ty)
+            .map_err(|e| String::from(e)),
         Expression::Literal(l) => match l {
             Literal::F32(_) | Literal::F64(_) | Literal::F16(_) | Literal::AbstractFloat(_) => {
                 Ok(ScalarKind::Float)
@@ -351,23 +653,18 @@ fn expr_scalar_kind(
                 .arguments
                 .get(*i as usize)
                 .ok_or_else(|| String::from("bad argument index"))?;
-            type_handle_scalar_kind(module, arg.ty)
+            type_handle_element_scalar_kind(module, arg.ty).map_err(|e| String::from(e))
         }
         Expression::LocalVariable(lv) => {
             let lv_ty = func.local_variables[*lv].ty;
-            type_handle_scalar_kind(module, lv_ty)
+            type_handle_element_scalar_kind(module, lv_ty).map_err(|e| String::from(e))
         }
         Expression::Load { pointer } => {
             let ptr = &func.expressions[*pointer];
             match ptr {
                 Expression::LocalVariable(lv) => {
-                    let inner = &module.types[func.local_variables[*lv].ty].inner;
-                    match *inner {
-                        TypeInner::Pointer { base, .. } => type_handle_scalar_kind(module, base),
-                        TypeInner::ValuePointer { scalar, .. } => Ok(scalar.kind),
-                        TypeInner::Scalar(s) => Ok(s.kind),
-                        _ => Err(format!("load pointer type: {inner:?}")),
-                    }
+                    let lv_ty = func.local_variables[*lv].ty;
+                    type_handle_element_scalar_kind(module, lv_ty).map_err(|e| String::from(e))
                 }
                 _ => expr_scalar_kind(module, func, *pointer),
             }
@@ -376,6 +673,21 @@ fn expr_scalar_kind(
         Expression::Unary { expr: inner, .. } => expr_scalar_kind(module, func, *inner),
         Expression::Select { accept, .. } => expr_scalar_kind(module, func, *accept),
         Expression::As { kind, .. } => Ok(*kind),
+        Expression::AccessIndex { base, .. } => {
+            crate::emit_vec::vector_element_kind(module, func, *base)
+        }
+        Expression::CallResult(fh) => {
+            let ret = module.functions[*fh]
+                .result
+                .as_ref()
+                .ok_or_else(|| String::from("CallResult for void function"))?;
+            type_handle_element_scalar_kind(module, ret.ty).map_err(|e| String::from(e))
+        }
+        Expression::Math {
+            fun: MathFunction::Min | MathFunction::Max,
+            arg,
+            ..
+        } => crate::emit_vec::vector_element_kind(module, func, *arg),
         Expression::ZeroValue(ty_h) => match &module.types[*ty_h].inner {
             TypeInner::Scalar(s) => Ok(s.kind),
             _ => Err(String::from("zerovalue kind")),
@@ -387,16 +699,7 @@ fn expr_scalar_kind(
     }
 }
 
-fn type_handle_scalar_kind(module: &Module, ty: Handle<naga::Type>) -> Result<ScalarKind, String> {
-    match &module.types[ty].inner {
-        TypeInner::Scalar(s) => Ok(s.kind),
-        TypeInner::Pointer { base, .. } => type_handle_scalar_kind(module, *base),
-        TypeInner::ValuePointer { scalar, .. } => Ok(scalar.kind),
-        _ => Err(String::from("non-scalar type handle")),
-    }
-}
-
-fn emit_binary(
+pub(crate) fn emit_binary(
     op: BinaryOperator,
     kind: ScalarKind,
     mode: FloatMode,
@@ -408,13 +711,13 @@ fn emit_binary(
             wasm_fn.instruction(&Instruction::F32Add);
         }
         (BinaryOperator::Add, ScalarKind::Float, FloatMode::Q32) => {
-            wasm_fn.instruction(&Instruction::I32Add);
+            emit_q32_add_sat(wasm_fn, alloc)?;
         }
         (BinaryOperator::Subtract, ScalarKind::Float, FloatMode::Float) => {
             wasm_fn.instruction(&Instruction::F32Sub);
         }
         (BinaryOperator::Subtract, ScalarKind::Float, FloatMode::Q32) => {
-            wasm_fn.instruction(&Instruction::I32Sub);
+            emit_q32_sub_sat(wasm_fn, alloc)?;
         }
         (BinaryOperator::Multiply, ScalarKind::Float, FloatMode::Float) => {
             wasm_fn.instruction(&Instruction::F32Mul);
@@ -577,7 +880,67 @@ fn emit_binary(
     Ok(())
 }
 
-fn emit_unary(
+pub(crate) fn emit_scalar_min_max(
+    is_max: bool,
+    kind: ScalarKind,
+    mode: FloatMode,
+    wasm_fn: &mut WasmFunction,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    match (kind, mode) {
+        (ScalarKind::Float, FloatMode::Float) => {
+            wasm_fn.instruction(if is_max {
+                &Instruction::F32Max
+            } else {
+                &Instruction::F32Min
+            });
+            Ok(())
+        }
+        (ScalarKind::Float, FloatMode::Q32) => {
+            emit_i32_min_max_select(is_max, false, wasm_fn, alloc)
+        }
+        (ScalarKind::Sint | ScalarKind::Bool, FloatMode::Q32) => {
+            emit_i32_min_max_select(is_max, false, wasm_fn, alloc)
+        }
+        (ScalarKind::Uint, FloatMode::Q32) => emit_i32_min_max_select(is_max, true, wasm_fn, alloc),
+        (ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool, FloatMode::Float) => Err(
+            String::from("WASM codegen: integer min/max in Float mode not supported"),
+        ),
+        _ => Err(format!(
+            "WASM codegen: min/max unsupported for {kind:?} / {mode:?}"
+        )),
+    }
+}
+
+fn emit_i32_min_max_select(
+    is_max: bool,
+    unsigned: bool,
+    wasm_fn: &mut WasmFunction,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    let (s0, s1) = alloc
+        .q32_scratch
+        .ok_or_else(|| String::from("Q32 scratch missing for i32 min/max"))?;
+    let cond_local = alloc.splat_scratch;
+    wasm_fn.instruction(&Instruction::LocalSet(s1));
+    wasm_fn.instruction(&Instruction::LocalSet(s0));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    match (is_max, unsigned) {
+        (false, false) => wasm_fn.instruction(&Instruction::I32LtS),
+        (false, true) => wasm_fn.instruction(&Instruction::I32LtU),
+        (true, false) => wasm_fn.instruction(&Instruction::I32GtS),
+        (true, true) => wasm_fn.instruction(&Instruction::I32GtU),
+    };
+    wasm_fn.instruction(&Instruction::LocalSet(cond_local));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    wasm_fn.instruction(&Instruction::LocalGet(cond_local));
+    wasm_fn.instruction(&Instruction::Select);
+    Ok(())
+}
+
+pub(crate) fn emit_unary(
     op: UnaryOperator,
     kind: ScalarKind,
     mode: FloatMode,
@@ -598,6 +961,9 @@ fn emit_unary(
         (UnaryOperator::LogicalNot, ScalarKind::Bool, _) => {
             wasm_fn.instruction(&Instruction::I32Eqz);
         }
+        (UnaryOperator::LogicalNot, ScalarKind::Sint | ScalarKind::Uint, _) => {
+            wasm_fn.instruction(&Instruction::I32Eqz);
+        }
         (UnaryOperator::BitwiseNot, ScalarKind::Sint | ScalarKind::Uint, _) => {
             wasm_fn.instruction(&Instruction::I32Const(-1));
             wasm_fn.instruction(&Instruction::I32Xor);
@@ -611,7 +977,21 @@ fn emit_unary(
     Ok(())
 }
 
-fn emit_cast(
+/// Map i32 bool (0 / non-zero) to Q16.16 `0.0` / `1.0`.
+fn emit_i32_bool_to_q32_float(
+    wasm_fn: &mut WasmFunction,
+    _alloc: &LocalAlloc,
+) -> Result<(), String> {
+    wasm_fn.instruction(&Instruction::I32Eqz);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::I32Const(0));
+    wasm_fn.instruction(&Instruction::Else);
+    wasm_fn.instruction(&Instruction::I32Const(65_536));
+    wasm_fn.instruction(&Instruction::End);
+    Ok(())
+}
+
+pub(crate) fn emit_cast(
     dst_kind: ScalarKind,
     convert: Option<Bytes>,
     src_kind: ScalarKind,
@@ -620,7 +1000,25 @@ fn emit_cast(
     alloc: &LocalAlloc,
 ) -> Result<(), String> {
     if convert.is_none() {
-        return Ok(());
+        match (src_kind, dst_kind, mode) {
+            (ScalarKind::Bool, ScalarKind::Float, FloatMode::Float) => {
+                wasm_fn.instruction(&Instruction::F32ConvertI32S);
+                return Ok(());
+            }
+            (ScalarKind::Bool, ScalarKind::Float, FloatMode::Q32) => {
+                return emit_i32_bool_to_q32_float(wasm_fn, alloc);
+            }
+            _ => {}
+        }
+        if matches!(
+            (src_kind, dst_kind),
+            (ScalarKind::Float, ScalarKind::Float)
+                | (ScalarKind::Sint, ScalarKind::Sint)
+                | (ScalarKind::Uint, ScalarKind::Uint)
+                | (ScalarKind::Bool, ScalarKind::Bool)
+        ) {
+            return Ok(());
+        }
     }
     match (src_kind, dst_kind, mode) {
         (ScalarKind::Float, ScalarKind::Float, _)
@@ -662,6 +1060,13 @@ fn emit_cast(
 
         (ScalarKind::Bool, ScalarKind::Sint | ScalarKind::Uint, _) => {}
 
+        (ScalarKind::Bool, ScalarKind::Float, FloatMode::Float) => {
+            wasm_fn.instruction(&Instruction::F32ConvertI32S);
+        }
+        (ScalarKind::Bool, ScalarKind::Float, FloatMode::Q32) => {
+            emit_i32_bool_to_q32_float(wasm_fn, alloc)?;
+        }
+
         (ScalarKind::Sint | ScalarKind::Uint, ScalarKind::Bool, _) => {
             wasm_fn.instruction(&Instruction::I32Const(0));
             wasm_fn.instruction(&Instruction::I32Ne);
@@ -681,6 +1086,54 @@ fn emit_cast(
                 "WASM codegen: unsupported cast {src_kind:?} -> {dst_kind:?} ({mode:?})"
             ));
         }
+    }
+    Ok(())
+}
+
+/// `if (!cond) { break; }` that the GLSL front lowers as the trailing check on `do {} while`.
+fn stmt_is_trailing_loop_guard(stmt: &Statement) -> bool {
+    let Statement::If { accept, reject, .. } = stmt else {
+        return false;
+    };
+    reject.is_empty() && accept.len() == 1 && matches!(accept.first(), Some(Statement::Break))
+}
+
+/// Split Naga `Loop::body` so `continue` can target the end of the user `do {}` block without
+/// skipping the trailing `if (!cond) break` (see `naga::front::glsl` do-while lowering).
+fn split_do_while_trailing_guard<'a>(
+    body: &'a Block,
+    continuing: &'a Block,
+    break_if: &'a Option<Handle<Expression>>,
+) -> (&'a [Statement], Option<&'a [Statement]>) {
+    let stmts: &'a [Statement] = body;
+    if !continuing.is_empty() || break_if.is_some() {
+        return (stmts, None);
+    }
+    if stmts.len() < 2 {
+        return (stmts, None);
+    }
+    let last = match stmts.last() {
+        Some(s) => s,
+        None => return (stmts, None),
+    };
+    if !stmt_is_trailing_loop_guard(last) {
+        return (stmts, None);
+    }
+    let n = stmts.len() - 1;
+    (&stmts[..n], Some(&stmts[n..]))
+}
+
+fn emit_stmt_slice(
+    module: &Module,
+    func: &Function,
+    stmts: &[Statement],
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+    ctx: &mut EmitCtx,
+) -> Result<(), String> {
+    for stmt in stmts {
+        emit_stmt(module, func, stmt, wasm_fn, mode, alloc, ctx)?;
     }
     Ok(())
 }
@@ -759,10 +1212,72 @@ fn emit_u32_clamp_then_q32_scale_uint(
     Ok(())
 }
 
+/// Match `__lp_q32_add` / `__lp_q32_sub`: widen to i64, op, saturate to fixed-point range.
+fn emit_q32_add_sat(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+    let (s0, s1) = alloc
+        .q32_scratch
+        .ok_or_else(|| String::from("Q32 scratch missing"))?;
+    let acc = alloc
+        .q32_i64_sat
+        .ok_or_else(|| String::from("Q32 i64 sat local missing"))?;
+    wasm_fn.instruction(&Instruction::LocalSet(s1));
+    wasm_fn.instruction(&Instruction::LocalSet(s0));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I64ExtendI32S);
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    wasm_fn.instruction(&Instruction::I64ExtendI32S);
+    wasm_fn.instruction(&Instruction::I64Add);
+    wasm_fn.instruction(&Instruction::LocalSet(acc));
+    emit_q32_sat_wide_i64_local(wasm_fn, acc)
+}
+
+fn emit_q32_sub_sat(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+    let (s0, s1) = alloc
+        .q32_scratch
+        .ok_or_else(|| String::from("Q32 scratch missing"))?;
+    let acc = alloc
+        .q32_i64_sat
+        .ok_or_else(|| String::from("Q32 i64 sat local missing"))?;
+    wasm_fn.instruction(&Instruction::LocalSet(s1));
+    wasm_fn.instruction(&Instruction::LocalSet(s0));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I64ExtendI32S);
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    wasm_fn.instruction(&Instruction::I64ExtendI32S);
+    wasm_fn.instruction(&Instruction::I64Sub);
+    wasm_fn.instruction(&Instruction::LocalSet(acc));
+    emit_q32_sat_wide_i64_local(wasm_fn, acc)
+}
+
+/// Saturate i64 in local `acc` to Q32 fixed range (same bounds as `__lp_q32_mul`), leave i32 on stack.
+fn emit_q32_sat_wide_i64_local(wasm_fn: &mut WasmFunction, acc: u32) -> Result<(), String> {
+    const MAX_FIXED: i64 = 0x7FFF_FFFF;
+    wasm_fn.instruction(&Instruction::LocalGet(acc));
+    wasm_fn.instruction(&Instruction::I64Const(MAX_FIXED));
+    wasm_fn.instruction(&Instruction::I64GtS);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::I32Const(0x7FFF_FFFF));
+    wasm_fn.instruction(&Instruction::Else);
+    wasm_fn.instruction(&Instruction::LocalGet(acc));
+    wasm_fn.instruction(&Instruction::I64Const(i32::MIN as i64));
+    wasm_fn.instruction(&Instruction::I64LtS);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::I32Const(i32::MIN));
+    wasm_fn.instruction(&Instruction::Else);
+    wasm_fn.instruction(&Instruction::LocalGet(acc));
+    wasm_fn.instruction(&Instruction::I32WrapI64);
+    wasm_fn.instruction(&Instruction::End);
+    wasm_fn.instruction(&Instruction::End);
+    Ok(())
+}
+
 fn emit_q32_mul(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
     let (s0, s1) = alloc
         .q32_scratch
         .ok_or_else(|| String::from("Q32 scratch missing"))?;
+    let acc = alloc
+        .q32_i64_sat
+        .ok_or_else(|| String::from("Q32 i64 sat local missing"))?;
     wasm_fn.instruction(&Instruction::LocalSet(s1));
     wasm_fn.instruction(&Instruction::LocalSet(s0));
     wasm_fn.instruction(&Instruction::LocalGet(s0));
@@ -772,8 +1287,8 @@ fn emit_q32_mul(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), St
     wasm_fn.instruction(&Instruction::I64Mul);
     wasm_fn.instruction(&Instruction::I64Const(16));
     wasm_fn.instruction(&Instruction::I64ShrS);
-    wasm_fn.instruction(&Instruction::I32WrapI64);
-    Ok(())
+    wasm_fn.instruction(&Instruction::LocalSet(acc));
+    emit_q32_sat_wide_i64_local(wasm_fn, acc)
 }
 
 fn emit_q32_div(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {

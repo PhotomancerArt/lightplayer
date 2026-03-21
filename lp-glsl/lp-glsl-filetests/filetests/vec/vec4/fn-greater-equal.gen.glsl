@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/vec4/fn-greater-equal --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Greater Than Equal: greaterThanEqual(vec4, vec4) -> bvec4 (component-wise)

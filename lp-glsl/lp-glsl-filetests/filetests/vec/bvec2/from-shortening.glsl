@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Shortening: bvec2(bvec3), bvec2(bvec4) - shortening constructors

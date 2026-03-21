@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Vectors: bvec3(bvec2, bool), bvec3(bool, bvec2) - vector combinations

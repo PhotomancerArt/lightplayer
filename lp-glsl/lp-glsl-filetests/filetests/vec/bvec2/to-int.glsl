@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // To Int: int(bvec2) - converts first component (false -> 0, true -> 1)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Access Swizzle: bvec2.xy, bvec2.yx, bvec2.xx, etc. - component swizzling

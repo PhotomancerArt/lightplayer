@@ -212,7 +212,11 @@ fn naga_type_inner_to_glsl(inner: &TypeInner) -> Result<GlslType, CompileError> 
             ))),
         },
         TypeInner::Vector { size, scalar } => {
-            if scalar.width != 4 {
+            let width_ok = match scalar.kind {
+                ScalarKind::Bool => scalar.width == 1,
+                _ => scalar.width == 4,
+            };
+            if !width_ok {
                 return Err(CompileError::UnsupportedType(format!(
                     "vector width {}",
                     scalar.width

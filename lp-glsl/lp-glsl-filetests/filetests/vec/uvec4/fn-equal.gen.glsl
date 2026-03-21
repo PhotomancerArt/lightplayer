@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/uvec4/fn-equal --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: equal(uvec4, uvec4) -> bvec4 (component-wise)
