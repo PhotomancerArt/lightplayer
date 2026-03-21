@@ -41,8 +41,9 @@ impl WasmExecutable {
             ))
         })?;
         let mut store = Store::new(&engine, ());
-        let instance = wasm_link::instantiate_wasm_module(&engine, &mut store, &wasm_bytes)
-            .map_err(|e| GlslDiagnostics::from(e))?;
+        let (instance, _memory) =
+            wasm_link::instantiate_wasm_module(&engine, &mut store, &wasm_bytes)
+                .map_err(|e| GlslDiagnostics::from(e))?;
 
         let exports: HashMap<String, WasmExport> = module
             .exports

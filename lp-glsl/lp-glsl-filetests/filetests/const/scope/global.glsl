@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Global const declaration and use.

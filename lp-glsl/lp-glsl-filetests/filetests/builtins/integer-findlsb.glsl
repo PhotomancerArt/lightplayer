@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // findLSB(): Find least significant bit function
@@ -12,7 +11,6 @@ int test_findlsb_int_zero() {
     return findLSB(0);
 }
 
-// @unimplemented()
 // run: test_findlsb_int_zero() == -1
 
 int test_findlsb_int_one() {
@@ -20,7 +18,6 @@ int test_findlsb_int_one() {
     return findLSB(1);
 }
 
-// @unimplemented()
 // run: test_findlsb_int_one() == 0
 
 int test_findlsb_int_two() {
@@ -28,7 +25,6 @@ int test_findlsb_int_two() {
     return findLSB(2);
 }
 
-// @unimplemented()
 // run: test_findlsb_int_two() == 1
 
 int test_findlsb_int_four() {
@@ -36,7 +32,6 @@ int test_findlsb_int_four() {
     return findLSB(4);
 }
 
-// @unimplemented()
 // run: test_findlsb_int_four() == 2
 
 int test_findlsb_int_pattern() {
@@ -44,7 +39,6 @@ int test_findlsb_int_pattern() {
     return findLSB(168);
 }
 
-// @unimplemented()
 // run: test_findlsb_int_pattern() == 3
 
 uint test_findlsb_uint_zero() {
@@ -52,7 +46,6 @@ uint test_findlsb_uint_zero() {
     return findLSB(0u);
 }
 
-// @unimplemented()
 // run: test_findlsb_uint_zero() == 4294967295u
 
 uint test_findlsb_uint_one() {
@@ -60,7 +53,6 @@ uint test_findlsb_uint_one() {
     return findLSB(1u);
 }
 
-// @unimplemented()
 // run: test_findlsb_uint_one() == 0u
 
 uint test_findlsb_uint_pattern() {
@@ -68,7 +60,6 @@ uint test_findlsb_uint_pattern() {
     return findLSB(168u);
 }
 
-// @unimplemented()
 // run: test_findlsb_uint_pattern() == 3u
 
 ivec2 test_findlsb_ivec2() {
@@ -76,7 +67,6 @@ ivec2 test_findlsb_ivec2() {
     return findLSB(ivec2(0, 168));
 }
 
-// @unimplemented()
 // run: test_findlsb_ivec2() == ivec2(-1, 3)
 
 

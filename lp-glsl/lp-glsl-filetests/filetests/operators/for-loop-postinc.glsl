@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int test_for_loop_postinc() {
     int sum = 0;

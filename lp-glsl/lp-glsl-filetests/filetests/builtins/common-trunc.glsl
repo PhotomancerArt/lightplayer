@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // trunc(): Truncate toward zero function
@@ -11,7 +10,6 @@ float test_trunc_integer() {
     return trunc(5.0);
 }
 
-// @unimplemented()
 // run: test_trunc_integer() ~= 5.0
 
 float test_trunc_positive() {
@@ -19,7 +17,6 @@ float test_trunc_positive() {
     return trunc(3.7);
 }
 
-// @unimplemented()
 // run: test_trunc_positive() ~= 3.0
 
 float test_trunc_negative() {
@@ -27,7 +24,6 @@ float test_trunc_negative() {
     return trunc(-2.3);
 }
 
-// @unimplemented()
 // run: test_trunc_negative() ~= -2.0
 
 float test_trunc_negative_small() {
@@ -35,7 +31,6 @@ float test_trunc_negative_small() {
     return trunc(-0.1);
 }
 
-// @unimplemented()
 // run: test_trunc_negative_small() ~= 0.0
 
 float test_trunc_half() {
@@ -43,7 +38,6 @@ float test_trunc_half() {
     return trunc(2.5);
 }
 
-// @unimplemented()
 // run: test_trunc_half() ~= 2.0
 
 vec2 test_trunc_vec2() {
@@ -51,7 +45,6 @@ vec2 test_trunc_vec2() {
     return trunc(vec2(1.9, -2.1));
 }
 
-// @unimplemented()
 // run: test_trunc_vec2() ~= vec2(1.0, -2.0)
 
 vec3 test_trunc_vec3() {
@@ -59,7 +52,6 @@ vec3 test_trunc_vec3() {
     return trunc(vec3(0.0, 3.7, -1.5));
 }
 
-// @unimplemented()
 // run: test_trunc_vec3() ~= vec3(0.0, 3.0, -1.0)
 
 vec4 test_trunc_vec4() {
@@ -67,7 +59,6 @@ vec4 test_trunc_vec4() {
     return trunc(vec4(1.1, 2.9, -0.5, 4.0));
 }
 
-// @unimplemented()
 // run: test_trunc_vec4() ~= vec4(1.0, 2.0, 0.0, 4.0)
 
 

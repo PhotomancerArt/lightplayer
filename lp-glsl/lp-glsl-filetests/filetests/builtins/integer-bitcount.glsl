@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // bitCount(): Bit count function
@@ -11,7 +10,6 @@ int test_bitcount_int_zero() {
     return bitCount(0);
 }
 
-// @unimplemented()
 // run: test_bitcount_int_zero() == 0
 
 int test_bitcount_int_one() {
@@ -19,7 +17,6 @@ int test_bitcount_int_one() {
     return bitCount(1);
 }
 
-// @unimplemented()
 // run: test_bitcount_int_one() == 1
 
 int test_bitcount_int_full() {
@@ -27,7 +24,6 @@ int test_bitcount_int_full() {
     return bitCount(-1);
 }
 
-// @unimplemented()
 // run: test_bitcount_int_full() == 32
 
 int test_bitcount_int_pattern() {
@@ -35,7 +31,6 @@ int test_bitcount_int_pattern() {
     return bitCount(170);
 }
 
-// @unimplemented()
 // run: test_bitcount_int_pattern() == 4
 
 uint test_bitcount_uint_zero() {
@@ -75,7 +70,6 @@ ivec2 test_bitcount_ivec2() {
     return bitCount(ivec2(0, 170));
 }
 
-// @unimplemented()
 // run: test_bitcount_ivec2() == ivec2(0, 4)
 
 

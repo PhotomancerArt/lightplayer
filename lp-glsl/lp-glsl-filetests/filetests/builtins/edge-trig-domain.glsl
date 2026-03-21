@@ -13,6 +13,7 @@ float test_asin_domain_over() {
     return asin(1.5);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {
@@ -20,6 +21,7 @@ float test_asin_domain_under() {
     return asin(-1.5);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_asin_domain_under() ~= 0.0
 
 float test_acos_domain_over() {
@@ -43,7 +45,7 @@ float test_atan2_zero_zero() {
     return atan(0.0, 0.0);
 }
 
-// @unimplemented()
+// @broken(backend=wasm, float_mode=q32, reason="wasm path rejects UB atan(0,0); cranelift returns ~0")
 // run: test_atan2_zero_zero() ~= 0.0
 
 float test_acosh_domain_under() {
@@ -51,6 +53,7 @@ float test_acosh_domain_under() {
     return acosh(0.5);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_acosh_domain_under() ~= 0.0
 
 float test_atanh_domain_over() {
@@ -58,6 +61,7 @@ float test_atanh_domain_over() {
     return atanh(1.5);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_atanh_domain_over() ~= 0.0
 
 float test_atanh_domain_under() {
@@ -65,6 +69,7 @@ float test_atanh_domain_under() {
     return atanh(-1.5);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_atanh_domain_under() ~= 0.0
 
 float test_atanh_domain_one() {
@@ -72,6 +77,7 @@ float test_atanh_domain_one() {
     return atanh(1.0);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_atanh_domain_one() ~= 0.0
 
 float test_atanh_domain_neg_one() {
@@ -79,6 +85,7 @@ float test_atanh_domain_neg_one() {
     return atanh(-1.0);
 }
 
+// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_atanh_domain_neg_one() ~= 0.0
 
 

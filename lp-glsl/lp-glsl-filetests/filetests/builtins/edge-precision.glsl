@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Precision and rounding tests
@@ -11,7 +10,7 @@ float test_round_half_up() {
     return round(2.5);
 }
 
-// @unimplemented()
+// @broken(backend=wasm, float_mode=q32, reason="Q32 round(2.5) ties differ from f32 half-away-from-zero")
 // run: test_round_half_up() ~= 3.0
 
 float test_round_half_down() {
@@ -19,7 +18,6 @@ float test_round_half_down() {
     return round(3.5);
 }
 
-// @unimplemented()
 // run: test_round_half_down() ~= 4.0
 
 float test_roundeven_half_up() {
@@ -35,7 +33,6 @@ float test_roundeven_half_down() {
     return roundEven(3.5);
 }
 
-// @unimplemented()
 // run: test_roundeven_half_down() ~= 4.0
 
 float test_precision_loss() {
@@ -43,7 +40,6 @@ float test_precision_loss() {
     return 1.0 + 1e-10;
 }
 
-// @unimplemented()
 // run: test_precision_loss() ~= 1.0
 
 float test_large_number_precision() {
@@ -59,7 +55,6 @@ float test_subnormal() {
     return 1e-40 + 1e-40;
 }
 
-// @unimplemented()
 // run: test_subnormal() ~= 0.0
 
 vec2 test_vec_precision() {
@@ -75,7 +70,6 @@ float test_fma_precision() {
     return fma(1.0000001, 1.0000001, -1.0000001);
 }
 
-// @unimplemented()
 // run: test_fma_precision() ~= 0.0000001020000001
 
 

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // intBitsToFloat(): Int bits to float function
@@ -11,7 +10,6 @@ float test_intbitstofloat_zero() {
     return intBitsToFloat(0);
 }
 
-// @unimplemented()
 // run: test_intbitstofloat_zero() ~= 0.0
 
 float test_intbitstofloat_one() {

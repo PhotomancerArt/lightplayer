@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Static Recursion Detection: Should produce compile errors
@@ -17,7 +16,6 @@ float test_recursive_direct() {
     return factorial(5);
 }
 
-// @unimplemented()
 // run: test_recursive_direct() ~= 120.0
 */
 

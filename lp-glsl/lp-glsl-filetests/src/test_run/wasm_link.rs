@@ -58,17 +58,21 @@ fn module_needs_builtins_link(shader: &Module) -> bool {
 }
 
 /// Instantiate a compiled shader module, linking builtins + `env.memory` when imports require it.
+///
+/// When LPFX/builtins are linked, returns the shared [`Memory`] handle (same backing store the
+/// shader imports as `env.memory`) so tests can inspect linear memory after calls.
 pub fn instantiate_wasm_module(
     engine: &Engine,
     store: &mut Store<()>,
     wasm_bytes: &[u8],
-) -> Result<Instance, GlslError> {
+) -> Result<(Instance, Option<Memory>), GlslError> {
     let shader_mod = Module::new(engine, wasm_bytes)
         .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM parse: {e}")))?;
 
     if !module_needs_builtins_link(&shader_mod) {
-        return Instance::new(&mut *store, &shader_mod, &[])
-            .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM instantiate: {e}")));
+        let instance = Instance::new(&mut *store, &shader_mod, &[])
+            .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM instantiate: {e}")))?;
+        return Ok((instance, None));
     }
 
     let builtins_path = builtins_wasm_path();
@@ -115,7 +119,8 @@ pub fn instantiate_wasm_module(
             })?;
     }
 
-    linker
+    let instance = linker
         .instantiate(&mut *store, &shader_mod)
-        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("shader instantiate: {e}")))
+        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("shader instantiate: {e}")))?;
+    Ok((instance, Some(memory)))
 }

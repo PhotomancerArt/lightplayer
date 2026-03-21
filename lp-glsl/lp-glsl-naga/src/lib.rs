@@ -125,9 +125,19 @@ impl fmt::Display for CompileError {
 
 impl core::error::Error for CompileError {}
 
+fn prepend_lpfx_prototypes(source: &str) -> String {
+    const PREAMBLE: &str = "#version 450 core\n";
+    let mut s = String::from(PREAMBLE);
+    s.push_str(include_str!("lpfx_prologue.glsl"));
+    s.push_str("\n#line 1\n");
+    s.push_str(source);
+    s
+}
+
 /// Parse GLSL and collect named function metadata.
 pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
-    let source = ensure_vertex_entry_point(source);
+    let source = prepend_lpfx_prototypes(source);
+    let source = ensure_vertex_entry_point(&source);
     let module = parse_glsl(&source)?;
     let functions = extract_functions(&module)?;
     Ok(NagaModule { module, functions })
@@ -165,7 +175,7 @@ fn extract_functions(
         let Some(name) = function.name.clone() else {
             continue;
         };
-        if name == "main" {
+        if name == "main" || name.starts_with("lpfx_") {
             continue;
         }
         let info = function_info(module, function, name)?;

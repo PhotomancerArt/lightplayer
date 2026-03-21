@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // fma(): Fused multiply-add function
@@ -11,7 +10,6 @@ float test_fma_simple() {
     return fma(2.0, 3.0, 4.0);
 }
 
-// @unimplemented()
 // run: test_fma_simple() ~= 10.0
 
 float test_fma_zero_c() {
@@ -19,7 +17,6 @@ float test_fma_zero_c() {
     return fma(2.0, 3.0, 0.0);
 }
 
-// @unimplemented()
 // run: test_fma_zero_c() ~= 6.0
 
 float test_fma_negative() {
@@ -27,7 +24,6 @@ float test_fma_negative() {
     return fma(2.0, -3.0, 5.0);
 }
 
-// @unimplemented()
 // run: test_fma_negative() ~= -1.0
 
 float test_fma_fractions() {
@@ -35,7 +31,6 @@ float test_fma_fractions() {
     return fma(1.5, 2.0, 0.5);
 }
 
-// @unimplemented()
 // run: test_fma_fractions() ~= 3.5
 
 float test_fma_one_one_one() {
@@ -43,7 +38,6 @@ float test_fma_one_one_one() {
     return fma(1.0, 1.0, 1.0);
 }
 
-// @unimplemented()
 // run: test_fma_one_one_one() ~= 2.0
 
 vec2 test_fma_vec2() {
@@ -51,7 +45,6 @@ vec2 test_fma_vec2() {
     return fma(vec2(2.0, 1.5), vec2(3.0, 2.0), vec2(4.0, 0.5));
 }
 
-// @unimplemented()
 // run: test_fma_vec2() ~= vec2(10.0, 3.5)
 
 vec3 test_fma_vec3() {
@@ -59,7 +52,6 @@ vec3 test_fma_vec3() {
     return fma(vec3(2.0, 1.0, 1.5), vec3(-3.0, 1.0, 2.0), vec3(5.0, 1.0, 0.5));
 }
 
-// @unimplemented()
 // run: test_fma_vec3() ~= vec3(-1.0, 2.0, 3.5)
 
 vec4 test_fma_vec4() {
@@ -67,7 +59,6 @@ vec4 test_fma_vec4() {
     return fma(vec4(1.0, 2.0, 1.5, 0.5), vec4(1.0, 3.0, 2.0, 4.0), vec4(1.0, 4.0, 0.5, 2.0));
 }
 
-// @unimplemented()
 // run: test_fma_vec4() ~= vec4(2.0, 10.0, 3.5, 4.0)
 
 

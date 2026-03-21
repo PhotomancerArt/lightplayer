@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 wasm-encoder = "0.245"

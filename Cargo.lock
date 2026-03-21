@@ -4032,6 +4032,7 @@ version = "40.0.0"
 dependencies = [
  "anyhow",
  "log",
+ "lp-glsl-builtin-ids",
  "lp-glsl-naga",
  "naga 29.0.0",
  "wasm-encoder 0.245.1",

@@ -32,10 +32,18 @@ pub struct LocalAlloc {
     pub q32_i64_sat: Option<u32>,
     /// Two f32 scratch slots for float `%` lowering (only `Some` in Float mode).
     pub float_scratch: Option<(u32, u32)>,
+    /// Two i32 scratch slots for `round()` lowering in Float mode (fixed-point detour).
+    float_round_i32_scratch: Option<(u32, u32)>,
     /// Base index of [`SCRATCH_TEMP_COUNT`] consecutive temps for vector lowering.
     scratch_temp_base: u32,
     /// Short-lived slot for `Splat` / scalar broadcast (does not overlap [`alloc_temp_n`] pool).
     pub splat_scratch: u32,
+    /// Single i32 slot for lowering scalar `&&` / `||` so the left bool survives [`emit_expr`] on the
+    /// right operand (which may reuse [`scratch_temp_base`] / [`splat_scratch`]).
+    ///
+    /// Nested `&&` / `||` reuse this slot between operands; GLSL parses these left-associative, which
+    /// matches that pattern. A right-nested tree would need additional stash locals.
+    pub(crate) bool_binary_stash: u32,
     /// WASM base local for each `Expression::CallResult` (multi-slot for vector returns).
     call_result_bases: BTreeMap<Handle<Expression>, u32>,
 }
@@ -72,6 +80,7 @@ impl LocalAlloc {
         let mut q32_scratch = None;
         let mut q32_i64_sat = None;
         let mut float_scratch = None;
+        let mut float_round_i32_scratch = None;
         if matches!(mode, FloatMode::Q32) {
             let a = next;
             let b = next + 1;
@@ -90,6 +99,12 @@ impl LocalAlloc {
             extra_local_valtypes.push(ValType::F32);
             float_scratch = Some((a, b));
             next += 2;
+            let ra = next;
+            let rb = next + 1;
+            extra_local_valtypes.push(ValType::I32);
+            extra_local_valtypes.push(ValType::I32);
+            float_round_i32_scratch = Some((ra, rb));
+            next += 2;
         }
 
         let scratch_vt = match mode {
@@ -103,6 +118,9 @@ impl LocalAlloc {
         next += SCRATCH_TEMP_COUNT;
         let splat_scratch = next;
         extra_local_valtypes.push(scratch_vt);
+        next += 1;
+        let bool_binary_stash = next;
+        extra_local_valtypes.push(ValType::I32);
         next += 1;
 
         let mut call_results: Vec<(Handle<Expression>, Handle<Type>)> = Vec::new();
@@ -127,14 +145,21 @@ impl LocalAlloc {
             q32_scratch,
             q32_i64_sat,
             float_scratch,
+            float_round_i32_scratch,
             scratch_temp_base,
             splat_scratch,
+            bool_binary_stash,
             call_result_bases,
         }
     }
 
     pub fn function_argument_wasm_base(&self, arg_idx: u32) -> Option<u32> {
         self.arg_wasm_bases.get(arg_idx as usize).copied()
+    }
+
+    /// i32 scratch used by Q32 `round()` / float `round()` (fixed-point) lowering.
+    pub(crate) fn round_i32_scratch(&self) -> Option<(u32, u32)> {
+        self.q32_scratch.or(self.float_round_i32_scratch)
     }
 
     /// WASM additional locals in index order (merged runs of the same [`ValType`] only when adjacent).
@@ -181,6 +206,16 @@ impl LocalAlloc {
             ));
         }
         Ok(self.scratch_temp_base)
+    }
+
+    /// First WASM local index of the shared scratch pool ([`alloc_temp_n`] always starts here).
+    pub(crate) fn scratch_pool_base(&self) -> u32 {
+        self.scratch_temp_base
+    }
+
+    /// Number of consecutive scratch locals ([`alloc_temp_n`] must not assume more than this).
+    pub(crate) fn scratch_pool_len() -> u32 {
+        SCRATCH_TEMP_COUNT
     }
 
     pub fn call_result_wasm_base(&self, res: Handle<Expression>) -> Option<u32> {

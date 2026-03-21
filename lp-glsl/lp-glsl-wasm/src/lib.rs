@@ -7,6 +7,7 @@ extern crate alloc;
 mod emit;
 mod emit_vec;
 mod locals;
+mod lpfx;
 pub mod module;
 pub mod options;
 pub mod types;

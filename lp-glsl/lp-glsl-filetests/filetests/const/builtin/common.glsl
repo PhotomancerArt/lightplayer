@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // Common builtins: abs, sign, floor, min, max, clamp.

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // findMSB(): Find most significant bit function
@@ -14,7 +13,6 @@ int test_findmsb_int_zero() {
     return findMSB(0);
 }
 
-// @unimplemented()
 // run: test_findmsb_int_zero() == -1
 
 int test_findmsb_int_one() {
@@ -22,7 +20,6 @@ int test_findmsb_int_one() {
     return findMSB(1);
 }
 
-// @unimplemented()
 // run: test_findmsb_int_one() == 0
 
 int test_findmsb_int_two() {
@@ -30,7 +27,6 @@ int test_findmsb_int_two() {
     return findMSB(2);
 }
 
-// @unimplemented()
 // run: test_findmsb_int_two() == 1
 
 int test_findmsb_int_neg_one() {
@@ -38,7 +34,6 @@ int test_findmsb_int_neg_one() {
     return findMSB(-1);
 }
 
-// @unimplemented()
 // run: test_findmsb_int_neg_one() == -1
 
 int test_findmsb_int_negative() {
@@ -62,7 +57,6 @@ uint test_findmsb_uint_zero() {
     return findMSB(0u);
 }
 
-// @unimplemented()
 // run: test_findmsb_uint_zero() == 4294967295u
 
 uint test_findmsb_uint_one() {
@@ -70,7 +64,6 @@ uint test_findmsb_uint_one() {
     return findMSB(1u);
 }
 
-// @unimplemented()
 // run: test_findmsb_uint_one() == 0u
 
 uint test_findmsb_uint_large() {
@@ -78,7 +71,6 @@ uint test_findmsb_uint_large() {
     return findMSB(2147483648u);
 }
 
-// @unimplemented()
 // run: test_findmsb_uint_large() == 31u
 
 ivec2 test_findmsb_ivec2() {
@@ -86,7 +78,6 @@ ivec2 test_findmsb_ivec2() {
     return findMSB(ivec2(0, 2));
 }
 
-// @unimplemented()
 // run: test_findmsb_ivec2() == ivec2(-1, 1)
 
 

@@ -4,15 +4,18 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
+use lp_glsl_builtin_ids::BuiltinId;
 use lp_glsl_naga::{FloatMode, NagaModule};
 use naga::{
     BinaryOperator, Block, Bytes, Expression, Function, Handle, Literal, MathFunction, Module,
     ScalarKind, Statement, TypeInner, UnaryOperator,
 };
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function as WasmFunction, FunctionSection,
-    Ieee32, Instruction, Module as WasmModule, TypeSection, ValType,
+    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function as WasmFunction,
+    FunctionSection, Ieee32, ImportSection, Instruction, MemoryType, Module as WasmModule,
+    TypeSection, ValType,
 };
 
 use crate::locals::LocalAlloc;
@@ -23,12 +26,18 @@ use crate::types::{
 
 const Q16_16_SCALE: f32 = 65536.0;
 
+/// Base offset for LPFX `out`-pointer scratch in imported linear memory (below typical stacks).
+const LPFX_SCRATCH_BASE: u32 = 65536;
+
 /// WASM structured-control nesting depth (each `block` / `loop` / `if` adds one).
 struct EmitCtx {
     depth: u32,
     loop_stack: Vec<LoopFrame>,
     /// Naga function handle → WASM function index (same order as [`emit_module`] exports).
     func_indices: BTreeMap<Handle<Function>, u32>,
+    /// Q32 LPFX builtin → WASM function import index (only when [`emit_module`] emitted imports).
+    lpfx_import_indices: BTreeMap<BuiltinId, u32>,
+    scratch_cursor: Cell<u32>,
 }
 
 impl Default for EmitCtx {
@@ -37,6 +46,8 @@ impl Default for EmitCtx {
             depth: 0,
             loop_stack: Vec::new(),
             func_indices: BTreeMap::new(),
+            lpfx_import_indices: BTreeMap::new(),
+            scratch_cursor: Cell::new(LPFX_SCRATCH_BASE),
         }
     }
 }
@@ -68,18 +79,72 @@ impl EmitCtx {
 
 pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Vec<u8>, String> {
     let module = &naga_module.module;
+
+    let lpfx_ids = crate::lpfx::collect_lpfx_builtin_ids(module, &naga_module.functions);
+    if lpfx_ids.is_empty() {
+        return emit_module_inner(naga_module, options, None, BTreeMap::new(), 0);
+    }
+
+    let bids: Vec<BuiltinId> = lpfx_ids.iter().copied().collect();
+    let num_lpfx = bids.len() as u32;
+    let mut lpfx_import_indices = BTreeMap::new();
+    for (i, bid) in bids.iter().enumerate() {
+        lpfx_import_indices.insert(*bid, i as u32);
+    }
+
+    emit_module_inner(
+        naga_module,
+        options,
+        Some(bids.as_slice()),
+        lpfx_import_indices,
+        num_lpfx,
+    )
+}
+
+fn emit_module_inner(
+    naga_module: &NagaModule,
+    options: &WasmOptions,
+    lpfx_bids: Option<&[BuiltinId]>,
+    lpfx_import_indices: BTreeMap<BuiltinId, u32>,
+    import_func_count: u32,
+) -> Result<Vec<u8>, String> {
+    let module = &naga_module.module;
     let mode = options.float_mode;
 
     let mut types_sec = TypeSection::new();
+    let mut import_sec = ImportSection::new();
     let mut func_sec = FunctionSection::new();
     let mut export_sec = ExportSection::new();
     let mut code_sec = CodeSection::new();
 
+    if let Some(bids) = lpfx_bids {
+        import_sec.import(
+            "env",
+            "memory",
+            MemoryType {
+                minimum: 2,
+                maximum: None,
+                memory64: false,
+                shared: false,
+                page_size_log2: None,
+            },
+        );
+        for (i, bid) in bids.iter().enumerate() {
+            let (params, results) =
+                crate::lpfx::q32_lpfx_wasm_signature(*bid).ok_or_else(|| {
+                    format!("WASM codegen: LPFX import missing signature for {bid:?}")
+                })?;
+            types_sec.ty().function(params, results);
+            import_sec.import("builtins", bid.name(), EntityType::Function(i as u32));
+        }
+    }
+
+    let type_base = import_func_count as usize;
     let func_indices: BTreeMap<Handle<Function>, u32> = naga_module
         .functions
         .iter()
         .enumerate()
-        .map(|(i, (h, _))| (*h, i as u32))
+        .map(|(i, (h, _))| (*h, import_func_count + i as u32))
         .collect();
 
     for (func_i, (func_handle, fi)) in naga_module.functions.iter().enumerate() {
@@ -93,10 +158,10 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
             .collect();
         let results: Vec<ValType> = glsl_type_to_wasm_components(&fi.return_type, mode);
 
-        let type_idx = func_i as u32;
+        let type_idx = (type_base + func_i) as u32;
         types_sec.ty().function(params.clone(), results.clone());
         func_sec.function(type_idx);
-        export_sec.export(name, ExportKind::Func, func_i as u32);
+        export_sec.export(name, ExportKind::Func, import_func_count + func_i as u32);
 
         let alloc = LocalAlloc::new(module, func, mode);
         let locals = alloc.wasm_local_groups();
@@ -106,6 +171,8 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
 
         let mut ctx = EmitCtx {
             func_indices: func_indices.clone(),
+            lpfx_import_indices: lpfx_import_indices.clone(),
+            scratch_cursor: Cell::new(LPFX_SCRATCH_BASE),
             ..Default::default()
         };
         emit_block(
@@ -124,6 +191,9 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
 
     let mut out = WasmModule::new();
     out.section(&types_sec);
+    if !import_sec.is_empty() {
+        out.section(&import_sec);
+    }
     out.section(&func_sec);
     out.section(&export_sec);
     out.section(&code_sec);
@@ -196,8 +266,14 @@ fn emit_stmt(
     match stmt {
         Statement::Emit(range) => {
             for h in range.clone() {
+                if !expr_may_have_side_effects(module, func, h) {
+                    continue;
+                }
+                let slots = crate::emit_vec::expr_component_count(module, func, h)?;
                 emit_expr(module, func, h, wasm_fn, mode, alloc)?;
-                wasm_fn.instruction(&Instruction::Drop);
+                for _ in 0..slots {
+                    wasm_fn.instruction(&Instruction::Drop);
+                }
             }
             Ok(())
         }
@@ -338,6 +414,27 @@ fn emit_stmt(
                     callee.arguments.len()
                 ));
             }
+            if matches!(mode, FloatMode::Q32) {
+                if let Some(bid) = crate::lpfx::resolve_lpfx_q32_builtin(module, *function) {
+                    let import_idx =
+                        ctx.lpfx_import_indices.get(&bid).copied().ok_or_else(|| {
+                            format!("WASM codegen: LPFX builtin {bid:?} missing from import map")
+                        })?;
+                    return crate::lpfx::emit_lpfx_import_call(
+                        module,
+                        func,
+                        *function,
+                        arguments,
+                        *result,
+                        wasm_fn,
+                        mode,
+                        alloc,
+                        import_idx,
+                        bid,
+                        &ctx.scratch_cursor,
+                    );
+                }
+            }
             for (&arg_h, arg_decl) in arguments.iter().zip(callee.arguments.iter()) {
                 let expected = type_handle_component_count(module, arg_decl.ty);
                 let actual = crate::emit_vec::expr_component_count(module, func, arg_h)?;
@@ -377,6 +474,75 @@ fn emit_stmt(
             Ok(())
         }
         _ => Err(format!("WASM codegen: unsupported statement {stmt:?}")),
+    }
+}
+
+/// Naga `Statement::Emit` may list pure expressions for evaluation visibility only.
+/// Emitting them here and dropping stack slots breaks parents that compose the same handles
+/// (e.g. chained `&&`); skip when there is no observable side effect.
+fn expr_may_have_side_effects(module: &Module, func: &Function, expr: Handle<Expression>) -> bool {
+    match &func.expressions[expr] {
+        Expression::ImageSample { .. }
+        | Expression::ImageLoad { .. }
+        | Expression::ImageQuery { .. }
+        | Expression::Derivative { .. }
+        | Expression::CooperativeLoad { .. }
+        | Expression::CooperativeMultiplyAdd { .. }
+        | Expression::RayQueryVertexPositions { .. }
+        | Expression::RayQueryGetIntersection { .. } => true,
+        Expression::Access { base, index } => {
+            expr_may_have_side_effects(module, func, *base)
+                || expr_may_have_side_effects(module, func, *index)
+        }
+        Expression::AccessIndex { base, .. }
+        | Expression::Splat { value: base, .. }
+        | Expression::Swizzle { vector: base, .. }
+        | Expression::Unary { expr: base, .. }
+        | Expression::Relational { argument: base, .. }
+        | Expression::As { expr: base, .. } => expr_may_have_side_effects(module, func, *base),
+        Expression::Binary { left, right, .. } => {
+            expr_may_have_side_effects(module, func, *left)
+                || expr_may_have_side_effects(module, func, *right)
+        }
+        Expression::Select {
+            condition,
+            accept,
+            reject,
+        } => {
+            expr_may_have_side_effects(module, func, *condition)
+                || expr_may_have_side_effects(module, func, *accept)
+                || expr_may_have_side_effects(module, func, *reject)
+        }
+        Expression::Math {
+            arg,
+            arg1,
+            arg2,
+            arg3,
+            ..
+        } => {
+            expr_may_have_side_effects(module, func, *arg)
+                || arg1.map_or(false, |h| expr_may_have_side_effects(module, func, h))
+                || arg2.map_or(false, |h| expr_may_have_side_effects(module, func, h))
+                || arg3.map_or(false, |h| expr_may_have_side_effects(module, func, h))
+        }
+        Expression::Compose { components, .. } => components
+            .iter()
+            .any(|&h| expr_may_have_side_effects(module, func, h)),
+        Expression::Load { pointer } => expr_may_have_side_effects(module, func, *pointer),
+        Expression::ArrayLength(p) => expr_may_have_side_effects(module, func, *p),
+        Expression::Literal(_)
+        | Expression::Constant(_)
+        | Expression::Override(_)
+        | Expression::ZeroValue(_)
+        | Expression::FunctionArgument(_)
+        | Expression::LocalVariable(_)
+        | Expression::GlobalVariable(_)
+        | Expression::CallResult(_)
+        | Expression::AtomicResult { .. }
+        | Expression::WorkGroupUniformLoadResult { .. }
+        | Expression::RayQueryProceedResult
+        | Expression::SubgroupBallotResult
+        | Expression::SubgroupOperationResult { .. } => false,
     }
 }
 
@@ -445,6 +611,30 @@ pub(crate) fn emit_expr(
                 _ => Err(String::from("WASM codegen: load from non-local pointer")),
             }
         }
+        Expression::Binary {
+            op: BinaryOperator::LogicalAnd,
+            left,
+            right,
+        } => {
+            emit_expr(module, func, *left, wasm_fn, mode, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalSet(alloc.bool_binary_stash));
+            emit_expr(module, func, *right, wasm_fn, mode, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalGet(alloc.bool_binary_stash));
+            wasm_fn.instruction(&Instruction::I32And);
+            Ok(())
+        }
+        Expression::Binary {
+            op: BinaryOperator::LogicalOr,
+            left,
+            right,
+        } => {
+            emit_expr(module, func, *left, wasm_fn, mode, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalSet(alloc.bool_binary_stash));
+            emit_expr(module, func, *right, wasm_fn, mode, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalGet(alloc.bool_binary_stash));
+            wasm_fn.instruction(&Instruction::I32Or);
+            Ok(())
+        }
         Expression::Binary { op, left, right } => {
             let k = expr_scalar_kind(module, func, *left)?;
             emit_expr(module, func, *left, wasm_fn, mode, alloc)?;
@@ -496,6 +686,54 @@ pub(crate) fn emit_expr(
             let inner = &module.types[*ty_h].inner;
             emit_zero_value(inner, wasm_fn, mode)
         }
+        Expression::Math {
+            fun: MathFunction::Mix,
+            arg,
+            arg1: Some(y),
+            arg2: Some(t),
+            ..
+        } => {
+            let k = expr_scalar_kind(module, func, *arg)?;
+            if k != ScalarKind::Float {
+                return Err(String::from("WASM codegen: mix expects float"));
+            }
+            emit_scalar_mix(module, func, *arg, *y, *t, wasm_fn, mode, alloc)
+        }
+        Expression::Math {
+            fun: MathFunction::SmoothStep,
+            arg: edge0,
+            arg1: Some(edge1),
+            arg2: Some(x),
+            ..
+        } => {
+            let k = expr_scalar_kind(module, func, *edge0)?;
+            if k != ScalarKind::Float {
+                return Err(String::from("WASM codegen: smoothstep expects float"));
+            }
+            emit_scalar_smoothstep(module, func, *edge0, *edge1, *x, wasm_fn, mode, alloc)
+        }
+        Expression::Math {
+            fun: MathFunction::Step,
+            arg: edge,
+            arg1: Some(x),
+            ..
+        } => {
+            let k = expr_scalar_kind(module, func, *edge)?;
+            if k != ScalarKind::Float {
+                return Err(String::from("WASM codegen: step expects float"));
+            }
+            emit_scalar_step(module, func, *edge, *x, wasm_fn, mode, alloc)
+        }
+        Expression::Math {
+            fun: MathFunction::Round,
+            arg,
+            ..
+        } => emit_scalar_round(module, func, *arg, wasm_fn, mode, alloc),
+        Expression::Math {
+            fun: MathFunction::Abs,
+            arg,
+            ..
+        } => emit_scalar_abs(module, func, *arg, wasm_fn, mode, alloc),
         Expression::Math { fun, arg, arg1, .. } => match (fun, arg1.as_ref()) {
             (MathFunction::Min | MathFunction::Max, Some(rhs)) => {
                 let is_max = matches!(fun, MathFunction::Max);
@@ -669,7 +907,17 @@ pub(crate) fn expr_scalar_kind(
                 _ => expr_scalar_kind(module, func, *pointer),
             }
         }
-        Expression::Binary { left, .. } => expr_scalar_kind(module, func, *left),
+        Expression::Binary { op, left, .. } => match op {
+            BinaryOperator::Equal
+            | BinaryOperator::NotEqual
+            | BinaryOperator::Less
+            | BinaryOperator::LessEqual
+            | BinaryOperator::Greater
+            | BinaryOperator::GreaterEqual
+            | BinaryOperator::LogicalAnd
+            | BinaryOperator::LogicalOr => Ok(ScalarKind::Bool),
+            _ => expr_scalar_kind(module, func, *left),
+        },
         Expression::Unary { expr: inner, .. } => expr_scalar_kind(module, func, *inner),
         Expression::Select { accept, .. } => expr_scalar_kind(module, func, *accept),
         Expression::As { kind, .. } => Ok(*kind),
@@ -684,7 +932,14 @@ pub(crate) fn expr_scalar_kind(
             type_handle_element_scalar_kind(module, ret.ty).map_err(|e| String::from(e))
         }
         Expression::Math {
-            fun: MathFunction::Min | MathFunction::Max,
+            fun:
+                MathFunction::Min
+                | MathFunction::Max
+                | MathFunction::Mix
+                | MathFunction::SmoothStep
+                | MathFunction::Step
+                | MathFunction::Round
+                | MathFunction::Abs,
             arg,
             ..
         } => crate::emit_vec::vector_element_kind(module, func, *arg),
@@ -977,6 +1232,163 @@ pub(crate) fn emit_unary(
     Ok(())
 }
 
+/// Fixed-point Q16.16 `round` (half-way away from zero), matching `__lp_q32_round`.
+fn emit_q32_round_inner(wasm_fn: &mut WasmFunction, s0: u32, s1: u32) -> Result<(), String> {
+    wasm_fn.instruction(&Instruction::LocalSet(s0));
+
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I32Eqz);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::I32Const(0));
+    wasm_fn.instruction(&Instruction::Else);
+
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I32Const(0));
+    wasm_fn.instruction(&Instruction::I32GtS);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I32Const(0x8000));
+    wasm_fn.instruction(&Instruction::I32Add);
+    wasm_fn.instruction(&Instruction::I32Const(16));
+    wasm_fn.instruction(&Instruction::I32ShrS);
+    wasm_fn.instruction(&Instruction::I32Const(16));
+    wasm_fn.instruction(&Instruction::I32Shl);
+    wasm_fn.instruction(&Instruction::Else);
+
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I32Const(0x8000));
+    wasm_fn.instruction(&Instruction::I32Add);
+    wasm_fn.instruction(&Instruction::I32Const(16));
+    wasm_fn.instruction(&Instruction::I32ShrS);
+    wasm_fn.instruction(&Instruction::I32Const(16));
+    wasm_fn.instruction(&Instruction::I32Shl);
+    wasm_fn.instruction(&Instruction::LocalSet(s1));
+    wasm_fn.instruction(&Instruction::LocalGet(s0));
+    wasm_fn.instruction(&Instruction::I32Const(0xFFFF));
+    wasm_fn.instruction(&Instruction::I32And);
+    wasm_fn.instruction(&Instruction::I32Const(0x8000));
+    wasm_fn.instruction(&Instruction::I32Eq);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    wasm_fn.instruction(&Instruction::I32Const(0x1_0000));
+    wasm_fn.instruction(&Instruction::I32Sub);
+    wasm_fn.instruction(&Instruction::Else);
+    wasm_fn.instruction(&Instruction::LocalGet(s1));
+    wasm_fn.instruction(&Instruction::End);
+
+    wasm_fn.instruction(&Instruction::End);
+
+    wasm_fn.instruction(&Instruction::End);
+    Ok(())
+}
+
+fn emit_q32_round(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+    let (s0, s1) = alloc
+        .round_i32_scratch()
+        .ok_or_else(|| String::from("WASM codegen: missing i32 scratch for round"))?;
+    emit_q32_round_inner(wasm_fn, s0, s1)
+}
+
+pub(crate) fn emit_round_top_of_stack(
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    match mode {
+        FloatMode::Q32 => emit_q32_round(wasm_fn, alloc),
+        FloatMode::Float => emit_float_round_via_q32(wasm_fn, alloc),
+    }
+}
+
+fn emit_float_round_via_q32(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+    const LO: f32 = -32768.0;
+    const HI: f32 = 32767.9999847412109375;
+    let (f0, _) = alloc
+        .float_scratch
+        .ok_or_else(|| String::from("WASM codegen: missing float scratch for round"))?;
+    wasm_fn.instruction(&Instruction::LocalSet(f0));
+    wasm_fn.instruction(&Instruction::LocalGet(f0));
+    wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(LO)));
+    wasm_fn.instruction(&Instruction::F32Max);
+    wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(HI)));
+    wasm_fn.instruction(&Instruction::F32Min);
+    wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(Q16_16_SCALE)));
+    wasm_fn.instruction(&Instruction::F32Mul);
+    wasm_fn.instruction(&Instruction::I32TruncSatF32S);
+    emit_q32_round(wasm_fn, alloc)?;
+    wasm_fn.instruction(&Instruction::F32ConvertI32S);
+    wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(Q16_16_SCALE)));
+    wasm_fn.instruction(&Instruction::F32Div);
+    Ok(())
+}
+
+fn emit_scalar_abs(
+    module: &Module,
+    func: &Function,
+    arg: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    let k = expr_scalar_kind(module, func, arg)?;
+    emit_expr(module, func, arg, wasm_fn, mode, alloc)?;
+    match k {
+        ScalarKind::Float => emit_abs_top_of_stack(wasm_fn, mode, alloc),
+        ScalarKind::Sint | ScalarKind::Uint => emit_i32_abs_top(wasm_fn, alloc),
+        _ => Err(format!(
+            "WASM codegen: abs unsupported for scalar {k:?} in {mode:?}"
+        )),
+    }
+}
+
+fn emit_i32_abs_top(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+    let t = alloc.alloc_temp_n(1)?;
+    wasm_fn.instruction(&Instruction::LocalTee(t));
+    wasm_fn.instruction(&Instruction::I32Const(0));
+    wasm_fn.instruction(&Instruction::LocalGet(t));
+    wasm_fn.instruction(&Instruction::I32LtS);
+    wasm_fn.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    wasm_fn.instruction(&Instruction::I32Const(0));
+    wasm_fn.instruction(&Instruction::LocalGet(t));
+    wasm_fn.instruction(&Instruction::I32Sub);
+    wasm_fn.instruction(&Instruction::Else);
+    wasm_fn.instruction(&Instruction::LocalGet(t));
+    wasm_fn.instruction(&Instruction::End);
+    Ok(())
+}
+
+pub(crate) fn emit_abs_top_of_stack(
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Abs);
+        }
+        FloatMode::Q32 => {
+            emit_i32_abs_top(wasm_fn, alloc)?;
+        }
+    }
+    Ok(())
+}
+
+fn emit_scalar_round(
+    module: &Module,
+    func: &Function,
+    arg: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    let k = expr_scalar_kind(module, func, arg)?;
+    if k != ScalarKind::Float {
+        return Err(String::from("WASM codegen: round expects float"));
+    }
+    emit_expr(module, func, arg, wasm_fn, mode, alloc)?;
+    emit_round_top_of_stack(wasm_fn, mode, alloc)
+}
+
 /// Map i32 bool (0 / non-zero) to Q16.16 `0.0` / `1.0`.
 fn emit_i32_bool_to_q32_float(
     wasm_fn: &mut WasmFunction,
@@ -1225,7 +1637,10 @@ fn emit_u32_clamp_then_q32_scale_uint(
 }
 
 /// Match `__lp_q32_add` / `__lp_q32_sub`: widen to i64, op, saturate to fixed-point range.
-fn emit_q32_add_sat(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+pub(crate) fn emit_q32_add_sat(
+    wasm_fn: &mut WasmFunction,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
     let (s0, s1) = alloc
         .q32_scratch
         .ok_or_else(|| String::from("Q32 scratch missing"))?;
@@ -1243,7 +1658,10 @@ fn emit_q32_add_sat(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<()
     emit_q32_sat_wide_i64_local(wasm_fn, acc)
 }
 
-fn emit_q32_sub_sat(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+pub(crate) fn emit_q32_sub_sat(
+    wasm_fn: &mut WasmFunction,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
     let (s0, s1) = alloc
         .q32_scratch
         .ok_or_else(|| String::from("Q32 scratch missing"))?;
@@ -1283,7 +1701,7 @@ fn emit_q32_sat_wide_i64_local(wasm_fn: &mut WasmFunction, acc: u32) -> Result<(
     Ok(())
 }
 
-fn emit_q32_mul(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
+pub(crate) fn emit_q32_mul(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
     let (s0, s1) = alloc
         .q32_scratch
         .ok_or_else(|| String::from("Q32 scratch missing"))?;
@@ -1321,6 +1739,222 @@ fn emit_q32_div(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), St
 }
 
 /// `a - trunc(a/b)*b` using two f32 scratch locals.
+fn emit_scalar_mix(
+    module: &Module,
+    func: &Function,
+    x: Handle<Expression>,
+    y: Handle<Expression>,
+    t: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    emit_expr(module, func, x, wasm_fn, mode, alloc)?;
+    emit_expr(module, func, y, wasm_fn, mode, alloc)?;
+    emit_expr(module, func, t, wasm_fn, mode, alloc)?;
+    let base = alloc.alloc_temp_n(3)?;
+    wasm_fn.instruction(&Instruction::LocalSet(base + 2));
+    wasm_fn.instruction(&Instruction::LocalSet(base + 1));
+    wasm_fn.instruction(&Instruction::LocalSet(base));
+    wasm_fn.instruction(&Instruction::LocalGet(base + 1));
+    wasm_fn.instruction(&Instruction::LocalGet(base));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Sub);
+            wasm_fn.instruction(&Instruction::LocalGet(base + 2));
+            wasm_fn.instruction(&Instruction::F32Mul);
+            wasm_fn.instruction(&Instruction::LocalGet(base));
+            wasm_fn.instruction(&Instruction::F32Add);
+        }
+        FloatMode::Q32 => {
+            emit_q32_sub_sat(wasm_fn, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalGet(base + 2));
+            emit_q32_mul(wasm_fn, alloc)?;
+            wasm_fn.instruction(&Instruction::LocalGet(base));
+            emit_q32_add_sat(wasm_fn, alloc)?;
+        }
+    }
+    Ok(())
+}
+
+fn emit_scalar_smoothstep(
+    module: &Module,
+    func: &Function,
+    edge0: Handle<Expression>,
+    edge1: Handle<Expression>,
+    x: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    emit_expr(module, func, edge0, wasm_fn, mode, alloc)?;
+    emit_expr(module, func, edge1, wasm_fn, mode, alloc)?;
+    emit_expr(module, func, x, wasm_fn, mode, alloc)?;
+    let work = alloc.alloc_temp_n(7)?;
+    wasm_fn.instruction(&Instruction::LocalSet(work + 2));
+    wasm_fn.instruction(&Instruction::LocalSet(work + 1));
+    wasm_fn.instruction(&Instruction::LocalSet(work));
+    emit_smoothstep_e0_e1_x_slots(wasm_fn, mode, alloc, work)
+}
+
+fn emit_scalar_step(
+    module: &Module,
+    func: &Function,
+    edge: Handle<Expression>,
+    x: Handle<Expression>,
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    emit_expr(module, func, x, wasm_fn, mode, alloc)?;
+    emit_expr(module, func, edge, wasm_fn, mode, alloc)?;
+    emit_step_x_edge_stack(wasm_fn, mode, alloc)
+}
+
+/// `work..work+2` hold e0,e1,x. Uses `work+3..=work+6` as temporaries.
+pub(crate) fn emit_smoothstep_e0_e1_x_slots(
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+    work: u32,
+) -> Result<(), String> {
+    let e0 = work;
+    let e1 = work + 1;
+    let xv = work + 2;
+    let range_s = work + 3;
+    let t_s = work + 4;
+    let tt_s = work + 5;
+    let aux_s = work + 6;
+
+    wasm_fn.instruction(&Instruction::LocalGet(e1));
+    wasm_fn.instruction(&Instruction::LocalGet(e0));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Sub);
+        }
+        FloatMode::Q32 => {
+            emit_q32_sub_sat(wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(range_s));
+
+    wasm_fn.instruction(&Instruction::LocalGet(xv));
+    wasm_fn.instruction(&Instruction::LocalGet(e0));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Sub);
+        }
+        FloatMode::Q32 => {
+            emit_q32_sub_sat(wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalGet(range_s));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Div);
+        }
+        FloatMode::Q32 => {
+            emit_q32_div(wasm_fn, alloc)?;
+        }
+    }
+
+    // clamp to [0, 1]
+    match mode {
+        FloatMode::Float => {
+            emit_literal(&Literal::F32(0.0), wasm_fn, mode)?;
+            wasm_fn.instruction(&Instruction::F32Max);
+            emit_literal(&Literal::F32(1.0), wasm_fn, mode)?;
+            wasm_fn.instruction(&Instruction::F32Min);
+        }
+        FloatMode::Q32 => {
+            emit_literal(&Literal::F32(0.0), wasm_fn, mode)?;
+            emit_scalar_min_max(true, ScalarKind::Float, mode, wasm_fn, alloc)?;
+            emit_literal(&Literal::F32(1.0), wasm_fn, mode)?;
+            emit_scalar_min_max(false, ScalarKind::Float, mode, wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(t_s));
+
+    wasm_fn.instruction(&Instruction::LocalGet(t_s));
+    wasm_fn.instruction(&Instruction::LocalGet(t_s));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Mul);
+        }
+        FloatMode::Q32 => {
+            emit_q32_mul(wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(tt_s));
+
+    emit_literal(&Literal::F32(2.0), wasm_fn, mode)?;
+    wasm_fn.instruction(&Instruction::LocalGet(t_s));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Mul);
+        }
+        FloatMode::Q32 => {
+            emit_q32_mul(wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(aux_s));
+
+    emit_literal(&Literal::F32(3.0), wasm_fn, mode)?;
+    wasm_fn.instruction(&Instruction::LocalGet(aux_s));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Sub);
+        }
+        FloatMode::Q32 => {
+            emit_q32_sub_sat(wasm_fn, alloc)?;
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(aux_s));
+
+    wasm_fn.instruction(&Instruction::LocalGet(tt_s));
+    wasm_fn.instruction(&Instruction::LocalGet(aux_s));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Mul);
+        }
+        FloatMode::Q32 => {
+            emit_q32_mul(wasm_fn, alloc)?;
+        }
+    }
+    Ok(())
+}
+
+/// Stack: `x`, `edge` (edge on top). Pushes `1.0` or `0.0` in the active float mode.
+pub(crate) fn emit_step_x_edge_stack(
+    wasm_fn: &mut WasmFunction,
+    mode: FloatMode,
+    alloc: &LocalAlloc,
+) -> Result<(), String> {
+    let cond = alloc.splat_scratch;
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Ge);
+        }
+        FloatMode::Q32 => {
+            wasm_fn.instruction(&Instruction::I32GeS);
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalSet(cond));
+    match mode {
+        FloatMode::Float => {
+            wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(1.0f32)));
+            wasm_fn.instruction(&Instruction::F32Const(Ieee32::from(0.0f32)));
+        }
+        FloatMode::Q32 => {
+            wasm_fn.instruction(&Instruction::I32Const(65_536));
+            wasm_fn.instruction(&Instruction::I32Const(0));
+        }
+    }
+    wasm_fn.instruction(&Instruction::LocalGet(cond));
+    wasm_fn.instruction(&Instruction::Select);
+    Ok(())
+}
+
 fn emit_f32_mod(wasm_fn: &mut WasmFunction, alloc: &LocalAlloc) -> Result<(), String> {
     let (s0, s1) = alloc
         .float_scratch
