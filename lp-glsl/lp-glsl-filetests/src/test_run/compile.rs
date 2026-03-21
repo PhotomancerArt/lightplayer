@@ -21,10 +21,10 @@ fn to_cranelift_float_mode(fm: FloatMode) -> lp_glsl_cranelift::FloatMode {
 }
 
 /// Map filetest FloatMode to wasm FloatMode.
-fn to_wasm_float_mode(fm: FloatMode) -> lp_glsl_wasm::FloatMode {
+fn to_wasm_float_mode(fm: FloatMode) -> lp_glsl_naga::FloatMode {
     match fm {
-        FloatMode::Q32 => lp_glsl_wasm::FloatMode::Q32,
-        FloatMode::F32 => lp_glsl_wasm::FloatMode::Float,
+        FloatMode::Q32 => lp_glsl_naga::FloatMode::Q32,
+        FloatMode::F32 => lp_glsl_naga::FloatMode::Float,
     }
 }
 
@@ -59,7 +59,6 @@ pub fn compile_for_target(
         Backend::Wasm => {
             let options = WasmOptions {
                 float_mode: to_wasm_float_mode(target.float_mode),
-                max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
             };
             let exec = crate::test_run::wasm_runner::WasmExecutable::from_source(source, options)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;

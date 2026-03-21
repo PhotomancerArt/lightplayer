@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 lp-glsl-cranelift = { path = "../lp-glsl-cranelift", features = ["std", "emulator"] }
+lp-glsl-naga = { path = "../lp-glsl-naga" }
 lp-glsl-wasm = { path = "../lp-glsl-wasm" }
 wasmtime = "42"
 wasm-encoder = "0.245"

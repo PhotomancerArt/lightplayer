@@ -1,0 +1,11 @@
+[package]
+name = "lp-glsl-naga"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }

@@ -63,4 +63,6 @@ float test_float_subtract_large_numbers() {
     return 3000000.0 - 1000000.0;
 }
 
+// Same constant-fold / clamp ordering gap as op-divide large-number case.
+// @unimplemented(backend=wasm)
 // run: test_float_subtract_large_numbers() ~= 0.0

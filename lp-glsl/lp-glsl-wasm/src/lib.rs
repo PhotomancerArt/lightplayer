@@ -1,89 +1,78 @@
-//! GLSL to WebAssembly code generation.
-//!
-//! Compiles GLSL shaders to WASM modules. Uses lp-glsl-frontend for parsing
-//! and semantic analysis; no Cranelift dependency.
+//! GLSL to WebAssembly: Naga GLSL frontend + stack-machine WASM emission.
 
 #![no_std]
 
 extern crate alloc;
 
-pub mod codegen;
+mod emit;
+mod locals;
 pub mod module;
 pub mod options;
 pub mod types;
 
-pub use lp_glsl_frontend::{CompilationPipeline, DEFAULT_MAX_ERRORS, FloatMode};
-pub use module::{WasmExport, WasmModule, WasmValType};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
+
+pub use lp_glsl_naga::{CompileError, FloatMode, GlslType};
+pub use module::{WasmExport, WasmModule};
 pub use options::WasmOptions;
 
-use crate::codegen::compile_to_wasm;
-use lp_glsl_frontend::error::GlslDiagnostics;
+use lp_glsl_naga::NagaModule;
+
+/// Full pipeline error (parse/metadata from [`lp_glsl_naga`], or WASM lowering).
+#[derive(Debug)]
+pub enum GlslWasmError {
+    Frontend(CompileError),
+    Codegen(String),
+}
+
+impl fmt::Display for GlslWasmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Frontend(e) => write!(f, "{e}"),
+            Self::Codegen(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl core::error::Error for GlslWasmError {}
+
+impl From<CompileError> for GlslWasmError {
+    fn from(e: CompileError) -> Self {
+        Self::Frontend(e)
+    }
+}
 
 /// Compile GLSL source to a WASM module.
-pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslDiagnostics> {
-    let semantic = CompilationPipeline::parse_and_analyze(source, options.max_errors)?;
-    let wasm_bytes = compile_to_wasm(&semantic.typed_ast, &options)?;
-    let exports = collect_exports(&semantic.typed_ast, &options);
+pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
+    let naga_module = lp_glsl_naga::compile(source)?;
+    let wasm_bytes = emit::emit_module(&naga_module, &options).map_err(GlslWasmError::Codegen)?;
+    let exports = collect_exports(&naga_module, &options);
     Ok(WasmModule {
         bytes: wasm_bytes,
         exports,
     })
 }
 
-fn collect_exports(
-    shader: &lp_glsl_frontend::semantic::TypedShader,
-    options: &WasmOptions,
-) -> alloc::vec::Vec<WasmExport> {
-    use crate::types::glsl_type_to_wasm_components;
-    use alloc::vec::Vec;
-    use lp_glsl_frontend::semantic::types::Type;
-
-    let mut out = Vec::new();
-
-    if let Some(ref main) = shader.main_function {
-        out.push(WasmExport {
-            name: main.name.clone(),
-            params: main
-                .parameters
+fn collect_exports(naga_module: &NagaModule, options: &WasmOptions) -> Vec<WasmExport> {
+    naga_module
+        .functions
+        .iter()
+        .map(|(_, fi)| {
+            let params: Vec<_> = fi
+                .params
                 .iter()
-                .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
-                .collect(),
-            results: if matches!(
-                main.return_type,
-                lp_glsl_frontend::semantic::types::Type::Void
-            ) {
-                Vec::new()
-            } else {
-                glsl_type_to_wasm_components(&main.return_type, options.float_mode)
-            },
-            signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
-                name: main.name.clone(),
-                return_type: main.return_type.clone(),
-                parameters: main.parameters.clone(),
-            },
-        });
-    }
-
-    for f in &shader.user_functions {
-        out.push(WasmExport {
-            name: f.name.clone(),
-            params: f
-                .parameters
-                .iter()
-                .flat_map(|p| glsl_type_to_wasm_components(&p.ty, options.float_mode))
-                .collect(),
-            results: if matches!(f.return_type, Type::Void) {
-                Vec::new()
-            } else {
-                glsl_type_to_wasm_components(&f.return_type, options.float_mode)
-            },
-            signature: lp_glsl_frontend::semantic::functions::FunctionSignature {
-                name: f.name.clone(),
-                return_type: f.return_type.clone(),
-                parameters: f.parameters.clone(),
-            },
-        });
-    }
-
-    out
+                .flat_map(|(_, ty)| types::glsl_type_to_wasm_components(ty, options.float_mode))
+                .collect();
+            let results = types::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
+            WasmExport {
+                name: fi.name.clone(),
+                params,
+                results,
+                return_type: fi.return_type.clone(),
+                param_types: fi.params.iter().map(|(_, ty)| ty.clone()).collect(),
+            }
+        })
+        .collect()
 }

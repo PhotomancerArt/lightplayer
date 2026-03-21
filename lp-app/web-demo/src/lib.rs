@@ -8,6 +8,6 @@ pub fn compile_glsl(source: &str) -> Result<Vec<u8>, String> {
     let options = WasmOptions::default();
     match glsl_wasm(source, options) {
         Ok(module) => Ok(module.bytes),
-        Err(diagnostics) => Err(diagnostics.to_string()),
+        Err(e) => Err(e.to_string()),
     }
 }

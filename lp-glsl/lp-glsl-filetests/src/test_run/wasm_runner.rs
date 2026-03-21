@@ -1,11 +1,12 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
-use lp_glsl_cranelift::semantic::functions::FunctionSignature;
+use lp_glsl_cranelift::semantic::functions::{FunctionSignature, ParamQualifier, Parameter};
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
+use lp_glsl_naga::GlslType;
 use lp_glsl_wasm::types::glsl_type_to_wasm_components;
-use lp_glsl_wasm::{WasmOptions, glsl_wasm};
+use lp_glsl_wasm::{GlslWasmError, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Config, Engine, Instance, Store};
@@ -19,15 +20,16 @@ const Q16_16_SCALE: f32 = 65536.0;
 pub struct WasmExecutable {
     store: Store<()>,
     instance: Instance,
-    exports: HashMap<String, FunctionSignature>,
-    float_mode: lp_glsl_wasm::FloatMode,
+    exports: HashMap<String, WasmExport>,
+    signatures: HashMap<String, FunctionSignature>,
+    float_mode: lp_glsl_naga::FloatMode,
     wasm_bytes: Vec<u8>,
 }
 
 impl WasmExecutable {
     /// Compile GLSL source to WASM and create an executable.
     pub fn from_source(source: &str, options: WasmOptions) -> Result<Self, GlslDiagnostics> {
-        let module = glsl_wasm(source, options.clone())?;
+        let module = glsl_wasm(source, options.clone()).map_err(glsl_wasm_error_to_diagnostics)?;
         let wasm_bytes = module.bytes.clone();
 
         let mut config = Config::new();
@@ -42,22 +44,27 @@ impl WasmExecutable {
         let instance = wasm_link::instantiate_wasm_module(&engine, &mut store, &wasm_bytes)
             .map_err(|e| GlslDiagnostics::from(e))?;
 
-        let exports: HashMap<String, FunctionSignature> = module
+        let exports: HashMap<String, WasmExport> = module
             .exports
             .iter()
-            .map(|e| (e.name.clone(), e.signature.clone()))
+            .map(|e| (e.name.clone(), e.clone()))
+            .collect();
+        let signatures: HashMap<String, FunctionSignature> = module
+            .exports
+            .iter()
+            .map(|e| (e.name.clone(), wasm_export_to_signature(e)))
             .collect();
 
         Ok(Self {
             store,
             instance,
             exports,
+            signatures,
             float_mode: options.float_mode,
             wasm_bytes,
         })
     }
 
-    /// Set fuel before each call so execution does not hang on infinite loops.
     fn prepare_call(&mut self) -> Result<(), GlslError> {
         self.store
             .set_fuel(DEFAULT_MAX_INSTRUCTIONS)
@@ -69,7 +76,7 @@ impl WasmExecutable {
         name: &str,
         args: &[GlslValue],
     ) -> Result<Vec<wasmtime::Val>, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
 
@@ -80,17 +87,13 @@ impl WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = sig
-            .parameters
-            .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
-            .collect();
+        let param_types: Vec<WasmValType> = export_info.params.clone();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
-        let result_types = glsl_type_to_wasm_components(&sig.return_type, self.float_mode);
+        let result_types = glsl_type_to_wasm_components(&export_info.return_type, self.float_mode);
         let mut results: Vec<wasmtime::Val> = result_types
             .iter()
             .map(|t| match t {
@@ -107,10 +110,53 @@ impl WasmExecutable {
     }
 }
 
+fn glsl_wasm_error_to_diagnostics(e: GlslWasmError) -> GlslDiagnostics {
+    GlslDiagnostics::from(GlslError::new(ErrorCode::E0400, e.to_string()))
+}
+
+fn wasm_export_to_signature(export: &WasmExport) -> FunctionSignature {
+    FunctionSignature {
+        name: export.name.clone(),
+        return_type: to_frontend_type(&export.return_type),
+        parameters: export
+            .param_types
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| Parameter {
+                name: format!("p{i}"),
+                ty: to_frontend_type(ty),
+                qualifier: ParamQualifier::In,
+            })
+            .collect(),
+    }
+}
+
+fn to_frontend_type(ty: &GlslType) -> Type {
+    match ty {
+        GlslType::Void => Type::Void,
+        GlslType::Float => Type::Float,
+        GlslType::Int => Type::Int,
+        GlslType::UInt => Type::UInt,
+        GlslType::Bool => Type::Bool,
+        GlslType::Vec2 => Type::Vec2,
+        GlslType::Vec3 => Type::Vec3,
+        GlslType::Vec4 => Type::Vec4,
+        GlslType::IVec2 => Type::IVec2,
+        GlslType::IVec3 => Type::IVec3,
+        GlslType::IVec4 => Type::IVec4,
+        GlslType::UVec2 => Type::UVec2,
+        GlslType::UVec3 => Type::UVec3,
+        GlslType::UVec4 => Type::UVec4,
+        GlslType::BVec2 => Type::BVec2,
+        GlslType::BVec3 => Type::BVec3,
+        GlslType::BVec4 => Type::BVec4,
+    }
+}
+
 fn glsl_value_to_wasm(
     v: &GlslValue,
     expected: WasmValType,
-    float_mode: lp_glsl_wasm::FloatMode,
+    float_mode: lp_glsl_naga::FloatMode,
 ) -> Result<wasmtime::Val, GlslError> {
     use wasmtime::Val;
 
@@ -120,7 +166,7 @@ fn glsl_value_to_wasm(
             GlslValue::U32(x) => Ok(Val::I32(*x as i32)),
             GlslValue::Bool(b) => Ok(Val::I32(if *b { 1 } else { 0 })),
             GlslValue::F32(f) => {
-                if matches!(float_mode, lp_glsl_wasm::FloatMode::Q32) {
+                if matches!(float_mode, lp_glsl_naga::FloatMode::Q32) {
                     Ok(Val::I32((*f * Q16_16_SCALE) as i32))
                 } else {
                     Err(GlslError::new(
@@ -150,7 +196,7 @@ fn glsl_value_to_wasm(
 
 impl GlslExecutable for WasmExecutable {
     fn call_void(&mut self, name: &str, args: &[GlslValue]) -> Result<(), GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let func = self
@@ -160,11 +206,7 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = sig
-            .parameters
-            .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
-            .collect();
+        let param_types: Vec<WasmValType> = export_info.params.clone();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
@@ -177,7 +219,7 @@ impl GlslExecutable for WasmExecutable {
     }
 
     fn call_i32(&mut self, name: &str, args: &[GlslValue]) -> Result<i32, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let func = self
@@ -187,11 +229,7 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = sig
-            .parameters
-            .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
-            .collect();
+        let param_types: Vec<WasmValType> = export_info.params.clone();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
@@ -213,7 +251,7 @@ impl GlslExecutable for WasmExecutable {
     }
 
     fn call_f32(&mut self, name: &str, args: &[GlslValue]) -> Result<f32, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let func = self
@@ -223,18 +261,23 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = sig
-            .parameters
-            .iter()
-            .map(|p| glsl_param_to_wasm(&p.ty, self.float_mode))
-            .collect();
+        let param_types: Vec<WasmValType> = export_info.params.clone();
         let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
         for (v, t) in args.iter().zip(param_types.iter()) {
             wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
         }
 
+        let return_type = export_info.return_type.clone();
         self.prepare_call()?;
-        let mut results = [wasmtime::Val::F32(0f32.to_bits())];
+        let result_types = glsl_type_to_wasm_components(&return_type, self.float_mode);
+        let mut results: Vec<wasmtime::Val> = result_types
+            .iter()
+            .map(|t| match t {
+                WasmValType::I32 => wasmtime::Val::I32(0),
+                WasmValType::F32 => wasmtime::Val::F32(0f32.to_bits()),
+                _ => wasmtime::Val::I32(0),
+            })
+            .collect();
         func.call(&mut self.store, &wasm_args, &mut results)
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM trap: {e}")))?;
 
@@ -259,19 +302,19 @@ impl GlslExecutable for WasmExecutable {
         args: &[GlslValue],
         dim: usize,
     ) -> Result<Vec<bool>, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let ok = matches!(
-            (&sig.return_type, dim),
-            (Type::BVec2, 2) | (Type::BVec3, 3) | (Type::BVec4, 4)
+            (&export_info.return_type, dim),
+            (GlslType::BVec2, 2) | (GlslType::BVec3, 3) | (GlslType::BVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
                     "call_bvec: function '{name}' returns {:?}, expected bvec{dim}",
-                    sig.return_type
+                    export_info.return_type
                 ),
             ));
         }
@@ -294,19 +337,19 @@ impl GlslExecutable for WasmExecutable {
         args: &[GlslValue],
         dim: usize,
     ) -> Result<Vec<i32>, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let ok = matches!(
-            (&sig.return_type, dim),
-            (Type::IVec2, 2) | (Type::IVec3, 3) | (Type::IVec4, 4)
+            (&export_info.return_type, dim),
+            (GlslType::IVec2, 2) | (GlslType::IVec3, 3) | (GlslType::IVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
                     "call_ivec: function '{name}' returns {:?}, expected ivec{dim}",
-                    sig.return_type
+                    export_info.return_type
                 ),
             ));
         }
@@ -329,19 +372,19 @@ impl GlslExecutable for WasmExecutable {
         args: &[GlslValue],
         dim: usize,
     ) -> Result<Vec<u32>, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let ok = matches!(
-            (&sig.return_type, dim),
-            (Type::UVec2, 2) | (Type::UVec3, 3) | (Type::UVec4, 4)
+            (&export_info.return_type, dim),
+            (GlslType::UVec2, 2) | (GlslType::UVec3, 3) | (GlslType::UVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
                     "call_uvec: function '{name}' returns {:?}, expected uvec{dim}",
-                    sig.return_type
+                    export_info.return_type
                 ),
             ));
         }
@@ -364,19 +407,19 @@ impl GlslExecutable for WasmExecutable {
         args: &[GlslValue],
         dim: usize,
     ) -> Result<Vec<f32>, GlslError> {
-        let sig = self.exports.get(name).ok_or_else(|| {
+        let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
         let ok = matches!(
-            (&sig.return_type, dim),
-            (Type::Vec2, 2) | (Type::Vec3, 3) | (Type::Vec4, 4)
+            (&export_info.return_type, dim),
+            (GlslType::Vec2, 2) | (GlslType::Vec3, 3) | (GlslType::Vec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
                     "call_vec: function '{name}' returns {:?}, expected vec{dim}",
-                    sig.return_type
+                    export_info.return_type
                 ),
             ));
         }
@@ -385,10 +428,10 @@ impl GlslExecutable for WasmExecutable {
         results
             .into_iter()
             .map(|r| match (r, fm) {
-                (wasmtime::Val::I32(i), lp_glsl_wasm::FloatMode::Q32) => {
+                (wasmtime::Val::I32(i), lp_glsl_naga::FloatMode::Q32) => {
                     Ok(i as f32 / Q16_16_SCALE)
                 }
-                (wasmtime::Val::F32(bits), lp_glsl_wasm::FloatMode::Float) => {
+                (wasmtime::Val::F32(bits), lp_glsl_naga::FloatMode::Float) => {
                     Ok(f32::from_bits(bits))
                 }
                 _ => Err(GlslError::new(
@@ -413,7 +456,7 @@ impl GlslExecutable for WasmExecutable {
     }
 
     fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {
-        self.exports.get(name)
+        self.signatures.get(name)
     }
 
     fn list_functions(&self) -> Vec<String> {
@@ -422,16 +465,5 @@ impl GlslExecutable for WasmExecutable {
 
     fn format_disassembly(&self) -> Option<String> {
         wasmprinter::print_bytes(&self.wasm_bytes).ok()
-    }
-}
-
-fn glsl_param_to_wasm(ty: &Type, float_mode: lp_glsl_wasm::FloatMode) -> WasmValType {
-    match ty {
-        Type::Int | Type::UInt | Type::Bool => WasmValType::I32,
-        Type::Float => match float_mode {
-            lp_glsl_wasm::FloatMode::Q32 => WasmValType::I32,
-            lp_glsl_wasm::FloatMode::Float => WasmValType::F32,
-        },
-        _ => panic!("WASM: unsupported param type {ty:?}"),
     }
 }

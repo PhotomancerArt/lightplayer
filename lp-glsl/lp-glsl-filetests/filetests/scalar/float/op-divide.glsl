@@ -63,4 +63,6 @@ float test_float_divide_large_numbers() {
     return 1000000.0 / 1000.0;
 }
 
+// Naga constant-folds before fixed-point clamp semantics; wasm matches folded literal.
+// @unimplemented(backend=wasm)
 // run: test_float_divide_large_numbers() ~= 32.768

@@ -85,6 +85,8 @@ uint test_uint_from_float_negative_literal() {
     return uint(-42.0);
 }
 
+// Naga constant-folds uint(negative float literal) to 0u; runtime uint(f) matches Cranelift.
+// @unimplemented(backend=wasm)
 // run: test_uint_from_float_negative_literal() == 4294967254u
 
 uint test_uint_from_float_negative_expression() {

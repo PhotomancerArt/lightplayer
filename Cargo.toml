@@ -17,6 +17,7 @@ members = [
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lp-glsl-filetests-gen-app",
     "lp-glsl/lp-glsl-frontend",
+    "lp-glsl/lp-glsl-naga",
     "lp-glsl/lp-glsl-cranelift",
     "lp-glsl/lp-glsl-filetests",
     "lp-glsl/lp-glsl-jit-util",
@@ -34,6 +35,7 @@ members = [
     "lp-glsl/lp-glsl-q32-metrics-app",
     "lp-glsl/lp-glsl-wasm",
     "lp-app/web-demo",
+    "spikes/naga-wasm-poc",
 ]
 resolver = "2"
 
@@ -56,6 +58,7 @@ default-members = [
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lp-glsl-filetests-gen-app",
     "lp-glsl/lp-glsl-frontend",
+    "lp-glsl/lp-glsl-naga",
     "lp-glsl/lp-glsl-cranelift",
     "lp-glsl/lp-glsl-filetests",
     "lp-glsl/lp-glsl-jit-util",

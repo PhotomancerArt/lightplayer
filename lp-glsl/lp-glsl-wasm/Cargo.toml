@@ -8,11 +8,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-lp-glsl-frontend = { path = "../lp-glsl-frontend" }
-lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lp-glsl-naga = { path = "../lp-glsl-naga" }
+naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 wasm-encoder = "0.245"
-glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false }
-hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]
