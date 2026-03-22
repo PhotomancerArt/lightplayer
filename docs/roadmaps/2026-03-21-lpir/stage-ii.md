@@ -14,7 +14,7 @@ with unit tests using hand-built IR.
 
 **In scope:**
 - `lp-glsl/lpir/` crate setup (Cargo.toml, no_std + alloc, no external deps)
-- `Op` enum, `IrFunction`, `IrModule`, `ScalarKind`, `VReg` type alias
+- `Op` enum, `IrFunction`, `IrModule`, `IrType` (F32/I32), `VReg` type alias
 - `VRegAllocator` — monotonic counter for fresh VRegs
 - Builder API for constructing `IrFunction` (push ops, allocate VRegs)
 - Text format printer (`IrFunction` → String)
@@ -37,11 +37,12 @@ with unit tests using hand-built IR.
 
 - The crate must be `no_std` + `alloc`. No external dependencies.
 - The builder API should make it easy to construct IR in the lowering
-  (Stage IV). Pattern: `let dst = builder.alloc_vreg(ScalarKind::Float);
-  builder.push(Op::FloatAdd { dst, lhs, rhs });`
+  (Stage IV). Pattern: `let dst = builder.alloc_vreg(IrType::F32);
+  builder.push(Op::Fadd { dst, lhs, rhs });`
 - The text printer should produce output identical to the spec examples.
 - The parser should handle the full grammar from the spec.
-- The interpreter operates on `Value` (Float(f32), Int(i32), Bool(bool)).
+- The interpreter operates on `Value` (`Float(f32)`, `Int(i32)`); conditions
+  and comparison results are `Int(i32)` (`0` / `1` or nonzero).
   It executes the float ops as f32 (the "native" semantics). Q32 semantics
   are tested post-transform in Stage III.
 - The Op enum must include i64 ops (for Q32 transform output in Stage III):

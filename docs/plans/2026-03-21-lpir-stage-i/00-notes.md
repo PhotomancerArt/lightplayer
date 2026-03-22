@@ -3,8 +3,8 @@
 ## Scope
 
 Define the complete LPIR language specification: operation set, type rules, text
-format grammar, and semantics. The deliverable is a single spec document
-(`spec.md`) that serves as the reference for all subsequent implementation
+format grammar, and semantics. The deliverable is a set of spec chapters in
+`docs/lpir/` that serve as the reference for all subsequent implementation
 (Stage II+).
 
 No Rust code is written in this stage. The spec should be thorough enough that
@@ -58,8 +58,8 @@ validation, but the op name makes intent clear. This matches the existing text
 format examples in the overview.
 
 **Answer**: Hybrid — **width-aware VReg types, short CLIF-style op names**.
-VReg annotations carry the concrete width (`v0:f32`, `v1:i32`, `v2:i64`,
-`v3:bool`). Op names use single-letter type prefix without width (`fadd`,
+VReg annotations carry the concrete width (`v0:f32`, `v1:i32`). Op names use
+single-letter type prefix without width (`fadd`,
 `isub`, `fconst`, `iconst`, `flt`, `ilt_s`, etc.). The op is unambiguous
 because the result VReg type resolves the width. This keeps the text format
 scannable while retaining full type information.
@@ -75,13 +75,15 @@ Options:
   internal detail of the Q32 transform pass (which creates its own temporaries).
 - **(b) i32+i64 in LPIR**: Include i64 ops. The Q32 transform emits i64 VRegs.
 
-**Suggested answer**: (a) i32-only for the base spec. The Q32 transform is a
-separate LPIR→LPIR pass that needs i64 intermediates, but those are internal to
-the transform and don't need to be in the "user-facing" op set. We can add an
-"internal ops" section or a "Q32 extension" section to the spec that covers the
-i64 ops the transform emits. This keeps the core spec clean.
+**Suggested answer**: (a) i32-only for the base spec.
 
-**Answer**: TODO
+**Answer**: **i32-only**. Q32 is now handled in each backend's emitter, not as
+an LPIR→LPIR transform. Investigation of the Cranelift backend showed Q32
+strategies are fundamentally backend-specific: WASM uses inline i64 sequences,
+Cranelift saturating uses builtin calls (`__lp_q32_add`), Cranelift wrapping
+uses all-i32 (`imul`+`smulhi`+shifts). A shared transform would pick one
+representation that doesn't fit all backends. Consequence: LPIR has no i64
+type. The type universe is f32 and i32 (GLSL `bool` lowers to i32 0/1).
 
 ### 3. Memory ops: scope and semantics?
 
@@ -99,7 +101,20 @@ Options:
 ABI. The ops should reflect what's actually needed: store a scalar to a fixed
 offset, load a scalar from a fixed offset.
 
-**Answer**: TODO
+**Answer**: **General pointer support via i32 addresses**. Pointers are just
+i32 VRegs — no special pointer type. Use cases: LPFX out-pointer ABI,
+out/inout parameters, local arrays, globals via context pointer.
+
+Memory ops:
+- `slot ssN, size` — function-level metadata declaring addressable memory
+- `slot_addr ssN` → i32 — get base address of a slot (runtime op)
+- `load base, offset` — load one scalar (type from result VReg)
+- `store base, offset, value` — store one scalar (type from value VReg)
+- `memcpy dst, src, size` — bulk copy for matrices/arrays
+
+Pointer arithmetic uses regular `iadd`/`imul`. Slots map to Cranelift
+`StackSlot`s and WASM shadow stack frames. `memcpy` maps to WASM
+`memory.copy` and Cranelift `emit_small_memory_copy`/`call_memcpy`.
 
 ### 4. Call conventions: how to represent LPFX vs user calls?
 
@@ -119,27 +134,25 @@ module header indicates whether a function is local or imported. The call site
 syntax is the same. The lowering handles flattening, pointer prepending, and
 post-call memory loads — those expand to multiple LPIR ops (store, call, load).
 
-**Answer**: TODO
+**Answer**: **Single `call` op, differentiated function declarations**. The
+call site syntax is always `call @name(args)`. Function declarations
+distinguish import vs local:
+- `import @__lp_q32_add(i32, i32) -> i32` — imported (Q32 builtin, LPFX)
+- `func @my_helper(f32, f32) -> f32 { ... }` — local user function
 
-### 5. Do we spec the Q32 transform ops in this document?
+The emitter uses the declaration to generate the right linkage (WASM import
+vs internal function index, Cranelift ExternalName vs local FuncRef). The
+lowering expands LPFX ABI (store args to slot, call, load results) into
+explicit LPIR ops before the call.
 
-The Q32 transform (LPIR→LPIR) is Stage IV work but the spec needs to be
-complete enough to know whether the op set supports it.
+### 5. ~~Do we spec the Q32 transform ops in this document?~~
 
-Options:
-- **(a) Full Q32 op section**: Include i64 ops, saturation ops, Q32-specific
-  constants in the spec.
-- **(b) Core + extension note**: Spec the core ops. Add a brief section noting
-  that the Q32 transform will extend the op set with i64 ops, with the full
-  Q32 extension specified when that stage is planned.
-- **(c) Core only**: Don't mention Q32 extension at all.
-
-**Suggested answer**: (b) Core + extension note. The spec should be
-self-contained for the core (float, i32, bool) while flagging that the Q32
-transform will add i64 ops. This keeps the spec focused but shows the design
-accommodates Q32.
-
-**Answer**: TODO
+**Resolved by Q2**: Q32 is handled per-backend in the emitter, not as an
+LPIR→LPIR transform. No Q32-specific ops in the spec. The spec covers the
+float-mode-agnostic op set (f32, i32). A brief note in the spec
+should mention that backends handle Q32 internally and that float ops
+(`fadd`, `fmul`, etc.) may be implemented as fixed-point arithmetic
+depending on the target's FloatMode.
 
 ### 6. What math builtins belong in the op set vs are decomposed during lowering?
 
@@ -160,7 +173,20 @@ Options:
 more readable. The lowering stays simple (Naga Math → LPIR Math, 1:1).
 Decomposition can happen in an optimization pass later if desired.
 
-**Answer**: TODO
+**Answer**: **Separate `mathcall` mechanism, SPIR-V extended instruction
+style**. Core Op enum stays small (arithmetic, comparison, logic, control
+flow, memory). Math builtins use a `MathCall` op variant with a `MathFunc`
+enum:
+
+    v5:f32 = mathcall fmin(v3, v4)
+    v6:f32 = mathcall fabs(v3)
+    v7:f32 = mathcall fsmoothstep(v0, v1, v2)
+    v8:f32 = mathcall fsin(v3)
+
+In Rust: `Op::MathCall { dst, func: MathFunc, args }`. New builtins grow the
+`MathFunc` enum without touching `Op`. The emitter maps `MathFunc` to optimal
+sequences per backend. Mirrors SPIR-V's `OpExtInst` + `GLSL.std.450` and
+Naga's `Expression::Math { fun: MathFunction }`.
 
 ### 7. How should the spec handle operations not yet needed (Switch, dynamic array access)?
 
@@ -180,7 +206,11 @@ section for Switch, dynamic array access, and Relational ops with notes on their
 planned semantics. This avoids designing ourselves into a corner without
 over-specifying unused features.
 
-**Answer**: TODO
+**Answer**: **(b) Core + reserved**. The spec fully defines ops needed for
+current scalar filetests and Phase II control flow/call patterns. A "Future
+Extensions" section lists known-needed ops (Switch, Relational ops like
+any/all) with brief semantic notes. Dynamic array access is already covered
+by the general pointer/load/store model.
 
 ## Notes
 

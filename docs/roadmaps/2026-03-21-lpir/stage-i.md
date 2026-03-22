@@ -13,9 +13,9 @@ for all subsequent implementation.
 ## Scope
 
 **In scope:**
-- Complete Op set enumeration (float ops, int ops, bool ops, casts,
-  comparisons, select, copy, control flow, calls, memory)
-- ScalarKind type system (Float, Sint, Uint, Bool)
+- Complete Op set enumeration (float ops, int ops, bitwise ops, casts,
+  comparisons producing i32, select, copy, control flow, calls, memory)
+- LPIR scalar types (`f32`, `i32`); GLSL `bool` / Naga bool lower to `i32`
 - VReg semantics (definition, reassignment, typing rules)
 - Text format grammar (formal or semi-formal)
 - Text format examples covering all ops and control flow patterns
@@ -40,8 +40,8 @@ for all subsequent implementation.
 
 ## Deliverables
 
-- `docs/plans/<date>-lpir-stage-i/spec.md` — the LPIR specification document
-  containing the full Op set, type rules, text format grammar, and examples.
+- `docs/lpir/*.md` — LPIR specification chapters (Op set, type rules, text
+  format grammar, examples, mapping).
 
 ## Dependencies
 
