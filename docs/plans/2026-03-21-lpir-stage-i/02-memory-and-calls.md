@@ -120,7 +120,7 @@ func @noise_example(v0:f32, v1:f32) -> f32 {
   v3:i32 = ftoi_sat_s v0             ; flatten to i32 for Q32
   v4:i32 = ftoi_sat_s v1
   store v2, 0, v3                    ; prepend result pointer (implicit)
-  call @__lpfx_noise3(v2, v3, v4)
+  call @lpfx::noise3(v2, v3, v4)
   v5:f32 = load v2, 0               ; result.x
   v6:f32 = load v2, 4               ; result.y
   v7:f32 = load v2, 8               ; result.z
@@ -178,7 +178,7 @@ func @mat_copy(v0:i32, v1:i32) {     ; dst ptr, src ptr
 #### Function declarations
 
 Three kinds:
-- **Imported functions**: `import @name(param_types) -> return_type`
+- **Imported functions**: `import @module::name(param_types) -> return_type`
 - **Local functions**: `func @name(params) -> return_type { body }`
 - **Entry function**: `entry func @name(params) -> return_type { body }`
 
@@ -189,8 +189,10 @@ test contexts; visibility is an emitter concern (WASM exports all functions,
 Cranelift JIT exposes all symbols), not gated by `entry`.
 
 ```
-import @__lp_q32_add(i32, i32) -> i32
-import @__lpfx_noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @std.math::fmin(f32, f32) -> f32
+import @std.math::fmax(f32, f32) -> f32
+import @lp.q32::q32_add(i32, i32) -> i32
+import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 
 entry func @shader_main(v0:i32) -> f32 {
   ...
@@ -210,11 +212,14 @@ func @void_func(v0:f32, v1:i32) {
 ```
 
 Document:
+- Import names use `@module::name` syntax — the module prefix tells
+  the emitter which provider resolves the function. The `::` separator
+  structurally distinguishes imports from local functions.
 - Import declarations specify parameter types (no VReg names).
 - Local function declarations specify parameter VRegs with types.
 - Return type is optional (omit for void functions).
 - Multiple return values are supported: `-> (f32, f32, f32)`.
-- Functions have a name prefixed with `@`.
+- Local functions have a name prefixed with `@`. Imports use `@module::name`.
 
 #### Call op
 
@@ -225,8 +230,10 @@ v5:f32, v6:f32, v7:f32 = call @vec3_fn(v1)   ; multi-return (scalarized vec3)
 ```
 
 Document:
-- Single `call` op for both imported and local functions.
-- The emitter uses the function declaration to determine linkage.
+- Single `call` op for both imported and local functions. Import calls
+  use the full qualified name: `call @std.math::fsin(v0)`.
+- The emitter uses the function declaration (and module prefix for
+  imports) to determine linkage and resolution.
 - Arguments are VRegs, passed by value.
 - Return value(s) bound to destination VReg(s). Multiple returns for
   scalarized vector/matrix results.

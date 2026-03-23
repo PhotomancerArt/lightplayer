@@ -94,7 +94,7 @@ tagged `supported` | `deferred` | `out of scope`, with one-line notes.
 | `Binary`, `Unary` | yes | **supported** | `LogicalAnd`/`Or`: flat evaluation in LPIR unless lowering preserves short-circuit. |
 | `Select`, `As` | yes | **supported** | `As` from vector: first component for scalar cast (match current behavior unless spec’d otherwise). |
 | `CallResult` | yes | **supported** | |
-| `Math` | partial | **supported** (partial) | WASM today: Mix, SmoothStep, Step, Round, Abs, Min, Max only. **v1 spec**: enumerate rest as `mathcall` + emitter errors until implemented. |
+| `Math` | partial | **supported** (partial) | WASM today: Mix, SmoothStep, Step, Round, Abs, Min, Max only. **v1 spec**: enumerate rest as `std.math` imports + emitter errors until implemented. |
 | `Relational` | no | **deferred** | `any`/`all`/etc. |
 | `ImageSample`, `ImageLoad`, `ImageQuery` | no | **out of scope v1** | |
 | `Derivative` | no | **out of scope v1** | |
@@ -366,7 +366,12 @@ for v1.
 
 ---
 
-## 5. `mathcall` semantics vs fast math / relaxed GPU libm
+## 5. ~~`mathcall`~~ Import module semantics vs fast math / relaxed GPU libm
+
+> **Superseded**: `mathcall` has been replaced by module-qualified imports
+> (`@std.math::fsin`, etc.). See `00-notes4.md`. The semantic precision
+> decisions below still apply — they now describe the `std.math` module's
+> contract rather than a `MathFunc` enum.
 
 **Context**  
 You prioritized performance and GPU-like behavior; `mathcall` covers `sin`,

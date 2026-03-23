@@ -105,8 +105,9 @@ v1:i32 = ineg v0           ; -i32 → i32 (wrapping, i.e. 0 - v0)
 
 Semantics notes:
 - Integer arithmetic is wrapping (mod 2^32).
-- `fmod` is a mathcall, not a core op (WASM has no `f32.rem`; GLSL `mod`
-  semantics require `x - y * floor(x/y)` which differs from C `fmod`).
+- `fmod` is an import (`@std.math::fmod`), not a core op (WASM has no
+  `f32.rem`; GLSL `mod` semantics require `x - y * floor(x/y)` which
+  differs from C `fmod`).
 - Float division by zero: IEEE 754 (±Inf/NaN).
 - Integer `idiv_*` / `irem_*` with divisor zero: **result `0`**, non-trapping.
   Both emitters must match (WASM: guard + select `0`; Cranelift: do not rely

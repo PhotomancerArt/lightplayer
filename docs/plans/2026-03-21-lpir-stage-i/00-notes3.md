@@ -85,7 +85,7 @@ the `loop`; increment expressions are part of `continuing`."
 
 **Decision**:
 
-Add a note in `04-mathcall-and-mapping.md` (statement mapping section) and
+Add a note in `04-import-modules-and-mapping.md` (statement mapping section) and
 plan for `08-glsl-mapping.md`: "GLSL `for`, `while`, and `do-while` all
 lower through Naga `Statement::Loop` → LPIR `loop`. Loop initializers emit
 before the `loop`; the `continuing` block maps to ops before `br_if_not`;
@@ -145,7 +145,7 @@ Naga mapping: `Statement::Switch { selector, cases }` → LPIR `switch`.
 `SwitchValue::Default` → `default { ... }`.
 
 Update: `00-design.md` (op diagram, control flow, well-formedness),
-`03-control-flow.md`, `05-text-format-grammar.md`, `04-mathcall-and-mapping.md`.
+`03-control-flow.md`, `05-text-format-grammar.md`, `04-import-modules-and-mapping.md`.
 
 ---
 

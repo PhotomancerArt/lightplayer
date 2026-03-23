@@ -220,7 +220,7 @@ bounds checks for dynamic indexing. OOB is not specified — a pipeline bug.
 
 **Entry**: At most **one** `entry func` per module — the runtime entry point.
 All functions remain visible and callable by the host (emitter concern, not
-IR annotation). Unsupported **mathcall** on a target → **emitter error**.
+IR annotation). Unresolved **import module** on a target → **emitter error**.
 
 A future diagnostic "safe mode" may warn on edge cases without changing
 results.

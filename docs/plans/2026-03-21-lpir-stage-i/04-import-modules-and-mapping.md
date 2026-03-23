@@ -1,50 +1,80 @@
-# Phase 4: MathCall Builtins and GLSL Mapping
+# Phase 4: Import Modules and GLSL Mapping
 
 ## Scope
 
 Write two spec chapters:
-- `docs/lpir/06-mathcall.md` — MathFunc enumeration, mathcall op
-  semantics, backend expectations.
+- `docs/lpir/06-import-modules.md` — Module-qualified import mechanism,
+  well-known module catalogs (`std.math`, etc.), semantic precision,
+  emitter provider contract.
 - `docs/lpir/08-glsl-mapping.md` — Full mapping from Naga expressions
   and statements to LPIR ops, including vector scalarization patterns.
 
 ## Reminders
 
 - This is a spec-writing phase, no Rust code.
-- Enumerate every MathFunc with its signature and GLSL source.
+- The `std.math` catalog is reference documentation, not a closed enum.
 - The mapping table should cover every Naga expression and statement
   variant we handle today.
 
 ## Implementation details
 
-### 1. MathCall Mechanism section
+### 1. Import Module Mechanism section
 
 Document the design:
-- `mathcall` is a single Op variant: `Op::MathCall { dst, func, args }`.
-- `func` is a `MathFunc` enum value.
-- New builtins extend `MathFunc` without changing `Op`.
-- Inspired by SPIR-V's `OpExtInst` + `GLSL.std.450`.
-- If a target cannot lower a `MathFunc`, the **emitter returns an error**
-  at emission time (no silent fallback or stub).
+- All external functions are declared via `import @module::name(sig) -> ret`.
+- Call sites use the full qualified name: `call @module::name(args)`.
+- The `::` separator is structural — the parser distinguishes imported
+  calls from local calls by its presence.
+- The emitter is configured with **providers** for import modules. Each
+  provider knows how to lower every function in its module. If the module
+  is not provided, the emitter returns an error.
+- Inspired by SPIR-V's `OpExtInstImport` + extended instruction sets,
+  but using the existing `import`/`call` mechanism.
 
 Syntax:
 ```
-v5:f32 = mathcall fmin(v3, v4)
-v6:f32 = mathcall fabs(v3)
-v7:f32 = mathcall fsmoothstep(v0, v1, v2)
+import @std.math::fmin(f32, f32) -> f32
+import @std.math::fmax(f32, f32) -> f32
+import @lp.q32::q32_add(i32, i32) -> i32
+import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+
+func @example(v0:f32, v1:f32) -> f32 {
+  v2:f32 = call @std.math::fmin(v0, v1)
+  return v2
+}
 ```
 
-### 2. MathFunc Enumeration
+**Emitter contract**:
+- Provider for `std.math`: WASM → browser libm imports; Cranelift →
+  libcalls or intrinsics.
+- Provider for `lp.q32`: only available in Q32 mode; provides fixed-point
+  math functions.
+- Provider for `lpfx`: Lygia builtins, only if configured.
+- Unresolved module → emitter error. Signature mismatch → emitter error.
 
-For each MathFunc, document:
-- **Name**: text format name
+**Benefits over a closed MathFunc enum**:
+- Open-ended: new modules (future Lygia versions, custom builtins) don't
+  require IR spec changes — just a new provider.
+- Context-aware: Q32 mode configures `lp.q32`; f32 mode doesn't.
+- Testable: test harness provides only the modules it needs (or none).
+- Single calling mechanism: `call` for everything.
+- Namespace safety: `@std.math::fsin` can't conflict with `@lpfx::fsin`.
+
+### 2. Well-known Module: `std.math`
+
+The `std.math` module provides standard math functions corresponding to
+GLSL builtins. This is reference documentation — the catalog may grow
+without IR spec changes.
+
+For each function, document:
+- **Name**: the function name after `std.math::`
 - **Signature**: operand types → result type
 - **GLSL equivalent**: the GLSL function it corresponds to
 - **Semantics**: brief description (can reference GLSL spec for full details)
 
 #### Float math (unary)
 
-| MathFunc | Signature | GLSL | Description |
+| Function | Signature | GLSL | Description |
 |---|---|---|---|
 | `fabs` | (f32) → f32 | `abs(x)` | Absolute value |
 | `fsign` | (f32) → f32 | `sign(x)` | Sign: -1.0, 0.0, or 1.0 |
@@ -75,7 +105,7 @@ For each MathFunc, document:
 
 #### Float math (binary)
 
-| MathFunc | Signature | GLSL | Description |
+| Function | Signature | GLSL | Description |
 |---|---|---|---|
 | `fmin` | (f32, f32) → f32 | `min(x, y)` | Minimum |
 | `fmax` | (f32, f32) → f32 | `max(x, y)` | Maximum |
@@ -87,7 +117,7 @@ For each MathFunc, document:
 
 #### Float math (ternary)
 
-| MathFunc | Signature | GLSL | Description |
+| Function | Signature | GLSL | Description |
 |---|---|---|---|
 | `fmix` | (f32, f32, f32) → f32 | `mix(x, y, a)` | Linear interpolation: x*(1-a) + y*a |
 | `fclamp` | (f32, f32, f32) → f32 | `clamp(x, min, max)` | Clamp to range |
@@ -96,7 +126,7 @@ For each MathFunc, document:
 
 #### Integer math
 
-| MathFunc | Signature | GLSL | Description |
+| Function | Signature | GLSL | Description |
 |---|---|---|---|
 | `iabs_s` | (i32) → i32 | `abs(x)` | Absolute value (signed) |
 | `imin_s` | (i32, i32) → i32 | `min(x, y)` | Minimum (signed) |
@@ -106,25 +136,26 @@ For each MathFunc, document:
 | `iclamp_s` | (i32, i32, i32) → i32 | `clamp(x, min, max)` | Clamp (signed) |
 | `iclamp_u` | (i32, i32, i32) → i32 | `clamp(x, min, max)` | Clamp (unsigned) |
 
-Note: this is the initial set. The `MathFunc` enum is designed to grow as
-we add support for more GLSL builtins. The spec should note which MathFuncs
-are required for the current scalar filetests vs which are included for
-completeness.
+Note: this is the initial `std.math` catalog. The module is open-ended —
+new functions can be added by updating the catalog documentation and the
+`std.math` provider in each emitter, without changing the IR spec or
+core op set.
 
 #### Semantic precision
 
-MathCall results are **relaxed / implementation-defined** within the range
-of reasonable libm behavior. WASM (browser libm) and device (Cranelift /
-builtins) may differ by small amounts for transcendentals (`fsin`, `fcos`,
-`fpow`, etc.). Filetests use tolerances where needed.
+Import module function results are **relaxed / implementation-defined**
+within the range of reasonable libm behavior. WASM (browser libm) and
+device (Cranelift / builtins) may differ by small amounts for
+transcendentals (`fsin`, `fcos`, `fpow`, etc.). Filetests use tolerances
+where needed.
 
 - **Core arithmetic** (`fadd`, `fmul`, `fdiv`, `fsub`) is IEEE 754 exact
-  (not relaxed). Only MathCall transcendentals are implementation-defined.
+  (not relaxed). Only `std.math` transcendentals are implementation-defined.
 - **`fmin` / `fmax` NaN propagation**: follows IEEE 754-2019 minimum /
   maximum (NaN-propagating) on targets that support it, otherwise
   implementation-defined. Not pinned across backends in v1.
 - **No strict-math mode in v1**. Future: a `strict_math` flag could tighten
-  semantics for specific MathFuncs if cross-backend bitwise reproducibility
+  semantics for specific functions if cross-backend bitwise reproducibility
   becomes a requirement.
 
 ### 3. GLSL → LPIR Mapping Table
@@ -151,7 +182,7 @@ Cover every variant of `naga::Expression` that the lowering handles:
 | `Select { cond, accept, reject }` | `select` | |
 | `As { expr, kind, convert }` | Cast op | `ftoi_sat_s`, `itof_s`, etc. |
 | `ZeroValue(ty)` | `fconst.f32 0.0` / `iconst.i32 0` | Bool zero is `iconst.i32 0` |
-| `Math { fun, args }` | `mathcall` | See MathFunc mapping |
+| `Math { fun, args }` | `call @std.math::name(...)` | See `std.math` catalog |
 | `CallResult(h)` | Result VReg from `call` | |
 | `Compose { .. }` | Multiple VRegs | Scalarized — one VReg per component |
 | `Splat { .. }` | `copy` to N VRegs | Scalarized |
@@ -166,7 +197,7 @@ Cover every variant of `naga::Expression` that the lowering handles:
 | Subtract | `fsub` | `isub` | `isub` | — |
 | Multiply | `fmul` | `imul` | `imul` | — |
 | Divide | `fdiv` | `idiv_s` | `idiv_u` | — |
-| Modulo | `mathcall fmod` | `irem_s` | `irem_u` | — |
+| Modulo | `call @std.math::fmod` | `irem_s` | `irem_u` | — |
 | Equal | `feq` | `ieq` | `ieq` | `ieq` |
 | NotEqual | `fne` | `ine` | `ine` | `ine` |
 | Less | `flt` | `ilt_s` | `ilt_u` | — |
@@ -203,7 +234,7 @@ Cover every variant of `naga::Expression` that the lowering handles:
 | `Continue` | `continue` |
 | `Return { value }` | `return v` / `return` |
 | `Store { pointer, value }` | VReg reassignment or `store` |
-| `Call { function, arguments, result }` | `call @name(args)` |
+| `Call { function, arguments, result }` | `call @name(args)` or `call @module::name(args)` |
 
 #### Vector scalarization mapping
 
@@ -216,14 +247,16 @@ Document how vector operations are decomposed:
 | `a.xy` (swizzle) | Select VRegs for x, y components |
 | `dot(a, b)` (vec3) | 3× `fmul` + 2× `fadd` |
 | `cross(a, b)` | 6× `fmul` + 3× `fsub` |
-| `length(a)` (vec3) | 3× `fmul` + 2× `fadd` + `mathcall fsqrt` |
+| `length(a)` (vec3) | 3× `fmul` + 2× `fadd` + `call @std.math::fsqrt` |
 
 ## Validate
 
 Review the section for:
-- Every MathFunc has name, signature, GLSL equivalent, and description.
+- The `std.math` catalog has name, signature, GLSL equivalent, and
+  description for every function.
 - The GLSL → LPIR mapping covers all currently-handled Naga variants.
 - Binary and unary op mappings are complete for all type combinations.
 - Vector scalarization examples are included.
 - Cross-reference with the current WASM emitter to ensure no handled
   expression or statement type is missing from the mapping.
+- Import module mechanism is clearly documented with emitter contract.

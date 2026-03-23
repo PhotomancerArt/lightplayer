@@ -3,7 +3,7 @@
 ## Scope
 
 Define the complete LPIR language specification. The deliverable is a set of
-chapters in `docs/lpir/` covering: type system, core op set, math builtins,
+chapters in `docs/lpir/` covering: type system, core op set, import modules,
 memory model, call conventions, control flow, text format grammar, operation
 semantics, and GLSL → LPIR mapping. No Rust code.
 
@@ -22,7 +22,7 @@ docs/lpir/                      # THE DELIVERABLE: LPIR specification
 ├── 03-memory.md                # Pointer model, slots, load/store/memcpy/slot_addr
 ├── 04-control-flow.md          # if/else, loop, break, continue, br_if_not, switch, return
 ├── 05-calls.md                 # Function declarations, call op, multi-return
-├── 06-mathcall.md              # MathCall mechanism, MathFunc enumeration
+├── 06-import-modules.md        # Module-qualified imports, well-known module catalogs
 ├── 07-text-format.md           # Grammar, lexical rules, _imm syntax
 ├── 08-glsl-mapping.md          # Naga expression/statement/vector mapping tables
 └── 09-future.md                # Reserved ops, vector types, planned extensions
@@ -136,31 +136,23 @@ Signed vs unsigned is determined by the op, not the type (e.g. `ilt_s` vs
 │                                                  │
 │  ┌───────────────────────────────────────┐       │
 │  │ Calls                                 │       │
-│  │    call  (unified op — import vs      │       │
-│  │           func distinguished in       │       │
-│  │           function declarations)      │       │
+│  │    call  (unified op — module-        │       │
+│  │           qualified imports and       │       │
+│  │           local funcs use the same    │       │
+│  │           call op)                    │       │
 │  └───────────────────────────────────────┘       │
 │                                                  │
 │  ┌───────────────────────────────────────┐       │
-│  │ MathCall  (extensible, SPIR-V style)  │       │
+│  │ Import Modules (external functions)   │       │
 │  │                                       │       │
-│  │  Float:                               │       │
-│  │    fmod,                              │       │
-│  │    fmin, fmax, fabs, fround,          │       │
-│  │    ffloor, fceil, ftrunc, ffract,     │       │
-│  │    fsin, fcos, ftan,                  │       │
-│  │    fasin, facos, fatan, fatan2,       │       │
-│  │    fsinh, fcosh, ftanh,              │       │
-│  │    fpow, fexp, fexp2, flog, flog2,    │       │
-│  │    fsqrt, finversesqrt,               │       │
-│  │    fmix, fstep, fsmoothstep,          │       │
-│  │    fclamp, ffma, fsign,               │       │
-│  │    fldexp, ffrexp                     │       │
+│  │  Well-known modules:                  │       │
+│  │    std.math  — fsin, fcos, fmin, ...  │       │
+│  │    lp.q32   — q32_add, q32_mul, ...  │       │
+│  │    lpfx     — noise3, fbm, ...       │       │
 │  │                                       │       │
-│  │  Integer:                             │       │
-│  │    imin_s, imax_s, iabs_s,            │       │
-│  │    imin_u, imax_u,                    │       │
-│  │    iclamp_s, iclamp_u                 │       │
+│  │  Open-ended: new modules don't        │       │
+│  │  require IR spec changes.             │       │
+│  │  Emitter configured with providers.   │       │
 │  └───────────────────────────────────────┘       │
 │                                                  │
 │  ┌───────────────────────────────────────┐       │
@@ -180,8 +172,8 @@ Signed vs unsigned is determined by the op, not the type (e.g. `ilt_s` vs
   operands: `iadd_imm v1, 42` instead of `iadd v1, v2`.
 - **Signed/unsigned suffix**: `_s` / `_u` where signedness matters
   (e.g. `ilt_s`, `idiv_u`).
-- **MathCall ops**: prefixed by type (`fsin`, `imin_s`), called via
-  `mathcall` keyword.
+- **Import module functions**: prefixed by type (`fsin`, `imin_s`),
+  called via `call @module::name(...)` like any other function.
 
 ### Memory model
 
@@ -235,16 +227,24 @@ Use cases:
 
 ### Call conventions
 
-Single `call` op. Function declarations distinguish linkage. Multi-return
-supported for scalarized vector/matrix results.
+Single `call` op. Module-qualified imports for external functions. Local
+function declarations for module-defined code. Multi-return supported for
+scalarized vector/matrix results.
 
 ```
-import @__lp_q32_add(i32, i32) -> i32              ; imported (Q32 builtin)
-import @__lpfx_noise3(i32, i32, i32, i32) -> (i32, i32, i32)  ; imported (LPFX, multi-return)
-entry func @shader_main(v0:i32) -> f32 { ... }     ; runtime entry point (0 or 1 per module)
-func @my_helper(v0:f32, v1:f32) -> f32 { ... }     ; local, single return
-func @vec3_fn(v0:f32) -> (f32, f32, f32) { ... }   ; local, multi-return
+import @std.math::fmin(f32, f32) -> f32             ; standard math
+import @std.math::fmax(f32, f32) -> f32             ; standard math
+import @lp.q32::q32_add(i32, i32) -> i32            ; Q32 builtin (mode-dependent)
+import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)  ; LPFX (multi-return)
+entry func @shader_main(v0:i32) -> f32 { ... }      ; runtime entry point (0 or 1 per module)
+func @my_helper(v0:f32, v1:f32) -> f32 { ... }      ; local, single return
+func @vec3_fn(v0:f32) -> (f32, f32, f32) { ... }    ; local, multi-return
 ```
+
+Import names use `@module::function` syntax. The module prefix (`std.math`,
+`lp.q32`, `lpfx`) tells the emitter which **provider** resolves the import.
+Local functions use bare `@name`. The `::` separator is structural — the
+parser distinguishes imported vs local calls by its presence.
 
 **Entry vs. visibility**: A module may have **zero or one** `entry func`
 declaration — the runtime entry point (the function the LightPlayer host
@@ -340,16 +340,17 @@ behavior stay aligned on overflow/NaN handling, not on trapping.
 ```
 ; LPIR text format
 
-import @__lp_q32_add(i32, i32) -> i32
+import @std.math::fmax(f32, f32) -> f32
+import @std.math::fmin(f32, f32) -> f32
 
 func @smoothstep(v0:f32, v1:f32, v2:f32) -> f32 {
   v3:f32 = fsub v1, v0
   v4:f32 = fsub v2, v0
   v5:f32 = fdiv v4, v3
   v6:f32 = fconst.f32 0.0
-  v7:f32 = mathcall fmax(v5, v6)
+  v7:f32 = call @std.math::fmax(v5, v6)
   v8:f32 = fconst.f32 1.0
-  v9:f32 = mathcall fmin(v7, v8)
+  v9:f32 = call @std.math::fmin(v7, v8)
   v10:f32 = fmul v9, v9
   v11:f32 = fconst.f32 3.0
   v12:f32 = fconst.f32 2.0
@@ -412,10 +413,10 @@ func @array_example(v0:i32) -> f32 {
 | `Expression::Literal(Bool(v))` | `iconst.i32 1` / `iconst.i32 0` |
 | `Expression::Select` | `select` |
 | `Expression::As` (float→int) | `ftoi_sat_s` / `ftoi_sat_u` |
-| `Expression::Math { Mix }` | `mathcall fmix(...)` |
-| `Expression::Math { SmoothStep }` | `mathcall fsmoothstep(...)` |
-| `Expression::Math { Min }` | `mathcall fmin(...)` / `mathcall imin_s(...)` |
-| `Expression::Math { Abs }` | `mathcall fabs(...)` / `mathcall iabs_s(...)` |
+| `Expression::Math { Mix }` | `call @std.math::fmix(...)` |
+| `Expression::Math { SmoothStep }` | `call @std.math::fsmoothstep(...)` |
+| `Expression::Math { Min }` | `call @std.math::fmin(...)` / `call @std.math::imin_s(...)` |
+| `Expression::Math { Abs }` | `call @std.math::fabs(...)` / `call @std.math::iabs_s(...)` |
 | `Statement::If` | `if v { ... } else { ... }` |
 | `Statement::Switch` | `switch v { case N { ... } default { ... } }` |
 | `Statement::Loop` | `loop { ... }` |
@@ -424,7 +425,7 @@ func @array_example(v0:i32) -> f32 {
 | `Statement::Return` | `return v` |
 | `Statement::Store` (local var) | VReg reassignment or `store` |
 | `Statement::Call` (user fn) | `call @name(...)` |
-| `Statement::Call` (LPFX) | `store` + `call` + `load` sequence |
+| `Statement::Call` (LPFX) | `store` + `call @lpfx::name(...)` + `load` sequence |
 | Vector expression | N× scalar ops (scalarized in lowering) |
 
 ### Numeric semantics: GPU-aligned, non-trapping
@@ -453,8 +454,9 @@ or Cranelift defaults. The guiding principles:
 
 **Interpreter**: Same rules; integer div/rem by zero → `0`.
 
-**MathCall**: If the target does not implement a requested `MathFunc`, the
-**emitter returns an error** at emission time (no silent fallback).
+**Import resolution**: If the emitter does not have a provider for a
+required import module, it returns an error at emission time (no silent
+fallback).
 
 **Future: diagnostic / safe mode**: A validation pass or interpreter flag
 that *warns* on: division by zero, NaN inputs, out-of-range casts before
@@ -474,13 +476,14 @@ this concept. The safe mode never changes results — it only reports.
    ABI, out/inout params, arrays, globals via context pointer. Slots for
    stack-allocated memory.
 
-4. **MathCall for builtins**: Core Op enum stays small. Math builtins use
-   a separate extensible `MathFunc` enum via `mathcall`, mirroring SPIR-V's
-   extended instruction set. Unsupported `MathFunc` for a target → **emitter
-   error**, not silent fallback.
+4. **Module-qualified imports for external functions**: Math builtins,
+   Q32 helpers, LPFX/Lygia functions are all `import @module::name(...)`.
+   The IR core stays small; external function catalogs are open-ended
+   reference documentation, not a closed enum. Emitters are configured
+   with providers per module; unresolved module → error.
 
-5. **Single `call` op**: Import vs local is a property of the function
-   declaration, not the call site. `entry` marks the runtime entry point.
+5. **Single `call` op**: `call @module::name(...)` for imports, `call
+   @name(...)` for local functions. `entry` marks the runtime entry point.
 
 6. **Non-SSA**: VRegs can be reassigned. Both targets (WASM, Cranelift)
    perform their own SSA construction.
@@ -500,7 +503,8 @@ this concept. The safe mode never changes results — it only reports.
 **Module**:
 - Every `call` target is declared (`import` or `func` / `entry func`).
 - At most one `entry func` declaration (the runtime entry point).
-- Function names (`@name`) are unique across declarations.
+- Function names are unique across declarations. Import names use
+  `@module::name`; local function names use `@name`.
 - `import` and `func` signatures are consistent with all call sites (arity
   and value types).
 - Call graphs may be cyclic (recursion is allowed). Stack overflow from

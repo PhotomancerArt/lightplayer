@@ -26,7 +26,8 @@ Key grammar elements to define:
 
 ```
 module      = { import | func | entry_func }
-import      = "import" func_name "(" type_list ")" [ "->" return_type ]
+import      = "import" import_name "(" type_list ")" [ "->" return_type ]
+import_name = "@" identifier "::" identifier   ; @module::function
 func        = "func" func_name "(" param_list ")" [ "->" return_type ] "{" body "}"
 entry_func  = "entry" "func" func_name "(" param_list ")" [ "->" return_type ] "{" body "}"
               ; at most one per module (runtime entry point)
@@ -52,9 +53,8 @@ Define the complete production rules for:
 - Function signatures (params, return type)
 - Slot declarations
 - All op forms (binary, unary, const, cast, select, copy)
-- MathCall syntax
 - Memory ops (load, store, slot_addr, memcpy)
-- Call syntax
+- Call syntax (local `@name` and imported `@module::name`)
 - Control flow (if/else, loop, break, continue, br_if_not, switch, return)
 - Comments (`;` to end of line)
 - Literals (decimal int, hex int, float with decimal point, special
@@ -69,13 +69,14 @@ Document:
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`.
 - VReg names: `v` followed by decimal digits.
 - Slot names: `ss` followed by decimal digits.
-- Function names: `@` followed by identifier.
+- Function names: `@` followed by identifier (local) or
+  `@` identifier `::` identifier (module-qualified import).
 - Integer literals: decimal (`42`, `-1`) or hex (`0xFF`).
 - Float literals: decimal with point (`1.5`, `-0.0`, `0.0`), or special
   (`inf`, `-inf`, `nan`).
 - Keywords: `func`, `entry`, `import`, `slot`, `if`, `else`, `loop`,
   `break`, `continue`, `return`, `br_if_not`, `switch`, `case`,
-  `default`, `call`, `mathcall`, `select`, `copy`, `load`, `store`,
+  `default`, `call`, `select`, `copy`, `load`, `store`,
   `slot_addr`, `memcpy`, `f32`, `i32`.
 - Typed constant syntax `iconst.i32` and `fconst.f32` are not single
   keywords; document them as dotted opcode names in the grammar (same
@@ -105,8 +106,8 @@ VRegs. Document the decision in the op reference.
 
 Write complete, self-contained examples that cover every feature:
 
-#### Example 1: Arithmetic and math builtins
-A function that exercises all arithmetic ops and several mathcalls.
+#### Example 1: Arithmetic and imported math functions
+A function that exercises all arithmetic ops and several `std.math` calls.
 
 #### Example 2: All comparison operators
 A function with every comparison op (float and integer, signed and unsigned).
@@ -130,8 +131,8 @@ A function demonstrating every cast op.
 - memcpy
 
 #### Example 6: Function calls
-- Import declaration and call to imported function
-- Local function definition and call
+- Module-qualified import declaration and call (`@std.math::fsin`, etc.)
+- Local function definition and call (`@my_helper`)
 - Void function call
 - Call with return value
 
@@ -144,8 +145,9 @@ to a vec3, with loop and conditional).
 Brief section noting ops and features reserved for future work:
 
 - Relational ops (`any`, `all`) — currently decomposed during scalarization.
-  May be added as MathCall entries if needed for optimization.
-- Additional MathFunc entries as GLSL coverage expands.
+  May be added as `std.math` entries if needed for optimization.
+- Additional `std.math` functions as GLSL coverage expands.
+- New import modules as the ecosystem grows.
 - **Vector types and ops** — additive extension for SIMD backends (WASM
   v128, ESP32-P4 PIE). See overview chapter.
 - **64-bit types** — `i64`, `f64` if needed in the future.
