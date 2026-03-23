@@ -168,7 +168,7 @@ Syntax summary:
 - `i*` — integer ops (`iadd`, `iadd_imm`, `iconst.i32`, `ilt_s`, etc.)
 - `if`/`loop`/`break`/`continue`/`return`/`br_if_not` — control flow
 - `call @name(args)` — function call
-- `store`/`load` — memory ops (LPFX ABI)
+- `store`/`load` — memory ops (slots, out/inout, LPFX scratch)
 - `;` — line comments
 
 ### Design decisions
@@ -208,14 +208,20 @@ Essential for isolating bugs and keeping tests fast.
 
 **GPU-aligned numeric semantics**: LPIR's edge-case behavior is modeled on
 GPU shader execution, not WASM or general-purpose CPU semantics. The core
-rule: no LPIR op traps. Shaders are visual code — garbage pixels from a
-division-by-zero are acceptable; a crash is not. This also ensures that
-a shader validated on the WASM backend won't crash on device.
+rule: no LPIR op traps. Integer **division and remainder by zero** are
+defined to produce **`0`** on all backends (WASM uses a guard; Cranelift
+matches, not raw RISC-V div-by-zero hardware results). IEEE 754 float,
+wrapping integer arithmetic, shift amounts masked to 5 bits, saturating
+float-to-int casts (`ftoi_sat_*`). Q32 emitters preserve the same saturating
+intent in fixed-point space.
 
-Specifics: IEEE 754 float, wrapping integer arithmetic, non-trapping integer
-division by zero (result unspecified), shift amounts masked to 5 bits,
-saturating float-to-int casts. The WASM emitter guards integer division
-(since WASM natively traps); RISC-V's M extension is naturally non-trapping.
+**Memory**: Well-formed LPIR assumes **in-bounds** access; lowering inserts
+bounds checks for dynamic indexing. OOB is not specified — a pipeline bug.
+
+**Entry**: At most **one** `entry func` per module — the runtime entry point.
+All functions remain visible and callable by the host (emitter concern, not
+IR annotation). Unsupported **mathcall** on a target → **emitter error**.
+
 A future diagnostic "safe mode" may warn on edge cases without changing
 results.
 
@@ -292,6 +298,24 @@ use case.
 - **IR ownership cost**: A text format, parser, and interpreter are significant
   to maintain. Justified by the testing and debugging benefits, and by sharing
   the lowering across backends.
+
+## Future work (beyond Stage VII)
+
+- **Cranelift backend migration**: Rewrite `lp-glsl-cranelift` to consume
+  LPIR. Multi-return calling convention (StructReturn for large tuples like
+  `mat4` → 16× `f32`) is a known implementation task for the Cranelift
+  `GlslExecutable`.
+
+- **SIMD / vector types**: Add `v2f32`, `v4f32`, `v4i32` to the IR type
+  system and corresponding vector ops. The lowering stops scalarizing for
+  SIMD-capable backends (WASM v128, ESP32-P4 PIE).
+
+- **LPIR optimizations**: Dead VReg elimination, constant folding, liveness-
+  based local reuse. Not needed for correctness but reduce output size.
+
+- **Diagnostic safe mode**: Interpreter / validator flag that warns on
+  div-by-zero, NaN inputs, out-of-range casts, OOB memory. Never changes
+  results.
 
 ## Scope estimate
 

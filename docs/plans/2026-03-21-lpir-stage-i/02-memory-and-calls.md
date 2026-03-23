@@ -22,10 +22,17 @@ Write two spec chapters:
 
 - Pointers are i32 VRegs holding byte addresses. No special pointer type.
 - Pointer arithmetic uses regular `iadd` / `imul`.
-- All scalar values are 4 bytes (f32, i32). Bool is stored as i32 (0/1)
-  in memory.
-- Alignment defaults to natural (4 bytes). The spec does not expose
-  alignment control.
+- **Dynamic index**: fold into `base` (`slot_addr` + index×stride + `iadd`);
+  `load`/`store` **offset literal** is usually `0` (see `00-design.md` and
+  `00-notes2.md` §1 “Spec notes”).
+- **`out` / `inout`**: `i32` pointer parameters + `load`/`store`; no new ops
+  (document in `05-calls.md` / mapping).
+- All scalar values are 4 bytes (f32, i32). Conditions use i32 (0/1) in memory
+  where relevant.
+- Alignment defaults to natural (4 bytes for f32/i32). The spec does not
+  expose alignment control. Unaligned access is target-defined.
+- **Endianness**: little-endian for scalar loads/stores (WASM mandates it;
+  typical embedded targets match).
 
 #### Slot declarations
 
@@ -47,9 +54,12 @@ Document:
 - Slots are function-scoped (lifetime = function invocation).
 
 Target mapping:
-- Cranelift: each slot → `create_sized_stack_slot`.
-- WASM: all slots summed → shadow stack frame. Prologue subtracts from
-  stack pointer global, epilogue restores.
+- Cranelift: each slot → `create_sized_stack_slot` (native stack).
+- WASM: shadow stack with elision. A mutable global `$sp` (i32) tracks
+  the stack pointer in linear memory. Functions with slots emit a prologue
+  (decrement `$sp` by frame size) and epilogue (restore `$sp`). Functions
+  with **no slots** emit no prologue/epilogue. LPFX scratch is ordinary
+  slots — no global scratch region.
 
 #### Memory ops
 
@@ -81,14 +91,21 @@ Semantics notes for each op:
 - `store`: writes a scalar value to `base + offset`. The stored type is
   determined by the value VReg's type. Offset is an unsigned literal.
 - `memcpy`: copies `size` bytes from `src` to `dst`. Both are i32 addresses.
-  Size is an unsigned literal. Overlapping regions: behavior is undefined
-  (use only for non-overlapping copies).
+  `size` is a **non-negative compile-time constant** (byte count). Regions
+  **must not overlap** — C `memcpy` contract, aligned with Cranelift
+  `emit_small_memory_copy` / `call_memcpy`. Overlap is invalid; lowering must
+  use a temp buffer or explicit loop for memmove-style copies.
+
+**Safe memory (well-formed IR)**: By LPIR, dynamic indexing is assumed
+**in-bounds**: the Naga → LPIR lowering emits bounds checks (or proves static
+safety). LPIR does not define out-of-bounds `load`/`store`/`memcpy` behavior;
+violations are pipeline bugs (WASM may trap; device may fault).
 
 Target mapping:
 - `load`/`store` → WASM `i32.load`/`i32.store`/`f32.load`/`f32.store`
   with MemArg `{ offset, align: 2 }`.
 - `load`/`store` → Cranelift `load`/`store` with MemFlags.
-- `memcpy` → WASM `memory.copy`.
+- `memcpy` → WASM `memory.copy` when non-overlap holds, else expanded sequence.
 - `memcpy` → Cranelift `emit_small_memory_copy` or `call_memcpy`.
 
 #### Use case examples
@@ -163,18 +180,19 @@ func @mat_copy(v0:i32, v1:i32) {     ; dst ptr, src ptr
 Three kinds:
 - **Imported functions**: `import @name(param_types) -> return_type`
 - **Local functions**: `func @name(params) -> return_type { body }`
-- **Exported functions**: `export func @name(params) -> return_type { body }`
+- **Entry function**: `entry func @name(params) -> return_type { body }`
 
-`export` marks a function as callable from the host (WASM export, Cranelift
-entry point). Most modules have one export (the shader entry). This is an
-IR-level concept — the emitter doesn't need out-of-band configuration to
-know which functions to export.
+`entry` marks the **runtime entry point** — the function the LightPlayer
+host invokes as the shader. A module has **at most one** `entry func`. All
+functions (entry or not) are **visible and callable** by the host in JIT /
+test contexts; visibility is an emitter concern (WASM exports all functions,
+Cranelift JIT exposes all symbols), not gated by `entry`.
 
 ```
 import @__lp_q32_add(i32, i32) -> i32
 import @__lpfx_noise3(i32, i32, i32, i32) -> (i32, i32, i32)
 
-export func @shader_main(v0:i32) -> f32 {
+entry func @shader_main(v0:i32) -> f32 {
   ...
 }
 
@@ -219,8 +237,14 @@ Multi-return target mapping:
 - WASM: native multi-value (core spec since 2020).
 - Cranelift: multi-return for small counts, automatic StructReturn
   (pointer-based) when the ABI doesn't support enough return registers.
-  The emitter pushes multiple `AbiParam` returns; Cranelift handles the
-  rest.
+  Each backend's `GlslExecutable` handles the concrete ABI.
+- No restriction on entry vs other functions — since all functions are
+  callable by the host, multi-return conventions apply everywhere.
+
+Recursion:
+- Call graphs may be cyclic (recursion is allowed). Stack overflow from
+  unbounded recursion is implementation-defined termination, not UB.
+  Embedders should enforce execution bounds (fuel, stack size).
 
 ## Validate
 

@@ -24,6 +24,8 @@ Document the design:
 - `func` is a `MathFunc` enum value.
 - New builtins extend `MathFunc` without changing `Op`.
 - Inspired by SPIR-V's `OpExtInst` + `GLSL.std.450`.
+- If a target cannot lower a `MathFunc`, the **emitter returns an error**
+  at emission time (no silent fallback or stub).
 
 Syntax:
 ```
@@ -77,6 +79,7 @@ For each MathFunc, document:
 |---|---|---|---|
 | `fmin` | (f32, f32) → f32 | `min(x, y)` | Minimum |
 | `fmax` | (f32, f32) → f32 | `max(x, y)` | Maximum |
+| `fmod` | (f32, f32) → f32 | `mod(x, y)` | GLSL: `x - y * floor(x / y)` (not C `fmod`) |
 | `fpow` | (f32, f32) → f32 | `pow(x, y)` | x^y |
 | `fatan2` | (f32, f32) → f32 | `atan(y, x)` | Two-argument arc tangent |
 | `fstep` | (f32, f32) → f32 | `step(edge, x)` | 0.0 if x < edge, else 1.0 |
@@ -107,6 +110,22 @@ Note: this is the initial set. The `MathFunc` enum is designed to grow as
 we add support for more GLSL builtins. The spec should note which MathFuncs
 are required for the current scalar filetests vs which are included for
 completeness.
+
+#### Semantic precision
+
+MathCall results are **relaxed / implementation-defined** within the range
+of reasonable libm behavior. WASM (browser libm) and device (Cranelift /
+builtins) may differ by small amounts for transcendentals (`fsin`, `fcos`,
+`fpow`, etc.). Filetests use tolerances where needed.
+
+- **Core arithmetic** (`fadd`, `fmul`, `fdiv`, `fsub`) is IEEE 754 exact
+  (not relaxed). Only MathCall transcendentals are implementation-defined.
+- **`fmin` / `fmax` NaN propagation**: follows IEEE 754-2019 minimum /
+  maximum (NaN-propagating) on targets that support it, otherwise
+  implementation-defined. Not pinned across backends in v1.
+- **No strict-math mode in v1**. Future: a `strict_math` flag could tighten
+  semantics for specific MathFuncs if cross-backend bitwise reproducibility
+  becomes a requirement.
 
 ### 3. GLSL → LPIR Mapping Table
 
@@ -177,7 +196,9 @@ Cover every variant of `naga::Expression` that the lowering handles:
 | `Emit { range }` | No-op (expressions emitted on demand) |
 | `Block(body)` | Emit body statements sequentially |
 | `If { condition, accept, reject }` | `if v { ... } else { ... }` |
+| `Switch { selector, cases }` | `switch v { case N { ... } default { ... } }` |
 | `Loop { body, continuing, break_if }` | `loop { ... br_if_not ... continue }` |
+| *(GLSL `for`/`while`/`do-while` all lower through Naga `Loop`)* | |
 | `Break` | `break` |
 | `Continue` | `continue` |
 | `Return { value }` | `return v` / `return` |

@@ -126,13 +126,79 @@ br_if_not v0
 - Conditional break: exits the innermost `loop` if `v0` (`i32`) is `0`.
 - Equivalent to `if (!v0) break`, but as a single op.
 - Only valid inside a `loop`.
+- The "not" naming reflects the loop-guard idiom: "keep looping while
+  condition holds, break if not."
 
-WASM mapping: `BrIf(depth)` to the loop's outer `Block`, with the
-condition appropriately handled (WASM `BrIf` branches on true, so
-the condition may need inversion or use `i32.eqz`).
+WASM mapping: `local.get v0` → `i32.eqz` → `br_if` to the loop's outer
+`Block`. (WASM `br_if` branches on nonzero, so `i32.eqz` inverts the
+condition to match `br_if_not` semantics.)
 
 This op exists because Naga's `break_if` pattern in loops is common
 and a single op avoids an extra `if` + `break` nesting level.
+
+#### switch
+
+```
+switch v0 {
+  case 0 {
+    ...
+  }
+  case 1 {
+    ...
+  }
+  case 5 {
+    ...
+  }
+  default {
+    ...
+  }
+}
+```
+
+- `v0` must be `i32`.
+- Case values are non-negative integer constants; duplicates are an error.
+- **No fall-through**: each case arm is independent. After executing a
+  matching case body, control falls to after the `switch`.
+- `default` is optional. If absent and no case matches, control falls to
+  after the `switch` (no-op).
+- `break` and `continue` inside case bodies target enclosing `loop`s, not
+  the `switch`. The switch is not a loop construct.
+
+WASM mapping (dense cases):
+```
+Block(Empty)                   ; end-of-switch target
+  Block(Empty)                 ; default target
+    Block(Empty)               ; case N target
+      ...
+        Block(Empty)           ; case 0 target
+          local.get v0
+          BrTable [0, 1, ..., N, default]
+        End                    ; case 0
+        ...case 0 body...
+        Br(end)
+      End                      ; case 1
+      ...case 1 body...
+      Br(end)
+    End                        ; case N
+    ...case N body...
+    Br(end)
+  End                          ; default
+  ...default body...
+End                            ; end-of-switch
+```
+
+For sparse cases, the emitter may normalize the selector (subtract min,
+gap-fill with default), or fall back to an `if`/`else` chain. This is an
+emitter optimization detail — the IR always uses `switch`.
+
+Cranelift mapping: `cranelift_frontend::Switch` utility (automatically
+selects jump table vs binary search based on case density).
+
+Naga mapping: `Statement::Switch { selector, cases }`. Each
+`SwitchCase { value: I32(n), body, fall_through }` maps to `case n { body }`.
+`SwitchValue::Default` maps to `default { body }`. Fall-through cases
+(`fall_through: true`) are merged by the Naga → LPIR lowering: a
+fall-through case's body is prepended to the next case's body.
 
 #### return
 
@@ -152,12 +218,13 @@ Naga mapping: `Statement::Return { value }`.
 ### Nesting and scoping rules
 
 Document:
-- Loops can nest inside loops and ifs.
-- `break` and `continue` target the innermost enclosing `loop` only.
+- Loops, ifs, and switches can nest arbitrarily inside each other.
+- `break` and `continue` target the innermost enclosing `loop` only
+  (not `switch` — switch is not a loop construct).
 - `br_if_not` targets the innermost enclosing `loop` only.
 - VReg scope is the entire function (flat, not block-scoped). A VReg
-  defined inside an `if` branch is accessible after the `if`, but its
-  value is only defined if that branch executed.
+  defined inside an `if` branch or `switch` case is accessible after
+  the construct, but its value is only defined if that branch executed.
 - There is no implicit fall-through or phi-node merging. The non-SSA
   model means VRegs defined before a branch retain their value in
   branches that don't reassign them.
@@ -232,7 +299,29 @@ func @nested(v0:i32, v1:i32) -> i32 {
 }
 ```
 
-5. Early return:
+5. Switch:
+```
+func @switch_example(v0:i32) -> f32 {
+  v1:f32 = fconst.f32 0.0
+  switch v0 {
+    case 0 {
+      v1 = fconst.f32 1.0
+    }
+    case 1 {
+      v1 = fconst.f32 2.0
+    }
+    case 2 {
+      v1 = fconst.f32 4.0
+    }
+    default {
+      v1 = fconst.f32 -1.0
+    }
+  }
+  return v1
+}
+```
+
+6. Early return:
 ```
 func @early_return(v0:f32) -> f32 {
   v1:f32 = fconst.f32 0.0
@@ -250,9 +339,9 @@ func @early_return(v0:f32) -> f32 {
 Review the section for:
 - Every control flow construct has syntax, semantics, and WASM mapping.
 - Nesting rules are explicit and unambiguous.
-- VReg scoping in branches is clearly documented.
+- VReg scoping in branches and switch cases is clearly documented.
 - Naga → LPIR mapping covers all statement types.
 - Examples cover: simple if, if/else, loop with br_if_not, nested loops,
-  early return.
+  switch, early return.
 - Cross-reference with the current WASM emitter's `emit_stmt` to ensure
   nothing is missing.

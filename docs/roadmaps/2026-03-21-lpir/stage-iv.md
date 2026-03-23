@@ -36,9 +36,9 @@ and by printing LPIR text from real GLSL inputs.
 
 ## Key decisions
 
-- The lowering is completely float-mode-unaware. It emits `float.add`,
-  `float.const 1.5`, etc. Q32 handling is done by the Q32 transform
-  (Stage III) applied to the output.
+- The lowering is completely float-mode-unaware. It emits `fadd`,
+  `fconst.f32 1.5`, etc. Q32 handling is done inside each backend's
+  emitter (Stage V), not as an IR transform.
 - Expression caching must handle the DAG nature of Naga's arena — an
   expression referenced multiple times produces one set of VRegs.
 - `Statement::Emit` ranges are no-ops; expressions are lowered on-demand
@@ -60,7 +60,8 @@ and by printing LPIR text from real GLSL inputs.
 ## Dependencies
 
 - Stage II (lpir crate with interpreter) must be complete.
-- Stage III (Q32 transform) should be complete for Q32-mode testing.
+- Stage III (interpreter + validation hardening) should be complete so the
+  interpreter is thoroughly tested before lowering builds on it.
 - Existing `lp-glsl-naga` crate (compile, LPFX injection) is the base.
 
 ## Estimated scope

@@ -15,15 +15,18 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 **In scope:**
 - Rewrite `lp-glsl-wasm/src/emit.rs` to walk `IrFunction.body` (Vec<Op>)
 - Local declaration: count VRegs by type, declare as function locals
-  (f32 locals for Float VRegs, i32 for Sint/Uint/Bool, i64 for I64 VRegs)
+  (f32 locals for Float VRegs, i32 for Int VRegs)
 - Op emission: 1:1 map for most ops
   - `float.add` → `local.get lhs`, `local.get rhs`, `f32.add`, `local.set dst`
   - `i32.add` → `local.get lhs`, `local.get rhs`, `i32.add`, `local.set dst`
   - Control flow: `if` → `block/br_if/block`, `loop` → `loop/br_if/br`
   - `call` → WASM call instruction
-  - `i32.store`/`i32.load` → WASM memory ops
+  - `load`/`store` → WASM memory ops on linear memory (shadow stack frame)
   - `return` → WASM return
 - Function parameters: first N locals are params (WASM convention)
+- Shadow stack for `slot`/`slot_addr`: mutable `$sp` global, per-function
+  prologue/epilogue for functions with slot declarations, elided when no
+  slots. LPFX scratch becomes ordinary slots — no global scratch region.
 - LPFX import handling: detect `call @lpfx_*` ops, generate WASM imports
 - Deletion of `locals.rs` and `emit_vec.rs`
 - Simplification of `types.rs`
@@ -38,14 +41,12 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 
 - VReg index = WASM local index (offset by parameter count for function-local
   VRegs). This makes local allocation trivial.
-- In Q32 mode, the LPIR has already been transformed (Stage III), so the
-  emitter only sees `i32.*` and `i64.*` ops for numeric work. No mode
-  dispatch in the emitter.
-- In float mode, the LPIR contains `float.*` ops, and the emitter maps them
-  to `f32.*` WASM instructions.
+- The emitter is **mode-aware**: LPIR contains float-agnostic ops (`fadd`,
+  `fmul`); the WASM emitter maps them to `f32.*` instructions in float
+  mode, or expands them to inline i64 Q32 sequences in Q32 mode. Q32
+  expansion is emitter-internal — no separate IR transform.
 - The emitter is simple enough that bugs should be rare. Most testing effort
-  goes into the lowering (Stage IV) and transform (Stage III) via the
-  interpreter.
+  goes into the lowering (Stage IV) via the interpreter.
 
 ## Deliverables
 
@@ -53,12 +54,11 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 - Deleted `lp-glsl-wasm/src/locals.rs`, `emit_vec.rs`
 - Simplified `lp-glsl-wasm/src/types.rs`
 - Wasmtime-based tests exercising the full pipeline
-  (GLSL → Naga → LPIR [→ Q32 transform] → WASM → run)
+  (GLSL → Naga → LPIR → WASM emitter [Q32 inside] → run)
 
 ## Dependencies
 
 - Stage IV (Naga → LPIR lowering) must produce valid IR.
-- Stage III (Q32 transform) must be complete for Q32-mode emission.
 
 ## Estimated scope
 

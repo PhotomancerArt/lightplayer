@@ -27,7 +27,7 @@ with unit tests using hand-built IR.
   mismatches)
 
 **Out of scope:**
-- Q32 transform (Stage III)
+- Q32 expansion (lives in backend emitters, not in `lpir`)
 - Naga lowering (Stage IV)
 - WASM emission (Stage V)
 - lpir-cli (deferred)
@@ -43,10 +43,10 @@ with unit tests using hand-built IR.
 - The parser should handle the full grammar from the spec.
 - The interpreter operates on `Value` (`Float(f32)`, `Int(i32)`); conditions
   and comparison results are `Int(i32)` (`0` / `1` or nonzero).
-  It executes the float ops as f32 (the "native" semantics). Q32 semantics
-  are tested post-transform in Stage III.
-- The Op enum must include i64 ops (for Q32 transform output in Stage III):
-  `I64ExtendI32S`, `I64Add`, `I64Mul`, `I64ShrS`, `I32WrapI64`, etc.
+  It executes float ops as `f32` (native float mode). Q32 is exercised only
+  through backend emitters, not as distinct LPIR ops or interpreter modes.
+- The `Op` enum is **LPIR-only** — no `i64` IR ops. Q32 widening lives inside
+  WASM / Cranelift emission (`Stage V+`), not in `lpir`.
 
 ## Deliverables
 

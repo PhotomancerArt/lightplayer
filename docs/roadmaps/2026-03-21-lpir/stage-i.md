@@ -24,7 +24,7 @@ for all subsequent implementation.
 
 **Out of scope:**
 - Rust implementation (Stage II)
-- Q32 transform (Stage III)
+- Q32 as an LPIR→LPIR transform (Q32 lives in backend emitters)
 - Naga lowering (Stage IV)
 - WASM emission (Stage V)
 - Vector operations (future — Phase II of Naga migration)

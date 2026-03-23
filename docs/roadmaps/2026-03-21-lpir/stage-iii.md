@@ -1,11 +1,16 @@
-# Stage III: Q32 Transform
+# Stage III: LPIR Interpreter + Validation Hardening
 
 ## Goal
 
-Implement the Q32 consuming transform (LPIR → LPIR) that rewrites
-float-mode-agnostic IR into Q32 fixed-point operations. Validate using
-the interpreter: execute pre-transform (f32) and post-transform (Q32),
-compare results within epsilon.
+Extend the interpreter (Stage II) and validator with comprehensive
+coverage: all ops exercised through the interpreter, edge-case numeric
+semantics verified (div-by-zero → 0, saturating casts, wrapping shifts),
+and well-formedness checks tested with intentionally malformed IR.
+
+This stage was originally "Q32 Transform (LPIR → LPIR)". That design was
+rejected — Q32 expansion lives inside each backend's emitter, not as a
+shared IR transform. See `docs/roadmaps/2026-03-21-lpir/overview.md`
+(design decisions) for rationale.
 
 ## Suggested plan name
 
@@ -14,49 +19,47 @@ compare results within epsilon.
 ## Scope
 
 **In scope:**
-- `lpir/src/q32.rs` — the consuming transform
-- 1:1 replacements: `FloatConst` → `I32Const` (f32 → Q16.16), `FloatLt` →
-  `I32LtS`, `FloatEq` → `I32Eq`, etc.
-- 1:N expansions: `FloatAdd` → i64 widen + add + saturate + wrap sequence,
-  `FloatMul` → i64 widen + mul + shift + saturate, `FloatDiv` → i64 shift +
-  div, `FloatSub` → i64 widen + sub + saturate
-- `FloatNeg` → `I32Const(0)` + `I32Sub`
-- `FloatAbs` → conditional negate
-- `FloatMin`/`FloatMax` → compare + select
-- Cast rewrites: `FloatToInt` → Q32 trunc, `IntToFloat` → Q32 scale
-- VReg type updates: `Float` → `Sint` for transformed VRegs
-- New VReg allocation for expansion intermediates
-- Recursive handling of control flow bodies (If, Loop)
-- Tests: hand-built float LPIR → transform → interpret → compare against
-  f32 interpreter results (within Q32 epsilon)
+- Interpreter tests for every Op variant (arithmetic, comparison, logic,
+  casts, constants, `_imm` variants, `select`, `copy`)
+- Interpreter tests for control flow: `if`/`else`, `loop`, `break`,
+  `continue`, `br_if_not`, `return`, nested loops
+- Interpreter tests for memory: `slot`, `slot_addr`, `load`, `store`,
+  `memcpy`
+- Interpreter tests for calls: `call` to local functions, multi-return,
+  recursion
+- Interpreter tests for `mathcall`: all MathFunc variants
+- Edge-case numeric semantics: div-by-zero, rem-by-zero, NaN propagation,
+  saturating casts, shift masking, wrapping arithmetic
+- Validator tests: reject malformed IR (undefined VReg, type mismatch,
+  `br_if_not` outside loop, `slot_addr` referencing missing slot, etc.)
+- Round-trip (print → parse → print) tests for all constructs
 
 **Out of scope:**
+- Q32 expansion (lives in backend emitters, not in `lpir`)
 - Naga lowering (Stage IV)
 - WASM emission (Stage V)
-- Float-mode-specific builtins (sin, cos, etc. — those are LPFX calls,
-  handled in Phase II)
 
 ## Key decisions
 
-- The transform consumes `Vec<Op>` by value and returns a new `Vec<Op>`.
-  Rust move semantics ensure minimal memory overhead.
-- The transform allocates new VRegs via `VRegAllocator` for expansion
-  intermediates (i64 temps, saturation comparison results, etc.).
-- Post-transform, the IR contains no `Float*` ops — only `I32*`, `I64*`,
-  `Bool*`, and control flow ops. This is a verifiable invariant.
-- The saturation bounds match `__lp_q32_add` / `__lp_q32_mul` from the
-  existing Rust builtins (Q16.16, i32 range clamped to ±0x7FFFFFFF).
+- **No `lpir/src/q32.rs`**. Q32 is backend-specific: WASM uses inline i64
+  sequences, Cranelift saturating uses builtin calls, Cranelift wrapping
+  uses all-i32. Each strategy is fundamentally different.
+- The interpreter executes float ops as native `f32`. Q32 behavior is
+  exercised only through backend emitters (Stage V+).
+- This stage ensures the `lpir` crate is thoroughly tested before the
+  lowering (Stage IV) and emission (Stage V) build on it.
 
 ## Deliverables
 
-- `lpir/src/q32.rs` — complete Q32 transform
-- Interpreter-based tests validating all float ops through the transform
-- A validation function that asserts no Float ops remain post-transform
+- Comprehensive interpreter test suite (~300–400 lines)
+- Validator test suite with positive and negative cases
+- Round-trip print/parse tests for all ops and control flow
 
 ## Dependencies
 
-- Stage II (lpir crate with interpreter) must be complete.
+- Stage II (lpir crate with interpreter and validator) must be complete.
 
 ## Estimated scope
 
-~300 lines of transform + ~200 lines of tests.
+~400 lines of tests. No new production code beyond minor interpreter or
+validator fixes discovered during testing.

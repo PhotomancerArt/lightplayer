@@ -25,19 +25,26 @@ and LL(1)-parseable.
 Key grammar elements to define:
 
 ```
-module      = { import | func }
-import      = "import" func_name "(" type_list ")" [ "->" type ]
-func        = "func" func_name "(" param_list ")" [ "->" type ] "{" body "}"
+module      = { import | func | entry_func }
+import      = "import" func_name "(" type_list ")" [ "->" return_type ]
+func        = "func" func_name "(" param_list ")" [ "->" return_type ] "{" body "}"
+entry_func  = "entry" "func" func_name "(" param_list ")" [ "->" return_type ] "{" body "}"
+              ; at most one per module (runtime entry point)
 body        = { slot_decl } { statement }
 slot_decl   = "slot" slot_name "," integer   ; slot_name begins with "ss"
-statement   = assignment | void_call | control_flow | "return" [ vreg ]
-              | "break" | "continue" | "br_if_not" vreg
-assignment  = vreg_def "=" op
+statement   = assignment | void_call | control_flow | switch_stmt
+              | "return" [ vreg ] | "break" | "continue" | "br_if_not" vreg
+switch_stmt = "switch" vreg "{" { switch_case } [ default_case ] "}"
+switch_case = "case" integer "{" body "}"
+default_case= "default" "{" body "}"
+assignment  = vreg_list "=" op
+vreg_list   = vreg_def { "," vreg_def }  ; multi-assign only valid with call
 vreg_def    = vreg_name [ ":" type ]     ; type required on first definition
 vreg_name   = "v" integer
 slot_name   = "ss" integer
 func_name   = "@" identifier
 type        = "f32" | "i32"
+return_type = type | "(" type { "," type } ")"   ; scalar or tuple
 ```
 
 Define the complete production rules for:
@@ -48,7 +55,7 @@ Define the complete production rules for:
 - MathCall syntax
 - Memory ops (load, store, slot_addr, memcpy)
 - Call syntax
-- Control flow (if/else, loop, break, continue, br_if_not, return)
+- Control flow (if/else, loop, break, continue, br_if_not, switch, return)
 - Comments (`;` to end of line)
 - Literals (decimal int, hex int, float with decimal point, special
   float values: `inf`, `-inf`, `nan`)
@@ -66,9 +73,10 @@ Document:
 - Integer literals: decimal (`42`, `-1`) or hex (`0xFF`).
 - Float literals: decimal with point (`1.5`, `-0.0`, `0.0`), or special
   (`inf`, `-inf`, `nan`).
-- Keywords: `func`, `import`, `slot`, `if`, `else`, `loop`, `break`,
-  `continue`, `return`, `br_if_not`, `call`, `mathcall`, `select`,
-  `copy`, `load`, `store`, `slot_addr`, `memcpy`, `f32`, `i32`.
+- Keywords: `func`, `entry`, `import`, `slot`, `if`, `else`, `loop`,
+  `break`, `continue`, `return`, `br_if_not`, `switch`, `case`,
+  `default`, `call`, `mathcall`, `select`, `copy`, `load`, `store`,
+  `slot_addr`, `memcpy`, `f32`, `i32`.
 - Typed constant syntax `iconst.i32` and `fconst.f32` are not single
   keywords; document them as dotted opcode names in the grammar (same
   pattern as other multi-token op spellings).
@@ -111,6 +119,7 @@ A function demonstrating every cast op.
 - If/else
 - Loop with counter and br_if_not
 - Nested loops
+- Switch with cases and default
 - Early return
 - Loop with break (not br_if_not)
 
@@ -134,8 +143,6 @@ to a vec3, with loop and conditional).
 
 Brief section noting ops and features reserved for future work:
 
-- `switch` — multi-way branch. Semantics TBD, will map to WASM `br_table`
-  and Naga `Statement::Switch`.
 - Relational ops (`any`, `all`) — currently decomposed during scalarization.
   May be added as MathCall entries if needed for optimization.
 - Additional MathFunc entries as GLSL coverage expands.

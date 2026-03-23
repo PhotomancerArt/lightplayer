@@ -16,6 +16,11 @@ clean up the plan.
 ### 1. Consistency review
 
 Check across all `docs/lpir/` chapters for:
+- Module/function **well-formedness** rules match `00-design.md` (`entry`
+  declaration — at most one,
+  call targets, control-flow placement, slot refs).
+- Numeric semantics: integer div/rem by zero → `0`; saturating `ftoi_sat_*`;
+  memcpy non-overlap; safe-memory assumption stated.
 - Op names are consistent throughout (no `float.add` remnants vs `fadd`).
 - Type names are consistent (`f32` not `float`, `i32` not `int`).
 - Slot names use `ssN` everywhere.
@@ -30,10 +35,18 @@ Check across all `docs/lpir/` chapters for:
 
 Verify against the current WASM emitter:
 - Every handled `Expression` variant has a mapping.
-- Every handled `Statement` variant has a mapping.
+- Every handled `Statement` variant has a mapping (including `Switch`).
 - Every binary/unary operator has a mapping for all applicable types.
 - Every `Math` function has a MathFunc mapping.
 - Q32 is mentioned only as a backend concern, not in the IR.
+- `entry func` (not `export func`) used consistently for the runtime entry point.
+- Source language target (GLSL 4.50 core) stated in overview.
+- Recursion allowed; stack overflow is implementation-defined termination.
+- Shadow stack / elision noted in target mapping for WASM slots.
+- MathCall "semantic precision" section present (relaxed default).
+- Endianness (little-endian) stated in memory chapter.
+- `switch` is first-class control flow (not in future extensions); grammar,
+  mapping, and well-formedness rules present.
 
 ### 3. Plan cleanup
 

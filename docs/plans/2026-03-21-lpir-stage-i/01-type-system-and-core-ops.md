@@ -1,5 +1,9 @@
 # Phase 1: Type System and Core Ops
 
+Normative numeric semantics (div-by-zero → `0`, saturating casts, etc.) are
+specified in the overview chapter (`docs/lpir/00-overview.md`); this phase
+duplicates op lists only — keep them consistent.
+
 ## Scope
 
 Write three spec chapters:
@@ -104,9 +108,9 @@ Semantics notes:
 - `fmod` is a mathcall, not a core op (WASM has no `f32.rem`; GLSL `mod`
   semantics require `x - y * floor(x/y)` which differs from C `fmod`).
 - Float division by zero: IEEE 754 (±Inf/NaN).
-- Integer division by zero: non-trapping, result unspecified. The WASM
-  emitter guards with a zero check; RISC-V M ext returns -1/x natively.
-  See the numeric semantics section in the overview chapter.
+- Integer `idiv_*` / `irem_*` with divisor zero: **result `0`**, non-trapping.
+  Both emitters must match (WASM: guard + select `0`; Cranelift: do not rely
+  on raw RISC-V div-by-zero results). See `00-design.md` numeric semantics.
 
 #### Comparison ops
 
