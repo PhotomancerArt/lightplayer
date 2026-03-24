@@ -1,28 +1,25 @@
-//! GLSL to WebAssembly: Naga GLSL frontend + stack-machine WASM emission.
+//! GLSL to WebAssembly: Naga GLSL frontend + LPIR + WASM emission (Stage V).
 
 #![no_std]
 
 extern crate alloc;
 
 mod emit;
-mod emit_vec;
-mod locals;
-mod lpfx;
 pub mod module;
 pub mod options;
-pub mod types;
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
 pub use lp_glsl_naga::{CompileError, FloatMode, GlslType};
-pub use module::{WasmExport, WasmModule};
+pub use module::{WasmExport, WasmModule, glsl_type_to_wasm_components};
 pub use options::WasmOptions;
 
 use lp_glsl_naga::NagaModule;
+use lpir::IrModule;
 
-/// Full pipeline error (parse/metadata from [`lp_glsl_naga`], or WASM lowering).
+/// Full pipeline error (parse/metadata from [`lp_glsl_naga`], lowering, or WASM emission).
 #[derive(Debug)]
 pub enum GlslWasmError {
     Frontend(CompileError),
@@ -46,30 +43,41 @@ impl From<CompileError> for GlslWasmError {
     }
 }
 
-/// Compile GLSL source to a WASM module.
+/// Compile GLSL source to a WASM module (Naga → LPIR → WASM).
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
     let naga_module = lp_glsl_naga::compile(source)?;
-    let wasm_bytes = emit::emit_module(&naga_module, &options).map_err(GlslWasmError::Codegen)?;
-    let exports = collect_exports(&naga_module, &options);
+    let ir_module = lp_glsl_naga::lower(&naga_module)
+        .map_err(|e| GlslWasmError::Codegen(alloc::format!("{e}")))?;
+    let wasm_bytes = emit::emit_module(&ir_module, &options).map_err(GlslWasmError::Codegen)?;
+    let exports = collect_exports(&ir_module, &naga_module, &options);
     Ok(WasmModule {
         bytes: wasm_bytes,
         exports,
     })
 }
 
-fn collect_exports(naga_module: &NagaModule, options: &WasmOptions) -> Vec<WasmExport> {
-    naga_module
-        .functions
+fn collect_exports(
+    ir: &IrModule,
+    naga_module: &NagaModule,
+    options: &WasmOptions,
+) -> Vec<WasmExport> {
+    debug_assert_eq!(
+        ir.functions.len(),
+        naga_module.functions.len(),
+        "LPIR and Naga should export the same functions in the same order"
+    );
+    ir.functions
         .iter()
-        .map(|(_, fi)| {
+        .zip(naga_module.functions.iter())
+        .map(|(ir_f, (_, fi))| {
             let params: Vec<_> = fi
                 .params
                 .iter()
-                .flat_map(|(_, ty)| types::glsl_type_to_wasm_components(ty, options.float_mode))
+                .flat_map(|(_, ty)| module::glsl_type_to_wasm_components(ty, options.float_mode))
                 .collect();
-            let results = types::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
+            let results = module::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
             WasmExport {
-                name: fi.name.clone(),
+                name: ir_f.name.clone(),
                 params,
                 results,
                 return_type: fi.return_type.clone(),

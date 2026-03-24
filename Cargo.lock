@@ -4037,7 +4037,7 @@ dependencies = [
  "log",
  "lp-glsl-builtin-ids",
  "lp-glsl-naga",
- "naga 29.0.0",
+ "lpir",
  "wasm-encoder 0.245.1",
  "wasmtime",
 ]

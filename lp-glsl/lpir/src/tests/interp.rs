@@ -1572,7 +1572,8 @@ fn interp_error_display() {
 
 #[test]
 fn interp_loop_continuing_for_sum() {
-    let ir = "func @for_sum(v0:i32) -> i32 {
+    let ir = "
+func @for_sum(v0:i32) -> i32 {
   v1:i32 = iconst.i32 0
   v2:i32 = iconst.i32 0
   loop {

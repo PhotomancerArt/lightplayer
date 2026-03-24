@@ -126,6 +126,68 @@ fn q32_add() {
 }
 
 #[test]
+fn q32_mul() {
+    let v = run_q32_f32(
+        "float mul(float a, float b) { return a * b; }",
+        "mul",
+        &[2.0, 3.0],
+    );
+    assert!((v - 6.0).abs() < 0.03);
+}
+
+#[test]
+fn q32_div() {
+    let v = run_q32_f32(
+        "float div(float a, float b) { return a / b; }",
+        "div",
+        &[6.0, 2.0],
+    );
+    assert!((v - 3.0).abs() < 0.03);
+}
+
+#[test]
+fn q32_abs() {
+    let v = run_q32_f32("float a(float x) { return abs(x); }", "a", &[-1.5]);
+    assert!((v - 1.5).abs() < 0.03);
+}
+
+#[test]
+fn q32_while_accumulates() {
+    let v = run_q32_f32_0(
+        "float f() { float s = 0.0; float i = 0.0; while (i < 4.0) { s = s + 1.0; i = i + 1.0; } return s; }",
+        "f",
+    );
+    assert!((v - 4.0).abs() < 0.05);
+}
+
+#[test]
+fn int_switch_dispatch() {
+    let source = "int pick(int x) { switch (x) { case 0: return 10; case 1: return 20; default: return 99; } }";
+    let opts = WasmOptions::default();
+    let module = glsl_wasm(source, opts).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let wasm_mod = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &wasm_mod, &[]).expect("instantiate");
+    let func = instance
+        .get_func(&mut store, "pick")
+        .expect("get_func")
+        .typed::<i32, i32>(&store)
+        .expect("typed");
+    assert_eq!(func.call(&mut store, 0).expect("call"), 10);
+    assert_eq!(func.call(&mut store, 1).expect("call"), 20);
+    assert_eq!(func.call(&mut store, 2).expect("call"), 99);
+}
+
+#[test]
+fn q32_floor_and_ceil() {
+    let flo = run_q32_f32("float f(float x) { return floor(x); }", "f", &[1.75]);
+    assert!((flo - 1.0).abs() < 0.03);
+    let cei = run_q32_f32("float g(float x) { return ceil(x); }", "g", &[1.25]);
+    assert!((cei - 2.0).abs() < 0.03);
+}
+
+#[test]
 fn q32_chained_float_compare_and() {
     let v = run_q32_f32_0(
         "float f() { float a = 1.0; float b = 0.5; return (a < 2.0 && b < 1.0) ? 1.0 : 0.0; }",

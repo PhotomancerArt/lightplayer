@@ -49,6 +49,8 @@ impl ImportHandler for StdMathHandler {
             "log2" => libm::log2f(f(0)?),
             "pow" => libm::powf(f(0)?, f(1)?),
             "ldexp" => libm::ldexpf(f(0)?, i(1)?),
+            "sqrt" => libm::sqrtf(f(0)?),
+            "round" => libm::roundf(f(0)?),
             _ => {
                 return Err(InterpError::Import(format!(
                     "unknown std.math function {func_name}"

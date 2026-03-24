@@ -75,6 +75,8 @@ fn register_std_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeR
     reg("log2", f1, r1);
     reg("pow", &[IrType::F32, IrType::F32], r1);
     reg("ldexp", &[IrType::F32, IrType::I32], r1);
+    reg("sqrt", f1, r1);
+    reg("round", f1, r1);
     m
 }
 

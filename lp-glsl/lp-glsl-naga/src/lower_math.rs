@@ -55,9 +55,7 @@ pub(crate) fn lower_math(
         },
         MathFunction::Sqrt => {
             let s = ctx.ensure_expr(arg)?;
-            let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsqrt { dst: d, src: s });
-            Ok(d)
+            push_std_math(ctx, "sqrt", &[s])
         }
         MathFunction::Floor => {
             let s = ctx.ensure_expr(arg)?;
@@ -73,9 +71,7 @@ pub(crate) fn lower_math(
         }
         MathFunction::Round => {
             let s = ctx.ensure_expr(arg)?;
-            let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fnearest { dst: d, src: s });
-            Ok(d)
+            push_std_math(ctx, "round", &[s])
         }
         MathFunction::Trunc => {
             let s = ctx.ensure_expr(arg)?;
@@ -573,8 +569,7 @@ fn lower_inverse_sqrt(
     arg: Handle<naga::Expression>,
 ) -> Result<VReg, LowerError> {
     let x = ctx.ensure_expr(arg)?;
-    let sq = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsqrt { dst: sq, src: x });
+    let sq = push_std_math(ctx, "sqrt", &[x])?;
     let one = fconst(ctx, 1.0);
     let r = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(Op::Fdiv {

@@ -5,7 +5,7 @@ use lp_glsl_cranelift::semantic::functions::{FunctionSignature, ParamQualifier, 
 use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
 use lp_glsl_naga::GlslType;
-use lp_glsl_wasm::types::glsl_type_to_wasm_components;
+use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
