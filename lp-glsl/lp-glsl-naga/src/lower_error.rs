@@ -5,9 +5,13 @@ use core::fmt;
 
 #[derive(Debug)]
 pub enum LowerError {
+    /// Naga [`naga::Expression`] form is not implemented for scalar lowering (detail string).
     UnsupportedExpression(String),
+    /// Naga [`naga::Statement`] form is not implemented (detail string).
     UnsupportedStatement(String),
+    /// Type or signature is outside the scalar lowering subset (detail string).
     UnsupportedType(String),
+    /// Invariant violated or missing internal mapping (detail string).
     Internal(String),
 }
 
