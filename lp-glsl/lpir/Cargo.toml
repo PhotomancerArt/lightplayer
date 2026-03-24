@@ -9,3 +9,4 @@ description = "LightPlayer intermediate representation (LPIR) core library"
 workspace = true
 
 [dependencies]
+libm = "0.2"

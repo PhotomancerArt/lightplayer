@@ -59,6 +59,21 @@ pub(crate) fn module_all_ops() -> IrModule {
         src: f1,
     });
 
+    macro_rules! unary_f {
+        ($op:ident, $src:expr) => {{
+            let d = b.alloc_vreg(IrType::F32);
+            b.push(Op::$op { dst: d, src: $src });
+        }};
+    }
+    unary_f!(Fabs, f1);
+    unary_f!(Fsqrt, f1);
+    fop!(Fmin);
+    fop!(Fmax);
+    unary_f!(Ffloor, f1);
+    unary_f!(Fceil, f1);
+    unary_f!(Ftrunc, f1);
+    unary_f!(Fnearest, f1);
+
     macro_rules! icmp {
         ($op:ident) => {{
             let d = b.alloc_vreg(IrType::I32);

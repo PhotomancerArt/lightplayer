@@ -31,6 +31,42 @@ pub enum Op {
         src: VReg,
     },
 
+    // --- Float math ---
+    Fabs {
+        dst: VReg,
+        src: VReg,
+    },
+    Fsqrt {
+        dst: VReg,
+        src: VReg,
+    },
+    Fmin {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+    },
+    Fmax {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+    },
+    Ffloor {
+        dst: VReg,
+        src: VReg,
+    },
+    Fceil {
+        dst: VReg,
+        src: VReg,
+    },
+    Ftrunc {
+        dst: VReg,
+        src: VReg,
+    },
+    Fnearest {
+        dst: VReg,
+        src: VReg,
+    },
+
     // --- Integer arithmetic ---
     Iadd {
         dst: VReg,

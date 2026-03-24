@@ -686,6 +686,40 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<Op, ParseError> {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
+        "fabs" => Ok(Op::Fabs {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "fsqrt" => Ok(Op::Fsqrt {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "fmin" => Ok(Op::Fmin {
+            dst,
+            lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            rhs: parse_vreg_token(parts[2])?,
+        }),
+        "fmax" => Ok(Op::Fmax {
+            dst,
+            lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
+            rhs: parse_vreg_token(parts[2])?,
+        }),
+        "ffloor" => Ok(Op::Ffloor {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "fceil" => Ok(Op::Fceil {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "ftrunc" => Ok(Op::Ftrunc {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
+        "fnearest" => Ok(Op::Fnearest {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
         "iadd" => Ok(Op::Iadd {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,

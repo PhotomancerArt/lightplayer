@@ -445,11 +445,21 @@ fn check_op_operands_defined(
         Op::Fadd { lhs, rhs, .. }
         | Op::Fsub { lhs, rhs, .. }
         | Op::Fmul { lhs, rhs, .. }
-        | Op::Fdiv { lhs, rhs, .. } => {
+        | Op::Fdiv { lhs, rhs, .. }
+        | Op::Fmin { lhs, rhs, .. }
+        | Op::Fmax { lhs, rhs, .. } => {
             check(*lhs, "lhs");
             check(*rhs, "rhs");
         }
-        Op::Fneg { src, .. } | Op::Ineg { src, .. } | Op::Ibnot { src, .. } => check(*src, "src"),
+        Op::Fneg { src, .. }
+        | Op::Fabs { src, .. }
+        | Op::Fsqrt { src, .. }
+        | Op::Ffloor { src, .. }
+        | Op::Fceil { src, .. }
+        | Op::Ftrunc { src, .. }
+        | Op::Fnearest { src, .. }
+        | Op::Ineg { src, .. }
+        | Op::Ibnot { src, .. } => check(*src, "src"),
         Op::Iadd { lhs, rhs, .. }
         | Op::Isub { lhs, rhs, .. }
         | Op::Imul { lhs, rhs, .. }
@@ -592,6 +602,14 @@ fn check_opcode_dst_types(
         | Op::Fmul { dst, .. }
         | Op::Fdiv { dst, .. }
         | Op::Fneg { dst, .. }
+        | Op::Fabs { dst, .. }
+        | Op::Fsqrt { dst, .. }
+        | Op::Fmin { dst, .. }
+        | Op::Fmax { dst, .. }
+        | Op::Ffloor { dst, .. }
+        | Op::Fceil { dst, .. }
+        | Op::Ftrunc { dst, .. }
+        | Op::Fnearest { dst, .. }
         | Op::FconstF32 { dst, .. }
         | Op::ItofS { dst, .. }
         | Op::ItofU { dst, .. } => expect(*dst, IrType::F32, "float op result"),
@@ -709,7 +727,15 @@ fn mark_op_defs(func: &IrFunction, op: &Op, defined: &mut [bool]) {
         | Op::Fsub { dst, .. }
         | Op::Fmul { dst, .. }
         | Op::Fdiv { dst, .. }
-        | Op::Fneg { dst, .. } => mark(*dst, defined),
+        | Op::Fneg { dst, .. }
+        | Op::Fabs { dst, .. }
+        | Op::Fsqrt { dst, .. }
+        | Op::Fmin { dst, .. }
+        | Op::Fmax { dst, .. }
+        | Op::Ffloor { dst, .. }
+        | Op::Fceil { dst, .. }
+        | Op::Ftrunc { dst, .. }
+        | Op::Fnearest { dst, .. } => mark(*dst, defined),
         Op::Iadd { dst, .. }
         | Op::Isub { dst, .. }
         | Op::Imul { dst, .. }

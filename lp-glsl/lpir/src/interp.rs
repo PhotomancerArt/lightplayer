@@ -399,6 +399,40 @@ fn eval_op(
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(-a))?;
         }
+        Op::Fabs { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(a.abs()))?;
+        }
+        Op::Fsqrt { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(libm::sqrtf(a)))?;
+        }
+        Op::Fmin { dst, lhs, rhs } => {
+            let a = val_f32(get_reg(regs, *lhs)?)?;
+            let b = val_f32(get_reg(regs, *rhs)?)?;
+            set_reg(regs, *dst, Value::F32(a.min(b)))?;
+        }
+        Op::Fmax { dst, lhs, rhs } => {
+            let a = val_f32(get_reg(regs, *lhs)?)?;
+            let b = val_f32(get_reg(regs, *rhs)?)?;
+            set_reg(regs, *dst, Value::F32(a.max(b)))?;
+        }
+        Op::Ffloor { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(libm::floorf(a)))?;
+        }
+        Op::Fceil { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(libm::ceilf(a)))?;
+        }
+        Op::Ftrunc { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(libm::truncf(a)))?;
+        }
+        Op::Fnearest { dst, src } => {
+            let a = val_f32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(round_even(a)))?;
+        }
         Op::Iadd { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, add),
         Op::Isub { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, sub),
         Op::Imul { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, mul),
@@ -740,4 +774,15 @@ fn ftoi_sat_u(f: f32) -> i32 {
         return -1i32;
     }
     f as u32 as i32
+}
+
+/// Round to nearest integer, ties to even (matches typical WASM `f32.nearest`).
+fn round_even(v: f32) -> f32 {
+    let r = libm::roundf(v);
+    if (v - r).abs() == 0.5 {
+        let f = r as i64;
+        if f % 2 != 0 { r - v.signum() } else { r }
+    } else {
+        r
+    }
 }

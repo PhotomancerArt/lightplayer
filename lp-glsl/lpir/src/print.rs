@@ -356,13 +356,15 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Fneg { dst, src } => {
-            let _ = write!(out, "{ind}");
-            fmt_vreg(st, out, *dst);
-            let _ = write!(out, " = fneg ");
-            fmt_vreg(st, out, *src);
-            let _ = writeln!(out);
-        }
+        Op::Fneg { dst, src } => unary(out, st, ind, "fneg", *dst, *src),
+        Op::Fabs { dst, src } => unary(out, st, ind, "fabs", *dst, *src),
+        Op::Fsqrt { dst, src } => unary(out, st, ind, "fsqrt", *dst, *src),
+        Op::Fmin { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmin", *dst, *lhs, *rhs),
+        Op::Fmax { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmax", *dst, *lhs, *rhs),
+        Op::Ffloor { dst, src } => unary(out, st, ind, "ffloor", *dst, *src),
+        Op::Fceil { dst, src } => unary(out, st, ind, "fceil", *dst, *src),
+        Op::Ftrunc { dst, src } => unary(out, st, ind, "ftrunc", *dst, *src),
+        Op::Fnearest { dst, src } => unary(out, st, ind, "fnearest", *dst, *src),
         Op::Iadd { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);

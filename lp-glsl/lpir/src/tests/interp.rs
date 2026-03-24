@@ -50,6 +50,55 @@ fn interp_fneg() {
     assert!((r + 3.0).abs() < 1e-6);
 }
 
+#[test]
+fn interp_fabs() {
+    let ir = "func @f(v0:f32) -> f32 {\n  v1:f32 = fabs v0\n  return v1\n}\n";
+    assert!((run_f32(ir, "f", &[Value::F32(3.0)]) - 3.0).abs() < 1e-6);
+    assert!((run_f32(ir, "f", &[Value::F32(-3.0)]) - 3.0).abs() < 1e-6);
+    assert!((run_f32(ir, "f", &[Value::F32(0.0)])).abs() < 1e-6);
+    assert!(run_f32(ir, "f", &[Value::F32(f32::NAN)]).is_nan());
+}
+
+#[test]
+fn interp_fsqrt() {
+    let ir = "func @f(v0:f32) -> f32 {\n  v1:f32 = fsqrt v0\n  return v1\n}\n";
+    assert!((run_f32(ir, "f", &[Value::F32(4.0)]) - 2.0).abs() < 1e-6);
+    assert!((run_f32(ir, "f", &[Value::F32(0.0)])).abs() < 1e-6);
+    assert!(run_f32(ir, "f", &[Value::F32(-1.0)]).is_nan());
+}
+
+#[test]
+fn interp_fmin_fmax() {
+    let ir_min = "func @f(v0:f32, v1:f32) -> f32 {\n  v2:f32 = fmin v0, v1\n  return v2\n}\n";
+    let ir_max = "func @f(v0:f32, v1:f32) -> f32 {\n  v2:f32 = fmax v0, v1\n  return v2\n}\n";
+    assert!((run_f32(ir_min, "f", &[Value::F32(1.0), Value::F32(5.0)]) - 1.0).abs() < 1e-6);
+    assert!((run_f32(ir_max, "f", &[Value::F32(1.0), Value::F32(5.0)]) - 5.0).abs() < 1e-6);
+    let nan = f32::NAN;
+    assert!((run_f32(ir_min, "f", &[Value::F32(nan), Value::F32(2.0)]) - 2.0).abs() < 1e-6);
+    assert!((run_f32(ir_min, "f", &[Value::F32(2.0), Value::F32(nan)]) - 2.0).abs() < 1e-6);
+}
+
+#[test]
+fn interp_ffloor_fceil_ftrunc() {
+    let ir_floor = "func @f(v0:f32) -> f32 {\n  v1:f32 = ffloor v0\n  return v1\n}\n";
+    let ir_ceil = "func @f(v0:f32) -> f32 {\n  v1:f32 = fceil v0\n  return v1\n}\n";
+    let ir_trunc = "func @f(v0:f32) -> f32 {\n  v1:f32 = ftrunc v0\n  return v1\n}\n";
+    assert!((run_f32(ir_floor, "f", &[Value::F32(1.7)]) - 1.0).abs() < 1e-6);
+    assert!((run_f32(ir_floor, "f", &[Value::F32(-1.2)]) - (-2.0)).abs() < 1e-6);
+    assert!((run_f32(ir_ceil, "f", &[Value::F32(1.2)]) - 2.0).abs() < 1e-6);
+    assert!((run_f32(ir_ceil, "f", &[Value::F32(-1.7)]) - (-1.0)).abs() < 1e-6);
+    assert!((run_f32(ir_trunc, "f", &[Value::F32(1.7)]) - 1.0).abs() < 1e-6);
+    assert!((run_f32(ir_trunc, "f", &[Value::F32(-1.7)]) - (-1.0)).abs() < 1e-6);
+}
+
+#[test]
+fn interp_fnearest() {
+    let ir = "func @f(v0:f32) -> f32 {\n  v1:f32 = fnearest v0\n  return v1\n}\n";
+    assert!((run_f32(ir, "f", &[Value::F32(0.5)]) - 0.0).abs() < 1e-6);
+    assert!((run_f32(ir, "f", &[Value::F32(1.5)]) - 2.0).abs() < 1e-6);
+    assert!((run_f32(ir, "f", &[Value::F32(2.5)]) - 2.0).abs() < 1e-6);
+}
+
 // --- Integer arithmetic ---
 
 #[test]

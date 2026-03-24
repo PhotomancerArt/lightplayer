@@ -4155,6 +4155,9 @@ dependencies = [
 [[package]]
 name = "lpir"
 version = "40.0.0"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "mach2"
