@@ -56,17 +56,15 @@ pub fn parse_module(input: &str) -> Result<IrModule, ParseError> {
             continue;
         }
         if s.starts_with("entry ") {
-            let func = parse_func_decl(&mut s, true, &names, mb.import_count())?;
-            let fname = func.name.clone();
-            let r = mb.add_function(func);
-            names.push((format!("@{fname}"), r));
+            let next_local = mb.function_count();
+            let func = parse_func_decl(&mut s, true, &mut names, mb.import_count(), next_local)?;
+            mb.add_function(func);
             continue;
         }
         if s.starts_with("func ") {
-            let func = parse_func_decl(&mut s, false, &names, mb.import_count())?;
-            let fname = func.name.clone();
-            let r = mb.add_function(func);
-            names.push((format!("@{fname}"), r));
+            let next_local = mb.function_count();
+            let func = parse_func_decl(&mut s, false, &mut names, mb.import_count(), next_local)?;
+            mb.add_function(func);
             continue;
         }
         let (line, col) = line_col(input, line_start);
@@ -209,8 +207,9 @@ fn paren_contents(s: &str) -> Result<&str, ParseError> {
 fn parse_func_decl(
     s: &mut &str,
     is_entry: bool,
-    names: &[(String, CalleeRef)],
+    names: &mut Vec<(String, CalleeRef)>,
     import_count: u32,
+    next_local_func_index: u32,
 ) -> Result<IrFunction, ParseError> {
     let mut t = *s;
     if is_entry {
@@ -248,13 +247,15 @@ fn parse_func_decl(
     let t = t.strip_prefix('{').ok_or_else(|| err(1, 1, "expected {"))?;
     let (body, rest) = extract_brace_inner(t)?;
     *s = rest.trim_start();
+    let self_ref = CalleeRef(import_count + next_local_func_index);
+    names.push((format!("@{fname}"), self_ref));
     parse_function_body(
         fname.as_str(),
         is_entry,
         &params,
         &rets,
         body,
-        names,
+        names.as_slice(),
         import_count,
     )
 }

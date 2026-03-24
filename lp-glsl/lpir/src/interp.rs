@@ -148,11 +148,17 @@ fn exec_func(
                 }
             }
             Op::Else => {
-                let merge = match ctrl.pop() {
-                    Some(Ctrl::If { merge }) => merge,
-                    _ => return Err(InterpError::Internal("else without if".into())),
-                };
-                pc = merge;
+                // False-branch entry jumps here from `IfStart` without pushing `Ctrl::If`.
+                // True-branch fall-through pushes `Ctrl::If` first; `Else` then skips the false arm.
+                if matches!(ctrl.last(), Some(Ctrl::If { .. })) {
+                    let merge = match ctrl.pop() {
+                        Some(Ctrl::If { merge }) => merge,
+                        _ => return Err(InterpError::Internal("else without if".into())),
+                    };
+                    pc = merge;
+                } else {
+                    pc += 1;
+                }
             }
             Op::LoopStart { end_offset } => {
                 ctrl.push(Ctrl::Loop {
@@ -285,7 +291,7 @@ enum Ctrl {
 }
 
 fn get_reg(regs: &[Option<Value>], v: crate::types::VReg) -> Result<Value, InterpError> {
-    regs[v.0 as usize].ok_or_else(|| InterpError::Internal(format!("undefined {}", v)))
+    regs[v.0 as usize].ok_or_else(|| InterpError::Internal(format!("undefined {v}")))
 }
 
 fn set_reg(

@@ -379,6 +379,10 @@ impl ModuleBuilder {
         self.imports.len() as u32
     }
 
+    pub fn function_count(&self) -> u32 {
+        self.functions.len() as u32
+    }
+
     pub fn add_import(&mut self, decl: ImportDecl) -> CalleeRef {
         self.imports.push(decl);
         CalleeRef((self.imports.len() - 1) as u32)
