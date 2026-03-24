@@ -18,6 +18,7 @@ pub use naga;
 
 use naga::{Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize};
 
+mod expr_scalar;
 pub mod lower;
 mod lower_ctx;
 mod lower_error;

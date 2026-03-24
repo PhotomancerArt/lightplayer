@@ -1,5 +1,8 @@
 //! Per-function lowering context (builder, expression cache, local maps).
-#![allow(dead_code, reason = "LowerCtx fields and helpers are used in phases 3–4.")]
+#![allow(
+    dead_code,
+    reason = "LowerCtx fields and helpers are used in phases 3–4."
+)]
 
 use alloc::collections::BTreeMap;
 use alloc::format;
