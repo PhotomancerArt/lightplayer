@@ -63,6 +63,27 @@
             letter-spacing: 0.02em;
         }
 
+        .tex-size-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        .tex-size-row input[type="range"] {
+            width: 180px;
+            accent-color: #6a9;
+        }
+
+        .tex-size-row #tex-size-label {
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #8c8;
+            min-width: 5.5em;
+        }
+
         #errors {
             margin-top: 12px;
             padding: 8px;
@@ -92,6 +113,12 @@
     <div id="canvas-pane">
         <canvas id="output" width="64" height="64"></canvas>
         <div id="status"></div>
+        <div class="tex-size-row">
+            <label for="tex-size">Texture</label>
+            <input type="range" id="tex-size" min="0" max="16" value="8" step="1"
+                   aria-valuemin="0" aria-valuemax="16" aria-label="Texture size"/>
+            <span id="tex-size-label" aria-live="polite">64×64</span>
+        </div>
     </div>
 </div>
 <pre id="errors"></pre>
@@ -99,34 +126,59 @@
 <script type="module">
   import init, {compile_glsl} from './pkg/web_demo.js';
 
-  const WIDTH = 64;
-  const HEIGHT = 64;
+  /** log₂ from 4..1024 in half-integer steps: 2^2, 2^2.5, …, 2^10 (rounded). */
+  const TEXTURE_SIZES = (() => {
+    const out = [];
+    for (let k = 0; k <= 16; k++) {
+      const exp = 2 + k * 0.5;
+      const s = Math.max(4, Math.min(1024, Math.round(2 ** exp)));
+      out.push(s);
+    }
+    return out;
+  })();
+
   const canvas = document.getElementById('output');
   // Default 2D backing store; avoid willReadFrequently — we only write via
   // putImageData each frame, and "read-optimized" mode tanks compositing FPS.
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.createImageData(WIDTH, HEIGHT);
-  const data = imageData.data;
+  let ctx = canvas.getContext('2d');
   const sourceEl = document.getElementById('source');
   const errorsEl = document.getElementById('errors');
   const statusEl = document.getElementById('status');
+  const texSizeInput = document.getElementById('tex-size');
+  const texSizeLabel = document.getElementById('tex-size-label');
 
-  /** Q16.16 component in [0,1] → 0–255 */
-  function q32ColorToU8(v) {
-    const n = (v * 255) / 65536;
-    if (n <= 0) return 0;
-    if (n >= 255) return 255;
-    return n | 0;
+  const PIXEL_BUF_OFFSET = 0x20000; // 128KB — above shadow stack region
+
+  let sharedMemory = null;
+
+  let texSize = TEXTURE_SIZES[Number(texSizeInput.value)] ?? 64;
+  let imageData = ctx.createImageData(texSize, texSize);
+
+  function pixelBufSize() {
+    return texSize * texSize * 4;
   }
 
-  /** Multi-value vec4 from WASM `main` (array-like, length >= 4). No alloc. */
-  function assertVec4MainResult(r) {
-    if (r == null || typeof r !== 'object' || typeof r.length !== 'number' || r.length < 4) {
-      throw new Error('main() must return four i32 (vec4); got: ' + typeof r);
+  function ensureWasmMemoryForPixelBuffer() {
+    const needBytes = PIXEL_BUF_OFFSET + pixelBufSize();
+    const needPages = Math.ceil(needBytes / 65536);
+    const curPages = sharedMemory.buffer.byteLength / 65536;
+    if (needPages > curPages) {
+      sharedMemory.grow(needPages - curPages);
     }
   }
 
-  let sharedMemory = null;
+  function applyTextureSizeIndex(idx) {
+    const n = TEXTURE_SIZES[idx];
+    if (n === undefined || n === texSize) return;
+    texSize = n;
+    ensureWasmMemoryForPixelBuffer();
+    canvas.width = n;
+    canvas.height = n;
+    ctx = canvas.getContext('2d');
+    imageData = ctx.createImageData(texSize, texSize);
+    texSizeLabel.textContent = `${n}×${n}`;
+    resetFrameSamples();
+  }
   let builtinsInstance = null;
   let shaderInstance = null;
   let compileTimeout = null;
@@ -158,6 +210,7 @@
         env: {memory: sharedMemory},
       });
       shaderInstance = instance;
+      resetFrameSamples();
       setError('');
       return true;
     } catch (e) {
@@ -173,6 +226,53 @@
     }, 300);
   }
 
+  const FRAME_SAMPLES_CAP = 100;
+  const frameUsRing = new Float64Array(FRAME_SAMPLES_CAP);
+  let frameUsWrite = 0;
+  let frameUsCount = 0;
+
+  function resetFrameSamples() {
+    frameUsWrite = 0;
+    frameUsCount = 0;
+  }
+
+  function pushFrameUsSample(us) {
+    frameUsRing[frameUsWrite] = us;
+    frameUsWrite = (frameUsWrite + 1) % FRAME_SAMPLES_CAP;
+    if (frameUsCount < FRAME_SAMPLES_CAP) {
+      frameUsCount++;
+    }
+  }
+
+  /** @returns {{mean: number, std: number, min: number, max: number, n: number} | null} */
+  function frameUsStats() {
+    if (frameUsCount < 2) return null;
+    const oldest = (frameUsWrite - frameUsCount + FRAME_SAMPLES_CAP) % FRAME_SAMPLES_CAP;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < frameUsCount; i++) {
+      const v = frameUsRing[(oldest + i) % FRAME_SAMPLES_CAP];
+      sum += v;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const mean = sum / frameUsCount;
+    let sq = 0;
+    for (let i = 0; i < frameUsCount; i++) {
+      const v = frameUsRing[(oldest + i) % FRAME_SAMPLES_CAP];
+      const d = v - mean;
+      sq += d * d;
+    }
+    const std = Math.sqrt(sq / (frameUsCount - 1));
+    return {mean, std, min, max, n: frameUsCount};
+  }
+
+  function fmtMsFromUs(us) {
+    const ms = us / 1000;
+    return ms >= 1 ? ms.toFixed(2) : ms.toFixed(3);
+  }
+
   let frames = 0;
   let lastFpsT = performance.now();
   let frameUsSum = 0;
@@ -181,34 +281,24 @@
     requestAnimationFrame(render);
 
     if (!shaderInstance) return;
-    const mainFn = shaderInstance.exports.main;
-    if (typeof mainFn !== 'function') return;
+    const renderFrameFn = shaderInstance.exports.render_frame;
+    if (typeof renderFrameFn !== 'function') return;
 
     const timeSec = timestamp / 1000;
     const q32Time = Math.round(timeSec * 65536);
-    const q32W = WIDTH << 16;
-    const q32H = HEIGHT << 16;
 
     const t0 = performance.now();
     try {
-      const probe = mainFn(0, 0, q32W, q32H, q32Time);
-      assertVec4MainResult(probe);
-      for (let y = 0; y < HEIGHT; y++) {
-        for (let x = 0; x < WIDTH; x++) {
-          const raw = mainFn(x << 16, y << 16, q32W, q32H, q32Time);
-          const o = (y * WIDTH + x) * 4;
-          data[o] = q32ColorToU8(raw[0]);
-          data[o + 1] = q32ColorToU8(raw[1]);
-          data[o + 2] = q32ColorToU8(raw[2]);
-          data[o + 3] = q32ColorToU8(raw[3]);
-        }
-      }
+      renderFrameFn(texSize, texSize, q32Time, PIXEL_BUF_OFFSET);
     } catch (e) {
       setError('Runtime: ' + e);
       return;
     }
     const frameUs = (performance.now() - t0) * 1000;
+    pushFrameUsSample(frameUs);
 
+    const src = new Uint8Array(sharedMemory.buffer, PIXEL_BUF_OFFSET, pixelBufSize());
+    imageData.data.set(src);
     ctx.putImageData(imageData, 0, 0);
 
     frames++;
@@ -217,13 +307,21 @@
     if (now - lastFpsT >= 1000) {
       const actualFps = (frames * 1000) / (now - lastFpsT);
       const avgUs = frameUsSum / frames;
-      const theoFps = 1e6 / avgUs;
+      const stats = frameUsStats();
+      const meanUsForTheo = stats ? stats.mean : avgUs;
+      const theoFps = 1e6 / meanUsForTheo;
+      const theoStr =
+        theoFps >= 1000 ? (theoFps / 1000).toFixed(1) + 'k' : theoFps.toFixed(0);
       if (lastError) {
         statusEl.textContent = 'error (previous shader still running)';
+      } else if (stats) {
+        const timeSeg = `${fmtMsFromUs(stats.mean)}±${fmtMsFromUs(stats.std)}ms (${fmtMsFromUs(stats.min)}–${fmtMsFromUs(stats.max)})`;
+        statusEl.textContent =
+          `${actualFps.toFixed(0)}fps · ${timeSeg} ~${theoStr}fps · ${texSize}×${texSize} · Q32`;
       } else {
         const usStr = avgUs >= 1000 ? (avgUs / 1000).toFixed(1) + 'ms' : avgUs.toFixed(0) + 'µs';
         statusEl.textContent =
-          `${actualFps.toFixed(0)}fps · ${usStr} (~${theoFps >= 1000 ? (theoFps / 1000).toFixed(1) + 'k' : theoFps.toFixed(0)}fps) · ${WIDTH}×${HEIGHT} · Q32`;
+          `${actualFps.toFixed(0)}fps · ${usStr} (~${theoStr}fps) · ${WIDTH}×${HEIGHT} · Q32`;
       }
       frames = 0;
       frameUsSum = 0;
@@ -243,15 +341,21 @@
 
     // Must be >= builtins `env.memory` import minimum (currently 17 pages from
     // `lp_glsl_builtins_wasm.wasm`; wasmtime tests use max(shader, builtins)).
-    sharedMemory = new WebAssembly.Memory({initial: 17});
+    sharedMemory = new WebAssembly.Memory({initial: 17, maximum: 256});
     const builtinsMod = await WebAssembly.instantiate(builtinsBytes, {
       env: {memory: sharedMemory},
     });
     builtinsInstance = builtinsMod.instance;
 
     await loadDefaultSource();
+    ensureWasmMemoryForPixelBuffer();
+    applyTextureSizeIndex(Number(texSizeInput.value));
     compileShader(sourceEl.value);
     sourceEl.addEventListener('input', scheduleCompile);
+
+    texSizeInput.addEventListener('input', () => {
+      applyTextureSizeIndex(Number(texSizeInput.value));
+    });
 
     requestAnimationFrame(render);
   }
