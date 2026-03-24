@@ -98,6 +98,7 @@ pub(crate) fn emit_module(
         filtered_import_count: filtered_fn_count,
     };
 
+    // $sp is global index 0 — only valid while it's the sole WASM global.
     let sp_global = if any_slots { Some(0u32) } else { None };
     let mut globals = GlobalSection::new();
     if any_slots {

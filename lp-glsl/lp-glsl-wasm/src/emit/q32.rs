@@ -109,6 +109,24 @@ pub(crate) fn emit_q32_fabs(sink: &mut InstructionSink<'_>, src: u32, dst: u32) 
     sink.local_set(dst);
 }
 
+pub(crate) fn emit_q32_itof_s(sink: &mut InstructionSink<'_>, src: u32, dst: u32, scratch: u32) {
+    sink.local_get(src)
+        .i64_extend_i32_s()
+        .i64_const(16)
+        .i64_shl();
+    emit_q32_sat_from_i64(sink, scratch);
+    sink.local_set(dst);
+}
+
+pub(crate) fn emit_q32_itof_u(sink: &mut InstructionSink<'_>, src: u32, dst: u32, scratch: u32) {
+    sink.local_get(src)
+        .i64_extend_i32_u()
+        .i64_const(16)
+        .i64_shl();
+    emit_q32_sat_from_i64(sink, scratch);
+    sink.local_set(dst);
+}
+
 pub(crate) fn emit_q32_ffloor(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
     sink.local_get(src)
         .i32_const(16)

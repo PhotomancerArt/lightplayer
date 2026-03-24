@@ -661,10 +661,10 @@ pub(crate) fn emit_op(
         },
         Op::ItofS { dst, src } => match fm {
             FloatMode::Q32 => {
-                sink.local_get(src.0)
-                    .i32_const(16)
-                    .i32_shl()
-                    .local_set(dst.0);
+                let s = fctx
+                    .i64_scratch
+                    .ok_or_else(|| String::from("internal: Q32 ItofS without i64 scratch local"))?;
+                q32::emit_q32_itof_s(sink, src.0, dst.0, s);
             }
             FloatMode::Float => {
                 sink.local_get(src.0).f32_convert_i32_s().local_set(dst.0);
@@ -672,10 +672,10 @@ pub(crate) fn emit_op(
         },
         Op::ItofU { dst, src } => match fm {
             FloatMode::Q32 => {
-                sink.local_get(src.0)
-                    .i32_const(16)
-                    .i32_shl()
-                    .local_set(dst.0);
+                let s = fctx
+                    .i64_scratch
+                    .ok_or_else(|| String::from("internal: Q32 ItofU without i64 scratch local"))?;
+                q32::emit_q32_itof_u(sink, src.0, dst.0, s);
             }
             FloatMode::Float => {
                 sink.local_get(src.0).f32_convert_i32_u().local_set(dst.0);

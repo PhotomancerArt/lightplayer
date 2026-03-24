@@ -24,9 +24,16 @@ fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
     if mode != FloatMode::Q32 {
         return false;
     }
-    f.body
-        .iter()
-        .any(|op| matches!(op, Op::Fadd { .. } | Op::Fsub { .. } | Op::Fmul { .. }))
+    f.body.iter().any(|op| {
+        matches!(
+            op,
+            Op::Fadd { .. }
+                | Op::Fsub { .. }
+                | Op::Fmul { .. }
+                | Op::ItofS { .. }
+                | Op::ItofU { .. }
+        )
+    })
 }
 
 /// WASM `(params) -> (results)` for `f`'s type section entry.

@@ -1,4 +1,4 @@
-//! wasmtime smoke tests for the Naga-based pipeline.
+//! wasmtime smoke tests for the LPIR → WASM pipeline.
 
 use lp_glsl_naga::FloatMode;
 use lp_glsl_wasm::{WasmOptions, glsl_wasm};
@@ -46,6 +46,26 @@ fn run_q32_f32(source: &str, func_name: &str, args: &[f32]) -> f32 {
         .expect("call");
     match results[0] {
         wasmtime::Val::I32(i) => i as f32 / SCALE,
+        _ => panic!("expected i32"),
+    }
+}
+
+fn run_q32_i32(source: &str, func_name: &str, args: &[i32]) -> i32 {
+    let opts = WasmOptions {
+        float_mode: FloatMode::Q32,
+    };
+    let module = glsl_wasm(source, opts).expect("compile");
+    let engine = wasmtime::Engine::default();
+    let mut store = wasmtime::Store::new(&engine, ());
+    let wasm_mod = wasmtime::Module::new(&engine, &module.bytes).expect("wasm module");
+    let instance = wasmtime::Instance::new(&mut store, &wasm_mod, &[]).expect("instantiate");
+    let func = instance.get_func(&mut store, func_name).expect("get_func");
+    let wasm_args: Vec<wasmtime::Val> = args.iter().map(|a| wasmtime::Val::I32(*a)).collect();
+    let mut results = [wasmtime::Val::I32(0)];
+    func.call(&mut store, &wasm_args, &mut results)
+        .expect("call");
+    match results[0] {
+        wasmtime::Val::I32(i) => i,
         _ => panic!("expected i32"),
     }
 }
@@ -212,4 +232,141 @@ fn q32_triple_float_compare_and() {
         "f",
     );
     assert!((v - 1.0).abs() < 0.02);
+}
+
+// --- Arithmetic ---
+
+#[test]
+fn q32_subtract() {
+    let v = run_q32_f32(
+        "float sub(float a, float b) { return a - b; }",
+        "sub",
+        &[5.0, 2.0],
+    );
+    assert!((v - 3.0).abs() < 0.02);
+}
+
+#[test]
+fn q32_negate() {
+    let v = run_q32_f32("float neg(float x) { return -x; }", "neg", &[3.5]);
+    assert!((v - (-3.5)).abs() < 0.02);
+}
+
+#[test]
+fn q32_int_modulo() {
+    let v = run_q32_i32("int m(int a, int b) { return a % b; }", "m", &[7, 3]);
+    assert_eq!(v, 1);
+}
+
+// --- Control flow ---
+
+#[test]
+fn q32_if_else() {
+    let v = run_q32_f32(
+        "float pick(float x) { float r = -1.0; if (x > 0.0) { r = 1.0; } return r; }",
+        "pick",
+        &[5.0],
+    );
+    assert!((v - 1.0).abs() < 0.02);
+    let v2 = run_q32_f32(
+        "float pick(float x) { float r = -1.0; if (x > 0.0) { r = 1.0; } return r; }",
+        "pick",
+        &[-5.0],
+    );
+    assert!((v2 - (-1.0)).abs() < 0.02);
+}
+
+#[test]
+fn q32_for_loop() {
+    let v = run_q32_f32_0(
+        "float f() { float s = 0.0; for (int i = 0; i < 5; i++) { s = s + 1.0; } return s; }",
+        "f",
+    );
+    assert!((v - 5.0).abs() < 0.05);
+}
+
+// --- Math builtins ---
+
+#[test]
+fn q32_min_max() {
+    let mn = run_q32_f32(
+        "float mn(float a, float b) { return min(a, b); }",
+        "mn",
+        &[3.0, 1.5],
+    );
+    assert!((mn - 1.5).abs() < 0.02);
+    let mx = run_q32_f32(
+        "float mx(float a, float b) { return max(a, b); }",
+        "mx",
+        &[3.0, 1.5],
+    );
+    assert!((mx - 3.0).abs() < 0.02);
+}
+
+#[test]
+fn q32_mix() {
+    let v = run_q32_f32_0("float f() { return mix(0.0, 10.0, 0.5); }", "f");
+    assert!((v - 5.0).abs() < 0.1);
+}
+
+#[test]
+fn q32_clamp() {
+    let v = run_q32_f32_0("float f() { return clamp(5.0, 0.0, 3.0); }", "f");
+    assert!((v - 3.0).abs() < 0.05);
+}
+
+#[test]
+fn q32_step() {
+    let below = run_q32_f32(
+        "float s(float edge, float x) { return step(edge, x); }",
+        "s",
+        &[1.0, 0.5],
+    );
+    assert!((below - 0.0).abs() < 0.02);
+    let above = run_q32_f32(
+        "float s(float edge, float x) { return step(edge, x); }",
+        "s",
+        &[1.0, 2.0],
+    );
+    assert!((above - 1.0).abs() < 0.02);
+}
+
+// --- Calls ---
+
+#[test]
+fn q32_call_user_func() {
+    let v = run_q32_f32_0(
+        "float dbl(float x) { return x + x; } float f() { return dbl(3.0); }",
+        "f",
+    );
+    assert!((v - 6.0).abs() < 0.05);
+}
+
+#[test]
+fn q32_call_chain() {
+    let v = run_q32_f32_0(
+        "float inc(float x) { return x + 1.0; } float dbl(float x) { return inc(inc(x)); } float f() { return dbl(1.0); }",
+        "f",
+    );
+    assert!((v - 3.0).abs() < 0.05);
+}
+
+// --- Casts ---
+
+#[test]
+fn q32_float_to_int() {
+    let v = run_q32_i32(
+        "int f(float x) { return int(x); }",
+        "f",
+        &[3 << 16 | 0x8000],
+    );
+    assert_eq!(v, 3);
+}
+
+#[test]
+fn q32_int_to_float() {
+    const SCALE: f32 = 65536.0;
+    let raw = run_q32_i32("float f(int x) { return float(x); }", "f", &[5]);
+    let v = raw as f32 / SCALE;
+    assert!((v - 5.0).abs() < 0.02);
 }
