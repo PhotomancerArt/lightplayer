@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>GLSL → WASM demo</title>
+    <title>LightPlayer Shader Demo</title>
     <style>
         :root {
             color-scheme: dark;
@@ -175,17 +175,18 @@
             <span id="tex-size-label" aria-live="polite">64×64</span>
         </div>
         <div id="sidebar-meta">
-            <h1>GLSL → WASM (Q32)</h1>
-            <p>Compiler runs in the browser. Edit GLSL; recompiles after a short pause.</p>
+            <h1>LightPlayer Shader Demo</h1>
+            <p>Edit GLSL on the left; the compiler runs in the browser and recompiles after a short pause.</p>
             <div class="toolbar">
                 <button id="btn-reset">Reset</button>
                 <button id="btn-copy-link">Copy link</button>
             </div>
             <p>
-                Shader demo for <a href="https://lightplayer.io">LightPlayer</a>.
                 GLSL is compiled to WASM via a
-                <a href="https://github.com/gfx-rs/naga">Naga</a> fork,
-                running in Q16.16 fixed-point. Same binary runs directly on ESP32 hardware.
+                <a href="https://github.com/gfx-rs/naga">Naga</a> fork.
+                All math uses Q16.16 fixed-point arithmetic -- no floats.
+                The compiler also targets riscv32imac (ESP32-C3/C6),
+                producing native binaries that run without an FPU.
             </p>
         </div>
     </div>

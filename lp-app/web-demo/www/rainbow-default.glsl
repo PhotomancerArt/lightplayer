@@ -79,7 +79,7 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 }
 
 vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
-    // Virtual resolution: pattern matches a 32×32 render (no zoom when outputSize changes).
+    // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 virtCoord = fragCoord * REF_SIZE / outputSize;
 

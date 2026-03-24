@@ -76,6 +76,49 @@ web-demo: web-demo-build
     echo "Serving http://127.0.0.1:2812 (Ctrl+C to stop)"
     miniserve --index index.html -p 2812 lp-app/web-demo/www/
 
+# Deploy web demo to gh-pages branch
+web-demo-deploy: web-demo-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    www="lp-app/web-demo/www"
+    branch="gh-pages"
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    # Copy built artifacts to temp dir
+    cp "$www/index.html" "$tmp_dir/"
+    cp "$www/rainbow-default.glsl" "$tmp_dir/"
+    cp "$www/builtins.wasm" "$tmp_dir/"
+    cp -r "$www/pkg" "$tmp_dir/pkg"
+
+    # Create/update gh-pages as orphan branch
+    if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+        git worktree add --force "$tmp_dir/wt" "$branch"
+    else
+        git worktree add --force --orphan -b "$branch" "$tmp_dir/wt"
+    fi
+
+    # Sync files into worktree
+    cp "$tmp_dir/index.html" "$tmp_dir/wt/"
+    cp "$tmp_dir/rainbow-default.glsl" "$tmp_dir/wt/"
+    cp "$tmp_dir/builtins.wasm" "$tmp_dir/wt/"
+    rm -rf "$tmp_dir/wt/pkg"
+    cp -r "$tmp_dir/pkg" "$tmp_dir/wt/pkg"
+
+    # Commit and push
+    cd "$tmp_dir/wt"
+    git add -A
+    url="https://light-player.github.io/lightplayer/"
+    if git diff --cached --quiet; then
+        echo "No changes to deploy. $url"
+    else
+        git commit -m "deploy: web-demo $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        git push origin "$branch"
+        echo "Deployed to $branch: $url"
+    fi
+    cd -
+    git worktree remove --force "$tmp_dir/wt"
+
 # ============================================================================
 # Build commands - Workspace-wide
 # ============================================================================

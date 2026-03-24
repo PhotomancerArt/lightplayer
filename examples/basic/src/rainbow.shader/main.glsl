@@ -79,6 +79,10 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 }
 
 vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+    // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
+    const vec2 REF_SIZE = vec2(32.0, 32.0);
+    vec2 virtCoord = fragCoord * REF_SIZE / outputSize;
+
     // Palette cycle: 5s per palette, 1s smooth transition to next
     // Clamp palette to 4 to avoid Q32 edge case where floor(mod(...)) yields 5.0
     float cyclePhase = mod(time, 5.0);
@@ -92,8 +96,8 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     float scaleSpeed = .7;
     float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
 
-    vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
+    vec2 center = REF_SIZE * 0.5;
+    vec2 dir = virtCoord - center;
     vec2 scaledCoord = center + dir * scale;
 
     vec2 tv = prsd_demo(scaledCoord, time);
