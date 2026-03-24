@@ -83,11 +83,275 @@ fn interp_if_else() {
 }
 
 #[test]
-#[ignore = "while/for loops: Naga loop body can reference counter locals before init stores land in the LPIR op order (validator: used before definition)"]
 fn interp_loop_sum() {
     let glsl =
         "int f(int n) { int s = 0; int i = 0; while (i < n) { s = s + i; i = i + 1; } return s; }";
     assert_eq!(run_i32(glsl, "f", &[Value::I32(4)]), 6);
+}
+
+#[test]
+fn interp_for_loop_sum() {
+    let glsl = "int f(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + i; } return s; }";
+    assert_eq!(run_i32(glsl, "f", &[Value::I32(4)]), 6);
+}
+
+#[test]
+fn interp_float_to_int() {
+    let glsl = "int f(float x) { return int(x); }";
+    assert_eq!(run_i32(glsl, "f", &[Value::F32(3.7)]), 3);
+}
+
+#[test]
+fn interp_int_to_float() {
+    let glsl = "float f(int x) { return float(x); }";
+    assert_f32_close(run_f32(glsl, "f", &[Value::I32(-2)]), -2.0, 1e-5);
+}
+
+#[test]
+fn interp_float_comparisons() {
+    let glsl = "int f(float a, float b) { return int(a < b) + 2 * int(a <= b) + 4 * int(a > b) \
+        + 8 * int(a >= b) + 16 * int(a == b) + 32 * int(a != b); }";
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::F32(1.0), Value::F32(2.0)]),
+        1 + 2 + 32
+    );
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::F32(2.0), Value::F32(2.0)]),
+        2 + 8 + 16
+    );
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::F32(3.0), Value::F32(2.0)]),
+        4 + 8 + 32
+    );
+}
+
+#[test]
+fn interp_int_comparisons() {
+    let glsl = "int f(int a, int b) { return int(a < b) + 2 * int(a <= b) + 4 * int(a > b) \
+        + 8 * int(a >= b) + 16 * int(a == b) + 32 * int(a != b); }";
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::I32(1), Value::I32(2)]),
+        1 + 2 + 32
+    );
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::I32(2), Value::I32(2)]),
+        2 + 8 + 16
+    );
+    assert_eq!(
+        run_i32(glsl, "f", &[Value::I32(3), Value::I32(2)]),
+        4 + 8 + 32
+    );
+}
+
+#[test]
+fn interp_bool_literal() {
+    let glsl = "bool f() { return true; } int g() { return int(f()); }";
+    assert_eq!(run_i32(glsl, "g", &[]), 1);
+}
+
+#[test]
+fn interp_nested_if() {
+    let glsl =
+        "float f(float x) { if (x > 0.0) { if (x > 5.0) return 2.0; return 1.0; } return 0.0; }";
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(-1.0)]), 0.0, 1e-5);
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(3.0)]), 1.0, 1e-5);
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(7.0)]), 2.0, 1e-5);
+}
+
+#[test]
+fn interp_floor_ceil_trunc() {
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return floor(x); }",
+            "f",
+            &[Value::F32(1.7)],
+        ),
+        1.0,
+        1e-5,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return ceil(x); }",
+            "f",
+            &[Value::F32(1.2)],
+        ),
+        2.0,
+        1e-5,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return trunc(x); }",
+            "f",
+            &[Value::F32(-1.7)],
+        ),
+        -1.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_min_max_float() {
+    let glsl = "float f(float a, float b) { return min(a, b) + max(a, b); }";
+    assert_f32_close(
+        run_f32(glsl, "f", &[Value::F32(2.0), Value::F32(5.0)]),
+        7.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_min_max_int() {
+    let glsl = "int f(int a, int b) { return min(a, b) + max(a, b); }";
+    assert_eq!(run_i32(glsl, "f", &[Value::I32(2), Value::I32(5)]), 7);
+}
+
+#[test]
+fn interp_clamp() {
+    let glsl = "float f(float x) { return clamp(x, 0.0, 1.0); }";
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(0.5)]), 0.5, 1e-5);
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(-1.0)]), 0.0, 1e-5);
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(2.0)]), 1.0, 1e-5);
+}
+
+#[test]
+fn interp_sign() {
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return sign(x); }",
+            "f",
+            &[Value::F32(3.0)],
+        ),
+        1.0,
+        1e-5,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return sign(x); }",
+            "f",
+            &[Value::F32(-2.0)],
+        ),
+        -1.0,
+        1e-5,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return sign(x); }",
+            "f",
+            &[Value::F32(0.0)],
+        ),
+        0.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_step() {
+    let glsl = "float f(float e, float x) { return step(e, x); }";
+    assert_f32_close(
+        run_f32(glsl, "f", &[Value::F32(1.0), Value::F32(0.5)]),
+        0.0,
+        1e-5,
+    );
+    assert_f32_close(
+        run_f32(glsl, "f", &[Value::F32(1.0), Value::F32(1.0)]),
+        1.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_smoothstep() {
+    let glsl = "float f(float x) { return smoothstep(0.0, 1.0, x); }";
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(0.0)]), 0.0, 1e-4);
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(1.0)]), 1.0, 1e-4);
+}
+
+#[test]
+fn interp_fract() {
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return fract(x); }",
+            "f",
+            &[Value::F32(2.25)],
+        ),
+        0.25,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_fma() {
+    let glsl = "float f(float a, float b, float c) { return fma(a, b, c); }";
+    assert_f32_close(
+        run_f32(
+            glsl,
+            "f",
+            &[Value::F32(2.0), Value::F32(3.0), Value::F32(4.0)],
+        ),
+        10.0,
+        1e-4,
+    );
+}
+
+#[test]
+fn interp_exp_log() {
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return exp(x); }",
+            "f",
+            &[Value::F32(0.0)],
+        ),
+        1.0,
+        1e-4,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return log(x); }",
+            "f",
+            &[Value::F32(1.0)],
+        ),
+        0.0,
+        1e-4,
+    );
+}
+
+#[test]
+fn interp_sin_cos() {
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return sin(x); }",
+            "f",
+            &[Value::F32(0.0)],
+        ),
+        0.0,
+        1e-4,
+    );
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return cos(x); }",
+            "f",
+            &[Value::F32(0.0)],
+        ),
+        1.0,
+        1e-4,
+    );
+    let pi_2 = std::f32::consts::FRAC_PI_2;
+    assert_f32_close(
+        run_f32(
+            "float f(float x) { return sin(x); }",
+            "f",
+            &[Value::F32(pi_2)],
+        ),
+        1.0,
+        1e-3,
+    );
+}
+
+#[test]
+fn interp_call_chain() {
+    let glsl = "float c(float x) { return x + 1.0; } float b(float x) { return c(x) * 2.0; } \
+        float f(float x) { return b(x) - 1.0; }";
+    assert_f32_close(run_f32(glsl, "f", &[Value::F32(1.0)]), 3.0, 1e-5);
 }
 
 #[test]

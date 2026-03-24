@@ -6,7 +6,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, VReg};
+use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, VReg};
 use naga::{Expression, Function, Handle, LocalVariable, Module, ScalarKind, Statement, TypeInner};
 
 use crate::lower_error::LowerError;
@@ -74,7 +74,7 @@ impl<'a> LowerCtx<'a> {
 
         let expr_cache = vec![None; func.expressions.len()];
 
-        Ok(Self {
+        let mut ctx = Self {
             fb,
             module,
             func,
@@ -86,7 +86,23 @@ impl<'a> LowerCtx<'a> {
             import_map: import_map.clone(),
             lpfx_map: lpfx_map.clone(),
             return_types,
-        })
+        };
+
+        for (lv_handle, var) in func.local_variables.iter() {
+            if ctx.param_aliases.contains_key(&lv_handle) {
+                continue;
+            }
+            let Some(init_h) = var.init else {
+                continue;
+            };
+            let dst = *ctx.local_map.get(&lv_handle).ok_or_else(|| {
+                LowerError::Internal(format!("local init for missing vreg {lv_handle:?}"))
+            })?;
+            let src = lower_expr::lower_expr(&mut ctx, init_h)?;
+            ctx.fb.push(Op::Copy { dst, src });
+        }
+
+        Ok(ctx)
     }
 
     pub(crate) fn finish(self) -> lpir::IrFunction {

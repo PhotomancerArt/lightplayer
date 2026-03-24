@@ -36,6 +36,17 @@ fn print_contains_std_math_import() {
 }
 
 #[test]
+fn print_contains_loop_structure() {
+    let glsl =
+        "int f(int n) { int s = 0; int i = 0; while (i < n) { s = s + i; i = i + 1; } return s; }";
+    let naga = compile(glsl).expect("compile");
+    let ir = lower(&naga).expect("lower");
+    validate_module(&ir).expect("validate");
+    let s = print_module(&ir);
+    assert!(s.contains("loop {"), "{s}");
+}
+
+#[test]
 fn print_contains_user_call() {
     let glsl = "float g(float x) { return x; } float f(float x) { return g(x); }";
     let naga = compile(glsl).expect("compile");

@@ -158,11 +158,12 @@ fn lower_min_max(
                 ctx.fb.push(Op::IgtS { dst: cmp, lhs, rhs });
             }
             let d = ctx.fb.alloc_vreg(IrType::I32);
+            // `IltS` / `IgtS`: non-zero cond → take `lhs`, else `rhs` (min vs max only changes the cmp).
             ctx.fb.push(Op::Select {
                 dst: d,
                 cond: cmp,
-                if_true: if is_min { lhs } else { rhs },
-                if_false: if is_min { rhs } else { lhs },
+                if_true: lhs,
+                if_false: rhs,
             });
             Ok(d)
         }
@@ -177,8 +178,8 @@ fn lower_min_max(
             ctx.fb.push(Op::Select {
                 dst: d,
                 cond: cmp,
-                if_true: if is_min { lhs } else { rhs },
-                if_false: if is_min { rhs } else { lhs },
+                if_true: lhs,
+                if_false: rhs,
             });
             Ok(d)
         }

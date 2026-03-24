@@ -58,9 +58,9 @@ fn lower_expr_uncached(
             kind,
             convert,
         } => {
-            if convert.is_some() {
+            if convert.is_some_and(|w| w != 4) {
                 return Err(LowerError::UnsupportedExpression(String::from(
-                    "As with explicit byte convert",
+                    "As with non-32-bit byte convert",
                 )));
             }
             lower_as(ctx, *inner, *kind)
