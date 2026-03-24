@@ -12,7 +12,7 @@ use crate::lower_ctx::LowerCtx;
 use crate::lower_error::LowerError;
 use crate::lower_lpfx;
 
-/// Lower a parsed [`NagaModule`] to LPIR (scalar expressions and statements only).
+/// Lower a parsed [`NagaModule`] to LPIR (scalarized vectors and matrices).
 ///
 /// Registers `std.math` and `@lpfx::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the

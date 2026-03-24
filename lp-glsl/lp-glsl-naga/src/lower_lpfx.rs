@@ -1,9 +1,8 @@
-//! LPFX builtin calls → `@lpfx::…` imports and slot-based out-parameters (scalar subset).
+//! LPFX builtin calls → `@lpfx::…` imports, scalar and vector value arguments, and out-parameters.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{CalleeRef, ImportDecl, IrType, ModuleBuilder, Op, VReg};
@@ -12,20 +11,22 @@ use naga::{
 };
 
 use crate::NagaModule;
-use crate::lower_ctx::naga_scalar_to_ir_type;
+use crate::lower_ctx::{VRegVec, naga_scalar_to_ir_type, naga_type_to_ir_types, vector_size_usize};
 use crate::lower_error::LowerError;
 
-/// How one LPFX callee argument maps to LPIR call operands.
+/// How one LPFX callee argument maps to LPIR call operands (one entry per Naga parameter).
 #[derive(Clone, Debug)]
 pub(crate) enum LpfxArgKind {
-    /// Pass lowered value (`F32` / `I32`).
+    /// Scalar value (`F32` / `I32`).
     Value,
-    /// Out-pointer: pass slot address (`I32`); callee writes one scalar to the slot.
+    /// Vector value: `count` scalar params after lowering.
+    ValueVector(u8),
+    /// Out-pointer: pass slot address (`I32`); callee writes one scalar.
     OutScalar(IrType),
+    /// Out-pointer to vector: one `I32` slot address; slot holds `count` scalars.
+    OutVector(IrType, u8),
 }
 
-/// Register `@lpfx` imports for every distinct `lpfx_*` callee used from exported functions.
-/// Returns `CalleeRef` per Naga function handle (stable with [`ModuleBuilder`] order).
 pub(crate) fn register_lpfx_imports(
     mb: &mut ModuleBuilder,
     naga_module: &NagaModule,
@@ -108,9 +109,7 @@ fn build_lpfx_import_decl(
                     let _ = naga_scalar_to_ir_type(scalar.kind)?;
                 }
                 TypeInner::Vector { .. } => {
-                    return Err(LowerError::UnsupportedType(String::from(
-                        "LPFX vector out-parameter",
-                    )));
+                    param_types.push(IrType::I32);
                 }
                 _ => {
                     return Err(LowerError::UnsupportedType(format!(
@@ -122,23 +121,24 @@ fn build_lpfx_import_decl(
             TypeInner::Scalar(scalar) => {
                 param_types.push(naga_scalar_to_ir_type(scalar.kind)?);
             }
+            TypeInner::Vector { size, scalar, .. } => {
+                let ir_ty = naga_scalar_to_ir_type(scalar.kind)?;
+                for _ in 0..vector_size_usize(*size) {
+                    param_types.push(ir_ty);
+                }
+            }
             _ => {
                 return Err(LowerError::UnsupportedType(format!(
-                    "LPFX argument type {:?} (scalar stage)",
+                    "LPFX argument type {:?}",
                     module.types[arg.ty].inner
                 )));
             }
         }
     }
     let return_types = if let Some(res) = &f.result {
-        match &module.types[res.ty].inner {
-            TypeInner::Scalar(scalar) => vec![naga_scalar_to_ir_type(scalar.kind)?],
-            _ => {
-                return Err(LowerError::UnsupportedType(String::from(
-                    "LPFX non-scalar return",
-                )));
-            }
-        }
+        let inner = &module.types[res.ty].inner;
+        let tys = naga_type_to_ir_types(inner)?;
+        tys.to_vec()
     } else {
         Vec::new()
     };
@@ -166,14 +166,15 @@ fn lpfx_arg_kinds(
                 TypeInner::Scalar(scalar) => {
                     out.push(LpfxArgKind::OutScalar(naga_scalar_to_ir_type(scalar.kind)?));
                 }
-                TypeInner::Vector { .. } => {
-                    return Err(LowerError::UnsupportedType(String::from(
-                        "LPFX vector out-parameter",
-                    )));
+                TypeInner::Vector { size, scalar, .. } => {
+                    out.push(LpfxArgKind::OutVector(
+                        naga_scalar_to_ir_type(scalar.kind)?,
+                        vector_size_usize(*size) as u8,
+                    ));
                 }
                 _ => {
                     return Err(LowerError::UnsupportedType(String::from(
-                        "LPFX out-pointer",
+                        "LPFX out-pointer base",
                     )));
                 }
             },
@@ -181,9 +182,13 @@ fn lpfx_arg_kinds(
                 let _ = naga_scalar_to_ir_type(scalar.kind)?;
                 out.push(LpfxArgKind::Value);
             }
+            TypeInner::Vector { size, scalar, .. } => {
+                let _ = naga_scalar_to_ir_type(scalar.kind)?;
+                out.push(LpfxArgKind::ValueVector(vector_size_usize(*size) as u8));
+            }
             _ => {
                 return Err(LowerError::UnsupportedType(String::from(
-                    "LPFX non-scalar value arg",
+                    "LPFX unsupported value arg",
                 )));
             }
         }
@@ -224,22 +229,56 @@ pub(crate) fn lower_lpfx_call(
     }
     let f = &ctx.module.functions[callee];
     let mut arg_vs: Vec<VReg> = Vec::new();
-    // (slot base address vreg, destination local vreg, scalar type stored in slot)
     let mut outs: Vec<(VReg, VReg, IrType)> = Vec::new();
+    let mut vec_outs: Vec<(VReg, VRegVec, IrType, usize)> = Vec::new();
 
     for (kind, &arg_expr) in kinds.iter().zip(arguments.iter()) {
         match kind {
             LpfxArgKind::Value => {
                 arg_vs.push(ctx.ensure_expr(arg_expr)?);
             }
+            LpfxArgKind::ValueVector(n) => {
+                let vs = ctx.ensure_expr_vec(arg_expr)?;
+                if vs.len() != *n as usize {
+                    return Err(LowerError::Internal(format!(
+                        "LPFX ValueVector expected {n} components, got {}",
+                        vs.len()
+                    )));
+                }
+                for v in &vs {
+                    arg_vs.push(*v);
+                }
+            }
             LpfxArgKind::OutScalar(ir) => {
                 let lv = out_pointer_local(ctx.func, arg_expr)?;
-                let dst = ctx.resolve_local(lv)?;
+                let dsts = ctx.resolve_local(lv)?;
+                if dsts.len() != 1 {
+                    return Err(LowerError::Internal(String::from(
+                        "LPFX OutScalar local width",
+                    )));
+                }
+                let dst = dsts[0];
                 let slot = ctx.fb.alloc_slot(4);
                 let addr = ctx.fb.alloc_vreg(IrType::I32);
                 ctx.fb.push(Op::SlotAddr { dst: addr, slot });
                 arg_vs.push(addr);
                 outs.push((addr, dst, *ir));
+            }
+            LpfxArgKind::OutVector(ir_ty, count) => {
+                let lv = out_pointer_local(ctx.func, arg_expr)?;
+                let dsts = ctx.resolve_local(lv)?;
+                let n = *count as usize;
+                if dsts.len() != n {
+                    return Err(LowerError::Internal(format!(
+                        "LPFX OutVector local width {} vs {n}",
+                        dsts.len()
+                    )));
+                }
+                let slot = ctx.fb.alloc_slot(n as u32 * 4);
+                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+                arg_vs.push(addr);
+                vec_outs.push((addr, dsts, *ir_ty, n));
             }
         }
     }
@@ -251,22 +290,19 @@ pub(crate) fn lower_lpfx_call(
             .as_ref()
             .ok_or_else(|| LowerError::Internal(String::from("LPFX void with result expr")))?;
         let inner = &ctx.module.types[res_ty.ty].inner;
-        let ir_ty = match inner {
-            TypeInner::Scalar(scalar) => naga_scalar_to_ir_type(scalar.kind)?,
-            _ => {
-                return Err(LowerError::Internal(String::from(
-                    "LPFX non-scalar return value",
-                )));
-            }
-        };
-        let v = ctx.fb.alloc_vreg(ir_ty);
-        if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
-            *slot = Some(v);
+        let ir_tys = naga_type_to_ir_types(inner)?;
+        let mut vregs = VRegVec::new();
+        for ty in &ir_tys {
+            let v = ctx.fb.alloc_vreg(*ty);
+            vregs.push(v);
+            result_vs.push(v);
         }
-        result_vs.push(v);
+        if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
+            *slot = Some(vregs);
+        }
     } else if f.result.is_some() {
         return Err(LowerError::Internal(String::from(
-            "LPFX scalar return missing result expression",
+            "LPFX return missing result expression",
         )));
     }
 
@@ -280,6 +316,21 @@ pub(crate) fn lower_lpfx_call(
             offset: 0,
         });
         ctx.fb.push(Op::Copy { dst, src: tmp });
+    }
+
+    for (addr, dsts, ir_ty, n) in vec_outs {
+        for i in 0..n {
+            let tmp = ctx.fb.alloc_vreg(ir_ty);
+            ctx.fb.push(Op::Load {
+                dst: tmp,
+                base: addr,
+                offset: (i as u32) * 4,
+            });
+            ctx.fb.push(Op::Copy {
+                dst: dsts[i],
+                src: tmp,
+            });
+        }
     }
 
     Ok(())

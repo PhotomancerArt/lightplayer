@@ -7,12 +7,18 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, VReg};
-use naga::{Expression, Function, Handle, LocalVariable, Module, ScalarKind, Statement, TypeInner};
+use naga::{
+    Expression, Function, Handle, LocalVariable, Module, ScalarKind, Statement, TypeInner,
+    VectorSize,
+};
+use smallvec::SmallVec;
 
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 
-// `ir_module`, `func_map`, `import_map` are for call/math lowering; `return_types` may be used for checks.
+pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
+pub(crate) type IrTypeVec = SmallVec<[IrType; 4]>;
+
 #[allow(
     dead_code,
     reason = "reserved for call lowering and cross-function checks"
@@ -22,9 +28,11 @@ pub(crate) struct LowerCtx<'a> {
     pub module: &'a Module,
     pub func: &'a Function,
     pub ir_module: Option<&'a IrModule>,
-    pub expr_cache: Vec<Option<VReg>>,
-    pub local_map: BTreeMap<Handle<LocalVariable>, VReg>,
-    pub param_aliases: BTreeMap<Handle<LocalVariable>, VReg>,
+    pub expr_cache: Vec<Option<VRegVec>>,
+    pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
+    pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
+    /// VRegs per function argument index (flattened scalars).
+    pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
     pub func_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub import_map: BTreeMap<String, CalleeRef>,
     pub lpfx_map: BTreeMap<Handle<Function>, CalleeRef>,
@@ -43,33 +51,38 @@ impl<'a> LowerCtx<'a> {
         let return_types = func_return_ir_types(module, func)?;
         let mut fb = FunctionBuilder::new(name, &return_types);
 
-        for arg in func.arguments.iter() {
+        let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
+        for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
-            let ty = naga_type_to_ir_type(inner)?;
-            fb.add_param(ty);
+            let tys = naga_type_to_ir_types(inner)?;
+            let mut vregs = VRegVec::new();
+            for ty in &tys {
+                let v = fb.add_param(*ty);
+                vregs.push(v);
+            }
+            arg_vregs.insert(i as u32, vregs);
         }
 
-        let arg_idx_to_vreg: BTreeMap<u32, VReg> = (0..func.arguments.len() as u32)
-            .map(|i| (i, VReg(i)))
-            .collect();
-
         let param_idx = scan_param_argument_indices(func);
-        let mut param_aliases: BTreeMap<Handle<LocalVariable>, VReg> = BTreeMap::new();
+        let mut param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
         for (lv, arg_i) in &param_idx {
-            if let Some(v) = arg_idx_to_vreg.get(arg_i) {
-                param_aliases.insert(*lv, *v);
+            if let Some(vs) = arg_vregs.get(arg_i) {
+                param_aliases.insert(*lv, vs.clone());
             }
         }
 
-        let mut local_map: BTreeMap<Handle<LocalVariable>, VReg> = BTreeMap::new();
+        let mut local_map: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
         for (lv_handle, var) in func.local_variables.iter() {
             if param_aliases.contains_key(&lv_handle) {
                 continue;
             }
             let inner = &module.types[var.ty].inner;
-            let ty = naga_type_to_ir_type(inner)?;
-            let v = fb.alloc_vreg(ty);
-            local_map.insert(lv_handle, v);
+            let tys = naga_type_to_ir_types(inner)?;
+            let mut vregs = VRegVec::new();
+            for ty in &tys {
+                vregs.push(fb.alloc_vreg(*ty));
+            }
+            local_map.insert(lv_handle, vregs);
         }
 
         let expr_cache = vec![None; func.expressions.len()];
@@ -82,6 +95,7 @@ impl<'a> LowerCtx<'a> {
             expr_cache,
             local_map,
             param_aliases,
+            arg_vregs,
             func_map: func_map.clone(),
             import_map: import_map.clone(),
             lpfx_map: lpfx_map.clone(),
@@ -95,11 +109,20 @@ impl<'a> LowerCtx<'a> {
             let Some(init_h) = var.init else {
                 continue;
             };
-            let dst = *ctx.local_map.get(&lv_handle).ok_or_else(|| {
+            let dsts = ctx.local_map.get(&lv_handle).cloned().ok_or_else(|| {
                 LowerError::Internal(format!("local init for missing vreg {lv_handle:?}"))
             })?;
-            let src = lower_expr::lower_expr(&mut ctx, init_h)?;
-            ctx.fb.push(Op::Copy { dst, src });
+            let srcs = lower_expr::lower_expr_vec(&mut ctx, init_h)?;
+            if dsts.len() != srcs.len() {
+                return Err(LowerError::Internal(format!(
+                    "local init component mismatch: {} vs {}",
+                    dsts.len(),
+                    srcs.len()
+                )));
+            }
+            for (d, s) in dsts.iter().zip(srcs.iter()) {
+                ctx.fb.push(Op::Copy { dst: *d, src: *s });
+            }
         }
 
         Ok(ctx)
@@ -109,29 +132,50 @@ impl<'a> LowerCtx<'a> {
         self.fb.finish()
     }
 
-    pub(crate) fn resolve_local(&self, lv: Handle<LocalVariable>) -> Result<VReg, LowerError> {
+    pub(crate) fn arg_vregs_for(&self, idx: u32) -> Result<VRegVec, LowerError> {
+        self.arg_vregs
+            .get(&idx)
+            .cloned()
+            .ok_or_else(|| LowerError::Internal(format!("bad FunctionArgument index {idx}")))
+    }
+
+    pub(crate) fn resolve_local(&self, lv: Handle<LocalVariable>) -> Result<VRegVec, LowerError> {
         if let Some(v) = self.param_aliases.get(&lv) {
-            return Ok(*v);
+            return Ok(v.clone());
         }
         self.local_map
             .get(&lv)
-            .copied()
+            .cloned()
             .ok_or_else(|| LowerError::Internal(format!("unknown local variable {lv:?}")))
+    }
+
+    pub(crate) fn ensure_expr_vec(
+        &mut self,
+        expr: Handle<naga::Expression>,
+    ) -> Result<VRegVec, LowerError> {
+        lower_expr::lower_expr_vec(self, expr)
     }
 
     pub(crate) fn ensure_expr(
         &mut self,
         expr: Handle<naga::Expression>,
     ) -> Result<VReg, LowerError> {
-        let i = expr.index();
-        if let Some(v) = self.expr_cache.get(i).and_then(|c| *c) {
-            return Ok(v);
+        let vs = self.ensure_expr_vec(expr)?;
+        if vs.len() != 1 {
+            return Err(LowerError::Internal(format!(
+                "expected scalar expression, got {} components",
+                vs.len()
+            )));
         }
-        let v = lower_expr::lower_expr(self, expr)?;
-        if let Some(slot) = self.expr_cache.get_mut(i) {
-            *slot = Some(v);
-        }
-        Ok(v)
+        Ok(vs[0])
+    }
+}
+
+pub(crate) fn vector_size_usize(size: VectorSize) -> usize {
+    match size {
+        VectorSize::Bi => 2,
+        VectorSize::Tri => 3,
+        VectorSize::Quad => 4,
     }
 }
 
@@ -145,25 +189,69 @@ pub(crate) fn naga_scalar_to_ir_type(kind: ScalarKind) -> Result<IrType, LowerEr
     }
 }
 
-pub(crate) fn naga_type_to_ir_type(inner: &TypeInner) -> Result<IrType, LowerError> {
+pub(crate) fn naga_type_to_ir_types(inner: &TypeInner) -> Result<IrTypeVec, LowerError> {
     match *inner {
-        TypeInner::Scalar(scalar) => naga_scalar_to_ir_type(scalar.kind),
+        TypeInner::Scalar(scalar) => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            Ok(smallvec::smallvec![t])
+        }
+        TypeInner::Vector { size, scalar, .. } => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(size);
+            Ok(SmallVec::from_elem(t, n))
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar,
+            ..
+        } => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(columns) * vector_size_usize(rows);
+            Ok(SmallVec::from_elem(t, n))
+        }
         _ => Err(LowerError::UnsupportedType(format!(
-            "only scalar locals/parameters supported, got {inner:?}"
+            "unsupported type for LPIR: {inner:?}"
         ))),
     }
 }
 
-fn func_return_ir_types(module: &Module, func: &Function) -> Result<Vec<IrType>, LowerError> {
+/// Single scalar IR type; use [`naga_type_to_ir_types`] for vectors and matrices.
+#[allow(
+    dead_code,
+    reason = "convenience for scalar-only call sites and future passes"
+)]
+pub(crate) fn naga_type_to_ir_type(inner: &TypeInner) -> Result<IrType, LowerError> {
+    let tys = naga_type_to_ir_types(inner)?;
+    if tys.len() != 1 {
+        return Err(LowerError::UnsupportedType(String::from(
+            "expected a single scalar IR type",
+        )));
+    }
+    Ok(tys[0])
+}
+
+pub(crate) fn naga_type_width(inner: &TypeInner) -> usize {
+    match *inner {
+        TypeInner::Scalar(_) => 1,
+        TypeInner::Vector { size, .. } => vector_size_usize(size),
+        TypeInner::Matrix { columns, rows, .. } => {
+            vector_size_usize(columns) * vector_size_usize(rows)
+        }
+        _ => 1,
+    }
+}
+
+pub(crate) fn func_return_ir_types(
+    module: &Module,
+    func: &Function,
+) -> Result<Vec<IrType>, LowerError> {
     let Some(res) = &func.result else {
         return Ok(Vec::new());
     };
-    match &module.types[res.ty].inner {
-        TypeInner::Scalar(scalar) => Ok(vec![naga_scalar_to_ir_type(scalar.kind)?]),
-        _ => Err(LowerError::UnsupportedType(String::from(
-            "only scalar return types supported",
-        ))),
-    }
+    let inner = &module.types[res.ty].inner;
+    let tys = naga_type_to_ir_types(inner)?;
+    Ok(tys.to_vec())
 }
 
 fn scan_param_argument_indices(func: &Function) -> BTreeMap<Handle<LocalVariable>, u32> {

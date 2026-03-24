@@ -430,6 +430,107 @@ fn interp_lpfx_saturate() {
     assert_f32_close(out[0].as_f32().expect("f32"), 1.0, 1e-5);
 }
 
+#[test]
+fn interp_vec3_compose_return() {
+    let glsl = "vec3 f() { return vec3(1.0, 2.0, 4.0); }";
+    let out = run(glsl, "f", &[]);
+    assert_eq!(out.len(), 3, "vec3 return should yield 3 values");
+    assert_f32_close(out[0].as_f32().expect("x"), 1.0, 1e-5);
+    assert_f32_close(out[1].as_f32().expect("y"), 2.0, 1e-5);
+    assert_f32_close(out[2].as_f32().expect("z"), 4.0, 1e-5);
+}
+
+#[test]
+fn interp_vec3_param_and_swizzle() {
+    let glsl = "float f(vec3 v) { vec3 t = v.zyx; return t.x + t.y; }";
+    assert_f32_close(
+        run_f32(
+            glsl,
+            "f",
+            &[Value::F32(1.0), Value::F32(2.0), Value::F32(4.0)],
+        ),
+        4.0 + 2.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_vec3_broadcast_mul() {
+    let glsl = "vec3 f(vec3 v) { return v * 2.0; }";
+    let out = run(
+        glsl,
+        "f",
+        &[Value::F32(1.0), Value::F32(2.0), Value::F32(3.0)],
+    );
+    assert_eq!(out.len(), 3);
+    assert_f32_close(out[0].as_f32().unwrap(), 2.0, 1e-5);
+    assert_f32_close(out[1].as_f32().unwrap(), 4.0, 1e-5);
+    assert_f32_close(out[2].as_f32().unwrap(), 6.0, 1e-5);
+}
+
+#[test]
+fn interp_dot() {
+    let glsl = "float f(vec3 a, vec3 b) { return dot(a, b); }";
+    assert_f32_close(
+        run_f32(
+            glsl,
+            "f",
+            &[
+                Value::F32(1.0),
+                Value::F32(2.0),
+                Value::F32(3.0),
+                Value::F32(0.0),
+                Value::F32(1.0),
+                Value::F32(0.0),
+            ],
+        ),
+        2.0,
+        1e-5,
+    );
+}
+
+#[test]
+fn interp_mix_vec_scalar_t() {
+    let glsl = "vec3 f(vec3 a, vec3 b) { return mix(a, b, 0.5); }";
+    let out = run(
+        glsl,
+        "f",
+        &[
+            Value::F32(0.0),
+            Value::F32(0.0),
+            Value::F32(0.0),
+            Value::F32(2.0),
+            Value::F32(4.0),
+            Value::F32(6.0),
+        ],
+    );
+    assert_f32_close(out[0].as_f32().unwrap(), 1.0, 1e-5);
+    assert_f32_close(out[1].as_f32().unwrap(), 2.0, 1e-5);
+    assert_f32_close(out[2].as_f32().unwrap(), 3.0, 1e-5);
+}
+
+#[test]
+fn interp_mat3_vec3_mul() {
+    let glsl = "vec3 f() { mat3 m = mat3(2.0); return m * vec3(1.0, 1.0, 1.0); }";
+    let out = run(glsl, "f", &[]);
+    assert_eq!(out.len(), 3);
+    assert_f32_close(out[0].as_f32().unwrap(), 2.0, 1e-4);
+    assert_f32_close(out[1].as_f32().unwrap(), 2.0, 1e-4);
+    assert_f32_close(out[2].as_f32().unwrap(), 2.0, 1e-4);
+}
+
+#[test]
+fn interp_normalize_length() {
+    let glsl = "float f() { return length(normalize(vec3(3.0, 0.0, 4.0))); }";
+    assert_f32_close(run_f32(glsl, "f", &[]), 1.0, 1e-4);
+}
+
+#[test]
+fn interp_transpose_mat2() {
+    let glsl = "float f() { mat2 m = mat2(1.0, 2.0, 3.0, 4.0); mat2 t = transpose(m); return t[0][1] + t[1][0]; }";
+    assert_f32_close(run_f32(glsl, "f", &[]), 3.0 + 2.0, 1e-4);
+}
+
 fn compile_and_lower(glsl: &str) -> lpir::IrModule {
     let naga = compile(glsl).expect("compile");
     let ir = lower(&naga).expect("lower");

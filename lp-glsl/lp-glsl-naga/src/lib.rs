@@ -12,8 +12,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
-use core::fmt::Write as _;
-
 pub use naga;
 
 use naga::{Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize};
@@ -25,6 +23,7 @@ mod lower_error;
 mod lower_expr;
 mod lower_lpfx;
 mod lower_math;
+mod lower_matrix;
 mod lower_stmt;
 pub mod std_math_handler;
 
@@ -273,11 +272,9 @@ fn ensure_vertex_entry_point(source: &str) -> String {
 fn parse_glsl(source: &str) -> Result<Module, CompileError> {
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(ShaderStage::Vertex);
-    frontend.parse(&options, source).map_err(|e| {
-        let mut msg = String::new();
-        let _ = write!(&mut msg, "{e}");
-        CompileError::Parse(msg)
-    })
+    frontend
+        .parse(&options, source)
+        .map_err(|e| CompileError::Parse(e.emit_to_string(source)))
 }
 
 fn extract_functions(

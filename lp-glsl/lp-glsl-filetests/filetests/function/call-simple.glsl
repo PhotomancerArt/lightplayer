@@ -48,13 +48,13 @@ float test_call_simple_no_args() {
 
 // run: test_call_simple_no_args() ~= 3.14
 
-float double(float x) {
+float double_val(float x) {
     return x * 2.0;
 }
 
 float test_call_simple_in_expression() {
     // Function call in expression
-    return double(5.0) + double(3.0);
+    return double_val(5.0) + double_val(3.0);
 }
 
 // run: test_call_simple_in_expression() ~= 16.0

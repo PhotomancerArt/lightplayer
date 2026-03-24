@@ -1,4 +1,4 @@
-//! Naga statements / blocks → LPIR op stream.
+//! Naga statements / blocks → LPIR op stream (scalar and multi-value store/return/call).
 
 use alloc::format;
 use alloc::string::String;
@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpir::Op;
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue};
 
-use crate::lower_ctx::{LowerCtx, naga_type_to_ir_type};
+use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_lpfx;
 
@@ -71,8 +71,8 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
         }
         Statement::Return { value } => match value {
             Some(expr) => {
-                let v = ctx.ensure_expr(*expr)?;
-                ctx.fb.push_return(&[v]);
+                let vs = ctx.ensure_expr_vec(*expr)?;
+                ctx.fb.push_return(&vs);
                 Ok(())
             }
             None => {
@@ -82,9 +82,18 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
         },
         Statement::Store { pointer, value } => {
             let lv = store_pointer_local(ctx.func, *pointer)?;
-            let dst = ctx.resolve_local(lv)?;
-            let src = ctx.ensure_expr(*value)?;
-            ctx.fb.push(Op::Copy { dst, src });
+            let dsts = ctx.resolve_local(lv)?;
+            let srcs = ctx.ensure_expr_vec(*value)?;
+            if dsts.len() != srcs.len() {
+                return Err(LowerError::UnsupportedStatement(format!(
+                    "Store component mismatch {} vs {}",
+                    dsts.len(),
+                    srcs.len()
+                )));
+            }
+            for (d, s) in dsts.iter().zip(srcs.iter()) {
+                ctx.fb.push(Op::Copy { dst: *d, src: *s });
+            }
             Ok(())
         }
         Statement::Switch { selector, cases } => {
@@ -170,7 +179,8 @@ fn lower_user_call(
         .ok_or_else(|| LowerError::Internal(format!("callee not in export map: {name:?}")))?;
     let mut arg_vs = Vec::new();
     for a in arguments {
-        arg_vs.push(ctx.ensure_expr(*a)?);
+        let vs = ctx.ensure_expr_vec(*a)?;
+        arg_vs.extend_from_slice(&vs);
     }
     let mut result_vs = Vec::new();
     if let Some(res_h) = result {
@@ -179,12 +189,16 @@ fn lower_user_call(
             .as_ref()
             .ok_or_else(|| LowerError::Internal(String::from("call result for void function")))?;
         let inner = &ctx.module.types[res_ty.ty].inner;
-        let ir_ty = naga_type_to_ir_type(inner)?;
-        let v = ctx.fb.alloc_vreg(ir_ty);
-        if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
-            *slot = Some(v);
+        let ir_tys = naga_type_to_ir_types(inner)?;
+        let mut vregs = VRegVec::new();
+        for ty in &ir_tys {
+            let v = ctx.fb.alloc_vreg(*ty);
+            vregs.push(v);
+            result_vs.push(v);
         }
-        result_vs.push(v);
+        if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
+            *slot = Some(vregs);
+        }
     }
     ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
     Ok(())

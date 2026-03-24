@@ -1,58 +1,223 @@
-//! Naga [`naga::Expression`] → LPIR ops (scalar subset).
+//! Naga [`naga::Expression`] → LPIR ops with vector and matrix scalarization.
 
 use alloc::format;
 use alloc::string::String;
-
 use lpir::{IrType, Op, VReg};
-use naga::{BinaryOperator, Expression, Handle, Literal, ScalarKind, UnaryOperator};
+use naga::{BinaryOperator, Expression, Handle, Literal, ScalarKind, TypeInner, UnaryOperator};
 
-use crate::expr_scalar::expr_scalar_kind;
-use crate::lower_ctx::LowerCtx;
+use crate::expr_scalar::{expr_scalar_kind, expr_type_inner};
+use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
 use crate::lower_error::LowerError;
 use crate::lower_math;
 
+pub(crate) fn lower_expr_vec(
+    ctx: &mut LowerCtx<'_>,
+    expr: Handle<Expression>,
+) -> Result<VRegVec, LowerError> {
+    let i = expr.index();
+    if let Some(vs) = ctx.expr_cache.get(i).and_then(|c| c.as_ref()) {
+        return Ok(vs.clone());
+    }
+    let vs = lower_expr_vec_uncached(ctx, expr)?;
+    if let Some(slot) = ctx.expr_cache.get_mut(i) {
+        *slot = Some(vs.clone());
+    }
+    Ok(vs)
+}
+
+#[allow(dead_code, reason = "scalar convenience over lower_expr_vec")]
 pub(crate) fn lower_expr(
     ctx: &mut LowerCtx<'_>,
     expr: Handle<Expression>,
 ) -> Result<VReg, LowerError> {
-    let i = expr.index();
-    if let Some(v) = ctx.expr_cache.get(i).and_then(|c| *c) {
-        return Ok(v);
+    let vs = lower_expr_vec(ctx, expr)?;
+    if vs.len() != 1 {
+        return Err(LowerError::Internal(format!(
+            "expected scalar expression, got {} components",
+            vs.len()
+        )));
     }
-    let v = lower_expr_uncached(ctx, expr)?;
-    if let Some(slot) = ctx.expr_cache.get_mut(i) {
-        *slot = Some(v);
-    }
-    Ok(v)
+    Ok(vs[0])
 }
 
-fn lower_expr_uncached(
+fn lower_expr_vec_uncached(
     ctx: &mut LowerCtx<'_>,
     expr: Handle<Expression>,
-) -> Result<VReg, LowerError> {
+) -> Result<VRegVec, LowerError> {
     match &ctx.func.expressions[expr] {
-        Expression::Literal(l) => push_literal(&mut ctx.fb, l),
-        Expression::Constant(h) => {
-            let init = ctx.module.constants[*h].init;
-            lower_global_expr(ctx, init)
-        }
-        Expression::FunctionArgument(i) => Ok(VReg(*i)),
-        Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
-            "LocalVariable must be used through Load",
-        ))),
+        Expression::FunctionArgument(i) => ctx.arg_vregs_for(*i),
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
             Expression::LocalVariable(lv) => ctx.resolve_local(*lv),
+            // Subscripted locals (`m[i][j]`) are pointers in Naga; value lives in vregs.
+            Expression::AccessIndex { .. } => lower_expr_vec(ctx, *pointer),
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
             ))),
         },
-        Expression::Binary { op, left, right } => lower_binary(ctx, *op, *left, *right),
-        Expression::Unary { op, expr: inner } => lower_unary(ctx, *op, *inner),
+        Expression::CallResult(_) => {
+            let i = expr.index();
+            ctx.expr_cache
+                .get(i)
+                .and_then(|c| c.as_ref())
+                .cloned()
+                .ok_or_else(|| {
+                    LowerError::Internal(String::from(
+                        "CallResult used before matching Call statement",
+                    ))
+                })
+        }
+        Expression::Compose { components, .. } => {
+            let mut result = VRegVec::new();
+            for &comp in components {
+                let vs = lower_expr_vec(ctx, comp)?;
+                result.extend_from_slice(&vs);
+            }
+            Ok(result)
+        }
+        Expression::Splat { size, value } => {
+            let vs = lower_expr_vec(ctx, *value)?;
+            if vs.len() != 1 {
+                return Err(LowerError::Internal(String::from("Splat of non-scalar")));
+            }
+            let scalar = vs[0];
+            let n = vector_size_usize(*size);
+            Ok(SmallVecRepeat::repeat(scalar, n))
+        }
+        Expression::Swizzle {
+            size,
+            vector,
+            pattern,
+        } => {
+            let base = lower_expr_vec(ctx, *vector)?;
+            let n = vector_size_usize(*size);
+            let mut result = VRegVec::new();
+            for i in 0..n {
+                let comp_idx = pattern[i] as usize;
+                result.push(base[comp_idx]);
+            }
+            Ok(result)
+        }
+        Expression::AccessIndex { base, index } => {
+            let base_inner = expr_type_inner(ctx.module, ctx.func, *base)?;
+            match base_inner {
+                TypeInner::Vector { .. } => {
+                    let base_vs = lower_expr_vec(ctx, *base)?;
+                    Ok(smallvec::smallvec![base_vs[*index as usize]])
+                }
+                TypeInner::Matrix { rows, .. } => {
+                    let base_vs = lower_expr_vec(ctx, *base)?;
+                    let n = vector_size_usize(rows);
+                    let start = (*index as usize) * n;
+                    Ok(base_vs[start..start + n].into())
+                }
+                // `mat` local: `t[i]` is a column (vector) in the local's vreg slice.
+                TypeInner::Pointer { base: ty_h, .. } => {
+                    let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
+                        return Err(LowerError::UnsupportedExpression(String::from(
+                            "AccessIndex: pointer base must be LocalVariable",
+                        )));
+                    };
+                    let inner = &ctx.module.types[ty_h].inner;
+                    let TypeInner::Matrix { rows, .. } = inner else {
+                        return Err(LowerError::UnsupportedExpression(format!(
+                            "AccessIndex on pointer to non-matrix {inner:?}"
+                        )));
+                    };
+                    let m = ctx.resolve_local(*lv)?;
+                    let n = vector_size_usize(*rows);
+                    let start = (*index as usize) * n;
+                    Ok(m[start..start + n].into())
+                }
+                // Matrix column or other vector behind a pointer (Naga `ValuePointer`).
+                TypeInner::ValuePointer { size: Some(_), .. } => {
+                    let base_vs = lower_expr_vec(ctx, *base)?;
+                    let i = *index as usize;
+                    let v = *base_vs.get(i).ok_or_else(|| {
+                        LowerError::UnsupportedExpression(format!(
+                            "AccessIndex index {i} out of range (len {})",
+                            base_vs.len()
+                        ))
+                    })?;
+                    Ok(smallvec::smallvec![v])
+                }
+                _ => Err(LowerError::UnsupportedExpression(format!(
+                    "AccessIndex on {base_inner:?}"
+                ))),
+            }
+        }
+        Expression::Access { .. } => Err(LowerError::UnsupportedExpression(String::from(
+            "dynamic vector access not supported",
+        ))),
+        Expression::ZeroValue(ty_h) => lower_zero_value_vec(ctx, *ty_h),
+        Expression::Constant(h) => {
+            let init = ctx.module.constants[*h].init;
+            lower_global_expr_vec(ctx, init)
+        }
+        Expression::Literal(l) => {
+            let v = push_literal(&mut ctx.fb, l)?;
+            Ok(smallvec::smallvec![v])
+        }
+        Expression::Binary { op, left, right } => {
+            if *op == BinaryOperator::Multiply {
+                let li = expr_type_inner(ctx.module, ctx.func, *left)?;
+                let ri = expr_type_inner(ctx.module, ctx.func, *right)?;
+                match (&li, &ri) {
+                    (
+                        TypeInner::Matrix {
+                            columns: lc,
+                            rows: lr,
+                            ..
+                        },
+                        TypeInner::Vector { size: vs, .. },
+                    ) if vector_size_usize(*lc) == vector_size_usize(*vs) => {
+                        let mat_vs = lower_expr_vec(ctx, *left)?;
+                        let vec_vs = lower_expr_vec(ctx, *right)?;
+                        crate::lower_matrix::lower_mat_vec_mul(
+                            ctx,
+                            &mat_vs,
+                            &vec_vs,
+                            vector_size_usize(*lc),
+                            vector_size_usize(*lr),
+                        )
+                    }
+                    (
+                        TypeInner::Vector { size: vs, .. },
+                        TypeInner::Matrix {
+                            columns: rc,
+                            rows: rr,
+                            ..
+                        },
+                    ) if vector_size_usize(*vs) == vector_size_usize(*rr) => {
+                        let vec_vs = lower_expr_vec(ctx, *left)?;
+                        let mat_vs = lower_expr_vec(ctx, *right)?;
+                        crate::lower_matrix::lower_vec_mat_mul(
+                            ctx,
+                            &vec_vs,
+                            &mat_vs,
+                            vector_size_usize(*rc),
+                            vector_size_usize(*rr),
+                        )
+                    }
+                    (TypeInner::Matrix { .. }, TypeInner::Matrix { .. }) => {
+                        let left_vs = lower_expr_vec(ctx, *left)?;
+                        let right_vs = lower_expr_vec(ctx, *right)?;
+                        let (lc, lr, rc, rr) = matrix_dims(&li, &ri)?;
+                        crate::lower_matrix::lower_mat_mat_mul(
+                            ctx, &left_vs, &right_vs, lc, lr, rc, rr,
+                        )
+                    }
+                    _ => lower_binary_vec(ctx, *op, *left, *right),
+                }
+            } else {
+                lower_binary_vec(ctx, *op, *left, *right)
+            }
+        }
+        Expression::Unary { op, expr: inner } => lower_unary_vec(ctx, *op, *inner),
         Expression::Select {
             condition,
             accept,
             reject,
-        } => lower_select(ctx, *condition, *accept, *reject),
+        } => lower_select_vec(ctx, *condition, *accept, *reject),
         Expression::As {
             expr: inner,
             kind,
@@ -63,16 +228,7 @@ fn lower_expr_uncached(
                     "As with non-32-bit byte convert",
                 )));
             }
-            lower_as(ctx, *inner, *kind)
-        }
-        Expression::ZeroValue(ty_h) => lower_zero_value(ctx, *ty_h),
-        Expression::CallResult(_) => {
-            let i = expr.index();
-            ctx.expr_cache.get(i).copied().flatten().ok_or_else(|| {
-                LowerError::Internal(String::from(
-                    "CallResult used before matching Call statement",
-                ))
-            })
+            lower_as_vec(ctx, *inner, *kind)
         }
         Expression::Math {
             fun,
@@ -80,7 +236,10 @@ fn lower_expr_uncached(
             arg1,
             arg2,
             arg3,
-        } => lower_math::lower_math(ctx, *fun, *arg, *arg1, *arg2, *arg3),
+        } => lower_math::lower_math_vec(ctx, *fun, *arg, *arg1, *arg2, *arg3),
+        Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
+            "LocalVariable must be used through Load",
+        ))),
         _ => Err(LowerError::UnsupportedExpression(format!(
             "{:?}",
             ctx.func.expressions[expr]
@@ -88,9 +247,120 @@ fn lower_expr_uncached(
     }
 }
 
-fn lower_global_expr(ctx: &mut LowerCtx<'_>, expr: Handle<Expression>) -> Result<VReg, LowerError> {
+/// Repeat a scalar VReg `n` times (same VReg reused).
+struct SmallVecRepeat;
+impl SmallVecRepeat {
+    fn repeat(scalar: VReg, n: usize) -> VRegVec {
+        let mut v = VRegVec::new();
+        v.resize(n, scalar);
+        v
+    }
+}
+
+fn matrix_dims(
+    left: &TypeInner,
+    right: &TypeInner,
+) -> Result<(usize, usize, usize, usize), LowerError> {
+    let TypeInner::Matrix {
+        columns: lc,
+        rows: lr,
+        ..
+    } = left
+    else {
+        return Err(LowerError::Internal(String::from("matrix_dims left")));
+    };
+    let TypeInner::Matrix {
+        columns: rc,
+        rows: rr,
+        ..
+    } = right
+    else {
+        return Err(LowerError::Internal(String::from("matrix_dims right")));
+    };
+    Ok((
+        vector_size_usize(*lc),
+        vector_size_usize(*lr),
+        vector_size_usize(*rc),
+        vector_size_usize(*rr),
+    ))
+}
+
+fn lower_zero_value_vec(
+    ctx: &mut LowerCtx<'_>,
+    ty_h: Handle<naga::Type>,
+) -> Result<VRegVec, LowerError> {
+    match &ctx.module.types[ty_h].inner {
+        TypeInner::Scalar(scalar) => {
+            let d = ctx.fb.alloc_vreg(naga_scalar_to_ir_type(scalar.kind)?);
+            push_zero_to(ctx, d, scalar.kind)?;
+            Ok(smallvec::smallvec![d])
+        }
+        TypeInner::Vector { size, scalar, .. } => {
+            let ir_ty = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(*size);
+            let mut result = VRegVec::new();
+            for _ in 0..n {
+                let d = ctx.fb.alloc_vreg(ir_ty);
+                push_zero_to(ctx, d, scalar.kind)?;
+                result.push(d);
+            }
+            Ok(result)
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar,
+            ..
+        } => {
+            let ir_ty = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(*columns) * vector_size_usize(*rows);
+            let mut result = VRegVec::new();
+            for _ in 0..n {
+                let d = ctx.fb.alloc_vreg(ir_ty);
+                push_zero_to(ctx, d, scalar.kind)?;
+                result.push(d);
+            }
+            Ok(result)
+        }
+        _ => Err(LowerError::UnsupportedType(String::from(
+            "ZeroValue unsupported type",
+        ))),
+    }
+}
+
+fn push_zero_to(ctx: &mut LowerCtx<'_>, dst: VReg, kind: ScalarKind) -> Result<(), LowerError> {
+    match kind {
+        ScalarKind::Float => {
+            ctx.fb.push(Op::FconstF32 { dst, value: 0.0 });
+        }
+        ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => {
+            ctx.fb.push(Op::IconstI32 { dst, value: 0 });
+        }
+        ScalarKind::AbstractInt | ScalarKind::AbstractFloat => {
+            return Err(LowerError::UnsupportedType(String::from(
+                "abstract zero value",
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn lower_global_expr_vec(
+    ctx: &mut LowerCtx<'_>,
+    expr: Handle<Expression>,
+) -> Result<VRegVec, LowerError> {
     match &ctx.module.global_expressions[expr] {
-        Expression::Literal(l) => push_literal(&mut ctx.fb, l),
+        Expression::Literal(l) => {
+            let v = push_literal(&mut ctx.fb, l)?;
+            Ok(smallvec::smallvec![v])
+        }
+        Expression::Compose { components, .. } => {
+            let mut result = VRegVec::new();
+            for &c in components {
+                result.extend_from_slice(&lower_global_expr_vec(ctx, c)?);
+            }
+            Ok(result)
+        }
         _ => Err(LowerError::UnsupportedExpression(format!(
             "unsupported global expression init {expr:?}"
         ))),
@@ -137,35 +407,14 @@ fn push_literal(fb: &mut lpir::FunctionBuilder, lit: &Literal) -> Result<VReg, L
     }
 }
 
-fn lower_zero_value(ctx: &mut LowerCtx<'_>, ty_h: Handle<naga::Type>) -> Result<VReg, LowerError> {
-    match &ctx.module.types[ty_h].inner {
-        naga::TypeInner::Scalar(scalar) => match scalar.kind {
-            ScalarKind::Float => {
-                let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::FconstF32 { dst: d, value: 0.0 });
-                Ok(d)
-            }
-            ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => {
-                let d = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: d, value: 0 });
-                Ok(d)
-            }
-            ScalarKind::AbstractInt | ScalarKind::AbstractFloat => Err(
-                LowerError::UnsupportedType(String::from("abstract zero value")),
-            ),
-        },
-        _ => Err(LowerError::UnsupportedType(String::from(
-            "ZeroValue non-scalar",
-        ))),
-    }
-}
-
-fn lower_binary(
+fn lower_binary_vec(
     ctx: &mut LowerCtx<'_>,
     op: BinaryOperator,
     left: Handle<Expression>,
     right: Handle<Expression>,
-) -> Result<VReg, LowerError> {
+) -> Result<VRegVec, LowerError> {
+    let left_inner = expr_type_inner(ctx.module, ctx.func, left)?;
+    let right_inner = expr_type_inner(ctx.module, ctx.func, right)?;
     let lk = expr_scalar_kind(ctx.module, ctx.func, left)?;
     let rk = expr_scalar_kind(ctx.module, ctx.func, right)?;
     if lk != rk {
@@ -173,8 +422,35 @@ fn lower_binary(
             "binary operand kind mismatch",
         )));
     }
-    let lhs = lower_expr(ctx, left)?;
-    let rhs = lower_expr(ctx, right)?;
+    let left_vs = lower_expr_vec(ctx, left)?;
+    let right_vs = lower_expr_vec(ctx, right)?;
+    let n = left_vs.len().max(right_vs.len());
+    if left_vs.len() != right_vs.len() && left_vs.len() != 1 && right_vs.len() != 1 {
+        return Err(LowerError::UnsupportedExpression(format!(
+            "binary vector width mismatch {} vs {}",
+            left_vs.len(),
+            right_vs.len()
+        )));
+    }
+    let mut result = VRegVec::new();
+    for i in 0..n {
+        let l = left_vs[i.min(left_vs.len().saturating_sub(1).max(0))];
+        let r = right_vs[i.min(right_vs.len().saturating_sub(1).max(0))];
+        let v = lower_binary_scalar(ctx, op, l, r, lk, &left_inner, &right_inner)?;
+        result.push(v);
+    }
+    Ok(result)
+}
+
+fn lower_binary_scalar(
+    ctx: &mut LowerCtx<'_>,
+    op: BinaryOperator,
+    lhs: VReg,
+    rhs: VReg,
+    lk: ScalarKind,
+    _left_ty: &TypeInner,
+    _right_ty: &TypeInner,
+) -> Result<VReg, LowerError> {
     match lk {
         ScalarKind::Float => lower_binary_float(ctx, op, lhs, rhs),
         ScalarKind::Sint => lower_binary_sint(ctx, op, lhs, rhs),
@@ -342,13 +618,27 @@ fn lower_binary_bool(
     Ok(dst)
 }
 
-fn lower_unary(
+fn lower_unary_vec(
     ctx: &mut LowerCtx<'_>,
     op: UnaryOperator,
     inner: Handle<Expression>,
-) -> Result<VReg, LowerError> {
+) -> Result<VRegVec, LowerError> {
+    let inner_vs = lower_expr_vec(ctx, inner)?;
     let k = expr_scalar_kind(ctx.module, ctx.func, inner)?;
-    let src = lower_expr(ctx, inner)?;
+    let mut result = VRegVec::new();
+    for &src in &inner_vs {
+        let v = lower_unary_scalar(ctx, op, src, k)?;
+        result.push(v);
+    }
+    Ok(result)
+}
+
+fn lower_unary_scalar(
+    ctx: &mut LowerCtx<'_>,
+    op: UnaryOperator,
+    src: VReg,
+    k: ScalarKind,
+) -> Result<VReg, LowerError> {
     let dst = match op {
         UnaryOperator::LogicalNot => {
             if k != ScalarKind::Bool {
@@ -392,43 +682,65 @@ fn lower_unary(
     Ok(dst)
 }
 
-fn lower_select(
+fn lower_select_vec(
     ctx: &mut LowerCtx<'_>,
     condition: Handle<Expression>,
     accept: Handle<Expression>,
     reject: Handle<Expression>,
-) -> Result<VReg, LowerError> {
-    let cond = lower_expr(ctx, condition)?;
-    let t = lower_expr(ctx, accept)?;
-    let f = lower_expr(ctx, reject)?;
+) -> Result<VRegVec, LowerError> {
+    let cond_vs = lower_expr_vec(ctx, condition)?;
+    let accept_vs = lower_expr_vec(ctx, accept)?;
+    let reject_vs = lower_expr_vec(ctx, reject)?;
+    if accept_vs.len() != reject_vs.len() {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "select accept/reject width mismatch",
+        )));
+    }
+    let n = accept_vs.len();
     let ty = expr_scalar_kind(ctx.module, ctx.func, accept)?;
     let dst_ty = match ty {
         ScalarKind::Float => IrType::F32,
-        ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => IrType::I32,
-        ScalarKind::AbstractInt | ScalarKind::AbstractFloat => {
-            return Err(LowerError::UnsupportedType(String::from("abstract select")));
-        }
+        _ => IrType::I32,
     };
-    let dst = ctx.fb.alloc_vreg(dst_ty);
-    ctx.fb.push(Op::Select {
-        dst,
-        cond,
-        if_true: t,
-        if_false: f,
-    });
-    Ok(dst)
+    let mut result = VRegVec::new();
+    for i in 0..n {
+        let c = cond_vs[i.min(cond_vs.len().saturating_sub(1).max(0))];
+        let dst = ctx.fb.alloc_vreg(dst_ty);
+        ctx.fb.push(Op::Select {
+            dst,
+            cond: c,
+            if_true: accept_vs[i],
+            if_false: reject_vs[i],
+        });
+        result.push(dst);
+    }
+    Ok(result)
 }
 
-fn lower_as(
+fn lower_as_vec(
     ctx: &mut LowerCtx<'_>,
     inner: Handle<Expression>,
     target: ScalarKind,
-) -> Result<VReg, LowerError> {
+) -> Result<VRegVec, LowerError> {
+    let inner_vs = lower_expr_vec(ctx, inner)?;
     let src_k = expr_scalar_kind(ctx.module, ctx.func, inner)?;
-    let v = lower_expr(ctx, inner)?;
     if src_k == target {
-        return Ok(v);
+        return Ok(inner_vs);
     }
+    let mut result = VRegVec::new();
+    for &src in &inner_vs {
+        let v = lower_as_scalar(ctx, src, src_k, target)?;
+        result.push(v);
+    }
+    Ok(result)
+}
+
+fn lower_as_scalar(
+    ctx: &mut LowerCtx<'_>,
+    v: VReg,
+    src_k: ScalarKind,
+    target: ScalarKind,
+) -> Result<VReg, LowerError> {
     let dst_ty = match target {
         ScalarKind::Float => IrType::F32,
         ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => IrType::I32,
