@@ -316,6 +316,46 @@ fn round_trip_constants() {
 }
 
 #[test]
+fn round_trip_loop_continuing() {
+    assert_round_trip(
+        "func @for_sum(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+  }
+  return v1
+}
+",
+    );
+}
+
+#[test]
+fn round_trip_loop_continuing_with_break_if() {
+    assert_round_trip(
+        "func @for_sum2(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+    v3:i32 = ige_s v2, v0
+    br_if_not v3
+  }
+  return v1
+}
+",
+    );
+}
+
+#[test]
 fn parse_accepts_hex_iconst() {
     let ir = "func @h() -> i32 {
   v0:i32 = iconst.i32 0xff

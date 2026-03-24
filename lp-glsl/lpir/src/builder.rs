@@ -31,6 +31,7 @@ enum BlockEntry {
     },
     Loop {
         start_idx: usize,
+        continuing_set: bool,
     },
     Switch {
         start_idx: usize,
@@ -154,8 +155,37 @@ impl FunctionBuilder {
 
     pub fn push_loop(&mut self) {
         let idx = self.body.len();
-        self.body.push(Op::LoopStart { end_offset: 0 });
-        self.block_stack.push(BlockEntry::Loop { start_idx: idx });
+        self.body.push(Op::LoopStart {
+            continuing_offset: 0,
+            end_offset: 0,
+        });
+        self.block_stack.push(BlockEntry::Loop {
+            start_idx: idx,
+            continuing_set: false,
+        });
+    }
+
+    pub fn push_continuing(&mut self) {
+        let cur = self.body.len() as u32;
+        let top = self
+            .block_stack
+            .last_mut()
+            .expect("push_continuing outside block");
+        let BlockEntry::Loop {
+            start_idx,
+            continuing_set,
+        } = top
+        else {
+            panic!("push_continuing: expected Loop on stack");
+        };
+        assert!(!*continuing_set, "push_continuing called twice");
+        *continuing_set = true;
+        if let Op::LoopStart {
+            continuing_offset, ..
+        } = &mut self.body[*start_idx]
+        {
+            *continuing_offset = cur;
+        }
     }
 
     pub fn end_loop(&mut self) {
@@ -164,8 +194,15 @@ impl FunctionBuilder {
         let after = (end_idx + 1) as u32;
         let entry = self.block_stack.pop().expect("end_loop without push_loop");
         match entry {
-            BlockEntry::Loop { start_idx } => {
-                if let Op::LoopStart { end_offset } = &mut self.body[start_idx] {
+            BlockEntry::Loop { start_idx, .. } => {
+                if let Op::LoopStart {
+                    continuing_offset,
+                    end_offset,
+                } = &mut self.body[start_idx]
+                {
+                    if *continuing_offset == 0 {
+                        *continuing_offset = (start_idx + 1) as u32;
+                    }
                     *end_offset = after;
                 }
             }

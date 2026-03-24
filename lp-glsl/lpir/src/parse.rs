@@ -433,6 +433,10 @@ fn parse_stmt_line(
         fb.push_else();
         return Ok(());
     }
+    if line == "continuing:" {
+        fb.push_continuing();
+        return Ok(());
+    }
     if line == "}" {
         fb.close_brace_for_text(peek_next_line)
             .map_err(|m| err(1, 1, m))?;

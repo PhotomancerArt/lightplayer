@@ -1521,6 +1521,101 @@ fn interp_error_display() {
     assert!(e.to_string().contains("nope"));
 }
 
+#[test]
+fn interp_loop_continuing_for_sum() {
+    let ir = "func @for_sum(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+  }
+  return v1
+}
+";
+    assert_eq!(run_i32(ir, "for_sum", &[Value::I32(5)]), 10);
+    assert_eq!(run_i32(ir, "for_sum", &[Value::I32(0)]), 0);
+    assert_eq!(run_i32(ir, "for_sum", &[Value::I32(1)]), 0);
+}
+
+#[test]
+fn interp_loop_continuing_break_if() {
+    let ir = "func @f(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+    v3:i32 = ilt_s v2, v0
+    br_if_not v3
+  }
+  return v1
+}
+";
+    assert_eq!(run_i32(ir, "f", &[Value::I32(5)]), 10);
+}
+
+#[test]
+fn interp_loop_continuing_continue_in_body() {
+    let ir = "func @f(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v4:i32 = ieq_imm v2, 2
+    if v4 {
+      continue
+    }
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+  }
+  return v1
+}
+";
+    // sum 0..5 skipping i=2: 0+1+3+4 = 8
+    assert_eq!(run_i32(ir, "f", &[Value::I32(5)]), 8);
+}
+
+#[test]
+fn interp_loop_continuing_nested() {
+    let ir = "func @f(v0:i32, v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
+  loop {
+    v4:i32 = ige_s v3, v0
+    if v4 {
+      break
+    }
+    v5:i32 = iconst.i32 0
+    loop {
+      v6:i32 = ige_s v5, v1
+      if v6 {
+        break
+      }
+      v2 = iadd v2, v5
+      continuing:
+      v5 = iadd_imm v5, 1
+    }
+    continuing:
+    v3 = iadd_imm v3, 1
+  }
+  return v2
+}
+";
+    // 3 outer * (0+1+2+3) inner = 3*6 = 18
+    assert_eq!(run_i32(ir, "f", &[Value::I32(3), Value::I32(4)]), 18);
+}
+
 // --- Helpers (bottom of module) ---
 
 struct NoImports;

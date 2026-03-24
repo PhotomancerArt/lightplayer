@@ -102,7 +102,10 @@ fn validate_imports(module: &IrModule, errs: &mut Vec<ValidationError>) {
 enum StackEntry {
     If,
     Else,
-    Loop,
+    Loop {
+        loop_start: usize,
+        continuing_offset: u32,
+    },
     Switch {
         cases: BTreeSet<i32>,
         default_arm: bool,
@@ -127,16 +130,31 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
 
         match op {
             Op::Break | Op::Continue | Op::BrIfNot { .. } => {
-                let loop_depth = stack
+                let innermost_loop = stack
                     .iter()
-                    .filter(|e| matches!(e, StackEntry::Loop))
-                    .count();
-                if loop_depth == 0 {
+                    .rev()
+                    .find(|e| matches!(e, StackEntry::Loop { .. }));
+                if innermost_loop.is_none() {
                     errs.push(err_in_func(
                         fname,
                         op_i,
                         "break/continue/br_if_not outside loop",
                     ));
+                } else if matches!(op, Op::Continue) {
+                    if let Some(StackEntry::Loop {
+                        loop_start,
+                        continuing_offset,
+                    }) = innermost_loop
+                    {
+                        let co = *continuing_offset as usize;
+                        if co > *loop_start + 1 && i >= co {
+                            errs.push(err_in_func(
+                                fname,
+                                op_i,
+                                "continue inside continuing section",
+                            ));
+                        }
+                    }
                 }
             }
             _ => {}
@@ -152,7 +170,30 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                 Some(StackEntry::If) => stack.push(StackEntry::Else),
                 _ => errs.push(err_in_func(fname, op_i, "`else` without matching `if`")),
             },
-            Op::LoopStart { .. } => stack.push(StackEntry::Loop),
+            Op::LoopStart {
+                continuing_offset,
+                end_offset,
+            } => {
+                let co = *continuing_offset as usize;
+                if co < i + 1 {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "LoopStart continuing_offset before body start",
+                    ));
+                }
+                if *end_offset > 0 && *continuing_offset >= *end_offset {
+                    errs.push(err_in_func(
+                        fname,
+                        op_i,
+                        "LoopStart continuing_offset >= end_offset",
+                    ));
+                }
+                stack.push(StackEntry::Loop {
+                    loop_start: i,
+                    continuing_offset: *continuing_offset,
+                });
+            }
             Op::SwitchStart { .. } => stack.push(StackEntry::Switch {
                 cases: BTreeSet::new(),
                 default_arm: false,

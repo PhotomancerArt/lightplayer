@@ -13,7 +13,7 @@ use crate::types::{IrType, VReg};
 enum Block {
     If,
     Else,
-    Loop,
+    Loop { start_pc: usize },
     Switch,
     Case,
 }
@@ -146,6 +146,17 @@ fn print_op_at(
     pc: &mut usize,
     depth: &mut usize,
 ) {
+    if let Some(Block::Loop { start_pc }) = stack.last() {
+        if let Op::LoopStart {
+            continuing_offset, ..
+        } = &body[*start_pc]
+        {
+            let co = *continuing_offset as usize;
+            if co != *start_pc + 1 && *pc == co {
+                let _ = writeln!(out, "{}continuing:", indent_str(*depth));
+            }
+        }
+    }
     let ind = indent_str(*depth);
     match &body[*pc] {
         Op::IfStart { cond, .. } => {
@@ -166,7 +177,7 @@ fn print_op_at(
         }
         Op::LoopStart { .. } => {
             let _ = writeln!(out, "{ind}loop {{");
-            stack.push(Block::Loop);
+            stack.push(Block::Loop { start_pc: *pc });
             *depth += 1;
             *pc += 1;
         }

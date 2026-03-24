@@ -302,6 +302,7 @@ pub enum Op {
     /// False branch target; if reached by fall-through from the then-arm, jump to the enclosing `IfStart`'s `end_offset`.
     Else,
     LoopStart {
+        continuing_offset: u32,
         end_offset: u32,
     },
     SwitchStart {

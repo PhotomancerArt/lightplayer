@@ -160,18 +160,20 @@ fn exec_func(
                     pc += 1;
                 }
             }
-            Op::LoopStart { end_offset } => {
+            Op::LoopStart {
+                continuing_offset,
+                end_offset,
+            } => {
                 ctrl.push(Ctrl::Loop {
                     head: pc,
+                    continuing: *continuing_offset as usize,
                     exit: *end_offset as usize,
                 });
                 pc += 1;
             }
             Op::End => match ctrl.last() {
-                Some(Ctrl::Loop { exit, .. }) if *exit == pc + 1 => {
-                    if let Some(Ctrl::Loop { head, .. }) = ctrl.pop() {
-                        pc = head + 1;
-                    }
+                Some(Ctrl::Loop { exit, head, .. }) if *exit == pc + 1 => {
+                    pc = *head + 1;
                 }
                 Some(Ctrl::If { .. }) => {
                     ctrl.pop();
@@ -195,14 +197,15 @@ fn exec_func(
                 }
             }
             Op::Continue => {
-                let mut head = None;
-                for c in ctrl.iter().rev() {
-                    if let Ctrl::Loop { head: h, .. } = c {
-                        head = Some(*h);
+                let mut target = None;
+                while let Some(c) = ctrl.last() {
+                    if let Ctrl::Loop { continuing, .. } = c {
+                        target = Some(*continuing);
                         break;
                     }
+                    ctrl.pop();
                 }
-                pc = head.ok_or_else(|| InterpError::Internal("continue".into()))? + 1;
+                pc = target.ok_or_else(|| InterpError::Internal("continue".into()))?;
             }
             Op::BrIfNot { cond } => {
                 let c = get_reg(&regs, *cond)?;
@@ -285,9 +288,18 @@ fn exec_func(
 }
 
 enum Ctrl {
-    If { merge: usize },
-    Loop { head: usize, exit: usize },
-    SwitchArm { end: usize, merge: usize },
+    If {
+        merge: usize,
+    },
+    Loop {
+        head: usize,
+        continuing: usize,
+        exit: usize,
+    },
+    SwitchArm {
+        end: usize,
+        merge: usize,
+    },
 }
 
 fn get_reg(regs: &[Option<Value>], v: crate::types::VReg) -> Result<Value, InterpError> {

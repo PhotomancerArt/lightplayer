@@ -310,6 +310,82 @@ fn validate_err_vreg_pool_oob() {
 }
 
 #[test]
+fn validate_err_continue_in_continuing() {
+    let ir = "func @bad(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+    continue
+  }
+  return v1
+}
+";
+    let m = parse_module(ir).unwrap();
+    let errs = validate_module(&m).expect_err("continue in continuing");
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("continue inside continuing"))
+    );
+}
+
+#[test]
+fn validate_ok_continue_in_nested_loop_in_continuing() {
+    let ir = "func @ok() -> i32 {
+  v0:i32 = iconst.i32 0
+  v1:i32 = iconst.i32 0
+  loop {
+    v2:i32 = ige_s v1, v0
+    if v2 {
+      break
+    }
+    continuing:
+    v1 = iadd_imm v1, 1
+    v3:i32 = iconst.i32 0
+    loop {
+      v4:i32 = ieq_imm v3, 1
+      if v4 {
+        break
+      }
+      v3 = iadd_imm v3, 1
+      continue
+    }
+  }
+  return v0
+}
+";
+    let m = parse_module(ir).unwrap();
+    validate_module(&m).unwrap();
+}
+
+#[test]
+fn validate_ok_loop_continuing_passes() {
+    let ir = "func @f(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v1 = iadd v1, v2
+    continuing:
+    v2 = iadd_imm v2, 1
+  }
+  return v1
+}
+";
+    let m = parse_module(ir).unwrap();
+    validate_module(&m).unwrap();
+}
+
+#[test]
 fn validate_err_slot_addr_oob() {
     let f = IrFunction {
         name: String::from("bad"),
