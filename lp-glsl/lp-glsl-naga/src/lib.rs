@@ -34,6 +34,7 @@ pub use lower_error::LowerError;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::std_math_handler::StdMathHandler;
 
     #[test]
     fn parse_float_add() {
@@ -106,6 +107,37 @@ mod tests {
         let naga = compile(src).unwrap();
         let ir = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_sin_validates_with_imports() {
+        let src = "float f(float x) { return sin(x); }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+        assert!(!ir.imports.is_empty());
+    }
+
+    #[test]
+    fn interp_sin_std_math() {
+        use lpir::{Value, interpret};
+        let src = "float f(float x) { return sin(x); }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        let mut h = StdMathHandler;
+        let out = interpret(&ir, "f", &[Value::F32(0.0)], &mut h).expect("interp");
+        assert!(out[0].as_f32().unwrap().abs() < 1e-5);
+    }
+
+    #[test]
+    fn interp_nested_user_call() {
+        use lpir::{Value, interpret};
+        let src = "float g(float x) { return x + 1.0; } float f(float x) { return g(x); }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        let mut h = StdMathHandler;
+        let out = interpret(&ir, "f", &[Value::F32(2.0)], &mut h).expect("interp");
+        assert!((out[0].as_f32().unwrap() - 3.0).abs() < 1e-4);
     }
 }
 

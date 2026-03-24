@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+libm = "0.2"
 lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
 lpir = { path = "../lpir" }
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }

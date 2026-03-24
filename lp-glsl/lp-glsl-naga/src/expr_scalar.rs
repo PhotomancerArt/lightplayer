@@ -78,9 +78,7 @@ pub(crate) fn expr_scalar_kind(
                 "ZeroValue non-scalar",
             ))),
         },
-        Expression::Math { .. } => Err(LowerError::UnsupportedExpression(String::from(
-            "Math (phase 5)",
-        ))),
+        Expression::Math { arg, .. } => expr_scalar_kind(module, func, *arg),
         _ => Err(LowerError::UnsupportedExpression(format!(
             "cannot infer scalar kind for {:?}",
             func.expressions[expr]

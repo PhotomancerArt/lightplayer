@@ -1,4 +1,4 @@
-//! Naga [`naga::Expression`] → LPIR ops (scalar subset; `Math` / `CallResult` in phase 5).
+//! Naga [`naga::Expression`] → LPIR ops (scalar subset).
 
 use alloc::format;
 use alloc::string::String;
@@ -9,6 +9,7 @@ use naga::{BinaryOperator, Expression, Handle, Literal, ScalarKind, UnaryOperato
 use crate::expr_scalar::expr_scalar_kind;
 use crate::lower_ctx::LowerCtx;
 use crate::lower_error::LowerError;
+use crate::lower_math;
 
 pub(crate) fn lower_expr(
     ctx: &mut LowerCtx<'_>,
@@ -65,12 +66,21 @@ fn lower_expr_uncached(
             lower_as(ctx, *inner, *kind)
         }
         Expression::ZeroValue(ty_h) => lower_zero_value(ctx, *ty_h),
-        Expression::CallResult(_) => Err(LowerError::UnsupportedExpression(String::from(
-            "CallResult (phase 5)",
-        ))),
-        Expression::Math { .. } => Err(LowerError::UnsupportedExpression(String::from(
-            "Math (phase 5)",
-        ))),
+        Expression::CallResult(_) => {
+            let i = expr.index();
+            ctx.expr_cache.get(i).copied().flatten().ok_or_else(|| {
+                LowerError::Internal(String::from(
+                    "CallResult used before matching Call statement",
+                ))
+            })
+        }
+        Expression::Math {
+            fun,
+            arg,
+            arg1,
+            arg2,
+            arg3,
+        } => lower_math::lower_math(ctx, *fun, *arg, *arg1, *arg2, *arg3),
         _ => Err(LowerError::UnsupportedExpression(format!(
             "{:?}",
             ctx.func.expressions[expr]
