@@ -1,8 +1,4 @@
 //! Per-function lowering context (builder, expression cache, local maps).
-#![allow(
-    dead_code,
-    reason = "LowerCtx fields and helpers are used in phases 3–4."
-)]
 
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -16,6 +12,8 @@ use naga::{Expression, Function, Handle, LocalVariable, Module, ScalarKind, Stat
 use crate::lower_error::LowerError;
 use crate::lower_expr;
 
+// `ir_module`, `func_map`, `import_map` are for call/math lowering; `return_types` may be used for checks.
+#[allow(dead_code, reason = "reserved for call lowering and cross-function checks")]
 pub(crate) struct LowerCtx<'a> {
     pub fb: FunctionBuilder,
     pub module: &'a Module,

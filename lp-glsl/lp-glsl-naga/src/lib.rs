@@ -91,6 +91,22 @@ mod tests {
         assert_eq!(ir.functions[0].name, "add");
         assert_eq!(ir.functions[0].param_count, 2);
     }
+
+    #[test]
+    fn lowered_module_validates() {
+        let src = "float add(float a, float b) { return a + b; }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate lowered IR");
+    }
+
+    #[test]
+    fn lower_void_implicit_return_validates() {
+        let src = "void f() { }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -2,17 +2,15 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use alloc::vec::Vec;
 
-use lpir::{CalleeRef, IrFunction, IrModule, IrType, ModuleBuilder, Op, VReg};
+use lpir::{CalleeRef, IrFunction, IrModule, ModuleBuilder};
 use naga::{Function, Handle, Module};
 
 use crate::NagaModule;
 use crate::lower_ctx::LowerCtx;
 use crate::lower_error::LowerError;
 
-/// Lower a parsed [`NagaModule`] to LPIR. Function bodies are stubbed (constant return only)
-/// until later phases wire in `lower_stmt` / `lower_expr`.
+/// Lower a parsed [`NagaModule`] to LPIR (scalar bodies via `lower_stmt` / `lower_expr`).
 pub fn lower(naga_module: &NagaModule) -> Result<IrModule, LowerError> {
     let import_count = 0u32;
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
@@ -24,7 +22,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<IrModule, LowerError> {
     let mut mb = ModuleBuilder::new();
     for (handle, info) in &naga_module.functions {
         let func = &naga_module.module.functions[*handle];
-        let ir = lower_stub_function(
+        let ir = lower_function(
             &naga_module.module,
             func,
             info.name.as_str(),
@@ -36,7 +34,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<IrModule, LowerError> {
     Ok(mb.finish())
 }
 
-fn lower_stub_function(
+fn lower_function(
     module: &Module,
     func: &Function,
     name: &str,
@@ -44,20 +42,9 @@ fn lower_stub_function(
     import_map: &BTreeMap<String, CalleeRef>,
 ) -> Result<IrFunction, LowerError> {
     let mut ctx = LowerCtx::new(module, func, name, func_map, import_map)?;
-    stub_return(&mut ctx)?;
-    Ok(ctx.finish())
-}
-
-fn stub_return(ctx: &mut LowerCtx<'_>) -> Result<(), LowerError> {
-    let mut out: Vec<VReg> = Vec::new();
-    for ty in &ctx.return_types {
-        let v = ctx.fb.alloc_vreg(*ty);
-        match ty {
-            IrType::F32 => ctx.fb.push(Op::FconstF32 { dst: v, value: 0.0 }),
-            IrType::I32 => ctx.fb.push(Op::IconstI32 { dst: v, value: 0 }),
-        }
-        out.push(v);
+    crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
+    if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {
+        ctx.fb.push_return(&[]);
     }
-    ctx.fb.push_return(&out);
-    Ok(())
+    Ok(ctx.finish())
 }
