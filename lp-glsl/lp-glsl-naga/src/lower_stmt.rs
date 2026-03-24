@@ -10,6 +10,7 @@ use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue};
 
 use crate::lower_ctx::{LowerCtx, naga_type_to_ir_type};
 use crate::lower_error::LowerError;
+use crate::lower_lpfx;
 
 pub(crate) fn lower_block(ctx: &mut LowerCtx<'_>, block: &Block) -> Result<(), LowerError> {
     for stmt in block.iter() {
@@ -152,9 +153,7 @@ fn lower_user_call(
     let f = &ctx.module.functions[callee];
     let name = f.name.as_deref().unwrap_or("");
     if name.starts_with("lpfx_") {
-        return Err(LowerError::UnsupportedStatement(String::from(
-            "LPFX call (phase 6)",
-        )));
+        return lower_lpfx::lower_lpfx_call(ctx, callee, arguments, result);
     }
     if f.body.is_empty() {
         if result.is_some() {

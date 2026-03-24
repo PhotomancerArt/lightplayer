@@ -33,8 +33,13 @@ pub use lower_error::LowerError;
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
     use super::*;
     use crate::std_math_handler::StdMathHandler;
+    use lpir::{ImportHandler, InterpError, Value};
 
     #[test]
     fn parse_float_add() {
@@ -138,6 +143,40 @@ mod tests {
         let mut h = StdMathHandler;
         let out = interpret(&ir, "f", &[Value::F32(2.0)], &mut h).expect("interp");
         assert!((out[0].as_f32().unwrap() - 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn lower_lpfx_saturate_validates_and_interps() {
+        use lpir::interpret;
+        let src = "float f(float x) { return lpfx_saturate(x); }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+        let mut imp = TestImports::default();
+        let out = interpret(&ir, "f", &[Value::F32(1.5)], &mut imp).expect("interp");
+        assert!((out[0].as_f32().unwrap() - 1.0).abs() < 1e-5);
+    }
+
+    #[derive(Default)]
+    struct TestImports {
+        math: StdMathHandler,
+    }
+
+    impl ImportHandler for TestImports {
+        fn call(
+            &mut self,
+            module_name: &str,
+            func_name: &str,
+            args: &[Value],
+        ) -> Result<Vec<Value>, InterpError> {
+            if module_name == "lpfx" && func_name.starts_with("lpfx_saturate_") {
+                let x = args[0]
+                    .as_f32()
+                    .ok_or_else(|| InterpError::Import(String::from("expected f32")))?;
+                return Ok(vec![Value::F32(x.max(0.0).min(1.0))]);
+            }
+            self.math.call(module_name, func_name, args)
+        }
     }
 }
 

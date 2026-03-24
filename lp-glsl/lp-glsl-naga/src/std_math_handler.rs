@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use lpir::{ImportHandler, InterpError, Value};
 
 /// Dispatches `std.math` imports using `libm` (`f32` paths).
+#[derive(Default)]
 pub struct StdMathHandler;
 
 impl ImportHandler for StdMathHandler {

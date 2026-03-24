@@ -13,7 +13,10 @@ use crate::lower_error::LowerError;
 use crate::lower_expr;
 
 // `ir_module`, `func_map`, `import_map` are for call/math lowering; `return_types` may be used for checks.
-#[allow(dead_code, reason = "reserved for call lowering and cross-function checks")]
+#[allow(
+    dead_code,
+    reason = "reserved for call lowering and cross-function checks"
+)]
 pub(crate) struct LowerCtx<'a> {
     pub fb: FunctionBuilder,
     pub module: &'a Module,
@@ -24,6 +27,7 @@ pub(crate) struct LowerCtx<'a> {
     pub param_aliases: BTreeMap<Handle<LocalVariable>, VReg>,
     pub func_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub import_map: BTreeMap<String, CalleeRef>,
+    pub lpfx_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub return_types: Vec<IrType>,
 }
 
@@ -34,6 +38,7 @@ impl<'a> LowerCtx<'a> {
         name: &str,
         func_map: &BTreeMap<Handle<Function>, CalleeRef>,
         import_map: &BTreeMap<String, CalleeRef>,
+        lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
     ) -> Result<Self, LowerError> {
         let return_types = func_return_ir_types(module, func)?;
         let mut fb = FunctionBuilder::new(name, &return_types);
@@ -79,6 +84,7 @@ impl<'a> LowerCtx<'a> {
             param_aliases,
             func_map: func_map.clone(),
             import_map: import_map.clone(),
+            lpfx_map: lpfx_map.clone(),
             return_types,
         })
     }

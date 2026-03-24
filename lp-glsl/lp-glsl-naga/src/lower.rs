@@ -10,11 +10,13 @@ use naga::{Function, Handle, Module};
 use crate::NagaModule;
 use crate::lower_ctx::LowerCtx;
 use crate::lower_error::LowerError;
+use crate::lower_lpfx;
 
 /// Lower a parsed [`NagaModule`] to LPIR (scalar bodies via `lower_stmt` / `lower_expr`).
 pub fn lower(naga_module: &NagaModule) -> Result<IrModule, LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_std_math_imports(&mut mb);
+    let lpfx_map = lower_lpfx::register_lpfx_imports(&mut mb, naga_module)?;
     let import_count = mb.import_count();
 
     let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
@@ -30,6 +32,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<IrModule, LowerError> {
             info.name.as_str(),
             &func_map,
             &import_map,
+            &lpfx_map,
         )?;
         mb.add_function(ir);
     }
@@ -77,8 +80,9 @@ fn lower_function(
     name: &str,
     func_map: &BTreeMap<Handle<Function>, CalleeRef>,
     import_map: &BTreeMap<String, CalleeRef>,
+    lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
 ) -> Result<IrFunction, LowerError> {
-    let mut ctx = LowerCtx::new(module, func, name, func_map, import_map)?;
+    let mut ctx = LowerCtx::new(module, func, name, func_map, import_map, lpfx_map)?;
     crate::lower_stmt::lower_block(&mut ctx, &func.body)?;
     if func.result.is_none() && crate::lower_stmt::void_block_missing_return(&func.body) {
         ctx.fb.push_return(&[]);
