@@ -4007,6 +4007,8 @@ dependencies = [
 name = "lp-glsl-naga"
 version = "40.0.0"
 dependencies = [
+ "lp-glsl-builtin-ids",
+ "lpir",
  "naga 29.0.0",
 ]
 

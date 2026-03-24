@@ -5,6 +5,9 @@
 
 extern crate alloc;
 
+// Dependency reserved for math/LPFX lowering (later phases).
+use lp_glsl_builtin_ids as _;
+
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -14,6 +17,18 @@ use core::fmt::Write as _;
 pub use naga;
 
 use naga::{Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize};
+
+pub mod lower;
+mod lower_ctx;
+mod lower_error;
+mod lower_expr;
+mod lower_lpfx;
+mod lower_math;
+mod lower_stmt;
+pub mod std_math_handler;
+
+pub use lower::lower;
+pub use lower_error::LowerError;
 
 #[cfg(test)]
 mod tests {
@@ -64,6 +79,16 @@ mod tests {
         let src = "float f() { return 1.0; }";
         let result = compile(src).unwrap();
         assert!(result.module.functions.len() >= 1);
+    }
+
+    #[test]
+    fn lower_produces_ir_functions() {
+        let src = "float add(float a, float b) { return a + b; }";
+        let naga = compile(src).unwrap();
+        let ir = super::lower(&naga).expect("lower");
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "add");
+        assert_eq!(ir.functions[0].param_count, 2);
     }
 }
 
