@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Mixed Parameter Qualifiers: in, out, inout combinations

@@ -41,6 +41,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         ("asinh", 1) => Some(BuiltinId::LpQ32Asinh),
         ("atan", 1) => Some(BuiltinId::LpQ32Atan),
         ("atan", 2) => Some(BuiltinId::LpQ32Atan2),
+        ("atan2", 2) => Some(BuiltinId::LpQ32Atan2),
         ("atanh", 1) => Some(BuiltinId::LpQ32Atanh),
         ("cos", 1) => Some(BuiltinId::LpQ32Cos),
         ("cosh", 1) => Some(BuiltinId::LpQ32Cosh),

@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, VReg};
 use naga::{
-    Expression, Function, Handle, LocalVariable, Module, ScalarKind, Statement, TypeInner,
-    VectorSize,
+    AddressSpace, Expression, Function, Handle, LocalVariable, Module, ScalarKind, Statement, Type,
+    TypeInner, VectorSize,
 };
 use smallvec::SmallVec;
 
@@ -33,6 +33,8 @@ pub(crate) struct LowerCtx<'a> {
     pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
     /// VRegs per function argument index (flattened scalars).
     pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
+    /// `in`/`out`/`inout` parameters: Naga type handle of the pointee (for Load/Store).
+    pub(crate) pointer_args: BTreeMap<u32, Handle<Type>>,
     pub func_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub import_map: BTreeMap<String, CalleeRef>,
     pub lpfx_map: BTreeMap<Handle<Function>, CalleeRef>,
@@ -52,18 +54,31 @@ impl<'a> LowerCtx<'a> {
         let mut fb = FunctionBuilder::new(name, &return_types);
 
         let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
+        let mut pointer_args: BTreeMap<u32, Handle<Type>> = BTreeMap::new();
         for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
-            let tys = naga_type_to_ir_types(inner)?;
-            let mut vregs = VRegVec::new();
-            for ty in &tys {
-                let v = fb.add_param(*ty);
-                vregs.push(v);
+            match inner {
+                TypeInner::Pointer {
+                    base,
+                    space: AddressSpace::Function,
+                } => {
+                    let addr = fb.add_param(IrType::I32);
+                    arg_vregs.insert(i as u32, smallvec::smallvec![addr]);
+                    pointer_args.insert(i as u32, *base);
+                }
+                _ => {
+                    let tys = naga_type_to_ir_types(inner)?;
+                    let mut vregs = VRegVec::new();
+                    for ty in &tys {
+                        let v = fb.add_param(*ty);
+                        vregs.push(v);
+                    }
+                    arg_vregs.insert(i as u32, vregs);
+                }
             }
-            arg_vregs.insert(i as u32, vregs);
         }
 
-        let param_idx = scan_param_argument_indices(func);
+        let param_idx = scan_param_argument_indices(module, func);
         let mut param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
         for (lv, arg_i) in &param_idx {
             if let Some(vs) = arg_vregs.get(arg_i) {
@@ -96,6 +111,7 @@ impl<'a> LowerCtx<'a> {
             local_map,
             param_aliases,
             arg_vregs,
+            pointer_args,
             func_map: func_map.clone(),
             import_map: import_map.clone(),
             lpfx_map: lpfx_map.clone(),
@@ -238,6 +254,13 @@ pub(crate) fn naga_type_width(inner: &TypeInner) -> usize {
         TypeInner::Matrix { columns, rows, .. } => {
             vector_size_usize(columns) * vector_size_usize(rows)
         }
+        // `AccessIndex` on a matrix (or other) pointer yields `ValuePointer`; width must match the
+        // lowered value so `Math`/`mix`/`clamp` use the vector path instead of `ensure_expr`.
+        TypeInner::ValuePointer {
+            size: Some(vec_size),
+            ..
+        } => vector_size_usize(vec_size),
+        TypeInner::ValuePointer { size: None, .. } => 1,
         _ => 1,
     }
 }
@@ -254,10 +277,14 @@ pub(crate) fn func_return_ir_types(
     Ok(tys.to_vec())
 }
 
-fn scan_param_argument_indices(func: &Function) -> BTreeMap<Handle<LocalVariable>, u32> {
+fn scan_param_argument_indices(
+    module: &Module,
+    func: &Function,
+) -> BTreeMap<Handle<LocalVariable>, u32> {
     let mut m = BTreeMap::new();
     fn walk_block(
         block: &naga::Block,
+        module: &Module,
         func: &Function,
         m: &mut BTreeMap<Handle<LocalVariable>, u32>,
     ) {
@@ -267,29 +294,41 @@ fn scan_param_argument_indices(func: &Function) -> BTreeMap<Handle<LocalVariable
                     if let (Expression::LocalVariable(lv), Expression::FunctionArgument(idx)) =
                         (&func.expressions[*pointer], &func.expressions[*value])
                     {
-                        m.insert(*lv, *idx);
+                        let arg_ty = func.arguments.get(*idx as usize).map(|a| a.ty);
+                        let is_ptr = arg_ty.is_some_and(|h| {
+                            matches!(
+                                &module.types[h].inner,
+                                TypeInner::Pointer {
+                                    space: AddressSpace::Function,
+                                    ..
+                                }
+                            )
+                        });
+                        if !is_ptr {
+                            m.insert(*lv, *idx);
+                        }
                     }
                 }
-                Statement::Block(inner) => walk_block(inner, func, m),
+                Statement::Block(inner) => walk_block(inner, module, func, m),
                 Statement::If { accept, reject, .. } => {
-                    walk_block(accept, func, m);
-                    walk_block(reject, func, m);
+                    walk_block(accept, module, func, m);
+                    walk_block(reject, module, func, m);
                 }
                 Statement::Switch { cases, .. } => {
                     for case in cases.iter() {
-                        walk_block(&case.body, func, m);
+                        walk_block(&case.body, module, func, m);
                     }
                 }
                 Statement::Loop {
                     body, continuing, ..
                 } => {
-                    walk_block(body, func, m);
-                    walk_block(continuing, func, m);
+                    walk_block(body, module, func, m);
+                    walk_block(continuing, module, func, m);
                 }
                 _ => {}
             }
         }
     }
-    walk_block(&func.body, func, &mut m);
+    walk_block(&func.body, module, func, &mut m);
     m
 }

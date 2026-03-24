@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int test_for_loop_preinc() {
     int sum = 0;

@@ -43,6 +43,7 @@ SHOW_HELP=false
 SHOW_LIST=false
 REGEN_GEN_FILES=false
 TARGET_ARG=()
+SUMMARY_ARG=()
 TEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -62,6 +63,10 @@ while [[ $# -gt 0 ]]; do
   --target)
     TARGET_ARG=("--target" "$2")
     shift 2
+    ;;
+  --summary)
+    SUMMARY_ARG=("--summary")
+    shift
     ;;
   *)
     TEST_ARGS+=("$1")
@@ -85,6 +90,7 @@ OPTIONS:
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
     --target NAME       Run only the specified target (cranelift.q32, wasm.q32)
+    --summary           Force summary mode even for a single test file
     --fix               Remove @unimplemented annotations from tests that now pass
 
 ENVIRONMENT:
@@ -227,4 +233,4 @@ fi
 # This ensures cargo run picks up all compilation changes in the lp-glsl workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
-cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"
+cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${SUMMARY_ARG[@]}" "${TEST_ARGS[@]}"

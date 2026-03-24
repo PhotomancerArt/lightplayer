@@ -40,6 +40,7 @@ pub(crate) fn expr_type_inner(
                 .arguments
                 .get(*i as usize)
                 .ok_or_else(|| LowerError::Internal(String::from("bad argument index")))?;
+            // Keep Pointer type for `inout`/`out` so `Load`/`expr_type_inner` see a pointer.
             Ok(module.types[arg.ty].inner.clone())
         }
         Expression::LocalVariable(lv) => Ok(TypeInner::Pointer {
@@ -317,7 +318,10 @@ pub(crate) fn expr_scalar_kind(
                 .arguments
                 .get(*i as usize)
                 .ok_or_else(|| LowerError::Internal(String::from("bad argument index")))?;
-            type_handle_scalar_kind(module, arg.ty)
+            match &module.types[arg.ty].inner {
+                TypeInner::Pointer { base, .. } => type_handle_scalar_kind(module, *base),
+                _ => type_handle_scalar_kind(module, arg.ty),
+            }
         }
         Expression::LocalVariable(lv) => {
             let lv_ty = func.local_variables[*lv].ty;

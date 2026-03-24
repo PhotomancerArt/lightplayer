@@ -13,7 +13,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub use lp_glsl_naga::{CompileError, FloatMode, GlslType};
-pub use module::{WasmExport, WasmModule, glsl_type_to_wasm_components};
+pub use module::{
+    SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmModule, glsl_type_to_wasm_components,
+};
 pub use options::WasmOptions;
 
 use lp_glsl_naga::NagaModule;
@@ -48,11 +50,13 @@ pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslW
     let naga_module = lp_glsl_naga::compile(source)?;
     let ir_module = lp_glsl_naga::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(alloc::format!("{e}")))?;
-    let wasm_bytes = emit::emit_module(&ir_module, &options).map_err(GlslWasmError::Codegen)?;
+    let (wasm_bytes, shadow_stack_base) =
+        emit::emit_module(&ir_module, &options).map_err(GlslWasmError::Codegen)?;
     let exports = collect_exports(&ir_module, &naga_module, &options);
     Ok(WasmModule {
         bytes: wasm_bytes,
         exports,
+        shadow_stack_base,
     })
 }
 

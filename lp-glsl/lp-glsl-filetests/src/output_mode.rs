@@ -12,8 +12,14 @@ pub enum OutputMode {
 }
 
 impl OutputMode {
-    /// Determine output mode based on test count and DEBUG environment variable.
-    pub fn from_test_count(test_count: usize) -> Self {
+    /// Determine output mode based on test count, DEBUG env var, and optional force flag.
+    ///
+    /// When `force_summary` is true, Summary mode is used regardless of test count.
+    /// `DEBUG=1` upgrades single-file runs to Debug, but does not override force_summary.
+    pub fn from_test_count(test_count: usize, force_summary: bool) -> Self {
+        if force_summary {
+            return OutputMode::Summary;
+        }
         let is_debug = std::env::var("DEBUG").unwrap_or_default() == "1";
         if test_count == 1 {
             if is_debug {

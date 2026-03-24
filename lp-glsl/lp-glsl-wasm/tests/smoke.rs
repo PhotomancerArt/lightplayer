@@ -277,6 +277,47 @@ fn q32_if_else() {
 }
 
 #[test]
+fn q32_if_else_both_return() {
+    let v = run_q32_f32(
+        "float f(float x) { if (x > 0.0) { return 1.0; } else { return 0.0; } return 0.0; }",
+        "f",
+        &[5.0],
+    );
+    assert!((v - 1.0).abs() < 0.02);
+    let v2 = run_q32_f32(
+        "float f(float x) { if (x > 0.0) { return 1.0; } else { return 0.0; } return 0.0; }",
+        "f",
+        &[-5.0],
+    );
+    assert!((v2 - 0.0).abs() < 0.02);
+}
+
+#[test]
+fn q32_vec4_if_else_return_validates() {
+    let src = r#"
+        vec2 prsd_demo(vec2 a, float t) { return vec2(0.0, 1.0); }
+        vec4 rainbow_main(vec2 fragCoord, vec2 outputSize, float time) {
+            vec2 tv = prsd_demo(fragCoord, time);
+            if (true) {
+                return vec4(tv.x, tv.y, 0.0, 1.0);
+            } else {
+                return vec4(0.0, 0.0, 0.0, 1.0);
+            }
+        }
+        float ok() { return 1.0; }
+    "#;
+    let module = glsl_wasm(
+        src,
+        WasmOptions {
+            float_mode: FloatMode::Q32,
+        },
+    )
+    .expect("compile");
+    let engine = wasmtime::Engine::default();
+    wasmtime::Module::new(&engine, &module.bytes).expect("wasm validate");
+}
+
+#[test]
 fn q32_for_loop() {
     let v = run_q32_f32_0(
         "float f() { float s = 0.0; for (int i = 0; i < 5; i++) { s = s + 1.0; } return s; }",

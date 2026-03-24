@@ -166,6 +166,7 @@ fn validate_err_call_arity() {
             func_name: String::from("g"),
             param_types: vec![IrType::F32],
             return_types: Vec::new(),
+            lpfx_glsl_params: None,
         }],
         functions: vec![func],
     };

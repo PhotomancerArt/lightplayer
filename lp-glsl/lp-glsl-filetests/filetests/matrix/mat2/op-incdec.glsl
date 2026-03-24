@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Pre-increment (++m) - mat2

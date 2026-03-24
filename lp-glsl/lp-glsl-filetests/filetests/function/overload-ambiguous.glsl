@@ -24,8 +24,6 @@ float test_overload_ambiguous_return_type() {
     return func_float(5); // Error: ambiguous call
 }
 
-// @unimplemented(backend=wasm)  // function in commented block
-// run: test_overload_ambiguous_return_type() ~= 5.0
 */
 
 float func_in(int x) {
@@ -61,9 +59,6 @@ float test_overload_ambiguous_conversions() {
     return func_float_int(1, 2); // Error: ambiguous - both equally good
 }
 
-// @unimplemented()
-// @unimplemented(backend=wasm)  // function in commented block
-// run: test_overload_ambiguous_conversions() ~= 3.0
 */
 
 float func_float_float(float x, float y) {
@@ -99,9 +94,6 @@ float test_overload_ambiguous_array_sizes() {
     return sum_arr2(arr2) + sum_arr3(arr3); // 3.0 + 6.0 = 9.0
 }
 
-// @unimplemented()
-// @unimplemented(backend=wasm)  // function in commented block
-// run: test_overload_ambiguous_array_sizes() ~= 9.0
 */
 
 float get_x_vec2(vec2 v) {
@@ -140,7 +132,4 @@ float test_overload_ambiguous_promotions() {
     return process_int(5); // Potentially ambiguous
 }
 
-// @unimplemented()
-// @unimplemented(backend=wasm)  // function in commented block
-// run: test_overload_ambiguous_promotions() ~= 5.0
 */

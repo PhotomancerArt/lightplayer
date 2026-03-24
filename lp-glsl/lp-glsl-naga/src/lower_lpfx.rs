@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, ImportDecl, IrType, ModuleBuilder, Op, VReg};
 use naga::{
-    AddressSpace, Block, Expression, Function, Handle, LocalVariable, Module, Statement, TypeInner,
+    AddressSpace, Block, Expression, Function, Handle, LocalVariable, Module, ScalarKind,
+    Statement, TypeInner, VectorSize,
 };
 
 use crate::NagaModule;
@@ -88,6 +89,66 @@ fn walk_block_for_lpfx_calls(
     }
 }
 
+fn lpfx_glsl_params_csv(module: &Module, callee: Handle<Function>) -> Result<String, LowerError> {
+    let f = &module.functions[callee];
+    let mut out = Vec::new();
+    for arg in &f.arguments {
+        out.push(lpfx_glsl_param_token(module, arg.ty)?);
+    }
+    Ok(out.join(","))
+}
+
+fn lpfx_glsl_param_token(module: &Module, ty: Handle<naga::Type>) -> Result<String, LowerError> {
+    match &module.types[ty].inner {
+        TypeInner::Pointer { base, .. } => lpfx_pointee_token(module, *base),
+        TypeInner::Scalar(scalar) => match scalar.kind {
+            ScalarKind::Float => Ok(String::from("Float")),
+            ScalarKind::Sint => Ok(String::from("Int")),
+            ScalarKind::Uint => Ok(String::from("UInt")),
+            ScalarKind::Bool | ScalarKind::AbstractInt | ScalarKind::AbstractFloat => Err(
+                LowerError::UnsupportedType(String::from("LPFX scalar parameter kind")),
+            ),
+        },
+        TypeInner::Vector { size, scalar, .. } => lpfx_vector_token(*size, scalar.kind),
+        _ => Err(LowerError::UnsupportedType(String::from(
+            "LPFX parameter type for glsl tag",
+        ))),
+    }
+}
+
+fn lpfx_pointee_token(module: &Module, base_ty: Handle<naga::Type>) -> Result<String, LowerError> {
+    match &module.types[base_ty].inner {
+        TypeInner::Scalar(scalar) => match scalar.kind {
+            ScalarKind::Float => Ok(String::from("Float")),
+            ScalarKind::Sint => Ok(String::from("Int")),
+            ScalarKind::Uint => Ok(String::from("UInt")),
+            ScalarKind::Bool | ScalarKind::AbstractInt | ScalarKind::AbstractFloat => Err(
+                LowerError::UnsupportedType(String::from("LPFX out scalar kind")),
+            ),
+        },
+        TypeInner::Vector { size, scalar, .. } => lpfx_vector_token(*size, scalar.kind),
+        _ => Err(LowerError::UnsupportedType(String::from(
+            "LPFX out pointee",
+        ))),
+    }
+}
+
+fn lpfx_vector_token(size: VectorSize, kind: ScalarKind) -> Result<String, LowerError> {
+    Ok(match (size, kind) {
+        (VectorSize::Bi, ScalarKind::Float) => String::from("Vec2"),
+        (VectorSize::Tri, ScalarKind::Float) => String::from("Vec3"),
+        (VectorSize::Quad, ScalarKind::Float) => String::from("Vec4"),
+        (VectorSize::Bi, ScalarKind::Uint) => String::from("UVec2"),
+        (VectorSize::Tri, ScalarKind::Uint) => String::from("UVec3"),
+        (VectorSize::Quad, ScalarKind::Uint) => String::from("UVec4"),
+        _ => {
+            return Err(LowerError::UnsupportedType(String::from(
+                "LPFX vector parameter kind",
+            )));
+        }
+    })
+}
+
 fn build_lpfx_import_decl(
     module: &Module,
     callee: Handle<Function>,
@@ -97,6 +158,7 @@ fn build_lpfx_import_decl(
         .name
         .clone()
         .ok_or_else(|| LowerError::Internal(String::from("LPFX callee missing name")))?;
+    let lpfx_glsl_params = Some(lpfx_glsl_params_csv(module, callee)?);
     let mut param_types = Vec::new();
     for arg in &f.arguments {
         match &module.types[arg.ty].inner {
@@ -148,6 +210,7 @@ fn build_lpfx_import_decl(
         func_name,
         param_types,
         return_types,
+        lpfx_glsl_params,
     })
 }
 

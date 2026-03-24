@@ -5,11 +5,12 @@ use alloc::string::String;
 
 use alloc::vec::Vec;
 
-use lpir::Op;
-use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue};
+use lpir::{IrType, Op, SlotId};
+use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
+use crate::lower_expr::coerce_assignment_vregs;
 use crate::lower_lpfx;
 
 pub(crate) fn lower_block(ctx: &mut LowerCtx<'_>, block: &Block) -> Result<(), LowerError> {
@@ -71,7 +72,11 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
         }
         Statement::Return { value } => match value {
             Some(expr) => {
-                let vs = ctx.ensure_expr_vec(*expr)?;
+                let mut vs = ctx.ensure_expr_vec(*expr)?;
+                if let Some(res) = &ctx.func.result {
+                    let dst_inner = &ctx.module.types[res.ty].inner;
+                    vs = coerce_assignment_vregs(ctx, dst_inner, *expr, vs)?;
+                }
                 ctx.fb.push_return(&vs);
                 Ok(())
             }
@@ -80,22 +85,50 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 Ok(())
             }
         },
-        Statement::Store { pointer, value } => {
-            let lv = store_pointer_local(ctx.func, *pointer)?;
-            let dsts = ctx.resolve_local(lv)?;
-            let srcs = ctx.ensure_expr_vec(*value)?;
-            if dsts.len() != srcs.len() {
-                return Err(LowerError::UnsupportedStatement(format!(
-                    "Store component mismatch {} vs {}",
-                    dsts.len(),
-                    srcs.len()
-                )));
+        Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
+            Expression::LocalVariable(lv) => {
+                let dsts = ctx.resolve_local(*lv)?;
+                let dst_inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                let raw = ctx.ensure_expr_vec(*value)?;
+                let srcs = coerce_assignment_vregs(ctx, dst_inner, *value, raw)?;
+                if dsts.len() != srcs.len() {
+                    return Err(LowerError::UnsupportedStatement(format!(
+                        "Store component mismatch {} vs {}",
+                        dsts.len(),
+                        srcs.len()
+                    )));
+                }
+                for (d, s) in dsts.iter().zip(srcs.iter()) {
+                    ctx.fb.push(Op::Copy { dst: *d, src: *s });
+                }
+                Ok(())
             }
-            for (d, s) in dsts.iter().zip(srcs.iter()) {
-                ctx.fb.push(Op::Copy { dst: *d, src: *s });
+            Expression::FunctionArgument(i) if ctx.pointer_args.contains_key(i) => {
+                let base_ty_h = ctx.pointer_args[i];
+                let base_inner = &ctx.module.types[base_ty_h].inner;
+                let ir_tys = naga_type_to_ir_types(base_inner)?;
+                let addr = ctx.arg_vregs_for(*i)?[0];
+                let srcs = ctx.ensure_expr_vec(*value)?;
+                if ir_tys.len() != srcs.len() {
+                    return Err(LowerError::UnsupportedStatement(format!(
+                        "Store to inout pointer: {} vs {} components",
+                        ir_tys.len(),
+                        srcs.len()
+                    )));
+                }
+                for (j, src) in srcs.iter().enumerate() {
+                    ctx.fb.push(Op::Store {
+                        base: addr,
+                        offset: (j * 4) as u32,
+                        value: *src,
+                    });
+                }
+                Ok(())
             }
-            Ok(())
-        }
+            _ => Err(LowerError::UnsupportedStatement(String::from(
+                "store to non-local pointer",
+            ))),
+        },
         Statement::Switch { selector, cases } => {
             let sel = ctx.ensure_expr(*selector)?;
             ctx.fb.push_switch(sel);
@@ -136,14 +169,14 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
     }
 }
 
-fn store_pointer_local(
+fn call_arg_pointer_local(
     func: &naga::Function,
     expr: Handle<Expression>,
 ) -> Result<Handle<LocalVariable>, LowerError> {
     match &func.expressions[expr] {
         Expression::LocalVariable(lv) => Ok(*lv),
-        _ => Err(LowerError::UnsupportedStatement(String::from(
-            "store to non-local pointer",
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "inout/out call argument must be a local variable",
         ))),
     }
 }
@@ -178,9 +211,31 @@ fn lower_user_call(
         .copied()
         .ok_or_else(|| LowerError::Internal(format!("callee not in export map: {name:?}")))?;
     let mut arg_vs = Vec::new();
-    for a in arguments {
-        let vs = ctx.ensure_expr_vec(*a)?;
-        arg_vs.extend_from_slice(&vs);
+    let mut inout_copybacks: Vec<(Handle<LocalVariable>, SlotId)> = Vec::new();
+    for (i, &arg_h) in arguments.iter().enumerate() {
+        let callee_arg = &f.arguments[i];
+        let callee_inner = &ctx.module.types[callee_arg.ty].inner;
+        if let TypeInner::Pointer { base, .. } = callee_inner {
+            let lv = call_arg_pointer_local(ctx.func, arg_h)?;
+            let local_vregs = ctx.resolve_local(lv)?;
+            let base_inner = &ctx.module.types[*base].inner;
+            let ir_tys = naga_type_to_ir_types(base_inner)?;
+            let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
+            let addr = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+            for (j, &src) in local_vregs.iter().enumerate() {
+                ctx.fb.push(Op::Store {
+                    base: addr,
+                    offset: (j * 4) as u32,
+                    value: src,
+                });
+            }
+            arg_vs.push(addr);
+            inout_copybacks.push((lv, slot));
+        } else {
+            let vs = ctx.ensure_expr_vec(arg_h)?;
+            arg_vs.extend_from_slice(&vs);
+        }
     }
     let mut result_vs = Vec::new();
     if let Some(res_h) = result {
@@ -201,5 +256,20 @@ fn lower_user_call(
         }
     }
     ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
+    for (lv, slot) in &inout_copybacks {
+        let local_vregs = ctx.resolve_local(*lv)?;
+        let addr = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(Op::SlotAddr {
+            dst: addr,
+            slot: *slot,
+        });
+        for (j, dst_v) in local_vregs.iter().enumerate() {
+            ctx.fb.push(Op::Load {
+                dst: *dst_v,
+                base: addr,
+                offset: (j * 4) as u32,
+            });
+        }
+    }
     Ok(())
 }

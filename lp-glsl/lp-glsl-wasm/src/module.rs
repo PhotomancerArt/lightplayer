@@ -7,6 +7,9 @@ use lp_glsl_naga::{FloatMode, GlslType};
 
 pub use wasm_encoder::ValType as WasmValType;
 
+/// Export name for the shadow stack pointer global when the module uses slot memory.
+pub const SHADOW_STACK_GLOBAL_EXPORT: &str = "__lp_shadow_sp";
+
 /// Map a GLSL type to the sequence of WASM locals/results used in the ABI.
 pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec<WasmValType> {
     match ty {
@@ -44,6 +47,8 @@ fn component_vt(ty: &GlslType, fm: FloatMode) -> WasmValType {
 pub struct WasmModule {
     pub bytes: Vec<u8>,
     pub exports: Vec<WasmExport>,
+    /// When set, WASM global index 0 is the shadow stack pointer; reset before each exported call.
+    pub shadow_stack_base: Option<i32>,
 }
 
 /// Metadata for an exported WASM function.

@@ -50,6 +50,28 @@ fn lower_expr_vec_uncached(
             Expression::LocalVariable(lv) => ctx.resolve_local(*lv),
             // Subscripted locals (`m[i][j]`) are pointers in Naga; value lives in vregs.
             Expression::AccessIndex { .. } => lower_expr_vec(ctx, *pointer),
+            Expression::FunctionArgument(i) => {
+                let idx = *i;
+                let Some(&base_ty_h) = ctx.pointer_args.get(&idx) else {
+                    return Err(LowerError::UnsupportedExpression(String::from(
+                        "Load from non-pointer",
+                    )));
+                };
+                let base_inner = &ctx.module.types[base_ty_h].inner;
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(base_inner)?;
+                let addr = ctx.arg_vregs_for(idx)?[0];
+                let mut vregs = VRegVec::new();
+                for (j, ty) in ir_tys.iter().enumerate() {
+                    let dst = ctx.fb.alloc_vreg(*ty);
+                    ctx.fb.push(Op::Load {
+                        dst,
+                        base: addr,
+                        offset: (j * 4) as u32,
+                    });
+                    vregs.push(dst);
+                }
+                Ok(vregs)
+            }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-local pointer",
             ))),
@@ -223,7 +245,8 @@ fn lower_expr_vec_uncached(
             kind,
             convert,
         } => {
-            if convert.is_some_and(|w| w != 4) {
+            // Naga uses 1-byte convert for bool targets; lowering uses I32 truthiness like other scalars.
+            if *kind != naga::ScalarKind::Bool && convert.is_some_and(|w| w != 4) {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "As with non-32-bit byte convert",
                 )));
@@ -715,6 +738,43 @@ fn lower_select_vec(
         result.push(dst);
     }
     Ok(result)
+}
+
+/// Coerce a lowered value to match a local/result type (implicit conversion on assignment/return).
+pub(crate) fn coerce_assignment_vregs(
+    ctx: &mut LowerCtx<'_>,
+    dst_ty_inner: &TypeInner,
+    value_expr: Handle<Expression>,
+    srcs: VRegVec,
+) -> Result<VRegVec, LowerError> {
+    let dst_tys = crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?;
+    if dst_tys.len() != srcs.len() {
+        return Err(LowerError::Internal(format!(
+            "assignment component count {} vs {}",
+            dst_tys.len(),
+            srcs.len()
+        )));
+    }
+    let src_k = expr_scalar_kind(ctx.module, ctx.func, value_expr)?;
+    let dst_k = root_scalar_kind(dst_ty_inner)?;
+    if src_k == dst_k {
+        return Ok(srcs);
+    }
+    let mut out = VRegVec::new();
+    for &src in &srcs {
+        out.push(lower_as_scalar(ctx, src, src_k, dst_k)?);
+    }
+    Ok(out)
+}
+
+fn root_scalar_kind(inner: &TypeInner) -> Result<ScalarKind, LowerError> {
+    match *inner {
+        TypeInner::Scalar(s) => Ok(s.kind),
+        TypeInner::Vector { scalar, .. } | TypeInner::Matrix { scalar, .. } => Ok(scalar.kind),
+        _ => Err(LowerError::Internal(String::from(
+            "root_scalar_kind: expected scalar, vector, or matrix",
+        ))),
+    }
 }
 
 fn lower_as_vec(

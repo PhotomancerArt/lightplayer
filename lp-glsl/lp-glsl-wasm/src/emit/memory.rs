@@ -7,6 +7,9 @@ use wasm_encoder::{InstructionSink, MemArg};
 
 const FRAME_ALIGN: u32 = 16;
 
+/// Initial value for the shadow stack pointer global (`$sp`).
+pub(crate) const SHADOW_STACK_BASE: i32 = 65536;
+
 pub(crate) fn align_up(n: u32, align: u32) -> u32 {
     (n + align - 1) / align * align
 }

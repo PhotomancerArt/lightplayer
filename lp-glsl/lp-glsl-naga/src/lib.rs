@@ -114,6 +114,22 @@ mod tests {
     }
 
     #[test]
+    fn lower_inout_float_modify() {
+        let src = r#"
+void modify_inout(inout float value) {
+    value = value + 10.0;
+}
+float test_main() {
+    float x = 5.0;
+    modify_inout(x);
+    return x;
+}
+"#;
+        let naga = compile(src).unwrap();
+        let _ = super::lower(&naga).expect("lower inout");
+    }
+
+    #[test]
     fn lower_sin_validates_with_imports() {
         let src = "float f(float x) { return sin(x); }";
         let naga = compile(src).unwrap();
@@ -303,13 +319,13 @@ fn function_info(
         .arguments
         .iter()
         .map(|arg| {
-            let ty = naga_type_inner_to_glsl(&module.types[arg.ty].inner)?;
+            let ty = naga_type_inner_to_glsl(module, &module.types[arg.ty].inner)?;
             let pname = arg.name.clone().unwrap_or_else(|| String::from("_"));
             Ok((pname, ty))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let return_type = match &function.result {
-        Some(res) => naga_type_inner_to_glsl(&module.types[res.ty].inner)?,
+        Some(res) => naga_type_inner_to_glsl(module, &module.types[res.ty].inner)?,
         None => GlslType::Void,
     };
     Ok(FunctionInfo {
@@ -319,8 +335,11 @@ fn function_info(
     })
 }
 
-fn naga_type_inner_to_glsl(inner: &TypeInner) -> Result<GlslType, CompileError> {
+fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslType, CompileError> {
     match *inner {
+        TypeInner::Pointer { base, .. } => {
+            naga_type_inner_to_glsl(module, &module.types[base].inner)
+        }
         TypeInner::Scalar(scalar) => match scalar.kind {
             ScalarKind::Float if scalar.width == 4 => Ok(GlslType::Float),
             ScalarKind::Sint if scalar.width == 4 => Ok(GlslType::Int),

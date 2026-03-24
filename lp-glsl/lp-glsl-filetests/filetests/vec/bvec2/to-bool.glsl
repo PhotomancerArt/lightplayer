@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // To Bool: bool(bvec2) - extract first component

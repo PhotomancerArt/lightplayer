@@ -84,8 +84,7 @@ float test_edge_inout_multiple_operations() {
     return x; // ((6*2)+5)/3 = 17/3 = 5.666...
 }
 
-// @unimplemented()
-// run: test_edge_inout_multiple_operations() ~= 5.666
+// run: test_edge_inout_multiple_operations() ~= 5.666 (tolerance: 0.001)
 
 void no_modify(inout float value) {
     float local = value; // Read input

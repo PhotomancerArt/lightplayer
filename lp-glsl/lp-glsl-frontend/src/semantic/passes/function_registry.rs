@@ -33,8 +33,23 @@ impl FunctionRegistryPass {
             if diagnostics.at_limit() {
                 break;
             }
-            if let glsl::syntax::ExternalDeclaration::FunctionDefinition(func) = decl {
-                match function_signature::extract_function_signature(&func.prototype, const_env) {
+            match decl {
+                glsl::syntax::ExternalDeclaration::FunctionDefinition(func) => {
+                    match function_signature::extract_function_signature(&func.prototype, const_env)
+                    {
+                        Ok(sig) => {
+                            let _ = self.registry.register_function(sig);
+                        }
+                        Err(e) => {
+                            if !diagnostics.push(e) {
+                                break;
+                            }
+                        }
+                    }
+                }
+                glsl::syntax::ExternalDeclaration::Declaration(
+                    glsl::syntax::Declaration::FunctionPrototype(proto),
+                ) => match function_signature::extract_function_signature(proto, const_env) {
                     Ok(sig) => {
                         let _ = self.registry.register_function(sig);
                     }
@@ -43,7 +58,8 @@ impl FunctionRegistryPass {
                             break;
                         }
                     }
-                }
+                },
+                _ => {}
             }
         }
     }

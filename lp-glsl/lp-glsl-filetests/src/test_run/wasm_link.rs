@@ -67,7 +67,7 @@ pub fn instantiate_wasm_module(
     wasm_bytes: &[u8],
 ) -> Result<(Instance, Option<Memory>), GlslError> {
     let shader_mod = Module::new(engine, wasm_bytes)
-        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM parse: {e}")))?;
+        .map_err(|e| GlslError::new(ErrorCode::E0400, format!("WASM parse: {e:#}")))?;
 
     if !module_needs_builtins_link(&shader_mod) {
         let instance = Instance::new(&mut *store, &shader_mod, &[])
@@ -95,12 +95,12 @@ pub fn instantiate_wasm_module(
     let memory = Memory::new(&mut *store, memory_ty)
         .map_err(|e| GlslError::new(ErrorCode::E0400, format!("Memory::new: {e}")))?;
 
-    let builtins_inst = Instance::new(&mut *store, &builtins_mod, &[memory.clone().into()])
+    let builtins_inst = Instance::new(&mut *store, &builtins_mod, &[memory.into()])
         .map_err(|e| GlslError::new(ErrorCode::E0400, format!("builtins instantiate: {e}")))?;
 
     let mut linker = Linker::new(engine);
     linker
-        .define(&mut *store, "env", "memory", memory.clone())
+        .define(&mut *store, "env", "memory", memory)
         .map_err(|e| GlslError::new(ErrorCode::E0400, format!("linker env.memory: {e}")))?;
 
     let builtin_funcs: Vec<(String, Func)> = builtins_inst

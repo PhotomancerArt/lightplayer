@@ -360,7 +360,7 @@ pub(crate) fn emit_op(
             sink.br(d);
         }
         Op::Continue => {
-            let d = innermost_loop_continue_depth(ctrl)?;
+            let d = innermost_loop_continue_depth(ctrl, *wasm_open)?;
             sink.br(d);
         }
         Op::BrIfNot { cond } => {

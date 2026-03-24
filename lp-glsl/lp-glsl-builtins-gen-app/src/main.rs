@@ -217,14 +217,15 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         if !builtin.module_path.starts_with("q32::") {
             continue;
         }
-        let (glsl, count) = q32_math_glsl_key(builtin);
-        if glsl.is_empty() {
-            continue;
+        for (glsl, count) in q32_math_glsl_keys(builtin) {
+            if glsl.is_empty() {
+                continue;
+            }
+            out.push_str(&format!(
+                "        (\"{}\", {}) => Some(BuiltinId::{}),\n",
+                glsl, count, builtin.enum_variant
+            ));
         }
-        out.push_str(&format!(
-            "        (\"{}\", {}) => Some(BuiltinId::{}),\n",
-            glsl, count, builtin.enum_variant
-        ));
     }
 
     out.push_str(
@@ -291,15 +292,17 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 }
 
 /// GLSL function name + AST arg count for `__lp_q32_*` imports.
-fn q32_math_glsl_key(builtin: &BuiltinInfo) -> (String, usize) {
+fn q32_math_glsl_keys(builtin: &BuiltinInfo) -> Vec<(String, usize)> {
     let Some(suffix) = builtin.symbol_name.strip_prefix("__lp_q32_") else {
-        return (String::new(), 0);
+        return Vec::new();
     };
     match suffix {
-        "roundeven" => ("roundEven".to_string(), builtin.param_count),
-        // GLSL uses `atan(y, x)` with name "atan", two arguments — not "atan2".
-        "atan2" => ("atan".to_string(), 2),
-        s => (s.to_string(), builtin.param_count),
+        "roundeven" => vec![("roundEven".to_string(), builtin.param_count)],
+        // GLSL: `atan(y, x)`; Naga lowers two-arg atan as `std.math::atan2`.
+        "atan2" if builtin.param_count == 2 => {
+            vec![("atan".to_string(), 2), ("atan2".to_string(), 2)]
+        }
+        s => vec![(s.to_string(), builtin.param_count)],
     }
 }
 

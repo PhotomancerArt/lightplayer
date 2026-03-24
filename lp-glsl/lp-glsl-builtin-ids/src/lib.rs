@@ -7,7 +7,7 @@
 #![no_std]
 
 /// Enum identifying builtin functions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinId {
     LpQ32Acos,
     LpQ32Acosh,

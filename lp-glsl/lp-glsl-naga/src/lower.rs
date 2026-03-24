@@ -51,6 +51,7 @@ fn register_std_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeR
             func_name: String::from(name),
             param_types: params.to_vec(),
             return_types: rets.to_vec(),
+            lpfx_glsl_params: None,
         });
         m.insert(format!("std.math::{name}"), r);
     };

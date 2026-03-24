@@ -138,18 +138,18 @@ pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> S
     let mut sig = Signature::new(CallConv::SystemV);
     match builtin {
         BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
-            // (x, y, period_x, period_y, alpha, gradient_out, seed) -> scalar
+            // Matches `__lpfx_psrdnoise2_*`: x, y, period_x, period_y, alpha, gradient_out, seed
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(pointer_type));
-            sig.params.push(AbiParam::new(types::I32)); // seed
+            sig.params.push(AbiParam::new(types::I32)); // uint seed (zero-extended)
             sig.returns.push(AbiParam::new(types::I32));
         }
         BuiltinId::LpfxPsrdnoise3F32 | BuiltinId::LpfxPsrdnoise3Q32 => {
-            // (x,y,z, period×3, alpha, gradient_out, seed) -> scalar
+            // Matches `__lpfx_psrdnoise3_*`: x,y,z, period_*, alpha, gradient_out, seed
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
@@ -158,7 +158,7 @@ pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> S
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(pointer_type));
-            sig.params.push(AbiParam::new(types::I32)); // seed
+            sig.params.push(AbiParam::new(types::I32)); // uint seed (zero-extended)
             sig.returns.push(AbiParam::new(types::I32));
         }
         BuiltinId::LpfxSrandom3TileF32 | BuiltinId::LpfxSrandom3TileQ32 => {

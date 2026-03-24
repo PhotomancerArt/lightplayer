@@ -68,13 +68,23 @@ pub(crate) fn innermost_loop_break_depth(
     Err(String::from("break/br_if_not outside loop"))
 }
 
-pub(crate) fn innermost_loop_continue_depth(ctrl: &[CtrlEntry]) -> Result<u32, String> {
+pub(crate) fn innermost_loop_continue_depth(
+    ctrl: &[CtrlEntry],
+    wasm_open: WasmOpenDepth,
+) -> Result<u32, String> {
     for entry in ctrl.iter().rev() {
-        if let CtrlEntry::Loop { inner_closed, .. } = entry {
+        if let CtrlEntry::Loop {
+            inner_closed,
+            outer_open_depth,
+            ..
+        } = entry
+        {
             if *inner_closed {
                 return Err(String::from("continue inside loop continuing section"));
             }
-            return Ok(0);
+            // Inner body `block` sits at outer_open_depth + 2 (break block, loop, body block).
+            // `br` depth = current nesting minus that target.
+            return Ok(wasm_open.saturating_sub(*outer_open_depth + 2));
         }
     }
     Err(String::from("continue outside loop"))
@@ -94,6 +104,9 @@ pub(crate) fn innermost_switch_selector(ctrl: &[CtrlEntry]) -> Result<u32, Strin
 ///
 /// Returning from a `switch` **case** closes only the case `if` (and inner `if`s), not the
 /// merge `block`, so later `case` arms still emit correctly.
+///
+/// Returning from an `if` **then** branch must not emit `end` before the matching `Else` op:
+/// LPIR still emits `else` / `end` for the same `if`, and WASM requires `else` to pair with the open `if`.
 pub(crate) fn unwind_ctrl_after_return(
     sink: &mut InstructionSink<'_>,
     ctrl: &mut Vec<CtrlEntry>,
@@ -124,7 +137,11 @@ pub(crate) fn unwind_ctrl_after_return(
                 }
                 break;
             }
-            CtrlEntry::If | CtrlEntry::Else => {
+            CtrlEntry::If => {
+                ctrl.push(CtrlEntry::If);
+                break;
+            }
+            CtrlEntry::Else => {
                 sink.end();
                 *wasm_open = wasm_open.saturating_sub(1);
             }

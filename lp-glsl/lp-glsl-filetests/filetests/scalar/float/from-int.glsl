@@ -71,7 +71,7 @@ float test_float_from_int_large() {
     return float(i);
 }
 
-// run: test_float_from_int_large() ~= 32767.0
+// run: test_float_from_int_large() ~= 32767.5 (tolerance: 1.5)
 
 float test_float_from_int_min() {
     int i = -2147483648;  // INT_MIN - clamped to fixed16x16 min

@@ -36,7 +36,7 @@ pub(crate) struct FuncEmitCtx<'a> {
 pub(crate) fn emit_module(
     ir: &IrModule,
     options: &crate::options::WasmOptions,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Option<i32>), String> {
     let filtered = imports::build_filtered_imports(ir)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
@@ -61,7 +61,9 @@ pub(crate) fn emit_module(
 
     let any_slots = ir.functions.iter().any(|f| !f.slots.is_empty());
     let mut import_section = ImportSection::new();
-    let needs_memory = !filtered.decls.is_empty() || any_slots;
+    // Memory is needed for builtins (imports), shadow stack (slots), or any Load/Store/Memcpy ops.
+    let needs_memory =
+        !filtered.decls.is_empty() || ir.functions.iter().any(|f| f.uses_memory());
     if needs_memory {
         import_section.import(
             "env",
@@ -86,6 +88,13 @@ pub(crate) fn emit_module(
     }
 
     let mut exports = ExportSection::new();
+    if any_slots {
+        exports.export(
+            crate::module::SHADOW_STACK_GLOBAL_EXPORT,
+            ExportKind::Global,
+            0,
+        );
+    }
     for (i, f) in ir.functions.iter().enumerate() {
         let wasm_fn_index = filtered_fn_count + i as u32;
         exports.export(f.name.as_str(), ExportKind::Func, wasm_fn_index);
@@ -108,7 +117,7 @@ pub(crate) fn emit_module(
                 mutable: true,
                 shared: false,
             },
-            &ConstExpr::i32_const(65536),
+            &ConstExpr::i32_const(memory::SHADOW_STACK_BASE),
         );
     }
 
@@ -130,5 +139,10 @@ pub(crate) fn emit_module(
     module.section(&exports);
     module.section(&code);
 
-    Ok(module.finish())
+    let shadow_stack_base = if any_slots {
+        Some(memory::SHADOW_STACK_BASE)
+    } else {
+        None
+    };
+    Ok((module.finish(), shadow_stack_base))
 }

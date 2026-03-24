@@ -13,6 +13,9 @@ pub struct ImportDecl {
     pub func_name: String,
     pub param_types: Vec<IrType>,
     pub return_types: Vec<IrType>,
+    /// LPFX only: comma-separated logical GLSL parameter kinds for WASM builtin matching
+    /// (e.g. `Vec2,Vec2,Float,Vec2,UInt`). When `None`, callers infer from [`Self::param_types`].
+    pub lpfx_glsl_params: Option<String>,
 }
 
 /// Stack slot in a function (`slot ssN, size`).
@@ -43,6 +46,18 @@ impl IrFunction {
             return &[];
         }
         &self.vreg_pool[start..end]
+    }
+
+    /// Whether this function's body contains any memory-accessing ops
+    /// (Load, Store, SlotAddr, Memcpy).
+    pub fn uses_memory(&self) -> bool {
+        !self.slots.is_empty()
+            || self.body.iter().any(|op| {
+                matches!(
+                    op,
+                    Op::Load { .. } | Op::Store { .. } | Op::SlotAddr { .. } | Op::Memcpy { .. }
+                )
+            })
     }
 }
 

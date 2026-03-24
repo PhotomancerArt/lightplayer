@@ -45,6 +45,40 @@ fn ir_params_to_glsl_kinds(params: &[IrType]) -> Vec<GlslParamKind> {
         .collect()
 }
 
+fn lpfx_glsl_kinds_from_decl(decl: &ImportDecl) -> Result<Vec<GlslParamKind>, String> {
+    if let Some(ref enc) = decl.lpfx_glsl_params {
+        parse_lpfx_glsl_params_csv(enc)
+    } else {
+        Ok(ir_params_to_glsl_kinds(&decl.param_types))
+    }
+}
+
+fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
+    if enc.is_empty() {
+        return Ok(Vec::new());
+    }
+    enc.split(',')
+        .map(|t| match t.trim() {
+            "Float" => Ok(GlslParamKind::Float),
+            "Int" => Ok(GlslParamKind::Int),
+            "UInt" => Ok(GlslParamKind::UInt),
+            "Vec2" => Ok(GlslParamKind::Vec2),
+            "Vec3" => Ok(GlslParamKind::Vec3),
+            "Vec4" => Ok(GlslParamKind::Vec4),
+            "IVec2" => Ok(GlslParamKind::IVec2),
+            "IVec3" => Ok(GlslParamKind::IVec3),
+            "IVec4" => Ok(GlslParamKind::IVec4),
+            "UVec2" => Ok(GlslParamKind::UVec2),
+            "UVec3" => Ok(GlslParamKind::UVec3),
+            "UVec4" => Ok(GlslParamKind::UVec4),
+            "BVec2" => Ok(GlslParamKind::BVec2),
+            "BVec3" => Ok(GlslParamKind::BVec3),
+            "BVec4" => Ok(GlslParamKind::BVec4),
+            other => Err(format!("unknown LPFX glsl param tag `{other}`")),
+        })
+        .collect()
+}
+
 fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     match decl.module_name.as_str() {
         "std.math" => {
@@ -58,7 +92,7 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
         }
         "lpfx" => {
             let base = lpfx_strip_suffix(&decl.func_name)?;
-            let kinds = ir_params_to_glsl_kinds(&decl.param_types);
+            let kinds = lpfx_glsl_kinds_from_decl(decl)?;
             glsl_lpfx_q32_builtin_id(base, &kinds).ok_or_else(|| {
                 format!(
                     "unsupported lpfx import `{}` with {:?}",

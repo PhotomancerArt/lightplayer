@@ -24,6 +24,9 @@ struct TestOptions {
     /// Run only the specified target (e.g. cranelift.q32, wasm.q32)
     #[arg(long)]
     target: Option<String>,
+    /// Force summary mode even for a single test file
+    #[arg(long)]
+    summary: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -49,7 +52,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            lp_glsl_filetests::run(&files, t.fix, target_filter)?;
+            lp_glsl_filetests::run(&files, t.fix, target_filter, t.summary)?;
         }
     }
 

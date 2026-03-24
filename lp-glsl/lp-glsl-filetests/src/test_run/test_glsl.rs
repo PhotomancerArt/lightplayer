@@ -1,7 +1,7 @@
 //! Generating isolated test GLSL code (includes function filtering).
 
 use anyhow::Result;
-use glsl::syntax::{CompoundStatement, Expr, SimpleStatement, Statement};
+use glsl::syntax::{CompoundStatement, Expr, ExternalDeclaration, SimpleStatement, Statement};
 use lp_glsl_cranelift::frontend::CompilationPipeline;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -542,16 +542,10 @@ fn extract_functions_from_source_using_ast(
     // Sort by start line to maintain order
     function_ranges.sort_by_key(|(start, _)| *start);
 
-    // Include all lines before the first function as preamble (global declarations like const).
-    // Filtered functions may depend on these.
     let min_func_start = function_ranges
         .first()
         .map(|(s, _)| *s)
         .unwrap_or(usize::MAX);
-    if min_func_start > 1 {
-        function_ranges.insert(0, (1, min_func_start.saturating_sub(1)));
-    }
-    function_ranges.sort_by_key(|(start, _)| *start);
 
     // Extract the functions from source
     let mut result = String::new();
@@ -564,6 +558,49 @@ fn extract_functions_from_source_using_ast(
 
         for i in start_idx..=end_idx.min(source_lines.len().saturating_sub(1)) {
             extracted_lines.insert(i);
+        }
+    }
+
+    // Preamble: lines before the first kept function (prototypes, const), but **not** bodies of
+    // unrelated user functions (they may call helpers we did not include).
+    if min_func_start > 1 {
+        let unkept_body_ranges: Vec<(usize, usize)> = ast
+            .0
+            .0
+            .iter()
+            .filter_map(|decl| {
+                if let ExternalDeclaration::FunctionDefinition(f) = decl {
+                    if function_names.contains(&f.prototype.name.name) {
+                        return None;
+                    }
+                    let sp = &f.span;
+                    if sp.is_unknown() {
+                        return None;
+                    }
+                    let start_line = byte_offset_to_line(source, sp.offset).ok()?;
+                    let end_line = byte_offset_to_line(
+                        source,
+                        sp.offset.saturating_add(sp.len).saturating_sub(1),
+                    )
+                    .ok()?;
+                    Some((start_line, end_line))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for line_1 in 1..min_func_start {
+            if unkept_body_ranges
+                .iter()
+                .any(|(s, e)| line_1 >= *s && line_1 <= *e)
+            {
+                continue;
+            }
+            let idx = line_1.saturating_sub(1);
+            if idx < source_lines.len() {
+                extracted_lines.insert(idx);
+            }
         }
     }
 

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply Vec: mat4 * vec4 -> vec4 (matrix-vector multiplication)

@@ -6,7 +6,7 @@ use lp_glsl_cranelift::semantic::types::Type;
 use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
 use lp_glsl_naga::GlslType;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
-use lp_glsl_wasm::{GlslWasmError, WasmExport, WasmOptions, glsl_wasm};
+use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Config, Engine, Instance, Store};
@@ -24,6 +24,7 @@ pub struct WasmExecutable {
     signatures: HashMap<String, FunctionSignature>,
     float_mode: lp_glsl_naga::FloatMode,
     wasm_bytes: Vec<u8>,
+    shadow_stack_base: Option<i32>,
 }
 
 impl WasmExecutable {
@@ -63,10 +64,26 @@ impl WasmExecutable {
             signatures,
             float_mode: options.float_mode,
             wasm_bytes,
+            shadow_stack_base: module.shadow_stack_base,
         })
     }
 
     fn prepare_call(&mut self) -> Result<(), GlslError> {
+        if let Some(base) = self.shadow_stack_base {
+            let g = self
+                .instance
+                .get_global(&mut self.store, SHADOW_STACK_GLOBAL_EXPORT)
+                .ok_or_else(|| {
+                    GlslError::new(ErrorCode::E0400, "missing shadow stack global export")
+                })?;
+            g.set(&mut self.store, wasmtime::Val::I32(base))
+                .map_err(|e| {
+                    GlslError::new(
+                        ErrorCode::E0400,
+                        format!("failed to reset shadow stack pointer: {e}"),
+                    )
+                })?;
+        }
         self.store
             .set_fuel(DEFAULT_MAX_INSTRUCTIONS)
             .map_err(|e| GlslError::new(ErrorCode::E0400, format!("failed to set fuel: {e}")))

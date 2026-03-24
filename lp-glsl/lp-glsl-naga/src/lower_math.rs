@@ -5,7 +5,9 @@ use alloc::format;
 use alloc::string::String;
 
 use lpir::{IrType, Op, VReg};
-use naga::{Handle, MathFunction, ScalarKind, TypeInner};
+use naga::{
+    BinaryOperator, Expression, Function, Handle, MathFunction, Module, ScalarKind, TypeInner,
+};
 
 use crate::expr_scalar::{expr_scalar_kind, expr_type_inner};
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_width};
@@ -313,7 +315,20 @@ pub(crate) fn lower_math_vec(
             Ok(out)
         }
         _ => {
-            let w = naga_type_width(&expr_type_inner(ctx.module, ctx.func, arg)?);
+            // GLSL smears scalars to match `genType` operands (`mix(float, vec3, float)`, etc.).
+            // Width must reflect every argument, not only the first. Also, `expr_type_inner` for
+            // `float * vec3` follows the left operand only; recurse through arithmetic trees so
+            // `pow(vec3*scalar, y)` does not take the scalar-only path.
+            let mut w = math_dispatch_width_expr(ctx.module, ctx.func, arg)?;
+            if let Some(a) = arg1 {
+                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+            }
+            if let Some(a) = arg2 {
+                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+            }
+            if let Some(a) = arg3 {
+                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+            }
             if w == 1 {
                 return Ok(smallvec::smallvec![lower_math_scalar_impl(
                     ctx, fun, arg, arg1, arg2, arg3
@@ -1757,4 +1772,30 @@ fn fconst(ctx: &mut LowerCtx<'_>, value: f32) -> VReg {
     let v = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(Op::FconstF32 { dst: v, value });
     v
+}
+
+fn binary_op_maxes_dispatch_width(op: BinaryOperator) -> bool {
+    matches!(
+        op,
+        BinaryOperator::Add
+            | BinaryOperator::Subtract
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo
+    )
+}
+
+/// Component width for scalar vs vector math dispatch (see `lower_math_vec` default arm).
+fn math_dispatch_width_expr(
+    module: &Module,
+    func: &Function,
+    expr: Handle<naga::Expression>,
+) -> Result<usize, LowerError> {
+    match &func.expressions[expr] {
+        Expression::Binary { op, left, right } if binary_op_maxes_dispatch_width(*op) => {
+            Ok(math_dispatch_width_expr(module, func, *left)?
+                .max(math_dispatch_width_expr(module, func, *right)?))
+        }
+        _ => Ok(naga_type_width(&expr_type_inner(module, func, expr)?)),
+    }
 }

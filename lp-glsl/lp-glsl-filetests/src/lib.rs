@@ -187,6 +187,7 @@ pub fn run(
     files: &[String],
     fix_xfail: bool,
     target_filter: Option<&'static Target>,
+    force_summary: bool,
 ) -> anyhow::Result<()> {
     // Check environment variable if flag not provided
     let fix_xfail = fix_xfail
@@ -299,7 +300,7 @@ pub fn run(
     println!("Running {} test file(s)...\n", test_specs.len());
 
     let start_time = Instant::now();
-    let output_mode = OutputMode::from_test_count(test_specs.len());
+    let output_mode = OutputMode::from_test_count(test_specs.len(), force_summary);
 
     // Use sequential execution for single test, concurrent for multiple tests
     if test_specs.len() == 1 {

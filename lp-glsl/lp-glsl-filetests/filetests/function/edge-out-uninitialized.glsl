@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Out Parameters Uninitialized: out parameters start uninitialized

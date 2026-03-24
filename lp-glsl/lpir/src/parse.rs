@@ -135,6 +135,7 @@ fn parse_import(s: &mut &str) -> Result<(ImportDecl, String), ParseError> {
         func_name: fn_name.to_string(),
         param_types: params,
         return_types: rets,
+        lpfx_glsl_params: None,
     };
     Ok((decl, key))
 }

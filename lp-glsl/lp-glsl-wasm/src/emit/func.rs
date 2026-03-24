@@ -141,6 +141,12 @@ fn emit_function_ops(
             memory::emit_shadow_epilogue(&mut sink, sp, fctx.frame_size);
         }
     }
+    // Multi-result functions whose body ends with `end_if` after both branches `return` have no
+    // fallthrough values; the implicit function `end` still type-checks the merge. Mark the tail
+    // unreachable so validation matches void-only `if`/`else`/`end` behavior.
+    if !f.return_types.is_empty() && f.body.last().is_some_and(|o| matches!(o, Op::End)) {
+        sink.unreachable();
+    }
     sink.end();
     Ok(())
 }
