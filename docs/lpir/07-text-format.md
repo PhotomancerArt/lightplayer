@@ -86,10 +86,10 @@ if_stmt          = "if" vreg "{" { inner_line } "}" [ "else" "{" { inner_line } 
 loop_stmt        = "loop" "{" { inner_line } "}"
 
 switch_stmt      = "switch" vreg "{" { switch_case } [ default_case ] "}"
-switch_case      = "case" uint_literal "{" { inner_line } "}"
+switch_case      = "case" integer_literal "{" { inner_line } "}"
 default_case     = "default" "{" { inner_line } "}"
 
-return_stmt      = "return" [ vreg ]
+return_stmt      = "return" [ vreg { "," vreg } ]
 br_if_not_stmt   = "br_if_not" vreg
 
 op               = const_op | unary_op | binary_op | imm_op | select_op | copy_op

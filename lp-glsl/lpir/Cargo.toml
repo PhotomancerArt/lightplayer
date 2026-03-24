@@ -1,0 +1,11 @@
+[package]
+name = "lpir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightPlayer intermediate representation (LPIR) core library"
+
+[lints]
+workspace = true
+
+[dependencies]
