@@ -48,6 +48,36 @@ vec3 applyPalette(float t, float palette) {
     return paletteWarm(t);
 }
 
+// Naga GLSL-in resolves calls in source order; define helpers before main.
+vec2 worley_demo(vec2 scaledCoord, float time) {
+    float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
+    float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
+    return vec2(t, 1.0);
+}
+
+vec2 fbm_demo(vec2 scaledCoord, float time) {
+    float noiseValue = lpfx_fbm(scaledCoord, 3, 0u);
+    float t = mod(time * 0.1 + (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5 / 3.0, 1.0);
+    return vec2(t, 1.0);
+}
+
+vec2 prsd_demo(vec2 scaledCoord, float time) {
+    vec2 gradient;
+    float noiseValue = lpfx_psrdnoise(
+        scaledCoord,
+        vec2(0.0),
+        time,
+        gradient,
+        0u
+    );
+
+    float hue = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
+    float gradientAngle = atan(gradient.y, gradient.x) / (2.0 * 3.14159) + 0.5;
+    float t = mod(time * 0.1 + hue / 3.0, 1.0);
+    float v = mix(0.5, 1.0, gradientAngle);
+    return vec2(t, v);
+}
+
 vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     // Palette cycle: 5s per palette, 1s smooth transition to next
     // Clamp palette to 4 to avoid Q32 edge case where floor(mod(...)) yields 5.0
@@ -79,33 +109,4 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     } else {
         return vec4(applyPalette(tv.x, 0) * tv.y, 1.0);
     }
-}
-
-vec2 worley_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
-    float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
-    return vec2(t, 1.0);
-}
-
-vec2 fbm_demo(vec2 scaledCoord, float time) {
-    float noiseValue = lpfx_fbm(scaledCoord, 3, 0u);
-    float t = mod(time * 0.1 + (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5 / 3.0, 1.0);
-    return vec2(t, 1.0);
-}
-
-vec2 prsd_demo(vec2 scaledCoord, float time) {
-    vec2 gradient;
-    float noiseValue = lpfx_psrdnoise(
-        scaledCoord,
-        vec2(0.0),
-        time,
-        gradient,
-        0u
-    );
-
-    float hue = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
-    float gradientAngle = atan(gradient.y, gradient.x) / (2.0 * 3.14159) + 0.5;
-    float t = mod(time * 0.1 + hue / 3.0, 1.0);
-    float v = mix(0.5, 1.0, gradientAngle);
-    return vec2(t, v);
 }

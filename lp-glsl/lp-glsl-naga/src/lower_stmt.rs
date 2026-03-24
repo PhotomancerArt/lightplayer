@@ -45,9 +45,29 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             break_if,
         } => {
             ctx.fb.push_loop();
-            lower_block(ctx, body)?;
-            // Naga runs `body` then `continuing` each iteration; LPIR `Continue` jumps here.
-            ctx.fb.push_continuing();
+
+            // Naga's GLSL frontend for do-while emits `if (!cond) { break; }` as
+            // the last body statement with empty continuing and no break_if. Move
+            // that trailing if+break into the continuing section so that
+            // `continue` (which branches past the inner body block) still reaches
+            // the condition check.
+            if continuing.is_empty() && break_if.is_none() && is_trailing_break_if(body) {
+                let n = body.len();
+                for (i, stmt) in body.iter().enumerate() {
+                    if i + 1 == n {
+                        break;
+                    }
+                    lower_statement(ctx, stmt)?;
+                }
+                ctx.fb.push_continuing();
+                if let Some(last) = body.last() {
+                    lower_statement(ctx, last)?;
+                }
+            } else {
+                lower_block(ctx, body)?;
+                ctx.fb.push_continuing();
+            }
+
             lower_block(ctx, continuing)?;
             if let Some(cond) = break_if {
                 let c = ctx.ensure_expr(*cond)?;
@@ -272,4 +292,19 @@ fn lower_user_call(
         }
     }
     Ok(())
+}
+
+/// `true` when `body` ends with `if (…) { break; }` — the do-while exit pattern
+/// emitted by Naga's GLSL frontend.
+fn is_trailing_break_if(body: &Block) -> bool {
+    matches!(
+        body.last(),
+        Some(Statement::If {
+            accept,
+            reject,
+            ..
+        }) if accept.len() == 1
+            && matches!(accept.last(), Some(Statement::Break))
+            && reject.is_empty()
+    )
 }

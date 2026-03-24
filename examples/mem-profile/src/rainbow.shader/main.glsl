@@ -44,35 +44,7 @@ vec3 applyPalette(float t, float palette) {
     return paletteWarm(t);
 }
 
-vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
-    // Palette cycle: 5s per palette, 1s smooth transition to next
-    float cyclePhase = mod(time, 5.0);
-    float palette = floor(mod(time * 0.2, 5.0));
-    float nextPalette = mod(palette + 1.0, 5.0);
-    float blend = smoothstep(4.0, 5.0, cyclePhase);
-
-    float panSpeed = .3;
-    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
-
-    float scaleSpeed = .7;
-    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
-
-    vec2 center = outputSize * 0.5;
-    vec2 dir = fragCoord - center;
-    vec2 scaledCoord = center + dir * scale;
-
-    vec2 tv = prsd_demo(scaledCoord, time);
-    //vec2 tv = fbm_demo(scaledCoord, time);
-    //vec2 tv = worley_demo(scaledCoord, time);
-
-    vec3 rgb = mix(
-        applyPalette(tv.x, palette),
-        applyPalette(tv.x, nextPalette),
-        blend
-    ) * tv.y;
-    return vec4(rgb, 1.0);
-}
-
+// Naga GLSL-in resolves calls in source order; define helpers before main.
 vec2 worley_demo(vec2 scaledCoord, float time) {
     float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
     float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
@@ -100,4 +72,33 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
     float t = mod(time * 0.1 + hue / 3.0, 1.0);
     float v = mix(0.5, 1.0, gradientAngle);
     return vec2(t, v);
+}
+
+vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+    // Palette cycle: 5s per palette, 1s smooth transition to next
+    float cyclePhase = mod(time, 5.0);
+    float palette = floor(mod(time * 0.2, 5.0));
+    float nextPalette = mod(palette + 1.0, 5.0);
+    float blend = smoothstep(4.0, 5.0, cyclePhase);
+
+    float panSpeed = .3;
+    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
+
+    float scaleSpeed = .7;
+    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
+
+    vec2 center = outputSize * 0.5;
+    vec2 dir = fragCoord - center;
+    vec2 scaledCoord = center + dir * scale;
+
+    vec2 tv = prsd_demo(scaledCoord, time);
+    //vec2 tv = fbm_demo(scaledCoord, time);
+    //vec2 tv = worley_demo(scaledCoord, time);
+
+    vec3 rgb = mix(
+        applyPalette(tv.x, palette),
+        applyPalette(tv.x, nextPalette),
+        blend
+    ) * tv.y;
+    return vec4(rgb, 1.0);
 }

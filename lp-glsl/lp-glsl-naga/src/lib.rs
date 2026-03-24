@@ -301,7 +301,12 @@ fn extract_functions(
         let Some(name) = function.name.clone() else {
             continue;
         };
-        if name == "main" || name.starts_with("lpfx_") {
+        if name.starts_with("lpfx_") {
+            continue;
+        }
+        // Skip the synthesized `void main() {}` entry point but keep user functions
+        // named "main" that have parameters (e.g. `vec4 main(vec2, vec2, float)`).
+        if name == "main" && function.arguments.is_empty() {
             continue;
         }
         let info = function_info(module, function, name)?;

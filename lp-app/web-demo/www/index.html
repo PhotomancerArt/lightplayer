@@ -56,9 +56,11 @@
         }
 
         #status {
-            font-size: 12px;
-            color: #888;
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #777;
             margin-top: 6px;
+            letter-spacing: 0.02em;
         }
 
         #errors {
@@ -173,6 +175,7 @@
 
   let frames = 0;
   let lastFpsT = performance.now();
+  let frameUsSum = 0;
 
   function render(timestamp) {
     requestAnimationFrame(render);
@@ -186,6 +189,7 @@
     const q32W = WIDTH << 16;
     const q32H = HEIGHT << 16;
 
+    const t0 = performance.now();
     try {
       const probe = mainFn(0, 0, q32W, q32H, q32Time);
       assertVec4MainResult(probe);
@@ -203,17 +207,26 @@
       setError('Runtime: ' + e);
       return;
     }
+    const frameUs = (performance.now() - t0) * 1000;
 
     ctx.putImageData(imageData, 0, 0);
 
     frames++;
+    frameUsSum += frameUs;
     const now = performance.now();
     if (now - lastFpsT >= 1000) {
-      const fps = (frames * 1000) / (now - lastFpsT);
-      statusEl.textContent = lastError
-        ? 'See error panel (previous successful shader may still be running).'
-        : `~${fps.toFixed(0)} fps · ${WIDTH}×${HEIGHT} · Q32`;
+      const actualFps = (frames * 1000) / (now - lastFpsT);
+      const avgUs = frameUsSum / frames;
+      const theoFps = 1e6 / avgUs;
+      if (lastError) {
+        statusEl.textContent = 'error (previous shader still running)';
+      } else {
+        const usStr = avgUs >= 1000 ? (avgUs / 1000).toFixed(1) + 'ms' : avgUs.toFixed(0) + 'µs';
+        statusEl.textContent =
+          `${actualFps.toFixed(0)}fps · ${usStr} (~${theoFps >= 1000 ? (theoFps / 1000).toFixed(1) + 'k' : theoFps.toFixed(0)}fps) · ${WIDTH}×${HEIGHT} · Q32`;
+      }
       frames = 0;
+      frameUsSum = 0;
       lastFpsT = now;
     }
   }
