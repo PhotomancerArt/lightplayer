@@ -6,7 +6,7 @@
 use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
 use anyhow::{Result, bail};
-use lp_glsl_cranelift::GlslValue;
+use lp_glsl_values::GlslValue;
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};

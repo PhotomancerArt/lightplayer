@@ -1,0 +1,11 @@
+[package]
+name = "lp-glsl-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GLSL semantic types shared across compilers (new stack)"
+
+[lints]
+workspace = true
+
+[dependencies]

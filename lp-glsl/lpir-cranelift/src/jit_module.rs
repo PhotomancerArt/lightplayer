@@ -15,6 +15,7 @@ use lpir::{FloatMode, GlslModuleMeta};
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
 use crate::module_lower::{LpirFuncEmitOrder, lower_lpir_into_module};
+use crate::process_sync;
 
 /// Finalized JIT shader module with GLSL metadata for typed calls.
 pub struct JitModule {
@@ -74,6 +75,8 @@ pub(crate) fn build_jit_module(
     glsl_meta: GlslModuleMeta,
     options: CompileOptions,
 ) -> Result<JitModule, CompilerError> {
+    let _codegen_guard = process_sync::codegen_guard();
+
     let mut flag_builder = settings::builder();
     flag_builder
         .set("regalloc_algorithm", "single_pass")

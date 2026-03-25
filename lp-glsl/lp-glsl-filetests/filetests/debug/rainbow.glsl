@@ -1,7 +1,7 @@
 // test run
 //
 // Integration-style checks mirroring examples/basic/src/rainbow.shader/main.glsl.
-// Expectations are blessed from cranelift.q32; wasm.q32 must match within tolerance.
+// Expectations are blessed from jit.q32; wasm.q32 must match within tolerance.
 
 const bool CYCLE_PALETTE = true;
 

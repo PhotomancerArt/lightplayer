@@ -1,10 +1,11 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
-use lp_glsl_cranelift::semantic::functions::{FunctionSignature, ParamQualifier, Parameter};
-use lp_glsl_cranelift::semantic::types::Type;
-use lp_glsl_cranelift::{ErrorCode, GlslDiagnostics, GlslError, GlslExecutable, GlslValue};
+use lp_glsl_core::{FunctionSignature, ParamQualifier, Parameter, Type};
+use lp_glsl_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
+use lp_glsl_exec::GlslExecutable;
 use lp_glsl_naga::GlslType;
+use lp_glsl_values::GlslValue;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;

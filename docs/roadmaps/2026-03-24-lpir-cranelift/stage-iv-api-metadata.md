@@ -54,9 +54,9 @@ complete compiler: GLSL in, callable module out.
 - Tests: GLSL source → `jit()` → `call()` → verify results
 
 **Out of scope:**
-- Filetest integration (Stage V)
+- Filetest integration (Stage V2)
 - lp-engine migration (Stage VI)
-- Object/emulator emission (Stage VI)
+- Object/emulator emission (Stage V1)
 - Level 2 mode-agnostic call interface (deferred)
 
 ## Key decisions

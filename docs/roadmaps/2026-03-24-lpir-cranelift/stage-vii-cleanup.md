@@ -18,8 +18,8 @@ everything still builds and passes.
   nothing else depends on it
 - Delete the `glsl` crate dependency chain if unused (the old hand-written
   GLSL parser)
-- Remove `cranelift.q32` from filetest targets (replaced by `jit.q32`
-  and `rv32.q32`)
+- Remove `cranelift.q32` from filetest targets if still present (typically
+  already removed in **Stage V2**; replaced by `jit.q32` and `rv32.q32`)
 - Remove any compatibility shims, `#[allow(dead_code)]` annotations, or
   conditional compilation added during migration
 - Update old builtins generator code if it still references old naming

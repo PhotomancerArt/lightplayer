@@ -111,7 +111,7 @@ lp-glsl/
 │       └── error.rs           #   CompileError, CallError
 ├── lp-glsl-builtin-ids/       # UPDATE: new naming, self-describing BuiltinId
 ├── lp-glsl-builtins/          # UPDATE: rename symbols to __lp_<module>_<fn>_<mode>
-└── lp-glsl-filetests/         # UPDATE: add jit.q32 target
+└── lp-glsl-filetests/         # UPDATE: Stage V2 — jit.q32 + rv32.q32 targets
 ```
 
 ### Builtin naming convention
@@ -203,21 +203,28 @@ resolved via BuiltinId → Cranelift func ref.
 
 ```
 wasm.q32     LPIR → WASM → wasmtime           existing
-jit.q32      LPIR → CLIF → host CPU            new (this roadmap)
-rv32.q32     LPIR → CLIF → RV32 → emulator     new (this roadmap)
+jit.q32      LPIR → CLIF → host CPU            Stage V2 (default local target)
+rv32.q32     LPIR → CLIF → RV32 → emulator     Stage V2 (+ CI)
 ```
+
+**Stage V2** removes the legacy **`cranelift.q32`** (old AST → RV32) from
+filetests; **`DEFAULT_TARGETS`** is **`jit.q32` only** for speed — **CI** runs
+**`wasm.q32`** and **`rv32.q32`** as well.
 
 Future (not this roadmap): `lpir.q32` (LPIR interpreter), `clif.q32`
 (Cranelift interpreter).
 
 ### Migration path
 
-1. Build new crate, validate via `jit.q32` filetests
-2. Switch lp-engine from `lp-glsl-cranelift` to new crate (clean swap,
+1. **Stage V1:** RV32 object + builtins link + emulator **inside
+   `lpir-cranelift`** (in-crate tests)
+2. **Stage V2:** Filetests — `jit.q32` (host) and `rv32.q32` (emulator) both use
+   `lpir-cranelift`
+3. Switch lp-engine from `lp-glsl-cranelift` to new crate (clean swap,
    no feature flags)
-3. Add `rv32.q32` target, validate on ESP32 via fw-esp32
-4. A/B compare against old compiler on main via git worktree
-5. Delete old `lp-glsl-cranelift` and `lp-glsl-frontend`
+4. Validate on ESP32 via fw-esp32
+5. A/B compare against old compiler on main via git worktree
+6. Delete old `lp-glsl-cranelift` and `lp-glsl-frontend`
 
 ## Alternatives considered
 

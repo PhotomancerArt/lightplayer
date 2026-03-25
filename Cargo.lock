@@ -3907,6 +3907,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-glsl-core"
+version = "40.0.0"
+
+[[package]]
 name = "lp-glsl-cranelift"
 version = "40.0.0"
 dependencies = [
@@ -3937,27 +3941,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-glsl-diagnostics"
+version = "40.0.0"
+
+[[package]]
+name = "lp-glsl-exec"
+version = "40.0.0"
+dependencies = [
+ "lp-glsl-core",
+ "lp-glsl-diagnostics",
+ "lp-glsl-values",
+]
+
+[[package]]
 name = "lp-glsl-filetests"
 version = "40.0.0"
 dependencies = [
  "anyhow",
- "cranelift-codegen 0.127.0",
- "cranelift-frontend 0.127.0",
- "cranelift-module",
- "cranelift-native 0.127.0",
- "cranelift-object",
  "glob",
  "glsl",
- "lp-glsl-cranelift",
- "lp-glsl-jit-util",
+ "lp-glsl-core",
+ "lp-glsl-diagnostics",
+ "lp-glsl-exec",
+ "lp-glsl-frontend",
  "lp-glsl-naga",
+ "lp-glsl-values",
  "lp-glsl-wasm",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lpir",
+ "lpir-cranelift",
  "num_cpus",
  "regex",
- "target-lexicon",
  "walkdir",
  "wasm-encoder 0.245.1",
  "wasmprinter 0.245.1",
@@ -4028,6 +4044,14 @@ dependencies = [
  "lp-glsl-cranelift",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "lp-glsl-values"
+version = "40.0.0"
+dependencies = [
+ "glsl",
+ "lp-glsl-diagnostics",
 ]
 
 [[package]]

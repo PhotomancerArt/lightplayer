@@ -3,16 +3,15 @@
 use crate::parse::{ErrorExpectation, TestFile};
 use crate::test_run::TestCaseStats;
 use anyhow::{Result, anyhow};
-use lp_glsl_cranelift::glsl_emu_riscv32_with_metadata;
-use lp_glsl_cranelift::{GlslOptions, RunMode};
-use lp_riscv_emu::LogLevel;
+use lp_glsl_diagnostics::{ErrorCode, GlslError};
+use lpir_cranelift::{CompileOptions, CompilerError, FloatMode as LpirFloatMode, jit};
 use std::path::Path;
 
 /// Run an error test: compile, expect failure, match diagnostics to expectations.
-/// Error tests run once regardless of target (frontend is shared).
+/// Error tests run once regardless of target (shared LPIR pipeline).
 pub fn run_error_test(
     test_file: &TestFile,
-    path: &Path,
+    _path: &Path,
 ) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>)> {
     if test_file.error_expectations.is_empty() {
         return Ok((
@@ -39,44 +38,17 @@ pub fn run_error_test(
         }
     }
 
-    const DEFAULT_MAX_MEMORY: usize = 1024 * 1024;
-    const DEFAULT_STACK_SIZE: usize = 64 * 1024;
-    const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
-
-    let run_mode = RunMode::Emulator {
-        max_memory: DEFAULT_MAX_MEMORY,
-        stack_size: DEFAULT_STACK_SIZE,
-        max_instructions: DEFAULT_MAX_INSTRUCTIONS,
-        log_level: Some(LogLevel::None),
+    let options = CompileOptions {
+        float_mode: LpirFloatMode::Q32,
     };
 
-    let options = GlslOptions {
-        run_mode,
-        float_mode: lp_glsl_cranelift::FloatMode::Q32,
-        q32_opts: lp_glsl_cranelift::Q32Options::default(),
-        memory_optimized: false,
-        target_override: None,
-        max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
-    };
-
-    let filetests_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
-    let relative_path = path
-        .strip_prefix(&filetests_dir)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
-
-    let result = glsl_emu_riscv32_with_metadata(
-        &test_file.glsl_source,
-        options.clone(),
-        Some(relative_path),
-    );
+    let result: Result<(), CompilerError> = jit(&test_file.glsl_source, &options).map(|_| ());
 
     let mut stats = TestCaseStats::default();
     stats.total = 1;
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             stats.failed = 1;
             Ok((
                 Err(anyhow!("expected compile error, but compilation succeeded")),
@@ -85,9 +57,9 @@ pub fn run_error_test(
                 vec![1],
             ))
         }
-        Err(diag) => {
-            let match_result =
-                match_expectations_to_errors(&test_file.error_expectations, &diag.errors);
+        Err(e) => {
+            let errors = vec![compiler_error_to_glsl_error(e)];
+            let match_result = match_expectations_to_errors(&test_file.error_expectations, &errors);
 
             match match_result {
                 Ok(()) => {
@@ -103,10 +75,14 @@ pub fn run_error_test(
     }
 }
 
+fn compiler_error_to_glsl_error(e: CompilerError) -> GlslError {
+    GlslError::new(ErrorCode::E0400, e.to_string())
+}
+
 /// Match expectations to actual errors. Returns Ok(()) if all match; Err with message otherwise.
 fn match_expectations_to_errors(
     expectations: &[ErrorExpectation],
-    actual_errors: &[lp_glsl_cranelift::GlslError],
+    actual_errors: &[GlslError],
 ) -> Result<()> {
     let mut used = vec![false; actual_errors.len()];
 

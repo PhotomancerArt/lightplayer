@@ -10,12 +10,100 @@ use cranelift_codegen::isa::CallConv;
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
 use lpir::module::IrModule;
+use lpir::{FloatMode, GlslModuleMeta, GlslType};
 
 use crate::compile_options::CompileOptions;
 use crate::emit;
 use crate::error::CompilerError;
 use crate::object_link::link_object_with_builtins;
 use crate::object_module::object_bytes_from_ir;
+use crate::values::{CallError, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg};
+
+/// Q32 typed call through the linked RV32 image (same marshalling as [`crate::JitModule::call`]).
+pub fn glsl_q32_call_emulated(
+    load: &ElfLoadInfo,
+    ir: &IrModule,
+    glsl_meta: &GlslModuleMeta,
+    options: &CompileOptions,
+    name: &str,
+    args: &[GlslQ32],
+) -> Result<GlslReturn<GlslQ32>, CallError> {
+    if options.float_mode != FloatMode::Q32 {
+        return Err(CallError::Unsupported(
+            "emulated Q32 call requires FloatMode::Q32".into(),
+        ));
+    }
+    let gfn = glsl_meta
+        .functions
+        .iter()
+        .find(|f| f.name == name)
+        .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+    if gfn.params.len() != args.len() {
+        return Err(CallError::Arity {
+            expected: gfn.params.len(),
+            got: args.len(),
+        });
+    }
+    let idx = ir
+        .functions
+        .iter()
+        .position(|f| f.name == name)
+        .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+    let ir_func = &ir.functions[idx];
+    let param_count = ir_func.param_count as usize;
+    let mut flat: Vec<i32> = Vec::new();
+    for (p, a) in gfn.params.iter().zip(args.iter()) {
+        flat.extend(flatten_q32_arg(p, a)?);
+    }
+    if flat.len() != param_count {
+        return Err(CallError::Unsupported(alloc::format!(
+            "flattened argument count {} does not match IR param_count {}",
+            flat.len(),
+            param_count
+        )));
+    }
+    let sig = emit::signature_for_ir_func(ir_func, CallConv::SystemV, options.float_mode);
+    let n_ret = sig.returns.len();
+    let entry = *load.symbol_map.get(name).ok_or_else(|| {
+        CallError::Unsupported(alloc::format!("symbol `{name}` not in linked RV32 image"))
+    })?;
+    let data_args: Vec<DataValue> = flat.iter().copied().map(DataValue::I32).collect();
+    let mut emu =
+        Riscv32Emulator::new(load.code.clone(), load.ram.clone()).with_log_level(LogLevel::None);
+    let ret = emu
+        .call_function(entry, &data_args, &sig)
+        .map_err(|e| CallError::Unsupported(alloc::format!("emulator: {e:?}")))?;
+    let mut words = Vec::with_capacity(ret.len());
+    for dv in ret {
+        match dv {
+            DataValue::I32(w) => words.push(w),
+            other => {
+                return Err(CallError::Unsupported(alloc::format!(
+                    "unexpected emulator return value: {other:?}"
+                )));
+            }
+        }
+    }
+    if words.len() < n_ret {
+        return Err(CallError::Unsupported(alloc::format!(
+            "emulator returned {} words, signature expects {}",
+            words.len(),
+            n_ret
+        )));
+    }
+    words.truncate(n_ret);
+    if gfn.return_type == GlslType::Void {
+        return Ok(GlslReturn {
+            value: None,
+            outs: Vec::new(),
+        });
+    }
+    let value = decode_q32_return(&gfn.return_type, &words)?;
+    Ok(GlslReturn {
+        value: Some(value),
+        outs: Vec::new(),
+    })
+}
 
 /// Run `func_name` after object emission, link, and load. Arguments and single `i32` return (Q32 / int).
 pub fn run_lpir_function_i32(

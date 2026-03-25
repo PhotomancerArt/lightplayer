@@ -8,7 +8,7 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// Per-target stats for summary table. Key = target name (e.g. "cranelift.q32").
+/// Per-target stats for summary table. Key = target name (e.g. "jit.q32").
 pub type PerTargetStats = BTreeMap<String, TestCaseStats>;
 
 /// Run all tests in a test file with optional line number filtering.

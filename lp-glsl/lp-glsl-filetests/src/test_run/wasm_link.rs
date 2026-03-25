@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use lp_glsl_cranelift::{ErrorCode, GlslError};
+use lp_glsl_diagnostics::{ErrorCode, GlslError};
 use wasmtime::{Engine, ExternType, Func, Instance, Linker, Memory, MemoryType, Module, Store};
 
 /// Path to `lp_glsl_builtins_wasm.wasm`. Override with `LP_GLSL_BUILTINS_WASM`.

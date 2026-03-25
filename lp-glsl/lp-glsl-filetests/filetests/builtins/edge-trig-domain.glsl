@@ -45,7 +45,7 @@ float test_atan2_zero_zero() {
     return atan(0.0, 0.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="wasm path rejects UB atan(0,0); cranelift returns ~0")
+// @broken(backend=wasm, float_mode=q32, reason="wasm path rejects UB atan(0,0); jit returns ~0")
 // run: test_atan2_zero_zero() ~= 0.0
 
 float test_acosh_domain_under() {

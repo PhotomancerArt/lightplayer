@@ -1,0 +1,18 @@
+[package]
+name = "lp-glsl-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GlslExecutable trait for pluggable GLSL backends (new stack)"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-glsl-core = { path = "../lp-glsl-core" }
+lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
+lp-glsl-values = { path = "../lp-glsl-values", default-features = false }
+
+[features]
+default = ["std"]
+std = ["lp-glsl-diagnostics/std", "lp-glsl-values/std"]

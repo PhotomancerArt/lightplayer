@@ -21,7 +21,7 @@ struct TestOptions {
     /// Automatically remove annotations from tests that now pass
     #[arg(long)]
     fix: bool,
-    /// Run only the specified target (e.g. cranelift.q32, wasm.q32)
+    /// Run only the specified target (e.g. jit.q32, wasm.q32, rv32.q32)
     #[arg(long)]
     target: Option<String>,
     /// Force summary mode even for a single test file

@@ -13,6 +13,7 @@ pub mod error;
 mod invoke;
 mod jit_module;
 mod module_lower;
+mod process_sync;
 mod q32;
 mod values;
 
@@ -29,9 +30,13 @@ pub use compile::{object_bytes_from_ir, run_lpir_function_i32};
 pub use compile_options::CompileOptions;
 pub use direct_call::DirectCall;
 pub use emit::signature_for_ir_func;
+#[cfg(feature = "riscv32-emu")]
+pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
 pub use lpir::FloatMode;
+#[cfg(feature = "riscv32-emu")]
+pub use object_link::link_object_with_builtins;
 pub use values::{CallError, CallResult, GlslQ32, GlslReturn};
 
 #[cfg(test)]

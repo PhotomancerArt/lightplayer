@@ -4,56 +4,64 @@ Cranelift-style filetest infrastructure for validating GLSL compilation and exec
 
 **Location:** `lp-glsl/lp-glsl-filetests/` (this is the canonical test suite)
 
-## Running Tests
+## Running tests
 
-### From Lightplayer Workspace
+### Recommended: script (matches CI)
+
+From the workspace root (`lp2025`):
 
 ```bash
-# Navigate to workspace root
-cd lp2025
+# Default backend: jit.q32 only (fast local default)
+scripts/glsl-filetests.sh
 
-# Run all tests
-cargo test -p lp-glsl-filetests --test filetests
+# One backend
+scripts/glsl-filetests.sh --target wasm.q32
+scripts/glsl-filetests.sh --target rv32.q32
 
-# Run with output
-cargo test -p lp-glsl-filetests --test filetests -- --nocapture
-
-# Run specific test file (by filtering)
-cargo test -p lp-glsl-filetests --test filetests -- --nocapture 2>&1 | grep "add.glsl"
-
-# Run a single test case from a specific file (using environment variables)
-TEST_FILE=math/float-add.glsl TEST_LINE=72 cargo test -p lp-glsl-filetests --test filetests -- --nocapture
-
-# Run all test cases from a specific file
-TEST_FILE=math/float-add.glsl cargo test -p lp-glsl-filetests --test filetests -- --nocapture
+# Full matrix (same as `just test-filetests` / `just test`)
+just test-filetests
 ```
 
-### From Crate Directory
+`just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script three times: default (`jit.q32`), then `wasm.q32`, then `rv32.q32`. Ensure `just build-ci` (or a full build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
+
+**Parallelism:** set `LP_FILETESTS_THREADS=N` if you need to limit worker threads (see `scripts/glsl-filetests.sh --help`).
+
+### Integration test harness (`#[ignore]`)
+
+`cargo test` does **not** run the corpus by default. The integration test in `tests/filetests.rs` is marked `#[ignore]` so it stays out of the normal Rust test suite.
+
+To run it explicitly (uses `DEFAULT_TARGETS` = `jit.q32` only, same as the script with no `--target`):
+
+```bash
+cd lp2025/lp-glsl
+cargo test -p lp-glsl-filetests --test filetests -- --ignored --nocapture
+
+# Filter by path substring
+TEST_FILE=scalar/float/op-add.glsl cargo test -p lp-glsl-filetests --test filetests -- --ignored --nocapture
+```
+
+For wasm/rv32 via the harness you would need separate tooling; prefer `scripts/glsl-filetests.sh --target …` for those.
+
+### From the crate directory
 
 ```bash
 cd lp-glsl/lp-glsl-filetests
-cargo test --test filetests
+cargo test --test filetests -- --ignored
 ```
 
 ## Skipped vs failed (especially `wasm.q32`)
 
-Summary lines like `0/10 … (10 skipped)` mean the file or directive has
-`// @ignore(backend=wasm)` (or another target filter), not that assertions failed.
-Those cases are usually **not implemented** on the WASM backend yet (e.g. some
-`bool` control-flow or float ordering tests). They are **expected** until the
-backend catches up.
+Summary lines like `0/10 … (10 skipped)` mean the file or directive has `// @ignore(backend=wasm)` (or another target filter), not that assertions failed. Those cases are usually **not implemented** on that backend yet. They are **expected** until the backend catches up.
 
-Failures are reported explicitly with expected vs actual values. Use
-`lp-glsl-filetests-app test --target wasm.q32` (or `cranelift.q32`) to focus one
-backend.
+Failures are reported with expected vs actual values. Use `scripts/glsl-filetests.sh --target wasm.q32` (or `jit.q32` / `rv32.q32`) to focus one backend.
 
-## Test File Format
+## Test file format
 
-Test files use GLSL's native comment syntax with directives and expectations:
+Test files use GLSL comments for directives and expectations:
 
 ```glsl
 // test run
-// target riscv32.q32
+// target jit.q32
 
 float add_float(float a, float b) {
     return a + b;
@@ -72,135 +80,67 @@ int add_int(int a, int b) {
 
 ### Directives
 
-- `// test run` - Marks this file as a test run file (required for execution tests)
-- `// target <arch>.<format>` - Specifies target architecture and format
-  - Examples: `riscv32.q32`, `riscv32.float`
-  - Default: `riscv32.q32` if not specified
+- `// test run` — marks an execution test file (required for run tests).
+- `// target <backend>.<format>` — file-level default target (e.g. `jit.q32`, `wasm.q32`, `rv32.q32`).
+- Per-directive filters: `// @jit`, `// @wasm`, `// @rv32` (see parser / plan docs).
 
-### Run Directives
+**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`jit.q32` only**. CI runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
 
-- `// run: <expression> == <expected>` - Exact equality comparison (for integers and booleans)
-- `// run: <expression> ~= <expected>` - Approximate equality with tolerance (for floats)
-  - Default tolerance: `1e-4` (0.0001)
-  - Example: `add_float(1.5, 2.5) ~= 4.0`
+### Run directives
 
-### Comparison Operators
+- `// run: <expression> == <expected>` — exact equality (`int`, `bool`).
+- `// run: <expression> ~= <expected>` — approximate float compare (default tolerance `1e-4`).
 
-- `==` - Exact equality (required for `int` and `bool` types)
-- `~=` - Approximate equality with tolerance (for `float` types)
+### Comparison operators
 
-## How Filetests Work
+- `==` — exact equality.
+- `~=` — approximate equality with tolerance for `float`.
 
-The filetest infrastructure follows Cranelift's filetests pattern:
+## How filetests work
 
-1. **Test Discovery**: Automatically discovers all `.glsl` files in the `filetests/` directory using `walkdir`
-2. **Parsing**: Parses directives (`// test run`, `// target`, `// run:`) from comments
-3. **Bootstrap Generation**: For each `// run:` directive, generates a `main()` function that calls the expression
-4. **Compilation**: Compiles the bootstrap code using the GLSL compiler with the specified target
-5. **Execution**: Executes the compiled code on the RISC-V emulator
-6. **Comparison**: Compares actual results with expected values:
-   - Integers/booleans: Exact equality (`==`)
-   - Floats: Approximate equality with tolerance (`~=`, default `1e-4`)
-7. **Error Handling**: On mismatch, either fails the test or updates expectations (BLESS mode)
+1. **Discovery** — `.glsl` files under `filetests/` (app and `walkdir` harness).
+2. **Parsing** — directives and `// run:` lines (`src/filetest.rs`, `src/parse/`).
+3. **Bootstrap** — generated `main()` calling each expression under test.
+4. **Compilation** — GLSL → LPIR → backend (`lp-glsl-exec`, `lpir-cranelift`, wasm path, etc.).
+5. **Execution** — **jit** (in-process), **wasm** (interpreter), or **rv32** (emulator + linked builtins), depending on target.
+6. **Comparison** — expected vs actual; BLESS can rewrite expectations.
 
 ### Comparison with Cranelift
 
-Our implementation matches Cranelift's filetests semantics:
+- Similar discovery, parsing, execution, and BLESS-style updates (`CRANELIFT_TEST_BLESS=1`).
+- Differences: GLSL instead of CLIF, `~=` for floats, comment-based directives.
 
-- **Similar structure**: Test discovery, parsing, execution, comparison
-- **Similar BLESS mode**: Automatic expectation updates via `CRANELIFT_TEST_BLESS=1`
-- **Differences**:
-  - GLSL syntax instead of CLIF
-  - `~=` operator for float tolerance (GLSL-specific)
-  - Standalone `// run:` lines instead of function comments
+## BLESS mode
 
-## BLESS Mode
-
-Automatically update test expectations when they don't match actual results:
+Update expectations in place when outputs change intentionally:
 
 ```bash
-# From workspace root
-cd lp2025
-
-# Update all test expectations
-CRANELIFT_TEST_BLESS=1 cargo test -p lp-glsl-filetests --test filetests
-
-# Update specific test (filter by file name)
-CRANELIFT_TEST_BLESS=1 cargo test -p lp-glsl-filetests --test filetests 2>&1 | grep "add.glsl"
+cd lp2025/lp-glsl
+CRANELIFT_TEST_BLESS=1 cargo test -p lp-glsl-filetests --test filetests -- --ignored --nocapture
 ```
 
-BLESS mode will:
+Always review diffs after BLESS.
 
-- Update `// run:` expectations with actual execution results
-- Preserve indentation and formatting
-- Handle multiple updates to the same file correctly
+## Test organization
 
-**Important**: Always review the generated expectations to ensure correctness. BLESS mode should be used when:
+Tests live under `filetests/` (e.g. `math/`, `operators/`, `type_errors/`).
 
-- Adding new tests
-- After intentional codegen changes
-- When fixing test expectations after compiler improvements
+## Adding new tests
 
-## Test Organization
-
-Tests are organized in the `filetests/` directory:
-
-- `math/` - Mathematical operations (add, subtract, multiply, etc.)
-- Future directories can be added as needed (e.g., `functions/`, `control_flow/`, `vectors/`)
-
-## Adding New Tests
-
-1. Create a `.glsl` file in the `filetests/` directory (or appropriate subdirectory)
-2. Add test directives and GLSL code:
-
-   ```glsl
-   // test run
-   // target riscv32.q32
-
-   float my_function(float x) {
-       return x * 2.0;
-   }
-
-   // run: my_function(1.5) ~= 3.0
-   ```
-
-3. Run with BLESS to generate expectations (from lightplayer workspace):
-   ```bash
-   cd lightplayer
-   CRANELIFT_TEST_BLESS=1 cargo test -p lp-glsl-filetests --test filetests
-   ```
-4. Review the generated expectations in your test file
-5. Run tests normally to verify:
-   ```bash
-   cargo test -p lp-glsl-filetests --test filetests
-   ```
-
-**Note**: Test discovery is automatic - you don't need to manually register tests in `tests/filetests.rs`. The test harness automatically finds all `.glsl` files in `filetests/`.
+1. Add a `.glsl` file under `filetests/`.
+2. Use `// test run`, optional `// target …`, and `// run:` lines.
+3. Run BLESS if needed, then run `scripts/glsl-filetests.sh` (and CI targets if you touch backend-specific behavior).
 
 ## Troubleshooting
 
-### Test passes when it should fail
+- **Wrong workspace** — run from repo root or `lp-glsl/lp-glsl-filetests` as above.
+- **Missing `// test run`** — file is skipped as a test.
+- **Float vs int** — use `~=` for floats, `==` for integers.
+- **Not found** — path must be under `filetests/` with extension `.glsl`.
 
-- Verify you're running tests from the correct location: `lp-glsl/lp-glsl-filetests/`
-- Check that the test file has `// test run` directive
-- Verify the comparison operator matches the value type (`==` for int/bool, `~=` for float)
-- Run with `--nocapture` to see detailed output
+## Implementation details
 
-### Type mismatch errors
-
-- Ensure expected values match the return type of the function
-- For floats, use `~=` with decimal values (e.g., `4.0`, not `4`)
-- For integers, use `==` with integer values
-
-### Test not found
-
-- Verify the file has `.glsl` extension
-- Check that the file is in `filetests/` directory (or subdirectory)
-- Ensure `// test run` directive is present
-
-## Implementation Details
-
-- **Test Discovery**: `tests/filetests.rs` uses `walkdir` to recursively scan `filetests/` directory
-- **Parsing**: `src/filetest.rs` parses directives and extracts GLSL source
-- **Execution**: `src/test_run.rs` handles compilation, execution, and comparison
-- **BLESS Mode**: `src/file_update.rs` updates test files in-place
+- **Discovery** — `tests/filetests.rs` (ignored test) uses `walkdir`; the app uses the same tree.
+- **Parsing** — `src/parse/`.
+- **Execution** — `src/test_run.rs` and backend adapters.
+- **BLESS** — `src/util/file_update.rs` (and integration with `CRANELIFT_TEST_BLESS`).

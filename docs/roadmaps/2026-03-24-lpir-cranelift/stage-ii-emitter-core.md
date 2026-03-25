@@ -49,7 +49,7 @@ native f32.
 - `jit()` from GLSL source (Stage IV)
 - Level 1 typed call interface (Stage IV)
 - GlslMetadata (Stage IV)
-- Filetest integration (Stage V)
+- Filetest integration (Stage V2)
 
 ## Key decisions
 

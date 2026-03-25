@@ -3,8 +3,8 @@
 ## Goal
 
 Migrate lp-engine from the old `lp-glsl-cranelift` to the new
-`lpir-cranelift` crate. Add `rv32.q32` filetest target. Test on ESP32
-hardware. Run A/B performance comparisons against the old compiler.
+`lpir-cranelift` crate. Test on ESP32 hardware. Run A/B performance
+comparisons against the old compiler. (`rv32.q32` filetests are Stage V2.)
 
 ## Suggested plan name
 
@@ -22,12 +22,6 @@ hardware. Run A/B performance comparisons against the old compiler.
   - Remove `cranelift_codegen` direct dependency from lp-engine if
     `DirectCall` successfully abstracts calling convention
   - Verify desktop host JIT still works
-- **`rv32.q32` filetest target**:
-  - Object emission: LPIR → CLIF → Cranelift ObjectModule → ELF bytes
-  - Builtins linking: merge shader object with builtins ELF (same
-    pattern as old `builtins_linker`)
-  - Emulator execution: load linked ELF into RISC-V emulator, run
-  - Add to filetests as `rv32.q32` target
 - **ESP32 firmware**:
   - `lp-server` → `lp-engine` picks up new crate transitively
   - Build `fw-esp32` with new compiler
@@ -92,7 +86,6 @@ hardware. Run A/B performance comparisons against the old compiler.
 ## Deliverables
 
 - lp-engine using the new compiler crate
-- `rv32.q32` filetest target
 - fw-esp32 building and running shaders
 - A/B comparison document: binary size, memory, compilation time,
   execution speed
@@ -100,10 +93,11 @@ hardware. Run A/B performance comparisons against the old compiler.
 
 ## Dependencies
 
-- Stage V (filetests passing on jit.q32) — correctness must be validated
-  before engine migration
+- Stage V2 (filetests on `jit.q32` and `rv32.q32`) — host and emulator
+  correctness validated
+- Stage V1 (object + emulator in `lpir-cranelift`) — already required by V2
 
 ## Estimated scope
 
-~500 lines of engine migration + ~400 lines of rv32/object/emulator path
-+ ~200 lines of test/benchmark infrastructure. Plus debugging.
+~500 lines of engine migration + ~200 lines of test/benchmark
+infrastructure. Plus debugging.

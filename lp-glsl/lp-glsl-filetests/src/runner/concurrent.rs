@@ -11,8 +11,10 @@ use std::collections::BTreeMap;
 use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::thread;
+
+static WORKER_PANIC_HOOK: Once = Once::new();
 
 /// Request sent to worker threads.
 struct Request {
@@ -139,11 +141,13 @@ fn worker_thread(
     thread::Builder::new()
         .name(format!("lp-glsl-filetests-app-worker-{thread_num}"))
         .spawn(move || {
-            // Set a custom panic hook for this worker thread that suppresses default output
-            // since we catch panics with catch_unwind and convert them to test failures
-            std::panic::set_hook(Box::new(|_panic_info| {
-                // Suppress default panic output - we handle panics via catch_unwind
-            }));
+            // Install once: replacing the process-global hook per worker was racy and could
+            // interact badly with the runtime when many threads start at once.
+            WORKER_PANIC_HOOK.call_once(|| {
+                std::panic::set_hook(Box::new(|_panic_info| {
+                    // Suppress default panic output — workers handle panics via catch_unwind.
+                }));
+            });
 
             loop {
                 // Lock the mutex only long enough to extract a request.

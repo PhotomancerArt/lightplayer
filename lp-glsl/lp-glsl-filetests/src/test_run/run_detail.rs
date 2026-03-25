@@ -4,6 +4,8 @@ use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
 use crate::target::{Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
+use lp_glsl_exec::GlslExecutable;
+
 use crate::test_run::compile;
 use crate::test_run::execution;
 use crate::test_run::parse_assert;
@@ -578,7 +580,7 @@ fn format_error(
     filename: &str,
     line_number: usize,
     test_glsl: Option<&str>,
-    executable: Option<&dyn lp_glsl_cranelift::GlslExecutable>,
+    executable: Option<&dyn GlslExecutable>,
     output_mode: OutputMode,
     _test_expression: Option<&str>,
 ) -> String {

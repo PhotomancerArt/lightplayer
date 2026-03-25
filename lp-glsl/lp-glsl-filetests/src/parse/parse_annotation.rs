@@ -110,10 +110,11 @@ fn split_params(s: &str) -> Vec<&str> {
 
 fn parse_backend(s: &str, line_number: usize) -> Result<Backend> {
     match s {
-        "cranelift" => Ok(Backend::Cranelift),
+        "jit" => Ok(Backend::Jit),
+        "rv32" => Ok(Backend::Rv32),
         "wasm" => Ok(Backend::Wasm),
         other => Err(anyhow!(
-            "line {line_number}: invalid backend '{other}', expected cranelift or wasm"
+            "line {line_number}: invalid backend '{other}', expected jit, rv32, or wasm"
         )),
     }
 }
@@ -173,10 +174,10 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_filters() {
-        let ann = parse_annotation_line("// @broken(backend=cranelift, isa=riscv32)", 1)
+        let ann = parse_annotation_line("// @broken(backend=rv32, isa=riscv32)", 1)
             .unwrap()
             .unwrap();
-        assert_eq!(ann.filter.backend, Some(Backend::Cranelift));
+        assert_eq!(ann.filter.backend, Some(Backend::Rv32));
         assert_eq!(ann.filter.isa, Some(Isa::Riscv32));
     }
 
@@ -200,12 +201,12 @@ mod tests {
     #[test]
     fn test_parse_all_filter_fields() {
         let ann = parse_annotation_line(
-            "// @ignore(backend=cranelift, float_mode=q32, isa=riscv32, exec_mode=emulator)",
+            "// @ignore(backend=rv32, float_mode=q32, isa=riscv32, exec_mode=emulator)",
             1,
         )
         .unwrap()
         .unwrap();
-        assert_eq!(ann.filter.backend, Some(Backend::Cranelift));
+        assert_eq!(ann.filter.backend, Some(Backend::Rv32));
         assert_eq!(ann.filter.float_mode, Some(FloatMode::Q32));
         assert_eq!(ann.filter.isa, Some(Isa::Riscv32));
         assert_eq!(ann.filter.exec_mode, Some(ExecMode::Emulator));

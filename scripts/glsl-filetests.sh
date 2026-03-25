@@ -89,13 +89,15 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
-    --target NAME       Run only the specified target (cranelift.q32, wasm.q32)
+    --target NAME       Run only the specified target (jit.q32, wasm.q32, rv32.q32)
     --summary           Force summary mode even for a single test file
     --fix               Remove @unimplemented annotations from tests that now pass
 
 ENVIRONMENT:
     DEBUG=1             Show debug output (CLIF, WAT) when a test fails
     LP_FIX_XFAIL=1      Same as --fix; remove annotations from newly passing tests
+    LP_FILETESTS_THREADS=N   Worker threads for the test runner (default: CPU count).
+                        If you still see crashes with parallel JIT, try N=1.
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.

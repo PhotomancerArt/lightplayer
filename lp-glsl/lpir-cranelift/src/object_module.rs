@@ -13,6 +13,7 @@ use target_lexicon::{
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
 use crate::module_lower::{LpirFuncEmitOrder, lower_lpir_into_module};
+use crate::process_sync;
 
 /// Same triple as `lp-glsl-cranelift` `Target::riscv32_emulator` (RISC-V32 imafc, ELF).
 fn riscv32_triple() -> Triple {
@@ -67,6 +68,8 @@ pub fn object_bytes_from_ir(
     ir: &IrModule,
     options: &CompileOptions,
 ) -> Result<Vec<u8>, CompilerError> {
+    let _codegen_guard = process_sync::codegen_guard();
+
     let isa = riscv32_owned_isa()?;
     let builder = ObjectBuilder::new(isa, b"lpir", cranelift_module::default_libcall_names())
         .map_err(|e| {

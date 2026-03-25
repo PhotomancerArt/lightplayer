@@ -950,8 +950,10 @@ fn format_file_counts(
     let counts_str = if denominator > 0 {
         format!("{numerator:2}/{denominator:2}")
     } else if stats.total > 0 {
-        // All tests are expected failures - show 0/total in yellow
-        format!("{numerator:2}/{total:2}", total = stats.total)
+        // No ordinary pass/fail mix: every case is skipped or an expected-failure
+        // disposition. Show accounted/total so we do not print misleading `0/total`.
+        let accounted = stats.passed + stats.skipped + stats.expected_failure();
+        format!("{accounted:2}/{total:2}", total = stats.total)
     } else {
         String::new()
     };
