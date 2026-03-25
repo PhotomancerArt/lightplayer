@@ -1,0 +1,106 @@
+use cranelift_codegen::ir::{InstBuilder, MemFlags, Value, types};
+use cranelift_frontend::{FunctionBuilder, Variable};
+use lpir::module::IrFunction;
+use lpir::op::Op;
+use lpir::types::VReg;
+
+use super::{EmitCtx, def_v, ir_type, use_v};
+use crate::error::CompileError;
+
+pub(crate) fn emit_memory(
+    op: &Op,
+    func: &IrFunction,
+    builder: &mut FunctionBuilder,
+    vars: &[Variable],
+    ctx: &EmitCtx,
+) -> Result<bool, CompileError> {
+    match op {
+        Op::SlotAddr { dst, slot } => {
+            let ss = *ctx
+                .slots
+                .get(slot.0 as usize)
+                .ok_or_else(|| CompileError::unsupported("invalid stack slot index"))?;
+            let addr = builder.ins().stack_addr(ctx.pointer_type, ss, 0);
+            def_v(builder, vars, *dst, addr);
+        }
+        Op::Load { dst, base, offset } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let ty = ir_type(func.vreg_types[dst.0 as usize]);
+            let val = builder.ins().load(
+                ty,
+                MemFlags::new(),
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("load offset does not fit in i32"))?,
+            );
+            def_v(builder, vars, *dst, val);
+        }
+        Op::Store {
+            base,
+            offset,
+            value,
+        } => {
+            let ptr = operand_as_ptr(builder, vars, ctx, *base);
+            let val = use_v(builder, vars, *value);
+            builder.ins().store(
+                MemFlags::new(),
+                val,
+                ptr,
+                i32::try_from(*offset)
+                    .map_err(|_| CompileError::unsupported("store offset does not fit in i32"))?,
+            );
+        }
+        Op::Memcpy {
+            dst_addr,
+            src_addr,
+            size,
+        } => {
+            let dst_ptr = operand_as_ptr(builder, vars, ctx, *dst_addr);
+            let src_ptr = operand_as_ptr(builder, vars, ctx, *src_addr);
+            if *size % 4 != 0 {
+                return Err(CompileError::unsupported(
+                    "memcpy size must be a multiple of 4",
+                ));
+            }
+            let mut off = 0i32;
+            let size_i = i32::try_from(*size)
+                .map_err(|_| CompileError::unsupported("memcpy size does not fit in i32"))?;
+            while off < size_i {
+                let chunk = builder
+                    .ins()
+                    .load(types::I32, MemFlags::new(), src_ptr, off);
+                builder.ins().store(MemFlags::new(), chunk, dst_ptr, off);
+                off += 4;
+            }
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn operand_as_ptr(
+    builder: &mut FunctionBuilder,
+    vars: &[Variable],
+    ctx: &EmitCtx,
+    v: VReg,
+) -> Value {
+    let val = use_v(builder, vars, v);
+    if ctx
+        .vreg_is_stack_addr
+        .get(v.0 as usize)
+        .copied()
+        .unwrap_or(false)
+    {
+        val
+    } else {
+        widen_to_ptr(builder, val, ctx.pointer_type)
+    }
+}
+
+fn widen_to_ptr(builder: &mut FunctionBuilder, val: Value, ptr_type: types::Type) -> Value {
+    if ptr_type == types::I32 {
+        val
+    } else {
+        builder.ins().uextend(ptr_type, val)
+    }
+}
