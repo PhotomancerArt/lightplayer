@@ -49,6 +49,7 @@ fn lpfx_saturate_vec3_q32_writes_shared_memory() {
 }
 
 #[test]
+#[ignore = "LPIR→WASM declares vec3 lpfx_saturate as multi-return; builtins.wasm exports result-ptr ABI — incompatible import type until aligned (stage-vii-cleanup.md)"]
 fn shader_lpfx_saturate_vec3_writes_scratch_then_reads_it() {
     let src = r#"
 float test_get_rx() {

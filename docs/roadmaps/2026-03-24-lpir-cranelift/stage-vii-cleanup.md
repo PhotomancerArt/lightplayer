@@ -80,3 +80,12 @@ everything still builds and passes.
 ~2000+ lines deleted. ~100 lines of Cargo.toml / build system updates.
 Documentation updates. The effort is mostly verification — making sure
 nothing breaks.
+
+## Temporarily ignored tests (re-enable during cleanup)
+
+These were ignored while LPIR / builtins / WASM linking is in flux. Before
+closing Stage VII, remove `#[ignore]`, run the tests, and fix any failures.
+
+| Location | What |
+|----------|------|
+| `lp-glsl/lp-glsl-filetests/tests/lpfx_builtins_memory.rs` — `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it` | Links shader WASM with `lp_glsl_builtins_wasm.wasm`. Failed with `incompatible import type for builtins::__lpfx_saturate_vec3_q32`: Naga/LPIR lowers `vec3 lpfx_saturate(vec3)` as a WASM import with three i32 params and three i32 results, while the Rust builtin is `(result_ptr: i32, x, y, z) -> ()`. **Re-check:** align LPIR import + `lp-glsl-wasm` emission with the result-pointer ABI (or document an adapter), then un-ignore and verify scratch-memory behavior. |
