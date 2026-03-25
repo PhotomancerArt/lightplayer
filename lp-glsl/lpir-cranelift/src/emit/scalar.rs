@@ -1,75 +1,173 @@
-use super::{bool_to_i32, def_v, def_v_expr, use_v};
+use super::{EmitCtx, bool_to_i32, def_v, def_v_expr, use_v};
 use crate::error::CompileError;
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{InstBuilder, types};
 use cranelift_frontend::{FunctionBuilder, Variable};
+use lpir::FloatMode;
 use lpir::module::IrFunction;
 use lpir::op::Op;
+
+fn q32_lpir_refs<'a>(ctx: &'a EmitCtx<'_>) -> Result<&'a super::LpirBuiltinRefs, CompileError> {
+    ctx.lpir_builtins
+        .as_ref()
+        .ok_or_else(|| CompileError::unsupported("missing Q32 LPIR opcode builtins"))
+}
 
 pub(crate) fn emit_scalar(
     op: &Op,
     func: &IrFunction,
     builder: &mut FunctionBuilder,
     vars: &[Variable],
+    ctx: &EmitCtx,
 ) -> Result<bool, CompileError> {
     match op {
         Op::Fadd { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fadd(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fadd(a, b)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fadd, &[a, b]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fsub { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fsub(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fsub(a, b)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fsub, &[a, b]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fmul { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fmul(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fmul(a, b)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fmul, &[a, b]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fdiv { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fdiv(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fdiv(a, b)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fdiv, &[a, b]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fneg { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fneg(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fneg(a)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_fneg(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fabs { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fabs(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fabs(a)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_fabs(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fsqrt { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().sqrt(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().sqrt(a)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fsqrt, &[a]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fmin { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fmin(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fmin(a, b)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_fmin(builder, a, b);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fmax { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().fmax(a, b));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fmax(a, b)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_fmax(builder, a, b);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Ffloor { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().floor(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().floor(a)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_ffloor(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fceil { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().ceil(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().ceil(a)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_fceil(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Ftrunc { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().trunc(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().trunc(a)),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_ftrunc(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Fnearest { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().nearest(a));
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().nearest(a)),
+                FloatMode::Q32 => {
+                    let refs = q32_lpir_refs(ctx)?;
+                    let call = builder.ins().call(refs.fnearest, &[a]);
+                    let out = builder.inst_results(call)[0];
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Iadd { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
@@ -144,9 +242,17 @@ pub(crate) fn emit_scalar(
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().ushr(a, b));
         }
-        Op::FconstF32 { dst, value } => {
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().f32const(*value));
-        }
+        Op::FconstF32 { dst, value } => match ctx.float_mode {
+            FloatMode::F32 => {
+                def_v_expr(builder, vars, *dst, |bd| bd.ins().f32const(*value));
+            }
+            FloatMode::Q32 => {
+                let encoded = crate::q32::q32_encode(*value);
+                def_v_expr(builder, vars, *dst, |bd| {
+                    bd.ins().iconst(types::I32, i64::from(encoded))
+                });
+            }
+        },
         Op::IconstI32 { dst, value } => {
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().iconst(types::I32, i64::from(*value))
@@ -255,62 +361,134 @@ pub(crate) fn emit_scalar(
         Op::Feq { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::Equal, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::Equal, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::Equal, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::Fne { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::NotEqual, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::NotEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::NotEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::Flt { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::LessThan, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::LessThan, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::Fle { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::Fgt { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::GreaterThan, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::GreaterThan, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::Fge { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            let cmp = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, a, b);
-            def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+            match ctx.float_mode {
+                FloatMode::F32 => {
+                    let cmp = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+                FloatMode::Q32 => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
+                    def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
+                }
+            }
         }
         Op::FtoiSatS { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| {
-                bd.ins().fcvt_to_sint_sat(types::I32, a)
-            });
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
+                    bd.ins().fcvt_to_sint_sat(types::I32, a)
+                }),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_to_sint(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::FtoiSatU { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| {
-                bd.ins().fcvt_to_uint_sat(types::I32, a)
-            });
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
+                    bd.ins().fcvt_to_uint_sat(types::I32, a)
+                }),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_to_uint(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::ItofS { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| {
-                bd.ins().fcvt_from_sint(types::F32, a)
-            });
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
+                    bd.ins().fcvt_from_sint(types::F32, a)
+                }),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_from_sint(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::ItofU { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v_expr(builder, vars, *dst, |bd| {
-                bd.ins().fcvt_from_uint(types::F32, a)
-            });
+            match ctx.float_mode {
+                FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
+                    bd.ins().fcvt_from_uint(types::F32, a)
+                }),
+                FloatMode::Q32 => {
+                    let out = crate::q32::emit_from_uint(builder, a);
+                    def_v(builder, vars, *dst, out);
+                }
+            }
         }
         Op::Select {
             dst,

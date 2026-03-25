@@ -4,7 +4,7 @@ use lpir::module::IrFunction;
 use lpir::op::Op;
 use lpir::types::VReg;
 
-use super::{EmitCtx, def_v, ir_type, use_v};
+use super::{EmitCtx, def_v, ir_type_for_mode, use_v};
 use crate::error::CompileError;
 
 pub(crate) fn emit_memory(
@@ -25,7 +25,7 @@ pub(crate) fn emit_memory(
         }
         Op::Load { dst, base, offset } => {
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let ty = ir_type(func.vreg_types[dst.0 as usize]);
+            let ty = ir_type_for_mode(func.vreg_types[dst.0 as usize], ctx.float_mode);
             let val = builder.ins().load(
                 ty,
                 MemFlags::new(),

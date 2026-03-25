@@ -37,7 +37,7 @@ fn vreg_val_ty(func: &IrFunction, reg: lpir::VReg, mode: FloatMode) -> Result<Va
     Ok(match (ty, mode) {
         (IrType::I32, _) => ValType::I32,
         (IrType::F32, FloatMode::Q32) => ValType::I32,
-        (IrType::F32, FloatMode::Float) => ValType::F32,
+        (IrType::F32, FloatMode::F32) => ValType::F32,
     })
 }
 
@@ -399,7 +399,7 @@ pub(crate) fn emit_op(
                 let q = q32::f32_to_q16_16(*value);
                 sink.i32_const(q).local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.f32_const(Ieee32::from(*value)).local_set(dst.0);
             }
         },
@@ -410,7 +410,7 @@ pub(crate) fn emit_op(
                     .ok_or_else(|| String::from("internal: Q32 Fadd without i64 scratch local"))?;
                 q32::emit_q32_fadd(sink, lhs.0, rhs.0, dst.0, s);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_add()
@@ -424,7 +424,7 @@ pub(crate) fn emit_op(
                     .ok_or_else(|| String::from("internal: Q32 Fsub without i64 scratch local"))?;
                 q32::emit_q32_fsub(sink, lhs.0, rhs.0, dst.0, s);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_sub()
@@ -438,7 +438,7 @@ pub(crate) fn emit_op(
                     .ok_or_else(|| String::from("internal: Q32 Fmul without i64 scratch local"))?;
                 q32::emit_q32_fmul(sink, lhs.0, rhs.0, dst.0, s);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_mul()
@@ -449,7 +449,7 @@ pub(crate) fn emit_op(
             FloatMode::Q32 => {
                 q32::emit_q32_fdiv(sink, lhs.0, rhs.0, dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_div()
@@ -463,7 +463,7 @@ pub(crate) fn emit_op(
                     .i32_sub()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_neg().local_set(dst.0);
             }
         },
@@ -471,7 +471,7 @@ pub(crate) fn emit_op(
             FloatMode::Q32 => {
                 q32::emit_q32_fabs(sink, src.0, dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_abs().local_set(dst.0);
             }
         },
@@ -481,7 +481,7 @@ pub(crate) fn emit_op(
                 let idx = wasm_func_index(fctx, callee)?;
                 sink.local_get(src.0).call(idx).local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_sqrt().local_set(dst.0);
             }
         },
@@ -495,7 +495,7 @@ pub(crate) fn emit_op(
                     .select()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_min()
@@ -512,7 +512,7 @@ pub(crate) fn emit_op(
                     .select()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_max()
@@ -523,7 +523,7 @@ pub(crate) fn emit_op(
             FloatMode::Q32 => {
                 q32::emit_q32_ffloor(sink, src.0, dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_floor().local_set(dst.0);
             }
         },
@@ -531,7 +531,7 @@ pub(crate) fn emit_op(
             FloatMode::Q32 => {
                 q32::emit_q32_fceil(sink, src.0, dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_ceil().local_set(dst.0);
             }
         },
@@ -539,7 +539,7 @@ pub(crate) fn emit_op(
             FloatMode::Q32 => {
                 q32::emit_q32_ftrunc(sink, src.0, dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_trunc().local_set(dst.0);
             }
         },
@@ -549,7 +549,7 @@ pub(crate) fn emit_op(
                 let idx = wasm_func_index(fctx, callee)?;
                 sink.local_get(src.0).call(idx).local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_nearest().local_set(dst.0);
             }
         },
@@ -560,7 +560,7 @@ pub(crate) fn emit_op(
                     .i32_eq()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_eq()
@@ -574,7 +574,7 @@ pub(crate) fn emit_op(
                     .i32_ne()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_ne()
@@ -588,7 +588,7 @@ pub(crate) fn emit_op(
                     .i32_lt_s()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_lt()
@@ -602,7 +602,7 @@ pub(crate) fn emit_op(
                     .i32_le_s()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_le()
@@ -616,7 +616,7 @@ pub(crate) fn emit_op(
                     .i32_gt_s()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_gt()
@@ -630,7 +630,7 @@ pub(crate) fn emit_op(
                     .i32_ge_s()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
                     .f32_ge()
@@ -644,7 +644,7 @@ pub(crate) fn emit_op(
                     .i32_shr_s()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).i32_trunc_sat_f32_s().local_set(dst.0);
             }
         },
@@ -655,7 +655,7 @@ pub(crate) fn emit_op(
                     .i32_shr_u()
                     .local_set(dst.0);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).i32_trunc_sat_f32_u().local_set(dst.0);
             }
         },
@@ -666,7 +666,7 @@ pub(crate) fn emit_op(
                     .ok_or_else(|| String::from("internal: Q32 ItofS without i64 scratch local"))?;
                 q32::emit_q32_itof_s(sink, src.0, dst.0, s);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_convert_i32_s().local_set(dst.0);
             }
         },
@@ -677,7 +677,7 @@ pub(crate) fn emit_op(
                     .ok_or_else(|| String::from("internal: Q32 ItofU without i64 scratch local"))?;
                 q32::emit_q32_itof_u(sink, src.0, dst.0, s);
             }
-            FloatMode::Float => {
+            FloatMode::F32 => {
                 sink.local_get(src.0).f32_convert_i32_u().local_set(dst.0);
             }
         },

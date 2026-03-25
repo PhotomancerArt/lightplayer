@@ -247,7 +247,7 @@ impl<'a, M: cranelift_module::Module> CodegenContext<'a, M> {
         );
 
         // Build signature with Float format (f32 args, f32 return); float mode only
-        let sig = build_call_signature(func, builtin_id, FloatMode::Float, pointer_type);
+        let sig = build_call_signature(func, builtin_id, FloatMode::F32, pointer_type);
         if func.glsl_sig.return_type.is_vector() {
             let _result_ptr_param = sig
                 .params

@@ -31,7 +31,7 @@ pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec
 fn scalar_float_vt(fm: FloatMode) -> WasmValType {
     match fm {
         FloatMode::Q32 => WasmValType::I32,
-        FloatMode::Float => WasmValType::F32,
+        FloatMode::F32 => WasmValType::F32,
     }
 }
 

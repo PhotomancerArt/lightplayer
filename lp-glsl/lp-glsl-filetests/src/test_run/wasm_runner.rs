@@ -449,7 +449,7 @@ impl GlslExecutable for WasmExecutable {
                 (wasmtime::Val::I32(i), lp_glsl_naga::FloatMode::Q32) => {
                     Ok(i as f32 / Q16_16_SCALE)
                 }
-                (wasmtime::Val::F32(bits), lp_glsl_naga::FloatMode::Float) => {
+                (wasmtime::Val::F32(bits), lp_glsl_naga::FloatMode::F32) => {
                     Ok(f32::from_bits(bits))
                 }
                 _ => Err(GlslError::new(

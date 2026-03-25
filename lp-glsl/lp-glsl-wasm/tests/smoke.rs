@@ -5,7 +5,7 @@ use lp_glsl_wasm::{WasmOptions, glsl_wasm};
 
 fn run_f32(source: &str, func_name: &str, args: &[f32]) -> f32 {
     let opts = WasmOptions {
-        float_mode: FloatMode::Float,
+        float_mode: FloatMode::F32,
     };
     let module = glsl_wasm(source, opts).expect("compile");
     let engine = wasmtime::Engine::default();
@@ -129,7 +129,7 @@ fn multiple_functions_exported() {
             float bar() { return 2.0; }
         "#;
     let opts = WasmOptions {
-        float_mode: FloatMode::Float,
+        float_mode: FloatMode::F32,
     };
     let module = glsl_wasm(src, opts).expect("compile");
     assert_eq!(module.exports.len(), 2);

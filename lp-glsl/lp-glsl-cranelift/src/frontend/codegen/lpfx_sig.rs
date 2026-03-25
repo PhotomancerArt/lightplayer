@@ -92,7 +92,7 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: FloatMode) -> Ve
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    FloatMode::Float => {
+                    FloatMode::F32 => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                     }
@@ -106,7 +106,7 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: FloatMode) -> Ve
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    FloatMode::Float => {
+                    FloatMode::F32 => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
@@ -122,7 +122,7 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: FloatMode) -> Ve
                         cranelift_types.push(types::I32);
                         cranelift_types.push(types::I32);
                     }
-                    FloatMode::Float => {
+                    FloatMode::F32 => {
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
                         cranelift_types.push(types::F32);
@@ -132,7 +132,7 @@ pub fn convert_to_cranelift_types(param_types: &[Type], format: FloatMode) -> Ve
             }
             Type::Float => match format {
                 FloatMode::Q32 => cranelift_types.push(types::I32),
-                FloatMode::Float => cranelift_types.push(types::F32),
+                FloatMode::F32 => cranelift_types.push(types::F32),
             },
             Type::UInt | Type::Int => {
                 // UInt and Int both map to I32 in Cranelift
@@ -178,7 +178,7 @@ pub fn build_call_signature(
         match return_type {
             Type::Float => match format {
                 FloatMode::Q32 => sig.returns.push(AbiParam::new(types::I32)),
-                FloatMode::Float => sig.returns.push(AbiParam::new(types::F32)),
+                FloatMode::F32 => sig.returns.push(AbiParam::new(types::F32)),
             },
             Type::UInt | Type::Int => {
                 sig.returns.push(AbiParam::new(types::I32));

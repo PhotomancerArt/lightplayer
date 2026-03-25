@@ -24,5 +24,5 @@ pub use module::{ImportDecl, IrFunction, IrModule, SlotDecl};
 pub use op::Op;
 pub use parse::{ParseError, parse_module};
 pub use print::print_module;
-pub use types::{CalleeRef, IrType, SlotId, VReg, VRegRange};
+pub use types::{CalleeRef, FloatMode, IrType, SlotId, VReg, VRegRange};
 pub use validate::{ValidationError, validate_function, validate_module};

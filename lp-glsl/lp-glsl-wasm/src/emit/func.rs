@@ -16,7 +16,7 @@ fn ir_type_to_val(ty: IrType, mode: FloatMode) -> ValType {
     match (ty, mode) {
         (IrType::I32, _) => ValType::I32,
         (IrType::F32, FloatMode::Q32) => ValType::I32,
-        (IrType::F32, FloatMode::Float) => ValType::F32,
+        (IrType::F32, FloatMode::F32) => ValType::F32,
     }
 }
 

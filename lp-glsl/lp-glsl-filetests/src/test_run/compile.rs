@@ -16,7 +16,7 @@ pub(crate) const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
 fn to_cranelift_float_mode(fm: FloatMode) -> lp_glsl_cranelift::FloatMode {
     match fm {
         FloatMode::Q32 => lp_glsl_cranelift::FloatMode::Q32,
-        FloatMode::F32 => lp_glsl_cranelift::FloatMode::Float,
+        FloatMode::F32 => lp_glsl_cranelift::FloatMode::F32,
     }
 }
 
@@ -24,7 +24,7 @@ fn to_cranelift_float_mode(fm: FloatMode) -> lp_glsl_cranelift::FloatMode {
 fn to_wasm_float_mode(fm: FloatMode) -> lp_glsl_naga::FloatMode {
     match fm {
         FloatMode::Q32 => lp_glsl_naga::FloatMode::Q32,
-        FloatMode::F32 => lp_glsl_naga::FloatMode::Float,
+        FloatMode::F32 => lp_glsl_naga::FloatMode::F32,
     }
 }
 

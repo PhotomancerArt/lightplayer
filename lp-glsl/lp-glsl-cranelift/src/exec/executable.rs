@@ -199,14 +199,14 @@ impl GlslOptions {
 
         // Validate option combinations
         match (&self.run_mode, self.float_mode) {
-            (RunMode::Emulator { .. }, FloatMode::Float) => {
+            (RunMode::Emulator { .. }, FloatMode::F32) => {
                 // TODO: Float support will be added for riscv32_imafc in the future
                 Err(GlslError::new(
                     ErrorCode::E0400,
                     "Float format not yet supported in emulator mode (will be supported for riscv32_imafc)",
                 ))
             }
-            (RunMode::HostJit, FloatMode::Float) => {
+            (RunMode::HostJit, FloatMode::F32) => {
                 // Check if host supports float by checking triple string
                 let triple = Triple::host();
                 let arch_str = format!("{:?}", triple.architecture);
@@ -233,7 +233,7 @@ impl GlslOptions {
     pub fn jit() -> Self {
         Self {
             run_mode: RunMode::HostJit,
-            float_mode: FloatMode::Float,
+            float_mode: FloatMode::F32,
             q32_opts: crate::backend::q32::Q32Options::default(),
             memory_optimized: Self::default_memory_optimized(),
             target_override: None,

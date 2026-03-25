@@ -5,7 +5,7 @@ use lp_glsl_cranelift::{FloatMode, GlslOptions, RunMode, glsl_jit};
 fn main() {
     let options = GlslOptions {
         run_mode: RunMode::HostJit,
-        float_mode: FloatMode::Float,
+        float_mode: FloatMode::F32,
         q32_opts: lp_glsl_cranelift::Q32Options::default(),
         memory_optimized: false,
         target_override: None,

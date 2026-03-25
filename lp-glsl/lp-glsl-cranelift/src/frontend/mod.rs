@@ -116,7 +116,7 @@ pub fn compile_glsl_to_gl_module_jit(
     use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
     let numeric_mode = match options.float_mode {
         FloatMode::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
-        FloatMode::Float => NumericMode::Float(FloatStrategy),
+        FloatMode::F32 => NumericMode::Float(FloatStrategy),
     };
     let mut compiler = GlslCompiler::new();
     let module =
@@ -155,7 +155,7 @@ pub fn compile_glsl_to_gl_module_object(
     use crate::frontend::codegen::numeric::{FloatStrategy, NumericMode, Q32Strategy};
     let numeric_mode = match options.float_mode {
         FloatMode::Q32 => NumericMode::Q32(Q32Strategy::new(options.q32_opts)),
-        FloatMode::Float => NumericMode::Float(FloatStrategy),
+        FloatMode::F32 => NumericMode::Float(FloatStrategy),
     };
     let module =
         compiler.compile_to_gl_module_object(source, target, options.max_errors, numeric_mode)?;

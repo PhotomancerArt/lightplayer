@@ -56,7 +56,7 @@ impl GlslCompiler {
         // 3. Create GlModule
         let float_mode = match &numeric_mode {
             NumericMode::Q32(_) => crate::FloatMode::Q32,
-            NumericMode::Float(_) => crate::FloatMode::Float,
+            NumericMode::Float(_) => crate::FloatMode::F32,
         };
         let mut gl_module = GlModule::new_jit(target, float_mode)?;
 
@@ -214,7 +214,7 @@ impl GlslCompiler {
         // 3. Create GlModule
         let float_mode = match &numeric_mode {
             NumericMode::Q32(_) => crate::FloatMode::Q32,
-            NumericMode::Float(_) => crate::FloatMode::Float,
+            NumericMode::Float(_) => crate::FloatMode::F32,
         };
         let mut gl_module = GlModule::new_object(target, float_mode)?;
 

@@ -153,7 +153,7 @@ pub(crate) fn import_decl_val_types(
     let map = |t: IrType| match (t, mode) {
         (IrType::I32, _) => wasm_encoder::ValType::I32,
         (IrType::F32, FloatMode::Q32) => wasm_encoder::ValType::I32,
-        (IrType::F32, FloatMode::Float) => wasm_encoder::ValType::F32,
+        (IrType::F32, FloatMode::F32) => wasm_encoder::ValType::F32,
     };
     let params = decl.param_types.iter().copied().map(map).collect();
     let results = decl.return_types.iter().copied().map(map).collect();

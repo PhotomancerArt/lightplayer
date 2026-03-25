@@ -128,7 +128,7 @@ pub fn get_builtin_id_for_format(
             float_impl,
             q32_impl,
         } => match format {
-            crate::FloatMode::Float => Some(*float_impl),
+            crate::FloatMode::F32 => Some(*float_impl),
             crate::FloatMode::Q32 => Some(*q32_impl),
         },
     }

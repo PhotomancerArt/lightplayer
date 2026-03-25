@@ -7,18 +7,27 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use lpir::FloatMode;
 use lpir::module::IrModule;
 use lpir::op::Op;
 
-use crate::emit::{self, translate_function};
+use crate::builtins;
+use crate::emit::{self, LpirBuiltinRefs, translate_function};
 use crate::error::CompileError;
 
 /// Build a host JIT module from LPIR.
 ///
 /// Returns the module and [`FuncId`] values in the same order as [`IrModule::functions`].
-/// Import calls fail at emit time with [`CompileError::Unsupported`]; other functions in the
-/// same module may still compile if they do not call imports.
-pub fn jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>), CompileError> {
+pub fn jit_from_ir(
+    ir: &IrModule,
+    mode: FloatMode,
+) -> Result<(JITModule, Vec<FuncId>), CompileError> {
+    if mode == FloatMode::F32 && !ir.imports.is_empty() {
+        return Err(CompileError::unsupported(
+            "LPIR imports require FloatMode::Q32 in lpir-cranelift",
+        ));
+    }
+
     let mut flag_builder = settings::builder();
     flag_builder
         .set("regalloc_algorithm", "single_pass")
@@ -30,16 +39,31 @@ pub fn jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>), CompileErr
         .finish(flags)
         .map_err(|e| CompileError::cranelift(alloc::format!("ISA: {e}")))?;
 
-    let call_conv = isa.default_call_conv();
-    let pointer_type = isa.pointer_type();
-    let mut jit_module = JITModule::new(JITBuilder::with_isa(
-        isa,
-        cranelift_module::default_libcall_names(),
-    ));
+    let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    jit_builder.symbol_lookup_fn(builtins::symbol_lookup_fn());
+    let mut jit_module = JITModule::new(jit_builder);
+
+    let call_conv = jit_module.isa().default_call_conv();
+    let pointer_type = jit_module.isa().pointer_type();
+
+    let import_func_ids = if mode == FloatMode::Q32 {
+        builtins::declare_module_imports(&mut jit_module, ir, pointer_type)?
+    } else {
+        Vec::new()
+    };
+
+    let lpir_builtin_ids = if mode == FloatMode::Q32 {
+        Some(builtins::declare_lpir_opcode_builtins(
+            &mut jit_module,
+            pointer_type,
+        )?)
+    } else {
+        None
+    };
 
     let mut fn_ids = Vec::with_capacity(ir.functions.len());
     for f in &ir.functions {
-        let sig = emit::signature_for_ir_func(f, call_conv);
+        let sig = emit::signature_for_ir_func(f, call_conv, mode);
         let id = jit_module
             .declare_function(&f.name, Linkage::Export, &sig)
             .map_err(|e| CompileError::cranelift(alloc::format!("declare {}: {e}", f.name)))?;
@@ -50,7 +74,7 @@ pub fn jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>), CompileErr
 
     for (f, fid) in ir.functions.iter().zip(&fn_ids) {
         ctx.clear();
-        ctx.func.signature = emit::signature_for_ir_func(f, call_conv);
+        ctx.func.signature = emit::signature_for_ir_func(f, call_conv, mode);
         let mut func_ctx = FunctionBuilderContext::new();
         {
             let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
@@ -75,6 +99,20 @@ pub fn jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>), CompileErr
                 .map(|id| jit_module.declare_func_in_func(*id, builder.func))
                 .collect();
 
+            let import_func_refs: Vec<FuncRef> = import_func_ids
+                .iter()
+                .map(|id| jit_module.declare_func_in_func(*id, builder.func))
+                .collect();
+
+            let lpir_builtins = lpir_builtin_ids.as_ref().map(|ids| LpirBuiltinRefs {
+                fadd: jit_module.declare_func_in_func(ids.fadd, builder.func),
+                fsub: jit_module.declare_func_in_func(ids.fsub, builder.func),
+                fmul: jit_module.declare_func_in_func(ids.fmul, builder.func),
+                fdiv: jit_module.declare_func_in_func(ids.fdiv, builder.func),
+                fsqrt: jit_module.declare_func_in_func(ids.fsqrt, builder.func),
+                fnearest: jit_module.declare_func_in_func(ids.fnearest, builder.func),
+            });
+
             let mut vreg_is_stack_addr = vec![false; f.vreg_types.len()];
             for op in &f.body {
                 if let Op::SlotAddr { dst, .. } = op {
@@ -87,10 +125,13 @@ pub fn jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>), CompileErr
 
             let emit_ctx = emit::EmitCtx {
                 func_refs: &func_refs,
+                import_func_refs: &import_func_refs,
                 slots: &slots,
                 ir,
                 pointer_type,
                 vreg_is_stack_addr,
+                float_mode: mode,
+                lpir_builtins,
             };
 
             translate_function(f, &mut builder, &emit_ctx)?;

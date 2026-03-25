@@ -6,6 +6,7 @@ use cranelift_codegen::ir::{AbiParam, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
 use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::{FunctionBuilder, Variable};
+use lpir::FloatMode;
 use lpir::module::{IrFunction, IrModule};
 use lpir::types::{IrType, VReg};
 
@@ -16,14 +17,27 @@ mod control;
 mod memory;
 mod scalar;
 
+/// FuncRefs for Q32 LPIR float ops lowered to `__lp_lpir_*_q32` calls.
+pub(crate) struct LpirBuiltinRefs {
+    pub fadd: FuncRef,
+    pub fsub: FuncRef,
+    pub fmul: FuncRef,
+    pub fdiv: FuncRef,
+    pub fsqrt: FuncRef,
+    pub fnearest: FuncRef,
+}
+
 /// Per-function context for calls, stack slots, and pointer width.
 pub(crate) struct EmitCtx<'a> {
     pub func_refs: &'a [FuncRef],
+    pub import_func_refs: &'a [FuncRef],
     pub slots: &'a [StackSlot],
     pub ir: &'a IrModule,
     pub pointer_type: types::Type,
     /// `true` for VRegs defined by `slot_addr` — use [`Self::pointer_type`] for their SSA variable.
     pub vreg_is_stack_addr: Vec<bool>,
+    pub float_mode: FloatMode,
+    pub lpir_builtins: Option<LpirBuiltinRefs>,
 }
 
 pub(crate) enum CtrlFrame {
@@ -58,21 +72,23 @@ pub(crate) enum CtrlFrame {
     },
 }
 
-pub fn signature_for_ir_func(func: &IrFunction, call_conv: CallConv) -> Signature {
+pub fn signature_for_ir_func(func: &IrFunction, call_conv: CallConv, mode: FloatMode) -> Signature {
     let mut sig = Signature::new(call_conv);
     for i in 0..func.param_count as usize {
-        sig.params.push(AbiParam::new(ir_type(func.vreg_types[i])));
+        sig.params
+            .push(AbiParam::new(ir_type_for_mode(func.vreg_types[i], mode)));
     }
     for t in &func.return_types {
-        sig.returns.push(AbiParam::new(ir_type(*t)));
+        sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode)));
     }
     sig
 }
 
-pub(crate) fn ir_type(t: IrType) -> types::Type {
-    match t {
-        IrType::F32 => types::F32,
-        IrType::I32 => types::I32,
+pub(crate) fn ir_type_for_mode(t: IrType, mode: FloatMode) -> types::Type {
+    match (t, mode) {
+        (IrType::I32, _) => types::I32,
+        (IrType::F32, FloatMode::F32) => types::F32,
+        (IrType::F32, FloatMode::Q32) => types::I32,
     }
 }
 
@@ -118,7 +134,7 @@ pub fn translate_function(
         let ct = if ctx.vreg_is_stack_addr.get(i).copied().unwrap_or(false) {
             ctx.pointer_type
         } else {
-            ir_type(*ty)
+            ir_type_for_mode(*ty, ctx.float_mode)
         };
         vars.push(builder.declare_var(ct));
     }
@@ -144,11 +160,11 @@ pub fn translate_function(
         if call::emit_call(op, func, builder, &vars, ctx)? {
             continue;
         }
-        if scalar::emit_scalar(op, func, builder, &vars)? {
+        if scalar::emit_scalar(op, func, builder, &vars, ctx)? {
             continue;
         }
         return Err(CompileError::unsupported(format!(
-            "unsupported LPIR op (imports and other Stage III features): {op:?}",
+            "unsupported LPIR op: {op:?}",
         )));
     }
 

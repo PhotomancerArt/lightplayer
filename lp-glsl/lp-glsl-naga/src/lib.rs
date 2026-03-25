@@ -195,11 +195,7 @@ float test_main() {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FloatMode {
-    Q32,
-    Float,
-}
+pub use lpir::FloatMode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GlslType {

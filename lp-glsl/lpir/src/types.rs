@@ -2,6 +2,15 @@
 
 use core::fmt;
 
+/// How [`IrType::F32`] is interpreted when lowering or executing LPIR.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FloatMode {
+    /// Fixed-point Q16.16 stored as a signed 32-bit integer.
+    Q32,
+    /// Native IEEE-754 `f32`.
+    F32,
+}
+
 /// LPIR scalar type (width-aware).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum IrType {

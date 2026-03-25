@@ -13,6 +13,7 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 libm = "0.2"
 lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lpir = { path = "../lpir" }
 
 [features]
 default = []

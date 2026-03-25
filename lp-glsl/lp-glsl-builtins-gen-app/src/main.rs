@@ -932,7 +932,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
             let fmt = if builtin.enum_variant.ends_with("Q32") {
                 "Some(crate::FloatMode::Q32)"
             } else if builtin.enum_variant.ends_with("F32") {
-                "Some(crate::FloatMode::Float)"
+                "Some(crate::FloatMode::F32)"
             } else {
                 "None"
             };

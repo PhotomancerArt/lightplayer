@@ -9,6 +9,8 @@ description = "Experimental LPIR → Cranelift JIT (Stage II)"
 workspace = true
 
 [dependencies]
+lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lp-glsl-builtins = { path = "../lp-glsl-builtins" }
 lpir = { path = "../lpir" }
 cranelift-codegen = { workspace = true, features = ["std", "host-arch"] }
 cranelift-frontend = { workspace = true, features = ["std"] }

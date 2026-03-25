@@ -22,16 +22,16 @@ pub(crate) fn emit_call(
             results,
         } => {
             let import_count = ctx.ir.imports.len() as u32;
-            if callee.0 < import_count {
-                return Err(CompileError::unsupported(
-                    "import calls not yet supported (Stage III)",
-                ));
-            }
-            let local_idx = (callee.0 - import_count) as usize;
-            let func_ref = *ctx
-                .func_refs
-                .get(local_idx)
-                .ok_or_else(|| CompileError::unsupported("call to unknown local function index"))?;
+            let func_ref = if callee.0 < import_count {
+                *ctx.import_func_refs
+                    .get(callee.0 as usize)
+                    .ok_or_else(|| CompileError::unsupported("call to unknown import index"))?
+            } else {
+                let local_idx = (callee.0 - import_count) as usize;
+                *ctx.func_refs.get(local_idx).ok_or_else(|| {
+                    CompileError::unsupported("call to unknown local function index")
+                })?
+            };
             let arg_vals: Vec<_> = func
                 .pool_slice(*args)
                 .iter()

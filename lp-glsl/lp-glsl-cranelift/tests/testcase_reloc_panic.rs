@@ -91,7 +91,7 @@ vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
     // fix was that Q32 no longer panics on TestCase relocations.
     let options_float = GlslOptions {
         run_mode: RunMode::HostJit,
-        float_mode: FloatMode::Float,
+        float_mode: FloatMode::F32,
         q32_opts: Q32Options::default(),
         memory_optimized: false,
         target_override: None,
