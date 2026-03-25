@@ -543,20 +543,20 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
     }
 
     let after_lp = func_name.strip_prefix("__lp_")?;
-    let (builtin_module, rest) = if after_lp.starts_with("lpir_") {
-        ("lpir", &after_lp[5..])
-    } else if after_lp.starts_with("glsl_") {
-        ("glsl", &after_lp[5..])
-    } else if after_lp.starts_with("lpfx_") {
-        ("lpfx", &after_lp[5..])
+    let (builtin_module, rest) = if let Some(r) = after_lp.strip_prefix("lpir_") {
+        ("lpir", r)
+    } else if let Some(r) = after_lp.strip_prefix("glsl_") {
+        ("glsl", r)
+    } else if let Some(r) = after_lp.strip_prefix("lpfx_") {
+        ("lpfx", r)
     } else {
         return None;
     };
 
-    let (fn_body, builtin_mode) = if rest.ends_with("_q32") {
-        (&rest[..rest.len() - 4], Some("q32".to_string()))
-    } else if rest.ends_with("_f32") {
-        (&rest[..rest.len() - 4], Some("f32".to_string()))
+    let (fn_body, builtin_mode) = if let Some(s) = rest.strip_suffix("_q32") {
+        (s, Some("q32".to_string()))
+    } else if let Some(s) = rest.strip_suffix("_f32") {
+        (s, Some("f32".to_string()))
     } else {
         (rest, None)
     };

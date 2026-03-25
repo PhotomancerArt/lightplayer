@@ -7,17 +7,20 @@ use crate::values::CallError;
 
 /// C-layout multi-scalar returns for hosts where `extern "C"` struct returns match Cranelift’s
 /// multi-`I32` layout (not Apple AArch64: read `x0`…`x3` after `blr` instead).
+#[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
 #[repr(C)]
 struct CRet2 {
     v0: i32,
     v1: i32,
 }
+#[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
 #[repr(C)]
 struct CRet3 {
     v0: i32,
     v1: i32,
     v2: i32,
 }
+#[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
 #[repr(C)]
 struct CRet4 {
     v0: i32,
@@ -329,6 +332,13 @@ fn invoke_cret4(code: *const u8, args: &[i32]) -> CRet4 {
 /// Cranelift places each `I32` return in its own GPR (`x0`…). Rust `extern "C"` `repr(C)` structs
 /// pack small aggregates differently on Apple AArch64, so read registers explicitly after `blr`.
 #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
+// Inline asm: Rust 2024 `unsafe_op_in_unsafe_fn`; not all x2/x3 outputs used when n_ret < 4.
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    unused_assignments,
+    unused_mut,
+    reason = "AArch64 `asm!(blr)` multi-return shim; register lateouts match callee ABI"
+)]
 unsafe fn aarch64_invoke_multi_ret(code: *const u8, args: &[i32], n_ret: usize) -> Vec<i32> {
     use core::arch::asm;
 
