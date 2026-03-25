@@ -1,4 +1,4 @@
-use crate::builtins::q32::__lp_lpir_fsqrt_q32;
+use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
 /// Fixed-point arithmetic (16.16 format)
 ///
 /// Core type and conversion utilities for fixed-point fixed.

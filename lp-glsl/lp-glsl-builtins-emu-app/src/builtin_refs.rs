@@ -6,6 +6,29 @@
 //! Or use the build script:
 //!     scripts/build-builtins.sh
 
+use lp_glsl_builtins::builtins::glsl::acos_q32::__lp_glsl_acos_q32;
+use lp_glsl_builtins::builtins::glsl::acosh_q32::__lp_glsl_acosh_q32;
+use lp_glsl_builtins::builtins::glsl::asin_q32::__lp_glsl_asin_q32;
+use lp_glsl_builtins::builtins::glsl::asinh_q32::__lp_glsl_asinh_q32;
+use lp_glsl_builtins::builtins::glsl::atan_q32::__lp_glsl_atan_q32;
+use lp_glsl_builtins::builtins::glsl::atan2_q32::__lp_glsl_atan2_q32;
+use lp_glsl_builtins::builtins::glsl::atanh_q32::__lp_glsl_atanh_q32;
+use lp_glsl_builtins::builtins::glsl::cos_q32::__lp_glsl_cos_q32;
+use lp_glsl_builtins::builtins::glsl::cosh_q32::__lp_glsl_cosh_q32;
+use lp_glsl_builtins::builtins::glsl::exp_q32::__lp_glsl_exp_q32;
+use lp_glsl_builtins::builtins::glsl::exp2_q32::__lp_glsl_exp2_q32;
+use lp_glsl_builtins::builtins::glsl::fma_q32::__lp_glsl_fma_q32;
+use lp_glsl_builtins::builtins::glsl::inversesqrt_q32::__lp_glsl_inversesqrt_q32;
+use lp_glsl_builtins::builtins::glsl::ldexp_q32::__lp_glsl_ldexp_q32;
+use lp_glsl_builtins::builtins::glsl::log_q32::__lp_glsl_log_q32;
+use lp_glsl_builtins::builtins::glsl::log2_q32::__lp_glsl_log2_q32;
+use lp_glsl_builtins::builtins::glsl::mod_q32::__lp_glsl_mod_q32;
+use lp_glsl_builtins::builtins::glsl::pow_q32::__lp_glsl_pow_q32;
+use lp_glsl_builtins::builtins::glsl::round_q32::__lp_glsl_round_q32;
+use lp_glsl_builtins::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
+use lp_glsl_builtins::builtins::glsl::sinh_q32::__lp_glsl_sinh_q32;
+use lp_glsl_builtins::builtins::glsl::tan_q32::__lp_glsl_tan_q32;
+use lp_glsl_builtins::builtins::glsl::tanh_q32::__lp_glsl_tanh_q32;
 use lp_glsl_builtins::builtins::lpfx::color::space::hue2rgb_f32::__lp_lpfx_hue2rgb_f32;
 use lp_glsl_builtins::builtins::lpfx::color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32;
 use lp_glsl_builtins::builtins::lpfx::color::space::{
@@ -79,35 +102,12 @@ use lp_glsl_builtins::builtins::lpfx::math::{
 use lp_glsl_builtins::builtins::lpfx::{
     hash::__lp_lpfx_hash_1, hash::__lp_lpfx_hash_2, hash::__lp_lpfx_hash_3,
 };
-use lp_glsl_builtins::builtins::q32::__lp_glsl_acos_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_acosh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_asin_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_asinh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_atan_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_atan2_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_atanh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_cos_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_cosh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_exp_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_exp2_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_fma_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_inversesqrt_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_ldexp_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_log_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_log2_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_mod_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_pow_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_round_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_sin_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_sinh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_tan_q32;
-use lp_glsl_builtins::builtins::q32::__lp_glsl_tanh_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fadd_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fdiv_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fmul_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fnearest_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fsqrt_q32;
-use lp_glsl_builtins::builtins::q32::__lp_lpir_fsub_q32;
+use lp_glsl_builtins::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32;
+use lp_glsl_builtins::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use lp_glsl_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
+use lp_glsl_builtins::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32;
+use lp_glsl_builtins::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
+use lp_glsl_builtins::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
 
 /// Reference all builtin functions to prevent dead code elimination.
 ///

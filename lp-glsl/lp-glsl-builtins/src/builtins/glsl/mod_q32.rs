@@ -2,8 +2,8 @@
 //!
 //! mod(x, y) = x - y * floor(x / y)
 
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
-use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 /// Fixed-point modulus: mod(x, y) = x - y * floor(x / y)
 ///

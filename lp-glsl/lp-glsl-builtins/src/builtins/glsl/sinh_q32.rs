@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 hyperbolic sine function.
 
-use super::exp::__lp_glsl_exp_q32;
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::glsl::exp_q32::__lp_glsl_exp_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
 
 /// Fixed-point value of 2.0 (Q16.16 format)
 const FIX16_TWO: i32 = 0x00020000; // 131072

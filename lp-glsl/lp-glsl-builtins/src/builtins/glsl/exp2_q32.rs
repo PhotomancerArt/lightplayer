@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 base-2 exponential function.
 
-use super::exp::__lp_glsl_exp_q32;
-use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
+use crate::builtins::glsl::exp_q32::__lp_glsl_exp_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of ln(2) ≈ 0.693147 (Q16.16 format)
 /// ln(2) ≈ 0.6931471805599453

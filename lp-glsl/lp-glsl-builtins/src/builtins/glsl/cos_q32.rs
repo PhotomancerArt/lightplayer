@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 cosine function.
 
-use super::sin::__lp_glsl_sin_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;

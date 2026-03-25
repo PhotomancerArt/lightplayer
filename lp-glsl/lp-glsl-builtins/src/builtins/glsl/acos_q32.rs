@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 arccosine function.
 
-use super::asin::__lp_glsl_asin_q32;
+use crate::builtins::glsl::asin_q32::__lp_glsl_asin_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;

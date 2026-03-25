@@ -2,7 +2,7 @@
 //!
 //! Returns values in [0, 1] range using fract(sin(dot(p, vec3(70.9898, 78.233, 32.4355)) + seed) * 43758.5453123)
 
-use crate::builtins::q32::__lp_glsl_sin_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
 

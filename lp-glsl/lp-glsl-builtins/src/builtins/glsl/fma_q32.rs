@@ -2,7 +2,7 @@
 //!
 //! fma(a, b, c) = a * b + c
 
-use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 /// Compute fma(a, b, c) = a * b + c
 ///

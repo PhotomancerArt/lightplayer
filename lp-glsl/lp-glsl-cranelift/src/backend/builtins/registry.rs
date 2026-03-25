@@ -137,28 +137,26 @@ impl BuiltinIdFormat for BuiltinId {
 pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> Signature {
     let mut sig = Signature::new(CallConv::SystemV);
     match builtin {
-        BuiltinId::LpLpfxPsrdnoise3F32 | BuiltinId::LpLpfxPsrdnoise3Q32 => {
-            // Out parameter function: (7 scalars, gradient pointer, u32 seed) -> scalar
-            sig.params.push(AbiParam::new(types::I32));
-            sig.params.push(AbiParam::new(types::I32));
+        BuiltinId::LpLpfxPsrdnoise2F32 | BuiltinId::LpLpfxPsrdnoise2Q32 => {
+            // Out parameter function: (5 i32 params, pointer_type) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(pointer_type));
-            sig.params.push(AbiParam::new(types::I32)); // seed (Rust u32 in C ABI)
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfxPsrdnoise2F32 | BuiltinId::LpLpfxPsrdnoise2Q32 => {
-            // Out parameter function: (5 scalars, gradient pointer, u32 seed) -> scalar
+        BuiltinId::LpLpfxPsrdnoise3F32 | BuiltinId::LpLpfxPsrdnoise3Q32 => {
+            // Out parameter function: (7 i32 params, pointer_type) -> i32
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(pointer_type));
-            sig.params.push(AbiParam::new(types::I32)); // seed (Rust u32 in C ABI)
             sig.returns.push(AbiParam::new(types::I32));
         }
         BuiltinId::LpLpfxSrandom3TileF32 | BuiltinId::LpLpfxSrandom3TileQ32 => {
@@ -326,37 +324,48 @@ pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> S
 ///
 /// Returns the function pointer that can be registered with JITModule.
 pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
-    use lp_glsl_builtins::builtins::{lpfx::color, lpfx::generative, lpfx::hash, lpfx::math, q32};
+    use lp_glsl_builtins::builtins::{
+        glsl::{
+            acos_q32, acosh_q32, asin_q32, asinh_q32, atan_q32, atan2_q32, atanh_q32, cos_q32,
+            cosh_q32, exp_q32, exp2_q32, fma_q32, inversesqrt_q32, ldexp_q32, log_q32, log2_q32,
+            mod_q32, pow_q32, round_q32, sin_q32, sinh_q32, tan_q32, tanh_q32,
+        },
+        lpfx::color,
+        lpfx::generative,
+        lpfx::hash,
+        lpfx::math,
+        lpir::{fadd_q32, fdiv_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32},
+    };
     match builtin {
-        BuiltinId::LpGlslAcosQ32 => q32::__lp_glsl_acos_q32 as *const u8,
-        BuiltinId::LpGlslAcoshQ32 => q32::__lp_glsl_acosh_q32 as *const u8,
-        BuiltinId::LpGlslAsinQ32 => q32::__lp_glsl_asin_q32 as *const u8,
-        BuiltinId::LpGlslAsinhQ32 => q32::__lp_glsl_asinh_q32 as *const u8,
-        BuiltinId::LpGlslAtan2Q32 => q32::__lp_glsl_atan2_q32 as *const u8,
-        BuiltinId::LpGlslAtanQ32 => q32::__lp_glsl_atan_q32 as *const u8,
-        BuiltinId::LpGlslAtanhQ32 => q32::__lp_glsl_atanh_q32 as *const u8,
-        BuiltinId::LpGlslCosQ32 => q32::__lp_glsl_cos_q32 as *const u8,
-        BuiltinId::LpGlslCoshQ32 => q32::__lp_glsl_cosh_q32 as *const u8,
-        BuiltinId::LpGlslExp2Q32 => q32::__lp_glsl_exp2_q32 as *const u8,
-        BuiltinId::LpGlslExpQ32 => q32::__lp_glsl_exp_q32 as *const u8,
-        BuiltinId::LpGlslFmaQ32 => q32::__lp_glsl_fma_q32 as *const u8,
-        BuiltinId::LpGlslInversesqrtQ32 => q32::__lp_glsl_inversesqrt_q32 as *const u8,
-        BuiltinId::LpGlslLdexpQ32 => q32::__lp_glsl_ldexp_q32 as *const u8,
-        BuiltinId::LpGlslLog2Q32 => q32::__lp_glsl_log2_q32 as *const u8,
-        BuiltinId::LpGlslLogQ32 => q32::__lp_glsl_log_q32 as *const u8,
-        BuiltinId::LpGlslModQ32 => q32::__lp_glsl_mod_q32 as *const u8,
-        BuiltinId::LpGlslPowQ32 => q32::__lp_glsl_pow_q32 as *const u8,
-        BuiltinId::LpGlslRoundQ32 => q32::__lp_glsl_round_q32 as *const u8,
-        BuiltinId::LpGlslSinQ32 => q32::__lp_glsl_sin_q32 as *const u8,
-        BuiltinId::LpGlslSinhQ32 => q32::__lp_glsl_sinh_q32 as *const u8,
-        BuiltinId::LpGlslTanQ32 => q32::__lp_glsl_tan_q32 as *const u8,
-        BuiltinId::LpGlslTanhQ32 => q32::__lp_glsl_tanh_q32 as *const u8,
-        BuiltinId::LpLpirFaddQ32 => q32::__lp_lpir_fadd_q32 as *const u8,
-        BuiltinId::LpLpirFdivQ32 => q32::__lp_lpir_fdiv_q32 as *const u8,
-        BuiltinId::LpLpirFmulQ32 => q32::__lp_lpir_fmul_q32 as *const u8,
-        BuiltinId::LpLpirFnearestQ32 => q32::__lp_lpir_fnearest_q32 as *const u8,
-        BuiltinId::LpLpirFsqrtQ32 => q32::__lp_lpir_fsqrt_q32 as *const u8,
-        BuiltinId::LpLpirFsubQ32 => q32::__lp_lpir_fsub_q32 as *const u8,
+        BuiltinId::LpGlslAcosQ32 => acos_q32::__lp_glsl_acos_q32 as *const u8,
+        BuiltinId::LpGlslAcoshQ32 => acosh_q32::__lp_glsl_acosh_q32 as *const u8,
+        BuiltinId::LpGlslAsinQ32 => asin_q32::__lp_glsl_asin_q32 as *const u8,
+        BuiltinId::LpGlslAsinhQ32 => asinh_q32::__lp_glsl_asinh_q32 as *const u8,
+        BuiltinId::LpGlslAtan2Q32 => atan2_q32::__lp_glsl_atan2_q32 as *const u8,
+        BuiltinId::LpGlslAtanQ32 => atan_q32::__lp_glsl_atan_q32 as *const u8,
+        BuiltinId::LpGlslAtanhQ32 => atanh_q32::__lp_glsl_atanh_q32 as *const u8,
+        BuiltinId::LpGlslCosQ32 => cos_q32::__lp_glsl_cos_q32 as *const u8,
+        BuiltinId::LpGlslCoshQ32 => cosh_q32::__lp_glsl_cosh_q32 as *const u8,
+        BuiltinId::LpGlslExp2Q32 => exp2_q32::__lp_glsl_exp2_q32 as *const u8,
+        BuiltinId::LpGlslExpQ32 => exp_q32::__lp_glsl_exp_q32 as *const u8,
+        BuiltinId::LpGlslFmaQ32 => fma_q32::__lp_glsl_fma_q32 as *const u8,
+        BuiltinId::LpGlslInversesqrtQ32 => inversesqrt_q32::__lp_glsl_inversesqrt_q32 as *const u8,
+        BuiltinId::LpGlslLdexpQ32 => ldexp_q32::__lp_glsl_ldexp_q32 as *const u8,
+        BuiltinId::LpGlslLog2Q32 => log2_q32::__lp_glsl_log2_q32 as *const u8,
+        BuiltinId::LpGlslLogQ32 => log_q32::__lp_glsl_log_q32 as *const u8,
+        BuiltinId::LpGlslModQ32 => mod_q32::__lp_glsl_mod_q32 as *const u8,
+        BuiltinId::LpGlslPowQ32 => pow_q32::__lp_glsl_pow_q32 as *const u8,
+        BuiltinId::LpGlslRoundQ32 => round_q32::__lp_glsl_round_q32 as *const u8,
+        BuiltinId::LpGlslSinQ32 => sin_q32::__lp_glsl_sin_q32 as *const u8,
+        BuiltinId::LpGlslSinhQ32 => sinh_q32::__lp_glsl_sinh_q32 as *const u8,
+        BuiltinId::LpGlslTanQ32 => tan_q32::__lp_glsl_tan_q32 as *const u8,
+        BuiltinId::LpGlslTanhQ32 => tanh_q32::__lp_glsl_tanh_q32 as *const u8,
+        BuiltinId::LpLpirFaddQ32 => fadd_q32::__lp_lpir_fadd_q32 as *const u8,
+        BuiltinId::LpLpirFdivQ32 => fdiv_q32::__lp_lpir_fdiv_q32 as *const u8,
+        BuiltinId::LpLpirFmulQ32 => fmul_q32::__lp_lpir_fmul_q32 as *const u8,
+        BuiltinId::LpLpirFnearestQ32 => fnearest_q32::__lp_lpir_fnearest_q32 as *const u8,
+        BuiltinId::LpLpirFsqrtQ32 => fsqrt_q32::__lp_lpir_fsqrt_q32 as *const u8,
+        BuiltinId::LpLpirFsubQ32 => fsub_q32::__lp_lpir_fsub_q32 as *const u8,
         BuiltinId::LpLpfxFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32 as *const u8,
         BuiltinId::LpLpfxFbm2Q32 => generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32 as *const u8,
         BuiltinId::LpLpfxFbm3F32 => generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32 as *const u8,

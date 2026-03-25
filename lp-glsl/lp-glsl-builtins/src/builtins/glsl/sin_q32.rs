@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 sine function.
 
-use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;

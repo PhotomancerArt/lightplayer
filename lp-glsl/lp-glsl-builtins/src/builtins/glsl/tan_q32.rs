@@ -1,8 +1,8 @@
 //! Fixed-point 16.16 tangent function.
 
-use super::cos::__lp_glsl_cos_q32;
-use super::sin::__lp_glsl_sin_q32;
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::glsl::cos_q32::__lp_glsl_cos_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
 
 /// Compute tangent using sine and cosine: tan(x) = sin(x) / cos(x)
 ///

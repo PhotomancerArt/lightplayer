@@ -2,7 +2,7 @@
 //!
 //! Returns vec3 in [-1, 1] range using dot products with different constant vectors
 
-use crate::builtins::q32::__lp_glsl_sin_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
 

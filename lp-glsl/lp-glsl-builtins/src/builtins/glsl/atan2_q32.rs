@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 arctangent2 function.
 
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
-use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of π/4 (Q16.16 format)
 const PI_DIV_4: i32 = 0x0000C90F; // 51471

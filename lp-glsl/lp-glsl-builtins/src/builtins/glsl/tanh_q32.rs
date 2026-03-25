@@ -1,8 +1,8 @@
 //! Fixed-point 16.16 hyperbolic tangent function.
 
-use super::cosh::__lp_glsl_cosh_q32;
-use super::sinh::__lp_glsl_sinh_q32;
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::glsl::cosh_q32::__lp_glsl_cosh_q32;
+use crate::builtins::glsl::sinh_q32::__lp_glsl_sinh_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
 
 /// Compute tanh(x) using: tanh(x) = sinh(x) / cosh(x)
 ///

@@ -42,7 +42,9 @@
 //!
 //! Noise value approximately in range [-1, 1] (float)
 
-use crate::builtins::q32::{__lp_glsl_cos_q32, __lp_glsl_mod_q32, __lp_glsl_sin_q32};
+use crate::builtins::glsl::cos_q32::__lp_glsl_cos_q32;
+use crate::builtins::glsl::mod_q32::__lp_glsl_mod_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
 

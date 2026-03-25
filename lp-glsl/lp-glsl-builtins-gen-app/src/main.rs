@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::{Item, ItemFn, parse_file};
@@ -22,7 +23,7 @@ struct BuiltinInfo {
     file_name: String,
     /// Rust function signature types as strings (e.g., "extern \"C\" fn(f32, u32) -> f32")
     rust_signature: String,
-    /// Module path relative to builtins/ directory (e.g., "q32", "lpfx::hash", "lpfx::simplex::simplex1_q32")
+    /// Module path relative to builtins/ directory (e.g., "glsl::sin_q32", "lpir::fsqrt_q32", "lpfx::hash")
     module_path: String,
     /// `lpir`, `glsl`, or `lpfx`
     builtin_module: String,
@@ -38,14 +39,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("lp-glsl-builtins")
         .join("src")
         .join("builtins");
-    let q32_dir = builtins_dir.join("q32");
+    let glsl_dir = builtins_dir.join("glsl");
+    let lpir_dir = builtins_dir.join("lpir");
     let lpfx_dir = builtins_dir.join("lpfx");
 
     let mut builtins =
-        discover_builtins(&q32_dir, &builtins_dir).expect("Failed to discover builtins");
-    let lpfx_builtins =
-        discover_builtins(&lpfx_dir, &builtins_dir).expect("Failed to discover lpfx builtins");
-    builtins.extend(lpfx_builtins);
+        discover_builtins(&glsl_dir, &builtins_dir).expect("Failed to discover glsl builtins");
+    builtins.extend(
+        discover_builtins(&lpir_dir, &builtins_dir).expect("Failed to discover lpir builtins"),
+    );
+    builtins.extend(
+        discover_builtins(&lpfx_dir, &builtins_dir).expect("Failed to discover lpfx builtins"),
+    );
 
     let glsl_map_path = workspace_root
         .join("lp-glsl-builtin-ids")
@@ -83,19 +88,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("builtin_refs.rs");
     generate_builtin_refs(&builtin_refs_wasm_path, &builtins);
 
-    // Generate mod.rs (only q32 functions, not lpfx functions)
-    let q32_builtins: Vec<BuiltinInfo> = builtins
+    // Generate glsl/mod.rs and lpir/mod.rs (submodule lists only; lpfx keeps hand-written mod tree)
+    let glsl_builtins: Vec<BuiltinInfo> = builtins
         .iter()
-        .filter(|b| b.module_path.starts_with("q32::"))
+        .filter(|b| b.module_path.starts_with("glsl::"))
         .cloned()
         .collect();
-    let mod_rs_path = workspace_root
+    let lpir_builtins: Vec<BuiltinInfo> = builtins
+        .iter()
+        .filter(|b| b.module_path.starts_with("lpir::"))
+        .cloned()
+        .collect();
+    let glsl_mod_rs_path = workspace_root
         .join("lp-glsl-builtins")
         .join("src")
         .join("builtins")
-        .join("q32")
+        .join("glsl")
         .join("mod.rs");
-    generate_mod_rs(&mod_rs_path, &q32_builtins);
+    let lpir_mod_rs_path = workspace_root
+        .join("lp-glsl-builtins")
+        .join("src")
+        .join("builtins")
+        .join("lpir")
+        .join("mod.rs");
+    generate_dir_mod_rs(
+        &glsl_mod_rs_path,
+        &glsl_builtins,
+        "GLSL scalar math builtins (fixed-point Q32).",
+    );
+    generate_dir_mod_rs(
+        &lpir_mod_rs_path,
+        &lpir_builtins,
+        "LPIR library operations (fixed-point Q32).",
+    );
 
     // Generate testcase mapping in backend/builtins/mapping.rs
     let mapping_rs_path = workspace_root
@@ -134,7 +159,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &registry_path,
             &builtin_refs_path,
             &builtin_refs_wasm_path,
-            &mod_rs_path,
+            &glsl_mod_rs_path,
+            &lpir_mod_rs_path,
             &mapping_rs_path,
             &lpfx_fns_path,
             &glsl_map_path,
@@ -453,7 +479,7 @@ fn discover_builtins(
         }
 
         // Compute module path relative to base_dir (builtins/)
-        // This includes the full directory structure: "q32", "lpfx::hash", "lpfx::simplex::simplex1_q32"
+        // This includes the full directory structure: "glsl::sin_q32", "lpfx::hash", ...
         let relative_path = path
             .strip_prefix(base_dir)
             .map_err(|_| "Failed to compute relative path")?;
@@ -1301,35 +1327,47 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("/// Returns the function pointer that can be registered with JITModule.\n");
     output.push_str("pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {\n");
 
-    // Collect unique import paths
-    // Import path: what goes in `use lp_glsl_builtins::builtins::{...};`
-    use std::collections::HashSet;
-    let mut import_paths: HashSet<String> = HashSet::new();
+    // Collect unique import paths for `use lp_glsl_builtins::builtins::{ glsl::{...}, lpir::{...}, lpfx::..., ... };`
+    let mut glsl_files: BTreeSet<String> = BTreeSet::new();
+    let mut lpir_files: BTreeSet<String> = BTreeSet::new();
+    let mut lpfx_roots: BTreeSet<String> = BTreeSet::new();
 
     for builtin in builtins {
         let components: Vec<&str> = builtin.module_path.split("::").collect();
-
-        let import_path = if components[0] == "q32" {
-            "q32".to_string()
-        } else if components.len() >= 2 && components[0] == "lpfx" {
-            // lpfx modules: import is "lpfx::{second_component}"
-            format!("lpfx::{}", components[1])
-        } else {
-            // Fallback: use module_path as-is
-            builtin.module_path.clone()
-        };
-
-        import_paths.insert(import_path);
+        match components.first().copied() {
+            Some("glsl") if components.len() >= 2 => {
+                glsl_files.insert(components[1].to_string());
+            }
+            Some("lpir") if components.len() >= 2 => {
+                lpir_files.insert(components[1].to_string());
+            }
+            Some("lpfx") if components.len() >= 2 => {
+                lpfx_roots.insert(format!("lpfx::{}", components[1]));
+            }
+            _ => {}
+        }
     }
 
-    // Generate imports
-    let mut imports: Vec<String> = import_paths.into_iter().collect();
-    imports.sort();
+    let mut import_parts: Vec<String> = Vec::new();
+    if !glsl_files.is_empty() {
+        import_parts.push(format!(
+            "glsl::{{{}}}",
+            glsl_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !lpir_files.is_empty() {
+        import_parts.push(format!(
+            "lpir::{{{}}}",
+            lpir_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    import_parts.extend(lpfx_roots);
+    import_parts.sort();
 
-    if !imports.is_empty() {
+    if !import_parts.is_empty() {
         output.push_str(&format!(
             "    use lp_glsl_builtins::builtins::{{{}}};\n",
-            imports.join(", ")
+            import_parts.join(", ")
         ));
     }
 
@@ -1338,19 +1376,11 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
         output.push_str("        BuiltinId::_Placeholder => core::ptr::null(),\n");
     } else {
         for builtin in builtins {
-            // Compute usage path from module_path
-            // Usage path is what comes before `::function_name` in the match
-            // module_path includes file_name: "q32::acos", "lpfx::hash", "lpfx::simplex::simplex1_q32"
+            // Path prefix for `usage_path::__lp_*` in the match (after `use` above).
             let components: Vec<&str> = builtin.module_path.split("::").collect();
-            let usage_path = if components[0] == "q32" {
-                // q32 functions are re-exported at q32 level: q32::__lp_q32_acos
-                "q32".to_string()
-            } else if components.len() >= 2 && components[0] == "lpfx" {
-                // lpfx functions: usage is everything after "lpfx"
-                // e.g., "lpfx::simplex::simplex1_q32" -> "simplex::simplex1_q32"
+            let usage_path = if components.len() >= 2 {
                 components[1..].join("::")
             } else {
-                // Fallback: use module_path as-is
                 builtin.module_path.clone()
             };
 
@@ -1477,28 +1507,21 @@ fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo]) {
         for module_path in modules {
             let module_builtins = &builtins_by_module[module_path];
 
-            // Derive import path from module_path structure
-            // module_path includes file_name: "q32::sqrt", "lpfx::hash", "lpfx::simplex::simplex1_q32"
-            // Import path should stop at parent directory (remove last component)
             let components: Vec<&str> = module_path.split("::").collect();
 
             let (import_path, function_prefix) = if components.len() == 1 {
-                // Single component: "q32" (shouldn't happen with file_name, but handle it)
                 (
                     format!("lp_glsl_builtins::builtins::{}", components[0]),
                     None,
                 )
-            } else if components[0] == "q32" {
-                // q32::file_name -> import from q32, function is directly accessible
-                ("lp_glsl_builtins::builtins::q32".to_string(), None)
+            } else if components[0] == "glsl" || components[0] == "lpir" {
+                // One Rust module per file: import symbols from the leaf module.
+                (format!("lp_glsl_builtins::builtins::{}", module_path), None)
             } else {
-                // lpfx::hash or lpfx::simplex::simplex1_q32
-                // Import path is everything except the last component (file_name)
+                // lpfx::...::file — import parent path, qualify with last component
                 let import_components = &components[..components.len() - 1];
                 let import_path_str = import_components.join("::");
                 let import_path = format!("lp_glsl_builtins::builtins::{}", import_path_str);
-
-                // Function prefix is the last component (file_name/submodule)
                 let function_prefix = Some(components.last().unwrap());
                 (import_path, function_prefix)
             };
@@ -1571,7 +1594,7 @@ fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo]) {
     fs::write(path, output).expect("Failed to write builtin_refs.rs");
 }
 
-fn generate_mod_rs(path: &Path, builtins: &[BuiltinInfo]) {
+fn generate_dir_mod_rs(path: &Path, builtins: &[BuiltinInfo], doc_line: &str) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
 //!
 //! To regenerate this file, run:
@@ -1583,27 +1606,14 @@ fn generate_mod_rs(path: &Path, builtins: &[BuiltinInfo]) {
 "#;
 
     let mut output = String::from(header);
-    output.push_str("//! Fixed-point 16.16 arithmetic builtins.\n");
-    output.push_str("//!\n");
-    output.push_str("//! Functions operate on i32 values representing fixed-point numbers\n");
-    output.push_str("//! with 16 bits of fractional precision.\n");
-    output.push('\n');
+    output.push_str(&format!("//! {}\n\n", doc_line));
 
-    // Generate mod declarations (deduplicate by file name)
-    let mut seen_files = std::collections::HashSet::new();
+    let mut names: BTreeSet<String> = BTreeSet::new();
     for builtin in builtins {
-        if seen_files.insert(&builtin.file_name) {
-            output.push_str(&format!("mod {};\n", builtin.file_name));
-        }
+        names.insert(builtin.file_name.clone());
     }
-    output.push('\n');
-
-    // Generate pub use statements
-    for builtin in builtins {
-        output.push_str(&format!(
-            "pub use {}::{};\n",
-            builtin.file_name, builtin.function_name
-        ));
+    for name in names {
+        output.push_str(&format!("pub mod {};\n", name));
     }
 
     fs::write(path, output).expect("Failed to write mod.rs");

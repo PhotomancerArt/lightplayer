@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 base-2 logarithm function.
 
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
-use crate::builtins::q32::mul;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fmul_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -45,7 +45,7 @@ fn log2_inner(x: i32) -> i32 {
     // libfixmath: for(i = 16; i > 0; i--) { x = fix16_mul(x, x); result <<= 1; ... }
     // After this loop, result has 16 fractional bits (bits 0-15)
     for _i in (1..=16).rev() {
-        x_val = mul::__lp_lpir_fmul_q32(x_val, x_val);
+        x_val = fmul_q32::__lp_lpir_fmul_q32(x_val, x_val);
         result <<= 1; // Make room for next fractional bit
         if x_val >= (2 << 16) {
             result |= 1; // Set this fractional bit
@@ -54,7 +54,7 @@ fn log2_inner(x: i32) -> i32 {
     }
 
     // Final rounding step: check if we should round up
-    x_val = mul::__lp_lpir_fmul_q32(x_val, x_val);
+    x_val = fmul_q32::__lp_lpir_fmul_q32(x_val, x_val);
     if x_val >= (2 << 16) {
         result += 1; // Round up
     }

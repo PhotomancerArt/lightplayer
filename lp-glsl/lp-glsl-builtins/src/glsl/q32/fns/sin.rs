@@ -1,4 +1,4 @@
-use crate::builtins::q32::__lp_glsl_sin_q32;
+use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;

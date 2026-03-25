@@ -2,8 +2,8 @@
 //!
 //! inversesqrt(x) = 1 / sqrt(x)
 
-use super::sqrt::__lp_lpir_fsqrt_q32;
-use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536

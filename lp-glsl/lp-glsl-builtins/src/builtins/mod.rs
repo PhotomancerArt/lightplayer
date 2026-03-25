@@ -46,5 +46,6 @@
 //! - The compiler to call lpfx functions via the extern C interface with expanded types
 //! - LPFX functions to call each other ergonomically without type conversions
 
+pub mod glsl;
 pub mod lpfx;
-pub mod q32;
+pub mod lpir;
