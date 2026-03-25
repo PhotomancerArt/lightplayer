@@ -1,4 +1,4 @@
-use crate::builtins::q32::__lp_q32_mod;
+use crate::builtins::q32::__lp_glsl_mod_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
@@ -9,8 +9,8 @@ use crate::glsl::q32::types::vec4_q32::Vec4Q32;
 #[inline(always)]
 pub fn mod_vec2(x: Vec2Q32, y: Vec2Q32) -> Vec2Q32 {
     Vec2Q32::new(
-        Q32::from_fixed(__lp_q32_mod(x.x.to_fixed(), y.x.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.y.to_fixed(), y.y.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.x.to_fixed(), y.x.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.y.to_fixed(), y.y.to_fixed())),
     )
 }
 
@@ -19,9 +19,9 @@ pub fn mod_vec2(x: Vec2Q32, y: Vec2Q32) -> Vec2Q32 {
 #[inline(always)]
 pub fn mod_vec3(x: Vec3Q32, y: Vec3Q32) -> Vec3Q32 {
     Vec3Q32::new(
-        Q32::from_fixed(__lp_q32_mod(x.x.to_fixed(), y.x.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.y.to_fixed(), y.y.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.z.to_fixed(), y.z.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.x.to_fixed(), y.x.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.y.to_fixed(), y.y.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.z.to_fixed(), y.z.to_fixed())),
     )
 }
 
@@ -30,10 +30,10 @@ pub fn mod_vec3(x: Vec3Q32, y: Vec3Q32) -> Vec3Q32 {
 #[inline(always)]
 pub fn mod_vec4(x: Vec4Q32, y: Vec4Q32) -> Vec4Q32 {
     Vec4Q32::new(
-        Q32::from_fixed(__lp_q32_mod(x.x.to_fixed(), y.x.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.y.to_fixed(), y.y.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.z.to_fixed(), y.z.to_fixed())),
-        Q32::from_fixed(__lp_q32_mod(x.w.to_fixed(), y.w.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.x.to_fixed(), y.x.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.y.to_fixed(), y.y.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.z.to_fixed(), y.z.to_fixed())),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.w.to_fixed(), y.w.to_fixed())),
     )
 }
 
@@ -43,9 +43,9 @@ pub fn mod_vec4(x: Vec4Q32, y: Vec4Q32) -> Vec4Q32 {
 pub fn mod_vec3_scalar(x: Vec3Q32, y: Q32) -> Vec3Q32 {
     let y_fixed = y.to_fixed();
     Vec3Q32::new(
-        Q32::from_fixed(__lp_q32_mod(x.x.to_fixed(), y_fixed)),
-        Q32::from_fixed(__lp_q32_mod(x.y.to_fixed(), y_fixed)),
-        Q32::from_fixed(__lp_q32_mod(x.z.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.x.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.y.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.z.to_fixed(), y_fixed)),
     )
 }
 
@@ -55,10 +55,10 @@ pub fn mod_vec3_scalar(x: Vec3Q32, y: Q32) -> Vec3Q32 {
 pub fn mod_vec4_scalar(x: Vec4Q32, y: Q32) -> Vec4Q32 {
     let y_fixed = y.to_fixed();
     Vec4Q32::new(
-        Q32::from_fixed(__lp_q32_mod(x.x.to_fixed(), y_fixed)),
-        Q32::from_fixed(__lp_q32_mod(x.y.to_fixed(), y_fixed)),
-        Q32::from_fixed(__lp_q32_mod(x.z.to_fixed(), y_fixed)),
-        Q32::from_fixed(__lp_q32_mod(x.w.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.x.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.y.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.z.to_fixed(), y_fixed)),
+        Q32::from_fixed(__lp_glsl_mod_q32(x.w.to_fixed(), y_fixed)),
     )
 }
 

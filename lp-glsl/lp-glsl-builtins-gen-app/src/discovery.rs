@@ -10,9 +10,9 @@ use crate::lpfx::errors::LpfxCodegenError;
 /// Information about a discovered LPFX function
 #[derive(Debug, Clone)]
 pub struct LpfxFunctionInfo {
-    /// Rust function name (e.g., "__lpfx_snoise3_f32")
+    /// Rust function name (e.g., "__lp_lpfx_snoise3_f32")
     pub rust_fn_name: String,
-    /// BuiltinId enum variant name (e.g., "LpfxSnoise3Float")
+    /// BuiltinId enum variant name (e.g., "LpLpfxSnoise3F32")
     pub builtin_id_variant: String,
     /// File path where function is defined
     pub file_path: PathBuf,
@@ -88,8 +88,8 @@ pub fn discover_lpfx_functions(dir: &Path) -> Result<Vec<LpfxFunctionInfo>, Lpfx
 fn extract_lpfx_function(func: &ItemFn, file_path: &Path) -> Option<LpfxFunctionInfo> {
     let func_name = func.sig.ident.to_string();
 
-    // Only process functions that start with __lpfx_ (LPFX convention)
-    if !func_name.starts_with("__lpfx_") {
+    // Only process functions that start with __lp_lpfx_ (LPFX convention)
+    if !func_name.starts_with("__lp_lpfx_") {
         return None;
     }
 
@@ -111,9 +111,9 @@ fn extract_lpfx_function(func: &ItemFn, file_path: &Path) -> Option<LpfxFunction
     // 2. Split by _ and capitalize each word
     // 3. Join together
     // Examples:
-    // __lpfx_hash_1 -> LpfxHash1
-    // __lpfx_snoise1_f32 -> LpfxSnoise1F32
-    // __lpfx_snoise1_q32 -> LpfxSnoise1Q32
+    // __lp_lpfx_hash_1 -> LpLpfxHash1
+    // __lp_lpfx_snoise1_f32 -> LpLpfxSnoise1F32
+    // __lp_lpfx_snoise1_q32 -> LpLpfxSnoise1Q32
     let name_without_prefix = func_name.strip_prefix("__").unwrap();
     let builtin_id_variant = name_without_prefix
         .split('_')

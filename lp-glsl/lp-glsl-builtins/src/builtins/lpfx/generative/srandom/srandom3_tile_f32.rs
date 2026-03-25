@@ -1,12 +1,12 @@
 //! 3D Signed Random function with tiling (float implementation - stub).
 
-use crate::builtins::lpfx::generative::srandom::srandom3_tile_q32::__lpfx_srandom3_tile_q32;
+use crate::builtins::lpfx::generative::srandom::srandom3_tile_q32::__lp_lpfx_srandom3_tile_q32;
 use crate::glsl::q32::types::q32::Q32;
 
 #[lpfx_impl_macro::lpfx_impl(f32, "vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_srandom3_tile_f32(
+pub extern "C" fn __lp_lpfx_srandom3_tile_f32(
     out: *mut f32,
     x: f32,
     y: f32,
@@ -20,7 +20,7 @@ pub extern "C" fn __lpfx_srandom3_tile_f32(
     let tile_length_q32 = Q32::from_f32(tile_length);
 
     let mut result_q32 = [0i32; 3];
-    __lpfx_srandom3_tile_q32(
+    __lp_lpfx_srandom3_tile_q32(
         result_q32.as_mut_ptr(),
         x_q32.to_fixed(),
         y_q32.to_fixed(),

@@ -278,7 +278,7 @@ mod tests {
         use lp_glsl_builtin_ids::BuiltinId;
 
         // Test that f32 builtin IDs map to LPFX functions, and we can extract q32_impl
-        let f32_builtin = BuiltinId::LpfxSaturateVec3F32;
+        let f32_builtin = BuiltinId::LpLpfxSaturateVec3F32;
         let lpfx_fn = find_lpfx_fn_by_builtin_id(f32_builtin);
         assert!(lpfx_fn.is_some());
         let lpfx_fn = lpfx_fn.unwrap();
@@ -296,8 +296,8 @@ mod tests {
                 float_impl,
                 q32_impl,
             } => {
-                assert_eq!(*float_impl, BuiltinId::LpfxSaturateVec3F32);
-                assert_eq!(*q32_impl, BuiltinId::LpfxSaturateVec3Q32);
+                assert_eq!(*float_impl, BuiltinId::LpLpfxSaturateVec3F32);
+                assert_eq!(*q32_impl, BuiltinId::LpLpfxSaturateVec3Q32);
             }
             _ => panic!("Expected Decimal implementation"),
         }
@@ -308,7 +308,7 @@ mod tests {
         use lp_glsl_builtin_ids::BuiltinId;
 
         // Test that q32 builtin IDs also map to LPFX functions
-        let q32_builtin = BuiltinId::LpfxSaturateVec3Q32;
+        let q32_builtin = BuiltinId::LpLpfxSaturateVec3Q32;
         let lpfx_fn = find_lpfx_fn_by_builtin_id(q32_builtin);
         assert!(lpfx_fn.is_some());
         let lpfx_fn = lpfx_fn.unwrap();
@@ -322,7 +322,7 @@ mod tests {
         use lp_glsl_builtin_ids::BuiltinId;
 
         // Test that non-LPFX builtins return None
-        let regular_builtin = BuiltinId::LpQ32Sin;
+        let regular_builtin = BuiltinId::LpGlslSinQ32;
         let lpfx_fn = find_lpfx_fn_by_builtin_id(regular_builtin);
         assert!(
             lpfx_fn.is_none(),
@@ -335,11 +335,11 @@ mod tests {
         use lp_glsl_builtin_ids::BuiltinId;
 
         // Test full lookup chain: name -> BuiltinId -> LpfxFn -> q32_impl -> name
-        let f32_name = "__lpfx_saturate_vec3_f32";
+        let f32_name = "__lp_lpfx_saturate_vec3_f32";
 
         // Step 1: name -> BuiltinId
         let f32_builtin = BuiltinId::builtin_id_from_name(f32_name);
-        assert_eq!(f32_builtin, Some(BuiltinId::LpfxSaturateVec3F32));
+        assert_eq!(f32_builtin, Some(BuiltinId::LpLpfxSaturateVec3F32));
 
         // Step 2: BuiltinId -> LpfxFn
         let lpfx_fn = find_lpfx_fn_by_builtin_id(f32_builtin.unwrap());
@@ -349,11 +349,11 @@ mod tests {
         // Step 3: LpfxFn -> q32_impl
         match &lpfx_fn.impls {
             crate::semantic::lpfx::lpfx_fn::LpfxFnImpl::Decimal { q32_impl, .. } => {
-                assert_eq!(*q32_impl, BuiltinId::LpfxSaturateVec3Q32);
+                assert_eq!(*q32_impl, BuiltinId::LpLpfxSaturateVec3Q32);
 
                 // Step 4: q32_impl -> name
                 let q32_name = q32_impl.name();
-                assert_eq!(q32_name, "__lpfx_saturate_vec3_q32");
+                assert_eq!(q32_name, "__lp_lpfx_saturate_vec3_q32");
             }
             _ => panic!("Expected Decimal implementation"),
         }

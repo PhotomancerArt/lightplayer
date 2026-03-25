@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 base-2 exponential function.
 
-use super::exp::__lp_q32_exp;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use super::exp::__lp_glsl_exp_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of ln(2) ≈ 0.693147 (Q16.16 format)
 /// ln(2) ≈ 0.6931471805599453
@@ -12,12 +12,12 @@ const FIX16_LN2: i32 = 45426; // 0.693147 * 65536 ≈ 45426
 /// This is simpler than porting fr_math's radix-based approach.
 /// exp2(x) = 2^x = e^(x * ln(2))
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_exp2(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_exp2_q32(x: i32) -> i32 {
     // Compute x * ln(2)
-    let x_times_ln2 = __lp_q32_mul(x, FIX16_LN2);
+    let x_times_ln2 = __lp_lpir_fmul_q32(x, FIX16_LN2);
 
     // Compute exp(x * ln(2)) = 2^x
-    __lp_q32_exp(x_times_ln2)
+    __lp_glsl_exp_q32(x_times_ln2)
 }
 
 #[cfg(test)]
@@ -38,6 +38,6 @@ mod tests {
         ];
 
         // Use 5% tolerance for exp2 (uses exp internally, so accumulates error)
-        test_q32_function_relative(|x| __lp_q32_exp2(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_exp2_q32(x), &tests, 0.05, 0.01);
     }
 }

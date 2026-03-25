@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 
 use lp_glsl_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    lpir_q32_builtin_id,
 };
 use lp_glsl_naga::FloatMode;
 use lpir::{CalleeRef, ImportDecl, IrModule, IrType, Op};
@@ -81,11 +82,20 @@ fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
 
 fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     match decl.module_name.as_str() {
-        "std.math" => {
+        "glsl" => {
             let ac = decl.param_types.len();
             glsl_q32_math_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
                 format!(
-                    "unsupported std.math import `{}` (arg count {ac})",
+                    "unsupported glsl import `{}` (arg count {ac})",
+                    decl.func_name
+                )
+            })
+        }
+        "lpir" => {
+            let ac = decl.param_types.len();
+            lpir_q32_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
+                format!(
+                    "unsupported lpir import `{}` (arg count {ac})",
                     decl.func_name
                 )
             })
@@ -154,11 +164,15 @@ pub(crate) fn builtins_wasm_name(decl: &ImportDecl) -> Result<&'static str, Stri
     Ok(resolve_builtin_id(decl)?.name())
 }
 
-pub(crate) fn std_math_callee(ir: &IrModule, func_name: &str) -> Result<CalleeRef, String> {
+pub(crate) fn import_callee(
+    ir: &IrModule,
+    module: &str,
+    func_name: &str,
+) -> Result<CalleeRef, String> {
     ir.imports
         .iter()
         .enumerate()
-        .find(|(_, d)| d.module_name == "std.math" && d.func_name == func_name)
+        .find(|(_, d)| d.module_name == module && d.func_name == func_name)
         .map(|(i, _)| CalleeRef(i as u32))
-        .ok_or_else(|| format!("missing import @std.math::{func_name}"))
+        .ok_or_else(|| format!("missing import @{module}::{func_name}"))
 }

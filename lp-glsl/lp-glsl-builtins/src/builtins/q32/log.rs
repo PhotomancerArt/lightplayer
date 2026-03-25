@@ -1,8 +1,8 @@
 //! Fixed-point 16.16 natural logarithm function.
 
-use super::exp::__lp_q32_exp;
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use super::exp::__lp_glsl_exp_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -13,7 +13,7 @@ const FIX16_ZERO: i32 = 0;
 /// Algorithm ported from libfixmath.
 /// Uses iterative refinement: solving e(guess) = x using Newton's method.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_log(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_log_q32(x: i32) -> i32 {
     // GLSL: log(x) for x <= 0 is undefined — return 0 (edge-exp-domain).
     if x <= 0 {
         return FIX16_ZERO;
@@ -33,13 +33,13 @@ pub extern "C" fn __lp_q32_log(x: i32) -> i32 {
     const E_TO_FOURTH: i32 = 3578144; // e^4 in fixed point (approximately)
 
     while in_value > (100 << 16) {
-        in_value = __lp_q32_div(in_value, E_TO_FOURTH);
+        in_value = __lp_lpir_fdiv_q32(in_value, E_TO_FOURTH);
         scaling += 4;
     }
 
     while in_value < FIX16_ONE {
         let prev_value = in_value;
-        in_value = __lp_q32_mul(in_value, E_TO_FOURTH);
+        in_value = __lp_lpir_fmul_q32(in_value, E_TO_FOURTH);
         scaling -= 4;
 
         // Safety check: if multiplication didn't change the value, we're stuck
@@ -63,8 +63,8 @@ pub extern "C" fn __lp_q32_log(x: i32) -> i32 {
     // delta = (in_value - e(guess)) / e(guess) = in_value/e(guess) - 1
     let mut count = 0;
     loop {
-        let e_guess = __lp_q32_exp(guess);
-        let delta = __lp_q32_div(in_value - e_guess, e_guess);
+        let e_guess = __lp_glsl_exp_q32(guess);
+        let delta = __lp_lpir_fdiv_q32(in_value - e_guess, e_guess);
 
         // It's unlikely that logarithm is very large, so avoid overshooting.
         // libfixmath clamps to fix16_from_int(3) which is 3 << 16
@@ -103,6 +103,6 @@ mod tests {
         ];
 
         // Use 5% tolerance for log functions (Newton-Raphson can have some error)
-        test_q32_function_relative(|x| __lp_q32_log(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_log_q32(x), &tests, 0.05, 0.01);
     }
 }

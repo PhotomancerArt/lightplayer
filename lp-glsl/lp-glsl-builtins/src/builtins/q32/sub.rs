@@ -8,7 +8,7 @@ const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
 /// Uses i64 internally to avoid overflow, then saturates to fixed-point range.
 /// Handles overflow/underflow by saturating to max/min fixed-point values.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_sub(a: i32, b: i32) -> i32 {
+pub extern "C" fn __lp_lpir_fsub_q32(a: i32, b: i32) -> i32 {
     // Use i64 internally for subtraction to avoid overflow
     let a_wide = a as i64;
     let b_wide = b as i64;
@@ -46,7 +46,7 @@ mod tests {
         for (a, b, expected) in tests {
             let a_fixed = float_to_fixed(a);
             let b_fixed = float_to_fixed(b);
-            let result_fixed = __lp_q32_sub(a_fixed, b_fixed);
+            let result_fixed = __lp_lpir_fsub_q32(a_fixed, b_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(
@@ -73,13 +73,13 @@ mod tests {
         let one = float_to_fixed(1.0);
         let zero = 0;
 
-        assert_eq!(__lp_q32_sub(one, zero), one, "1 - 0 should be 1");
+        assert_eq!(__lp_lpir_fsub_q32(one, zero), one, "1 - 0 should be 1");
         assert_eq!(
-            __lp_q32_sub(zero, one),
+            __lp_lpir_fsub_q32(zero, one),
             float_to_fixed(-1.0),
             "0 - 1 should be -1"
         );
-        assert_eq!(__lp_q32_sub(zero, zero), 0, "0 - 0 should be 0");
+        assert_eq!(__lp_lpir_fsub_q32(zero, zero), 0, "0 - 0 should be 0");
     }
 
     #[test]
@@ -94,7 +94,7 @@ mod tests {
         for (a, b, expected) in tests {
             let a_fixed = float_to_fixed(a);
             let b_fixed = float_to_fixed(b);
-            let result_fixed = __lp_q32_sub(a_fixed, b_fixed);
+            let result_fixed = __lp_lpir_fsub_q32(a_fixed, b_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(
@@ -121,7 +121,7 @@ mod tests {
         // Test values that would overflow
         let large_a = float_to_fixed(1000.0);
         let large_neg_b = float_to_fixed(-1000.0);
-        let result = __lp_q32_sub(large_a, large_neg_b);
+        let result = __lp_lpir_fsub_q32(large_a, large_neg_b);
 
         // Result should be saturated to MAX_FIXED
         assert!(
@@ -136,7 +136,7 @@ mod tests {
         // Test values that would underflow
         let large_neg_a = float_to_fixed(-1000.0);
         let large_b = float_to_fixed(1000.0);
-        let result = __lp_q32_sub(large_neg_a, large_b);
+        let result = __lp_lpir_fsub_q32(large_neg_a, large_b);
 
         // Result should be saturated to MIN_FIXED (if negative) or within range
         assert!(

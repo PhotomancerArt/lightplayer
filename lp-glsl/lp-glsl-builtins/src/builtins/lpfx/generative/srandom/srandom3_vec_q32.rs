@@ -2,7 +2,7 @@
 //!
 //! Returns vec3 in [-1, 1] range using dot products with different constant vectors
 
-use crate::builtins::q32::__lp_q32_sin;
+use crate::builtins::q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
 
@@ -50,17 +50,17 @@ pub fn lpfx_srandom3_vec(p: Vec3Q32, _seed: u32) -> Vec3Q32 {
         + ((p.z.to_fixed() as i64 * DOT_Z_Z as i64) >> 16) as i32;
 
     // sin(dot) * 43758.5453123, then fract, then -1.0 + 2.0 * fract
-    let sin_x = __lp_q32_sin(dot_x);
+    let sin_x = __lp_glsl_sin_q32(dot_x);
     let multiplied_x = ((sin_x as i64 * RANDOM_MULT) >> 16) as i32;
     let fract_x = Q32::from_fixed(multiplied_x).frac();
     let result_x = Q32::from_f32(-1.0) + Q32::from_f32(2.0) * fract_x;
 
-    let sin_y = __lp_q32_sin(dot_y);
+    let sin_y = __lp_glsl_sin_q32(dot_y);
     let multiplied_y = ((sin_y as i64 * RANDOM_MULT) >> 16) as i32;
     let fract_y = Q32::from_fixed(multiplied_y).frac();
     let result_y = Q32::from_f32(-1.0) + Q32::from_f32(2.0) * fract_y;
 
-    let sin_z = __lp_q32_sin(dot_z);
+    let sin_z = __lp_glsl_sin_q32(dot_z);
     let multiplied_z = ((sin_z as i64 * RANDOM_MULT) >> 16) as i32;
     let fract_z = Q32::from_fixed(multiplied_z).frac();
     let result_z = Q32::from_f32(-1.0) + Q32::from_f32(2.0) * fract_z;
@@ -79,7 +79,7 @@ pub fn lpfx_srandom3_vec(p: Vec3Q32, _seed: u32) -> Vec3Q32 {
 #[lpfx_impl_macro::lpfx_impl(q32, "vec3 lpfx_srandom3_vec(vec3 p, uint seed)")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_srandom3_vec_q32(out: *mut i32, x: i32, y: i32, z: i32, seed: u32) {
+pub extern "C" fn __lp_lpfx_srandom3_vec_q32(out: *mut i32, x: i32, y: i32, z: i32, seed: u32) {
     let result = lpfx_srandom3_vec(
         Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z)),
         seed,

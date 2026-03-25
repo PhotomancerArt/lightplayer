@@ -1,6 +1,6 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::builtins::q32::__lp_q32_sqrt;
+use crate::builtins::q32::__lp_lpir_fsqrt_q32;
 use crate::glsl::q32::fns;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
@@ -67,7 +67,7 @@ impl Vec4Q32 {
     #[inline(always)]
     pub fn length(self) -> Q32 {
         let len_sq = self.length_squared();
-        Q32::from_fixed(__lp_q32_sqrt(len_sq.to_fixed()))
+        Q32::from_fixed(__lp_lpir_fsqrt_q32(len_sq.to_fixed()))
     }
 
     /// Distance between two vectors

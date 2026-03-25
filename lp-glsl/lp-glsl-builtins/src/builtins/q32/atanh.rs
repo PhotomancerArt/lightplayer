@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 inverse hyperbolic tangent function.
 
-use super::log::__lp_q32_log;
-use crate::builtins::q32::div::__lp_q32_div;
+use super::log::__lp_glsl_log_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -11,7 +11,7 @@ const FIX16_ONE: i32 = 0x00010000; // 65536
 /// Uses the mathematical definition with log and division.
 /// Domain: |x| < 1
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_atanh(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_atanh_q32(x: i32) -> i32 {
     // Handle zero case: atanh(0) = 0
     if x == 0 {
         return 0;
@@ -25,16 +25,16 @@ pub extern "C" fn __lp_q32_atanh(x: i32) -> i32 {
     // Compute (1 + x) / (1 - x)
     let one_plus_x = FIX16_ONE + x;
     let one_minus_x = FIX16_ONE - x;
-    let ratio = __lp_q32_div(one_plus_x, one_minus_x);
+    let ratio = __lp_lpir_fdiv_q32(one_plus_x, one_minus_x);
 
     // Compute log((1+x)/(1-x))
-    let log_val = __lp_q32_log(ratio);
+    let log_val = __lp_glsl_log_q32(ratio);
 
     // Compute (1/2) * log((1+x)/(1-x))
     // Multiply by 0.5 in fixed point: multiply by 32768 then shift right by 16
     // Or simpler: divide by 2 in fixed point = divide by 131072
     const FIX16_TWO: i32 = 0x00020000; // 131072
-    __lp_q32_div(log_val, FIX16_TWO)
+    __lp_lpir_fdiv_q32(log_val, FIX16_TWO)
 }
 
 #[cfg(test)]
@@ -54,6 +54,6 @@ mod tests {
         ];
 
         // Use 5% tolerance for inverse hyperbolic functions
-        test_q32_function_relative(|x| __lp_q32_atanh(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_atanh_q32(x), &tests, 0.05, 0.01);
     }
 }

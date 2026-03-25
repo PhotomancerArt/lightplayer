@@ -2,7 +2,7 @@
 //!
 //! fma(a, b, c) = a * b + c
 
-use crate::builtins::q32::mul::__lp_q32_mul;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Compute fma(a, b, c) = a * b + c
 ///
@@ -10,9 +10,9 @@ use crate::builtins::q32::mul::__lp_q32_mul;
 /// In fixed-point, we can't truly fuse the operations, but we use mul builtin
 /// for better precision than doing the operations separately.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_fma(a: i32, b: i32, c: i32) -> i32 {
+pub extern "C" fn __lp_glsl_fma_q32(a: i32, b: i32, c: i32) -> i32 {
     // Compute a * b using mul builtin
-    let product = __lp_q32_mul(a, b);
+    let product = __lp_lpir_fmul_q32(a, b);
 
     // Add c (simple addition in fixed-point)
     product.wrapping_add(c)
@@ -31,7 +31,7 @@ mod tests {
         let a = float_to_fixed(2.0);
         let b = float_to_fixed(3.0);
         let c = float_to_fixed(4.0);
-        let result = __lp_q32_fma(a, b, c);
+        let result = __lp_glsl_fma_q32(a, b, c);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 10.0).abs() < 0.01,
@@ -46,7 +46,7 @@ mod tests {
         let a = float_to_fixed(2.0);
         let b = float_to_fixed(-3.0);
         let c = float_to_fixed(5.0);
-        let result = __lp_q32_fma(a, b, c);
+        let result = __lp_glsl_fma_q32(a, b, c);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - (-1.0)).abs() < 0.01,
@@ -61,7 +61,7 @@ mod tests {
         let a = float_to_fixed(1.5);
         let b = float_to_fixed(2.0);
         let c = float_to_fixed(0.5);
-        let result = __lp_q32_fma(a, b, c);
+        let result = __lp_glsl_fma_q32(a, b, c);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 3.5).abs() < 0.01,

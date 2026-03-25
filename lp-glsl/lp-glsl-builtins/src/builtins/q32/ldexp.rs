@@ -7,7 +7,7 @@
 /// In fixed-point Q16.16, multiplying by 2^exp is equivalent to left-shifting by exp bits.
 /// For negative exp, we right-shift.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_ldexp(x: i32, exp: i32) -> i32 {
+pub extern "C" fn __lp_glsl_ldexp_q32(x: i32, exp: i32) -> i32 {
     if exp == 0 {
         return x;
     }
@@ -35,7 +35,7 @@ mod tests {
     fn test_ldexp_one_one() {
         // ldexp(1.0, 1) = 2.0
         let x = float_to_fixed(1.0);
-        let result = __lp_q32_ldexp(x, 1);
+        let result = __lp_glsl_ldexp_q32(x, 1);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -48,7 +48,7 @@ mod tests {
     fn test_ldexp_one_two() {
         // ldexp(1.0, 2) = 4.0
         let x = float_to_fixed(1.0);
-        let result = __lp_q32_ldexp(x, 2);
+        let result = __lp_glsl_ldexp_q32(x, 2);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 4.0).abs() < 0.01,
@@ -61,7 +61,7 @@ mod tests {
     fn test_ldexp_half_neg_one() {
         // ldexp(0.5, -1) = 0.25
         let x = float_to_fixed(0.5);
-        let result = __lp_q32_ldexp(x, -1);
+        let result = __lp_glsl_ldexp_q32(x, -1);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 0.25).abs() < 0.01,

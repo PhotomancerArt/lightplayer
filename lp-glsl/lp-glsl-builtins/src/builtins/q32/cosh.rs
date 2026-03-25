@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 hyperbolic cosine function.
 
-use super::exp::__lp_q32_exp;
-use crate::builtins::q32::div::__lp_q32_div;
+use super::exp::__lp_glsl_exp_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 
 /// Fixed-point value of 2.0 (Q16.16 format)
 const FIX16_TWO: i32 = 0x00020000; // 131072
@@ -10,19 +10,19 @@ const FIX16_TWO: i32 = 0x00020000; // 131072
 ///
 /// Uses the mathematical definition with exp.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_cosh(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_cosh_q32(x: i32) -> i32 {
     // Handle zero case: cosh(0) = 1
     if x == 0 {
         return 0x00010000; // 1.0 in fixed point
     }
 
     // Compute exp(x) and exp(-x)
-    let exp_x = __lp_q32_exp(x);
-    let exp_neg_x = __lp_q32_exp(-x);
+    let exp_x = __lp_glsl_exp_q32(x);
+    let exp_neg_x = __lp_glsl_exp_q32(-x);
 
     // cosh(x) = (exp(x) + exp(-x)) / 2
     let numerator = exp_x + exp_neg_x;
-    __lp_q32_div(numerator, FIX16_TWO)
+    __lp_lpir_fdiv_q32(numerator, FIX16_TWO)
 }
 
 #[cfg(test)]
@@ -42,6 +42,6 @@ mod tests {
         ];
 
         // Use 5% tolerance for hyperbolic functions (uses exp internally)
-        test_q32_function_relative(|x| __lp_q32_cosh(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_cosh_q32(x), &tests, 0.05, 0.01);
     }
 }

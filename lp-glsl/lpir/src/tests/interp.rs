@@ -1450,10 +1450,10 @@ func @main() -> f32 {
 
 #[test]
 fn interp_import_call_unary() {
-    let ir = "import @std.math::fabs(f32) -> f32
+    let ir = "import @glsl::fabs(f32) -> f32
 
 func @f(v0:f32) -> f32 {
-  v1:f32 = call @std.math::fabs(v0)
+  v1:f32 = call @glsl::fabs(v0)
   return v1
 }
 ";
@@ -1463,10 +1463,10 @@ func @f(v0:f32) -> f32 {
 
 #[test]
 fn interp_import_call_binary() {
-    let ir = "import @std.math::fmax(f32, f32) -> f32
+    let ir = "import @glsl::fmax(f32, f32) -> f32
 
 func @f(v0:f32, v1:f32) -> f32 {
-  v2:f32 = call @std.math::fmax(v0, v1)
+  v2:f32 = call @glsl::fmax(v0, v1)
   return v2
 }
 ";
@@ -1481,11 +1481,11 @@ func @f(v0:f32, v1:f32) -> f32 {
 
 #[test]
 fn interp_import_error() {
-    let ir = "import @std.math::fabs(f32) -> f32
-import @std.math::unknown(f32) -> f32
+    let ir = "import @glsl::fabs(f32) -> f32
+import @glsl::unknown(f32) -> f32
 
 func @f(v0:f32) -> f32 {
-  v1:f32 = call @std.math::unknown(v0)
+  v1:f32 = call @glsl::unknown(v0)
   return v1
 }
 ";
@@ -1686,16 +1686,16 @@ impl ImportHandler for MockMathImports {
         args: &[Value],
     ) -> Result<Vec<Value>, InterpError> {
         match (module_name, func_name) {
-            ("std.math", "fabs") => {
+            ("glsl", "fabs") => {
                 let v = args[0].as_f32().unwrap();
                 Ok(vec![Value::F32(v.abs())])
             }
-            ("std.math", "fmax") => {
+            ("glsl", "fmax") => {
                 let a = args[0].as_f32().unwrap();
                 let b = args[1].as_f32().unwrap();
                 Ok(vec![Value::F32(a.max(b))])
             }
-            ("std.math", "unknown") => Err(InterpError::Import(String::from("unknown"))),
+            ("glsl", "unknown") => Err(InterpError::Import(String::from("unknown"))),
             _ => Err(InterpError::Import(format!(
                 "unknown {module_name}::{func_name}"
             ))),

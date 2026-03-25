@@ -20,7 +20,7 @@
 //! This derivative work (Rust/f32 wrapper implementation):
 //! Also published under the terms of the MIT license.
 
-use crate::builtins::lpfx::generative::psrdnoise::psrdnoise2_q32::__lpfx_psrdnoise2_q32;
+use crate::builtins::lpfx::generative::psrdnoise::psrdnoise2_q32::__lp_lpfx_psrdnoise2_q32;
 use crate::glsl::q32::types::q32::Q32;
 
 /// 2D Periodic Simplex Rotational Domain noise function (float version).
@@ -42,7 +42,7 @@ use crate::glsl::q32::types::q32::Q32;
 )]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_psrdnoise2_f32(
+pub extern "C" fn __lp_lpfx_psrdnoise2_f32(
     x: f32,
     y: f32,
     period_x: f32,
@@ -59,7 +59,7 @@ pub extern "C" fn __lpfx_psrdnoise2_f32(
     let alpha_q32 = Q32::from_f32(alpha);
 
     let mut gradient_q32 = [0i32; 2];
-    let result_fixed = __lpfx_psrdnoise2_q32(
+    let result_fixed = __lp_lpfx_psrdnoise2_q32(
         x_q32.to_fixed(),
         y_q32.to_fixed(),
         period_x_q32.to_fixed(),

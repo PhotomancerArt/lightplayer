@@ -49,7 +49,7 @@ pub fn lpfx_fbm2(p: Vec2Q32, octaves: i32, seed: u32) -> Q32 {
 /// Noise value as i32 (Q32 fixed-point format)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_fbm(vec2 p, int octaves, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_fbm2_q32(x: i32, y: i32, octaves: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_fbm2_q32(x: i32, y: i32, octaves: i32, seed: u32) -> i32 {
     lpfx_fbm2(
         Vec2Q32::new(Q32::from_fixed(x), Q32::from_fixed(y)),
         octaves,
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_fbm2_basic() {
-        let result = __lpfx_fbm2_q32(
+        let result = __lp_lpfx_fbm2_q32(
             Q32::from_f32(42.5).to_fixed(),
             Q32::from_f32(10.3).to_fixed(),
             4,

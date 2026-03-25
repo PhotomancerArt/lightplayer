@@ -19,15 +19,15 @@ use crate::glsl::q32::types::vec3_q32::Vec3Q32;
 pub fn lpfx_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 {
     // mod(p, tile_length) component-wise
     let p_mod = Vec3Q32::new(
-        Q32::from_fixed(crate::builtins::q32::__lp_q32_mod(
+        Q32::from_fixed(crate::builtins::q32::__lp_glsl_mod_q32(
             p.x.to_fixed(),
             tile_length.to_fixed(),
         )),
-        Q32::from_fixed(crate::builtins::q32::__lp_q32_mod(
+        Q32::from_fixed(crate::builtins::q32::__lp_glsl_mod_q32(
             p.y.to_fixed(),
             tile_length.to_fixed(),
         )),
-        Q32::from_fixed(crate::builtins::q32::__lp_q32_mod(
+        Q32::from_fixed(crate::builtins::q32::__lp_glsl_mod_q32(
             p.z.to_fixed(),
             tile_length.to_fixed(),
         )),
@@ -49,7 +49,7 @@ pub fn lpfx_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 {
 #[lpfx_impl_macro::lpfx_impl(q32, "vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_srandom3_tile_q32(
+pub extern "C" fn __lp_lpfx_srandom3_tile_q32(
     out: *mut i32,
     x: i32,
     y: i32,

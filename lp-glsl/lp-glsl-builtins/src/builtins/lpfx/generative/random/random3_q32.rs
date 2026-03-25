@@ -2,7 +2,7 @@
 //!
 //! Returns values in [0, 1] range using fract(sin(dot(p, vec3(70.9898, 78.233, 32.4355)) + seed) * 43758.5453123)
 
-use crate::builtins::q32::__lp_q32_sin;
+use crate::builtins::q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
 
@@ -35,7 +35,7 @@ pub fn lpfx_random3(p: Vec3Q32, seed: u32) -> Q32 {
     let combined = dot_result.wrapping_add(seed as i32);
 
     // sin(combined) * 43758.5453123
-    let sin_val = __lp_q32_sin(combined);
+    let sin_val = __lp_glsl_sin_q32(combined);
     let multiplied = ((sin_val as i64 * RANDOM_MULT) >> 16) as i32;
 
     // fract() - get fractional part
@@ -54,7 +54,7 @@ pub fn lpfx_random3(p: Vec3Q32, seed: u32) -> Q32 {
 /// Random value in [0, 1] range as i32 (Q32 fixed-point format)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_random(vec3 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_random3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_random3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
     lpfx_random3(
         Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z)),
         seed,
@@ -70,19 +70,19 @@ mod tests {
 
     #[test]
     fn test_random3_basic() {
-        let result1 = __lpfx_random3_q32(
+        let result1 = __lp_lpfx_random3_q32(
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             0,
         );
-        let result2 = __lpfx_random3_q32(
+        let result2 = __lp_lpfx_random3_q32(
             Q32::from_f32(1.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             0,
         );
-        let result3 = __lpfx_random3_q32(
+        let result3 = __lp_lpfx_random3_q32(
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
@@ -106,13 +106,13 @@ mod tests {
 
     #[test]
     fn test_random3_deterministic() {
-        let result1 = __lpfx_random3_q32(
+        let result1 = __lp_lpfx_random3_q32(
             Q32::from_f32(42.0).to_fixed(),
             Q32::from_f32(10.0).to_fixed(),
             Q32::from_f32(5.0).to_fixed(),
             123,
         );
-        let result2 = __lpfx_random3_q32(
+        let result2 = __lp_lpfx_random3_q32(
             Q32::from_f32(42.0).to_fixed(),
             Q32::from_f32(10.0).to_fixed(),
             Q32::from_f32(5.0).to_fixed(),

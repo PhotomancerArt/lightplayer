@@ -144,7 +144,7 @@ float test_main() {
         let src = "float f(float x) { return sin(x); }";
         let naga = compile(src).unwrap();
         let ir = super::lower(&naga).expect("lower");
-        let mut h = StdMathHandler;
+        let mut h: StdMathHandler = Default::default();
         let out = interpret(&ir, "f", &[Value::F32(0.0)], &mut h).expect("interp");
         assert!(out[0].as_f32().unwrap().abs() < 1e-5);
     }
@@ -155,7 +155,7 @@ float test_main() {
         let src = "float g(float x) { return x + 1.0; } float f(float x) { return g(x); }";
         let naga = compile(src).unwrap();
         let ir = super::lower(&naga).expect("lower");
-        let mut h = StdMathHandler;
+        let mut h: StdMathHandler = Default::default();
         let out = interpret(&ir, "f", &[Value::F32(2.0)], &mut h).expect("interp");
         assert!((out[0].as_f32().unwrap() - 3.0).abs() < 1e-4);
     }

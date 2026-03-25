@@ -38,8 +38,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxFbm2F32,
-            q32_impl: BuiltinId::LpfxFbm2Q32,
+            float_impl: BuiltinId::LpLpfxFbm2F32,
+            q32_impl: BuiltinId::LpLpfxFbm2Q32,
         },
     },
     LpfxFn {
@@ -65,8 +65,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxFbm3F32,
-            q32_impl: BuiltinId::LpfxFbm3Q32,
+            float_impl: BuiltinId::LpLpfxFbm3F32,
+            q32_impl: BuiltinId::LpLpfxFbm3Q32,
         },
     },
     LpfxFn {
@@ -97,8 +97,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxFbm3TileF32,
-            q32_impl: BuiltinId::LpfxFbm3TileQ32,
+            float_impl: BuiltinId::LpLpfxFbm3TileF32,
+            q32_impl: BuiltinId::LpLpfxFbm3TileQ32,
         },
     },
     LpfxFn {
@@ -119,8 +119,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxGnoise1F32,
-            q32_impl: BuiltinId::LpfxGnoise1Q32,
+            float_impl: BuiltinId::LpLpfxGnoise1F32,
+            q32_impl: BuiltinId::LpLpfxGnoise1Q32,
         },
     },
     LpfxFn {
@@ -141,8 +141,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxGnoise2F32,
-            q32_impl: BuiltinId::LpfxGnoise2Q32,
+            float_impl: BuiltinId::LpLpfxGnoise2F32,
+            q32_impl: BuiltinId::LpLpfxGnoise2Q32,
         },
     },
     LpfxFn {
@@ -163,8 +163,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxGnoise3F32,
-            q32_impl: BuiltinId::LpfxGnoise3Q32,
+            float_impl: BuiltinId::LpLpfxGnoise3F32,
+            q32_impl: BuiltinId::LpLpfxGnoise3Q32,
         },
     },
     LpfxFn {
@@ -190,8 +190,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxGnoise3TileF32,
-            q32_impl: BuiltinId::LpfxGnoise3TileQ32,
+            float_impl: BuiltinId::LpLpfxGnoise3TileF32,
+            q32_impl: BuiltinId::LpLpfxGnoise3TileQ32,
         },
     },
     LpfxFn {
@@ -211,7 +211,7 @@ static LPFX_FNS: &[LpfxFn] = &[
                 },
             ],
         },
-        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpfxHash1),
+        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpLpfxHash1),
     },
     LpfxFn {
         glsl_sig: FunctionSignatureRef {
@@ -230,7 +230,7 @@ static LPFX_FNS: &[LpfxFn] = &[
                 },
             ],
         },
-        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpfxHash2),
+        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpLpfxHash2),
     },
     LpfxFn {
         glsl_sig: FunctionSignatureRef {
@@ -249,7 +249,7 @@ static LPFX_FNS: &[LpfxFn] = &[
                 },
             ],
         },
-        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpfxHash3),
+        impls: LpfxFnImpl::NonDecimal(BuiltinId::LpLpfxHash3),
     },
     LpfxFn {
         glsl_sig: FunctionSignatureRef {
@@ -262,8 +262,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxHsv2rgbF32,
-            q32_impl: BuiltinId::LpfxHsv2rgbQ32,
+            float_impl: BuiltinId::LpLpfxHsv2rgbF32,
+            q32_impl: BuiltinId::LpLpfxHsv2rgbQ32,
         },
     },
     LpfxFn {
@@ -277,8 +277,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxHsv2rgbVec4F32,
-            q32_impl: BuiltinId::LpfxHsv2rgbVec4Q32,
+            float_impl: BuiltinId::LpLpfxHsv2rgbVec4F32,
+            q32_impl: BuiltinId::LpLpfxHsv2rgbVec4Q32,
         },
     },
     LpfxFn {
@@ -292,8 +292,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxHue2rgbF32,
-            q32_impl: BuiltinId::LpfxHue2rgbQ32,
+            float_impl: BuiltinId::LpLpfxHue2rgbF32,
+            q32_impl: BuiltinId::LpLpfxHue2rgbQ32,
         },
     },
     LpfxFn {
@@ -329,8 +329,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxPsrdnoise2F32,
-            q32_impl: BuiltinId::LpfxPsrdnoise2Q32,
+            float_impl: BuiltinId::LpLpfxPsrdnoise2F32,
+            q32_impl: BuiltinId::LpLpfxPsrdnoise2Q32,
         },
     },
     LpfxFn {
@@ -366,8 +366,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxPsrdnoise3F32,
-            q32_impl: BuiltinId::LpfxPsrdnoise3Q32,
+            float_impl: BuiltinId::LpLpfxPsrdnoise3F32,
+            q32_impl: BuiltinId::LpLpfxPsrdnoise3Q32,
         },
     },
     LpfxFn {
@@ -388,8 +388,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxRandom1F32,
-            q32_impl: BuiltinId::LpfxRandom1Q32,
+            float_impl: BuiltinId::LpLpfxRandom1F32,
+            q32_impl: BuiltinId::LpLpfxRandom1Q32,
         },
     },
     LpfxFn {
@@ -410,8 +410,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxRandom2F32,
-            q32_impl: BuiltinId::LpfxRandom2Q32,
+            float_impl: BuiltinId::LpLpfxRandom2F32,
+            q32_impl: BuiltinId::LpLpfxRandom2Q32,
         },
     },
     LpfxFn {
@@ -432,8 +432,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxRandom3F32,
-            q32_impl: BuiltinId::LpfxRandom3Q32,
+            float_impl: BuiltinId::LpLpfxRandom3F32,
+            q32_impl: BuiltinId::LpLpfxRandom3Q32,
         },
     },
     LpfxFn {
@@ -447,8 +447,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxRgb2hsvF32,
-            q32_impl: BuiltinId::LpfxRgb2hsvQ32,
+            float_impl: BuiltinId::LpLpfxRgb2hsvF32,
+            q32_impl: BuiltinId::LpLpfxRgb2hsvQ32,
         },
     },
     LpfxFn {
@@ -462,8 +462,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxRgb2hsvVec4F32,
-            q32_impl: BuiltinId::LpfxRgb2hsvVec4Q32,
+            float_impl: BuiltinId::LpLpfxRgb2hsvVec4F32,
+            q32_impl: BuiltinId::LpLpfxRgb2hsvVec4Q32,
         },
     },
     LpfxFn {
@@ -477,8 +477,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSaturateF32,
-            q32_impl: BuiltinId::LpfxSaturateQ32,
+            float_impl: BuiltinId::LpLpfxSaturateF32,
+            q32_impl: BuiltinId::LpLpfxSaturateQ32,
         },
     },
     LpfxFn {
@@ -492,8 +492,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSaturateVec3F32,
-            q32_impl: BuiltinId::LpfxSaturateVec3Q32,
+            float_impl: BuiltinId::LpLpfxSaturateVec3F32,
+            q32_impl: BuiltinId::LpLpfxSaturateVec3Q32,
         },
     },
     LpfxFn {
@@ -507,8 +507,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             }],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSaturateVec4F32,
-            q32_impl: BuiltinId::LpfxSaturateVec4Q32,
+            float_impl: BuiltinId::LpLpfxSaturateVec4F32,
+            q32_impl: BuiltinId::LpLpfxSaturateVec4Q32,
         },
     },
     LpfxFn {
@@ -529,8 +529,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSnoise1F32,
-            q32_impl: BuiltinId::LpfxSnoise1Q32,
+            float_impl: BuiltinId::LpLpfxSnoise1F32,
+            q32_impl: BuiltinId::LpLpfxSnoise1Q32,
         },
     },
     LpfxFn {
@@ -551,8 +551,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSnoise2F32,
-            q32_impl: BuiltinId::LpfxSnoise2Q32,
+            float_impl: BuiltinId::LpLpfxSnoise2F32,
+            q32_impl: BuiltinId::LpLpfxSnoise2Q32,
         },
     },
     LpfxFn {
@@ -573,8 +573,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSnoise3F32,
-            q32_impl: BuiltinId::LpfxSnoise3Q32,
+            float_impl: BuiltinId::LpLpfxSnoise3F32,
+            q32_impl: BuiltinId::LpLpfxSnoise3Q32,
         },
     },
     LpfxFn {
@@ -595,8 +595,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSrandom1F32,
-            q32_impl: BuiltinId::LpfxSrandom1Q32,
+            float_impl: BuiltinId::LpLpfxSrandom1F32,
+            q32_impl: BuiltinId::LpLpfxSrandom1Q32,
         },
     },
     LpfxFn {
@@ -617,8 +617,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSrandom2F32,
-            q32_impl: BuiltinId::LpfxSrandom2Q32,
+            float_impl: BuiltinId::LpLpfxSrandom2F32,
+            q32_impl: BuiltinId::LpLpfxSrandom2Q32,
         },
     },
     LpfxFn {
@@ -639,8 +639,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSrandom3F32,
-            q32_impl: BuiltinId::LpfxSrandom3Q32,
+            float_impl: BuiltinId::LpLpfxSrandom3F32,
+            q32_impl: BuiltinId::LpLpfxSrandom3Q32,
         },
     },
     LpfxFn {
@@ -666,8 +666,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSrandom3TileF32,
-            q32_impl: BuiltinId::LpfxSrandom3TileQ32,
+            float_impl: BuiltinId::LpLpfxSrandom3TileF32,
+            q32_impl: BuiltinId::LpLpfxSrandom3TileQ32,
         },
     },
     LpfxFn {
@@ -688,8 +688,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxSrandom3VecF32,
-            q32_impl: BuiltinId::LpfxSrandom3VecQ32,
+            float_impl: BuiltinId::LpLpfxSrandom3VecF32,
+            q32_impl: BuiltinId::LpLpfxSrandom3VecQ32,
         },
     },
     LpfxFn {
@@ -710,8 +710,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxWorley2F32,
-            q32_impl: BuiltinId::LpfxWorley2Q32,
+            float_impl: BuiltinId::LpLpfxWorley2F32,
+            q32_impl: BuiltinId::LpLpfxWorley2Q32,
         },
     },
     LpfxFn {
@@ -732,8 +732,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxWorley3F32,
-            q32_impl: BuiltinId::LpfxWorley3Q32,
+            float_impl: BuiltinId::LpLpfxWorley3F32,
+            q32_impl: BuiltinId::LpLpfxWorley3Q32,
         },
     },
     LpfxFn {
@@ -754,8 +754,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxWorley2ValueF32,
-            q32_impl: BuiltinId::LpfxWorley2ValueQ32,
+            float_impl: BuiltinId::LpLpfxWorley2ValueF32,
+            q32_impl: BuiltinId::LpLpfxWorley2ValueQ32,
         },
     },
     LpfxFn {
@@ -776,8 +776,8 @@ static LPFX_FNS: &[LpfxFn] = &[
             ],
         },
         impls: LpfxFnImpl::Decimal {
-            float_impl: BuiltinId::LpfxWorley3ValueF32,
-            q32_impl: BuiltinId::LpfxWorley3ValueQ32,
+            float_impl: BuiltinId::LpLpfxWorley3ValueF32,
+            q32_impl: BuiltinId::LpLpfxWorley3ValueQ32,
         },
     },
 ];

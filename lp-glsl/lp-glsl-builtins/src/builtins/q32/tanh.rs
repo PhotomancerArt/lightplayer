@@ -1,26 +1,26 @@
 //! Fixed-point 16.16 hyperbolic tangent function.
 
-use super::cosh::__lp_q32_cosh;
-use super::sinh::__lp_q32_sinh;
-use crate::builtins::q32::div::__lp_q32_div;
+use super::cosh::__lp_glsl_cosh_q32;
+use super::sinh::__lp_glsl_sinh_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 
 /// Compute tanh(x) using: tanh(x) = sinh(x) / cosh(x)
 ///
 /// Uses the mathematical definition with sinh and cosh.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_tanh(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_tanh_q32(x: i32) -> i32 {
     // Handle zero case: tanh(0) = 0
     if x == 0 {
         return 0;
     }
 
     // Compute sinh(x) and cosh(x)
-    let sinh_x = __lp_q32_sinh(x);
-    let cosh_x = __lp_q32_cosh(x);
+    let sinh_x = __lp_glsl_sinh_q32(x);
+    let cosh_x = __lp_glsl_cosh_q32(x);
 
     // tanh(x) = sinh(x) / cosh(x)
     // cosh(x) is never zero, so division is safe
-    __lp_q32_div(sinh_x, cosh_x)
+    __lp_lpir_fdiv_q32(sinh_x, cosh_x)
 }
 
 #[cfg(test)]
@@ -40,6 +40,6 @@ mod tests {
         ];
 
         // Use 5% tolerance for hyperbolic functions
-        test_q32_function_relative(|x| __lp_q32_tanh(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_tanh_q32(x), &tests, 0.05, 0.01);
     }
 }

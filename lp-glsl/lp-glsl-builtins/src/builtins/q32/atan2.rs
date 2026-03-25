@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 arctangent2 function.
 
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of π/4 (Q16.16 format)
 const PI_DIV_4: i32 = 0x0000C90F; // 51471
@@ -14,7 +14,7 @@ const THREE_PI_DIV_4: i32 = 0x00025B2F; // 154415
 /// Algorithm ported from libfixmath.
 /// Returns angle in radians in range [-π, π].
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_atan2(y: i32, x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_atan2_q32(y: i32, x: i32) -> i32 {
     // GLSL atan(y,x) is undefined at (0,0); our first-quadrant formula uses
     // div(x - |y|, x + |y|) which hits div(0,0) when both are zero. Saturating
     // div returns MAX_FIXED and the polynomial becomes garbage — visible as
@@ -29,16 +29,16 @@ pub extern "C" fn __lp_q32_atan2(y: i32, x: i32) -> i32 {
 
     let base_angle = if x >= 0 {
         // First quadrant: x >= 0
-        let r = __lp_q32_div(x - abs_y, x + abs_y);
-        let r_3 = __lp_q32_mul(__lp_q32_mul(r, r), r);
+        let r = __lp_lpir_fdiv_q32(x - abs_y, x + abs_y);
+        let r_3 = __lp_lpir_fmul_q32(__lp_lpir_fmul_q32(r, r), r);
         // Polynomial: 0x00003240 * r³ - 0x0000FB50 * r + π/4
-        __lp_q32_mul(0x00003240, r_3) - __lp_q32_mul(0x0000FB50, r) + PI_DIV_4
+        __lp_lpir_fmul_q32(0x00003240, r_3) - __lp_lpir_fmul_q32(0x0000FB50, r) + PI_DIV_4
     } else {
         // Second/third quadrant: x < 0
-        let r = __lp_q32_div(x + abs_y, abs_y - x);
-        let r_3 = __lp_q32_mul(__lp_q32_mul(r, r), r);
+        let r = __lp_lpir_fdiv_q32(x + abs_y, abs_y - x);
+        let r_3 = __lp_lpir_fmul_q32(__lp_lpir_fmul_q32(r, r), r);
         // Polynomial: 0x00003240 * r³ - 0x0000FB50 * r + 3π/4
-        __lp_q32_mul(0x00003240, r_3) - __lp_q32_mul(0x0000FB50, r) + THREE_PI_DIV_4
+        __lp_lpir_fmul_q32(0x00003240, r_3) - __lp_lpir_fmul_q32(0x0000FB50, r) + THREE_PI_DIV_4
     };
 
     // Negate if y < 0
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_atan2_origin_returns_zero() {
-        assert_eq!(__lp_q32_atan2(0, 0), 0);
+        assert_eq!(__lp_glsl_atan2_q32(0, 0), 0);
     }
 
     #[test]
@@ -68,7 +68,7 @@ mod tests {
         for ((y, x), expected) in tests {
             let y_fixed = (y * 65536.0f32).round() as i32;
             let x_fixed = (x * 65536.0f32).round() as i32;
-            let result_fixed = __lp_q32_atan2(y_fixed, x_fixed);
+            let result_fixed = __lp_glsl_atan2_q32(y_fixed, x_fixed);
             let result = result_fixed as f32 / 65536.0f32;
 
             std::println!(

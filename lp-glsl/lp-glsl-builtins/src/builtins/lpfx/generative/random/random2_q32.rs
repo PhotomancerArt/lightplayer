@@ -2,7 +2,7 @@
 //!
 //! Returns values in [0, 1] range using fract(sin(dot(p, vec2(12.9898, 78.233)) + seed) * 43758.5453)
 
-use crate::builtins::q32::__lp_q32_sin;
+use crate::builtins::q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
 
@@ -33,7 +33,7 @@ pub fn lpfx_random2(p: Vec2Q32, seed: u32) -> Q32 {
     let combined = dot_result.wrapping_add(seed as i32);
 
     // sin(combined) * 43758.5453
-    let sin_val = __lp_q32_sin(combined);
+    let sin_val = __lp_glsl_sin_q32(combined);
     let multiplied = ((sin_val as i64 * RANDOM_MULT) >> 16) as i32;
 
     // fract() - get fractional part
@@ -51,7 +51,7 @@ pub fn lpfx_random2(p: Vec2Q32, seed: u32) -> Q32 {
 /// Random value in [0, 1] range as i32 (Q32 fixed-point format)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_random(vec2 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_random2_q32(x: i32, y: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_random2_q32(x: i32, y: i32, seed: u32) -> i32 {
     lpfx_random2(Vec2Q32::new(Q32::from_fixed(x), Q32::from_fixed(y)), seed).to_fixed()
 }
 
@@ -63,17 +63,17 @@ mod tests {
 
     #[test]
     fn test_random2_basic() {
-        let result1 = __lpfx_random2_q32(
+        let result1 = __lp_lpfx_random2_q32(
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             0,
         );
-        let result2 = __lpfx_random2_q32(
+        let result2 = __lp_lpfx_random2_q32(
             Q32::from_f32(1.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             0,
         );
-        let result3 = __lpfx_random2_q32(
+        let result3 = __lp_lpfx_random2_q32(
             Q32::from_f32(0.0).to_fixed(),
             Q32::from_f32(0.0).to_fixed(),
             1,
@@ -96,12 +96,12 @@ mod tests {
 
     #[test]
     fn test_random2_deterministic() {
-        let result1 = __lpfx_random2_q32(
+        let result1 = __lp_lpfx_random2_q32(
             Q32::from_f32(42.0).to_fixed(),
             Q32::from_f32(10.0).to_fixed(),
             123,
         );
-        let result2 = __lpfx_random2_q32(
+        let result2 = __lp_lpfx_random2_q32(
             Q32::from_f32(42.0).to_fixed(),
             Q32::from_f32(10.0).to_fixed(),
             123,

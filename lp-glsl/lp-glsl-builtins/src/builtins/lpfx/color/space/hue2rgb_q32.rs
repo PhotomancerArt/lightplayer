@@ -47,7 +47,7 @@ pub fn lpfx_hue2rgb_q32(hue: Q32) -> Vec3Q32 {
 /// * `hue` - Hue value as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "vec3 lpfx_hue2rgb(float hue)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_hue2rgb_q32(result_ptr: *mut i32, hue: i32) {
+pub extern "C" fn __lp_lpfx_hue2rgb_q32(result_ptr: *mut i32, hue: i32) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[i32; 3]>() };
     let rgb = lpfx_hue2rgb_q32(Q32::from_fixed(hue));

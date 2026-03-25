@@ -7,7 +7,7 @@ const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
 ///
 /// Uses native Rust division. Handles division by zero by saturating to max/min fixed-point values.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_div(dividend: i32, divisor: i32) -> i32 {
+pub extern "C" fn __lp_lpir_fdiv_q32(dividend: i32, divisor: i32) -> i32 {
     // Handle division by zero: saturate to max/min based on sign
     if divisor == 0 {
         if dividend >= 0 {
@@ -55,7 +55,7 @@ mod tests {
         for (dividend, divisor, expected) in tests {
             let dividend_fixed = float_to_fixed(dividend);
             let divisor_fixed = float_to_fixed(divisor);
-            let result_fixed = __lp_q32_div(dividend_fixed, divisor_fixed);
+            let result_fixed = __lp_lpir_fdiv_q32(dividend_fixed, divisor_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(
@@ -84,8 +84,8 @@ mod tests {
         let neg_dividend = float_to_fixed(-10.0);
         let zero = 0;
 
-        let result_pos = __lp_q32_div(pos_dividend, zero);
-        let result_neg = __lp_q32_div(neg_dividend, zero);
+        let result_pos = __lp_lpir_fdiv_q32(pos_dividend, zero);
+        let result_neg = __lp_lpir_fdiv_q32(neg_dividend, zero);
 
         assert_eq!(
             result_pos, MAX_FIXED,
@@ -109,7 +109,7 @@ mod tests {
         for (dividend, divisor, expected) in tests {
             let dividend_fixed = float_to_fixed(dividend);
             let divisor_fixed = float_to_fixed(divisor);
-            let result_fixed = __lp_q32_div(dividend_fixed, divisor_fixed);
+            let result_fixed = __lp_lpir_fdiv_q32(dividend_fixed, divisor_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(
@@ -139,14 +139,14 @@ mod tests {
         let one = float_to_fixed(1.0);
 
         // MAX / 1 should be MAX
-        let result_max = __lp_q32_div(max_val, one);
+        let result_max = __lp_lpir_fdiv_q32(max_val, one);
         assert!(
             result_max >= MAX_FIXED - 1000,
             "MAX / 1 should be close to MAX"
         );
 
         // MIN / 1 should be MIN
-        let result_min = __lp_q32_div(min_val, one);
+        let result_min = __lp_lpir_fdiv_q32(min_val, one);
         assert!(
             result_min <= MIN_FIXED + 1000,
             "MIN / 1 should be close to MIN"
@@ -167,7 +167,7 @@ mod tests {
         for (dividend, divisor, expected) in tests {
             let dividend_fixed = float_to_fixed(dividend);
             let divisor_fixed = float_to_fixed(divisor);
-            let result_fixed = __lp_q32_div(dividend_fixed, divisor_fixed);
+            let result_fixed = __lp_lpir_fdiv_q32(dividend_fixed, divisor_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(

@@ -27,39 +27,39 @@ use super::registry::BuiltinId;
 ///     scripts/build-builtins.sh
 pub fn map_testcase_to_builtin(testcase_name: &str, arg_count: usize) -> Option<BuiltinId> {
     match (testcase_name, arg_count) {
-        ("lp_q32_acosf" | "__lp_q32_acos" | "acosf", 1) => Some(BuiltinId::LpQ32Acos),
-        ("lp_q32_acoshf" | "__lp_q32_acosh" | "acoshf", 1) => Some(BuiltinId::LpQ32Acosh),
-        ("lp_q32_addf" | "__lp_q32_add" | "addf", 2) => Some(BuiltinId::LpQ32Add),
-        ("lp_q32_asinf" | "__lp_q32_asin" | "asinf", 1) => Some(BuiltinId::LpQ32Asin),
-        ("lp_q32_asinhf" | "__lp_q32_asinh" | "asinhf", 1) => Some(BuiltinId::LpQ32Asinh),
-        ("lp_q32_atanf" | "__lp_q32_atan" | "atanf", 1) => Some(BuiltinId::LpQ32Atan),
-        ("lp_q32_atan2f" | "__lp_q32_atan2" | "atan2f", 2) => Some(BuiltinId::LpQ32Atan2),
-        ("lp_q32_atanhf" | "__lp_q32_atanh" | "atanhf", 1) => Some(BuiltinId::LpQ32Atanh),
-        ("lp_q32_cosf" | "__lp_q32_cos" | "cosf", 1) => Some(BuiltinId::LpQ32Cos),
-        ("lp_q32_coshf" | "__lp_q32_cosh" | "coshf", 1) => Some(BuiltinId::LpQ32Cosh),
-        ("lp_q32_divf" | "__lp_q32_div" | "divf", 2) => Some(BuiltinId::LpQ32Div),
-        ("lp_q32_expf" | "__lp_q32_exp" | "expf", 1) => Some(BuiltinId::LpQ32Exp),
-        ("lp_q32_exp2f" | "__lp_q32_exp2" | "exp2f", 1) => Some(BuiltinId::LpQ32Exp2),
-        ("lp_q32_fmaf" | "__lp_q32_fma" | "fmaf", 3) => Some(BuiltinId::LpQ32Fma),
-        ("lp_q32_inversesqrtf" | "__lp_q32_inversesqrt" | "inversesqrtf", 1) => {
-            Some(BuiltinId::LpQ32Inversesqrt)
+        ("lp_glsl_acosf" | "__lp_glsl_acos_q32" | "acosf", 1) => Some(BuiltinId::LpGlslAcosQ32),
+        ("lp_glsl_acoshf" | "__lp_glsl_acosh_q32" | "acoshf", 1) => Some(BuiltinId::LpGlslAcoshQ32),
+        ("lp_glsl_asinf" | "__lp_glsl_asin_q32" | "asinf", 1) => Some(BuiltinId::LpGlslAsinQ32),
+        ("lp_glsl_asinhf" | "__lp_glsl_asinh_q32" | "asinhf", 1) => Some(BuiltinId::LpGlslAsinhQ32),
+        ("lp_glsl_atan2f" | "__lp_glsl_atan2_q32" | "atan2f", 2) => Some(BuiltinId::LpGlslAtan2Q32),
+        ("lp_glsl_atanf" | "__lp_glsl_atan_q32" | "atanf", 1) => Some(BuiltinId::LpGlslAtanQ32),
+        ("lp_glsl_atanhf" | "__lp_glsl_atanh_q32" | "atanhf", 1) => Some(BuiltinId::LpGlslAtanhQ32),
+        ("lp_glsl_cosf" | "__lp_glsl_cos_q32" | "cosf", 1) => Some(BuiltinId::LpGlslCosQ32),
+        ("lp_glsl_coshf" | "__lp_glsl_cosh_q32" | "coshf", 1) => Some(BuiltinId::LpGlslCoshQ32),
+        ("lp_glsl_exp2f" | "__lp_glsl_exp2_q32" | "exp2f", 1) => Some(BuiltinId::LpGlslExp2Q32),
+        ("lp_glsl_expf" | "__lp_glsl_exp_q32" | "expf", 1) => Some(BuiltinId::LpGlslExpQ32),
+        ("lp_glsl_fmaf" | "__lp_glsl_fma_q32" | "fmaf", 3) => Some(BuiltinId::LpGlslFmaQ32),
+        ("lp_glsl_inversesqrtf" | "__lp_glsl_inversesqrt_q32" | "inversesqrtf", 1) => {
+            Some(BuiltinId::LpGlslInversesqrtQ32)
         }
-        ("lp_q32_ldexpf" | "__lp_q32_ldexp" | "ldexpf", 2) => Some(BuiltinId::LpQ32Ldexp),
-        ("lp_q32_logf" | "__lp_q32_log" | "logf", 1) => Some(BuiltinId::LpQ32Log),
-        ("lp_q32_log2f" | "__lp_q32_log2" | "log2f", 1) => Some(BuiltinId::LpQ32Log2),
-        ("lp_q32_modf" | "__lp_q32_mod" | "fmodf", 2) => Some(BuiltinId::LpQ32Mod),
-        ("lp_q32_mulf" | "__lp_q32_mul" | "mulf", 2) => Some(BuiltinId::LpQ32Mul),
-        ("lp_q32_powf" | "__lp_q32_pow" | "powf", 2) => Some(BuiltinId::LpQ32Pow),
-        ("lp_q32_roundf" | "__lp_q32_round" | "roundf", 1) => Some(BuiltinId::LpQ32Round),
-        ("lp_q32_roundevenf" | "__lp_q32_roundeven" | "roundevenf", 1) => {
-            Some(BuiltinId::LpQ32Roundeven)
+        ("lp_glsl_ldexpf" | "__lp_glsl_ldexp_q32" | "ldexpf", 2) => Some(BuiltinId::LpGlslLdexpQ32),
+        ("lp_glsl_log2f" | "__lp_glsl_log2_q32" | "log2f", 1) => Some(BuiltinId::LpGlslLog2Q32),
+        ("lp_glsl_logf" | "__lp_glsl_log_q32" | "logf", 1) => Some(BuiltinId::LpGlslLogQ32),
+        ("lp_glsl_modf" | "__lp_glsl_mod_q32" | "fmodf", 2) => Some(BuiltinId::LpGlslModQ32),
+        ("lp_glsl_powf" | "__lp_glsl_pow_q32" | "powf", 2) => Some(BuiltinId::LpGlslPowQ32),
+        ("lp_glsl_roundf" | "__lp_glsl_round_q32" | "roundf", 1) => Some(BuiltinId::LpGlslRoundQ32),
+        ("lp_glsl_sinf" | "__lp_glsl_sin_q32" | "sinf", 1) => Some(BuiltinId::LpGlslSinQ32),
+        ("lp_glsl_sinhf" | "__lp_glsl_sinh_q32" | "sinhf", 1) => Some(BuiltinId::LpGlslSinhQ32),
+        ("lp_glsl_tanf" | "__lp_glsl_tan_q32" | "tanf", 1) => Some(BuiltinId::LpGlslTanQ32),
+        ("lp_glsl_tanhf" | "__lp_glsl_tanh_q32" | "tanhf", 1) => Some(BuiltinId::LpGlslTanhQ32),
+        ("lp_lpir_faddf" | "__lp_lpir_fadd_q32", 2) => Some(BuiltinId::LpLpirFaddQ32),
+        ("lp_lpir_fdivf" | "__lp_lpir_fdiv_q32", 2) => Some(BuiltinId::LpLpirFdivQ32),
+        ("lp_lpir_fmulf" | "__lp_lpir_fmul_q32", 2) => Some(BuiltinId::LpLpirFmulQ32),
+        ("lp_lpir_fnearestf" | "__lp_lpir_fnearest_q32" | "roundevenf", 1) => {
+            Some(BuiltinId::LpLpirFnearestQ32)
         }
-        ("lp_q32_sinf" | "__lp_q32_sin" | "sinf", 1) => Some(BuiltinId::LpQ32Sin),
-        ("lp_q32_sinhf" | "__lp_q32_sinh" | "sinhf", 1) => Some(BuiltinId::LpQ32Sinh),
-        ("lp_q32_sqrtf" | "__lp_q32_sqrt" | "sqrtf", 1) => Some(BuiltinId::LpQ32Sqrt),
-        ("lp_q32_subf" | "__lp_q32_sub" | "subf", 2) => Some(BuiltinId::LpQ32Sub),
-        ("lp_q32_tanf" | "__lp_q32_tan" | "tanf", 1) => Some(BuiltinId::LpQ32Tan),
-        ("lp_q32_tanhf" | "__lp_q32_tanh" | "tanhf", 1) => Some(BuiltinId::LpQ32Tanh),
+        ("lp_lpir_fsqrtf" | "__lp_lpir_fsqrt_q32" | "sqrtf", 1) => Some(BuiltinId::LpLpirFsqrtQ32),
+        ("lp_lpir_fsubf" | "__lp_lpir_fsub_q32", 2) => Some(BuiltinId::LpLpirFsubQ32),
         _ => None,
     }
 }
@@ -91,28 +91,28 @@ mod tests {
     #[test]
     fn test_map_testcase_to_builtin_standard_math() {
         assert_eq!(
-            map_testcase_to_builtin("lp_q32_sinf", 1),
-            Some(BuiltinId::LpQ32Sin)
+            map_testcase_to_builtin("lp_glsl_sinf", 1),
+            Some(BuiltinId::LpGlslSinQ32)
         );
         assert_eq!(
-            map_testcase_to_builtin("__lp_q32_sin", 1),
-            Some(BuiltinId::LpQ32Sin)
+            map_testcase_to_builtin("__lp_glsl_sin_q32", 1),
+            Some(BuiltinId::LpGlslSinQ32)
         );
         assert_eq!(
-            map_testcase_to_builtin("lp_q32_addf", 2),
-            Some(BuiltinId::LpQ32Add)
+            map_testcase_to_builtin("lp_lpir_faddf", 2),
+            Some(BuiltinId::LpLpirFaddQ32)
         );
         assert_eq!(
-            map_testcase_to_builtin("__lp_q32_add", 2),
-            Some(BuiltinId::LpQ32Add)
+            map_testcase_to_builtin("__lp_lpir_fadd_q32", 2),
+            Some(BuiltinId::LpLpirFaddQ32)
         );
         assert_eq!(
-            map_testcase_to_builtin("lp_q32_fmaf", 3),
-            Some(BuiltinId::LpQ32Fma)
+            map_testcase_to_builtin("lp_glsl_fmaf", 3),
+            Some(BuiltinId::LpGlslFmaQ32)
         );
         assert_eq!(
-            map_testcase_to_builtin("__lp_q32_fma", 3),
-            Some(BuiltinId::LpQ32Fma)
+            map_testcase_to_builtin("__lp_glsl_fma_q32", 3),
+            Some(BuiltinId::LpGlslFmaQ32)
         );
     }
 

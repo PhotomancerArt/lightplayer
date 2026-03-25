@@ -1,9 +1,9 @@
 //! Fixed-point 16.16 power function.
 
-use super::exp2::__lp_q32_exp2;
-use super::log2::__lp_q32_log2;
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use super::exp2::__lp_glsl_exp2_q32;
+use super::log2::__lp_glsl_log2_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -20,7 +20,7 @@ const FIX16_ZERO: i32 = 0;
 /// - pow(0, y) = 0 for y > 0
 /// - pow(x, -y) = 1 / pow(x, y)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
+pub extern "C" fn __lp_glsl_pow_q32(x: i32, y: i32) -> i32 {
     // GLSL: 0^0 and related cases are undefined — match test/emu as 0.
     if x == FIX16_ZERO && y == FIX16_ZERO {
         return FIX16_ZERO;
@@ -39,8 +39,8 @@ pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
 
     // Handle negative exponent: pow(x, -y) = 1 / pow(x, y)
     if y < 0 {
-        let result = __lp_q32_pow(x, -y);
-        return __lp_q32_div(FIX16_ONE, result);
+        let result = __lp_glsl_pow_q32(x, -y);
+        return __lp_lpir_fdiv_q32(FIX16_ONE, result);
     }
 
     // Check if exponent is an integer (no fractional part)
@@ -66,9 +66,9 @@ pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
 
         while exp > 0 {
             if exp & 1 != 0 {
-                result = __lp_q32_mul(result, base);
+                result = __lp_lpir_fmul_q32(result, base);
             }
-            base = __lp_q32_mul(base, base);
+            base = __lp_lpir_fmul_q32(base, base);
             exp >>= 1;
         }
 
@@ -83,9 +83,9 @@ pub extern "C" fn __lp_q32_pow(x: i32, y: i32) -> i32 {
     }
 
     // Fractional exponent: pow(x, y) = exp2(log2(x) * y)
-    let log2_x = __lp_q32_log2(x);
-    let product = __lp_q32_mul(log2_x, y);
-    __lp_q32_exp2(product)
+    let log2_x = __lp_glsl_log2_q32(x);
+    let product = __lp_lpir_fmul_q32(log2_x, y);
+    __lp_glsl_exp2_q32(product)
 }
 
 #[cfg(test)]
@@ -99,7 +99,7 @@ mod tests {
         for (x, y, expected) in inputs {
             let x_fixed = crate::util::test_helpers::float_to_fixed(*x);
             let y_fixed = crate::util::test_helpers::float_to_fixed(*y);
-            let result_fixed = __lp_q32_pow(x_fixed, y_fixed);
+            let result_fixed = __lp_glsl_pow_q32(x_fixed, y_fixed);
             let result_float = crate::util::test_helpers::fixed_to_float(result_fixed);
 
             let abs_error = (result_float - expected).abs();

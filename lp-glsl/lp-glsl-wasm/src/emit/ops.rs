@@ -477,7 +477,7 @@ pub(crate) fn emit_op(
         },
         Op::Fsqrt { dst, src } => match fm {
             FloatMode::Q32 => {
-                let callee = imports::std_math_callee(ir, "sqrt")?;
+                let callee = imports::import_callee(ir, "lpir", "sqrt")?;
                 let idx = wasm_func_index(fctx, callee)?;
                 sink.local_get(src.0).call(idx).local_set(dst.0);
             }
@@ -545,7 +545,7 @@ pub(crate) fn emit_op(
         },
         Op::Fnearest { dst, src } => match fm {
             FloatMode::Q32 => {
-                let callee = imports::std_math_callee(ir, "round")?;
+                let callee = imports::import_callee(ir, "glsl", "round")?;
                 let idx = wasm_func_index(fctx, callee)?;
                 sink.local_get(src.0).call(idx).local_set(dst.0);
             }

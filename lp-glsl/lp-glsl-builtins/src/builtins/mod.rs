@@ -16,7 +16,7 @@
 //!    - Can be inlined when called from other Rust code
 //!    - Allows ergonomic calls between lpfx functions (e.g., `hsv2rgb` can call `hue2rgb` and `saturate` with nice types)
 //!
-//! 2. **`__lpfx_*`** - Extern C wrappers with expanded types (i32, flattened vectors)
+//! 2. **`__lp_lpfx_*`** - Extern C wrappers with expanded types (i32, flattened vectors)
 //!    - Wraps the `lpfx_*` function for compiler/GLSL calls
 //!    - Takes expanded types: Q32 becomes i32, Vec3Q32 becomes three i32 parameters
 //!    - Has `#[lpfx_impl_macro::lpfx_impl]` annotation for auto-registration
@@ -36,7 +36,7 @@
 //! // Extern C wrapper for compiler
 //! #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_example(float x)")]
 //! #[unsafe(no_mangle)]
-//! pub extern "C" fn __lpfx_example_q32(value: i32) -> i32 {
+//! pub extern "C" fn __lp_lpfx_example_q32(value: i32) -> i32 {
 //!     lpfx_example_q32(Q32::from_fixed(value)).to_fixed()
 //! }
 //! ```

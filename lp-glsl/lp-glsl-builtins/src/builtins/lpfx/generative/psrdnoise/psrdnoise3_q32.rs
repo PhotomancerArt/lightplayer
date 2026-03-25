@@ -42,7 +42,7 @@
 //!
 //! Noise value approximately in range [-1, 1] (float)
 
-use crate::builtins::q32::__lp_q32_mod;
+use crate::builtins::q32::__lp_glsl_mod_q32;
 use crate::glsl::q32::fns;
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
@@ -84,7 +84,7 @@ const ONE_SIXTH: Q32 = Q32(10923); // 0.16666667 * 65536
 /// Helper: mod289(x) = mod(x, 289.0)
 #[inline(always)]
 fn mod289_q32(x: i32) -> i32 {
-    __lp_q32_mod(x, PERIOD_289.to_fixed())
+    __lp_glsl_mod_q32(x, PERIOD_289.to_fixed())
 }
 
 /// Helper: permute(v) = mod289(((v * 34.0) + 1.0) * v)
@@ -407,7 +407,7 @@ pub fn lpfx_psrdnoise3(
 )]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_psrdnoise3_q32(
+pub extern "C" fn __lp_lpfx_psrdnoise3_q32(
     x: i32,
     y: i32,
     z: i32,
@@ -457,7 +457,7 @@ mod tests {
         let alpha = float_to_fixed(0.0);
         let mut gradient = [0i32; 3];
 
-        let result = __lpfx_psrdnoise3_q32(
+        let result = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,
@@ -509,7 +509,7 @@ mod tests {
         let alpha = float_to_fixed(0.0);
         let mut gradient = [0i32; 3];
 
-        let result = __lpfx_psrdnoise3_q32(
+        let result = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,
@@ -543,7 +543,7 @@ mod tests {
         let mut gradient1 = [0i32; 3];
         let mut gradient2 = [0i32; 3];
 
-        let result1 = __lpfx_psrdnoise3_q32(
+        let result1 = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,
@@ -554,7 +554,7 @@ mod tests {
             gradient1.as_mut_ptr(),
             0,
         );
-        let result2 = __lpfx_psrdnoise3_q32(
+        let result2 = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,
@@ -592,7 +592,7 @@ mod tests {
         let mut gradient1 = [0i32; 3];
         let mut gradient2 = [0i32; 3];
 
-        let result1 = __lpfx_psrdnoise3_q32(
+        let result1 = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,
@@ -603,7 +603,7 @@ mod tests {
             gradient1.as_mut_ptr(),
             0,
         );
-        let result2 = __lpfx_psrdnoise3_q32(
+        let result2 = __lp_lpfx_psrdnoise3_q32(
             x,
             y,
             z,

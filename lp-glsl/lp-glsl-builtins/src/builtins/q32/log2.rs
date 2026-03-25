@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 base-2 logarithm function.
 
-use crate::builtins::q32::div::__lp_q32_div;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 use crate::builtins::q32::mul;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
@@ -45,7 +45,7 @@ fn log2_inner(x: i32) -> i32 {
     // libfixmath: for(i = 16; i > 0; i--) { x = fix16_mul(x, x); result <<= 1; ... }
     // After this loop, result has 16 fractional bits (bits 0-15)
     for _i in (1..=16).rev() {
-        x_val = mul::__lp_q32_mul(x_val, x_val);
+        x_val = mul::__lp_lpir_fmul_q32(x_val, x_val);
         result <<= 1; // Make room for next fractional bit
         if x_val >= (2 << 16) {
             result |= 1; // Set this fractional bit
@@ -54,7 +54,7 @@ fn log2_inner(x: i32) -> i32 {
     }
 
     // Final rounding step: check if we should round up
-    x_val = mul::__lp_q32_mul(x_val, x_val);
+    x_val = mul::__lp_lpir_fmul_q32(x_val, x_val);
     if x_val >= (2 << 16) {
         result += 1; // Round up
     }
@@ -69,7 +69,7 @@ fn log2_inner(x: i32) -> i32 {
 /// Algorithm ported from libfixmath.
 /// For x < 1: log2(x) = -log2(1/x)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_log2(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_log2_q32(x: i32) -> i32 {
     // Note that a negative x gives a non-real result.
     // If x == 0, the limit of log2(x) as x -> 0 = -infinity.
     // log2(-ve) gives a complex result.
@@ -84,7 +84,7 @@ pub extern "C" fn __lp_q32_log2(x: i32) -> i32 {
             return -(16 << 16);
         }
 
-        let inverse = __lp_q32_div(FIX16_ONE, x);
+        let inverse = __lp_lpir_fdiv_q32(FIX16_ONE, x);
         return -log2_inner(inverse);
     }
 
@@ -116,6 +116,6 @@ mod tests {
         ];
 
         // Use 3% tolerance for log2
-        test_q32_function_relative(|x| __lp_q32_log2(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_log2_q32(x), &tests, 0.03, 0.01);
     }
 }

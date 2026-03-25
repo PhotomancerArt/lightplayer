@@ -9,7 +9,7 @@
 /// - Then truncate by shifting right 16 bits and left 16 bits
 /// - For negative numbers, adding 0.5 then truncating rounds away from zero correctly
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_round(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_round_q32(x: i32) -> i32 {
     if x == 0 {
         return 0;
     }
@@ -50,7 +50,7 @@ mod tests {
     fn test_round_positive() {
         // round(1.7) = 2.0
         let x = float_to_fixed(1.7);
-        let result = __lp_q32_round(x);
+        let result = __lp_glsl_round_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -63,7 +63,7 @@ mod tests {
     fn test_round_negative() {
         // round(-1.7) = -2.0
         let x = float_to_fixed(-1.7);
-        let result = __lp_q32_round(x);
+        let result = __lp_glsl_round_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - (-2.0)).abs() < 0.01,
@@ -76,7 +76,7 @@ mod tests {
     fn test_round_halfway_positive() {
         // round(1.5) = 2.0 (away from zero)
         let x = float_to_fixed(1.5);
-        let result = __lp_q32_round(x);
+        let result = __lp_glsl_round_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -89,7 +89,7 @@ mod tests {
     fn test_round_halfway_negative() {
         // round(-1.5) = -2.0 (away from zero)
         let x = float_to_fixed(-1.5);
-        let result = __lp_q32_round(x);
+        let result = __lp_glsl_round_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - (-2.0)).abs() < 0.01,

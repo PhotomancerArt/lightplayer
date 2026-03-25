@@ -3892,7 +3892,6 @@ name = "lp-glsl-builtins-gen-app"
 version = "40.0.0"
 dependencies = [
  "glsl",
- "lp-glsl-cranelift",
  "lp-glsl-frontend",
  "proc-macro2",
  "quote",

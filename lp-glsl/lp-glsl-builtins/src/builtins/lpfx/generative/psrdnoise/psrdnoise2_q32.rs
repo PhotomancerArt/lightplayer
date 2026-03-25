@@ -42,7 +42,7 @@
 //!
 //! Noise value approximately in range [-1, 1] (float)
 
-use crate::builtins::q32::{__lp_q32_cos, __lp_q32_mod, __lp_q32_sin};
+use crate::builtins::q32::{__lp_glsl_cos_q32, __lp_glsl_mod_q32, __lp_glsl_sin_q32};
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec2_q32::Vec2Q32;
 
@@ -135,14 +135,14 @@ pub fn lpfx_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
 
         // Wrap to periods where specified
         if period.x > Q32::ZERO {
-            xw_x = Q32::from_fixed(__lp_q32_mod(v0.x.to_fixed(), period.x.to_fixed()));
-            xw_y = Q32::from_fixed(__lp_q32_mod(v1.x.to_fixed(), period.x.to_fixed()));
-            xw_z = Q32::from_fixed(__lp_q32_mod(v2.x.to_fixed(), period.x.to_fixed()));
+            xw_x = Q32::from_fixed(__lp_glsl_mod_q32(v0.x.to_fixed(), period.x.to_fixed()));
+            xw_y = Q32::from_fixed(__lp_glsl_mod_q32(v1.x.to_fixed(), period.x.to_fixed()));
+            xw_z = Q32::from_fixed(__lp_glsl_mod_q32(v2.x.to_fixed(), period.x.to_fixed()));
         }
         if period.y > Q32::ZERO {
-            yw_x = Q32::from_fixed(__lp_q32_mod(v0.y.to_fixed(), period.y.to_fixed()));
-            yw_y = Q32::from_fixed(__lp_q32_mod(v1.y.to_fixed(), period.y.to_fixed()));
-            yw_z = Q32::from_fixed(__lp_q32_mod(v2.y.to_fixed(), period.y.to_fixed()));
+            yw_x = Q32::from_fixed(__lp_glsl_mod_q32(v0.y.to_fixed(), period.y.to_fixed()));
+            yw_y = Q32::from_fixed(__lp_glsl_mod_q32(v1.y.to_fixed(), period.y.to_fixed()));
+            yw_z = Q32::from_fixed(__lp_glsl_mod_q32(v2.y.to_fixed(), period.y.to_fixed()));
         }
 
         // Transform back to simplex space and fix rounding errors
@@ -163,45 +163,45 @@ pub fn lpfx_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
 
     // Compute one pseudo-random hash value for each corner
     // hash = mod(iu, 289.0)
-    let hash_x = __lp_q32_mod(iu_x << 16, PERIOD_289.to_fixed());
-    let hash_y = __lp_q32_mod(iu_y << 16, PERIOD_289.to_fixed());
-    let hash_z = __lp_q32_mod(iu_z << 16, PERIOD_289.to_fixed());
+    let hash_x = __lp_glsl_mod_q32(iu_x << 16, PERIOD_289.to_fixed());
+    let hash_y = __lp_glsl_mod_q32(iu_y << 16, PERIOD_289.to_fixed());
+    let hash_z = __lp_glsl_mod_q32(iu_z << 16, PERIOD_289.to_fixed());
 
     // hash = mod((hash*51.0 + 2.0)*hash + iv, 289.0)
     let hash_x = {
         let temp = Q32::from_fixed(hash_x) * HASH_CONST_51 + HASH_CONST_2;
         let temp = temp * Q32::from_fixed(hash_x) + Q32::from_i32(iv_x);
-        __lp_q32_mod(temp.to_fixed(), PERIOD_289.to_fixed())
+        __lp_glsl_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
     };
     let hash_y = {
         let temp = Q32::from_fixed(hash_y) * HASH_CONST_51 + HASH_CONST_2;
         let temp = temp * Q32::from_fixed(hash_y) + Q32::from_i32(iv_y);
-        __lp_q32_mod(temp.to_fixed(), PERIOD_289.to_fixed())
+        __lp_glsl_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
     };
     let hash_z = {
         let temp = Q32::from_fixed(hash_z) * HASH_CONST_51 + HASH_CONST_2;
         let temp = temp * Q32::from_fixed(hash_z) + Q32::from_i32(iv_z);
-        __lp_q32_mod(temp.to_fixed(), PERIOD_289.to_fixed())
+        __lp_glsl_mod_q32(temp.to_fixed(), PERIOD_289.to_fixed())
     };
 
     // hash = mod((hash*34.0 + 10.0)*hash, 289.0)
     let hash_x = {
         let temp = Q32::from_fixed(hash_x) * HASH_CONST_34 + HASH_CONST_10;
-        __lp_q32_mod(
+        __lp_glsl_mod_q32(
             (temp * Q32::from_fixed(hash_x)).to_fixed(),
             PERIOD_289.to_fixed(),
         )
     };
     let hash_y = {
         let temp = Q32::from_fixed(hash_y) * HASH_CONST_34 + HASH_CONST_10;
-        __lp_q32_mod(
+        __lp_glsl_mod_q32(
             (temp * Q32::from_fixed(hash_y)).to_fixed(),
             PERIOD_289.to_fixed(),
         )
     };
     let hash_z = {
         let temp = Q32::from_fixed(hash_z) * HASH_CONST_34 + HASH_CONST_10;
-        __lp_q32_mod(
+        __lp_glsl_mod_q32(
             (temp * Q32::from_fixed(hash_z)).to_fixed(),
             PERIOD_289.to_fixed(),
         )
@@ -214,12 +214,12 @@ pub fn lpfx_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
     let psi_z = Q32::from_fixed(hash_z) * HASH_MULT_0_07482 + alpha;
 
     // gx = cos(psi), gy = sin(psi)
-    let gx_x = Q32::from_fixed(__lp_q32_cos(psi_x.to_fixed()));
-    let gx_y = Q32::from_fixed(__lp_q32_cos(psi_y.to_fixed()));
-    let gx_z = Q32::from_fixed(__lp_q32_cos(psi_z.to_fixed()));
-    let gy_x = Q32::from_fixed(__lp_q32_sin(psi_x.to_fixed()));
-    let gy_y = Q32::from_fixed(__lp_q32_sin(psi_y.to_fixed()));
-    let gy_z = Q32::from_fixed(__lp_q32_sin(psi_z.to_fixed()));
+    let gx_x = Q32::from_fixed(__lp_glsl_cos_q32(psi_x.to_fixed()));
+    let gx_y = Q32::from_fixed(__lp_glsl_cos_q32(psi_y.to_fixed()));
+    let gx_z = Q32::from_fixed(__lp_glsl_cos_q32(psi_z.to_fixed()));
+    let gy_x = Q32::from_fixed(__lp_glsl_sin_q32(psi_x.to_fixed()));
+    let gy_y = Q32::from_fixed(__lp_glsl_sin_q32(psi_y.to_fixed()));
+    let gy_z = Q32::from_fixed(__lp_glsl_sin_q32(psi_z.to_fixed()));
 
     // Reorganize for dot products below
     let g0_x = gx_x;
@@ -309,7 +309,7 @@ pub fn lpfx_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
 )]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_psrdnoise2_q32(
+pub extern "C" fn __lp_lpfx_psrdnoise2_q32(
     x: i32,
     y: i32,
     period_x: i32,
@@ -350,7 +350,7 @@ mod tests {
         let mut gradient = [0i32; 2];
 
         let result =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient.as_mut_ptr(), 0);
 
         // Should produce some value
         let result_float = fixed_to_float(result);
@@ -385,7 +385,7 @@ mod tests {
         let mut gradient = [0i32; 2];
 
         let result =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient.as_mut_ptr(), 0);
 
         // Should produce some value
         let result_float = fixed_to_float(result);
@@ -408,9 +408,9 @@ mod tests {
         let mut gradient2 = [0i32; 2];
 
         let result1 =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha1, gradient1.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha1, gradient1.as_mut_ptr(), 0);
         let result2 =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha2, gradient2.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha2, gradient2.as_mut_ptr(), 0);
 
         // Different rotation angles should produce different results
         // (though they might occasionally match)
@@ -438,9 +438,9 @@ mod tests {
         let mut gradient2 = [0i32; 2];
 
         let result1 =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient1.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient1.as_mut_ptr(), 0);
         let result2 =
-            __lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient2.as_mut_ptr(), 0);
+            __lp_lpfx_psrdnoise2_q32(x, y, period_x, period_y, alpha, gradient2.as_mut_ptr(), 0);
 
         // Same inputs should produce same outputs
         assert_eq!(result1, result2, "Noise should be deterministic");

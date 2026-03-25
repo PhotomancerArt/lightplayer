@@ -24,7 +24,7 @@
 //!
 //! # Internal Implementation
 //!
-//! The user-facing `lpfx_snoise` function maps to internal `__lpfx_snoise1` which
+//! The user-facing `lpfx_snoise` function maps to internal `__lp_lpfx_snoise1` which
 //! operates on Q32 fixed-point values. The compiler handles type conversion automatically.
 
 use crate::builtins::lpfx::hash::lpfx_hash;
@@ -89,7 +89,7 @@ pub fn lpfx_snoise(x: Q32, seed: u32) -> Q32 {
 /// Noise value as i32 (Q32 fixed-point format), approximately in range [-1, 1]
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_snoise(float x, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_snoise1_q32(x: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_snoise1_q32(x: i32, seed: u32) -> i32 {
     lpfx_snoise(Q32::from_fixed(x), seed).to_fixed()
 }
 
@@ -106,7 +106,7 @@ mod tests {
     fn test_simplex1_basic() {
         // Test with various inputs to ensure we get different outputs
         let results: Vec<i32> = (0..10)
-            .map(|i| __lpfx_snoise1_q32(float_to_fixed(i as f32 * 0.5), 0))
+            .map(|i| __lp_lpfx_snoise1_q32(float_to_fixed(i as f32 * 0.5), 0))
             .collect();
 
         // Check that we get some variation (not all zeros)
@@ -114,8 +114,8 @@ mod tests {
         assert!(!all_zero, "Simplex1 should produce non-zero values");
 
         // Test seed affects output
-        let result_seed0 = __lpfx_snoise1_q32(float_to_fixed(5.0), 0);
-        let result_seed1 = __lpfx_snoise1_q32(float_to_fixed(5.0), 1);
+        let result_seed0 = __lp_lpfx_snoise1_q32(float_to_fixed(5.0), 0);
+        let result_seed1 = __lp_lpfx_snoise1_q32(float_to_fixed(5.0), 1);
         // Note: seed might not always change output at every point, but should often
         // We just verify the function works with different seeds
         let _ = result_seed0;
@@ -140,8 +140,8 @@ mod tests {
         // Test many points - seeds should produce different outputs at some points
         for i in 0..100 {
             let x = float_to_fixed(i as f32 * 0.1);
-            let result_seed0 = __lpfx_snoise1_q32(x, 0);
-            let result_seed1 = __lpfx_snoise1_q32(x, 1);
+            let result_seed0 = __lp_lpfx_snoise1_q32(x, 0);
+            let result_seed1 = __lp_lpfx_snoise1_q32(x, 1);
 
             if result_seed0 != result_seed1 {
                 found_difference = true;
@@ -164,7 +164,7 @@ mod tests {
         println!("X values from 0.0 to 9.0:");
         for row in 0..10 {
             let x = row as f32;
-            let result = __lpfx_snoise1_q32(float_to_fixed(x), 0);
+            let result = __lp_lpfx_snoise1_q32(float_to_fixed(x), 0);
             let result_float = fixed_to_float(result);
             println!("  x={:4.1}: {:7.4}", x, result_float);
         }
@@ -173,7 +173,7 @@ mod tests {
         println!("X values from 0.0 to 9.0:");
         for row in 0..10 {
             let x = row as f32;
-            let result = __lpfx_snoise1_q32(float_to_fixed(x), 1);
+            let result = __lp_lpfx_snoise1_q32(float_to_fixed(x), 1);
             let result_float = fixed_to_float(result);
             println!("  x={:4.1}: {:7.4}", x, result_float);
         }
@@ -181,7 +181,7 @@ mod tests {
         println!("\n=== Simplex1 Seed Comparison (x=0.5) ===");
         let x = float_to_fixed(0.5);
         for seed in 0..5 {
-            let result = __lpfx_snoise1_q32(x, seed);
+            let result = __lp_lpfx_snoise1_q32(x, seed);
             let result_float = fixed_to_float(result);
             println!("  seed={}: {:7.4}", seed, result_float);
         }
@@ -189,7 +189,7 @@ mod tests {
         // Verify outputs are in reasonable range
         for i in 0..100 {
             let x = float_to_fixed(i as f32 * 0.1);
-            let result = __lpfx_snoise1_q32(x, 0);
+            let result = __lp_lpfx_snoise1_q32(x, 0);
             let result_float = fixed_to_float(result);
             assert!(
                 result_float >= -2.0 && result_float <= 2.0,
@@ -204,7 +204,7 @@ mod tests {
         // Test that output is approximately in [-1, 1] range
         for i in 0..100 {
             let x = float_to_fixed(i as f32 * 0.1);
-            let result = __lpfx_snoise1_q32(x, 0);
+            let result = __lp_lpfx_snoise1_q32(x, 0);
             let result_float = fixed_to_float(result);
 
             assert!(
@@ -218,8 +218,8 @@ mod tests {
 
     #[test]
     fn test_simplex1_deterministic() {
-        let result1 = __lpfx_snoise1_q32(float_to_fixed(42.5), 123);
-        let result2 = __lpfx_snoise1_q32(float_to_fixed(42.5), 123);
+        let result1 = __lp_lpfx_snoise1_q32(float_to_fixed(42.5), 123);
+        let result2 = __lp_lpfx_snoise1_q32(float_to_fixed(42.5), 123);
 
         // Same input and seed should produce same output
         assert_eq!(result1, result2, "Noise should be deterministic");

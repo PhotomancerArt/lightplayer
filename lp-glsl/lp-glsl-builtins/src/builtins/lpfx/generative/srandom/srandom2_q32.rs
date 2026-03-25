@@ -32,7 +32,7 @@ pub fn lpfx_srandom2(p: Vec2Q32, seed: u32) -> Q32 {
 /// Random value in [-1, 1] range as i32 (Q32 fixed-point format)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_srandom(vec2 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_srandom2_q32(x: i32, y: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_srandom2_q32(x: i32, y: i32, seed: u32) -> i32 {
     lpfx_srandom2(Vec2Q32::new(Q32::from_fixed(x), Q32::from_fixed(y)), seed).to_fixed()
 }
 
@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_srandom2_range() {
-        let result = __lpfx_srandom2_q32(
+        let result = __lp_lpfx_srandom2_q32(
             Q32::from_f32(42.0).to_fixed(),
             Q32::from_f32(10.0).to_fixed(),
             123,

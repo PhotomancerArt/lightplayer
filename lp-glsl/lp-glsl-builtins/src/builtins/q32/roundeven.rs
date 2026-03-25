@@ -10,7 +10,7 @@
 /// - If halfway and integer part is even, round toward zero
 /// - Otherwise, round normally (add/subtract 0.5 and truncate)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_roundeven(x: i32) -> i32 {
+pub extern "C" fn __lp_lpir_fnearest_q32(x: i32) -> i32 {
     if x == 0 {
         return 0;
     }
@@ -58,7 +58,7 @@ mod tests {
     fn test_roundeven_halfway_even() {
         // roundeven(2.5) = 2.0 (round to even)
         let x = float_to_fixed(2.5);
-        let result = __lp_q32_roundeven(x);
+        let result = __lp_lpir_fnearest_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -71,7 +71,7 @@ mod tests {
     fn test_roundeven_halfway_odd() {
         // roundeven(1.5) = 2.0 (round to even)
         let x = float_to_fixed(1.5);
-        let result = __lp_q32_roundeven(x);
+        let result = __lp_lpir_fnearest_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -84,7 +84,7 @@ mod tests {
     fn test_roundeven_negative_halfway_even() {
         // roundeven(-2.5) = -2.0 (round to even)
         let x = float_to_fixed(-2.5);
-        let result = __lp_q32_roundeven(x);
+        let result = __lp_lpir_fnearest_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - (-2.0)).abs() < 0.01,
@@ -97,7 +97,7 @@ mod tests {
     fn test_roundeven_normal() {
         // roundeven(1.7) = 2.0 (normal rounding)
         let x = float_to_fixed(1.7);
-        let result = __lp_q32_roundeven(x);
+        let result = __lp_lpir_fnearest_q32(x);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,

@@ -540,7 +540,7 @@ fn compile_and_lower(glsl: &str) -> lpir::IrModule {
 
 fn run(glsl: &str, func: &str, args: &[Value]) -> Vec<Value> {
     let module = compile_and_lower(glsl);
-    let mut h = StdMathHandler;
+    let mut h: StdMathHandler = Default::default();
     interpret(&module, func, args, &mut h).expect("interpret")
 }
 

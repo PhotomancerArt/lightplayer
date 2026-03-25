@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 arccosine function.
 
-use super::asin::__lp_q32_asin;
+use super::asin::__lp_glsl_asin_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;
@@ -11,9 +11,9 @@ const FIX16_PI: i32 = 205887;
 /// Domain: |x| <= 1
 /// Returns angle in radians in range [0, π].
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_acos(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_acos_q32(x: i32) -> i32 {
     let half_pi = FIX16_PI >> 1;
-    half_pi - __lp_q32_asin(x)
+    half_pi - __lp_glsl_asin_q32(x)
 }
 
 #[cfg(test)]
@@ -33,6 +33,6 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions
-        test_q32_function_relative(|x| __lp_q32_acos(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_acos_q32(x), &tests, 0.03, 0.01);
     }
 }

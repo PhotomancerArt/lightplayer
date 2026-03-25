@@ -61,7 +61,7 @@ pub fn lpfx_gnoise3(p: Vec3Q32, seed: u32) -> Q32 {
 /// Noise value in [-1, 1] range as i32 (Q32 fixed-point format)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_gnoise(vec3 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_gnoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
     lpfx_gnoise3(
         Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z)),
         seed,
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_gnoise3_range() {
-        let result = __lpfx_gnoise3_q32(
+        let result = __lp_lpfx_gnoise3_q32(
             Q32::from_f32(42.5).to_fixed(),
             Q32::from_f32(10.3).to_fixed(),
             Q32::from_f32(5.7).to_fixed(),

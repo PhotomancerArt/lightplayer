@@ -1,9 +1,9 @@
 //! Fixed-point 16.16 arcsine function.
 
-use super::atan::__lp_q32_atan;
-use super::sqrt::__lp_q32_sqrt;
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use super::atan::__lp_glsl_atan_q32;
+use super::sqrt::__lp_lpir_fsqrt_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -14,7 +14,7 @@ const FIX16_ONE: i32 = 0x00010000; // 65536
 /// Domain: |x| <= 1
 /// Returns angle in radians in range [-π/2, π/2].
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_asin(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_asin_q32(x: i32) -> i32 {
     // Domain check: |x| > 1 returns 0 (libfixmath behavior)
     if !(-FIX16_ONE..=FIX16_ONE).contains(&x) {
         return 0;
@@ -33,16 +33,16 @@ pub extern "C" fn __lp_q32_asin(x: i32) -> i32 {
     }
 
     // Compute 1 - x²
-    let one_minus_x_sq = FIX16_ONE - __lp_q32_mul(x, x);
+    let one_minus_x_sq = FIX16_ONE - __lp_lpir_fmul_q32(x, x);
 
     // Compute sqrt(1 - x²)
-    let sqrt_val = __lp_q32_sqrt(one_minus_x_sq);
+    let sqrt_val = __lp_lpir_fsqrt_q32(one_minus_x_sq);
 
     // Compute x / sqrt(1 - x²)
-    let ratio = __lp_q32_div(x, sqrt_val);
+    let ratio = __lp_lpir_fdiv_q32(x, sqrt_val);
 
     // Compute atan(ratio)
-    __lp_q32_atan(ratio)
+    __lp_glsl_atan_q32(ratio)
 }
 
 #[cfg(test)]
@@ -62,6 +62,6 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions
-        test_q32_function_relative(|x| __lp_q32_asin(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_asin_q32(x), &tests, 0.03, 0.01);
     }
 }

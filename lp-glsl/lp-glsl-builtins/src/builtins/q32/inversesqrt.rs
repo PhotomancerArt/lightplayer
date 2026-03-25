@@ -2,8 +2,8 @@
 //!
 //! inversesqrt(x) = 1 / sqrt(x)
 
-use super::sqrt::__lp_q32_sqrt;
-use crate::builtins::q32::div::__lp_q32_div;
+use super::sqrt::__lp_lpir_fsqrt_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -12,17 +12,17 @@ const FIX16_ONE: i32 = 0x00010000; // 65536
 ///
 /// Uses sqrt builtin and div builtin.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_inversesqrt(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_inversesqrt_q32(x: i32) -> i32 {
     // GLSL: inversesqrt(x) for x <= 0 is undefined — return 0 (edge-exp-domain).
     if x <= 0 {
         return 0;
     }
 
     // Compute sqrt(x)
-    let sqrt_x = __lp_q32_sqrt(x);
+    let sqrt_x = __lp_lpir_fsqrt_q32(x);
 
     // Compute 1 / sqrt(x)
-    __lp_q32_div(FIX16_ONE, sqrt_x)
+    __lp_lpir_fdiv_q32(FIX16_ONE, sqrt_x)
 }
 
 #[cfg(test)]
@@ -43,6 +43,6 @@ mod tests {
         ];
 
         // Use 5% tolerance (uses sqrt and div internally)
-        test_q32_function_relative(|x| __lp_q32_inversesqrt(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_inversesqrt_q32(x), &tests, 0.05, 0.01);
     }
 }

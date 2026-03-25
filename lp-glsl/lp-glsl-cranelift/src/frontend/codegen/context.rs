@@ -491,7 +491,7 @@ impl<'a, M: Module> CodegenContext<'a, M> {
                 if matches!(s.opts.add_sub, AddSubMode::Saturating) {
                     let func_ref = self
                         .gl_module
-                        .get_builtin_func_ref(BuiltinId::LpQ32Add, self.builder.func)
+                        .get_builtin_func_ref(BuiltinId::LpLpirFaddQ32, self.builder.func)
                         .expect("Q32 add builtin declared");
                     let call = self.builder.ins().call(func_ref, &[a, b]);
                     self.builder.inst_results(call)[0]
@@ -509,7 +509,7 @@ impl<'a, M: Module> CodegenContext<'a, M> {
                 if matches!(s.opts.add_sub, AddSubMode::Saturating) {
                     let func_ref = self
                         .gl_module
-                        .get_builtin_func_ref(BuiltinId::LpQ32Sub, self.builder.func)
+                        .get_builtin_func_ref(BuiltinId::LpLpirFsubQ32, self.builder.func)
                         .expect("Q32 sub builtin declared");
                     let call = self.builder.ins().call(func_ref, &[a, b]);
                     self.builder.inst_results(call)[0]
@@ -527,7 +527,7 @@ impl<'a, M: Module> CodegenContext<'a, M> {
                 if matches!(s.opts.mul, MulMode::Saturating) {
                     let func_ref = self
                         .gl_module
-                        .get_builtin_func_ref(BuiltinId::LpQ32Mul, self.builder.func)
+                        .get_builtin_func_ref(BuiltinId::LpLpirFmulQ32, self.builder.func)
                         .expect("Q32 mul builtin declared");
                     let call = self.builder.ins().call(func_ref, &[a, b]);
                     self.builder.inst_results(call)[0]
@@ -545,7 +545,7 @@ impl<'a, M: Module> CodegenContext<'a, M> {
                 if matches!(s.opts.div, DivMode::Saturating) {
                     let func_ref = self
                         .gl_module
-                        .get_builtin_func_ref(BuiltinId::LpQ32Div, self.builder.func)
+                        .get_builtin_func_ref(BuiltinId::LpLpirFdivQ32, self.builder.func)
                         .expect("Q32 div builtin declared");
                     let call = self.builder.ins().call(func_ref, &[a, b]);
                     self.builder.inst_results(call)[0]
@@ -590,7 +590,7 @@ impl<'a, M: Module> CodegenContext<'a, M> {
             NumericMode::Q32(_) => {
                 let func_ref = self
                     .gl_module
-                    .get_builtin_func_ref(BuiltinId::LpQ32Sqrt, self.builder.func)
+                    .get_builtin_func_ref(BuiltinId::LpLpirFsqrtQ32, self.builder.func)
                     .expect("Q32 sqrt builtin declared");
                 let call = self.builder.ins().call(func_ref, &[a]);
                 self.builder.inst_results(call)[0]

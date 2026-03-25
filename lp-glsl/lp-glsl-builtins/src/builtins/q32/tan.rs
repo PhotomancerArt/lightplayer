@@ -1,18 +1,18 @@
 //! Fixed-point 16.16 tangent function.
 
-use super::cos::__lp_q32_cos;
-use super::sin::__lp_q32_sin;
-use crate::builtins::q32::div::__lp_q32_div;
+use super::cos::__lp_glsl_cos_q32;
+use super::sin::__lp_glsl_sin_q32;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
 
 /// Compute tangent using sine and cosine: tan(x) = sin(x) / cos(x)
 ///
 /// Algorithm ported from libfixmath.
 /// Accuracy: ~2.1% (same as sin/cos)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_tan(x: i32) -> i32 {
-    let sin_val = __lp_q32_sin(x);
-    let cos_val = __lp_q32_cos(x);
-    __lp_q32_div(sin_val, cos_val)
+pub extern "C" fn __lp_glsl_tan_q32(x: i32) -> i32 {
+    let sin_val = __lp_glsl_sin_q32(x);
+    let cos_val = __lp_glsl_cos_q32(x);
+    __lp_lpir_fdiv_q32(sin_val, cos_val)
 }
 
 #[cfg(test)]
@@ -31,7 +31,7 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions (~2.1% accuracy)
-        test_q32_function_relative(|x| __lp_q32_tan(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_tan_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -42,7 +42,7 @@ mod tests {
             (-0.1, -0.10033467208545055),
         ];
 
-        test_q32_function_relative(|x| __lp_q32_tan(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_tan_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -53,6 +53,6 @@ mod tests {
         ];
 
         // Use larger tolerance for values near zero
-        test_q32_function_relative(|x| __lp_q32_tan(x), &tests, 0.05, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_tan_q32(x), &tests, 0.05, 0.01);
     }
 }

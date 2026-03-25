@@ -1,4 +1,4 @@
-//! Naga [`Expression::Math`] → LPIR: inline ops, `@std.math` imports, per-component vector math,
+//! Naga [`Expression::Math`] → LPIR: inline ops, `@glsl` / `@lpir` imports, per-component vector math,
 //! and geometry/matrix builtins (`dot`, `normalize`, `transpose`, etc.).
 
 use alloc::format;
@@ -211,7 +211,7 @@ pub(crate) fn lower_math_vec(
                     lhs: eta_v,
                     rhs: i[j],
                 });
-                let root = push_std_math(ctx, "sqrt", &[k])?;
+                let root = push_import_call(ctx, "lpir", "sqrt", &[k])?;
                 let eta_ndi = ctx.fb.alloc_vreg(IrType::F32);
                 ctx.fb.push(Op::Fmul {
                     dst: eta_ndi,
@@ -403,7 +403,7 @@ fn lower_math_scalar_impl(
         },
         MathFunction::Sqrt => {
             let s = ctx.ensure_expr(arg)?;
-            push_std_math(ctx, "sqrt", &[s])
+            push_import_call(ctx, "lpir", "sqrt", &[s])
         }
         MathFunction::Floor => {
             let s = ctx.ensure_expr(arg)?;
@@ -419,7 +419,7 @@ fn lower_math_scalar_impl(
         }
         MathFunction::Round => {
             let s = ctx.ensure_expr(arg)?;
-            push_std_math(ctx, "round", &[s])
+            push_import_call(ctx, "glsl", "round", &[s])
         }
         MathFunction::Trunc => {
             let s = ctx.ensure_expr(arg)?;
@@ -917,7 +917,7 @@ fn lower_inverse_sqrt(
     arg: Handle<naga::Expression>,
 ) -> Result<VReg, LowerError> {
     let x = ctx.ensure_expr(arg)?;
-    let sq = push_std_math(ctx, "sqrt", &[x])?;
+    let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
     let one = fconst(ctx, 1.0);
     let r = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(Op::Fdiv {
@@ -986,7 +986,7 @@ fn std_math_unary(
     arg: Handle<naga::Expression>,
 ) -> Result<VReg, LowerError> {
     let s = ctx.ensure_expr(arg)?;
-    push_std_math(ctx, name, &[s])
+    push_import_call(ctx, "glsl", name, &[s])
 }
 
 fn std_math_binary(
@@ -998,7 +998,7 @@ fn std_math_binary(
     let b = b.ok_or_else(|| LowerError::Internal(format!("{name} missing arg")))?;
     let av = ctx.ensure_expr(a)?;
     let bv = ctx.ensure_expr(b)?;
-    push_std_math(ctx, name, &[av, bv])
+    push_import_call(ctx, "glsl", name, &[av, bv])
 }
 
 fn lower_ldexp_import(
@@ -1009,15 +1009,16 @@ fn lower_ldexp_import(
     let e = e.ok_or_else(|| LowerError::Internal(String::from("ldexp")))?;
     let xv = ctx.ensure_expr(x)?;
     let ev = ctx.ensure_expr(e)?;
-    push_std_math(ctx, "ldexp", &[xv, ev])
+    push_import_call(ctx, "glsl", "ldexp", &[xv, ev])
 }
 
-fn push_std_math(
+fn push_import_call(
     ctx: &mut LowerCtx<'_>,
+    module: &'static str,
     name: &'static str,
     args: &[VReg],
 ) -> Result<VReg, LowerError> {
-    let key = format!("std.math::{name}");
+    let key = format!("{module}::{name}");
     let callee = ctx
         .import_map
         .get(&key)
@@ -1119,14 +1120,14 @@ fn lower_math_per_component(
                 "abs on non-numeric vector",
             ))),
         },
-        MathFunction::Sqrt => std_math_unary_vec(ctx, "sqrt", arg),
+        MathFunction::Sqrt => std_math_unary_vec(ctx, "lpir", "sqrt", arg),
         MathFunction::Floor => unary_float_op_vec(ctx, arg, |fb, d, s| {
             fb.push(Op::Ffloor { dst: d, src: s });
         }),
         MathFunction::Ceil => unary_float_op_vec(ctx, arg, |fb, d, s| {
             fb.push(Op::Fceil { dst: d, src: s });
         }),
-        MathFunction::Round => std_math_unary_vec(ctx, "round", arg),
+        MathFunction::Round => std_math_unary_vec(ctx, "glsl", "round", arg),
         MathFunction::Trunc => unary_float_op_vec(ctx, arg, |fb, d, s| {
             fb.push(Op::Ftrunc { dst: d, src: s });
         }),
@@ -1216,23 +1217,23 @@ fn lower_math_per_component(
         MathFunction::Saturate => saturate_vec(ctx, arg),
         MathFunction::Radians => scale_vec_f32(ctx, arg, core::f32::consts::PI / 180.0),
         MathFunction::Degrees => scale_vec_f32(ctx, arg, 180.0 / core::f32::consts::PI),
-        MathFunction::Sin => std_math_unary_vec(ctx, "sin", arg),
-        MathFunction::Cos => std_math_unary_vec(ctx, "cos", arg),
-        MathFunction::Tan => std_math_unary_vec(ctx, "tan", arg),
-        MathFunction::Asin => std_math_unary_vec(ctx, "asin", arg),
-        MathFunction::Acos => std_math_unary_vec(ctx, "acos", arg),
-        MathFunction::Atan => std_math_unary_vec(ctx, "atan", arg),
+        MathFunction::Sin => std_math_unary_vec(ctx, "glsl", "sin", arg),
+        MathFunction::Cos => std_math_unary_vec(ctx, "glsl", "cos", arg),
+        MathFunction::Tan => std_math_unary_vec(ctx, "glsl", "tan", arg),
+        MathFunction::Asin => std_math_unary_vec(ctx, "glsl", "asin", arg),
+        MathFunction::Acos => std_math_unary_vec(ctx, "glsl", "acos", arg),
+        MathFunction::Atan => std_math_unary_vec(ctx, "glsl", "atan", arg),
         MathFunction::Atan2 => std_math_binary_vec(ctx, "atan2", arg, arg1),
-        MathFunction::Sinh => std_math_unary_vec(ctx, "sinh", arg),
-        MathFunction::Cosh => std_math_unary_vec(ctx, "cosh", arg),
-        MathFunction::Tanh => std_math_unary_vec(ctx, "tanh", arg),
-        MathFunction::Asinh => std_math_unary_vec(ctx, "asinh", arg),
-        MathFunction::Acosh => std_math_unary_vec(ctx, "acosh", arg),
-        MathFunction::Atanh => std_math_unary_vec(ctx, "atanh", arg),
-        MathFunction::Exp => std_math_unary_vec(ctx, "exp", arg),
-        MathFunction::Exp2 => std_math_unary_vec(ctx, "exp2", arg),
-        MathFunction::Log => std_math_unary_vec(ctx, "log", arg),
-        MathFunction::Log2 => std_math_unary_vec(ctx, "log2", arg),
+        MathFunction::Sinh => std_math_unary_vec(ctx, "glsl", "sinh", arg),
+        MathFunction::Cosh => std_math_unary_vec(ctx, "glsl", "cosh", arg),
+        MathFunction::Tanh => std_math_unary_vec(ctx, "glsl", "tanh", arg),
+        MathFunction::Asinh => std_math_unary_vec(ctx, "glsl", "asinh", arg),
+        MathFunction::Acosh => std_math_unary_vec(ctx, "glsl", "acosh", arg),
+        MathFunction::Atanh => std_math_unary_vec(ctx, "glsl", "atanh", arg),
+        MathFunction::Exp => std_math_unary_vec(ctx, "glsl", "exp", arg),
+        MathFunction::Exp2 => std_math_unary_vec(ctx, "glsl", "exp2", arg),
+        MathFunction::Log => std_math_unary_vec(ctx, "glsl", "log", arg),
+        MathFunction::Log2 => std_math_unary_vec(ctx, "glsl", "log2", arg),
         MathFunction::Pow => std_math_binary_vec(ctx, "pow", arg, arg1),
         MathFunction::Ldexp => ldexp_vec(ctx, arg, arg1),
         _ => Err(LowerError::UnsupportedExpression(format!(
@@ -1258,13 +1259,14 @@ fn unary_float_op_vec(
 
 fn std_math_unary_vec(
     ctx: &mut LowerCtx<'_>,
+    module: &'static str,
     name: &'static str,
     arg: Handle<naga::Expression>,
 ) -> Result<VRegVec, LowerError> {
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
     for s in vs {
-        o.push(push_std_math(ctx, name, &[s])?);
+        o.push(push_import_call(ctx, module, name, &[s])?);
     }
     Ok(o)
 }
@@ -1281,7 +1283,12 @@ fn std_math_binary_vec(
     let n = av.len().max(bv.len());
     let mut o = VRegVec::new();
     for i in 0..n {
-        o.push(push_std_math(ctx, name, &[vat(&av, i), vat(&bv, i)])?);
+        o.push(push_import_call(
+            ctx,
+            "glsl",
+            name,
+            &[vat(&av, i), vat(&bv, i)],
+        )?);
     }
     Ok(o)
 }
@@ -1693,7 +1700,7 @@ fn inverse_sqrt_vec(
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
     for x in vs {
-        let sq = push_std_math(ctx, "sqrt", &[x])?;
+        let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
         let one = fconst(ctx, 1.0);
         let r = ctx.fb.alloc_vreg(IrType::F32);
         ctx.fb.push(Op::Fdiv {
@@ -1763,7 +1770,12 @@ fn ldexp_vec(
     let n = xv.len().max(ev.len());
     let mut o = VRegVec::new();
     for i in 0..n {
-        o.push(push_std_math(ctx, "ldexp", &[vat(&xv, i), vat(&ev, i)])?);
+        o.push(push_import_call(
+            ctx,
+            "glsl",
+            "ldexp",
+            &[vat(&xv, i), vat(&ev, i)],
+        )?);
     }
     Ok(o)
 }

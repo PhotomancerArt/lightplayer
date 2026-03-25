@@ -153,7 +153,7 @@ pub fn lpfx_worley2(p: Vec2Q32, seed: u32) -> Q32 {
 /// Euclidean squared distance as i32 (Q32 fixed-point format), approximately in range [-1, 1]
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_worley(vec2 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32 {
     let p = Vec2Q32::new(Q32::from_fixed(x), Q32::from_fixed(y));
     lpfx_worley2(p, seed).to_fixed()
 }
@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn test_worley2_basic() {
-        let result1 = __lpfx_worley2_q32(float_to_fixed(1.5), float_to_fixed(2.3), 0);
-        let result2 = __lpfx_worley2_q32(float_to_fixed(3.7), float_to_fixed(2.3), 0);
-        let result3 = __lpfx_worley2_q32(float_to_fixed(1.5), float_to_fixed(2.3), 1);
+        let result1 = __lp_lpfx_worley2_q32(float_to_fixed(1.5), float_to_fixed(2.3), 0);
+        let result2 = __lp_lpfx_worley2_q32(float_to_fixed(3.7), float_to_fixed(2.3), 0);
+        let result3 = __lp_lpfx_worley2_q32(float_to_fixed(1.5), float_to_fixed(2.3), 1);
 
         // Different inputs should produce different outputs
         assert_ne!(
@@ -217,7 +217,7 @@ mod tests {
         for i in 0..50 {
             let x = float_to_fixed(i as f32 * 0.1);
             let y = float_to_fixed(i as f32 * 0.15);
-            let result = __lpfx_worley2_q32(x, y, 0);
+            let result = __lp_lpfx_worley2_q32(x, y, 0);
             let result_float = fixed_to_float(result);
 
             assert!(
@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_worley2_deterministic() {
-        let result1 = __lpfx_worley2_q32(float_to_fixed(42.5), float_to_fixed(37.3), 123);
-        let result2 = __lpfx_worley2_q32(float_to_fixed(42.5), float_to_fixed(37.3), 123);
+        let result1 = __lp_lpfx_worley2_q32(float_to_fixed(42.5), float_to_fixed(37.3), 123);
+        let result2 = __lp_lpfx_worley2_q32(float_to_fixed(42.5), float_to_fixed(37.3), 123);
 
         // Same input and seed should produce same output
         assert_eq!(result1, result2, "Noise should be deterministic");

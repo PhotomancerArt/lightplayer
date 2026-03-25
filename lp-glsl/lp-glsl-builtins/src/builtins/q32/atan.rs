@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 arctangent function.
 
-use super::atan2::__lp_q32_atan2;
+use super::atan2::__lp_glsl_atan2_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -10,8 +10,8 @@ const FIX16_ONE: i32 = 0x00010000; // 65536
 /// Algorithm ported from libfixmath.
 /// Returns angle in radians in range [-π/2, π/2].
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_atan(x: i32) -> i32 {
-    __lp_q32_atan2(x, FIX16_ONE)
+pub extern "C" fn __lp_glsl_atan_q32(x: i32) -> i32 {
+    __lp_glsl_atan2_q32(x, FIX16_ONE)
 }
 
 #[cfg(test)]
@@ -31,6 +31,6 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions
-        test_q32_function_relative(|x| __lp_q32_atan(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_atan_q32(x), &tests, 0.03, 0.01);
     }
 }

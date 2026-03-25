@@ -168,10 +168,10 @@ fn round_trip_entry_and_multi_return() {
 #[test]
 fn round_trip_import_and_call() {
     assert_round_trip(
-        "import @std.math::fsin(f32) -> f32
+        "import @glsl::fsin(f32) -> f32
 
 func @use(v0:f32) -> f32 {
-  v1:f32 = call @std.math::fsin(v0)
+  v1:f32 = call @glsl::fsin(v0)
   return v1
 }
 ",

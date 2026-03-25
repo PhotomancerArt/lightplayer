@@ -2,16 +2,16 @@
 //!
 //! mod(x, y) = x - y * floor(x / y)
 
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point modulus: mod(x, y) = x - y * floor(x / y)
 ///
 /// Uses div builtin for division and mul builtin for multiplication.
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_mod(x: i32, y: i32) -> i32 {
+pub extern "C" fn __lp_glsl_mod_q32(x: i32, y: i32) -> i32 {
     // Compute x / y using div builtin
-    let div_result = __lp_q32_div(x, y);
+    let div_result = __lp_lpir_fdiv_q32(x, y);
 
     // floor(x / y): In fixed-point Q16.16, floor is just shifting right by 16 then left by 16
     // This truncates the fractional part (rounds toward negative infinity for negative numbers)
@@ -19,7 +19,7 @@ pub extern "C" fn __lp_q32_mod(x: i32, y: i32) -> i32 {
     let floored = (div_result >> 16) << 16;
 
     // y * floor(x / y) using mul builtin
-    let y_times_floor = __lp_q32_mul(y, floored);
+    let y_times_floor = __lp_lpir_fmul_q32(y, floored);
 
     // x - y * floor(x / y)
     x.wrapping_sub(y_times_floor)
@@ -37,7 +37,7 @@ mod tests {
         // mod(7.0, 3.0) = 1.0
         let x = float_to_fixed(7.0);
         let y = float_to_fixed(3.0);
-        let result = __lp_q32_mod(x, y);
+        let result = __lp_glsl_mod_q32(x, y);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 1.0).abs() < 0.01,
@@ -51,7 +51,7 @@ mod tests {
         // mod(6.0, 3.0) = 0.0
         let x = float_to_fixed(6.0);
         let y = float_to_fixed(3.0);
-        let result = __lp_q32_mod(x, y);
+        let result = __lp_glsl_mod_q32(x, y);
         let result_float = fixed_to_float(result);
         assert!(
             result_float.abs() < 0.01,
@@ -65,7 +65,7 @@ mod tests {
         // mod(-7.0, 3.0) = 2.0
         let x = float_to_fixed(-7.0);
         let y = float_to_fixed(3.0);
-        let result = __lp_q32_mod(x, y);
+        let result = __lp_glsl_mod_q32(x, y);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 2.0).abs() < 0.01,
@@ -79,7 +79,7 @@ mod tests {
         // mod(7.5, 2.0) = 1.5
         let x = float_to_fixed(7.5);
         let y = float_to_fixed(2.0);
-        let result = __lp_q32_mod(x, y);
+        let result = __lp_glsl_mod_q32(x, y);
         let result_float = fixed_to_float(result);
         assert!(
             (result_float - 1.5).abs() < 0.01,

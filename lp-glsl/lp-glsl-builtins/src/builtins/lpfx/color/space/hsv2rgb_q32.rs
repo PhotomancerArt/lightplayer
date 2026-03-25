@@ -54,7 +54,7 @@ pub fn lpfx_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32 {
 /// * `z` - V component as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "vec3 lpfx_hsv2rgb(vec3 hsv)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_hsv2rgb_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32) {
+pub extern "C" fn __lp_lpfx_hsv2rgb_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[i32; 3]>() };
     let hsv = Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z));
@@ -76,7 +76,7 @@ pub extern "C" fn __lpfx_hsv2rgb_q32(result_ptr: *mut i32, x: i32, y: i32, z: i3
 /// * `w` - A component as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "vec4 lpfx_hsv2rgb(vec4 hsv)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_hsv2rgb_vec4_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32, w: i32) {
+pub extern "C" fn __lp_lpfx_hsv2rgb_vec4_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32, w: i32) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[i32; 4]>() };
     let hsv = Vec4Q32::new(

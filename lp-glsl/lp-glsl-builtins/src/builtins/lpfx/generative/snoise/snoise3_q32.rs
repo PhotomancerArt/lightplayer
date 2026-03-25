@@ -24,7 +24,7 @@
 //!
 //! # Internal Implementation
 //!
-//! The user-facing `lpfx_snoise` function maps to internal `__lpfx_snoise3` which
+//! The user-facing `lpfx_snoise` function maps to internal `__lp_lpfx_snoise3` which
 //! operates on Q32 fixed-point values. Vector arguments are automatically flattened
 //! by the compiler (vec3 becomes three i32 parameters).
 
@@ -218,7 +218,7 @@ pub fn lpfx_snoise3(p: Vec3Q32, seed: u32) -> Q32 {
 /// Noise value as i32 (Q32 fixed-point format), approximately in range [-1, 1]
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_snoise(vec3 p, uint seed)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_snoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
+pub extern "C" fn __lp_lpfx_snoise3_q32(x: i32, y: i32, z: i32, seed: u32) -> i32 {
     let p = Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z));
     lpfx_snoise3(p, seed).to_fixed()
 }
@@ -307,7 +307,7 @@ mod tests {
         // Test with various inputs to ensure we get different outputs
         let results: Vec<i32> = (0..10)
             .map(|i| {
-                __lpfx_snoise3_q32(
+                __lp_lpfx_snoise3_q32(
                     float_to_fixed(i as f32 * 0.5),
                     float_to_fixed(i as f32 * 0.3),
                     float_to_fixed(i as f32 * 0.7),
@@ -321,13 +321,13 @@ mod tests {
         assert!(!all_zero, "Simplex3 should produce non-zero values");
 
         // Test seed affects output
-        let result_seed0 = __lpfx_snoise3_q32(
+        let result_seed0 = __lp_lpfx_snoise3_q32(
             float_to_fixed(5.0),
             float_to_fixed(3.0),
             float_to_fixed(2.0),
             0,
         );
-        let result_seed1 = __lpfx_snoise3_q32(
+        let result_seed1 = __lp_lpfx_snoise3_q32(
             float_to_fixed(5.0),
             float_to_fixed(3.0),
             float_to_fixed(2.0),
@@ -346,7 +346,7 @@ mod tests {
             let x = float_to_fixed(i as f32 * 0.1);
             let y = float_to_fixed(i as f32 * 0.15);
             let z = float_to_fixed(i as f32 * 0.2);
-            let result = __lpfx_snoise3_q32(x, y, z, 0);
+            let result = __lp_lpfx_snoise3_q32(x, y, z, 0);
             let result_float = fixed_to_float(result);
 
             assert!(
@@ -360,13 +360,13 @@ mod tests {
 
     #[test]
     fn test_simplex3_deterministic() {
-        let result1 = __lpfx_snoise3_q32(
+        let result1 = __lp_lpfx_snoise3_q32(
             float_to_fixed(42.5),
             float_to_fixed(37.3),
             float_to_fixed(25.1),
             123,
         );
-        let result2 = __lpfx_snoise3_q32(
+        let result2 = __lp_lpfx_snoise3_q32(
             float_to_fixed(42.5),
             float_to_fixed(37.3),
             float_to_fixed(25.1),
@@ -393,8 +393,12 @@ mod tests {
                 let x = x_idx as f32;
                 let y = y_idx as f32;
                 let z = 0.0;
-                let result =
-                    __lpfx_snoise3_q32(float_to_fixed(x), float_to_fixed(y), float_to_fixed(z), 0);
+                let result = __lp_lpfx_snoise3_q32(
+                    float_to_fixed(x),
+                    float_to_fixed(y),
+                    float_to_fixed(z),
+                    0,
+                );
                 let result_float = fixed_to_float(result);
                 print!("{:6.3} ", result_float);
             }
@@ -414,8 +418,12 @@ mod tests {
                 let x = x_idx as f32;
                 let y = y_idx as f32;
                 let z = 2.0;
-                let result =
-                    __lpfx_snoise3_q32(float_to_fixed(x), float_to_fixed(y), float_to_fixed(z), 0);
+                let result = __lp_lpfx_snoise3_q32(
+                    float_to_fixed(x),
+                    float_to_fixed(y),
+                    float_to_fixed(z),
+                    0,
+                );
                 let result_float = fixed_to_float(result);
                 print!("{:6.3} ", result_float);
             }
@@ -427,7 +435,7 @@ mod tests {
         let y = float_to_fixed(2.5);
         let z = float_to_fixed(2.5);
         for seed in 0..5 {
-            let result = __lpfx_snoise3_q32(x, y, z, seed);
+            let result = __lp_lpfx_snoise3_q32(x, y, z, seed);
             let result_float = fixed_to_float(result);
             println!("  seed={}: {:7.4}", seed, result_float);
         }
@@ -437,7 +445,7 @@ mod tests {
             let x = float_to_fixed(i as f32 * 0.1);
             let y = float_to_fixed(i as f32 * 0.15);
             let z = float_to_fixed(i as f32 * 0.2);
-            let result = __lpfx_snoise3_q32(x, y, z, 0);
+            let result = __lp_lpfx_snoise3_q32(x, y, z, 0);
             let result_float = fixed_to_float(result);
             assert!(
                 result_float >= -2.0 && result_float <= 2.0,
@@ -463,7 +471,7 @@ mod tests {
 
         for (x, y, z) in boundary_points {
             let result =
-                __lpfx_snoise3_q32(float_to_fixed(x), float_to_fixed(y), float_to_fixed(z), 0);
+                __lp_lpfx_snoise3_q32(float_to_fixed(x), float_to_fixed(y), float_to_fixed(z), 0);
             let result_float = fixed_to_float(result);
 
             if let Some(prev) = prev_value {

@@ -8,7 +8,7 @@
 /// 3. Result is already in fixed-point format (scaled by 256)
 /// 4. Truncate to i32
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_sqrt(x: i32) -> i32 {
+pub extern "C" fn __lp_lpir_fsqrt_q32(x: i32) -> i32 {
     // Handle edge cases
     if x <= 0 {
         return 0;
@@ -60,7 +60,7 @@ mod tests {
 
         for (x, expected) in tests {
             let x_fixed = float_to_fixed(x);
-            let result_fixed = __lp_q32_sqrt(x_fixed);
+            let result_fixed = __lp_lpir_fsqrt_q32(x_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!("sqrt({}) -> Expected: {}, Actual: {}", x, expected, result);
@@ -87,7 +87,7 @@ mod tests {
 
         for (x, expected) in tests {
             let x_fixed = float_to_fixed(x);
-            let result_fixed = __lp_q32_sqrt(x_fixed);
+            let result_fixed = __lp_lpir_fsqrt_q32(x_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(
@@ -113,9 +113,9 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         // Test x <= 0 should return 0
-        assert_eq!(__lp_q32_sqrt(0), 0, "sqrt(0) should be 0");
-        assert_eq!(__lp_q32_sqrt(-1), 0, "sqrt(-1) should be 0");
-        assert_eq!(__lp_q32_sqrt(i32::MIN), 0, "sqrt(MIN) should be 0");
+        assert_eq!(__lp_lpir_fsqrt_q32(0), 0, "sqrt(0) should be 0");
+        assert_eq!(__lp_lpir_fsqrt_q32(-1), 0, "sqrt(-1) should be 0");
+        assert_eq!(__lp_lpir_fsqrt_q32(i32::MIN), 0, "sqrt(MIN) should be 0");
     }
 
     #[test]
@@ -124,7 +124,7 @@ mod tests {
 
         for (x, expected) in tests {
             let x_fixed = float_to_fixed(x);
-            let result_fixed = __lp_q32_sqrt(x_fixed);
+            let result_fixed = __lp_lpir_fsqrt_q32(x_fixed);
             let result = fixed_to_float(result_fixed);
 
             std::println!(

@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 sine function.
 
-use crate::builtins::q32::mul::__lp_q32_mul;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;
@@ -12,7 +12,7 @@ const FIX16_PI: i32 = 205887;
 ///
 /// Formula: sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040 + x⁹/362880 - x¹¹/39916800
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_sin(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_sin_q32(x: i32) -> i32 {
     // Handle zero case early (sin(0) = 0 exactly)
     if x == 0 {
         return 0;
@@ -30,29 +30,29 @@ pub extern "C" fn __lp_q32_sin(x: i32) -> i32 {
     }
 
     // Compute temp_angle² for Taylor series
-    let temp_angle_sq = __lp_q32_mul(temp_angle, temp_angle);
+    let temp_angle_sq = __lp_lpir_fmul_q32(temp_angle, temp_angle);
 
     // Taylor series: x - x³/6 + x⁵/120 - x⁷/5040 + x⁹/362880 - x¹¹/39916800
     let mut result = temp_angle;
 
     // x³ term: -x³/6
-    let mut term = __lp_q32_mul(temp_angle, temp_angle_sq);
+    let mut term = __lp_lpir_fmul_q32(temp_angle, temp_angle_sq);
     result -= term / 6;
 
     // x⁵ term: +x⁵/120
-    term = __lp_q32_mul(term, temp_angle_sq);
+    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
     result += term / 120;
 
     // x⁷ term: -x⁷/5040
-    term = __lp_q32_mul(term, temp_angle_sq);
+    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
     result -= term / 5040;
 
     // x⁹ term: +x⁹/362880
-    term = __lp_q32_mul(term, temp_angle_sq);
+    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
     result += term / 362880;
 
     // x¹¹ term: -x¹¹/39916800
-    term = __lp_q32_mul(term, temp_angle_sq);
+    term = __lp_lpir_fmul_q32(term, temp_angle_sq);
     result -= term / 39916800;
 
     result
@@ -75,7 +75,7 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions (~2.1% accuracy)
-        test_q32_function_relative(|x| __lp_q32_sin(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_sin_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -86,7 +86,7 @@ mod tests {
             (-6.283185307179586, 0.0), // -2π
         ];
 
-        test_q32_function_relative(|x| __lp_q32_sin(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_sin_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -97,6 +97,6 @@ mod tests {
             (-0.1, -0.09983341664682815),
         ];
 
-        test_q32_function_relative(|x| __lp_q32_sin(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_sin_q32(x), &tests, 0.03, 0.01);
     }
 }

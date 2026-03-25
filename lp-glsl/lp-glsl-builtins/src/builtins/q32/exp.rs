@@ -1,7 +1,7 @@
 //! Fixed-point 16.16 exponential function.
 
-use crate::builtins::q32::div::__lp_q32_div;
-use crate::builtins::q32::mul::__lp_q32_mul;
+use crate::builtins::q32::div::__lp_lpir_fdiv_q32;
+use crate::builtins::q32::mul::__lp_lpir_fmul_q32;
 
 /// Fixed-point value of 1.0 (Q16.16 format)
 const FIX16_ONE: i32 = 0x00010000; // 65536
@@ -17,7 +17,7 @@ const FIX16_MIN_EXP: i32 = -772243; // ~-11.8 in fixed point
 /// Algorithm ported from libfixmath.
 /// For negative x: exp(-x) = 1/exp(x)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_exp(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_exp_q32(x: i32) -> i32 {
     // Handle special cases
     if x == 0 {
         return FIX16_ONE;
@@ -44,7 +44,7 @@ pub extern "C" fn __lp_q32_exp(x: i32) -> i32 {
     for i in 2..30 {
         // Convert i to fixed point for division
         let i_fixed = i << 16;
-        term = __lp_q32_mul(term, __lp_q32_div(in_value, i_fixed));
+        term = __lp_lpir_fmul_q32(term, __lp_lpir_fdiv_q32(in_value, i_fixed));
         result += term;
 
         // Early termination if term becomes small enough
@@ -55,7 +55,7 @@ pub extern "C" fn __lp_q32_exp(x: i32) -> i32 {
 
     // Handle negative x: exp(-x) = 1/exp(x)
     if neg {
-        result = __lp_q32_div(FIX16_ONE, result);
+        result = __lp_lpir_fdiv_q32(FIX16_ONE, result);
     }
 
     result
@@ -79,6 +79,6 @@ mod tests {
         ];
 
         // Use 3% tolerance for exponential functions
-        test_q32_function_relative(|x| __lp_q32_exp(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_exp_q32(x), &tests, 0.03, 0.01);
     }
 }

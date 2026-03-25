@@ -1,6 +1,6 @@
 //! Fixed-point 16.16 cosine function.
 
-use super::sin::__lp_q32_sin;
+use super::sin::__lp_glsl_sin_q32;
 
 /// Fixed-point value of π (Q16.16 format)
 const FIX16_PI: i32 = 205887;
@@ -10,10 +10,10 @@ const FIX16_PI: i32 = 205887;
 /// Algorithm ported from libfixmath.
 /// Accuracy: ~2.1% (same as sin)
 #[unsafe(no_mangle)]
-pub extern "C" fn __lp_q32_cos(x: i32) -> i32 {
+pub extern "C" fn __lp_glsl_cos_q32(x: i32) -> i32 {
     // cos(x) = sin(x + π/2)
     let half_pi = FIX16_PI >> 1;
-    __lp_q32_sin(x + half_pi)
+    __lp_glsl_sin_q32(x + half_pi)
 }
 
 #[cfg(test)]
@@ -33,7 +33,7 @@ mod tests {
         ];
 
         // Use 3% tolerance for trig functions (~2.1% accuracy)
-        test_q32_function_relative(|x| __lp_q32_cos(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_cos_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -44,7 +44,7 @@ mod tests {
             (-6.283185307179586, 1.0), // -2π
         ];
 
-        test_q32_function_relative(|x| __lp_q32_cos(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_cos_q32(x), &tests, 0.03, 0.01);
     }
 
     #[test]
@@ -55,6 +55,6 @@ mod tests {
             (-0.1, 0.9950041652780258),
         ];
 
-        test_q32_function_relative(|x| __lp_q32_cos(x), &tests, 0.03, 0.01);
+        test_q32_function_relative(|x| __lp_glsl_cos_q32(x), &tests, 0.03, 0.01);
     }
 }

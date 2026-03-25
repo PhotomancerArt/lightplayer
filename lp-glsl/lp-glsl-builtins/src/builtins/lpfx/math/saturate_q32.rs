@@ -61,7 +61,7 @@ pub fn lpfx_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32 {
 /// Value clamped between 0 and 1 as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "float lpfx_saturate(float x)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
+pub extern "C" fn __lp_lpfx_saturate_q32(value: i32) -> i32 {
     lpfx_saturate_q32(Q32::from_fixed(value)).to_fixed()
 }
 
@@ -76,7 +76,7 @@ pub extern "C" fn __lpfx_saturate_q32(value: i32) -> i32 {
 /// * `z` - Z component as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "vec3 lpfx_saturate(vec3 v)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_saturate_vec3_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32) {
+pub extern "C" fn __lp_lpfx_saturate_vec3_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[i32; 3]>() };
     let v = Vec3Q32::new(Q32::from_fixed(x), Q32::from_fixed(y), Q32::from_fixed(z));
@@ -98,7 +98,13 @@ pub extern "C" fn __lpfx_saturate_vec3_q32(result_ptr: *mut i32, x: i32, y: i32,
 /// * `w` - W component as i32 (Q32 fixed-point)
 #[lpfx_impl_macro::lpfx_impl(q32, "vec4 lpfx_saturate(vec4 v)")]
 #[unsafe(no_mangle)]
-pub extern "C" fn __lpfx_saturate_vec4_q32(result_ptr: *mut i32, x: i32, y: i32, z: i32, w: i32) {
+pub extern "C" fn __lp_lpfx_saturate_vec4_q32(
+    result_ptr: *mut i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    w: i32,
+) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[i32; 4]>() };
     let v = Vec4Q32::new(

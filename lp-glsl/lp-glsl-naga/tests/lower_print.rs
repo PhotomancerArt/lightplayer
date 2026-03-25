@@ -31,8 +31,14 @@ fn print_contains_std_math_import() {
     let ir = lower(&naga).expect("lower");
     validate_module(&ir).expect("validate");
     let s = print_module(&ir);
-    assert!(s.contains("import @std.math::"), "{s}");
-    assert!(s.contains("call @std.math::"), "{s}");
+    assert!(
+        s.contains("import @glsl::") || s.contains("import @lpir::"),
+        "{s}"
+    );
+    assert!(
+        s.contains("call @glsl::") || s.contains("call @lpir::"),
+        "{s}"
+    );
 }
 
 #[test]
