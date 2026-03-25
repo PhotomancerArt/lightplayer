@@ -677,6 +677,58 @@ func @apply_sin(v0:f32) -> f32 {
         }
     }
 
+    #[test]
+    fn q32_jit_invoke_two_returns() {
+        let ir = parse_module(
+            r"func @pair() -> (f32, f32) {
+  v0:f32 = fconst.f32 1.0
+  v1:f32 = fconst.f32 2.0
+  return v0, v1
+}",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+            },
+        )
+        .expect("jit");
+        let p = m.finalized_ptr_by_index(0);
+        let words = unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 2).expect("invoke") };
+        assert_eq!(words.len(), 2, "{words:?}");
+        assert_q32_approx(words[0], 1.0, 1e-4);
+        assert_q32_approx(words[1], 2.0, 1e-4);
+    }
+
+    /// Regression: host JIT must return all words of a multi-return; Rust tuple `extern "C"`
+    /// returns are not ABI-safe (see `invoke.rs` `CRet3`).
+    #[test]
+    fn q32_jit_invoke_three_returns() {
+        let ir = parse_module(
+            r"func @triple() -> (f32, f32, f32) {
+  v0:f32 = fconst.f32 1.0
+  v1:f32 = fconst.f32 2.0
+  v2:f32 = fconst.f32 0.5
+  return v0, v1, v2
+}",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+            },
+        )
+        .expect("jit");
+        let p = m.finalized_ptr_by_index(0);
+        let words = unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 3).expect("invoke") };
+        assert_eq!(words.len(), 3, "{words:?}");
+        assert_q32_approx(words[0], 1.0, 1e-4);
+        assert_q32_approx(words[1], 2.0, 1e-4);
+        assert_q32_approx(words[2], 0.5, 1e-4);
+    }
+
     fn q32(f: f32) -> i32 {
         crate::q32::q32_encode(f)
     }

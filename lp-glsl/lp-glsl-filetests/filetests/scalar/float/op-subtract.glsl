@@ -60,9 +60,10 @@ float test_float_subtract_small_numbers() {
 float test_float_subtract_large_numbers() {
     // Large numbers are clamped to fixed16x16 max (32767.99998)
     // Both operands become max, so max - max = 0
-    return 3000000.0 - 1000000.0;
+    float a = 3000000.0;
+    float b = 1000000.0;
+    return a - b;
 }
 
-// Same constant-fold / clamp ordering gap as op-divide large-number case.
 // @unimplemented(backend=wasm)
 // run: test_float_subtract_large_numbers() ~= 0.0

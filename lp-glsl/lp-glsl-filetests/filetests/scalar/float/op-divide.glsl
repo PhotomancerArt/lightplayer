@@ -60,9 +60,11 @@ float test_float_divide_fractions() {
 float test_float_divide_large_numbers() {
     // Large numbers are clamped to fixed16x16 max (32767.99998)
     // 32767.99998 / 1000.0 = 32.76799998 (within range, no saturation needed)
-    return 1000000.0 / 1000.0;
+    // Use locals so Naga does not constant-fold before Q32 literal encoding.
+    float a = 1000000.0;
+    float b = 1000.0;
+    return a / b;
 }
 
-// Naga constant-folds before fixed-point clamp semantics; wasm matches folded literal.
 // @unimplemented(backend=wasm)
 // run: test_float_divide_large_numbers() ~= 32.768

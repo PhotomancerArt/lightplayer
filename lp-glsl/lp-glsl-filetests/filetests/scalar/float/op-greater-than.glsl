@@ -65,7 +65,9 @@ bool test_float_greater_than_fractions() {
 bool test_float_greater_than_large_numbers() {
     // Large numbers are clamped to fixed16x16 max (32767.99998)
     // Both become equal, so comparison returns false
-    return 2000000.0 > 1000000.0;
+    float a = 2000000.0;
+    float b = 1000000.0;
+    return a > b;
 }
 
 // run: test_float_greater_than_large_numbers() == false

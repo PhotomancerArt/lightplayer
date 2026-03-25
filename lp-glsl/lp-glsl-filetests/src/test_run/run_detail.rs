@@ -669,12 +669,27 @@ fn extract_error_message(error_str: &str) -> String {
     }
 }
 
-/// Format source code as a code block with line numbers for better readability
+/// Format source code as a code block with line numbers for better readability.
+///
+/// Trims leading and trailing whitespace-only lines. The text is usually
+/// [`test_glsl::TestGlslResult::source`]: a slice of the test file with other
+/// functions' bodies removed but blank lines between sections kept, which
+/// otherwise produces long runs of empty numbered lines in failure output.
 fn format_code_block(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
-    let max_line_num_width = (lines.len() + 1).to_string().len();
+    let start = lines
+        .iter()
+        .position(|line| !line.trim().is_empty())
+        .unwrap_or(0);
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(start);
+    let trimmed: &[&str] = if end > start { &lines[start..end] } else { &[] };
+    let max_line_num_width = trimmed.len().max(1).to_string().len();
 
-    lines
+    trimmed
         .iter()
         .enumerate()
         .map(|(i, line)| format!("{:width$} | {}", i + 1, line, width = max_line_num_width))

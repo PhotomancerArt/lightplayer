@@ -115,10 +115,20 @@ pub(crate) fn emit_to_uint(builder: &mut FunctionBuilder, v: Value) -> Value {
     builder.ins().select(is_neg, zero, trunc)
 }
 
-/// Unsigned integer → Q16.16 (shift left, no sign extension needed)
+/// Unsigned integer → Q16.16.
+///
+/// `v` is an `i32` carrying a GLSL `uint` bit pattern. Values above `2^31-1` appear
+/// negative when interpreted as signed; clamp **unsigned** magnitude to the same
+/// integer range as [`emit_from_sint`] (Q16.16 max ~32767) before shifting, so
+/// `4294967295u` maps to 32767.0 rather than `ishl(-1, 16)` → -1.0.
 pub(crate) fn emit_from_uint(builder: &mut FunctionBuilder, v: Value) -> Value {
     let shift = builder.ins().iconst(types::I32, Q32_SHIFT);
-    builder.ins().ishl(v, shift)
+    let zero = builder.ins().iconst(types::I32, 0);
+    let max_int = builder.ins().iconst(types::I32, 32767);
+    let is_high_uint = builder.ins().icmp(IntCC::SignedLessThan, v, zero);
+    let clamped_nonneg = builder.ins().smin(v, max_int);
+    let clamped = builder.ins().select(is_high_uint, max_int, clamped_nonneg);
+    builder.ins().ishl(clamped, shift)
 }
 
 #[cfg(test)]
