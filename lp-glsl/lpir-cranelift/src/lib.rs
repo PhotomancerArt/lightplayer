@@ -1,23 +1,36 @@
-//! LPIR → Cranelift JIT: structured control flow, memory (stack slots), and local calls.
+//! LPIR → Cranelift: host JIT by default; optional `riscv32-emu` for RV32 object emission,
+//! linking with `lp-glsl-builtins-emu-app`, and `lp-riscv-emu` execution helpers.
 
 extern crate alloc;
 
 mod builtins;
 mod call;
 mod compile;
+mod compile_options;
 mod direct_call;
 mod emit;
 pub mod error;
 mod invoke;
 mod jit_module;
+mod module_lower;
 mod q32;
 mod values;
 
+#[cfg(feature = "riscv32-emu")]
+mod emu_run;
+#[cfg(feature = "riscv32-emu")]
+mod object_link;
+#[cfg(feature = "riscv32-emu")]
+mod object_module;
+
 pub use compile::{jit, jit_from_ir, jit_from_ir_owned};
+#[cfg(feature = "riscv32-emu")]
+pub use compile::{object_bytes_from_ir, run_lpir_function_i32};
+pub use compile_options::CompileOptions;
 pub use direct_call::DirectCall;
 pub use emit::signature_for_ir_func;
 pub use error::{CompileError, CompilerError};
-pub use jit_module::{CompileOptions, JitModule};
+pub use jit_module::JitModule;
 pub use lpir::FloatMode;
 pub use values::{CallError, CallResult, GlslQ32, GlslReturn};
 

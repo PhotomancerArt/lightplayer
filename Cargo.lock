@@ -4172,9 +4172,12 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native 0.127.0",
+ "cranelift-object",
  "lp-glsl-builtin-ids",
  "lp-glsl-builtins",
  "lp-glsl-naga",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
  "lpir",
  "target-lexicon",
 ]

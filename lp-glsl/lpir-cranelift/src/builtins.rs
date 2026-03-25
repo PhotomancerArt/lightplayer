@@ -7,7 +7,6 @@ use alloc::vec::Vec;
 
 use cranelift_codegen::ir::{AbiParam, Signature, types};
 use cranelift_codegen::isa::CallConv;
-use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use lp_glsl_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
@@ -489,7 +488,7 @@ pub(crate) struct LpirBuiltinFuncIds {
 }
 
 pub(crate) fn declare_module_imports(
-    module: &mut JITModule,
+    module: &mut impl Module,
     ir: &IrModule,
     pointer_type: types::Type,
 ) -> Result<Vec<FuncId>, CompileError> {
@@ -507,7 +506,7 @@ pub(crate) fn declare_module_imports(
 }
 
 pub(crate) fn declare_lpir_opcode_builtins(
-    module: &mut JITModule,
+    module: &mut impl Module,
     pointer_type: types::Type,
 ) -> Result<LpirBuiltinFuncIds, CompileError> {
     let call_conv = module.isa().default_call_conv();

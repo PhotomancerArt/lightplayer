@@ -2,8 +2,9 @@
 
 use lpir::{GlslModuleMeta, IrModule};
 
+use crate::compile_options::CompileOptions;
 use crate::error::CompilerError;
-use crate::jit_module::{CompileOptions, JitModule, build_jit_module};
+use crate::jit_module::{JitModule, build_jit_module};
 
 /// Compile GLSL source to a host JIT module (Q32 recommended; F32 for import-free IR).
 pub fn jit(source: &str, options: &CompileOptions) -> Result<JitModule, CompilerError> {
@@ -28,3 +29,8 @@ pub fn jit_from_ir_owned(
 ) -> Result<JitModule, CompilerError> {
     build_jit_module(&ir, meta, *options)
 }
+
+#[cfg(feature = "riscv32-emu")]
+pub use crate::emu_run::run_lpir_function_i32;
+#[cfg(feature = "riscv32-emu")]
+pub use crate::object_module::object_bytes_from_ir;
