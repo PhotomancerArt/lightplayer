@@ -132,23 +132,54 @@ fn lower_expr_vec_uncached(
                     let start = (*index as usize) * n;
                     Ok(base_vs[start..start + n].into())
                 }
-                // `mat` local: `t[i]` is a column (vector) in the local's vreg slice.
+                // Naga types locals as `Pointer` to value type; `v.x` is `AccessIndex` on that pointer.
                 TypeInner::Pointer { base: ty_h, .. } => {
-                    let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
-                        return Err(LowerError::UnsupportedExpression(String::from(
-                            "AccessIndex: pointer base must be LocalVariable",
-                        )));
-                    };
                     let inner = &ctx.module.types[ty_h].inner;
-                    let TypeInner::Matrix { rows, .. } = inner else {
-                        return Err(LowerError::UnsupportedExpression(format!(
-                            "AccessIndex on pointer to non-matrix {inner:?}"
-                        )));
-                    };
-                    let m = ctx.resolve_local(*lv)?;
-                    let n = vector_size_usize(*rows);
-                    let start = (*index as usize) * n;
-                    Ok(m[start..start + n].into())
+                    match inner {
+                        TypeInner::Vector { scalar, .. } => match &ctx.func.expressions[*base] {
+                            Expression::LocalVariable(lv) => {
+                                let vs = ctx.resolve_local(*lv)?;
+                                let i = *index as usize;
+                                let v = *vs.get(i).ok_or_else(|| {
+                                    LowerError::UnsupportedExpression(format!(
+                                        "AccessIndex index {i} out of range (len {})",
+                                        vs.len()
+                                    ))
+                                })?;
+                                Ok(smallvec::smallvec![v])
+                            }
+                            Expression::FunctionArgument(arg_i)
+                                if ctx.pointer_args.contains_key(arg_i) =>
+                            {
+                                let t = crate::lower_ctx::naga_scalar_to_ir_type(scalar.kind)?;
+                                let dst = ctx.fb.alloc_vreg(t);
+                                let addr = ctx.arg_vregs_for(*arg_i)?[0];
+                                ctx.fb.push(Op::Load {
+                                    dst,
+                                    base: addr,
+                                    offset: *index * 4,
+                                });
+                                Ok(smallvec::smallvec![dst])
+                            }
+                            _ => Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex: pointer to vector must be local or parameter",
+                            ))),
+                        },
+                        TypeInner::Matrix { rows, .. } => {
+                            let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
+                                return Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: matrix pointer base must be LocalVariable",
+                                )));
+                            };
+                            let m = ctx.resolve_local(*lv)?;
+                            let n = vector_size_usize(*rows);
+                            let start = (*index as usize) * n;
+                            Ok(m[start..start + n].into())
+                        }
+                        _ => Err(LowerError::UnsupportedExpression(format!(
+                            "AccessIndex on pointer to {inner:?}"
+                        ))),
+                    }
                 }
                 // Matrix column or other vector behind a pointer (Naga `ValuePointer`).
                 TypeInner::ValuePointer { size: Some(_), .. } => {

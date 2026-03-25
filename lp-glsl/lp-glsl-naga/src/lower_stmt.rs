@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use lpir::{IrType, Op, SlotId};
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
+use crate::expr_scalar::expr_type_inner;
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
@@ -106,6 +107,78 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
         },
         Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
+            // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
+            Expression::AccessIndex { base, index } => match &ctx.func.expressions[*base] {
+                Expression::LocalVariable(lv) => {
+                    let dsts = ctx.resolve_local(*lv)?;
+                    let comp = *index as usize;
+                    if comp >= dsts.len() {
+                        return Err(LowerError::UnsupportedStatement(format!(
+                            "AccessIndex {comp} out of range (len {})",
+                            dsts.len()
+                        )));
+                    }
+                    let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                    let scalar_inner = match lv_ty {
+                        TypeInner::Vector { scalar, .. } => TypeInner::Scalar(*scalar),
+                        TypeInner::Matrix { .. } => {
+                            return Err(LowerError::UnsupportedStatement(String::from(
+                                "component store to matrix element not supported",
+                            )));
+                        }
+                        _ => {
+                            return Err(LowerError::UnsupportedStatement(String::from(
+                                "component store on non-vector local",
+                            )));
+                        }
+                    };
+                    let raw = ctx.ensure_expr_vec(*value)?;
+                    let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                    if srcs.len() != 1 {
+                        return Err(LowerError::UnsupportedStatement(format!(
+                            "component store expects one scalar, got {} values",
+                            srcs.len()
+                        )));
+                    }
+                    ctx.fb.push(Op::Copy {
+                        dst: dsts[comp],
+                        src: srcs[0],
+                    });
+                    Ok(())
+                }
+                Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
+                    let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;
+                    let dst_inner = match store_ty {
+                        TypeInner::ValuePointer {
+                            size: None, scalar, ..
+                        } => TypeInner::Scalar(scalar),
+                        TypeInner::Scalar(s) => TypeInner::Scalar(s),
+                        other => {
+                            return Err(LowerError::UnsupportedStatement(format!(
+                                "component store through parameter pointer: expected scalar target, got {other:?}"
+                            )));
+                        }
+                    };
+                    let addr = ctx.arg_vregs_for(*arg_i)?[0];
+                    let raw = ctx.ensure_expr_vec(*value)?;
+                    let srcs = coerce_assignment_vregs(ctx, &dst_inner, *value, raw)?;
+                    if srcs.len() != 1 {
+                        return Err(LowerError::UnsupportedStatement(format!(
+                            "component store expects one scalar, got {} values",
+                            srcs.len()
+                        )));
+                    }
+                    ctx.fb.push(Op::Store {
+                        base: addr,
+                        offset: *index * 4,
+                        value: srcs[0],
+                    });
+                    Ok(())
+                }
+                _ => Err(LowerError::UnsupportedStatement(String::from(
+                    "store to non-local pointer",
+                ))),
+            },
             Expression::LocalVariable(lv) => {
                 let dsts = ctx.resolve_local(*lv)?;
                 let dst_inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
