@@ -48,19 +48,25 @@ SECTIONS {
                 if out_path.exists() {
                     let text_x = out_path.join("text.x");
                     if text_x.exists() {
-                        let _ = std::fs::write(&text_x, patched_text);
+                        std::fs::write(&text_x, patched_text).unwrap_or_else(|e| {
+                            panic!("failed to patch {}: {e}", text_x.display())
+                        });
                     }
                     let eh_frame_x = out_path.join("eh_frame.x");
                     if eh_frame_x.exists() {
-                        let _ =
-                            std::fs::write(&eh_frame_x, "/* patched: .eh_frame is in text.x */\n");
+                        std::fs::write(&eh_frame_x, "/* patched: .eh_frame is in text.x */\n")
+                            .unwrap_or_else(|e| {
+                                panic!("failed to patch {}: {e}", eh_frame_x.display())
+                            });
                     }
                 }
             }
         }
     }
 
+    // No cargo:rerun-if-changed restriction — we must re-run whenever esp-hal's
+    // build hash changes so we can patch its freshly-generated text.x / eh_frame.x.
+    // Cargo's default (re-run when any package file changes) is the right behavior.
     let eh_frame = manifest_dir.join("linker").join("eh_frame_unwind.x");
-    println!("cargo:rerun-if-changed={}", eh_frame.display());
     println!("cargo:rustc-link-arg=-T{}", eh_frame.display());
 }
