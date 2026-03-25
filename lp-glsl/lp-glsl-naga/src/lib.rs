@@ -14,7 +14,9 @@ use alloc::vec::Vec;
 use core::fmt;
 pub use naga;
 
-use naga::{Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize};
+use naga::{
+    AddressSpace, Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize,
+};
 
 mod expr_scalar;
 pub mod lower;
@@ -30,8 +32,11 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
+pub use lpir::{GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType};
+
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -48,6 +53,10 @@ mod tests {
         assert_eq!(result.functions[0].1.name, "add");
         assert_eq!(result.functions[0].1.return_type, GlslType::Float);
         assert_eq!(result.functions[0].1.params.len(), 2);
+        assert_eq!(
+            result.functions[0].1.params[0].qualifier,
+            GlslParamQualifier::In
+        );
     }
 
     #[test]
@@ -81,6 +90,17 @@ mod tests {
     }
 
     #[test]
+    fn lower_error_in_function_display_names_function() {
+        let e = LowerError::InFunction {
+            name: String::from("my_fn"),
+            inner: Box::new(LowerError::Internal(String::from("detail"))),
+        };
+        let s = alloc::format!("{e}");
+        assert!(s.contains("my_fn"), "{s}");
+        assert!(s.contains("detail"), "{s}");
+    }
+
+    #[test]
     fn naga_module_accessible() {
         let src = "float f() { return 1.0; }";
         let result = compile(src).unwrap();
@@ -91,7 +111,7 @@ mod tests {
     fn lower_produces_ir_functions() {
         let src = "float add(float a, float b) { return a + b; }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         assert_eq!(ir.functions.len(), 1);
         assert_eq!(ir.functions[0].name, "add");
         assert_eq!(ir.functions[0].param_count, 2);
@@ -101,7 +121,7 @@ mod tests {
     fn lowered_module_validates() {
         let src = "float add(float a, float b) { return a + b; }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate lowered IR");
     }
 
@@ -109,7 +129,7 @@ mod tests {
     fn lower_void_implicit_return_validates() {
         let src = "void f() { }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
     }
 
@@ -133,7 +153,7 @@ float test_main() {
     fn lower_sin_validates_with_imports() {
         let src = "float f(float x) { return sin(x); }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
         assert!(!ir.imports.is_empty());
     }
@@ -143,7 +163,7 @@ float test_main() {
         use lpir::{Value, interpret};
         let src = "float f(float x) { return sin(x); }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         let mut h: StdMathHandler = Default::default();
         let out = interpret(&ir, "f", &[Value::F32(0.0)], &mut h).expect("interp");
         assert!(out[0].as_f32().unwrap().abs() < 1e-5);
@@ -154,7 +174,7 @@ float test_main() {
         use lpir::{Value, interpret};
         let src = "float g(float x) { return x + 1.0; } float f(float x) { return g(x); }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         let mut h: StdMathHandler = Default::default();
         let out = interpret(&ir, "f", &[Value::F32(2.0)], &mut h).expect("interp");
         assert!((out[0].as_f32().unwrap() - 3.0).abs() < 1e-4);
@@ -165,7 +185,7 @@ float test_main() {
         use lpir::interpret;
         let src = "float f(float x) { return lpfx_saturate(x); }";
         let naga = compile(src).unwrap();
-        let ir = super::lower(&naga).expect("lower");
+        let (ir, _) = super::lower(&naga).expect("lower");
         lpir::validate_module(&ir).expect("validate");
         let mut imp = TestImports::default();
         let out = interpret(&ir, "f", &[Value::F32(1.5)], &mut imp).expect("interp");
@@ -197,31 +217,10 @@ float test_main() {
 
 pub use lpir::FloatMode;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum GlslType {
-    Void,
-    Float,
-    Int,
-    UInt,
-    Bool,
-    Vec2,
-    Vec3,
-    Vec4,
-    IVec2,
-    IVec3,
-    IVec4,
-    UVec2,
-    UVec3,
-    UVec4,
-    BVec2,
-    BVec3,
-    BVec4,
-}
-
 #[derive(Clone, Debug)]
 pub struct FunctionInfo {
     pub name: String,
-    pub params: Vec<(String, GlslType)>,
+    pub params: Vec<GlslParamMeta>,
     pub return_type: GlslType,
 }
 
@@ -320,9 +319,26 @@ fn function_info(
         .arguments
         .iter()
         .map(|arg| {
-            let ty = naga_type_inner_to_glsl(module, &module.types[arg.ty].inner)?;
+            let inner = &module.types[arg.ty].inner;
             let pname = arg.name.clone().unwrap_or_else(|| String::from("_"));
-            Ok((pname, ty))
+            let (ty, qualifier) = match *inner {
+                TypeInner::Pointer {
+                    base,
+                    space: AddressSpace::Function,
+                } => (
+                    naga_type_inner_to_glsl(module, &module.types[base].inner)?,
+                    GlslParamQualifier::InOut,
+                ),
+                _ => (
+                    naga_type_inner_to_glsl(module, inner)?,
+                    GlslParamQualifier::In,
+                ),
+            };
+            Ok(GlslParamMeta {
+                name: pname,
+                qualifier,
+                ty,
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let return_type = match &function.result {

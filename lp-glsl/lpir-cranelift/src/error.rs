@@ -31,3 +31,39 @@ impl core::fmt::Display for CompileError {
 }
 
 impl std::error::Error for CompileError {}
+
+/// Full compiler pipeline errors (parse, lowering, codegen).
+#[derive(Debug)]
+pub enum CompilerError {
+    /// GLSL parse / naga frontend (line-oriented message).
+    Parse(String),
+    /// Naga → LPIR lowering.
+    Lower(lp_glsl_naga::LowerError),
+    /// LPIR → machine code.
+    Codegen(CompileError),
+}
+
+impl core::fmt::Display for CompilerError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            CompilerError::Parse(s) => write!(f, "{s}"),
+            CompilerError::Lower(e) => write!(f, "{e}"),
+            CompilerError::Codegen(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for CompilerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CompilerError::Codegen(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<CompileError> for CompilerError {
+    fn from(value: CompileError) -> Self {
+        CompilerError::Codegen(value)
+    }
+}

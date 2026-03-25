@@ -533,7 +533,7 @@ fn interp_transpose_mat2() {
 
 fn compile_and_lower(glsl: &str) -> lpir::IrModule {
     let naga = compile(glsl).expect("compile");
-    let ir = lower(&naga).expect("lower");
+    let (ir, _) = lower(&naga).expect("lower");
     validate_module(&ir).expect("validate lowered IR");
     ir
 }

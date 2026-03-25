@@ -48,7 +48,7 @@ impl From<CompileError> for GlslWasmError {
 /// Compile GLSL source to a WASM module (Naga → LPIR → WASM).
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
     let naga_module = lp_glsl_naga::compile(source)?;
-    let ir_module = lp_glsl_naga::lower(&naga_module)
+    let (ir_module, _) = lp_glsl_naga::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(alloc::format!("{e}")))?;
     let (wasm_bytes, shadow_stack_base) =
         emit::emit_module(&ir_module, &options).map_err(GlslWasmError::Codegen)?;
@@ -77,7 +77,7 @@ fn collect_exports(
             let params: Vec<_> = fi
                 .params
                 .iter()
-                .flat_map(|(_, ty)| module::glsl_type_to_wasm_components(ty, options.float_mode))
+                .flat_map(|p| module::glsl_type_to_wasm_components(&p.ty, options.float_mode))
                 .collect();
             let results = module::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
             WasmExport {
@@ -85,7 +85,7 @@ fn collect_exports(
                 params,
                 results,
                 return_type: fi.return_type.clone(),
-                param_types: fi.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                param_types: fi.params.iter().map(|p| p.ty.clone()).collect(),
             }
         })
         .collect()

@@ -1,5 +1,6 @@
 //! Errors from Naga → LPIR lowering.
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use core::fmt;
 
@@ -13,6 +14,11 @@ pub enum LowerError {
     UnsupportedType(String),
     /// Invariant violated or missing internal mapping (detail string).
     Internal(String),
+    /// Failure while lowering a specific GLSL user function.
+    InFunction {
+        name: String,
+        inner: Box<LowerError>,
+    },
 }
 
 impl fmt::Display for LowerError {
@@ -22,6 +28,9 @@ impl fmt::Display for LowerError {
             LowerError::UnsupportedStatement(s) => write!(f, "unsupported statement: {s}"),
             LowerError::UnsupportedType(s) => write!(f, "unsupported type: {s}"),
             LowerError::Internal(s) => write!(f, "internal lowering error: {s}"),
+            LowerError::InFunction { name, inner } => {
+                write!(f, "in function '{name}': {inner}")
+            }
         }
     }
 }

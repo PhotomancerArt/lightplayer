@@ -4174,6 +4174,7 @@ dependencies = [
  "cranelift-native 0.127.0",
  "lp-glsl-builtin-ids",
  "lp-glsl-builtins",
+ "lp-glsl-naga",
  "lpir",
  "target-lexicon",
 ]

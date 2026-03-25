@@ -12,7 +12,12 @@ const Q32_FRAC: i32 = (1 << Q32_SHIFT) - 1;
 
 /// Encode an f32 constant as a Q16.16 fixed-point i32.
 pub(crate) fn q32_encode(value: f32) -> i32 {
-    let scaled = (value as f64 * Q32_SCALE).round();
+    q32_encode_f64(f64::from(value))
+}
+
+/// Encode `f64` as Q16.16 (Level-1 call interchange).
+pub(crate) fn q32_encode_f64(value: f64) -> i32 {
+    let scaled = (value * Q32_SCALE).round();
     if scaled > Q32_MAX as f64 {
         Q32_MAX as i32
     } else if scaled < Q32_MIN as f64 {
@@ -20,6 +25,11 @@ pub(crate) fn q32_encode(value: f32) -> i32 {
     } else {
         scaled as i32
     }
+}
+
+/// Decode Q16.16 fixed-point to `f64`.
+pub(crate) fn q32_to_f64(raw: i32) -> f64 {
+    f64::from(raw) / Q32_SCALE
 }
 
 pub(crate) fn emit_fneg(builder: &mut FunctionBuilder, v: Value) -> Value {
