@@ -1,0 +1,18 @@
+[package]
+name = "lpir-cranelift"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Experimental LPIR → Cranelift JIT (Stage II)"
+
+[lints]
+workspace = true
+
+[dependencies]
+lpir = { path = "../lpir" }
+cranelift-codegen = { workspace = true, features = ["std", "host-arch"] }
+cranelift-frontend = { workspace = true, features = ["std"] }
+cranelift-module = { workspace = true, features = ["std"] }
+cranelift-jit = { workspace = true, features = ["std"] }
+cranelift-native = { workspace = true }
+target-lexicon = { workspace = true }

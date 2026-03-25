@@ -4163,6 +4163,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpir-cranelift"
+version = "40.0.0"
+dependencies = [
+ "cranelift-codegen 0.127.0",
+ "cranelift-frontend 0.127.0",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native 0.127.0",
+ "lpir",
+ "target-lexicon",
+]
+
+[[package]]
 name = "mach2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

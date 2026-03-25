@@ -18,6 +18,7 @@ members = [
     "lp-glsl/lp-glsl-filetests-gen-app",
     "lp-glsl/lp-glsl-frontend",
     "lp-glsl/lp-glsl-naga",
+    "lp-glsl/lpir-cranelift",
     "lp-glsl/lpir",
     "lp-glsl/lp-glsl-cranelift",
     "lp-glsl/lp-glsl-filetests",
