@@ -13,7 +13,7 @@
 - Level 3: `direct_call()` with flat pointer ABI and struct-return handling.
 - Tests: end-to-end GLSL → JIT → typed `call()`.
 
-**Out of scope:** filetest runner (Stage V), object/emulator (Stage V-b),
+**Out of scope:** filetest runner (Stage V2), object/emulator (Stage V1),
 lp-engine (Stage VI).
 
 ## Current state
@@ -42,14 +42,15 @@ lp-engine (Stage VI).
 
 ### Roadmap additions (emulator)
 
-- Stage V-b now owns `rv32.q32`; Stage IV stays host JIT only.
+- Stage V1 owns RV32 object + emulator in-crate; Stage V2 owns `rv32.q32`
+  filetests. Stage IV stays host JIT only.
 
 ## Questions
 
 ### Q1: Where should `GlslMetadata` (and related types) live?
 
 **Context:** Needed by `lpir-cranelift` for `call()`, possibly filetests (Stage
-V), and conceptually describes how to interpret an `IrModule` / `IrFunction`
+V2), and conceptually describes how to interpret an `IrModule` / `IrFunction`
 at the GLSL ABI level.
 
 **Answer:** **`lpir` crate** — main home for IR model and companion metadata.
