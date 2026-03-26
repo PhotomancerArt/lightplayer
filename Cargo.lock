@@ -3844,17 +3844,15 @@ dependencies = [
 name = "lp-engine"
 version = "40.0.0"
 dependencies = [
- "cranelift-codegen 0.127.0",
  "env_logger 0.11.9",
  "hashbrown 0.15.5",
  "libm",
  "log",
  "lp-engine-client",
  "lp-glsl-builtins",
- "lp-glsl-cranelift",
- "lp-glsl-jit-util",
  "lp-model",
  "lp-shared",
+ "lpir-cranelift",
  "serde",
  "unwinding",
 ]

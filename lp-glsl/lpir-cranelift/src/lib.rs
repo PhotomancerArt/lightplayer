@@ -773,6 +773,32 @@ func @apply_sin(v0:f32) -> f32 {
     }
 
     #[test]
+    fn direct_call_i32_buf_matches_call_i32() {
+        let ir = parse_module(
+            r"func @triple() -> (f32, f32, f32) {
+  v0:f32 = fconst.f32 1.0
+  v1:f32 = fconst.f32 2.0
+  v2:f32 = fconst.f32 0.5
+  return v0, v1, v2
+}",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let dc = m.direct_call("triple").expect("direct_call");
+        let via_vec = unsafe { dc.call_i32(&[]).expect("call_i32") };
+        let mut buf = [0i32; 3];
+        unsafe { dc.call_i32_buf(&[], &mut buf).expect("call_i32_buf") };
+        assert_eq!(via_vec.as_slice(), buf.as_slice());
+    }
+
+    #[test]
     fn compile_options_default() {
         let opts = CompileOptions::default();
         assert_eq!(opts.float_mode, FloatMode::Q32);

@@ -34,6 +34,11 @@ pub struct JitModule {
     pub(crate) float_mode: FloatMode,
 }
 
+// SAFETY: Finalized JIT code is immutable after `build_jit_module` returns. `JITModule` is not
+// mutated on the post-compile call path; `NodeRuntime: Send + Sync` needs this for the engine.
+unsafe impl Send for JitModule {}
+unsafe impl Sync for JitModule {}
+
 impl JitModule {
     /// Raw finalized code pointer for a function index (same order as source [`IrModule::functions`]).
     pub fn finalized_ptr_by_index(&self, index: usize) -> *const u8 {
