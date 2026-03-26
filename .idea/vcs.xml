@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lp-fw/esp-println-fork" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/lp-glsl/pp-rs" vcs="Git" />
   </component>
 </project>
