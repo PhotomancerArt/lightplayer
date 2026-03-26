@@ -51,7 +51,34 @@ pub use object_link::link_object_with_builtins;
 pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
 pub use values::{CallError, CallResult, GlslQ32, GlslReturn};
 
+/// Options-only tests: run under `--no-default-features` (no host JIT execution).
 #[cfg(test)]
+mod tests_options {
+    use super::{
+        AddSubMode, CompileOptions, DivMode, FloatMode, MemoryStrategy, MulMode, Q32Options,
+    };
+
+    #[test]
+    fn compile_options_default() {
+        let opts = CompileOptions::default();
+        assert_eq!(opts.float_mode, FloatMode::Q32);
+        assert_eq!(opts.q32_options, Q32Options::default());
+        assert_eq!(opts.memory_strategy, MemoryStrategy::Default);
+        assert_eq!(opts.max_errors, None);
+    }
+
+    #[test]
+    fn q32_options_default_is_saturating() {
+        let q = Q32Options::default();
+        assert_eq!(q.add_sub, AddSubMode::Saturating);
+        assert_eq!(q.mul, MulMode::Saturating);
+        assert_eq!(q.div, DivMode::Saturating);
+    }
+}
+
+/// Host JIT tests: `jit_from_ir` with `std` uses the native ISA. Without `std`, JIT targets RV32
+/// and executing it on the host is undefined — those cases are covered by `riscv32-emu` / fw-emu.
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use core::mem;
 
@@ -796,23 +823,6 @@ func @apply_sin(v0:f32) -> f32 {
         let mut buf = [0i32; 3];
         unsafe { dc.call_i32_buf(&[], &mut buf).expect("call_i32_buf") };
         assert_eq!(via_vec.as_slice(), buf.as_slice());
-    }
-
-    #[test]
-    fn compile_options_default() {
-        let opts = CompileOptions::default();
-        assert_eq!(opts.float_mode, FloatMode::Q32);
-        assert_eq!(opts.q32_options, Q32Options::default());
-        assert_eq!(opts.memory_strategy, MemoryStrategy::Default);
-        assert_eq!(opts.max_errors, None);
-    }
-
-    #[test]
-    fn q32_options_default_is_saturating() {
-        let q = Q32Options::default();
-        assert_eq!(q.add_sub, AddSubMode::Saturating);
-        assert_eq!(q.mul, MulMode::Saturating);
-        assert_eq!(q.div, DivMode::Saturating);
     }
 
     #[test]

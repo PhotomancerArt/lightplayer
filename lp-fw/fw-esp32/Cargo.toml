@@ -48,19 +48,9 @@ lp-server = { path = "../../lp-core/lp-server", default-features = false, featur
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true, features = ["ser-write-json"] }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
-lp-engine = { path = "../../lp-core/lp-engine", default-features = false, optional = true }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
-# Dependencies for optional GLSL compilation features
-lp-glsl-cranelift = { path = "../../lp-glsl/lp-glsl-cranelift", default-features = false, features = ["core"], optional = true }
-lp-glsl-jit-util = { path = "../../lp-glsl/lp-glsl-jit-util", default-features = false, optional = true }
-lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", optional = true }
-cranelift-codegen = { workspace = true, features = ["riscv32"], optional = true }
-cranelift-frontend = { workspace = true, features = ["core"], optional = true }
-cranelift-module = { workspace = true, features = ["core"], optional = true }
-cranelift-control = { workspace = true, optional = true }
-target-lexicon = { workspace = true, optional = true }
 smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"

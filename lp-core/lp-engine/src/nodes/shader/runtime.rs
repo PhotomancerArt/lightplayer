@@ -132,6 +132,7 @@ impl NodeRuntime for ShaderRuntime {
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
         #[cfg(not(feature = "std"))]
         {
+            let _ = ctx;
             return Err(Error::Other {
                 message: String::from("Shader JIT requires `lp-engine` `std` feature"),
             });
