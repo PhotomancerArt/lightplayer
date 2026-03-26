@@ -79,6 +79,44 @@ fn test_sync_with_changes() {
 }
 
 #[test]
+fn test_detail_only_entry_uses_pending_status_changed() {
+    use alloc::boxed::Box;
+    use lp_model::nodes::shader::ShaderState;
+    use lp_model::project::api::{NodeChange, NodeDetail, NodeState, NodeStatus};
+
+    let mut view = ClientProjectView::new();
+    let handle = NodeHandle::new(1);
+    let path = lp_model::LpPathBuf::from("/src/s.shader");
+    let frame = FrameId::new(1);
+
+    let mut details = BTreeMap::new();
+    details.insert(
+        handle,
+        NodeDetail {
+            path: path.clone(),
+            config: Box::new(lp_model::nodes::shader::ShaderConfig::default()),
+            state: NodeState::Shader(ShaderState::new(frame)),
+        },
+    );
+
+    let response = ProjectResponse::GetChanges {
+        current_frame: frame,
+        since_frame: FrameId::default(),
+        node_handles: vec![handle],
+        node_changes: vec![NodeChange::StatusChanged {
+            handle,
+            status: NodeStatus::Ok,
+        }],
+        node_details: details,
+        theoretical_fps: None,
+    };
+
+    view.apply_changes(&response).unwrap();
+    let entry = view.nodes.get(&handle).expect("node");
+    assert!(matches!(entry.status, NodeStatus::Ok));
+}
+
+#[test]
 fn test_partial_state_merge_texture() {
     use alloc::boxed::Box;
     use lp_model::nodes::texture::{TextureConfig, TextureState};

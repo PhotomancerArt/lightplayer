@@ -7,9 +7,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use fw_tests::shader_emu_gate::assert_shader_compiled_ok;
+use fw_tests::sync_emu_project_view;
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
-use lp_client::{LpClient, serializable_response_to_project_response};
+use lp_client::LpClient;
 use lp_engine_client::ClientProjectView;
 use lp_model::{AsLpPath, FrameId};
 use lp_riscv_elf::load_elf;
@@ -73,7 +75,7 @@ async fn test_scene_render_fw_emu() {
 
     // Add nodes
     let texture_path = builder.texture().width(2).height(2).add(&mut builder);
-    builder.shader_basic(&texture_path);
+    let shader_path = builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
@@ -107,16 +109,18 @@ async fn test_scene_render_fw_emu() {
         .await
         .expect("Failed to load project");
 
-    // Create client view for syncing
     let mut client_view = ClientProjectView::new();
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
 
-    // Initial sync to get all nodes (they may not be initialized yet)
-    sync_client_view(&client, project_handle, &mut client_view).await;
+    let shader_handle = client_view
+        .nodes
+        .iter()
+        .find(|(_, entry)| entry.path.as_str() == shader_path.as_str())
+        .map(|(handle, _)| *handle)
+        .expect("Shader node not found in client view");
 
-    // Initial sync to get all nodes (using All to populate the view)
-    sync_client_view(&client, project_handle, &mut client_view).await;
+    client_view.watch_detail(shader_handle);
 
-    // Find output node handle by path
     let output_handle = client_view
         .nodes
         .iter()
@@ -124,8 +128,10 @@ async fn test_scene_render_fw_emu() {
         .map(|(handle, _)| *handle)
         .expect("Output node not found in client view");
 
-    // Watch output for detail changes
     client_view.watch_detail(output_handle);
+
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
+    assert_shader_compiled_ok(&client_view, shader_path.as_str());
 
     // ---------------------------------------------------------------------------------------------
     // Act & Assert: Render frames
@@ -139,7 +145,7 @@ async fn test_scene_render_fw_emu() {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(40);
     }
-    sync_client_view(&client, project_handle, &mut client_view).await;
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
     assert_output_red(&client_view, output_handle, 10);
 
     // Frame 2
@@ -147,7 +153,7 @@ async fn test_scene_render_fw_emu() {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(40);
     }
-    sync_client_view(&client, project_handle, &mut client_view).await;
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
     assert_output_red(&client_view, output_handle, 20);
 
     // Frame 3
@@ -155,7 +161,7 @@ async fn test_scene_render_fw_emu() {
         let mut emu = emulator_arc.lock().unwrap();
         emu.advance_time(40);
     }
-    sync_client_view(&client, project_handle, &mut client_view).await;
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
     // NOTE: This really should be 30, but there is some minor issue causing imprecision
     //       it's not important to fix right now, but it may cause issues later and should
     //       be fixed.
@@ -205,32 +211,6 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
     }
 
     files
-}
-
-/// Sync client view with server
-async fn sync_client_view(
-    client: &LpClient,
-    handle: lp_model::project::handle::ProjectHandle,
-    view: &mut ClientProjectView,
-) {
-    // For initial sync (empty view), request all nodes to populate the list
-    // Otherwise use normal detail_specifier
-    let is_initial_sync = view.nodes.is_empty();
-    let detail_spec = if is_initial_sync {
-        lp_model::project::api::ApiNodeSpecifier::All
-    } else {
-        view.detail_specifier()
-    };
-
-    let response = client
-        .project_sync_internal(handle, Some(view.frame_id), detail_spec)
-        .await
-        .expect("Failed to sync project");
-
-    let project_response =
-        serializable_response_to_project_response(response).expect("Failed to convert response");
-    view.apply_changes(&project_response)
-        .expect("Failed to apply changes");
 }
 
 /// Assert that the output channel has the expected red value

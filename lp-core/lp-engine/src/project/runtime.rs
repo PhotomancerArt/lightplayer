@@ -931,6 +931,19 @@ impl ProjectRuntime {
 
         // Collect changes and details
         for (handle, entry) in &self.nodes {
+            // Emit `Created` before `StatusChanged` so clients that apply changes in order create
+            // the entry first; otherwise `StatusChanged` is a no-op and `Created` leaves
+            // `NodeStatus::Created` (see `ClientProjectView::apply_changes`).
+            if entry.config_ver.as_i64() > since_frame.as_i64()
+                && entry.config_ver == entry.state_ver
+            {
+                node_changes.push(NodeChange::Created {
+                    handle: *handle,
+                    path: entry.path.clone(),
+                    kind: entry.kind,
+                });
+            }
+
             // Check for changes since since_frame
             if entry.config_ver.as_i64() > since_frame.as_i64() {
                 node_changes.push(NodeChange::ConfigUpdated {
@@ -965,17 +978,6 @@ impl ProjectRuntime {
                 node_changes.push(NodeChange::StatusChanged {
                     handle: *handle,
                     status: api_status,
-                });
-            }
-
-            // Check if node was created after since_frame
-            if entry.config_ver.as_i64() > since_frame.as_i64()
-                && entry.config_ver == entry.state_ver
-            {
-                node_changes.push(NodeChange::Created {
-                    handle: *handle,
-                    path: entry.path.clone(),
-                    kind: entry.kind,
                 });
             }
 

@@ -169,9 +169,9 @@ impl NodeRuntime for ShaderRuntime {
             self.jit_module = None;
             self.direct_call = None;
         }
-        self.state
-            .glsl_code
-            .set(lp_model::project::FrameId::default(), String::new());
+        // Keep `glsl_code` for the debug UI and for peers: `handle_fs_changes` sheds *all* nodes
+        // before one shader's GLSL edit, but only that node receives `handle_fs_change` — clearing
+        // source here would leave other shaders blank until reloaded.
         Ok(())
     }
 
@@ -449,9 +449,11 @@ impl ShaderRuntime {
 
     #[cfg(not(feature = "std"))]
     fn compile_shader(&mut self, _glsl_source: &str) -> Result<(), Error> {
-        Err(Error::Other {
-            message: String::from("Shader JIT requires `lp-engine` `std` feature"),
-        })
+        let msg = String::from("Shader JIT requires `lp-engine` `std` feature");
+        self.compilation_error = Some(msg.clone());
+        let frame_id = FrameId::default();
+        self.state.error.set(frame_id, Some(msg.clone()));
+        Err(Error::Other { message: msg })
     }
 
     fn load_and_compile_shader(
@@ -460,6 +462,11 @@ impl ShaderRuntime {
         ctx: &dyn NodeInitContext,
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
+        let frame_id = FrameId::default();
+        // Expose source to clients even when compilation fails (e.g. missing `std` misconfig) or
+        // after a global shed dropped JIT state.
+        self.state.glsl_code.set(frame_id, glsl_source.clone());
+
         let start_ms = ctx.now_ms();
         let result = self.compile_shader(glsl_source.as_str());
         if result.is_ok() {
@@ -475,8 +482,6 @@ impl ShaderRuntime {
             }
         }
         result?;
-        let frame_id = FrameId::default();
-        self.state.glsl_code.set(frame_id, glsl_source);
         Ok(())
     }
 }

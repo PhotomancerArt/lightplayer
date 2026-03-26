@@ -4,9 +4,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use fw_tests::shader_emu_gate::assert_shader_compiled_ok;
+use fw_tests::sync_emu_project_view;
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
 use log;
 use lp_client::LpClient;
+use lp_engine_client::ClientProjectView;
 use lp_model::AsLpPath;
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
@@ -82,7 +85,7 @@ async fn test_alloc_trace_produces_valid_output() {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
     let texture_path = builder.texture().width(2).height(2).add(&mut builder);
-    builder.shader_basic(&texture_path);
+    let shader_path = builder.shader_basic(&texture_path);
     let output_path = builder.output_basic();
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
@@ -98,11 +101,24 @@ async fn test_alloc_trace_produces_valid_output() {
             .expect("Failed to write project file");
     }
 
-    // Load project
-    let _project_handle = client
+    let project_handle = client
         .project_load(project_dir)
         .await
         .expect("Failed to load project");
+
+    let mut client_view = ClientProjectView::new();
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
+
+    let shader_handle = client_view
+        .nodes
+        .iter()
+        .find(|(_, entry)| entry.path.as_str() == shader_path.as_str())
+        .map(|(handle, _)| *handle)
+        .expect("Shader node not found in client view");
+
+    client_view.watch_detail(shader_handle);
+    sync_emu_project_view(&client, project_handle, &mut client_view).await;
+    assert_shader_compiled_ok(&client_view, shader_path.as_str());
 
     // Tick a few frames
     for _ in 0..3 {
