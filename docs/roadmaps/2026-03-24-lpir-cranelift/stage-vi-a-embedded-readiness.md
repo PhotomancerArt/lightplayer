@@ -70,3 +70,9 @@ the compiler work on constrained hardware" effort.
 
 ~400–600 lines of feature gating, `CompileOptions` expansion, and memory
 strategy work. Plus Cranelift dependency flag plumbing.
+
+## Firmware validation (embedded JIT)
+
+On-device GLSL → JIT is exercised by `fw-tests` (`scene_render_emu`, `alloc_trace_emu`) and by
+`cargo check -p fw-esp32` on `riscv32imac-unknown-none-elf` with `server`. See
+`docs/plans-done/2026-03-26-fw-embedded-shader-jit/00-notes.md` for the copy-paste acceptance commands.

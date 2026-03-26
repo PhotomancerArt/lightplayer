@@ -24,11 +24,20 @@ Related roadmap context: `docs/roadmaps/2026-03-24-lpir-cranelift/stage-vi-a-emb
 
 ## Current state of the codebase
 
-- **`pp-rs` / `lp-glsl-naga`:** `no_std` path exists; `cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf` works (prerequisite done).
-- **`lpir-cranelift`:** Crate is `#![no_std]` + `alloc`; **`jit()`** (GLSL entry) is **`#[cfg(feature = "std")]`** only because **`lp-glsl-naga`** was tied to the **`std`** feature in `Cargo.toml` — **stale**; **`lp-glsl-naga` is `no_std`**. **`jit_from_ir` / `build_jit_module`** exist without `std`. **`jit_memory`** exists for non-host JIT allocation.
-- **`lp-engine` `ShaderRuntime`:** **`compile_shader`** is real only with **`feature = "std"`**; otherwise a stub returning *"Shader JIT requires `lp-engine` `std` feature"*.
-- **`fw-emu`:** `lp-server = { default-features = false, features = ["panic-recovery"] }` → **`lp-engine` without `std`** → stub path → **`fw-tests` fail** at `shader_emu_gate` (expected today).
-- **`fw-esp32`:** Same pattern: `lp-server` optional with **`default-features = false`**, **`panic-recovery` only** — no shader compile path until features are extended.
+- **`pp-rs` / `lp-glsl-naga`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
+- **`lpir-cranelift`:** `glsl` feature enables **`lp-glsl-naga`**; **`jit()`** is **`#[cfg(feature = "glsl")]`**, not `std`. Default features are **`std` + `glsl`** for host; embedded uses **`glsl`** without **`std`**. RISC-V32 uses **StructReturn** when a function returns more than two scalar words (Cranelift #9510).
+- **`lp-engine`:** **`lpir-cranelift`** dependency includes **`features = ["glsl"]`**; **`ShaderRuntime`** compiles shaders without **`std`**.
+- **`fw-emu` / `fw-esp32`:** **`lp-server`** with **`default-features = false`** still pulls the full GLSL JIT via **`lp-engine`**’s **`glsl`** dependency feature.
+
+## Acceptance checklist
+
+```bash
+cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
+cargo check -p lp-server
+cargo check -p lpir-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
+```
 
 ## Questions (to resolve one at a time)
 
