@@ -74,6 +74,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("registry.rs");
     generate_registry(&registry_path, &builtins);
 
+    let lpir_builtin_abi_path = workspace_root
+        .join("lpir-cranelift")
+        .join("src")
+        .join("generated_builtin_abi.rs");
+    generate_lpir_cranelift_builtin_abi(&lpir_builtin_abi_path, &builtins);
+
     // Generate builtin_refs.rs (RISC-V emu app)
     let builtin_refs_path = workspace_root
         .join("lp-glsl-builtins-emu-app")
@@ -157,6 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[
             &builtin_ids_path,
             &registry_path,
+            &lpir_builtin_abi_path,
             &builtin_refs_path,
             &builtin_refs_wasm_path,
             &glsl_mod_rs_path,
@@ -888,6 +895,180 @@ pub enum BuiltinId {
     fs::write(path, output).expect("Failed to write builtin-ids lib.rs");
 }
 
+/// Split comma-separated list at nesting depth 0 (for simple `extern "C"` fn param lists).
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let mut depth: i32 = 0;
+    let mut start = 0;
+    let mut out = Vec::new();
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                let t = s[start..i].trim();
+                if !t.is_empty() {
+                    out.push(t.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let t = s[start..].trim();
+    if !t.is_empty() {
+        out.push(t.to_string());
+    }
+    out
+}
+
+fn parse_rust_extern_sig(rust_sig: &str) -> (Vec<String>, String) {
+    let rest = rust_sig
+        .split("fn(")
+        .nth(1)
+        .unwrap_or_else(|| panic!("invalid rust_signature (no fn(: {:?}", rust_sig));
+    let (params_str, ret_str) = rest
+        .split_once(") -> ")
+        .unwrap_or_else(|| panic!("invalid rust_signature (no ) -> {:?}", rust_sig));
+    (
+        split_top_level_commas(params_str),
+        ret_str.trim().to_string(),
+    )
+}
+
+fn cranelift_push_for_param_type(ty: &str) -> &'static str {
+    let t = ty.trim();
+    if t.contains('*') {
+        return "sig.params.push(AbiParam::new(pointer_type));";
+    }
+    match t {
+        "i32" | "u32" | "i8" | "u8" | "i16" | "u16" | "i64" | "u64" | "isize" | "usize"
+        | "bool" => "sig.params.push(AbiParam::new(types::I32));",
+        "f32" => "sig.params.push(AbiParam::new(types::F32));",
+        "f64" => "sig.params.push(AbiParam::new(types::F64));",
+        _ => panic!("unsupported builtin param type `{t}`", t = t),
+    }
+}
+
+fn cranelift_push_for_return_type(ty: &str) -> Option<&'static str> {
+    match ty.trim() {
+        "()" => None,
+        "i32" | "u32" | "i8" | "u8" | "i16" | "u16" | "i64" | "u64" | "isize" | "usize"
+        | "bool" => Some("sig.returns.push(AbiParam::new(types::I32));"),
+        "f32" => Some("sig.returns.push(AbiParam::new(types::F32));"),
+        "f64" => Some("sig.returns.push(AbiParam::new(types::F64));"),
+        other => panic!("unsupported return type `{other}` (rust_signature)"),
+    }
+}
+
+/// Grouping key: Cranelift ABI push lines (no comment), derived from each builtin's `rust_signature`.
+fn signature_abi_key(rust_sig: &str) -> String {
+    let (params, ret) = parse_rust_extern_sig(rust_sig);
+    let mut parts = Vec::new();
+    for p in &params {
+        parts.push(cranelift_push_for_param_type(p).to_string());
+    }
+    if let Some(r) = cranelift_push_for_return_type(&ret) {
+        parts.push(r.to_string());
+    }
+    parts.join("\n")
+}
+
+fn emit_grouped_signature_match_arms(builtins: &[BuiltinInfo]) -> String {
+    use std::collections::HashMap;
+    let mut groups: HashMap<String, Vec<&BuiltinInfo>> = HashMap::new();
+    for b in builtins {
+        let key = signature_abi_key(&b.rust_signature);
+        groups.entry(key).or_default().push(b);
+    }
+    let mut entries: Vec<_> = groups.into_iter().collect();
+    entries.sort_by(|a, b| a.1[0].enum_variant.cmp(&b.1[0].enum_variant));
+    let mut s = String::new();
+    for (key, group) in entries {
+        let repr = &group[0].rust_signature;
+        s.push_str("            ");
+        for (i, b) in group.iter().enumerate() {
+            if i > 0 {
+                s.push_str(" | ");
+            }
+            s.push_str(&format!("BuiltinId::{}", b.enum_variant));
+        }
+        s.push_str(" => {\n");
+        s.push_str(&format!("                // {}\n", repr.replace('\n', " ")));
+        for line in key.lines() {
+            s.push_str("                ");
+            s.push_str(line);
+            s.push('\n');
+        }
+        s.push_str("            }\n");
+    }
+    s
+}
+
+fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInfo]) {
+    let mut glsl_files: BTreeSet<String> = BTreeSet::new();
+    let mut lpir_files: BTreeSet<String> = BTreeSet::new();
+    let mut lpfx_roots: BTreeSet<String> = BTreeSet::new();
+
+    for builtin in builtins {
+        let components: Vec<&str> = builtin.module_path.split("::").collect();
+        match components.first().copied() {
+            Some("glsl") if components.len() >= 2 => {
+                glsl_files.insert(components[1].to_string());
+            }
+            Some("lpir") if components.len() >= 2 => {
+                lpir_files.insert(components[1].to_string());
+            }
+            Some("lpfx") if components.len() >= 2 => {
+                lpfx_roots.insert(format!("lpfx::{}", components[1]));
+            }
+            _ => {}
+        }
+    }
+
+    let mut import_parts: Vec<String> = Vec::new();
+    if !glsl_files.is_empty() {
+        import_parts.push(format!(
+            "glsl::{{{}}}",
+            glsl_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !lpir_files.is_empty() {
+        import_parts.push(format!(
+            "lpir::{{{}}}",
+            lpir_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    import_parts.extend(lpfx_roots);
+    import_parts.sort();
+
+    if !import_parts.is_empty() {
+        output.push_str(&format!(
+            "    use lp_glsl_builtins::builtins::{{{}}};\n",
+            import_parts.join(", ")
+        ));
+    }
+
+    output.push_str("    match builtin {\n");
+    if builtins.is_empty() {
+        output.push_str("        BuiltinId::_Placeholder => core::ptr::null(),\n");
+    } else {
+        for builtin in builtins {
+            let components: Vec<&str> = builtin.module_path.split("::").collect();
+            let usage_path = if components.len() >= 2 {
+                components[1..].join("::")
+            } else {
+                builtin.module_path.clone()
+            };
+
+            output.push_str(&format!(
+                "        BuiltinId::{} => {}::{} as *const u8,\n",
+                builtin.enum_variant, usage_path, builtin.function_name
+            ));
+        }
+    }
+    output.push_str("    }\n");
+}
+
 fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
 //!
@@ -963,358 +1144,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
         output.push_str("                // Placeholder - no builtins defined\n");
         output.push_str("            }\n");
     } else {
-        // Detect StructReturn functions (void return + pointer first param)
-        let uses_struct_return = |b: &&BuiltinInfo| -> bool {
-            b.rust_signature.contains("-> ()") && b.rust_signature.contains("*mut ")
-        };
-
-        // Detect functions with out parameters that return a value (not void)
-        // These have *mut in params but return i32 (or other non-void type)
-        let uses_out_param = |b: &&BuiltinInfo| -> bool {
-            // Check for functions that return a value (not void) and have *mut pointer params
-            let has_non_void_return = !b.rust_signature.contains("-> ()");
-            // Check for *mut (with or without space) - signatures are normalized to *mut
-            let has_mut_ptr =
-                b.rust_signature.contains("*mut") || b.function_name.contains("psrdnoise");
-            has_non_void_return && has_mut_ptr
-        };
-
-        // Separate StructReturn functions, out-param functions, and regular functions
-        let (struct_return_builtins, rest): (Vec<_>, Vec<_>) =
-            builtins.iter().partition(|b| uses_struct_return(b));
-        let (mut out_param_builtins, regular_builtins): (Vec<_>, Vec<_>) =
-            rest.iter().partition(|b| uses_out_param(b));
-
-        // Manually add psrdnoise functions if they weren't detected (workaround for detection issue)
-        for builtin in builtins.iter() {
-            if builtin.function_name.contains("psrdnoise") {
-                let already_added = out_param_builtins
-                    .iter()
-                    .any(|b: &&BuiltinInfo| b.function_name == builtin.function_name);
-                if !already_added {
-                    out_param_builtins.push(builtin);
-                }
-            }
-        }
-
-        // Helper to count i32/f32 parameters before the pointer in a signature
-        // Both i32 and f32 map to types::I32 in Cranelift signatures
-        let count_i32_before_pointer = |sig: &str| -> usize {
-            // Extract the parameter list: "extern \"C\" fn(i32, i32, *mut i32, u32) -> i32"
-            // We want to find the part between fn( and ) ->
-            if let Some(start) = sig.find("fn(")
-                && let Some(end) = sig.find(") ->")
-            {
-                let params_str = &sig[start + 3..end];
-                let params: Vec<&str> = params_str.split(',').map(|s| s.trim()).collect();
-                // Count params that are "i32" or "f32" before we hit "*mut"
-                let mut count = 0;
-                for param in params {
-                    if param.contains("*mut") {
-                        break;
-                    }
-                    // Check if param is "i32" or "f32" (exact match or starts with "i32"/"f32" followed by space/end)
-                    if param == "i32"
-                        || param == "f32"
-                        || (param.starts_with("i32")
-                            && (param.len() == 3 || param.chars().nth(3) == Some(' ')))
-                        || (param.starts_with("f32")
-                            && (param.len() == 3 || param.chars().nth(3) == Some(' ')))
-                    {
-                        count += 1;
-                    }
-                }
-                return count;
-            }
-            0
-        };
-
-        // Group out-param functions by number of i32 params before pointer
-        let mut out_param_groups: std::collections::HashMap<usize, Vec<_>> =
-            std::collections::HashMap::new();
-        for builtin in &out_param_builtins {
-            let i32_count = count_i32_before_pointer(&builtin.rust_signature);
-            out_param_groups
-                .entry(i32_count)
-                .or_insert_with(Vec::new)
-                .push(builtin);
-        }
-
-        // Generate out-param signatures (functions with pointer params that return a value)
-        for (i32_count, group) in out_param_groups.iter() {
-            if group.is_empty() {
-                continue;
-            }
-            output.push_str("            ");
-            for (i, builtin) in group.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str(&format!(
-                "                // Out parameter function: ({} i32 params, pointer_type) -> i32\n",
-                i32_count
-            ));
-            // Add i32 parameters
-            for _ in 0..*i32_count {
-                output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            }
-            // Add pointer parameter
-            output.push_str("                sig.params.push(AbiParam::new(pointer_type));\n");
-            // Add return value
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        // Group StructReturn functions by parameter count
-        let struct_return_6_params: Vec<_> = struct_return_builtins
-            .iter()
-            .filter(|b| b.param_count == 6)
-            .collect();
-        let struct_return_5_params: Vec<_> = struct_return_builtins
-            .iter()
-            .filter(|b| b.param_count == 5)
-            .collect();
-        let struct_return_4_params: Vec<_> = struct_return_builtins
-            .iter()
-            .filter(|b| b.param_count == 4)
-            .collect();
-        let struct_return_3_params: Vec<_> = struct_return_builtins
-            .iter()
-            .filter(|b| b.param_count == 3)
-            .collect();
-        let struct_return_2_params: Vec<_> = struct_return_builtins
-            .iter()
-            .filter(|b| b.param_count == 2)
-            .collect();
-
-        // Generate StructReturn signatures
-        if !struct_return_6_params.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in struct_return_6_params.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str(
-                "                // Result pointer as normal parameter: (pointer_type, i32, i32, i32, i32, i32) -> ()\n",
-            );
-            output.push_str("                sig.params.insert(0, AbiParam::new(pointer_type));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                // Functions with result pointer return void\n");
-            output.push_str("            }\n");
-        }
-
-        if !struct_return_5_params.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in struct_return_5_params.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str(
-                "                // Result pointer as normal parameter: (pointer_type, i32, i32, i32, i32) -> ()\n",
-            );
-            output.push_str("                sig.params.insert(0, AbiParam::new(pointer_type));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                // Functions with result pointer return void\n");
-            output.push_str("            }\n");
-        }
-
-        if !struct_return_4_params.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in struct_return_4_params.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // Result pointer as normal parameter: (pointer_type, i32, i32, i32) -> ()\n");
-            output.push_str("                sig.params.insert(0, AbiParam::new(pointer_type));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                // Functions with result pointer return void\n");
-            output.push_str("            }\n");
-        }
-
-        if !struct_return_3_params.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in struct_return_3_params.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // Result pointer as normal parameter: (pointer_type, i32, i32) -> ()\n");
-            output.push_str("                sig.params.insert(0, AbiParam::new(pointer_type));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                // Functions with result pointer return void\n");
-            output.push_str("            }\n");
-        }
-
-        if !struct_return_2_params.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in struct_return_2_params.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // Result pointer as normal parameter: (pointer_type, i32) -> ()\n");
-            output.push_str("                sig.params.insert(0, AbiParam::new(pointer_type));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                // Functions with result pointer return void\n");
-            output.push_str("            }\n");
-        }
-
-        // Group regular functions by parameter count
-        let senary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 6)
-            .collect();
-        let quinary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 5)
-            .collect();
-        let quaternary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 4)
-            .collect();
-        let ternary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 3)
-            .collect();
-        let binary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 2)
-            .collect();
-        let unary_ops: Vec<_> = regular_builtins
-            .iter()
-            .filter(|b| b.param_count == 1)
-            .collect();
-
-        if !senary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in senary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32, i32, i32, i32, i32, i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        if !quinary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in quinary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32, i32, i32, i32, i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        if !quaternary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in quaternary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32, i32, i32, i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        if !ternary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in ternary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32, i32, i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        if !binary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in binary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32, i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
-
-        if !unary_ops.is_empty() {
-            output.push_str("            ");
-            for (i, builtin) in unary_ops.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(" | ");
-                }
-                output.push_str(&format!("BuiltinId::{}", builtin.enum_variant));
-            }
-            output.push_str(" => {\n");
-            output.push_str("                // (i32) -> i32\n");
-            output.push_str("                sig.params.push(AbiParam::new(types::I32));\n");
-            output.push_str("                sig.returns.push(AbiParam::new(types::I32));\n");
-            output.push_str("            }\n");
-        }
+        output.push_str(&emit_grouped_signature_match_arms(builtins));
     }
 
     output.push_str("    }\n");
@@ -1326,71 +1156,7 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("///\n");
     output.push_str("/// Returns the function pointer that can be registered with JITModule.\n");
     output.push_str("pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {\n");
-
-    // Collect unique import paths for `use lp_glsl_builtins::builtins::{ glsl::{...}, lpir::{...}, lpfx::..., ... };`
-    let mut glsl_files: BTreeSet<String> = BTreeSet::new();
-    let mut lpir_files: BTreeSet<String> = BTreeSet::new();
-    let mut lpfx_roots: BTreeSet<String> = BTreeSet::new();
-
-    for builtin in builtins {
-        let components: Vec<&str> = builtin.module_path.split("::").collect();
-        match components.first().copied() {
-            Some("glsl") if components.len() >= 2 => {
-                glsl_files.insert(components[1].to_string());
-            }
-            Some("lpir") if components.len() >= 2 => {
-                lpir_files.insert(components[1].to_string());
-            }
-            Some("lpfx") if components.len() >= 2 => {
-                lpfx_roots.insert(format!("lpfx::{}", components[1]));
-            }
-            _ => {}
-        }
-    }
-
-    let mut import_parts: Vec<String> = Vec::new();
-    if !glsl_files.is_empty() {
-        import_parts.push(format!(
-            "glsl::{{{}}}",
-            glsl_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if !lpir_files.is_empty() {
-        import_parts.push(format!(
-            "lpir::{{{}}}",
-            lpir_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    import_parts.extend(lpfx_roots);
-    import_parts.sort();
-
-    if !import_parts.is_empty() {
-        output.push_str(&format!(
-            "    use lp_glsl_builtins::builtins::{{{}}};\n",
-            import_parts.join(", ")
-        ));
-    }
-
-    output.push_str("    match builtin {\n");
-    if builtins.is_empty() {
-        output.push_str("        BuiltinId::_Placeholder => core::ptr::null(),\n");
-    } else {
-        for builtin in builtins {
-            // Path prefix for `usage_path::__lp_*` in the match (after `use` above).
-            let components: Vec<&str> = builtin.module_path.split("::").collect();
-            let usage_path = if components.len() >= 2 {
-                components[1..].join("::")
-            } else {
-                builtin.module_path.clone()
-            };
-
-            output.push_str(&format!(
-                "        BuiltinId::{} => {}::{} as *const u8,\n",
-                builtin.enum_variant, usage_path, builtin.function_name
-            ));
-        }
-    }
-    output.push_str("    }\n");
+    append_get_function_pointer_match(&mut output, builtins);
     output.push_str("}\n\n");
 
     // Generate declare_builtins and related functions
@@ -1472,6 +1238,57 @@ fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("}\n");
 
     fs::write(path, output).expect("Failed to write registry.rs");
+}
+
+/// Same `rust_signature` → Cranelift ABI mapping as `lp-glsl-cranelift` `registry.rs`, with
+/// `CallConv` supplied by the caller (embedded JIT uses the ISA default, not hardcoded SystemV where it differs).
+fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
+    let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
+//!
+//! To regenerate this file, run:
+//!     cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl/lp-glsl-builtins-gen-app/Cargo.toml
+//!
+//! Or use the build script:
+//!     scripts/build-builtins.sh
+
+//! Cranelift signatures and function pointers for [`BuiltinId`].
+//!
+//! Generated from the same `rust_signature` strings as `lp-glsl-cranelift` `registry.rs`.
+//! Changing an `extern "C"` builtin in `lp-glsl-builtins` without re-running codegen will desync
+//! this file and fail `cargo check` until you regenerate.
+
+"#;
+
+    let mut output = String::from(header);
+    output.push_str("use cranelift_codegen::ir::{AbiParam, Signature, types};\n");
+    output.push_str("use cranelift_codegen::isa::CallConv;\n");
+    output.push_str("use lp_glsl_builtin_ids::BuiltinId;\n\n");
+    output.push_str(
+        "pub(crate) fn cranelift_sig_for_builtin_inner(\n\
+    builtin: BuiltinId,\n\
+    pointer_type: types::Type,\n\
+    call_conv: CallConv,\n\
+) -> Signature {\n",
+    );
+    output.push_str("    let mut sig = Signature::new(call_conv);\n");
+    output.push_str("    match builtin {\n");
+    if builtins.is_empty() {
+        output.push_str("        BuiltinId::_Placeholder => {}\n");
+    } else {
+        output.push_str(&emit_grouped_signature_match_arms(builtins));
+    }
+    output.push_str("    }\n");
+    output.push_str("    sig\n");
+    output.push_str("}\n\n");
+    output
+        .push_str("pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {\n");
+    append_get_function_pointer_match(&mut output, builtins);
+    output.push_str("}\n");
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create lpir-cranelift generated parent dir");
+    }
+    fs::write(path, output).expect("Failed to write generated_builtin_abi.rs");
 }
 
 fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo]) {

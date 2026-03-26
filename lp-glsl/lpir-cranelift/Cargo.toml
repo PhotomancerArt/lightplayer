@@ -10,7 +10,8 @@ build = "build.rs"
 workspace = true
 
 [features]
-default = ["std"]
+# Host: `std` (libstd + native ISA). GLSL front end is separate (`glsl`); embedded JIT uses `glsl` without `std`.
+default = ["std", "glsl"]
 std = [
     "cranelift-codegen/std",
     "cranelift-codegen/host-arch",
@@ -18,13 +19,15 @@ std = [
     "cranelift-module/std",
     "cranelift-jit/std",
     "dep:cranelift-native",
-    "dep:lp-glsl-naga",
     "lp-glsl-builtins/std",
 ]
+# GLSL string entry (`jit`) via `lp-glsl-naga`; independent of `std` for on-device builds.
+glsl = ["dep:lp-glsl-naga"]
 cranelift-optimizer = ["cranelift-codegen/optimizer"]
 cranelift-verifier = ["cranelift-codegen/verifier"]
 riscv32-emu = [
     "std",
+    "glsl",
     "dep:cranelift-object",
     "dep:lp-riscv-elf",
     "dep:lp-riscv-emu",

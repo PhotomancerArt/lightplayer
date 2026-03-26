@@ -7,10 +7,9 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-#[cfg(all(feature = "std", feature = "panic-recovery"))]
+#[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
 use log;
-#[cfg(feature = "std")]
 use lp_model::glsl_opts::{AddSubMode, DivMode, MulMode};
 use lp_model::{
     LpPathBuf, NodeHandle,
@@ -18,17 +17,14 @@ use lp_model::{
     project::FrameId,
 };
 use lp_shared::fs::fs_event::FsChange;
-#[cfg(all(feature = "std", feature = "panic-recovery"))]
+#[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
-#[cfg(feature = "std")]
 use lpir_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
 
 /// Default max semantic errors forwarded to the GLSL front-end (matches `lp-glsl-frontend`).
-#[cfg(feature = "std")]
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-#[cfg(feature = "std")]
 fn map_add_sub(m: AddSubMode) -> lpir_cranelift::AddSubMode {
     match m {
         AddSubMode::Saturating => lpir_cranelift::AddSubMode::Saturating,
@@ -36,7 +32,6 @@ fn map_add_sub(m: AddSubMode) -> lpir_cranelift::AddSubMode {
     }
 }
 
-#[cfg(feature = "std")]
 fn map_mul(m: MulMode) -> lpir_cranelift::MulMode {
     match m {
         MulMode::Saturating => lpir_cranelift::MulMode::Saturating,
@@ -44,7 +39,6 @@ fn map_mul(m: MulMode) -> lpir_cranelift::MulMode {
     }
 }
 
-#[cfg(feature = "std")]
 fn map_div(m: DivMode) -> lpir_cranelift::DivMode {
     match m {
         DivMode::Saturating => lpir_cranelift::DivMode::Saturating,
@@ -55,9 +49,7 @@ fn map_div(m: DivMode) -> lpir_cranelift::DivMode {
 /// Shader node runtime
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
-    #[cfg(feature = "std")]
     jit_module: Option<JitModule>,
-    #[cfg(feature = "std")]
     direct_call: Option<lpir_cranelift::DirectCall>,
     texture_handle: Option<TextureHandle>,
     compilation_error: Option<String>,
@@ -70,9 +62,7 @@ impl ShaderRuntime {
     pub fn new(node_handle: NodeHandle) -> Self {
         Self {
             config: None,
-            #[cfg(feature = "std")]
             jit_module: None,
-            #[cfg(feature = "std")]
             direct_call: None,
             texture_handle: None,
             compilation_error: None,
@@ -130,45 +120,31 @@ impl NodeRuntime for ShaderRuntime {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderContext) -> Result<(), Error> {
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = ctx;
-            return Err(Error::Other {
-                message: String::from("Shader JIT requires `lp-engine` `std` feature"),
-            });
-        }
+        let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
+            message: String::from("Texture handle not resolved"),
+        })?;
 
-        #[cfg(feature = "std")]
-        {
-            let texture_handle = self.texture_handle.ok_or_else(|| Error::Other {
-                message: String::from("Texture handle not resolved"),
-            })?;
+        let dc = self.direct_call.as_ref().ok_or_else(|| Error::Other {
+            message: String::from(
+                "Shader has no direct call for `main` (compilation may have omitted fast path)",
+            ),
+        })?;
 
-            let dc = self.direct_call.as_ref().ok_or_else(|| Error::Other {
-                message: String::from(
-                    "Shader has no direct call for `main` (compilation may have omitted fast path)",
-                ),
-            })?;
+        let time = ctx.get_time();
+        let texture = ctx.get_texture_mut(texture_handle)?;
+        let width = texture.width();
+        let height = texture.height();
 
-            let time = ctx.get_time();
-            let texture = ctx.get_texture_mut(texture_handle)?;
-            let width = texture.width();
-            let height = texture.height();
-
-            Self::render_direct_call(dc, width, height, time, texture)?;
-            Ok(())
-        }
+        Self::render_direct_call(dc, width, height, time, texture)?;
+        Ok(())
     }
 
     fn shed_optional_buffers(
         &mut self,
         _output_provider: Option<&dyn OutputProvider>,
     ) -> Result<(), Error> {
-        #[cfg(feature = "std")]
-        {
-            self.jit_module = None;
-            self.direct_call = None;
-        }
+        self.jit_module = None;
+        self.direct_call = None;
         // Keep `glsl_code` for the debug UI and for peers: `handle_fs_changes` sheds *all* nodes
         // before one shader's GLSL edit, but only that node receives `handle_fs_change` — clearing
         // source here would leave other shaders blank until reloaded.
@@ -256,11 +232,8 @@ impl NodeRuntime for ShaderRuntime {
                     let _ = self.load_and_compile_shader(&config, ctx);
                 }
                 lp_shared::fs::fs_event::ChangeType::Delete => {
-                    #[cfg(feature = "std")]
-                    {
-                        self.jit_module = None;
-                        self.direct_call = None;
-                    }
+                    self.jit_module = None;
+                    self.direct_call = None;
                     let error_msg = "GLSL file deleted".to_string();
                     self.compilation_error = Some(error_msg.clone());
                     let frame_id = FrameId::default();
@@ -275,7 +248,6 @@ impl NodeRuntime for ShaderRuntime {
 }
 
 impl ShaderRuntime {
-    #[cfg(feature = "std")]
     fn render_direct_call(
         dc: &lpir_cranelift::DirectCall,
         width: u32,
@@ -367,7 +339,6 @@ impl ShaderRuntime {
         })
     }
 
-    #[cfg(feature = "std")]
     fn compile_shader(&mut self, glsl_source: &str) -> Result<(), Error> {
         log::info!(
             "Shader {} compilation starting ({} bytes)",
@@ -400,7 +371,7 @@ impl ShaderRuntime {
         let options = CompileOptions {
             float_mode: FloatMode::Q32,
             q32_options,
-            // Match previous `GlslOptions` with `std`: host JIT used `memory_optimized == false`.
+            // Match host `GlslOptions`: `memory_optimized == false` equivalent.
             memory_strategy: MemoryStrategy::Default,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
         };
@@ -447,15 +418,6 @@ impl ShaderRuntime {
         }
     }
 
-    #[cfg(not(feature = "std"))]
-    fn compile_shader(&mut self, _glsl_source: &str) -> Result<(), Error> {
-        let msg = String::from("Shader JIT requires `lp-engine` `std` feature");
-        self.compilation_error = Some(msg.clone());
-        let frame_id = FrameId::default();
-        self.state.error.set(frame_id, Some(msg.clone()));
-        Err(Error::Other { message: msg })
-    }
-
     fn load_and_compile_shader(
         &mut self,
         config: &ShaderConfig,
@@ -463,8 +425,7 @@ impl ShaderRuntime {
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
         let frame_id = FrameId::default();
-        // Expose source to clients even when compilation fails (e.g. missing `std` misconfig) or
-        // after a global shed dropped JIT state.
+        // Expose source to clients even when compilation fails or after a global shed dropped JIT state.
         self.state.glsl_code.set(frame_id, glsl_source.clone());
 
         let start_ms = ctx.now_ms();

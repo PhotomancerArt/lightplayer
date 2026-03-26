@@ -35,6 +35,8 @@ pub(crate) struct LoweredLpirModule {
     pub func_ids: Vec<FuncId>,
     pub func_names: Vec<String>,
     pub signatures: BTreeMap<String, Signature>,
+    /// LPIR scalar return words per function (for StructReturn ABIs where `Signature::returns` is empty).
+    pub logical_return_words: BTreeMap<String, usize>,
     pub ir_param_counts: Vec<u16>,
     pub name_to_index: BTreeMap<String, usize>,
     pub call_conv: CallConv,
@@ -96,12 +98,20 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
 
     let mut func_ids = Vec::with_capacity(indices.len());
     let mut signatures = BTreeMap::new();
+    let mut logical_return_words = BTreeMap::new();
     let mut func_names = Vec::with_capacity(indices.len());
     let mut ir_param_counts = Vec::with_capacity(indices.len());
 
+    let callee_struct_return: alloc::vec::Vec<bool> = ir
+        .functions
+        .iter()
+        .map(|f| emit::signature_uses_struct_return(module.isa(), f))
+        .collect();
+
     for &i in &indices {
         let f = &ir.functions[i];
-        let sig = emit::signature_for_ir_func(f, call_conv, mode);
+        logical_return_words.insert(f.name.clone(), f.return_types.len());
+        let sig = emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let id = module
             .declare_function(&f.name, Linkage::Export, &sig)
             .map_err(|e| {
@@ -133,7 +143,9 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         let f = &ir.functions[ir_idx];
         let fid = func_ids[emit_pos];
         ctx.clear();
-        ctx.func.signature = emit::signature_for_ir_func(f, call_conv, mode);
+        let uses_struct_return = emit::signature_uses_struct_return(module.isa(), f);
+        ctx.func.signature =
+            emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let mut func_ctx = FunctionBuilderContext::new();
         {
             let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
@@ -193,6 +205,8 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 vreg_is_stack_addr,
                 float_mode: mode,
                 lpir_builtins,
+                uses_struct_return,
+                callee_struct_return: &callee_struct_return,
             };
 
             translate_function(f, &mut builder, &emit_ctx).map_err(|e| {
@@ -225,6 +239,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         func_ids,
         func_names,
         signatures,
+        logical_return_words,
         ir_param_counts,
         name_to_index,
         call_conv,

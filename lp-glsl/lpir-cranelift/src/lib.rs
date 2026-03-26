@@ -1,5 +1,5 @@
-//! LPIR → Cranelift: host JIT by default; optional `riscv32-emu` for RV32 object emission,
-//! linking with `lp-glsl-builtins-emu-app`, and `lp-riscv-emu` execution helpers.
+//! LPIR → Cranelift: host JIT (`std` + native ISA) or embedded JIT (`glsl` without `std`, RV32 ISA).
+//! Optional `riscv32-emu` links with `lp-glsl-builtins-emu-app` and `lp-riscv-emu` helpers.
 
 #![no_std]
 
@@ -16,6 +16,7 @@ mod compile_options;
 mod direct_call;
 mod emit;
 pub mod error;
+mod generated_builtin_abi;
 mod invoke;
 #[cfg(not(feature = "std"))]
 mod jit_memory;
@@ -33,7 +34,7 @@ mod object_link;
 #[cfg(feature = "riscv32-emu")]
 mod object_module;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "glsl")]
 pub use compile::jit;
 pub use compile::{jit_from_ir, jit_from_ir_owned};
 #[cfg(feature = "riscv32-emu")]
@@ -84,11 +85,11 @@ mod tests {
 
     use lpir::parse_module;
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        AddSubMode, CompileError, CompileOptions, CompilerError, DivMode, FloatMode, GlslQ32,
-        MemoryStrategy, MulMode, Q32Options, jit_from_ir,
+        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, MemoryStrategy,
+        jit_from_ir,
     };
 
     #[test]
@@ -696,7 +697,7 @@ func @apply_sin(v0:f32) -> f32 {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(feature = "glsl")]
     fn jit_glsl_call_add_q32() {
         let src = "float add(float a, float b) { return a + b; }";
         let m = jit(
@@ -718,7 +719,7 @@ func @apply_sin(v0:f32) -> f32 {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(feature = "glsl")]
     fn glsl_call_agrees_with_direct_call() {
         let src = "float add(float a, float b) { return a + b; }";
         let m = jit(
@@ -764,7 +765,8 @@ func @apply_sin(v0:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
-        let words = unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 2).expect("invoke") };
+        let words =
+            unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 2, false).expect("invoke") };
         assert_eq!(words.len(), 2, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);
@@ -792,7 +794,8 @@ func @apply_sin(v0:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
-        let words = unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 3).expect("invoke") };
+        let words =
+            unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 3, false).expect("invoke") };
         assert_eq!(words.len(), 3, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);

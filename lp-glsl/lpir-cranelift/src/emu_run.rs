@@ -5,12 +5,14 @@
 use alloc::vec::Vec;
 
 use cranelift_codegen::data_value::DataValue;
-use cranelift_codegen::ir::Signature;
-use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::ir::{ArgumentPurpose, Signature};
+use cranelift_codegen::isa::{self, CallConv};
+use cranelift_codegen::settings::{self, Configurable};
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
 use lpir::module::IrModule;
 use lpir::{FloatMode, GlslModuleMeta, GlslType};
+use target_lexicon::Triple;
 
 use crate::compile_options::CompileOptions;
 use crate::emit;
@@ -18,6 +20,25 @@ use crate::error::CompilerError;
 use crate::object_link::link_object_with_builtins;
 use crate::object_module::object_bytes_from_ir;
 use crate::values::{CallError, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg};
+
+fn riscv32_reference_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, CompilerError> {
+    let mut flag_builder = settings::builder();
+    flag_builder.set("is_pic", "false").map_err(|e| {
+        CompilerError::Codegen(crate::error::CompileError::cranelift(alloc::format!("{e}")))
+    })?;
+    let flags = settings::Flags::new(flag_builder);
+    let triple: Triple = "riscv32imac-unknown-none-elf".parse().map_err(|e| {
+        CompilerError::Codegen(crate::error::CompileError::cranelift(alloc::format!("{e}")))
+    })?;
+    isa::lookup(triple)
+        .map_err(|e| {
+            CompilerError::Codegen(crate::error::CompileError::cranelift(alloc::format!("{e}")))
+        })?
+        .finish(flags)
+        .map_err(|e| {
+            CompilerError::Codegen(crate::error::CompileError::cranelift(alloc::format!("{e}")))
+        })
+}
 
 /// Q32 typed call through the linked RV32 image (same marshalling as [`crate::JitModule::call`]).
 pub fn glsl_q32_call_emulated(
@@ -62,17 +83,32 @@ pub fn glsl_q32_call_emulated(
             param_count
         )));
     }
-    let sig = emit::signature_for_ir_func(ir_func, CallConv::SystemV, options.float_mode);
-    let n_ret = sig.returns.len();
+    let isa = riscv32_reference_isa().map_err(|e| CallError::Unsupported(alloc::format!("{e}")))?;
+    let sig = emit::signature_for_ir_func(
+        ir_func,
+        CallConv::SystemV,
+        options.float_mode,
+        isa.pointer_type(),
+        &*isa,
+    );
+    let n_ret = ir_func.return_types.len();
     let entry = *load.symbol_map.get(name).ok_or_else(|| {
         CallError::Unsupported(alloc::format!("symbol `{name}` not in linked RV32 image"))
     })?;
     let data_args: Vec<DataValue> = flat.iter().copied().map(DataValue::I32).collect();
     let mut emu =
         Riscv32Emulator::new(load.code.clone(), load.ram.clone()).with_log_level(LogLevel::None);
-    let ret = emu
-        .call_function(entry, &data_args, &sig)
-        .map_err(|e| CallError::Unsupported(alloc::format!("emulator: {e:?}")))?;
+    let has_sr = sig
+        .params
+        .iter()
+        .any(|p| p.purpose == ArgumentPurpose::StructReturn);
+    let ret = if has_sr {
+        emu.call_function_with_struct_return(entry, &data_args, &sig, n_ret * 4)
+            .map_err(|e| CallError::Unsupported(alloc::format!("emulator: {e:?}")))?
+    } else {
+        emu.call_function(entry, &data_args, &sig)
+            .map_err(|e| CallError::Unsupported(alloc::format!("emulator: {e:?}")))?
+    };
     let mut words = Vec::with_capacity(ret.len());
     for dv in ret {
         match dv {
@@ -134,7 +170,14 @@ pub fn run_loaded_function_i32(
                 "no IR function `{func_name}`"
             )))
         })?;
-    let sig = emit::signature_for_ir_func(f, CallConv::SystemV, options.float_mode);
+    let isa = riscv32_reference_isa()?;
+    let sig = emit::signature_for_ir_func(
+        f,
+        CallConv::SystemV,
+        options.float_mode,
+        isa.pointer_type(),
+        &*isa,
+    );
     run_loaded_function_i32_with_sig(load_info, &sig, func_name, args)
 }
 
@@ -150,11 +193,20 @@ pub(crate) fn run_loaded_function_i32_with_sig(
         )))
     })?;
 
-    if args.len() != signature.params.len() {
+    let has_sr = signature
+        .params
+        .iter()
+        .any(|p| p.purpose == ArgumentPurpose::StructReturn);
+    let expected_args = if has_sr {
+        signature.params.len().saturating_sub(1)
+    } else {
+        signature.params.len()
+    };
+    if args.len() != expected_args {
         return Err(CompilerError::Codegen(
             crate::error::CompileError::unsupported(format!(
                 "`{func_name}`: expected {} args, got {}",
-                signature.params.len(),
+                expected_args,
                 args.len()
             )),
         ));
@@ -165,13 +217,21 @@ pub(crate) fn run_loaded_function_i32_with_sig(
     let mut emu = Riscv32Emulator::new(load_info.code.clone(), load_info.ram.clone())
         .with_log_level(LogLevel::None);
 
-    let ret = emu
-        .call_function(entry, &data_args, signature)
-        .map_err(|e| {
-            CompilerError::Codegen(crate::error::CompileError::cranelift(format!(
-                "emulator: {e:?}"
-            )))
-        })?;
+    let ret = if has_sr {
+        emu.call_function_with_struct_return(entry, &data_args, signature, 4)
+            .map_err(|e| {
+                CompilerError::Codegen(crate::error::CompileError::cranelift(format!(
+                    "emulator: {e:?}"
+                )))
+            })?
+    } else {
+        emu.call_function(entry, &data_args, signature)
+            .map_err(|e| {
+                CompilerError::Codegen(crate::error::CompileError::cranelift(format!(
+                    "emulator: {e:?}"
+                )))
+            })?
+    };
 
     match ret.as_slice() {
         [DataValue::I32(v)] => Ok(*v),

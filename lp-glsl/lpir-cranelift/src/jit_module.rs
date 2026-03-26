@@ -28,6 +28,8 @@ pub struct JitModule {
     pub(crate) func_ids: Vec<FuncId>,
     pub(crate) name_to_index: BTreeMap<String, usize>,
     pub(crate) signatures: BTreeMap<String, Signature>,
+    /// Scalar return words per function (LPIR), even when the ABI uses StructReturn (empty `returns`).
+    pub(crate) logical_return_words: BTreeMap<String, usize>,
     pub(crate) ir_param_counts: Vec<u16>,
     pub(crate) call_conv: CallConv,
     pub(crate) pointer_type: types::Type,
@@ -151,6 +153,7 @@ pub(crate) fn build_jit_module(
         func_ids: lowered.func_ids,
         name_to_index: lowered.name_to_index,
         signatures: lowered.signatures,
+        logical_return_words: lowered.logical_return_words,
         ir_param_counts: lowered.ir_param_counts,
         call_conv: lowered.call_conv,
         pointer_type: lowered.pointer_type,

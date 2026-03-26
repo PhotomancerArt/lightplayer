@@ -6,136 +6,22 @@
 //! Or use the build script:
 //!     scripts/build-builtins.sh
 
-//! Builtin function registry implementation.
+//! Cranelift signatures and function pointers for [`BuiltinId`].
 //!
-//! Provides enum-based registry for builtin functions with support for both
-//! JIT (function pointer) and emulator (ELF symbol) linking.
+//! Generated from the same `rust_signature` strings as `lp-glsl-cranelift` `registry.rs`.
+//! Changing an `extern "C"` builtin in `lp-glsl-builtins` without re-running codegen will desync
+//! this file and fail `cargo check` until you regenerate.
 
-pub use lp_glsl_builtin_ids::BuiltinId;
-
-use crate::error::{ErrorCode, GlslError};
 use cranelift_codegen::ir::{AbiParam, Signature, types};
 use cranelift_codegen::isa::CallConv;
-use cranelift_module::{Linkage, Module};
+use lp_glsl_builtin_ids::BuiltinId;
 
-#[cfg(not(feature = "std"))]
-use alloc::format;
-
-/// Format affinity for builtins (Cranelift-specific, format-aware declaration).
-trait BuiltinIdFormat {
-    fn format(&self) -> Option<crate::FloatMode>;
-}
-
-impl BuiltinIdFormat for BuiltinId {
-    fn format(&self) -> Option<crate::FloatMode> {
-        match self {
-            BuiltinId::LpGlslAcosQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAcoshQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAsinQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAsinhQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAtan2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAtanQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslAtanhQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslCosQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslCoshQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslExp2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslExpQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslFmaQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslInversesqrtQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslLdexpQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslLog2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslLogQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslModQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslPowQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslRoundQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslSinQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslSinhQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslTanQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpGlslTanhQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFaddQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFdivQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFmulQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFnearestQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFsqrtQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpirFsubQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxFbm2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxFbm2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxFbm3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxFbm3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxFbm3TileF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxFbm3TileQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxGnoise1F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxGnoise1Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxGnoise2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxGnoise2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxGnoise3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxGnoise3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxGnoise3TileF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxGnoise3TileQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxHash1 => None,
-            BuiltinId::LpLpfxHash2 => None,
-            BuiltinId::LpLpfxHash3 => None,
-            BuiltinId::LpLpfxHsv2rgbF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxHsv2rgbQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxHsv2rgbVec4F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxHsv2rgbVec4Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxHue2rgbF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxHue2rgbQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxPsrdnoise2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxPsrdnoise2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxPsrdnoise3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxPsrdnoise3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxRandom1F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxRandom1Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxRandom2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxRandom2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxRandom3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxRandom3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxRgb2hsvF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxRgb2hsvQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxRgb2hsvVec4F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxRgb2hsvVec4Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSaturateF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSaturateQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSaturateVec3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSaturateVec3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSaturateVec4F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSaturateVec4Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSnoise1F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSnoise1Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSnoise2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSnoise2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSnoise3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSnoise3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSrandom1F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSrandom1Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSrandom2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSrandom2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSrandom3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSrandom3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSrandom3TileF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSrandom3TileQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxSrandom3VecF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxSrandom3VecQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxWorley2F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxWorley2Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxWorley2ValueF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxWorley2ValueQ32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxWorley3F32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxWorley3Q32 => Some(crate::FloatMode::Q32),
-            BuiltinId::LpLpfxWorley3ValueF32 => Some(crate::FloatMode::F32),
-            BuiltinId::LpLpfxWorley3ValueQ32 => Some(crate::FloatMode::Q32),
-        }
-    }
-}
-
-/// Get the Cranelift signature for this builtin function.
-///
-/// `pointer_type` is the native pointer type for the target architecture.
-/// For RISC-V 32-bit, this should be `types::I32`.
-/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.
-pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> Signature {
-    let mut sig = Signature::new(CallConv::SystemV);
+pub(crate) fn cranelift_sig_for_builtin_inner(
+    builtin: BuiltinId,
+    pointer_type: types::Type,
+    call_conv: CallConv,
+) -> Signature {
+    let mut sig = Signature::new(call_conv);
     match builtin {
         BuiltinId::LpGlslAcosQ32
         | BuiltinId::LpGlslAcoshQ32
@@ -430,10 +316,7 @@ pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> S
     sig
 }
 
-/// Get function pointer for a builtin (JIT mode only).
-///
-/// Returns the function pointer that can be registered with JITModule.
-pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
+pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
     use lp_glsl_builtins::builtins::{
         glsl::{
             acos_q32, acosh_q32, asin_q32, asinh_q32, atan_q32, atan2_q32, atanh_q32, cos_q32,
@@ -660,70 +543,4 @@ pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
             generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32 as *const u8
         }
     }
-}
-
-/// Declare builtin functions as external symbols.
-///
-/// This is the same for both JIT and emulator - they both use Linkage::Import.
-/// The difference is only in how they're linked:
-/// - JIT: Function pointers are registered via symbol_lookup_fn during module creation
-/// - Emulator: Symbols are resolved by the linker when linking the static library
-///
-/// `pointer_type` is the native pointer type for the target architecture.
-/// For RISC-V 32-bit, this should be `types::I32`.
-/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.
-/// `format` filters builtins: in Q32 mode, F32-only builtins are skipped; in Float mode, Q32 builtins are skipped.
-pub fn declare_builtins<M: Module>(
-    module: &mut M,
-    pointer_type: types::Type,
-    format: crate::FloatMode,
-) -> Result<(), GlslError> {
-    for builtin in BuiltinId::all() {
-        if let Some(f) = builtin.format() {
-            if f != format {
-                continue;
-            }
-        }
-        let name = builtin.name();
-        let sig = signature_for_builtin(*builtin, pointer_type);
-
-        module
-            .declare_function(name, Linkage::Import, &sig)
-            .map_err(|e| {
-                GlslError::new(
-                    ErrorCode::E0400,
-                    format!("Failed to declare builtin '{name}': {e}"),
-                )
-            })?;
-    }
-
-    Ok(())
-}
-
-/// Declare and link builtin functions for JIT mode.
-///
-/// This declares all builtins as external functions. The function pointers
-/// are registered via a symbol lookup function that's added during module creation.
-///
-/// `pointer_type` is the native pointer type for the target architecture.
-pub fn declare_for_jit<M: Module>(
-    module: &mut M,
-    pointer_type: types::Type,
-    format: crate::FloatMode,
-) -> Result<(), GlslError> {
-    declare_builtins(module, pointer_type, format)
-}
-
-/// Declare builtin functions as external symbols for emulator mode.
-///
-/// This declares all builtins as external symbols (Linkage::Import) that will
-/// be resolved by the linker when linking the static library.
-///
-/// `pointer_type` is the native pointer type for the target architecture.
-pub fn declare_for_emulator<M: Module>(
-    module: &mut M,
-    pointer_type: types::Type,
-    format: crate::FloatMode,
-) -> Result<(), GlslError> {
-    declare_builtins(module, pointer_type, format)
 }

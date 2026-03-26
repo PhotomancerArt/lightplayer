@@ -1,4 +1,4 @@
-//! GLSL → Naga → LPIR → JIT pipeline (GLSL front-end requires the `std` feature).
+//! GLSL → Naga → LPIR → JIT pipeline (GLSL front-end: enable crate feature `glsl`).
 
 use lpir::{GlslModuleMeta, IrModule};
 
@@ -6,10 +6,11 @@ use crate::compile_options::CompileOptions;
 use crate::error::CompilerError;
 use crate::jit_module::{JitModule, build_jit_module};
 
-/// Compile GLSL source to a host JIT module (Q32 recommended; F32 for import-free IR).
+/// Compile GLSL source to a JIT module (Q32 recommended; F32 for import-free IR).
 ///
-/// Requires the `std` feature (`lp-glsl-naga` / Naga GLSL-in depend on `std`).
-#[cfg(feature = "std")]
+/// Requires the `glsl` feature (`lp-glsl-naga`). Works on `#!no_std` + `alloc` targets (e.g. ESP32);
+/// host builds add `std` for native ISA autodetection via `cranelift-native`.
+#[cfg(feature = "glsl")]
 pub fn jit(source: &str, options: &CompileOptions) -> Result<JitModule, CompilerError> {
     let naga =
         lp_glsl_naga::compile(source).map_err(|e| CompilerError::Parse(alloc::format!("{e}")))?;

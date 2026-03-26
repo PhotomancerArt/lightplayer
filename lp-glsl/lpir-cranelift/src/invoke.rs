@@ -29,154 +29,77 @@ struct CRet4 {
     v3: i32,
 }
 
+/// RISC-V32: hidden StructReturn pointer (`a0`) plus user `i32` args; callee writes `out.len()` words.
+#[cfg(target_arch = "riscv32")]
+unsafe fn invoke_riscv32_struct_return_buf(
+    code: *const u8,
+    args: &[i32],
+    out: &mut [i32],
+) -> Result<(), CallError> {
+    let buf = out.as_mut_ptr();
+    unsafe {
+        match args.len() {
+            0 => {
+                let f: extern "C" fn(*mut i32) = transmute(code);
+                f(buf);
+            }
+            1 => {
+                let f: extern "C" fn(*mut i32, i32) = transmute(code);
+                f(buf, args[0]);
+            }
+            2 => {
+                let f: extern "C" fn(*mut i32, i32, i32) = transmute(code);
+                f(buf, args[0], args[1]);
+            }
+            3 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32) = transmute(code);
+                f(buf, args[0], args[1], args[2]);
+            }
+            4 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32, i32) = transmute(code);
+                f(buf, args[0], args[1], args[2], args[3]);
+            }
+            5 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32) = transmute(code);
+                f(buf, args[0], args[1], args[2], args[3], args[4]);
+            }
+            6 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32) = transmute(code);
+                f(buf, args[0], args[1], args[2], args[3], args[4], args[5]);
+            }
+            7 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32, i32) = transmute(code);
+                f(
+                    buf, args[0], args[1], args[2], args[3], args[4], args[5], args[6],
+                );
+            }
+            8 => {
+                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
+                f(
+                    buf, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+    Ok(())
+}
+
 /// Call a finalized JIT function passing `i32` scalars and collecting `i32` return words.
 ///
 /// # Safety
 /// `code` must be a pointer from [`cranelift_jit::JITModule::get_finalized_function`] with a
-/// matching ABI (SystemV-style `extern "C"` on the host).
+/// matching ABI (SystemV-style `extern "C"` on the host; RISC-V may use StructReturn).
 pub(crate) unsafe fn invoke_i32_args_returns(
     code: *const u8,
     args: &[i32],
     n_ret: usize,
+    uses_struct_return: bool,
 ) -> Result<Vec<i32>, CallError> {
-    if args.len() > 8 {
-        return Err(CallError::Unsupported(
-            "more than 8 scalar arguments not supported by invoke shim".into(),
-        ));
-    }
-    if n_ret > 4 {
-        return Err(CallError::Unsupported(
-            "more than 4 scalar returns not supported by invoke shim".into(),
-        ));
-    }
-
-    match n_ret {
-        0 => Ok(match args.len() {
-            0 => {
-                let f: extern "C" fn() = unsafe { transmute(code) };
-                f();
-                Vec::new()
-            }
-            1 => {
-                let f: extern "C" fn(i32) = unsafe { transmute(code) };
-                f(args[0]);
-                Vec::new()
-            }
-            2 => {
-                let f: extern "C" fn(i32, i32) = unsafe { transmute(code) };
-                f(args[0], args[1]);
-                Vec::new()
-            }
-            3 => {
-                let f: extern "C" fn(i32, i32, i32) = unsafe { transmute(code) };
-                f(args[0], args[1], args[2]);
-                Vec::new()
-            }
-            4 => {
-                let f: extern "C" fn(i32, i32, i32, i32) = unsafe { transmute(code) };
-                f(args[0], args[1], args[2], args[3]);
-                Vec::new()
-            }
-            5 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32) = unsafe { transmute(code) };
-                f(args[0], args[1], args[2], args[3], args[4]);
-                Vec::new()
-            }
-            6 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32) = unsafe { transmute(code) };
-                f(args[0], args[1], args[2], args[3], args[4], args[5]);
-                Vec::new()
-            }
-            7 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32) =
-                    unsafe { transmute(code) };
-                f(
-                    args[0], args[1], args[2], args[3], args[4], args[5], args[6],
-                );
-                Vec::new()
-            }
-            8 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32) =
-                    unsafe { transmute(code) };
-                f(
-                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
-                );
-                Vec::new()
-            }
-            _ => unreachable!(),
-        }),
-        1 => Ok(match args.len() {
-            0 => {
-                let f: extern "C" fn() -> i32 = unsafe { transmute(code) };
-                alloc::vec![f()]
-            }
-            1 => {
-                let f: extern "C" fn(i32) -> i32 = unsafe { transmute(code) };
-                alloc::vec![f(args[0])]
-            }
-            2 => {
-                let f: extern "C" fn(i32, i32) -> i32 = unsafe { transmute(code) };
-                alloc::vec![f(args[0], args[1])]
-            }
-            3 => {
-                let f: extern "C" fn(i32, i32, i32) -> i32 = unsafe { transmute(code) };
-                alloc::vec![f(args[0], args[1], args[2])]
-            }
-            4 => {
-                let f: extern "C" fn(i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
-                alloc::vec![f(args[0], args[1], args[2], args[3])]
-            }
-            5 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
-                alloc::vec![f(args[0], args[1], args[2], args[3], args[4])]
-            }
-            6 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32) -> i32 =
-                    unsafe { transmute(code) };
-                alloc::vec![f(args[0], args[1], args[2], args[3], args[4], args[5],)]
-            }
-            7 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32) -> i32 =
-                    unsafe { transmute(code) };
-                alloc::vec![f(
-                    args[0], args[1], args[2], args[3], args[4], args[5], args[6],
-                )]
-            }
-            8 => {
-                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32) -> i32 =
-                    unsafe { transmute(code) };
-                alloc::vec![f(
-                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
-                )]
-            }
-            _ => unreachable!(),
-        }),
-        2..=4 => {
-            #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
-            {
-                Ok(unsafe { aarch64_invoke_multi_ret(code, args, n_ret) })
-            }
-            #[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
-            {
-                Ok(match n_ret {
-                    2 => {
-                        let r = invoke_cret2(code, args);
-                        alloc::vec![r.v0, r.v1]
-                    }
-                    3 => {
-                        let r = invoke_cret3(code, args);
-                        alloc::vec![r.v0, r.v1, r.v2]
-                    }
-                    4 => {
-                        let r = invoke_cret4(code, args);
-                        alloc::vec![r.v0, r.v1, r.v2, r.v3]
-                    }
-                    _ => unreachable!(),
-                })
-            }
-        }
-        _ => unreachable!(),
-    }
+    let mut out = alloc::vec![0i32; n_ret];
+    unsafe { invoke_i32_args_returns_buf(code, args, n_ret, &mut out, uses_struct_return)? };
+    Ok(out)
 }
 
 /// Like [`invoke_i32_args_returns`] but writes each return scalar into `out` (no heap allocation).
@@ -188,6 +111,7 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
     args: &[i32],
     n_ret: usize,
     out: &mut [i32],
+    uses_struct_return: bool,
 ) -> Result<(), CallError> {
     if out.len() != n_ret {
         return Err(CallError::TypeMismatch(alloc::format!(
@@ -206,6 +130,19 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
         return Err(CallError::Unsupported(
             "more than 4 scalar returns not supported by invoke shim".into(),
         ));
+    }
+
+    if uses_struct_return {
+        #[cfg(target_arch = "riscv32")]
+        {
+            return unsafe { invoke_riscv32_struct_return_buf(code, args, out) };
+        }
+        #[cfg(not(target_arch = "riscv32"))]
+        {
+            return Err(CallError::Unsupported(
+                "StructReturn JIT calls are only supported on riscv32".into(),
+            ));
+        }
     }
 
     match n_ret {
@@ -498,10 +435,11 @@ fn invoke_cret4(code: *const u8, args: &[i32]) -> CRet4 {
 #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
 // Inline asm: Rust 2024 `unsafe_op_in_unsafe_fn`; not all x2/x3 outputs used when n_ret < 4.
 #[allow(
+    dead_code,
     unsafe_op_in_unsafe_fn,
     unused_assignments,
     unused_mut,
-    reason = "AArch64 `asm!(blr)` multi-return shim; register lateouts match callee ABI"
+    reason = "vec-return variant kept alongside aarch64_invoke_multi_ret_buf; invoke delegates to buf"
 )]
 unsafe fn aarch64_invoke_multi_ret(code: *const u8, args: &[i32], n_ret: usize) -> Vec<i32> {
     use core::arch::asm;

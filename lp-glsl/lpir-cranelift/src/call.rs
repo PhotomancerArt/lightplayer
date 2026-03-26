@@ -1,5 +1,6 @@
 //! Level-1 [`GlslQ32`] calls using [`lpir::GlslModuleMeta`].
 
+use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lpir::GlslType;
 
@@ -44,16 +45,25 @@ impl JitModule {
                 param_count
             )));
         }
-        let n_ret = self
+        let sig = self
             .signatures
             .get(name)
-            .ok_or_else(|| CallError::MissingMetadata(name.into()))?
-            .returns
-            .len();
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let uses_struct_return = sig
+            .params
+            .iter()
+            .any(|p| p.purpose == ArgumentPurpose::StructReturn);
+        let n_ret = self
+            .logical_return_words
+            .get(name)
+            .copied()
+            .unwrap_or_else(|| sig.returns.len());
         let code = self
             .finalized_ptr(name)
             .ok_or_else(|| CallError::Unsupported("internal: missing finalized pointer".into()))?;
-        let words = unsafe { crate::invoke::invoke_i32_args_returns(code, &flat, n_ret)? };
+        let words = unsafe {
+            crate::invoke::invoke_i32_args_returns(code, &flat, n_ret, uses_struct_return)?
+        };
         if gfn.return_type == GlslType::Void {
             return Ok(GlslReturn {
                 value: None,

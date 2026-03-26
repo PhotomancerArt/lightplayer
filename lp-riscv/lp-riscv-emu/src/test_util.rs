@@ -131,12 +131,8 @@ mod std_impl {
         lock_exclusive(&lock_file)
             .map_err(|e| std::format!("Failed to acquire build lock: {e}"))?;
 
-        // Re-check after acquiring lock (another process may have built it)
-        if cached_path.exists() {
-            let mut cache = get_cache().lock().unwrap();
-            cache.insert(cache_key, Some(cached_path.clone()));
-            return Ok(cached_path);
-        }
+        // Do not skip the build when a cached copy exists: the cache key does not include
+        // dependency sources, so a stale binary would otherwise mask fixes in lp-engine / lp-server.
 
         // Build binary
         std::println!("Building {} for {}...", config.package, config.target);

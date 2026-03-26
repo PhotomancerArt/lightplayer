@@ -2,9 +2,9 @@
 
 use alloc::vec::Vec;
 
-use cranelift_codegen::ir::{AbiParam, Signature, types};
+use cranelift_codegen::ir::{AbiParam, ArgumentPurpose, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
-use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::FloatMode;
 use lpir::module::{IrFunction, IrModule};
@@ -38,6 +38,10 @@ pub(crate) struct EmitCtx<'a> {
     pub vreg_is_stack_addr: Vec<bool>,
     pub float_mode: FloatMode,
     pub lpir_builtins: Option<LpirBuiltinRefs>,
+    /// This function uses Cranelift `StructReturn` (RISC-V32: >2 scalar returns).
+    pub uses_struct_return: bool,
+    /// Per user function: same as [`signature_uses_struct_return`].
+    pub callee_struct_return: &'a [bool],
 }
 
 pub(crate) enum CtrlFrame {
@@ -72,14 +76,36 @@ pub(crate) enum CtrlFrame {
     },
 }
 
-pub fn signature_for_ir_func(func: &IrFunction, call_conv: CallConv, mode: FloatMode) -> Signature {
+/// RISC-V32 cannot return >2 scalars in registers; use a hidden StructReturn pointer (Cranelift #9510).
+pub(crate) fn signature_uses_struct_return(isa: &dyn TargetIsa, func: &IrFunction) -> bool {
+    use target_lexicon::Architecture;
+    matches!(isa.triple().architecture, Architecture::Riscv32(_)) && func.return_types.len() > 2
+}
+
+/// Build the Cranelift [`Signature`] for `func`, including RISC-V32 StructReturn when required.
+pub fn signature_for_ir_func(
+    func: &IrFunction,
+    call_conv: CallConv,
+    mode: FloatMode,
+    pointer_type: types::Type,
+    isa: &dyn TargetIsa,
+) -> Signature {
     let mut sig = Signature::new(call_conv);
+    let sr = signature_uses_struct_return(isa, func);
+    if sr {
+        sig.params.push(AbiParam::special(
+            pointer_type,
+            ArgumentPurpose::StructReturn,
+        ));
+    }
     for i in 0..func.param_count as usize {
         sig.params
             .push(AbiParam::new(ir_type_for_mode(func.vreg_types[i], mode)));
     }
-    for t in &func.return_types {
-        sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode)));
+    if !sr {
+        for t in &func.return_types {
+            sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode)));
+        }
     }
     sig
 }
@@ -141,9 +167,14 @@ pub fn translate_function(
 
     let entry = builder.current_block().expect("entry block");
     let params: Vec<Value> = builder.block_params(entry).to_vec();
+    let param_base = usize::from(ctx.uses_struct_return);
     for (i, val) in params.into_iter().enumerate() {
-        if (i as u16) < func.param_count {
-            def_v(builder, &vars, VReg(i as u32), val);
+        if i < param_base {
+            continue;
+        }
+        let user_idx = i - param_base;
+        if (user_idx as u16) < func.param_count {
+            def_v(builder, &vars, VReg(user_idx as u32), val);
         }
     }
 
