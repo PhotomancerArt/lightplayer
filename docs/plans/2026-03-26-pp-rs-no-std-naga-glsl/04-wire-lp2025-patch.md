@@ -14,17 +14,13 @@ Point the **workspace** at **`light-player/pp-rs`** so every **`pp-rs`** edge (t
 
 ## Implementation Details
 
-1. In **`lp2025/Cargo.toml`**, under **`[patch.crates-io]`**, add:
+1. In **`lp2025/Cargo.toml`**, under **`[patch.crates-io]`**, add **`pp-rs`** (done: **`path = "lp-glsl/pp-rs"`** until **`light-player/pp-rs`** exists). Then prefer:
    ```toml
    pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
    ```
    (Adjust **branch** if you use **`lightplayer`** / version branches.)
 
-2. Mirror the **local dev** pattern used for **Cranelift**: in **`# Local dev patches`**, a **commented** line (uncomment to override git):
-   ```toml
-   # pp-rs = { path = "../pp-rs" }
-   ```
-   **Do not** leave **`path`** enabled in committed **`main`** unless policy explicitly allows (prefer **git** for reproducible CI).
+2. Mirror the **local dev** pattern used for **Cranelift**: in **`# Local dev patches`**, a **commented** **`git`** override (see root **`Cargo.toml`** — uncomment **`git`** and drop **`path`** when the GitHub repo is live). Optional sibling clone: `# pp-rs = { path = "../pp-rs" }`.
 
 3. Run **`cargo update -p pp-rs`** (or full refresh) so **`Cargo.lock`** records the **git** source.
 

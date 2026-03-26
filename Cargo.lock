@@ -5116,10 +5116,9 @@ dependencies = [
 
 [[package]]
 name = "pp-rs"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb458bb7f6e250e6eb79d5026badc10a3ebb8f9a15d1fff0f13d17c71f4d6dee"
+version = "0.2.2"
 dependencies = [
+ "hashbrown 0.15.5",
  "unicode-xid",
 ]
 

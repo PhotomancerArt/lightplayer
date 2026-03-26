@@ -1,0 +1,18 @@
+[package]
+name = "pp-rs"
+version = "0.2.2"
+authors = ["pp-rs Developers"]
+description = "Shader preprocessor (no_std + alloc; fork for naga glsl-in on bare-metal)"
+homepage = "https://github.com/Kangz/glslpp-rs"
+repository = "https://github.com/light-player/pp-rs"
+keywords = ["shader", "preprocessor", "glsl"]
+license = "BSD-3-Clause"
+edition = "2021"
+rust-version = "1.74"
+
+[dependencies]
+unicode-xid = "0.2"
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
+
+# Not a workspace member of lp2025; `cargo test --manifest-path` uses this as its own root.
+[workspace]

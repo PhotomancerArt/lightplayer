@@ -52,5 +52,6 @@
 ## Notes
 
 - **`fw-tests`** (`scene_render_emu`, `alloc_trace_emu`) assert **`NodeStatus::Ok`** on the shader after sync so the suite **fails** while **`fw-emu`** builds **`lp-engine`** without **`std`** (no JIT). They should pass again once embedded GLSL codegen is wired and the firmware enables the real compiler path.
+- **`pp-rs`:** in-tree fork at **`lp-glsl/pp-rs`** (v**0.2.2**), wired via **`[patch.crates-io]`** `path = "lp-glsl/pp-rs"`. Push that tree to **`light-player/pp-rs`** when ready and switch the patch to **`git`** (comment in root **`Cargo.toml`**).
 - Disabling the preprocessor entirely in **naga** is **not** a small feature flag: the GLSL lexer is built around **`pp_rs::Preprocessor`**. This plan **does not** pursue preprocessor removal.
 - Binary-size win from dropping **`pp-rs`** would be small vs **naga** itself; **`no_std`** **`pp-rs`** keeps full preprocessor behavior.
