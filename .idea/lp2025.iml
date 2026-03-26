@@ -61,6 +61,18 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/web-demo/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-naga/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-naga/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-diagnostics/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-exec/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-values/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/target" />
     </content>
