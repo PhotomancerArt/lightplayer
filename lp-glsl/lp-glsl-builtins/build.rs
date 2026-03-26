@@ -1,11 +1,8 @@
 //! Build script for lp-glsl-builtins
 //!
-//! This script is minimal - it just ensures the crate can be built as a staticlib.
-//! The actual cross-compilation to riscv32imac-unknown-none-elf is handled by
-//! lp-glsl-cranelift's build.rs to avoid infinite loops.
+//! This script is minimal — the crate builds as a staticlib for guest and host links.
+//! RISC-V guest images and `lpir-cranelift` embedding use workspace scripts / `lpir-cranelift` build glue.
 
 fn main() {
-    // This build.rs is intentionally minimal.
-    // The actual building of lp-glsl-builtins for riscv32imac-unknown-none-elf
-    // is done by lp-glsl-cranelift's build.rs when needed.
+    // Intentionally empty — cross-target emu builds are driven by `lpir-cranelift` / workspace scripts.
 }

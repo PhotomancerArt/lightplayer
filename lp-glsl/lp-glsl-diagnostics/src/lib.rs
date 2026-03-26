@@ -1,8 +1,6 @@
 //! Structured GLSL errors and source locations.
 //!
-//! This crate is the **new** shared diagnostics layer. `lp-glsl-frontend` and
-//! `lp-glsl-cranelift` retain their own copies until those crates are removed or
-//! rewired to depend on this crate.
+//! Shared diagnostics for the GLSL / LPIR test and exec stack.
 //!
 //! Stack: `lp-glsl-diagnostics` → `lp-glsl-core` → `lp-glsl-values` → `lp-glsl-exec`.
 

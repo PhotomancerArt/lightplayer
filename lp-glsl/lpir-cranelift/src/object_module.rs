@@ -15,7 +15,7 @@ use crate::error::{CompileError, CompilerError};
 use crate::module_lower::{LpirFuncEmitOrder, lower_lpir_into_module};
 use crate::process_sync;
 
-/// Same triple as `lp-glsl-cranelift` `Target::riscv32_emulator` (RISC-V32 imafc, ELF).
+/// RISC-V32 imafc ELF triple for emulator-linked objects (matches firmware guest conventions).
 fn riscv32_triple() -> Triple {
     Triple {
         architecture: Architecture::Riscv32(Riscv32Architecture::Riscv32imafc),

@@ -1,4 +1,4 @@
-//! `GlslValue` and related helpers (copied from `lp-glsl-cranelift`).
+//! `GlslValue` and related helpers for filetests and `lp-glsl-exec`.
 
 #![no_std]
 

@@ -16,7 +16,6 @@ members = [
     "lp-glsl/lp-glsl-builtin-ids",
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-frontend",
     "lp-glsl/lp-glsl-core",
     "lp-glsl/lp-glsl-diagnostics",
     "lp-glsl/lp-glsl-exec",
@@ -24,9 +23,7 @@ members = [
     "lp-glsl/lp-glsl-naga",
     "lp-glsl/lpir-cranelift",
     "lp-glsl/lpir",
-    "lp-glsl/lp-glsl-cranelift",
     "lp-glsl/lp-glsl-filetests",
-    "lp-glsl/lp-glsl-jit-util",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
@@ -37,15 +34,13 @@ members = [
     "lp-glsl/lp-glsl-builtins-emu-app",
     "lp-glsl/lp-glsl-builtins-wasm",
     "lp-glsl/lp-glsl-filetests-app",
-    "lp-glsl/esp32-glsl-jit",
-    "lp-glsl/lp-glsl-q32-metrics-app",
     "lp-glsl/lp-glsl-wasm",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc",
 ]
 resolver = "2"
 
-# Exclude lp-glsl-builtins-emu-app, lp-glsl-builtins-wasm, esp32-glsl-jit, and fw-esp32 from default workspace builds (cross-target only)
+# Exclude lp-glsl-builtins-emu-app, lp-glsl-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
 # Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
@@ -63,23 +58,19 @@ default-members = [
     "lp-glsl/lp-glsl-builtin-ids",
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-frontend",
     "lp-glsl/lp-glsl-core",
     "lp-glsl/lp-glsl-diagnostics",
     "lp-glsl/lp-glsl-exec",
     "lp-glsl/lp-glsl-values",
     "lp-glsl/lp-glsl-naga",
     "lp-glsl/lpir",
-    "lp-glsl/lp-glsl-cranelift",
     "lp-glsl/lp-glsl-filetests",
-    "lp-glsl/lp-glsl-jit-util",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
     "lp-glsl/lp-glsl-builtins-gen-app",
     "lp-glsl/lp-glsl-filetests-app",
-    "lp-glsl/lp-glsl-q32-metrics-app",
 ]
 [workspace.package]
 version = "40.0.0"
@@ -153,10 +144,6 @@ lto = true
 opt-level = "z"
 codegen-units = 1
 panic = "unwind"
-
-# ESP32 app release profile optimizations (embedded target)
-[profile.release.package.esp32-glsl-jit]
-strip = "debuginfo"
 
 # fw-emu: keep debug info for backtrace symbolication
 [profile.release.package.fw-emu]

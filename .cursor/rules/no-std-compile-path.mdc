@@ -1,0 +1,30 @@
+---
+description: no_std policy for the shader compilation pipeline
+globs: lp-core/**/*.rs,lp-core/**/Cargo.toml,lp-glsl/**/*.rs,lp-glsl/**/Cargo.toml,lp-fw/**/*.rs,lp-fw/**/Cargo.toml
+alwaysApply: false
+---
+
+# no_std Policy for the Shader Pipeline
+
+## Feature flag meaning
+
+- `std` = host-only conveniences (libstd, cranelift-native, anyhow, etc.)
+- `std` does NOT mean "has a compiler"
+- `glsl` = GLSL front-end (lp-glsl-naga). Independent of `std`.
+- Default server builds include the full compiler. Opt-out features (e.g.
+  `no-shader-compile`) exist only for stripped/test builds.
+
+## What MUST work without `std`
+
+- `lp-glsl-naga` — GLSL parsing via naga (`#![no_std]` + alloc)
+- `lpir-cranelift` — LPIR → Cranelift → RISC-V machine code
+- `lpir-cranelift::jit(source, options)` — full GLSL string entry point
+- `lp-engine` `ShaderRuntime::compile_shader` — real compilation, not a stub
+- `lp-server` — project/client management on bare metal
+
+## Anti-patterns (do NOT do these)
+
+- `#[cfg(feature = "std")] fn compile_shader(...)` with a stub `#[cfg(not(...))]`
+- `#[cfg(feature = "std")] pub use compile::jit;` (jit must be available without std)
+- Making `lp-glsl-naga` a `std`-only dependency of `lpir-cranelift`
+- Suggesting "precompile shaders on host" as an alternative to on-device JIT

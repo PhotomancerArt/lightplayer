@@ -4,7 +4,7 @@
 //! differently depending on execution context:
 //! - Emulator: Functions defined in `lp-glsl-builtins-emu-app` (syscall-based)
 //! - Tests: Functions defined here using `std` (gated by feature flag)
-//! - JIT: Functions registered by `GlJitModule` (delegate to `lp-glsl-cranelift` macros)
+//! - JIT: Functions registered by `GlJitModule` (delegates to `lpir-cranelift` host hooks)
 
 mod logger;
 mod macros;
@@ -20,7 +20,7 @@ pub use registry::HostFn;
 // Function declarations are provided by:
 // - Emulator: `lp-glsl-builtins-emu-app` (syscall-based)
 // - Tests: `test` module (gated by feature flag)
-// - JIT: `lp-glsl-cranelift` (delegates to `lp-glsl-cranelift` macros)
+// - JIT: `lpir-cranelift` (registers host syscalls / logging)
 //
 // No default implementations here to avoid symbol conflicts when linking.
 

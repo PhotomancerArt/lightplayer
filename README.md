@@ -96,19 +96,17 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 
 ## GLSL Compiler (`lp-glsl/`)
 
-- **`lp-glsl-frontend`** Target-independent GLSL parsing, semantic analysis, and error handling
+- **`lp-glsl-naga`** GLSL → LPIR (via naga)
+- **`lpir`** LightPlayer IR definitions
+- **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
 - **`lp-glsl-builtin-ids`** Generated enum of builtin function IDs
-- **`lp-glsl-cranelift`** Cranelift-backed codegen, JIT, and ELF linking
 - **`lp-glsl-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
   lygia-inspired library of native glsl functions
 - **`lp-glsl-builtins-emu-app`** RISC-V guest for running tests linked against builtins
 - **`lp-glsl-builtins-gen-app`** Code generator for builtin function boilerplate
-- **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctnees
-- **`lp-glsl-filetests-gen-app`** Generator for repetative filetests (vector, matries)
+- **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctness
+- **`lp-glsl-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
 - **`lp-glsl-filetests-app`** Filetest runner binary
-- **`lp-glsl-jit-util`** Utilities for JIT compilation
-- **`esp32-glsl-jit`** ESP32 proof-of-concept JIT compiler
-- **`lp-glsl-q32-metrics-app`** Metrics tool for fixed-point math (q32)
 - **`lpfx-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)

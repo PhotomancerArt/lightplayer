@@ -1,4 +1,4 @@
-//! `GlslExecutable` (copied from `lp-glsl-cranelift`, without Cranelift-only hooks).
+//! `GlslExecutable` — uniform interface for running compiled GLSL from filetests.
 
 use alloc::{string::String, vec::Vec};
 

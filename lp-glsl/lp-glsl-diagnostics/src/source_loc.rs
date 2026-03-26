@@ -1,4 +1,4 @@
-//! Minimal source location types for errors (copied from `lp-glsl-frontend`).
+//! Minimal source location types for errors.
 
 use core::fmt;
 

@@ -18,7 +18,7 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ============================================================================
 declare -a COMMANDS=(
     "GLSL filetests|lp-glsl|cargo test -p lp-glsl-filetests --test filetests"
-    "ESP32 build|lp-glsl|cargo build --target riscv32imac-unknown-none-elf -p esp32-glsl-jit --release"
+    "ESP32 firmware (compiler in tree)|.|cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server"
 )
 
 # ============================================================================

@@ -20,8 +20,8 @@ fn lpfx_saturate_vec3_q32_writes_shared_memory() {
         Instance::new(&mut store, &builtins_mod, &[memory.clone().into()]).expect("instantiate");
 
     let f = builtins_inst
-        .get_func(&mut store, "__lpfx_saturate_vec3_q32")
-        .expect("export __lpfx_saturate_vec3_q32");
+        .get_func(&mut store, "__lp_lpfx_saturate_vec3_q32")
+        .expect("export __lp_lpfx_saturate_vec3_q32");
 
     let base = 65536usize;
     for b in memory.data_mut(&mut store)[base..base + 16].iter_mut() {
@@ -49,7 +49,7 @@ fn lpfx_saturate_vec3_q32_writes_shared_memory() {
 }
 
 #[test]
-#[ignore = "LPIR→WASM declares vec3 lpfx_saturate as multi-return; builtins.wasm exports result-ptr ABI — incompatible import type until aligned (stage-vii-cleanup.md)"]
+#[ignore = "WASM import ABI mismatch for vec3 LPFX (multi-return vs result-pointer). See docs/roadmaps/2026-03-25-lpir-features/"]
 fn shader_lpfx_saturate_vec3_writes_scratch_then_reads_it() {
     let src = r#"
 float test_get_rx() {

@@ -1,10 +1,10 @@
 //! Parse GLSL signature strings into FunctionSignature
 
 use crate::lpfx::errors::LpfxCodegenError;
+use crate::lpfx::signature_parse::extract_function_signature;
+use crate::lpfx::types::FunctionSignature;
 use glsl::parser::Parse;
 use glsl::syntax::{ExternalDeclaration, TranslationUnit};
-use lp_glsl_frontend::semantic::functions::FunctionSignature;
-use lp_glsl_frontend::semantic::passes::function_signature::extract_function_signature;
 
 /// Parse a GLSL function signature string into a FunctionSignature
 pub fn parse_glsl_signature(
@@ -37,12 +37,12 @@ pub fn parse_glsl_signature(
     // Find the function definition in the shader
     for decl in &shader.0 {
         if let ExternalDeclaration::FunctionDefinition(func_def) = decl {
-            return extract_function_signature(&func_def.prototype, None).map_err(|e| {
+            return extract_function_signature(&func_def.prototype).map_err(|e| {
                 LpfxCodegenError::InvalidSignature {
                     function_name: function_name.to_string(),
                     file_path: file_path.to_string(),
                     signature: sig_str.to_string(),
-                    error: format!("Failed to extract function signature: {}", e),
+                    error: format!("Failed to extract function signature: {e}"),
                 }
             });
         }

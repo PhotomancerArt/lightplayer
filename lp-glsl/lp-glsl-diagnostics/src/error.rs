@@ -1,4 +1,4 @@
-//! Error codes and `GlslError` (subset copied from `lp-glsl-frontend`).
+//! Error codes and `GlslError`.
 
 use alloc::{format, string::String, vec::Vec};
 use core::fmt;

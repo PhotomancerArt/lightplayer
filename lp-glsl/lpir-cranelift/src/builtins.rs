@@ -1,9 +1,8 @@
 //! JIT builtin symbols and LPIR import resolution.
 //!
 //! Cranelift [`Signature`] and [`get_function_pointer`] for each [`BuiltinId`] are generated in
-//! [`crate::generated_builtin_abi`] from the same `rust_signature` strings as
-//! `lp-glsl-cranelift` `registry.rs` (`lp-glsl-builtins-gen-app`). Re-run codegen after changing any
-//! `extern "C"` builtin in `lp-glsl-builtins`.
+//! [`crate::generated_builtin_abi`] from `rust_signature` metadata in `lp-glsl-builtins`
+//! (`lp-glsl-builtins-gen-app`). Re-run codegen after changing any `extern "C"` builtin.
 
 use alloc::boxed::Box;
 use alloc::format;

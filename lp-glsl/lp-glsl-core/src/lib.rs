@@ -1,7 +1,6 @@
 //! Core GLSL type and function-signature shapes (no parser, no codegen).
 //!
-//! Copied from `lp-glsl-frontend` for the **new** stack. The frontend crate keeps
-//! its own definitions until it is retired or switched to depend on this crate.
+//! Used by `lp-glsl-naga`, filetests, and `lp-glsl-exec`.
 
 #![no_std]
 

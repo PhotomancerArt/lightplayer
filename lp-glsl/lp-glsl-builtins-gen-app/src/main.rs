@@ -8,10 +8,10 @@ mod discovery;
 mod lpfx;
 
 use discovery::discover_lpfx_functions;
-use lp_glsl_frontend::semantic::types::Type;
 use lpfx::errors::Variant;
-use lpfx::generate::{generate_lpfx_fns, group_by_signature, group_functions_by_name};
+use lpfx::grouping::{group_by_signature, group_functions_by_name};
 use lpfx::process::process_lpfx_functions;
+use lpfx::types::Type;
 use lpfx::validate::{ParsedLpfxFunction, validate_lpfx_functions};
 
 #[derive(Debug, Clone)]
@@ -64,15 +64,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("src")
         .join("lib.rs");
     generate_builtin_ids(&builtin_ids_path, &builtins);
-
-    // Generate registry.rs
-    let registry_path = workspace_root
-        .join("lp-glsl-cranelift")
-        .join("src")
-        .join("backend")
-        .join("builtins")
-        .join("registry.rs");
-    generate_registry(&registry_path, &builtins);
 
     let lpir_builtin_abi_path = workspace_root
         .join("lpir-cranelift")
@@ -128,24 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "LPIR library operations (fixed-point Q32).",
     );
 
-    // Generate testcase mapping in backend/builtins/mapping.rs
-    let mapping_rs_path = workspace_root
-        .join("lp-glsl-cranelift")
-        .join("src")
-        .join("backend")
-        .join("builtins")
-        .join("mapping.rs");
-    generate_testcase_mapping(&mapping_rs_path, &builtins);
-
-    // Generate lpfx_fns.rs
-    let lpfx_fns_path = workspace_root
-        .join("lp-glsl-frontend")
-        .join("src")
-        .join("semantic")
-        .join("lpfx")
-        .join("lpfx_fns.rs");
-    generate_lpfx_fns_file(&lpfx_fns_path, &lpfx_dir)?;
-
     let wasm_import_types_path = workspace_root
         .join("lp-glsl-wasm")
         .join("src")
@@ -162,43 +135,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         actual_workspace_root,
         &[
             &builtin_ids_path,
-            &registry_path,
             &lpir_builtin_abi_path,
             &builtin_refs_path,
             &builtin_refs_wasm_path,
             &glsl_mod_rs_path,
             &lpir_mod_rs_path,
-            &mapping_rs_path,
-            &lpfx_fns_path,
             &glsl_map_path,
             &wasm_import_types_path,
         ],
     );
 
     println!("Generated all builtin boilerplate files");
-    Ok(())
-}
-
-/// Generate lpfx_fns.rs file
-fn generate_lpfx_fns_file(
-    output_path: &Path,
-    lpfx_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Discover LPFX functions
-    let discovered = discover_lpfx_functions(lpfx_dir)?;
-
-    // Process: parse attributes and GLSL signatures
-    let parsed = process_lpfx_functions(&discovered)?;
-
-    // Validate
-    validate_lpfx_functions(&parsed)?;
-
-    // Generate code
-    let code = generate_lpfx_fns(&parsed);
-
-    // Write to file
-    fs::write(output_path, code)?;
-
     Ok(())
 }
 
@@ -444,7 +391,7 @@ fn find_workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
                 let mut check = std::env::current_dir()?;
                 loop {
                     if check.join("lp-glsl-builtins").exists()
-                        || check.join("lp-glsl-cranelift").exists()
+                        || check.join("lpir-cranelift").exists()
                     {
                         return Ok(check);
                     }
@@ -1069,179 +1016,7 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
     output.push_str("    }\n");
 }
 
-fn generate_registry(path: &Path, builtins: &[BuiltinInfo]) {
-    let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
-//!
-//! To regenerate this file, run:
-//!     cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl/lp-glsl-builtins-gen-app/Cargo.toml
-//!
-//! Or use the build script:
-//!     scripts/build-builtins.sh
-
-"#;
-
-    let mut output = String::from(header);
-    output.push_str("//! Builtin function registry implementation.\n");
-    output.push_str("//!\n");
-    output
-        .push_str("//! Provides enum-based registry for builtin functions with support for both\n");
-    output.push_str("//! JIT (function pointer) and emulator (ELF symbol) linking.\n");
-    output.push('\n');
-
-    output.push_str("pub use lp_glsl_builtin_ids::BuiltinId;\n\n");
-    output.push_str("use crate::error::{ErrorCode, GlslError};\n");
-    output.push_str("use cranelift_codegen::ir::{AbiParam, Signature, types};\n");
-    output.push_str("use cranelift_codegen::isa::CallConv;\n");
-    output.push_str("use cranelift_module::{Linkage, Module};\n\n");
-    output.push_str("#[cfg(not(feature = \"std\"))]\n");
-    output.push_str("use alloc::format;\n\n");
-
-    // Extension trait for format() - cannot add inherent methods to foreign type
-    output.push_str(
-        "/// Format affinity for builtins (Cranelift-specific, format-aware declaration).\n",
-    );
-    output.push_str("trait BuiltinIdFormat {\n");
-    output.push_str("    fn format(&self) -> Option<crate::FloatMode>;\n");
-    output.push_str("}\n\n");
-    output.push_str("impl BuiltinIdFormat for BuiltinId {\n");
-    output.push_str("    fn format(&self) -> Option<crate::FloatMode> {\n");
-    output.push_str("        match self {\n");
-    if builtins.is_empty() {
-        output.push_str("            BuiltinId::_Placeholder => None,\n");
-    } else {
-        for builtin in builtins {
-            let fmt = if builtin.enum_variant.ends_with("Q32") {
-                "Some(crate::FloatMode::Q32)"
-            } else if builtin.enum_variant.ends_with("F32") {
-                "Some(crate::FloatMode::F32)"
-            } else {
-                "None"
-            };
-            output.push_str(&format!(
-                "            BuiltinId::{} => {},\n",
-                builtin.enum_variant, fmt
-            ));
-        }
-    }
-    output.push_str("        }\n");
-    output.push_str("    }\n");
-    output.push_str("}\n\n");
-
-    // Generate signature_for_builtin() - free function (cannot add inherent methods to foreign type)
-    output.push_str("/// Get the Cranelift signature for this builtin function.\n");
-    output.push_str("///\n");
-    output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str("/// For RISC-V 32-bit, this should be `types::I32`.\n");
-    output.push_str(
-        "/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.\n",
-    );
-    output.push_str("pub fn signature_for_builtin(builtin: BuiltinId, pointer_type: types::Type) -> Signature {\n");
-    output.push_str("    let mut sig = Signature::new(CallConv::SystemV);\n");
-    output.push_str("    match builtin {\n");
-
-    if builtins.is_empty() {
-        output.push_str("            BuiltinId::_Placeholder => {\n");
-        output.push_str("                // Placeholder - no builtins defined\n");
-        output.push_str("            }\n");
-    } else {
-        output.push_str(&emit_grouped_signature_match_arms(builtins));
-    }
-
-    output.push_str("    }\n");
-    output.push_str("    sig\n");
-    output.push_str("}\n\n");
-
-    // Generate get_function_pointer()
-    output.push_str("/// Get function pointer for a builtin (JIT mode only).\n");
-    output.push_str("///\n");
-    output.push_str("/// Returns the function pointer that can be registered with JITModule.\n");
-    output.push_str("pub fn get_function_pointer(builtin: BuiltinId) -> *const u8 {\n");
-    append_get_function_pointer_match(&mut output, builtins);
-    output.push_str("}\n\n");
-
-    // Generate declare_builtins and related functions
-    output.push_str("/// Declare builtin functions as external symbols.\n");
-    output.push_str("///\n");
-    output.push_str(
-        "/// This is the same for both JIT and emulator - they both use Linkage::Import.\n",
-    );
-    output.push_str("/// The difference is only in how they're linked:\n");
-    output.push_str(
-        "/// - JIT: Function pointers are registered via symbol_lookup_fn during module creation\n",
-    );
-    output.push_str(
-        "/// - Emulator: Symbols are resolved by the linker when linking the static library\n",
-    );
-    output.push_str("///\n");
-    output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str("/// For RISC-V 32-bit, this should be `types::I32`.\n");
-    output.push_str(
-        "/// For 64-bit architectures (like Apple Silicon), this should be `types::I64`.\n",
-    );
-    output.push_str("/// `format` filters builtins: in Q32 mode, F32-only builtins are skipped; in Float mode, Q32 builtins are skipped.\n");
-    output.push_str("pub fn declare_builtins<M: Module>(\n");
-    output.push_str("    module: &mut M,\n");
-    output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::FloatMode,\n");
-    output.push_str(") -> Result<(), GlslError> {\n");
-    output.push_str("    for builtin in BuiltinId::all() {\n");
-    output.push_str("        if let Some(f) = builtin.format() {\n");
-    output.push_str("            if f != format {\n");
-    output.push_str("                continue;\n");
-    output.push_str("            }\n");
-    output.push_str("        }\n");
-    output.push_str("        let name = builtin.name();\n");
-    output.push_str("        let sig = signature_for_builtin(*builtin, pointer_type);\n\n");
-    output.push_str("        module\n");
-    output.push_str("            .declare_function(name, Linkage::Import, &sig)\n");
-    output.push_str("            .map_err(|e| {\n");
-    output.push_str("                GlslError::new(\n");
-    output.push_str("                    ErrorCode::E0400,\n");
-    output.push_str("                    format!(\"Failed to declare builtin '{name}': {e}\"),\n");
-    output.push_str("                )\n");
-    output.push_str("            })?;\n");
-    output.push_str("    }\n\n");
-    output.push_str("    Ok(())\n");
-    output.push_str("}\n\n");
-
-    output.push_str("/// Declare and link builtin functions for JIT mode.\n");
-    output.push_str("///\n");
-    output
-        .push_str("/// This declares all builtins as external functions. The function pointers\n");
-    output.push_str(
-        "/// are registered via a symbol lookup function that's added during module creation.\n",
-    );
-    output.push_str("///\n");
-    output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str("pub fn declare_for_jit<M: Module>(\n");
-    output.push_str("    module: &mut M,\n");
-    output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::FloatMode,\n");
-    output.push_str(") -> Result<(), GlslError> {\n");
-    output.push_str("    declare_builtins(module, pointer_type, format)\n");
-    output.push_str("}\n\n");
-
-    output.push_str("/// Declare builtin functions as external symbols for emulator mode.\n");
-    output.push_str("///\n");
-    output.push_str(
-        "/// This declares all builtins as external symbols (Linkage::Import) that will\n",
-    );
-    output.push_str("/// be resolved by the linker when linking the static library.\n");
-    output.push_str("///\n");
-    output.push_str("/// `pointer_type` is the native pointer type for the target architecture.\n");
-    output.push_str("pub fn declare_for_emulator<M: Module>(\n");
-    output.push_str("    module: &mut M,\n");
-    output.push_str("    pointer_type: types::Type,\n");
-    output.push_str("    format: crate::FloatMode,\n");
-    output.push_str(") -> Result<(), GlslError> {\n");
-    output.push_str("    declare_builtins(module, pointer_type, format)\n");
-    output.push_str("}\n");
-
-    fs::write(path, output).expect("Failed to write registry.rs");
-}
-
-/// Same `rust_signature` → Cranelift ABI mapping as `lp-glsl-cranelift` `registry.rs`, with
-/// `CallConv` supplied by the caller (embedded JIT uses the ISA default, not hardcoded SystemV where it differs).
+/// Cranelift signatures derived from each builtin's `rust_signature` strings in `lp-glsl-builtins`.
 fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
 //!
@@ -1253,7 +1028,7 @@ fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
 
 //! Cranelift signatures and function pointers for [`BuiltinId`].
 //!
-//! Generated from the same `rust_signature` strings as `lp-glsl-cranelift` `registry.rs`.
+//! Generated from `rust_signature` metadata scraped from `lp-glsl-builtins`.
 //! Changing an `extern "C"` builtin in `lp-glsl-builtins` without re-running codegen will desync
 //! this file and fail `cargo check` until you regenerate.
 
@@ -1434,85 +1209,6 @@ fn generate_dir_mod_rs(path: &Path, builtins: &[BuiltinInfo], doc_line: &str) {
     }
 
     fs::write(path, output).expect("Failed to write mod.rs");
-}
-
-fn generate_testcase_mapping(path: &Path, builtins: &[BuiltinInfo]) {
-    // Read existing file
-    let content = fs::read_to_string(path).expect("Failed to read mapping.rs");
-
-    // Find the map_testcase_to_builtin function and replace it
-    let start_marker = "/// Map TestCase function name and argument count to BuiltinId.";
-
-    let start_idx = content
-        .find(start_marker)
-        .expect("Could not find map_testcase_to_builtin function");
-
-    // Find the end of the function (look for the closing brace after the match)
-    let mut end_idx = start_idx;
-    let mut brace_count = 0;
-    let mut in_function = false;
-
-    for (i, ch) in content[start_idx..].char_indices() {
-        if ch == '{' {
-            brace_count += 1;
-            in_function = true;
-        } else if ch == '}' {
-            brace_count -= 1;
-            if in_function && brace_count == 0 {
-                end_idx = start_idx + i + 1;
-                break;
-            }
-        }
-    }
-
-    let before = &content[..start_idx];
-    let after = &content[end_idx..];
-
-    let header = "/// Map TestCase function name and argument count to BuiltinId.\n///\n/// Returns None if the function name is not a math function that should be converted.\n/// Handles both standard C math function names (sinf, cosf) and intrinsic names (__lp_sin, __lp_cos).\n/// Supports overloaded functions by matching on both name and argument count.\n///\n/// This function is AUTO-GENERATED. Do not edit manually.\n///\n/// To regenerate this function, run:\n///     cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl/lp-glsl-builtins-gen-app/Cargo.toml\n///\n/// Or use the build script:\n///     scripts/build-builtins.sh\n";
-
-    let mut new_function = String::from(header);
-    new_function.push_str(
-        "pub fn map_testcase_to_builtin(testcase_name: &str, arg_count: usize) -> Option<BuiltinId> {\n",
-    );
-    new_function.push_str("    match (testcase_name, arg_count) {\n");
-
-    // Generate mappings
-    if builtins.is_empty() {
-        // No builtins, so no mappings
-    } else {
-        for builtin in builtins {
-            if builtin.module_path.starts_with("lpfx::") {
-                continue;
-            }
-            let intrinsic_name = builtin.symbol_name.clone();
-            let q32_alias = format!("lp_{}_{}f", builtin.builtin_module, builtin.builtin_fn_name);
-            let mut extra = String::new();
-            if builtin.builtin_module == "glsl" {
-                if builtin.builtin_fn_name == "mod" {
-                    extra.push_str(" | \"fmodf\"");
-                } else {
-                    extra.push_str(&format!(" | \"{}f\"", builtin.builtin_fn_name));
-                }
-            }
-            if builtin.builtin_fn_name == "fnearest" {
-                extra.push_str(" | \"roundevenf\"");
-            }
-            if builtin.builtin_module == "lpir" && builtin.builtin_fn_name == "fsqrt" {
-                extra.push_str(" | \"sqrtf\"");
-            }
-            new_function.push_str(&format!(
-                "        (\"{}\" | \"{}\"{}, {}) => Some(BuiltinId::{}),\n",
-                q32_alias, intrinsic_name, extra, builtin.param_count, builtin.enum_variant
-            ));
-        }
-    }
-
-    new_function.push_str("        _ => None,\n");
-    new_function.push_str("    }\n");
-    new_function.push_str("}\n");
-
-    let new_content = format!("{}{}{}", before, new_function, after);
-    fs::write(path, new_content).expect("Failed to write mapping.rs");
 }
 
 fn format_generated_files(workspace_root: &Path, files: &[&Path]) {

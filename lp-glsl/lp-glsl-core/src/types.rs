@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 
-/// GLSL type system (copied from `lp-glsl-frontend`).
+/// GLSL type system (shared with exec / filetests).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Void,

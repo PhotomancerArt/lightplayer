@@ -32,7 +32,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-emu-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/tests" isTestSource="true" />
@@ -44,9 +43,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests-gen-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-jit-util/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-jit-util/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-q32-metrics-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpfx-impl-macro/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/tests" isTestSource="true" />
@@ -54,10 +50,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtin-ids/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-cranelift/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-cranelift/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-cranelift/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-frontend/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/examples" isTestSource="false" />
@@ -74,7 +66,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-values/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
-      <excludeFolder url="file://$MODULE_DIR$/lp-glsl/esp32-glsl-jit/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

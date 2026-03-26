@@ -1,8 +1,9 @@
 //! Generating isolated test GLSL code (includes function filtering).
 
 use anyhow::Result;
+use glsl::parser::Parse;
+use glsl::syntax::TranslationUnit;
 use glsl::syntax::{CompoundStatement, Expr, ExternalDeclaration, SimpleStatement, Statement};
-use lp_glsl_frontend::CompilationPipeline;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Result of test GLSL code generation.
@@ -32,9 +33,9 @@ pub fn generate_test_glsl(
 
     // Try to filter functions using call graph analysis
     // If parsing/filtering fails, fall back to including all functions
-    let function_code = match CompilationPipeline::parse(&full_function_code) {
+    let function_code = match TranslationUnit::parse(&full_function_code) {
         Ok(parse_result) => {
-            match glsl_for_fn_graph(&parse_result.shader, &full_function_code, &func_name) {
+            match glsl_for_fn_graph(&parse_result, &full_function_code, &func_name) {
                 Ok(filtered) if !filtered.is_empty() => filtered,
                 _ => full_function_code.clone(), // Fallback to all functions
             }
@@ -631,6 +632,7 @@ fn byte_offset_to_line(source: &str, offset: usize) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glsl::parser::Parse;
 
     #[test]
     fn test_extract_function_name() {
@@ -664,8 +666,8 @@ float test() {
 }
 "#;
 
-        let parse_result = CompilationPipeline::parse(source).unwrap();
-        let filtered = glsl_for_fn_graph(&parse_result.shader, source, "test").unwrap();
+        let parse_result = TranslationUnit::parse(source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, source, "test").unwrap();
 
         // Should include test, multiply, and add
         assert!(filtered.contains("test"));
@@ -683,8 +685,8 @@ float d() { return 4.0; }
 float test() { return c(); }
 "#;
 
-        let parse_result = CompilationPipeline::parse(source).unwrap();
-        let filtered = glsl_for_fn_graph(&parse_result.shader, source, "test").unwrap();
+        let parse_result = TranslationUnit::parse(source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, source, "test").unwrap();
 
         // Should include test, c, b, a (but not d)
         assert!(filtered.contains("test"));
@@ -700,8 +702,8 @@ float test() { return c(); }
 float test() { return 1.0; }
 "#;
 
-        let parse_result = CompilationPipeline::parse(source).unwrap();
-        let filtered = glsl_for_fn_graph(&parse_result.shader, source, "nonexistent").unwrap();
+        let parse_result = TranslationUnit::parse(source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, source, "nonexistent").unwrap();
 
         // Should return empty or just the function itself
         assert!(filtered.is_empty() || !filtered.contains("test"));

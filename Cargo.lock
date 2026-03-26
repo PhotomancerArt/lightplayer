@@ -734,26 +734,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "capstone"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "015ef5d5ca1743e3f94af9509ba6bd2886523cfee46e48d15c2ef5216fd4ac9a"
-dependencies = [
- "capstone-sys",
- "libc",
-]
-
-[[package]]
-name = "capstone-sys"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2267cb8d16a1e4197863ec4284ffd1aec26fe7e57c58af46b02590a0235809a0"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1066,9 +1046,7 @@ name = "cranelift-codegen"
 version = "0.127.0"
 source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
 dependencies = [
- "anyhow",
  "bumpalo",
- "capstone",
  "cranelift-assembler-x64 0.127.0",
  "cranelift-bforest 0.127.0",
  "cranelift-bitset 0.127.0",
@@ -1211,19 +1189,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cranelift-interpreter"
-version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
-dependencies = [
- "cranelift-codegen 0.127.0",
- "cranelift-entity 0.127.0",
- "libm",
- "log",
- "smallvec",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "cranelift-isle"
 version = "0.127.0"
 source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
@@ -1297,17 +1262,6 @@ dependencies = [
  "cranelift-module",
  "log",
  "object",
- "target-lexicon",
-]
-
-[[package]]
-name = "cranelift-reader"
-version = "0.127.0"
-source = "git+https://github.com/light-player/lp-cranelift?branch=main#a74110a0b67ebeef955a6bc782e26bd5609e72a8"
-dependencies = [
- "anyhow",
- "cranelift-codegen 0.127.0",
- "smallvec",
  "target-lexicon",
 ]
 
@@ -1882,26 +1836,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embassy-usb-driver"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17119855ccc2d1f7470a39756b12068454ae27a3eabb037d940b5c03d9c77b7a"
-dependencies = [
- "embedded-io-async 0.6.1",
-]
-
-[[package]]
-name = "embassy-usb-synopsys-otg"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288751f8eaa44a5cf2613f13cee0ca8e06e6638cb96e897e6834702c79084b23"
-dependencies = [
- "critical-section",
- "embassy-sync 0.7.2",
- "embassy-usb-driver",
-]
-
-[[package]]
 name = "embedded-can"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2158,7 +2092,6 @@ dependencies = [
  "esp-println",
  "heapless 0.9.2",
  "riscv",
- "semihosting",
  "xtensa-lx",
 ]
 
@@ -2220,8 +2153,6 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-sync 0.7.2",
- "embassy-usb-driver",
- "embassy-usb-synopsys-otg",
  "embedded-can",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -2236,7 +2167,6 @@ dependencies = [
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
- "esp-synopsys-usb-otg",
  "esp32",
  "esp32c2",
  "esp32c3",
@@ -2253,8 +2183,6 @@ dependencies = [
  "rand_core 0.6.4",
  "rand_core 0.9.5",
  "riscv",
- "sha1",
- "sha2",
  "strum",
  "ufmt-write",
  "xtensa-lx",
@@ -2388,19 +2316,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "esp-synopsys-usb-otg"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8938451cb19032f13365328ea66ab38c8d16deecdf322067442297110eb74468"
-dependencies = [
- "critical-section",
- "embedded-hal 0.2.7",
- "ral-registers",
- "usb-device",
- "vcell",
-]
-
-[[package]]
 name = "esp32"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2408,25 +2323,6 @@ checksum = "b76170a463d18f888a1ad258031901036fd827a9ef126733053ba5f8739fb0c8"
 dependencies = [
  "critical-section",
  "vcell",
-]
-
-[[package]]
-name = "esp32-glsl-jit"
-version = "0.0.0"
-dependencies = [
- "cranelift-codegen 0.127.0",
- "embassy-executor",
- "embassy-time",
- "esp-alloc",
- "esp-backtrace",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-println",
- "esp-rtos",
- "hashbrown 0.15.5",
- "lp-glsl-builtins",
- "lp-glsl-cranelift",
- "lp-glsl-jit-util",
 ]
 
 [[package]]
@@ -3881,7 +3777,6 @@ name = "lp-glsl-builtins-gen-app"
 version = "40.0.0"
 dependencies = [
  "glsl",
- "lp-glsl-frontend",
  "proc-macro2",
  "quote",
  "syn",
@@ -3898,36 +3793,6 @@ dependencies = [
 [[package]]
 name = "lp-glsl-core"
 version = "40.0.0"
-
-[[package]]
-name = "lp-glsl-cranelift"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "cranelift-codegen 0.127.0",
- "cranelift-control 0.127.0",
- "cranelift-frontend 0.127.0",
- "cranelift-interpreter",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native 0.127.0",
- "cranelift-object",
- "cranelift-reader",
- "glsl",
- "hashbrown 0.15.5",
- "libm",
- "log",
- "lp-glsl-builtin-ids",
- "lp-glsl-builtins",
- "lp-glsl-frontend",
- "lp-glsl-jit-util",
- "lp-model",
- "lp-riscv-elf",
- "lp-riscv-emu",
- "lp-riscv-inst",
- "object",
- "target-lexicon",
-]
 
 [[package]]
 name = "lp-glsl-diagnostics"
@@ -3952,7 +3817,6 @@ dependencies = [
  "lp-glsl-core",
  "lp-glsl-diagnostics",
  "lp-glsl-exec",
- "lp-glsl-frontend",
  "lp-glsl-naga",
  "lp-glsl-values",
  "lp-glsl-wasm",
@@ -3989,26 +3853,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-glsl-frontend"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "hashbrown 0.15.5",
- "libm",
- "log",
- "lp-glsl-builtin-ids",
- "lpir",
-]
-
-[[package]]
-name = "lp-glsl-jit-util"
-version = "40.0.0"
-dependencies = [
- "cranelift-codegen 0.127.0",
- "target-lexicon",
-]
-
-[[package]]
 name = "lp-glsl-naga"
 version = "40.0.0"
 dependencies = [
@@ -4017,22 +3861,6 @@ dependencies = [
  "lpir",
  "naga 29.0.0",
  "smallvec",
-]
-
-[[package]]
-name = "lp-glsl-q32-metrics-app"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "cranelift-codegen 0.127.0",
- "cranelift-module",
- "cranelift-object",
- "hashbrown 0.15.5",
- "lp-glsl-cranelift",
- "serde",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -5148,7 +4976,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.4+spec-1.1.0",
+ "toml_edit",
 ]
 
 [[package]]
@@ -5234,12 +5062,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "ral-registers"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46b71a9d9206e8b46714c74255adcaea8b11e0350c1d8456165073c3f75fc81a"
 
 [[package]]
 name = "rand"
@@ -5655,12 +5477,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "semihosting"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8e4abf97879f4e80db69a9fba7bd64998e9bdad25f58ef045a778e191172fd4"
-
-[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5753,15 +5569,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "serde_spanned"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -6331,38 +6138,17 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
-dependencies = [
- "serde",
- "serde_spanned 0.6.9",
- "toml_datetime 0.6.11",
- "toml_edit 0.22.27",
-]
-
-[[package]]
-name = "toml"
 version = "0.9.12+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
 dependencies = [
  "indexmap",
  "serde_core",
- "serde_spanned 1.0.4",
+ "serde_spanned",
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -6385,20 +6171,6 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
-dependencies = [
- "indexmap",
- "serde",
- "serde_spanned 0.6.9",
- "toml_datetime 0.6.11",
- "toml_write",
- "winnow",
-]
-
-[[package]]
-name = "toml_edit"
 version = "0.25.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7193cbd0ce53dc966037f54351dbbcf0d5a642c7f0038c382ef9e677ce8c13f2"
@@ -6417,12 +6189,6 @@ checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
 dependencies = [
  "winnow",
 ]
-
-[[package]]
-name = "toml_write"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "toml_writer"
@@ -6619,16 +6385,6 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
-]
-
-[[package]]
-name = "usb-device"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
-dependencies = [
- "heapless 0.8.0",
- "portable-atomic",
 ]
 
 [[package]]
@@ -6977,7 +6733,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2",
- "toml 0.9.12+spec-1.1.0",
+ "toml",
  "wasmtime-environ",
  "windows-sys 0.61.2",
  "zstd",

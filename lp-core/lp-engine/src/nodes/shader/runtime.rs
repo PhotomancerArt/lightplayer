@@ -22,7 +22,7 @@ use unwinding::panic::catch_unwind;
 
 use lpir_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
 
-/// Default max semantic errors forwarded to the GLSL front-end (matches `lp-glsl-frontend`).
+/// Default max semantic errors forwarded from the GLSL → LPIR front-end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
 fn map_add_sub(m: AddSubMode) -> lpir_cranelift::AddSubMode {

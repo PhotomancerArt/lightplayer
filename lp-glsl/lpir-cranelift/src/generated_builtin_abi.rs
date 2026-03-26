@@ -8,7 +8,7 @@
 
 //! Cranelift signatures and function pointers for [`BuiltinId`].
 //!
-//! Generated from the same `rust_signature` strings as `lp-glsl-cranelift` `registry.rs`.
+//! Generated from `rust_signature` metadata scraped from `lp-glsl-builtins`.
 //! Changing an `extern "C"` builtin in `lp-glsl-builtins` without re-running codegen will desync
 //! this file and fail `cargo check` until you regenerate.
 

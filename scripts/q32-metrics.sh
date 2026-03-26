@@ -1,31 +1,4 @@
 #!/bin/bash
-set -e
-
-# Find workspace root (directory containing Cargo.toml)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Default paths relative to workspace root
-TESTS_DIR="${WORKSPACE_ROOT}/lp-glsl/lp-glsl-q32-metrics-app/glsl"
-OUTPUT_DIR="${WORKSPACE_ROOT}/docs/reports/q32"
-FORMAT="Fixed16x16"
-
-# Report name is required
-if [ $# -eq 0 ]; then
-  echo "Error: Report name is required"
-  echo "Usage: $0 <report-name> [additional-args...]"
-  echo "Example: $0 pre-div-fix"
-  exit 1
-fi
-
-REPORT_NAME="$1"
-shift
-
-# Run the app with defaults
-cd "$WORKSPACE_ROOT"
-cargo run --bin lp-glsl-q32-xform-metrics-app -- \
-  --tests-dir "$TESTS_DIR" \
-  --output-dir "$OUTPUT_DIR" \
-  --format "$FORMAT" \
-  "$REPORT_NAME" \
-  "$@"
+# Removed with `lp-glsl-q32-metrics-app` (Stage VII). Recover the script and app from git history if needed.
+echo "lp-glsl-q32-metrics-app was deleted; use lpir-cranelift-based tooling or restore from git." >&2
+exit 1

@@ -98,9 +98,6 @@ runtime.
 | `fw-esp32` | ESP32 firmware | yes (bare metal) |
 | `fw-emu` | RISC-V emulator firmware (CI) | yes (bare metal) |
 
-Do NOT confuse `lpir-cranelift` (used by `lp-engine`) with
-`lp-glsl-cranelift` (separate GLSL frontend path, not used by firmware).
-
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:

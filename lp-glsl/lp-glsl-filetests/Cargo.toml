@@ -11,7 +11,6 @@ workspace = true
 lp-glsl-core = { path = "../lp-glsl-core" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", features = ["std"] }
 lp-glsl-exec = { path = "../lp-glsl-exec" }
-lp-glsl-frontend = { path = "../lp-glsl-frontend" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }
 lp-glsl-values = { path = "../lp-glsl-values", features = ["std"] }
 lp-glsl-wasm = { path = "../lp-glsl-wasm" }
