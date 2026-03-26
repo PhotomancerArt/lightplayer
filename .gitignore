@@ -14,8 +14,6 @@
 rusty-tags.*
 tags
 target
-# `lp-glsl/pp-rs` is a nested workspace for `cargo test --manifest-path` only
-lp-glsl/pp-rs/Cargo.lock
 .z3-trace
 foo
 .cargo

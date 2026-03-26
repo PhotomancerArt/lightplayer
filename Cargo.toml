@@ -200,15 +200,15 @@ codegen-units = 4
 # Patch esp-println to use our fork with custom writer support
 [patch.crates-io]
 esp-println = { path = "lp-fw/esp-println-fork" }
-# no_std pp-rs fork for naga `glsl-in` on bare-metal (see `lp-glsl/pp-rs`, docs/plans/2026-03-26-pp-rs-no-std-naga-glsl)
-pp-rs = { path = "lp-glsl/pp-rs" }
+# no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
+pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
 
 #####################################
 # Local dev patches
 
-# When `light-player/pp-rs` is published, prefer git for reproducible CI:
-# pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
-# (Remove or override the `path` patch above.)
+# pp-rs local clone (sibling of lp2025): git clone https://github.com/light-player/pp-rs ../pp-rs
+#[patch.crates-io]
+#pp-rs = { path = "../pp-rs" }
 
 #[patch."https://github.com/light-player/lp-regalloc2"]
 #regalloc2 = { path = "../lp-regalloc2" }
