@@ -55,7 +55,8 @@ complete compiler: GLSL in, callable module out.
 
 **Out of scope:**
 - Filetest integration (Stage V2)
-- lp-engine migration (Stage VI)
+- Embedded readiness (Stage VI-A)
+- lp-engine migration / fw-emu (Stage VI-B)
 - Object/emulator emission (Stage V1)
 - Level 2 mode-agnostic call interface (deferred)
 

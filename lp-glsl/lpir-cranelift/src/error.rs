@@ -30,6 +30,7 @@ impl core::fmt::Display for CompileError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for CompileError {}
 
 /// Full compiler pipeline errors (parse, lowering, codegen).
@@ -37,7 +38,8 @@ impl std::error::Error for CompileError {}
 pub enum CompilerError {
     /// GLSL parse / naga frontend (line-oriented message).
     Parse(String),
-    /// Naga → LPIR lowering.
+    /// Naga → LPIR lowering (only when the `std` feature enables `lp-glsl-naga`).
+    #[cfg(feature = "std")]
     Lower(lp_glsl_naga::LowerError),
     /// LPIR → machine code.
     Codegen(CompileError),
@@ -47,12 +49,14 @@ impl core::fmt::Display for CompilerError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CompilerError::Parse(s) => write!(f, "{s}"),
+            #[cfg(feature = "std")]
             CompilerError::Lower(e) => write!(f, "{e}"),
             CompilerError::Codegen(e) => write!(f, "{e}"),
         }
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for CompilerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {

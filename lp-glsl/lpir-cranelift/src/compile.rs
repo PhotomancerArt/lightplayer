@@ -1,4 +1,4 @@
-//! GLSL → Naga → LPIR → JIT pipeline.
+//! GLSL → Naga → LPIR → JIT pipeline (GLSL front-end requires the `std` feature).
 
 use lpir::{GlslModuleMeta, IrModule};
 
@@ -7,6 +7,9 @@ use crate::error::CompilerError;
 use crate::jit_module::{JitModule, build_jit_module};
 
 /// Compile GLSL source to a host JIT module (Q32 recommended; F32 for import-free IR).
+///
+/// Requires the `std` feature (`lp-glsl-naga` / Naga GLSL-in depend on `std`).
+#[cfg(feature = "std")]
 pub fn jit(source: &str, options: &CompileOptions) -> Result<JitModule, CompilerError> {
     let naga =
         lp_glsl_naga::compile(source).map_err(|e| CompilerError::Parse(alloc::format!("{e}")))?;

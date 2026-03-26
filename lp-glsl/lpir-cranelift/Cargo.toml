@@ -10,9 +10,21 @@ build = "build.rs"
 workspace = true
 
 [features]
-default = []
-# RISC-V32 relocatable object, link with builtins ELF, in-tree emulator smoke tests.
+default = ["std"]
+std = [
+    "cranelift-codegen/std",
+    "cranelift-codegen/host-arch",
+    "cranelift-frontend/std",
+    "cranelift-module/std",
+    "cranelift-jit/std",
+    "dep:cranelift-native",
+    "dep:lp-glsl-naga",
+    "lp-glsl-builtins/std",
+]
+cranelift-optimizer = ["cranelift-codegen/optimizer"]
+cranelift-verifier = ["cranelift-codegen/verifier"]
 riscv32-emu = [
+    "std",
     "dep:cranelift-object",
     "dep:lp-riscv-elf",
     "dep:lp-riscv-emu",
@@ -20,15 +32,16 @@ riscv32-emu = [
 ]
 
 [dependencies]
+libm = "0.2"
 lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
-lp-glsl-builtins = { path = "../lp-glsl-builtins" }
-lp-glsl-naga = { path = "../lp-glsl-naga" }
+lp-glsl-builtins = { path = "../lp-glsl-builtins", default-features = false }
+lp-glsl-naga = { path = "../lp-glsl-naga", optional = true }
 lpir = { path = "../lpir" }
-cranelift-codegen = { workspace = true, default-features = false, features = ["std", "host-arch"] }
-cranelift-frontend = { workspace = true, features = ["std"] }
-cranelift-module = { workspace = true, features = ["std"] }
-cranelift-jit = { workspace = true, features = ["std"] }
-cranelift-native = { workspace = true }
+cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }
+cranelift-frontend = { workspace = true, default-features = false, features = ["core"] }
+cranelift-module = { workspace = true, default-features = false, features = ["core"] }
+cranelift-jit = { workspace = true, default-features = false, features = ["core"] }
+cranelift-native = { workspace = true, optional = true }
 cranelift-object = { workspace = true, optional = true }
 target-lexicon = { workspace = true }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }

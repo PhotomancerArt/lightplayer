@@ -71,9 +71,9 @@ everything still builds and passes.
 
 ## Dependencies
 
-- Stage VI (engine migration + ESP32 validation) must be complete and
-  stable. No point deleting the old compiler until we're confident in
-  the replacement.
+- Stage VI-C (ESP32 hardware validation) must be complete and stable.
+  No point deleting the old compiler until we're confident in the
+  replacement across desktop, emulator, and hardware.
 
 ## Estimated scope
 

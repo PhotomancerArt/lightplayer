@@ -1,7 +1,13 @@
 //! LPIR → Cranelift: host JIT by default; optional `riscv32-emu` for RV32 object emission,
 //! linking with `lp-glsl-builtins-emu-app`, and `lp-riscv-emu` execution helpers.
 
+#![no_std]
+
+#[macro_use]
 extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 mod builtins;
 mod call;
@@ -11,10 +17,13 @@ mod direct_call;
 mod emit;
 pub mod error;
 mod invoke;
+#[cfg(not(feature = "std"))]
+mod jit_memory;
 mod jit_module;
 mod module_lower;
 mod process_sync;
 mod q32;
+mod q32_options;
 mod values;
 
 #[cfg(feature = "riscv32-emu")]
@@ -24,10 +33,12 @@ mod object_link;
 #[cfg(feature = "riscv32-emu")]
 mod object_module;
 
-pub use compile::{jit, jit_from_ir, jit_from_ir_owned};
+#[cfg(feature = "std")]
+pub use compile::jit;
+pub use compile::{jit_from_ir, jit_from_ir_owned};
 #[cfg(feature = "riscv32-emu")]
 pub use compile::{object_bytes_from_ir, run_lpir_function_i32};
-pub use compile_options::CompileOptions;
+pub use compile_options::{CompileOptions, MemoryStrategy};
 pub use direct_call::DirectCall;
 pub use emit::signature_for_ir_func;
 #[cfg(feature = "riscv32-emu")]
@@ -37,6 +48,7 @@ pub use jit_module::JitModule;
 pub use lpir::FloatMode;
 #[cfg(feature = "riscv32-emu")]
 pub use object_link::link_object_with_builtins;
+pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
 pub use values::{CallError, CallResult, GlslQ32, GlslReturn};
 
 #[cfg(test)]
@@ -45,8 +57,11 @@ mod tests {
 
     use lpir::parse_module;
 
+    #[cfg(feature = "std")]
+    use super::jit;
     use super::{
-        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, jit, jit_from_ir,
+        AddSubMode, CompileError, CompileOptions, CompilerError, DivMode, FloatMode, GlslQ32,
+        MemoryStrategy, MulMode, Q32Options, jit_from_ir,
     };
 
     #[test]
@@ -64,6 +79,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -90,6 +106,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -117,6 +134,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -144,6 +162,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -172,6 +191,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -205,6 +225,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -236,6 +257,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -262,6 +284,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -288,6 +311,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -320,6 +344,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -350,6 +375,7 @@ func @quad(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -377,6 +403,7 @@ func @double_swap(v0:f32, v1:f32) -> (f32, f32) {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -407,6 +434,7 @@ func @double_swap(v0:f32, v1:f32) -> (f32, f32) {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -439,6 +467,7 @@ func @count_up(v0:i32, v1:i32) -> i32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -463,6 +492,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         ) {
             Err(e) => e,
@@ -488,6 +518,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -508,6 +539,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -529,6 +561,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -551,6 +584,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -573,6 +607,7 @@ func @u(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -597,6 +632,7 @@ func @apply_sin(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -624,6 +660,7 @@ func @apply_sin(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -632,12 +669,14 @@ func @apply_sin(v0:f32) -> f32 {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn jit_glsl_call_add_q32() {
         let src = "float add(float a, float b) { return a + b; }";
         let m = jit(
             src,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -652,12 +691,14 @@ func @apply_sin(v0:f32) -> f32 {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn glsl_call_agrees_with_direct_call() {
         let src = "float add(float a, float b) { return a + b; }";
         let m = jit(
             src,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -691,6 +732,7 @@ func @apply_sin(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -718,6 +760,7 @@ func @apply_sin(v0:f32) -> f32 {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::Q32,
+                ..Default::default()
             },
         )
         .expect("jit");
@@ -727,6 +770,56 @@ func @apply_sin(v0:f32) -> f32 {
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);
         assert_q32_approx(words[2], 0.5, 1e-4);
+    }
+
+    #[test]
+    fn compile_options_default() {
+        let opts = CompileOptions::default();
+        assert_eq!(opts.float_mode, FloatMode::Q32);
+        assert_eq!(opts.q32_options, Q32Options::default());
+        assert_eq!(opts.memory_strategy, MemoryStrategy::Default);
+        assert_eq!(opts.max_errors, None);
+    }
+
+    #[test]
+    fn q32_options_default_is_saturating() {
+        let q = Q32Options::default();
+        assert_eq!(q.add_sub, AddSubMode::Saturating);
+        assert_eq!(q.mul, MulMode::Saturating);
+        assert_eq!(q.div, DivMode::Saturating);
+    }
+
+    #[test]
+    fn low_memory_strategy_compiles() {
+        let ir = parse_module(
+            r"func @big(v0:f32, v1:f32) -> f32 {
+  v2:f32 = fadd v0, v1
+  v3:f32 = fadd v2, v0
+  v4:f32 = fadd v3, v1
+  return v4
+}
+
+func @small(v0:f32) -> f32 {
+  return v0
+}
+",
+        )
+        .expect("parse");
+
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                memory_strategy: MemoryStrategy::LowMemory,
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit with LowMemory");
+
+        let big_ptr = m.finalized_ptr("big").expect("big");
+        let small_ptr = m.finalized_ptr("small").expect("small");
+        assert!(!big_ptr.is_null());
+        assert!(!small_ptr.is_null());
     }
 
     fn q32(f: f32) -> i32 {

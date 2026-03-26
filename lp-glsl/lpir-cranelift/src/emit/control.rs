@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{Block, InstBuilder};
 use cranelift_frontend::{FunctionBuilder, Variable};

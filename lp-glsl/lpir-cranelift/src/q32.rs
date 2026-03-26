@@ -17,7 +17,7 @@ pub(crate) fn q32_encode(value: f32) -> i32 {
 
 /// Encode `f64` as Q16.16 (Level-1 call interchange).
 pub(crate) fn q32_encode_f64(value: f64) -> i32 {
-    let scaled = (value * Q32_SCALE).round();
+    let scaled = libm::round(value * Q32_SCALE);
     if scaled > Q32_MAX as f64 {
         Q32_MAX as i32
     } else if scaled < Q32_MIN as f64 {

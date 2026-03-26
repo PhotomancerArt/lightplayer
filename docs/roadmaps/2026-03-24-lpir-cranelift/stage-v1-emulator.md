@@ -36,8 +36,9 @@ not strand the `rv32.q32` / emulator path on the old compiler.
 
 **Out of scope (Stage V2):**
 - **`jit.q32` / `rv32.q32` filetest targets** in `lp-glsl-filetests` (runner wiring)
-- lp-engine migration (Stage VI)
-- ESP32 firmware (Stage VI)
+- Embedded readiness (Stage VI-A)
+- lp-engine migration / fw-emu (Stage VI-B)
+- ESP32 firmware (Stage VI-C)
 
 ## Key decisions
 

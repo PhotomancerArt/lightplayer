@@ -111,6 +111,7 @@ mod tests {
             &ir,
             &CompileOptions {
                 float_mode: FloatMode::F32,
+                ..Default::default()
             },
         )
         .expect("object");

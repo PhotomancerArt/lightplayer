@@ -42,7 +42,10 @@ impl LpirRv32Executable {
             crate::target::FloatMode::Q32 => LpirFloatMode::Q32,
             crate::target::FloatMode::F32 => LpirFloatMode::F32,
         };
-        let options = CompileOptions { float_mode: fm };
+        let options = CompileOptions {
+            float_mode: fm,
+            ..Default::default()
+        };
         let object = object_bytes_from_ir(&ir, &options)?;
         let load = link_object_with_builtins(&object)?;
         let signatures = signatures_from_meta(&meta);

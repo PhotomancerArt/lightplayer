@@ -32,7 +32,10 @@ impl LpirJitExecutable {
             crate::target::FloatMode::Q32 => LpirFloatMode::Q32,
             crate::target::FloatMode::F32 => LpirFloatMode::F32,
         };
-        let options = CompileOptions { float_mode: fm };
+        let options = CompileOptions {
+            float_mode: fm,
+            ..Default::default()
+        };
         let module = jit(source, &options)?;
         let signatures = signatures_from_meta(module.glsl_meta());
         Ok(Self { module, signatures })

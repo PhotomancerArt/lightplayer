@@ -213,6 +213,7 @@ mod tests {
         .expect("parse");
         let opts = CompileOptions {
             float_mode: FloatMode::Q32,
+            ..Default::default()
         };
         let out = run_lpir_function_i32(&ir, &opts, "main", &[]).expect("emu");
         assert_eq!(out, q32_encode_f64(3.0));

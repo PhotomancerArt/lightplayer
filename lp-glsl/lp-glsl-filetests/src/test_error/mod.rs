@@ -40,6 +40,7 @@ pub fn run_error_test(
 
     let options = CompileOptions {
         float_mode: LpirFloatMode::Q32,
+        ..Default::default()
     };
 
     let result: Result<(), CompilerError> = jit(&test_file.glsl_source, &options).map(|_| ());

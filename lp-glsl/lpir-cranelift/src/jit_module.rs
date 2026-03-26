@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use cranelift_codegen::ir::{Signature, types};
-use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::isa::{CallConv, OwnedTargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
@@ -16,6 +16,9 @@ use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
 use crate::module_lower::{LpirFuncEmitOrder, lower_lpir_into_module};
 use crate::process_sync;
+
+#[cfg(not(feature = "std"))]
+use crate::jit_memory::AllocJitMemoryProvider;
 
 /// Finalized JIT shader module with GLSL metadata for typed calls.
 pub struct JitModule {
@@ -70,6 +73,34 @@ impl JitModule {
     }
 }
 
+#[cfg(feature = "std")]
+fn build_isa(flags: settings::Flags) -> Result<OwnedTargetIsa, CompilerError> {
+    cranelift_native::builder()
+        .map_err(|m| {
+            CompilerError::Codegen(CompileError::cranelift(alloc::format!(
+                "native ISA detection: {m}"
+            )))
+        })?
+        .finish(flags)
+        .map_err(|e| CompilerError::Codegen(CompileError::cranelift(alloc::format!("ISA: {e}"))))
+}
+
+#[cfg(not(feature = "std"))]
+fn build_isa(flags: settings::Flags) -> Result<OwnedTargetIsa, CompilerError> {
+    use cranelift_codegen::isa;
+    use target_lexicon::Triple;
+
+    let triple: Triple = "riscv32imac-unknown-none-elf".parse().map_err(|e| {
+        CompilerError::Codegen(CompileError::cranelift(alloc::format!("parse triple: {e}")))
+    })?;
+    isa::lookup(triple)
+        .map_err(|e| {
+            CompilerError::Codegen(CompileError::cranelift(alloc::format!("ISA lookup: {e}")))
+        })?
+        .finish(flags)
+        .map_err(|e| CompilerError::Codegen(CompileError::cranelift(alloc::format!("ISA: {e}"))))
+}
+
 pub(crate) fn build_jit_module(
     ir: &IrModule,
     glsl_meta: GlslModuleMeta,
@@ -85,19 +116,19 @@ pub(crate) fn build_jit_module(
                 "regalloc_algorithm: {e}"
             )))
         })?;
+    flag_builder.set("is_pic", "false").map_err(|e| {
+        CompilerError::Codegen(CompileError::cranelift(alloc::format!("is_pic: {e}")))
+    })?;
     let flags = settings::Flags::new(flag_builder);
 
-    let isa = cranelift_native::builder()
-        .map_err(|m| {
-            CompilerError::Codegen(CompileError::cranelift(alloc::format!(
-                "native ISA detection: {m}"
-            )))
-        })?
-        .finish(flags)
-        .map_err(|e| CompilerError::Codegen(CompileError::cranelift(alloc::format!("ISA: {e}"))))?;
+    let isa = build_isa(flags)?;
 
     let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
     jit_builder.symbol_lookup_fn(crate::builtins::symbol_lookup_fn());
+
+    #[cfg(not(feature = "std"))]
+    jit_builder.memory_provider(alloc::boxed::Box::new(AllocJitMemoryProvider::new()));
+
     let mut jit_module = JITModule::new(jit_builder);
 
     let lowered = lower_lpir_into_module(&mut jit_module, ir, options, LpirFuncEmitOrder::Source)?;

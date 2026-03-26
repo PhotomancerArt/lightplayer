@@ -220,11 +220,14 @@ Future (not this roadmap): `lpir.q32` (LPIR interpreter), `clif.q32`
    `lpir-cranelift`** (in-crate tests)
 2. **Stage V2:** Filetests — `jit.q32` (host) and `rv32.q32` (emulator) both use
    `lpir-cranelift`
-3. Switch lp-engine from `lp-glsl-cranelift` to new crate (clean swap,
-   no feature flags)
-4. Validate on ESP32 via fw-esp32
-5. A/B compare against old compiler on main via git worktree
-6. Delete old `lp-glsl-cranelift` and `lp-glsl-frontend`
+3. **Stage VI-A:** Make `lpir-cranelift` embedded-ready (`no_std`, explicit
+   ISA, memory strategy, `CompileOptions` expansion)
+4. **Stage VI-B:** Migrate `lp-engine` from `lp-glsl-cranelift` to
+   `lpir-cranelift` (clean swap). Validate via `fw-emu` (RV32 emulator on
+   desktop — no hardware required)
+5. **Stage VI-C:** Build and run `fw-esp32` on real hardware. A/B compare
+   against old compiler on main via git worktree
+6. Delete old `lp-glsl-cranelift` and `lp-glsl-frontend` (Stage VII)
 
 ## Alternatives considered
 

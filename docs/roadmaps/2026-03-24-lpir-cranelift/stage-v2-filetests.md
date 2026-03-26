@@ -31,7 +31,9 @@ a later deprecation pass.
 - Scalar corpus triage; `@unimplemented` / `@ignore` for `jit` / `rv32` / `wasm`
 
 **Out of scope:**
-- lp-engine migration (Stage VI)
+- Embedded readiness (Stage VI-A)
+- lp-engine migration / fw-emu (Stage VI-B)
+- ESP32 firmware (Stage VI-C)
 - Vector filetests (future)
 - **Deleting** the **`lp-glsl-cranelift`** crate entirely (**Stage VII** — filetests
   no longer need it after V2, but other workspace crates may until VII)

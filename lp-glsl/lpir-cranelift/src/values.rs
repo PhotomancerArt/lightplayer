@@ -57,6 +57,7 @@ impl fmt::Display for CallError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for CallError {}
 
 pub(crate) fn glsl_component_count(ty: &GlslType) -> usize {

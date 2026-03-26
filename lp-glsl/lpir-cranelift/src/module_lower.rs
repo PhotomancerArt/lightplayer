@@ -13,7 +13,7 @@ use lpir::module::IrModule;
 use lpir::op::Op;
 
 use crate::builtins::{self, LpirBuiltinFuncIds};
-use crate::compile_options::CompileOptions;
+use crate::compile_options::{CompileOptions, MemoryStrategy};
 use crate::emit::{self, LpirBuiltinRefs, translate_function};
 use crate::error::{CompileError, CompilerError};
 
@@ -75,9 +75,19 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         None
     };
 
-    let indices: Vec<usize> = match order {
-        LpirFuncEmitOrder::Source => (0..ir.functions.len()).collect(),
-        LpirFuncEmitOrder::Name => {
+    let indices: Vec<usize> = match (order, options.memory_strategy) {
+        (_, MemoryStrategy::LowMemory) => {
+            let mut v: Vec<usize> = (0..ir.functions.len()).collect();
+            v.sort_by(|a, b| {
+                ir.functions[*b]
+                    .body
+                    .len()
+                    .cmp(&ir.functions[*a].body.len())
+            });
+            v
+        }
+        (LpirFuncEmitOrder::Source, _) => (0..ir.functions.len()).collect(),
+        (LpirFuncEmitOrder::Name, _) => {
             let mut v: Vec<usize> = (0..ir.functions.len()).collect();
             v.sort_by(|a, b| ir.functions[*a].name.cmp(&ir.functions[*b].name));
             v
@@ -203,6 +213,12 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 f.name
             )))
         })?;
+
+        if options.memory_strategy == MemoryStrategy::LowMemory {
+            module.clear_context(&mut ctx);
+        } else {
+            ctx.clear();
+        }
     }
 
     Ok(LoweredLpirModule {

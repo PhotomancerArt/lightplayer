@@ -4197,6 +4197,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native 0.127.0",
  "cranelift-object",
+ "libm",
  "lp-glsl-builtin-ids",
  "lp-glsl-builtins",
  "lp-glsl-naga",
