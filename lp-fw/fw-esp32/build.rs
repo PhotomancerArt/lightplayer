@@ -39,6 +39,32 @@ SECTIONS {
 }
 ";
 
+    // The ESP32 bootloader only supports 2 ROM-mapped segments. espflash creates
+    // image segments from ELF sections, splitting on gaps between sections. The
+    // original rodata.x defines .rodata_desc and .rodata as separate output sections,
+    // which creates a gap (due to .rodata's 128-byte input alignment) that espflash
+    // treats as a segment boundary — producing 3 ROM segments and triggering
+    // `rom_index < 2` in bootloader_utility.c. Fix: merge everything into one
+    // .rodata output section so there's no gap.
+    let patched_rodata = "\
+SECTIONS {
+  .rodata : ALIGN(4)
+  {
+    KEEP(*(.rodata_desc));
+    KEEP(*(.rodata_desc.*));
+    . = ALIGN(4);
+    _rodata_start = ABSOLUTE(.);
+    *(.rodata .rodata.*)
+    *(.srodata .srodata.*)
+    *(.gcc_except_table .gcc_except_table.*)
+    . = ALIGN(4);
+    *( .rodata_wlog_*.* )
+    . = ALIGN(4);
+    _rodata_end = ABSOLUTE(.);
+  } > RODATA
+}
+";
+
     // Patch all esp-hal-* build dirs; Cargo may use any of them depending on feature set.
     if let Ok(entries) = std::fs::read_dir(build_dir) {
         for entry in entries.flatten() {
@@ -58,6 +84,12 @@ SECTIONS {
                             .unwrap_or_else(|e| {
                                 panic!("failed to patch {}: {e}", eh_frame_x.display())
                             });
+                    }
+                    let rodata_x = out_path.join("rodata.x");
+                    if rodata_x.exists() {
+                        std::fs::write(&rodata_x, patched_rodata).unwrap_or_else(|e| {
+                            panic!("failed to patch {}: {e}", rodata_x.display())
+                        });
                     }
                 }
             }
