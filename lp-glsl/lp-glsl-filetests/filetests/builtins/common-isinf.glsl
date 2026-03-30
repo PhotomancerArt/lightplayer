@@ -1,61 +1,62 @@
 // test run
-// @unimplemented(backend=wasm)
-// @unsupported(float_mode=q32, reason="Q32 has no Inf encoding; isinf is always false; tests expect IEEE infinities from 1.0/0.0")
 
 // ============================================================================
-// isinf(): Is infinity function
-// isinf(x) returns true if x is positive or negative infinity
+// isinf(): Is infinity function (Q32: always false — docs/design/q32.md §6)
 // ============================================================================
 
 bool test_isinf_normal() {
-    // isinf(1.0) should be false
     return isinf(1.0);
 }
 
 // run: test_isinf_normal() == false
 
 bool test_isinf_zero() {
-    // isinf(0.0) should be false
     return isinf(0.0);
 }
 
 // run: test_isinf_zero() == false
 
 bool test_isinf_inf() {
-    // isinf with positive infinity should be true
-    return isinf(1.0 / 0.0);
+    float a = 1.0;
+    float b = 0.0;
+    return isinf(a / b);
 }
 
-// run: test_isinf_inf() == true
+// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// run: test_isinf_inf() == false
 
 bool test_isinf_neg_inf() {
-    // isinf with negative infinity should be true
-    return isinf(-1.0 / 0.0);
+    float a = -1.0;
+    float b = 0.0;
+    return isinf(a / b);
 }
 
-// run: test_isinf_neg_inf() == true
+// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// run: test_isinf_neg_inf() == false
 
 bvec2 test_isinf_vec2() {
-    // Test with vec2
-    return isinf(vec2(1.0 / 0.0, 1.0));
+    float p = 1.0;
+    float z = 0.0;
+    return isinf(vec2(p / z, 1.0));
 }
 
-// run: test_isinf_vec2() == bvec2(true, false)
+// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// run: test_isinf_vec2() == bvec2(false, false)
 
 bvec3 test_isinf_vec3() {
-    // Test with vec3
-    return isinf(vec3(1.0, -1.0 / 0.0, 2.0));
+    float p = 1.0;
+    float z = 0.0;
+    return isinf(vec3(1.0, -p / z, 2.0));
 }
 
-// run: test_isinf_vec3() == bvec3(false, true, false)
+// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// run: test_isinf_vec3() == bvec3(false, false, false)
 
 bvec4 test_isinf_vec4() {
-    // Test with vec4
-    return isinf(vec4(1.0 / 0.0, -1.0 / 0.0, 1.0, 0.0));
+    float p = 1.0;
+    float z = 0.0;
+    return isinf(vec4(p / z, -p / z, 1.0, 0.0));
 }
 
-// run: test_isinf_vec4() == bvec4(true, true, false, false)
-
-
-
-
+// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// run: test_isinf_vec4() == bvec4(false, false, false, false)

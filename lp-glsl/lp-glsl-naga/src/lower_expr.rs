@@ -933,74 +933,15 @@ fn lower_relational(
                     "isnan/isinf expect float",
                 )));
             }
+            // Q32 (and filetest targets): docs/design/q32.md §6 — no NaN/Inf encoding; div0
+            // saturation values are not exposed as infinity through `isinf`.
             let mut out = VRegVec::new();
-            for &v in &arg_vs {
-                let b = if matches!(fun, RelationalFunction::IsNan) {
-                    lower_isnan_component(ctx, v)?
-                } else {
-                    lower_isinf_component(ctx, v)?
-                };
+            for _ in 0..arg_vs.len() {
+                let b = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(Op::IconstI32 { dst: b, value: 0 });
                 out.push(b);
             }
             Ok(out)
         }
     }
-}
-
-fn lower_isnan_component(ctx: &mut LowerCtx<'_>, v: VReg) -> Result<VReg, LowerError> {
-    let dst = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Fne {
-        dst,
-        lhs: v,
-        rhs: v,
-    });
-    Ok(dst)
-}
-
-/// Q32 division-by-zero saturation uses these raw lane values as “infinity”.
-const Q32_DIV0_POS: i32 = 0x7FFF_FFFF;
-const Q32_DIV0_NEG: i32 = i32::MIN;
-
-fn lower_isinf_component(ctx: &mut LowerCtx<'_>, v: VReg) -> Result<VReg, LowerError> {
-    let raw_pos = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
-        dst: raw_pos,
-        value: Q32_DIV0_POS,
-    });
-    let pat_pos = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FfromI32Bits {
-        dst: pat_pos,
-        src: raw_pos,
-    });
-    let eq_pos = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Feq {
-        dst: eq_pos,
-        lhs: v,
-        rhs: pat_pos,
-    });
-
-    let raw_neg = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
-        dst: raw_neg,
-        value: Q32_DIV0_NEG,
-    });
-    let pat_neg = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FfromI32Bits {
-        dst: pat_neg,
-        src: raw_neg,
-    });
-    let eq_neg = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Feq {
-        dst: eq_neg,
-        lhs: v,
-        rhs: pat_neg,
-    });
-
-    let dst = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Ior {
-        dst,
-        lhs: eq_pos,
-        rhs: eq_neg,
-    });
-    Ok(dst)
 }

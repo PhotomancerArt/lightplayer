@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // All: all(bvec2) -> bool (true only if all components are true)
@@ -11,7 +10,6 @@ bool test_bvec2_all_all_true() {
     return all(a);
 }
 
-// @unimplemented(backend=jit)
 // run: test_bvec2_all_all_true() == true
 
 bool test_bvec2_all_all_false() {

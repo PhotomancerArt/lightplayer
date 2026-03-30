@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: mat4 == mat4 -> bool (aggregate equality)
@@ -11,7 +10,6 @@ bool test_mat4_equal_true() {
     return a == b;
 }
 
-// @unimplemented(backend=jit)
 // run: test_mat4_equal_true() == true
 
 bool test_mat4_equal_false() {

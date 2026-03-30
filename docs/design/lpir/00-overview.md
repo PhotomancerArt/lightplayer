@@ -68,7 +68,7 @@ Lowering is **mode-unaware**: it does not encode f32 vs fixed-point (Q32) choice
 
 1. **Width-aware virtual register types and short op names** — Types are explicit on registers; opcode names stay compact and stable across backends.
 
-2. **Q32 in the emitter, not as an LPIR→LPIR rewrite** — Fixed-point behavior is applied when emitting target code. Backends differ: for example, WebAssembly may use inline `i64` arithmetic where appropriate; Cranelift may use saturating paths via builtin calls or an all-`i32` wrapping strategy. A shared IR-level Q32 pass would not match these per-backend choices.
+2. **Q32 in the emitter, not as an LPIR→LPIR rewrite** — Fixed-point behavior is applied when emitting target code. Backends differ: for example, WebAssembly may use inline `i64` arithmetic where appropriate; Cranelift may use saturating paths via builtin calls or an all-`i32` wrapping strategy. A shared IR-level Q32 pass would not match these per-backend choices. **Concrete Q32 numeric rules** (builtins, div0, `isnan`/`isinf`, comparisons) are defined in [`../q32.md`](../q32.md); that document is normative for implementations.
 
 3. **General pointer model via `i32`** — Address-sized or opaque pointer values are represented as `i32` at the IR boundary appropriate to the ABI (including out-parameters and similar conventions).
 
@@ -98,6 +98,10 @@ LPIR numeric behavior follows GLSL-oriented, GPU-style rules: operations do not 
 | NaN in comparisons                           | Treated as false (`0` for condition values)   |
 | Shift amount ≥ 32 bits                       | Shift amount masked to 5 bits                 |
 | Float-to-integer conversion: overflow or NaN | Saturating to the representable integer range |
+
+This table describes the **abstract** LPIR float interpretation. When targets run in **Q32**
+fixed-point mode, float ops map to Q16.16 rules in [`../q32.md`](../q32.md) instead of IEEE 754 for
+those paths.
 
 Exact opcode mappings and edge cases are specified in the dedicated semantics documentation.
 

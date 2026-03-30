@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Not Equal: mat2 != mat2 -> bool (aggregate inequality)
@@ -11,7 +10,6 @@ bool test_mat2_not_equal_false() {
     return a != b;
 }
 
-// @unimplemented(backend=jit)
 // run: test_mat2_not_equal_false() == false
 
 bool test_mat2_not_equal_true() {

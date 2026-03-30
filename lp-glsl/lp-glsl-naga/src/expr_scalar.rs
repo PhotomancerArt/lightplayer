@@ -203,10 +203,46 @@ pub(crate) fn expr_type_inner(
         Expression::Math { fun, arg, arg1, .. } => {
             math_result_type_inner(module, func, *fun, *arg, *arg1)
         }
+        Expression::Relational { fun, argument } => {
+            relational_result_type_inner(module, func, *fun, *argument)
+        }
         _ => Err(LowerError::UnsupportedExpression(format!(
             "expr_type_inner unsupported {:?}",
             func.expressions[expr]
         ))),
+    }
+}
+
+/// Result type of `Expression::Relational` (`all`/`any` → scalar bool; `isnan`/`isinf` → bool vector).
+fn relational_result_type_inner(
+    module: &Module,
+    func: &Function,
+    fun: RelationalFunction,
+    argument: Handle<Expression>,
+) -> Result<TypeInner, LowerError> {
+    let bool_scalar = Scalar {
+        kind: ScalarKind::Bool,
+        width: 4,
+    };
+    match fun {
+        RelationalFunction::All | RelationalFunction::Any => Ok(TypeInner::Scalar(bool_scalar)),
+        RelationalFunction::IsNan | RelationalFunction::IsInf => {
+            let arg_ty = expr_type_inner(module, func, argument)?;
+            match arg_ty {
+                TypeInner::Vector { size, scalar } if scalar.kind == ScalarKind::Float => {
+                    Ok(TypeInner::Vector {
+                        size,
+                        scalar: bool_scalar,
+                    })
+                }
+                TypeInner::Scalar(s) if s.kind == ScalarKind::Float => {
+                    Ok(TypeInner::Scalar(bool_scalar))
+                }
+                _ => Err(LowerError::UnsupportedExpression(String::from(
+                    "isnan/isinf expect float scalar or vector",
+                ))),
+            }
+        }
     }
 }
 
@@ -370,13 +406,9 @@ pub(crate) fn expr_scalar_kind(
             MathFunction::Transpose | MathFunction::Inverse => expr_scalar_kind(module, func, *arg),
             _ => expr_scalar_kind(module, func, *arg),
         },
-        Expression::Relational { fun, argument } => match fun {
-            RelationalFunction::All | RelationalFunction::Any => {
-                expr_scalar_kind(module, func, *argument)
-            }
-            RelationalFunction::IsNan | RelationalFunction::IsInf => {
-                expr_scalar_kind(module, func, *argument)
-            }
+        Expression::Relational { fun, .. } => match fun {
+            RelationalFunction::All | RelationalFunction::Any => Ok(ScalarKind::Bool),
+            RelationalFunction::IsNan | RelationalFunction::IsInf => Ok(ScalarKind::Bool),
         },
         _ => Err(LowerError::UnsupportedExpression(format!(
             "cannot infer scalar kind for {:?}",

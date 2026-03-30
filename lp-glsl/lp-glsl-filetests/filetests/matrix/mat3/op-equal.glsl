@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: mat3 == mat3 -> bool (aggregate equality)
@@ -11,7 +10,6 @@ bool test_mat3_equal_true() {
     return a == b;
 }
 
-// @unimplemented(backend=jit)
 // run: test_mat3_equal_true() == true
 
 bool test_mat3_equal_false() {

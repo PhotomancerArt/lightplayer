@@ -28,7 +28,7 @@ LPIR                  flat, scalarized, mode-agnostic IR
 
 LPIR is LightPlayer's own intermediate representation. It keeps the compiler decoupled from
 Cranelift — see [`lpir/README.md`](lpir/README.md) for rationale and examples, and
-[`docs/lpir/`](../docs/lpir/) for the full spec.
+[`docs/design/lpir/`](../docs/design/lpir/) for the full spec.
 
 ## Q32 fixed-point mode
 
@@ -36,6 +36,9 @@ GLSL `float` can be compiled as **Q16.16 fixed-point** (`i32`) instead of IEEE `
 targets hardware without an FPU (like ESP32-C6) and produces bit-identical results across the
 native and WASM backends. Builtins (`sin`, `cos`, `sqrt`, etc.) are provided as `extern "C"`
 functions in `lp-glsl-builtins` and linked at JIT time.
+
+**Normative semantics** for Q32 (arithmetic, div-by-zero, relational builtins, filetest policy) are
+in [`docs/design/q32.md`](../docs/design/q32.md).
 
 Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
