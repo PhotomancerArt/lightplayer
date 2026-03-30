@@ -198,3 +198,56 @@ pub(crate) fn flatten_local_array_shape(
 
     Ok((dimensions, leaf_ty, leaf_stride))
 }
+
+/// Like [`flatten_local_array_shape`], but from an array [`naga::Type`] handle only (no initializer).
+/// Used for `in T[N]` function parameters, which are value types in Naga (not pointers).
+pub(crate) fn flatten_array_type_shape(
+    module: &Module,
+    mut cur_ty: Handle<Type>,
+) -> Result<(SmallVec<[u32; 4]>, Handle<Type>, u32), LowerError> {
+    let mut dimensions = SmallVec::<[u32; 4]>::new();
+
+    let (leaf_ty, leaf_stride) = loop {
+        match &module.types[cur_ty].inner {
+            TypeInner::Array { base, size, stride } => {
+                let n = match size {
+                    ArraySize::Constant(nz) => nz.get(),
+                    ArraySize::Pending(_) | ArraySize::Dynamic => {
+                        return Err(LowerError::UnsupportedType(String::from(
+                            "flatten_array_type_shape: only constant-sized arrays supported",
+                        )));
+                    }
+                };
+                dimensions.push(n);
+                let stride_v = *stride;
+                match &module.types[*base].inner {
+                    TypeInner::Array { .. } => {
+                        cur_ty = *base;
+                    }
+                    _ => {
+                        let aligned_stride = stride_v.max(4);
+                        break (*base, aligned_stride);
+                    }
+                }
+            }
+            _ => {
+                return Err(LowerError::Internal(String::from(
+                    "flatten_array_type_shape: not an array type",
+                )));
+            }
+        }
+    };
+
+    let leaf_inner = &module.types[leaf_ty].inner;
+    let ir_components = u32::try_from(naga_type_to_ir_types(leaf_inner)?.len()).map_err(|_| {
+        LowerError::Internal(String::from(
+            "flatten_array_type_shape: IR component count overflows u32",
+        ))
+    })?;
+    let min_layout_stride = ir_components.saturating_mul(4);
+    let leaf_stride = leaf_stride.max(min_layout_stride);
+
+    dimensions.reverse();
+
+    Ok((dimensions, leaf_ty, leaf_stride))
+}

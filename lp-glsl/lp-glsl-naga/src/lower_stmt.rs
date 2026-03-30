@@ -288,6 +288,12 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 ctx, &dst_info, *value,
                             );
                         }
+                        Expression::FunctionArgument(arg_i) => {
+                            let src = ctx.arg_vregs_for(*arg_i)?;
+                            return crate::lower_array::store_array_from_flat_vregs(
+                                ctx, &dst_info, &src,
+                            );
+                        }
                         _ => {
                             let src_lv = crate::lower_array::peel_array_local_value(
                                 ctx.func,
@@ -404,6 +410,31 @@ fn call_arg_pointer_local(
     }
 }
 
+/// Naga may pass a stack array as `LocalVariable` or `Load` of that local (implicit decay).
+fn call_arg_array_local(
+    ctx: &LowerCtx<'_>,
+    mut expr: Handle<Expression>,
+) -> Result<Handle<LocalVariable>, LowerError> {
+    loop {
+        match &ctx.func.expressions[expr] {
+            Expression::Load { pointer } => expr = *pointer,
+            Expression::LocalVariable(lv) => {
+                if ctx.array_map.contains_key(lv) {
+                    return Ok(*lv);
+                }
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "array call argument must be a local array",
+                )));
+            }
+            _ => {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "array call argument must be a local array",
+                )));
+            }
+        }
+    }
+}
+
 /// `true` if this block does not end with an explicit `return`.
 pub(crate) fn void_block_missing_return(block: &Block) -> bool {
     !matches!(block.last(), Some(Statement::Return { .. }))
@@ -455,6 +486,18 @@ fn lower_user_call(
             }
             arg_vs.push(addr);
             inout_copybacks.push((lv, slot));
+        } else if matches!(
+            &ctx.module.types[callee_arg.ty].inner,
+            TypeInner::Array { .. }
+        ) {
+            let lv = call_arg_array_local(ctx, arg_h)?;
+            let info = ctx.array_map.get(&lv).cloned().ok_or_else(|| {
+                LowerError::UnsupportedExpression(String::from(
+                    "array call argument: not a stack-slot array",
+                ))
+            })?;
+            let flat = crate::lower_array::load_array_flat_vregs_for_call(ctx, &info)?;
+            arg_vs.extend(flat);
         } else {
             let vs = ctx.ensure_expr_vec(arg_h)?;
             arg_vs.extend_from_slice(&vs);

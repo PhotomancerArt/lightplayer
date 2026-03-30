@@ -3,6 +3,7 @@
 //! Matrix types use **column-major** component order (same as GLSL / Naga scalarization):
 //! `mat2` is 4 float words `[col0row0, col0row1, col1row0, col1row1]`, etc.
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -37,6 +38,11 @@ pub enum GlslType {
     Mat2,
     Mat3,
     Mat4,
+    /// Fixed-size array `T[n]`; ABI is `n` flattened scalars (row-major).
+    Array {
+        element: Box<GlslType>,
+        len: u32,
+    },
 }
 
 /// One GLSL parameter after lowering (pointee type for `out` / `inout` pointers).

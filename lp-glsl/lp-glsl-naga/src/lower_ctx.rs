@@ -22,10 +22,19 @@ pub(crate) use crate::naga_util::{
 
 pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 
+/// Where array element data lives: owned stack slot vs. `inout`/`out` parameter buffer (`arg_vregs` base).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ArraySlot {
+    Local(SlotId),
+    /// Reserved for future pointer-to-array formals (`out` / `inout`); lowering uses `ArraySlot::Local` for `in T[]` today.
+    #[allow(dead_code)]
+    Param(u32),
+}
+
 /// Stack [`SlotId`] metadata for one array-typed [`LocalVariable`].
 #[derive(Clone, Debug)]
 pub(crate) struct ArrayInfo {
-    pub slot: SlotId,
+    pub slot: ArraySlot,
     /// Outer dimension first, e.g. `[2, 3]` for `int[2][3]`.
     pub dimensions: SmallVec<[u32; 4]>,
     pub leaf_element_ty: Handle<Type>,
@@ -85,6 +94,14 @@ impl<'a> LowerCtx<'a> {
                     arg_vregs.insert(i as u32, smallvec::smallvec![addr]);
                     pointer_args.insert(i as u32, *base);
                 }
+                TypeInner::Array { .. } => {
+                    let tys = array_ty_flat_ir_types(module, arg.ty)?;
+                    let mut vregs = VRegVec::new();
+                    for ty in tys {
+                        vregs.push(fb.add_param(ty));
+                    }
+                    arg_vregs.insert(i as u32, vregs);
+                }
                 _ => {
                     let tys = naga_type_to_ir_types(inner)?;
                     let mut vregs = VRegVec::new();
@@ -128,7 +145,7 @@ impl<'a> LowerCtx<'a> {
                     array_map.insert(
                         lv_handle,
                         ArrayInfo {
-                            slot,
+                            slot: ArraySlot::Local(slot),
                             dimensions,
                             leaf_element_ty: leaf_ty,
                             leaf_stride,
@@ -154,7 +171,9 @@ impl<'a> LowerCtx<'a> {
             }
             if let Some(info) = array_map.get(&lv_handle) {
                 if var.init.is_none() {
-                    crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
+                    if matches!(info.slot, ArraySlot::Local(_)) {
+                        crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
+                    }
                 }
             }
         }
@@ -269,6 +288,30 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
+/// One LPIR parameter per scalar component, row-major, for a value `in` array argument.
+fn array_ty_flat_ir_types(
+    module: &Module,
+    array_ty: Handle<Type>,
+) -> Result<Vec<IrType>, LowerError> {
+    let (dimensions, leaf_ty, _) =
+        crate::lower_array_multidim::flatten_array_type_shape(module, array_ty)?;
+    let element_count = dimensions
+        .iter()
+        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| {
+            LowerError::Internal(String::from("array_ty_flat_ir_types: count overflow"))
+        })?;
+    let leaf_inner = &module.types[leaf_ty].inner;
+    let leaf_tys = naga_type_to_ir_types(leaf_inner)?;
+    let mut out = Vec::new();
+    for _ in 0..element_count {
+        for ty in leaf_tys.iter() {
+            out.push(*ty);
+        }
+    }
+    Ok(out)
+}
+
 fn scan_param_argument_indices(
     module: &Module,
     func: &Function,
@@ -296,7 +339,11 @@ fn scan_param_argument_indices(
                                 }
                             )
                         });
-                        if !is_ptr {
+                        let is_array_val = arg_ty.is_some_and(|h| {
+                            matches!(&module.types[h].inner, TypeInner::Array { .. })
+                        });
+                        // `in T[]` uses a real stack array in `array_map`; do not alias as flat vregs.
+                        if !is_ptr && !is_array_val {
                             m.insert(*lv, *idx);
                         }
                     }

@@ -74,6 +74,9 @@ pub(crate) fn glsl_component_count(ty: &GlslType) -> usize {
         GlslType::Mat2 => 4,
         GlslType::Mat3 => 9,
         GlslType::Mat4 => 16,
+        GlslType::Array { element, len } => {
+            glsl_component_count(element).saturating_mul(*len as usize)
+        }
     }
 }
 
@@ -141,6 +144,10 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
         (GlslType::Mat4, GlslQ32::Mat4(a)) => {
             Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
         }
+
+        (GlslType::Array { .. }, _) => Err(CallError::Unsupported(String::from(
+            "array arguments are not supported by Level-1 call() yet",
+        ))),
 
         (expected, got) => Err(CallError::TypeMismatch(format!(
             "argument type mismatch: expected {:?}, got {:?}",
@@ -258,5 +265,10 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
             crate::q32::q32_to_f64(words[14]),
             crate::q32::q32_to_f64(words[15]),
         ]),
+        GlslType::Array { .. } => {
+            return Err(CallError::Unsupported(String::from(
+                "array return values are not supported by Level-1 decode yet",
+            )));
+        }
     })
 }

@@ -13,7 +13,9 @@ use naga::{
     TypeInner,
 };
 
-use crate::lower_ctx::{ArrayInfo, LowerCtx, VRegVec, naga_type_to_ir_types, vector_size_usize};
+use crate::lower_ctx::{
+    ArrayInfo, ArraySlot, LowerCtx, VRegVec, naga_type_to_ir_types, vector_size_usize,
+};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 
@@ -160,15 +162,35 @@ fn array_slot_base_fb(fb: &mut lpir::FunctionBuilder, slot: lpir::SlotId) -> VRe
     base
 }
 
+/// Base address for array data: stack slot (`SlotAddr`) or callee parameter pointer (`arg_vregs[0]`).
+pub(crate) fn array_storage_base_vreg(
+    ctx: &mut LowerCtx<'_>,
+    slot: &ArraySlot,
+) -> Result<VReg, LowerError> {
+    match slot {
+        ArraySlot::Local(s) => Ok(array_slot_base(ctx, *s)),
+        ArraySlot::Param(arg_i) => {
+            ctx.arg_vregs_for(*arg_i)?.first().copied().ok_or_else(|| {
+                LowerError::Internal(String::from("array param: missing address vreg"))
+            })
+        }
+    }
+}
+
 /// Zero-initialize every element (no `LowerCtx`; used from [`crate::lower_ctx::LowerCtx::new`]).
 pub(crate) fn zero_fill_array_slot(
     fb: &mut lpir::FunctionBuilder,
     module: &Module,
     info: &ArrayInfo,
 ) -> Result<(), LowerError> {
+    let ArraySlot::Local(slot) = info.slot else {
+        return Err(LowerError::Internal(String::from(
+            "zero_fill_array_slot: not a local stack array",
+        )));
+    };
     let elem_inner = &module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
-    let base = array_slot_base_fb(fb, info.slot);
+    let base = array_slot_base_fb(fb, slot);
 
     for i in 0..info.element_count {
         let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
@@ -216,7 +238,7 @@ pub(crate) fn load_array_element_const(
     let index = index.min(info.element_count - 1);
     let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
-    let base = array_slot_base(ctx, info.slot);
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
     let byte_off = index
         .checked_mul(info.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("load_array_element_const: overflow")))?;
@@ -250,7 +272,7 @@ pub(crate) fn load_array_element_dynamic(
         lhs: clamped,
         rhs: stride_v,
     });
-    let base = array_slot_base(ctx, info.slot);
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
     let addr = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::Iadd {
         dst: addr,
@@ -296,7 +318,7 @@ pub(crate) fn store_array_element_const(
             ir_tys.len()
         )));
     }
-    let base = array_slot_base(ctx, info.slot);
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
     let byte_off = index
         .checked_mul(info.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("store_array_element_const: overflow")))?;
@@ -328,7 +350,7 @@ pub(crate) fn store_array_element_dynamic(
         lhs: clamped,
         rhs: stride_v,
     });
-    let base = array_slot_base(ctx, info.slot);
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
     let addr = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::Iadd {
         dst: addr,
@@ -374,7 +396,7 @@ pub(crate) fn lower_array_initializer(
                     "array initializer: too many elements",
                 )));
             }
-            let base = array_slot_base(ctx, info.slot);
+            let base = array_storage_base_vreg(ctx, &info.slot)?;
             for (i, &comp) in flat_components.iter().enumerate() {
                 let byte_off = (i as u32)
                     .checked_mul(info.leaf_stride)
@@ -566,6 +588,73 @@ pub(crate) fn peel_array_local_value(
     }
 }
 
+/// Callee prologue: Naga emits `Store(local_array, FunctionArgument(i))` for `in T[]` parameters.
+pub(crate) fn store_array_from_flat_vregs(
+    ctx: &mut LowerCtx<'_>,
+    info: &ArrayInfo,
+    src: &[VReg],
+) -> Result<(), LowerError> {
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
+    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let per_el = ir_tys.len();
+    let expected = info.element_count as usize * per_el;
+    if src.len() != expected {
+        return Err(LowerError::Internal(format!(
+            "store_array_from_flat_vregs: want {} vregs, got {}",
+            expected,
+            src.len()
+        )));
+    }
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
+    let mut flat = 0usize;
+    for i in 0..info.element_count {
+        let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
+            LowerError::Internal(String::from("store_array_from_flat_vregs: off"))
+        })?;
+        for j in 0..per_el {
+            ctx.fb.push(Op::Store {
+                base,
+                offset: byte_off + (j as u32) * 4,
+                value: src[flat + j],
+            });
+        }
+        flat += per_el;
+    }
+    Ok(())
+}
+
+/// Caller: load a local stack array into one vreg per scalar component (row-major) for `in` array calls.
+pub(crate) fn load_array_flat_vregs_for_call(
+    ctx: &mut LowerCtx<'_>,
+    info: &ArrayInfo,
+) -> Result<Vec<VReg>, LowerError> {
+    if !matches!(info.slot, ArraySlot::Local(_)) {
+        return Err(LowerError::Internal(String::from(
+            "load_array_flat_vregs_for_call: expected local array",
+        )));
+    }
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
+    let ir_tys = naga_type_to_ir_types(elem_inner)?;
+    let per_el = ir_tys.len();
+    let base = array_storage_base_vreg(ctx, &info.slot)?;
+    let mut out = Vec::new();
+    for i in 0..info.element_count {
+        let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
+            LowerError::Internal(String::from("load_array_flat_vregs_for_call: off"))
+        })?;
+        for j in 0..per_el {
+            let dst = ctx.fb.alloc_vreg(ir_tys[j]);
+            ctx.fb.push(Op::Load {
+                dst,
+                base,
+                offset: byte_off + (j as u32) * 4,
+            });
+            out.push(dst);
+        }
+    }
+    Ok(out)
+}
+
 /// GLSL `.length()` / [`Expression::ArrayLength`]: size of the leftmost `[]` for the array value.
 /// Copy one stack-slot array to another (same shape); used for whole-array assignment.
 pub(crate) fn copy_stack_array_slots(
@@ -581,12 +670,17 @@ pub(crate) fn copy_stack_array_slots(
             "array copy: shape mismatch",
         )));
     }
+    let (ArraySlot::Local(dst_slot), ArraySlot::Local(src_slot)) = (dst.slot, src.slot) else {
+        return Err(LowerError::UnsupportedStatement(String::from(
+            "array copy: only local stack arrays",
+        )));
+    };
     let sz = dst
         .element_count
         .checked_mul(dst.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("array copy: size overflow")))?;
-    let dst_addr = array_slot_base(ctx, dst.slot);
-    let src_addr = array_slot_base(ctx, src.slot);
+    let dst_addr = array_slot_base(ctx, dst_slot);
+    let src_addr = array_slot_base(ctx, src_slot);
     ctx.fb.push(Op::Memcpy {
         dst_addr,
         src_addr,

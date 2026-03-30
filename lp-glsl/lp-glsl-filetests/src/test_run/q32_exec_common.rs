@@ -48,6 +48,9 @@ fn lpir_glsl_type_to_core(t: &GlslType) -> Type {
         GlslType::Mat2 => Type::Mat2,
         GlslType::Mat3 => Type::Mat3,
         GlslType::Mat4 => Type::Mat4,
+        GlslType::Array { element, len } => {
+            Type::Array(Box::new(lpir_glsl_type_to_core(element)), *len as usize)
+        }
     }
 }
 

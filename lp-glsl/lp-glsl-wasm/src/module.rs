@@ -28,6 +28,14 @@ pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec
         GlslType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
         GlslType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
         GlslType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
+        GlslType::Array { element, len } => {
+            let inner = glsl_type_to_wasm_components(element, float_mode);
+            let mut out = Vec::with_capacity(inner.len().saturating_mul(*len as usize));
+            for _ in 0..*len {
+                out.extend_from_slice(&inner);
+            }
+            out
+        }
     }
 }
 

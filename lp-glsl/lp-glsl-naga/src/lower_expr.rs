@@ -158,6 +158,8 @@ fn lower_expr_vec_uncached(
             if let Some((lv, ops)) =
                 crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
             {
+                // `ArraySlot::Param` (pointer array formals) uses the same path via
+                // [`crate::lower_array::array_storage_base_vreg`].
                 if let Some(info) = ctx.array_map.get(&lv).cloned() {
                     if ops.len() == info.dimensions.len() {
                         if ops.iter().all(|o| {

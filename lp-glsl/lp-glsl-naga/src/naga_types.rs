@@ -1,11 +1,12 @@
 //! [`NagaModule`], function metadata, Naga → [`GlslType`] mapping, and [`CompileError`] for type extraction.
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use naga::{AddressSpace, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
+use naga::{AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
 
 use lpir::{GlslParamMeta, GlslParamQualifier, GlslType};
 
@@ -154,6 +155,21 @@ fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslTyp
                     size, scalar.kind
                 ))),
             }
+        }
+        TypeInner::Array { base, size, .. } => {
+            let len = match size {
+                ArraySize::Constant(n) => n.get(),
+                ArraySize::Pending(_) | ArraySize::Dynamic => {
+                    return Err(CompileError::UnsupportedType(String::from(
+                        "array with non-constant size",
+                    )));
+                }
+            };
+            let elem = naga_type_inner_to_glsl(module, &module.types[base].inner)?;
+            Ok(GlslType::Array {
+                element: Box::new(elem),
+                len,
+            })
         }
         TypeInner::Matrix {
             columns,

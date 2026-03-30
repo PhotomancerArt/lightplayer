@@ -329,15 +329,24 @@ fn extract_function_calls_from_compound(compound: &CompoundStatement, calls: &mu
 fn extract_function_calls_from_expr(expr: &Expr, calls: &mut HashSet<String>) {
     match expr {
         Expr::FunCall(func_ident, args, _) => {
-            // Extract function name
-            if let glsl::syntax::FunIdentifier::Identifier(ident) = func_ident {
-                let func_name = ident.name.clone();
-                // Filter out built-ins and type constructors (simple heuristic)
-                if !is_builtin_or_constructor(&func_name) {
-                    calls.insert(func_name);
+            // Extract function name (some parser shapes use `FunIdentifier::Expr(Variable(..))`).
+            match func_ident {
+                glsl::syntax::FunIdentifier::Identifier(ident) => {
+                    let func_name = ident.name.clone();
+                    if !is_builtin_or_constructor(&func_name) {
+                        calls.insert(func_name);
+                    }
+                }
+                glsl::syntax::FunIdentifier::Expr(callee) => {
+                    if let Expr::Variable(ident, _) = callee.as_ref() {
+                        let func_name = ident.name.clone();
+                        if !is_builtin_or_constructor(&func_name) {
+                            calls.insert(func_name);
+                        }
+                    }
+                    extract_function_calls_from_expr(callee, calls);
                 }
             }
-            // Also check arguments for nested function calls
             for arg in args {
                 extract_function_calls_from_expr(arg, calls);
             }
@@ -673,6 +682,25 @@ float test() {
         assert!(filtered.contains("test"));
         assert!(filtered.contains("multiply"));
         assert!(filtered.contains("add"));
+    }
+
+    #[test]
+    fn callee_via_fun_identifier_expr_variable() {
+        let source = r#"
+int callee(int x[2]) {
+    return x[0] + x[1];
+}
+int test_fn() {
+    int a[2] = {1, 2};
+    return callee(a);
+}
+"#;
+        let parse_result = TranslationUnit::parse(source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, source, "test_fn").unwrap();
+        assert!(
+            filtered.contains("callee"),
+            "expected call graph to keep callee, got: {filtered:?}"
+        );
     }
 
     #[test]

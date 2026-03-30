@@ -172,6 +172,9 @@ fn to_frontend_type(ty: &GlslType) -> Type {
         GlslType::Mat2 => Type::Mat2,
         GlslType::Mat3 => Type::Mat3,
         GlslType::Mat4 => Type::Mat4,
+        GlslType::Array { element, len } => {
+            Type::Array(Box::new(to_frontend_type(element)), *len as usize)
+        }
     }
 }
 
