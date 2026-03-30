@@ -8,32 +8,34 @@ extern crate alloc;
 // Dependency reserved for math/LPFX lowering (later phases).
 use lp_glsl_builtin_ids as _;
 
-use alloc::format;
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::fmt;
 pub use naga;
 
-use naga::{
-    AddressSpace, Function, Handle, Module, ScalarKind, ShaderStage, TypeInner, VectorSize,
-};
-
-mod expr_scalar;
 pub mod lower;
 mod lower_access;
+mod lower_binary;
+mod lower_cast;
 mod lower_ctx;
 mod lower_error;
 mod lower_expr;
 mod lower_lpfx;
 mod lower_math;
+mod lower_math_geom;
+mod lower_math_helpers;
 mod lower_matrix;
 mod lower_stmt;
+mod lower_unary;
+mod naga_types;
+mod naga_util;
+mod parse;
 pub mod std_math_handler;
 
 pub use lower::lower;
 pub use lower_error::LowerError;
 
 pub use lpir::{GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType};
+
+pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_parsed};
+pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};
 
 #[cfg(test)]
 mod tests {
@@ -237,239 +239,3 @@ float test_main() {
 }
 
 pub use lpir::FloatMode;
-
-#[derive(Clone, Debug)]
-pub struct FunctionInfo {
-    pub name: String,
-    pub params: Vec<GlslParamMeta>,
-    pub return_type: GlslType,
-}
-
-/// Parsed module plus one entry per named user function, in [`Module::functions`] iteration order.
-pub struct NagaModule {
-    pub module: Module,
-    /// `(function_handle, metadata)` for each exported GLSL function.
-    pub functions: Vec<(Handle<Function>, FunctionInfo)>,
-}
-
-#[derive(Debug)]
-pub enum CompileError {
-    Parse(String),
-    UnsupportedType(String),
-}
-
-impl fmt::Display for CompileError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Parse(msg) => write!(f, "GLSL parse error: {msg}"),
-            Self::UnsupportedType(msg) => write!(f, "unsupported type: {msg}"),
-        }
-    }
-}
-
-impl core::error::Error for CompileError {}
-
-/// LPFX preamble and `#line 1` sent to Naga before the user snippet (same layout as [`compile`]).
-const LPFX_PREFIX: &str = concat!(
-    "#version 450 core\n",
-    include_str!("lpfx_prologue.glsl"),
-    "\n#line 1\n",
-);
-
-fn prepend_lpfx_prototypes(source: &str) -> String {
-    let mut s = String::from(LPFX_PREFIX);
-    s.push_str(source);
-    s
-}
-
-/// 1-based physical line where the user snippet's line 1 begins in sources from
-/// [`prepared_glsl_for_compile`] (after `#line 1`, before any synthesized `void main()` suffix).
-pub fn user_snippet_first_physical_line() -> usize {
-    LPFX_PREFIX.lines().count() + 1
-}
-
-/// Full GLSL source passed to Naga: LPFX preamble, user snippet, then optional synthesized
-/// `void main() {}` when the user did not define `void main`.
-pub fn prepared_glsl_for_compile(user_snippet: &str) -> String {
-    let source = prepend_lpfx_prototypes(user_snippet);
-    ensure_vertex_entry_point(&source)
-}
-
-/// Wrap a parsed [`Module`] the same way as [`compile`] after parsing.
-pub fn naga_module_from_parsed(module: Module) -> Result<NagaModule, CompileError> {
-    let functions = extract_functions(&module)?;
-    Ok(NagaModule { module, functions })
-}
-
-/// Parse GLSL and collect named function metadata.
-pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
-    let source = prepared_glsl_for_compile(source);
-    let module = parse_glsl(&source)?;
-    naga_module_from_parsed(module)
-}
-
-/// Naga's GLSL frontend expects a shader entry point. Filetests and snippets only define helpers;
-/// append an empty `main` when missing.
-fn ensure_vertex_entry_point(source: &str) -> String {
-    if glsl_source_declares_main(source) {
-        return String::from(source);
-    }
-    let mut s = String::from(source);
-    if !s.is_empty() && !s.ends_with('\n') {
-        s.push('\n');
-    }
-    s.push_str("void main() {}\n");
-    s
-}
-
-fn glsl_source_declares_main(source: &str) -> bool {
-    source.lines().any(|line| {
-        let t = line.trim_start();
-        if t.starts_with("//") {
-            return false;
-        }
-        t.split_whitespace().any(|tok| tok.starts_with("main("))
-    })
-}
-
-fn parse_glsl(source: &str) -> Result<Module, CompileError> {
-    let mut frontend = naga::front::glsl::Frontend::default();
-    let options = naga::front::glsl::Options::from(ShaderStage::Vertex);
-    frontend
-        .parse(&options, source)
-        .map_err(|e| CompileError::Parse(e.emit_to_string(source)))
-}
-
-fn extract_functions(
-    module: &Module,
-) -> Result<Vec<(Handle<Function>, FunctionInfo)>, CompileError> {
-    let mut out = Vec::new();
-    for (handle, function) in module.functions.iter() {
-        let Some(name) = function.name.clone() else {
-            continue;
-        };
-        if name.starts_with("lpfx_") {
-            continue;
-        }
-        // Skip the synthesized `void main() {}` entry point but keep user functions
-        // named "main" that have parameters (e.g. `vec4 main(vec2, vec2, float)`).
-        if name == "main" && function.arguments.is_empty() {
-            continue;
-        }
-        let info = function_info(module, function, name)?;
-        out.push((handle, info));
-    }
-    Ok(out)
-}
-
-fn function_info(
-    module: &Module,
-    function: &Function,
-    name: String,
-) -> Result<FunctionInfo, CompileError> {
-    let params = function
-        .arguments
-        .iter()
-        .map(|arg| {
-            let inner = &module.types[arg.ty].inner;
-            let pname = arg.name.clone().unwrap_or_else(|| String::from("_"));
-            let (ty, qualifier) = match *inner {
-                TypeInner::Pointer {
-                    base,
-                    space: AddressSpace::Function,
-                } => (
-                    naga_type_inner_to_glsl(module, &module.types[base].inner)?,
-                    GlslParamQualifier::InOut,
-                ),
-                _ => (
-                    naga_type_inner_to_glsl(module, inner)?,
-                    GlslParamQualifier::In,
-                ),
-            };
-            Ok(GlslParamMeta {
-                name: pname,
-                qualifier,
-                ty,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let return_type = match &function.result {
-        Some(res) => naga_type_inner_to_glsl(module, &module.types[res.ty].inner)?,
-        None => GlslType::Void,
-    };
-    Ok(FunctionInfo {
-        name,
-        params,
-        return_type,
-    })
-}
-
-fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslType, CompileError> {
-    match *inner {
-        TypeInner::Pointer { base, .. } => {
-            naga_type_inner_to_glsl(module, &module.types[base].inner)
-        }
-        TypeInner::Scalar(scalar) => match scalar.kind {
-            ScalarKind::Float if scalar.width == 4 => Ok(GlslType::Float),
-            ScalarKind::Sint if scalar.width == 4 => Ok(GlslType::Int),
-            ScalarKind::Uint if scalar.width == 4 => Ok(GlslType::UInt),
-            ScalarKind::Bool => Ok(GlslType::Bool),
-            _ => Err(CompileError::UnsupportedType(format!(
-                "scalar kind {:?} width {}",
-                scalar.kind, scalar.width
-            ))),
-        },
-        TypeInner::Vector { size, scalar } => {
-            let width_ok = match scalar.kind {
-                ScalarKind::Bool => scalar.width == 1,
-                _ => scalar.width == 4,
-            };
-            if !width_ok {
-                return Err(CompileError::UnsupportedType(format!(
-                    "vector width {}",
-                    scalar.width
-                )));
-            }
-            match (size, scalar.kind) {
-                (VectorSize::Bi, ScalarKind::Float) => Ok(GlslType::Vec2),
-                (VectorSize::Tri, ScalarKind::Float) => Ok(GlslType::Vec3),
-                (VectorSize::Quad, ScalarKind::Float) => Ok(GlslType::Vec4),
-                (VectorSize::Bi, ScalarKind::Sint) => Ok(GlslType::IVec2),
-                (VectorSize::Tri, ScalarKind::Sint) => Ok(GlslType::IVec3),
-                (VectorSize::Quad, ScalarKind::Sint) => Ok(GlslType::IVec4),
-                (VectorSize::Bi, ScalarKind::Uint) => Ok(GlslType::UVec2),
-                (VectorSize::Tri, ScalarKind::Uint) => Ok(GlslType::UVec3),
-                (VectorSize::Quad, ScalarKind::Uint) => Ok(GlslType::UVec4),
-                (VectorSize::Bi, ScalarKind::Bool) => Ok(GlslType::BVec2),
-                (VectorSize::Tri, ScalarKind::Bool) => Ok(GlslType::BVec3),
-                (VectorSize::Quad, ScalarKind::Bool) => Ok(GlslType::BVec4),
-                _ => Err(CompileError::UnsupportedType(format!(
-                    "vector {:?} {:?}",
-                    size, scalar.kind
-                ))),
-            }
-        }
-        TypeInner::Matrix {
-            columns,
-            rows,
-            scalar,
-        } => {
-            if scalar.kind != ScalarKind::Float || scalar.width != 4 {
-                return Err(CompileError::UnsupportedType(format!(
-                    "matrix scalar {:?} width {}",
-                    scalar.kind, scalar.width
-                )));
-            }
-            match (columns, rows) {
-                (VectorSize::Bi, VectorSize::Bi) => Ok(GlslType::Mat2),
-                (VectorSize::Tri, VectorSize::Tri) => Ok(GlslType::Mat3),
-                (VectorSize::Quad, VectorSize::Quad) => Ok(GlslType::Mat4),
-                _ => Err(CompileError::UnsupportedType(format!(
-                    "matrix {columns:?}x{rows:?}"
-                ))),
-            }
-        }
-        TypeInner::Struct { .. } => Err(CompileError::UnsupportedType(String::from("struct"))),
-        _ => Err(CompileError::UnsupportedType(format!("{inner:?}"))),
-    }
-}

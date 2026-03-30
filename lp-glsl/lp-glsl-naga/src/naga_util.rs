@@ -1,15 +1,107 @@
-//! [`ScalarKind`] inference and expression type shape for Naga IR.
+//! Naga IR: LPIR type layout, widths, and expression [`TypeInner`] / [`ScalarKind`] helpers.
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
+use lpir::IrType;
 use naga::{
     BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module,
     RelationalFunction, Scalar, ScalarKind, TypeInner, VectorSize,
 };
+use smallvec::SmallVec;
 
-use crate::lower_ctx::vector_size_usize;
 use crate::lower_error::LowerError;
+
+pub(crate) type IrTypeVec = SmallVec<[IrType; 4]>;
+
+pub(crate) fn vector_size_usize(size: VectorSize) -> usize {
+    match size {
+        VectorSize::Bi => 2,
+        VectorSize::Tri => 3,
+        VectorSize::Quad => 4,
+    }
+}
+
+pub(crate) fn naga_scalar_to_ir_type(kind: ScalarKind) -> Result<IrType, LowerError> {
+    match kind {
+        ScalarKind::Float => Ok(IrType::F32),
+        ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => Ok(IrType::I32),
+        ScalarKind::AbstractInt | ScalarKind::AbstractFloat => Err(LowerError::UnsupportedType(
+            String::from("abstract numeric type"),
+        )),
+    }
+}
+
+pub(crate) fn naga_type_to_ir_types(inner: &TypeInner) -> Result<IrTypeVec, LowerError> {
+    match *inner {
+        TypeInner::Scalar(scalar) => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            Ok(smallvec::smallvec![t])
+        }
+        TypeInner::Vector { size, scalar, .. } => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(size);
+            Ok(SmallVec::from_elem(t, n))
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar,
+            ..
+        } => {
+            let t = naga_scalar_to_ir_type(scalar.kind)?;
+            let n = vector_size_usize(columns) * vector_size_usize(rows);
+            Ok(SmallVec::from_elem(t, n))
+        }
+        _ => Err(LowerError::UnsupportedType(format!(
+            "unsupported type for LPIR: {inner:?}"
+        ))),
+    }
+}
+
+/// Single scalar IR type; use [`naga_type_to_ir_types`] for vectors and matrices.
+#[allow(
+    dead_code,
+    reason = "convenience for scalar-only call sites and future passes"
+)]
+pub(crate) fn naga_type_to_ir_type(inner: &TypeInner) -> Result<IrType, LowerError> {
+    let tys = naga_type_to_ir_types(inner)?;
+    if tys.len() != 1 {
+        return Err(LowerError::UnsupportedType(String::from(
+            "expected a single scalar IR type",
+        )));
+    }
+    Ok(tys[0])
+}
+
+pub(crate) fn naga_type_width(inner: &TypeInner) -> usize {
+    match *inner {
+        TypeInner::Scalar(_) => 1,
+        TypeInner::Vector { size, .. } => vector_size_usize(size),
+        TypeInner::Matrix { columns, rows, .. } => {
+            vector_size_usize(columns) * vector_size_usize(rows)
+        }
+        TypeInner::ValuePointer {
+            size: Some(vec_size),
+            ..
+        } => vector_size_usize(vec_size),
+        TypeInner::ValuePointer { size: None, .. } => 1,
+        _ => 1,
+    }
+}
+
+pub(crate) fn func_return_ir_types(
+    module: &Module,
+    func: &Function,
+) -> Result<Vec<IrType>, LowerError> {
+    let Some(res) = &func.result else {
+        return Ok(Vec::new());
+    };
+    let inner = &module.types[res.ty].inner;
+    let tys = naga_type_to_ir_types(inner)?;
+    Ok(tys.to_vec())
+}
 
 pub(crate) fn type_handle_scalar_kind(
     module: &Module,

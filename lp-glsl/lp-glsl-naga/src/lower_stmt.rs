@@ -8,12 +8,12 @@ use alloc::vec::Vec;
 use lpir::{IrType, Op, SlotId};
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
-use crate::expr_scalar::expr_type_inner;
 use crate::lower_access;
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 use crate::lower_lpfx;
+use crate::naga_util::expr_type_inner;
 
 pub(crate) fn lower_block(ctx: &mut LowerCtx<'_>, block: &Block) -> Result<(), LowerError> {
     for stmt in block.iter() {

@@ -1,18 +1,17 @@
 //! Naga [`Expression::Math`] → LPIR: inline ops, `@glsl` / `@lpir` imports, per-component vector math,
-//! and geometry/matrix builtins (`dot`, `normalize`, `transpose`, etc.).
+//! and geometry/matrix builtins (see [`crate::lower_math_geom`]).
 
 use alloc::format;
 use alloc::string::String;
 
 use lpir::{IrType, Op, VReg};
-use naga::{
-    BinaryOperator, Expression, Function, Handle, MathFunction, Module, ScalarKind, TypeInner,
-};
+use naga::{Handle, MathFunction, ScalarKind};
 
-use crate::expr_scalar::{expr_scalar_kind, expr_type_inner};
-use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_width};
+use crate::lower_ctx::{LowerCtx, VRegVec};
 use crate::lower_error::LowerError;
-use crate::lower_matrix;
+use crate::lower_math_geom::try_lower_special;
+use crate::lower_math_helpers::{fconst, math_dispatch_width_expr, push_import_call, vat};
+use crate::naga_util::expr_scalar_kind;
 
 pub(crate) fn lower_math_vec(
     ctx: &mut LowerCtx<'_>,
@@ -22,321 +21,26 @@ pub(crate) fn lower_math_vec(
     arg2: Option<Handle<naga::Expression>>,
     arg3: Option<Handle<naga::Expression>>,
 ) -> Result<VRegVec, LowerError> {
-    match fun {
-        MathFunction::Dot => {
-            let a = ctx.ensure_expr_vec(arg)?;
-            let b = ctx
-                .ensure_expr_vec(arg1.ok_or_else(|| LowerError::Internal(String::from("dot")))?)?;
-            let d = lower_matrix::emit_dot_product(ctx, &a, &b)?;
-            Ok(smallvec::smallvec![d])
-        }
-        MathFunction::Cross => {
-            let a = ctx.ensure_expr_vec(arg)?;
-            let b = ctx.ensure_expr_vec(
-                arg1.ok_or_else(|| LowerError::Internal(String::from("cross")))?,
-            )?;
-            if a.len() != 3 || b.len() != 3 {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "cross expects vec3",
-                )));
-            }
-            emit_cross(ctx, &a, &b)
-        }
-        MathFunction::Length => {
-            let v = ctx.ensure_expr_vec(arg)?;
-            let d = lower_matrix::emit_dot_product(ctx, &v, &v)?;
-            let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsqrt { dst: r, src: d });
-            Ok(smallvec::smallvec![r])
-        }
-        MathFunction::Distance => {
-            let a = ctx.ensure_expr_vec(arg)?;
-            let b = ctx.ensure_expr_vec(
-                arg1.ok_or_else(|| LowerError::Internal(String::from("distance")))?,
-            )?;
-            if a.len() != b.len() {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "distance length mismatch",
-                )));
-            }
-            let mut diffs = VRegVec::new();
-            for i in 0..a.len() {
-                let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
-                    dst: d,
-                    lhs: a[i],
-                    rhs: b[i],
-                });
-                diffs.push(d);
-            }
-            let d = lower_matrix::emit_dot_product(ctx, &diffs, &diffs)?;
-            let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsqrt { dst: r, src: d });
-            Ok(smallvec::smallvec![r])
-        }
-        MathFunction::Normalize => {
-            let v = ctx.ensure_expr_vec(arg)?;
-            let len = {
-                let d = lower_matrix::emit_dot_product(ctx, &v, &v)?;
-                let r = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsqrt { dst: r, src: d });
-                r
-            };
-            let mut out = VRegVec::new();
-            for &c in &v {
-                let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fdiv {
-                    dst: d,
-                    lhs: c,
-                    rhs: len,
-                });
-                out.push(d);
-            }
-            Ok(out)
-        }
-        MathFunction::FaceForward => {
-            let n = ctx.ensure_expr_vec(arg)?;
-            let i =
-                ctx.ensure_expr_vec(arg1.ok_or_else(|| LowerError::Internal(String::from("ff")))?)?;
-            let nref =
-                ctx.ensure_expr_vec(arg2.ok_or_else(|| LowerError::Internal(String::from("ff")))?)?;
-            let d = lower_matrix::emit_dot_product(ctx, &nref, &i)?;
-            let z = fconst(ctx, 0.0);
-            let cmp = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
-                dst: cmp,
-                lhs: d,
-                rhs: z,
-            });
-            let mut out = VRegVec::new();
-            for j in 0..n.len() {
-                let neg = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fneg {
-                    dst: neg,
-                    src: n[j],
-                });
-                let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
-                    dst,
-                    cond: cmp,
-                    if_true: n[j],
-                    if_false: neg,
-                });
-                out.push(dst);
-            }
-            Ok(out)
-        }
-        MathFunction::Reflect => {
-            let i = ctx.ensure_expr_vec(arg)?;
-            let n = ctx.ensure_expr_vec(
-                arg1.ok_or_else(|| LowerError::Internal(String::from("reflect")))?,
-            )?;
-            let two = fconst(ctx, 2.0);
-            let ndi = lower_matrix::emit_dot_product(ctx, &n, &i)?;
-            let scale = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
-                dst: scale,
-                lhs: two,
-                rhs: ndi,
-            });
-            let mut out = VRegVec::new();
-            for j in 0..i.len() {
-                let pn = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
-                    dst: pn,
-                    lhs: scale,
-                    rhs: n[j],
-                });
-                let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
-                    dst,
-                    lhs: i[j],
-                    rhs: pn,
-                });
-                out.push(dst);
-            }
-            Ok(out)
-        }
-        MathFunction::Refract => {
-            let i = ctx.ensure_expr_vec(arg)?;
-            let n = ctx.ensure_expr_vec(
-                arg1.ok_or_else(|| LowerError::Internal(String::from("refract")))?,
-            )?;
-            let eta_v = ctx
-                .ensure_expr(arg2.ok_or_else(|| LowerError::Internal(String::from("refract")))?)?;
-            let one = fconst(ctx, 1.0);
-            let ndi = lower_matrix::emit_dot_product(ctx, &n, &i)?;
-            let ndi2 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
-                dst: ndi2,
-                lhs: ndi,
-                rhs: ndi,
-            });
-            let t1 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsub {
-                dst: t1,
-                lhs: one,
-                rhs: ndi2,
-            });
-            let eta2 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
-                dst: eta2,
-                lhs: eta_v,
-                rhs: eta_v,
-            });
-            let k_inner = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
-                dst: k_inner,
-                lhs: eta2,
-                rhs: t1,
-            });
-            let k = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsub {
-                dst: k,
-                lhs: one,
-                rhs: k_inner,
-            });
-            let z = fconst(ctx, 0.0);
-            let k_neg = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
-                dst: k_neg,
-                lhs: k,
-                rhs: z,
-            });
-            let mut out = VRegVec::new();
-            for j in 0..i.len() {
-                let etai = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
-                    dst: etai,
-                    lhs: eta_v,
-                    rhs: i[j],
-                });
-                let root = push_import_call(ctx, "lpir", "sqrt", &[k])?;
-                let eta_ndi = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
-                    dst: eta_ndi,
-                    lhs: eta_v,
-                    rhs: ndi,
-                });
-                let sum = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fadd {
-                    dst: sum,
-                    lhs: eta_ndi,
-                    rhs: root,
-                });
-                let pn = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
-                    dst: pn,
-                    lhs: sum,
-                    rhs: n[j],
-                });
-                let refr = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
-                    dst: refr,
-                    lhs: etai,
-                    rhs: pn,
-                });
-                let zero = fconst(ctx, 0.0);
-                let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
-                    dst,
-                    cond: k_neg,
-                    if_true: zero,
-                    if_false: refr,
-                });
-                out.push(dst);
-            }
-            Ok(out)
-        }
-        MathFunction::Transpose => {
-            let inner = expr_type_inner(ctx.module, ctx.func, arg)?;
-            let TypeInner::Matrix { columns, rows, .. } = inner else {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "transpose non-matrix",
-                )));
-            };
-            let lc = crate::lower_ctx::vector_size_usize(columns);
-            let lr = crate::lower_ctx::vector_size_usize(rows);
-            let v = ctx.ensure_expr_vec(arg)?;
-            Ok(lower_matrix::lower_transpose(&v, lc, lr))
-        }
-        MathFunction::Determinant => {
-            let inner = expr_type_inner(ctx.module, ctx.func, arg)?;
-            let TypeInner::Matrix { columns, rows, .. } = inner else {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "determinant non-matrix",
-                )));
-            };
-            let lc = crate::lower_ctx::vector_size_usize(columns);
-            let lr = crate::lower_ctx::vector_size_usize(rows);
-            if lc != lr {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "determinant non-square",
-                )));
-            }
-            let v = ctx.ensure_expr_vec(arg)?;
-            let d = lower_matrix::lower_determinant(ctx, &v, lc)?;
-            Ok(smallvec::smallvec![d])
-        }
-        MathFunction::Inverse => {
-            let inner = expr_type_inner(ctx.module, ctx.func, arg)?;
-            let TypeInner::Matrix { columns, rows, .. } = inner else {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "inverse non-matrix",
-                )));
-            };
-            let lc = crate::lower_ctx::vector_size_usize(columns);
-            let lr = crate::lower_ctx::vector_size_usize(rows);
-            if lc != lr {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "inverse non-square",
-                )));
-            }
-            let v = ctx.ensure_expr_vec(arg)?;
-            lower_matrix::lower_inverse(ctx, &v, lc)
-        }
-        MathFunction::Outer => {
-            let a = ctx.ensure_expr_vec(arg)?;
-            let b = ctx.ensure_expr_vec(
-                arg1.ok_or_else(|| LowerError::Internal(String::from("outer")))?,
-            )?;
-            let mut out = VRegVec::new();
-            for c in 0..b.len() {
-                for r in 0..a.len() {
-                    let d = ctx.fb.alloc_vreg(IrType::F32);
-                    ctx.fb.push(Op::Fmul {
-                        dst: d,
-                        lhs: a[r],
-                        rhs: b[c],
-                    });
-                    out.push(d);
-                }
-            }
-            Ok(out)
-        }
-        _ => {
-            // GLSL smears scalars to match `genType` operands (`mix(float, vec3, float)`, etc.).
-            // Width must reflect every argument, not only the first. Also, `expr_type_inner` for
-            // `float * vec3` follows the left operand only; recurse through arithmetic trees so
-            // `pow(vec3*scalar, y)` does not take the scalar-only path.
-            let mut w = math_dispatch_width_expr(ctx.module, ctx.func, arg)?;
-            if let Some(a) = arg1 {
-                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
-            }
-            if let Some(a) = arg2 {
-                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
-            }
-            if let Some(a) = arg3 {
-                w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
-            }
-            if w == 1 {
-                return Ok(smallvec::smallvec![lower_math_scalar_impl(
-                    ctx, fun, arg, arg1, arg2, arg3
-                )?]);
-            }
-            lower_math_per_component(ctx, fun, arg, arg1, arg2, arg3)
-        }
+    if let Some(v) = try_lower_special(ctx, fun, arg, arg1, arg2, arg3)? {
+        return Ok(v);
     }
+
+    let mut w = math_dispatch_width_expr(ctx.module, ctx.func, arg)?;
+    if let Some(a) = arg1 {
+        w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+    }
+    if let Some(a) = arg2 {
+        w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+    }
+    if let Some(a) = arg3 {
+        w = w.max(math_dispatch_width_expr(ctx.module, ctx.func, a)?);
+    }
+    if w == 1 {
+        return Ok(smallvec::smallvec![lower_math_scalar_impl(
+            ctx, fun, arg, arg1, arg2, arg3
+        )?]);
+    }
+    lower_math_vectorized(ctx, fun, arg, arg1, arg2, arg3)
 }
 
 #[allow(dead_code, reason = "scalar wrapper over lower_math_vec")]
@@ -368,39 +72,10 @@ fn lower_math_scalar_impl(
 ) -> Result<VReg, LowerError> {
     let k0 = expr_scalar_kind(ctx.module, ctx.func, arg)?;
     match fun {
-        MathFunction::Abs => match k0 {
-            ScalarKind::Float => {
-                let s = ctx.ensure_expr(arg)?;
-                let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fabs { dst: d, src: s });
-                Ok(d)
-            }
-            ScalarKind::Sint => {
-                let s = ctx.ensure_expr(arg)?;
-                let z = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-                let neg = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Ineg { dst: neg, src: s });
-                let lt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IltS {
-                    dst: lt,
-                    lhs: s,
-                    rhs: z,
-                });
-                let d = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Select {
-                    dst: d,
-                    cond: lt,
-                    if_true: neg,
-                    if_false: s,
-                });
-                Ok(d)
-            }
-            ScalarKind::Uint => ctx.ensure_expr(arg),
-            _ => Err(LowerError::UnsupportedExpression(String::from(
-                "abs on non-numeric scalar",
-            ))),
-        },
+        MathFunction::Abs => {
+            let s = ctx.ensure_expr(arg)?;
+            emit_abs(ctx, k0, s)
+        }
         MathFunction::Sqrt => {
             let s = ctx.ensure_expr(arg)?;
             push_import_call(ctx, "lpir", "sqrt", &[s])
@@ -427,19 +102,37 @@ fn lower_math_scalar_impl(
             ctx.fb.push(Op::Ftrunc { dst: d, src: s });
             Ok(d)
         }
-        MathFunction::Min => lower_min_max(ctx, arg, arg1, k0, true),
-        MathFunction::Max => lower_min_max(ctx, arg, arg1, k0, false),
-        MathFunction::Mix => lower_mix(ctx, arg, arg1, arg2, k0),
-        MathFunction::SmoothStep => lower_smoothstep(ctx, arg, arg1, arg2),
-        MathFunction::Step => lower_step(ctx, arg, arg1),
-        MathFunction::Fma => lower_fma(ctx, arg, arg1, arg2),
-        MathFunction::Clamp => lower_clamp(ctx, arg, arg1, arg2, k0),
-        MathFunction::Sign => lower_sign(ctx, arg, k0),
-        MathFunction::Fract => lower_fract(ctx, arg),
-        MathFunction::InverseSqrt => lower_inverse_sqrt(ctx, arg),
-        MathFunction::Saturate => lower_saturate(ctx, arg),
-        MathFunction::Radians => lower_radians(ctx, arg),
-        MathFunction::Degrees => lower_degrees(ctx, arg),
+        MathFunction::Min => lower_min_max_scalar(ctx, arg, arg1, k0, true),
+        MathFunction::Max => lower_min_max_scalar(ctx, arg, arg1, k0, false),
+        MathFunction::Mix => lower_mix_scalar(ctx, arg, arg1, arg2, k0),
+        MathFunction::SmoothStep => lower_smoothstep_scalar(ctx, arg, arg1, arg2),
+        MathFunction::Step => lower_step_scalar(ctx, arg, arg1),
+        MathFunction::Fma => lower_fma_scalar(ctx, arg, arg1, arg2),
+        MathFunction::Clamp => lower_clamp_scalar(ctx, arg, arg1, arg2, k0),
+        MathFunction::Sign => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_sign(ctx, k0, x)
+        }
+        MathFunction::Fract => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_fract_f32(ctx, x)
+        }
+        MathFunction::InverseSqrt => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_inverse_sqrt_f32(ctx, x)
+        }
+        MathFunction::Saturate => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_saturate_f32(ctx, x)
+        }
+        MathFunction::Radians => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_scale_f32(ctx, x, core::f32::consts::PI / 180.0)
+        }
+        MathFunction::Degrees => {
+            let x = ctx.ensure_expr(arg)?;
+            emit_scale_f32(ctx, x, 180.0 / core::f32::consts::PI)
+        }
 
         MathFunction::Sin => std_math_unary(ctx, "sin", arg),
         MathFunction::Cos => std_math_unary(ctx, "cos", arg),
@@ -467,608 +160,7 @@ fn lower_math_scalar_impl(
     }
 }
 
-fn lower_min_max(
-    ctx: &mut LowerCtx<'_>,
-    a: Handle<naga::Expression>,
-    b: Option<Handle<naga::Expression>>,
-    k: ScalarKind,
-    is_min: bool,
-) -> Result<VReg, LowerError> {
-    let b = b.ok_or_else(|| LowerError::Internal(String::from("min/max missing arg")))?;
-    let lk = expr_scalar_kind(ctx.module, ctx.func, a)?;
-    let rk = expr_scalar_kind(ctx.module, ctx.func, b)?;
-    if lk != rk || lk != k {
-        return Err(LowerError::UnsupportedExpression(String::from(
-            "min/max operand mismatch",
-        )));
-    }
-    let lhs = ctx.ensure_expr(a)?;
-    let rhs = ctx.ensure_expr(b)?;
-    match k {
-        ScalarKind::Float => {
-            let d = ctx.fb.alloc_vreg(IrType::F32);
-            if is_min {
-                ctx.fb.push(Op::Fmin { dst: d, lhs, rhs });
-            } else {
-                ctx.fb.push(Op::Fmax { dst: d, lhs, rhs });
-            }
-            Ok(d)
-        }
-        ScalarKind::Sint => {
-            let cmp = ctx.fb.alloc_vreg(IrType::I32);
-            if is_min {
-                ctx.fb.push(Op::IltS { dst: cmp, lhs, rhs });
-            } else {
-                ctx.fb.push(Op::IgtS { dst: cmp, lhs, rhs });
-            }
-            let d = ctx.fb.alloc_vreg(IrType::I32);
-            // `IltS` / `IgtS`: non-zero cond → take `lhs`, else `rhs` (min vs max only changes the cmp).
-            ctx.fb.push(Op::Select {
-                dst: d,
-                cond: cmp,
-                if_true: lhs,
-                if_false: rhs,
-            });
-            Ok(d)
-        }
-        ScalarKind::Uint => {
-            let cmp = ctx.fb.alloc_vreg(IrType::I32);
-            if is_min {
-                ctx.fb.push(Op::IltU { dst: cmp, lhs, rhs });
-            } else {
-                ctx.fb.push(Op::IgtU { dst: cmp, lhs, rhs });
-            }
-            let d = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: d,
-                cond: cmp,
-                if_true: lhs,
-                if_false: rhs,
-            });
-            Ok(d)
-        }
-        _ => Err(LowerError::UnsupportedExpression(String::from(
-            "min/max on non-numeric",
-        ))),
-    }
-}
-
-fn lower_mix(
-    ctx: &mut LowerCtx<'_>,
-    x: Handle<naga::Expression>,
-    y: Option<Handle<naga::Expression>>,
-    t: Option<Handle<naga::Expression>>,
-    k: ScalarKind,
-) -> Result<VReg, LowerError> {
-    let y = y.ok_or_else(|| LowerError::Internal(String::from("mix missing y")))?;
-    let t = t.ok_or_else(|| LowerError::Internal(String::from("mix missing t")))?;
-    if k != ScalarKind::Float {
-        return Err(LowerError::UnsupportedExpression(String::from(
-            "mix non-float",
-        )));
-    }
-    let xv = ctx.ensure_expr(x)?;
-    let yv = ctx.ensure_expr(y)?;
-    let tv = ctx.ensure_expr(t)?;
-    let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: d,
-        lhs: yv,
-        rhs: xv,
-    });
-    let m = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: m,
-        lhs: d,
-        rhs: tv,
-    });
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fadd {
-        dst: r,
-        lhs: xv,
-        rhs: m,
-    });
-    Ok(r)
-}
-
-fn lower_smoothstep(
-    ctx: &mut LowerCtx<'_>,
-    e0: Handle<naga::Expression>,
-    e1: Option<Handle<naga::Expression>>,
-    x: Option<Handle<naga::Expression>>,
-) -> Result<VReg, LowerError> {
-    let e1 = e1.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
-    let x = x.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
-    let e0v = ctx.ensure_expr(e0)?;
-    let e1v = ctx.ensure_expr(e1)?;
-    let xv = ctx.ensure_expr(x)?;
-    let range = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: range,
-        lhs: e1v,
-        rhs: e0v,
-    });
-    let raw = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: raw,
-        lhs: xv,
-        rhs: e0v,
-    });
-    let div = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
-        dst: div,
-        lhs: raw,
-        rhs: range,
-    });
-    let z = fconst(ctx, 0.0);
-    let lo = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmax {
-        dst: lo,
-        lhs: div,
-        rhs: z,
-    });
-    let one = fconst(ctx, 1.0);
-    let t = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmin {
-        dst: t,
-        lhs: lo,
-        rhs: one,
-    });
-    let two = fconst(ctx, 2.0);
-    let three = fconst(ctx, 3.0);
-    let t2 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: t2,
-        lhs: t,
-        rhs: t,
-    });
-    let twot = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: twot,
-        lhs: two,
-        rhs: t,
-    });
-    let diff = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: diff,
-        lhs: three,
-        rhs: twot,
-    });
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: r,
-        lhs: t2,
-        rhs: diff,
-    });
-    Ok(r)
-}
-
-fn lower_step(
-    ctx: &mut LowerCtx<'_>,
-    edge: Handle<naga::Expression>,
-    x: Option<Handle<naga::Expression>>,
-) -> Result<VReg, LowerError> {
-    let x = x.ok_or_else(|| LowerError::Internal(String::from("step")))?;
-    let ev = ctx.ensure_expr(edge)?;
-    let xv = ctx.ensure_expr(x)?;
-    let cmp = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Fge {
-        dst: cmp,
-        lhs: xv,
-        rhs: ev,
-    });
-    let one = fconst(ctx, 1.0);
-    let zero = fconst(ctx, 0.0);
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Select {
-        dst: r,
-        cond: cmp,
-        if_true: one,
-        if_false: zero,
-    });
-    Ok(r)
-}
-
-fn lower_fma(
-    ctx: &mut LowerCtx<'_>,
-    a: Handle<naga::Expression>,
-    b: Option<Handle<naga::Expression>>,
-    c: Option<Handle<naga::Expression>>,
-) -> Result<VReg, LowerError> {
-    let b = b.ok_or_else(|| LowerError::Internal(String::from("fma")))?;
-    let c = c.ok_or_else(|| LowerError::Internal(String::from("fma")))?;
-    let av = ctx.ensure_expr(a)?;
-    let bv = ctx.ensure_expr(b)?;
-    let cv = ctx.ensure_expr(c)?;
-    let m = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: m,
-        lhs: av,
-        rhs: bv,
-    });
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fadd {
-        dst: r,
-        lhs: m,
-        rhs: cv,
-    });
-    Ok(r)
-}
-
-fn lower_clamp(
-    ctx: &mut LowerCtx<'_>,
-    x: Handle<naga::Expression>,
-    lo: Option<Handle<naga::Expression>>,
-    hi: Option<Handle<naga::Expression>>,
-    k: ScalarKind,
-) -> Result<VReg, LowerError> {
-    let lo = lo.ok_or_else(|| LowerError::Internal(String::from("clamp")))?;
-    let hi = hi.ok_or_else(|| LowerError::Internal(String::from("clamp")))?;
-    match k {
-        ScalarKind::Float => {
-            let xv = ctx.ensure_expr(x)?;
-            let lov = ctx.ensure_expr(lo)?;
-            let hiv = ctx.ensure_expr(hi)?;
-            let t = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmax {
-                dst: t,
-                lhs: xv,
-                rhs: lov,
-            });
-            let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmin {
-                dst: r,
-                lhs: t,
-                rhs: hiv,
-            });
-            Ok(r)
-        }
-        ScalarKind::Sint => {
-            let xv = ctx.ensure_expr(x)?;
-            let lov = ctx.ensure_expr(lo)?;
-            let hiv = ctx.ensure_expr(hi)?;
-            let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IltS {
-                dst: lt,
-                lhs: xv,
-                rhs: lov,
-            });
-            let t = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: t,
-                cond: lt,
-                if_true: lov,
-                if_false: xv,
-            });
-            let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtS {
-                dst: gt,
-                lhs: t,
-                rhs: hiv,
-            });
-            let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: r,
-                cond: gt,
-                if_true: hiv,
-                if_false: t,
-            });
-            Ok(r)
-        }
-        ScalarKind::Uint => {
-            let xv = ctx.ensure_expr(x)?;
-            let lov = ctx.ensure_expr(lo)?;
-            let hiv = ctx.ensure_expr(hi)?;
-            let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IltU {
-                dst: lt,
-                lhs: xv,
-                rhs: lov,
-            });
-            let t = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: t,
-                cond: lt,
-                if_true: lov,
-                if_false: xv,
-            });
-            let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtU {
-                dst: gt,
-                lhs: t,
-                rhs: hiv,
-            });
-            let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: r,
-                cond: gt,
-                if_true: hiv,
-                if_false: t,
-            });
-            Ok(r)
-        }
-        _ => Err(LowerError::UnsupportedExpression(String::from(
-            "clamp non-numeric",
-        ))),
-    }
-}
-
-fn lower_sign(
-    ctx: &mut LowerCtx<'_>,
-    arg: Handle<naga::Expression>,
-    k: ScalarKind,
-) -> Result<VReg, LowerError> {
-    match k {
-        ScalarKind::Float => {
-            let x = ctx.ensure_expr(arg)?;
-            let zero = fconst(ctx, 0.0);
-            let one = fconst(ctx, 1.0);
-            let neg1 = fconst(ctx, -1.0);
-            let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Fgt {
-                dst: gt,
-                lhs: x,
-                rhs: zero,
-            });
-            let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
-                dst: lt,
-                lhs: x,
-                rhs: zero,
-            });
-            let z = fconst(ctx, 0.0);
-            let r1 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Select {
-                dst: r1,
-                cond: gt,
-                if_true: one,
-                if_false: z,
-            });
-            let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Select {
-                dst: r,
-                cond: lt,
-                if_true: neg1,
-                if_false: r1,
-            });
-            Ok(r)
-        }
-        ScalarKind::Sint => {
-            let x = ctx.ensure_expr(arg)?;
-            let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-            let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtS {
-                dst: gt,
-                lhs: x,
-                rhs: z,
-            });
-            let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IltS {
-                dst: lt,
-                lhs: x,
-                rhs: z,
-            });
-            let one = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
-            let neg1 = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 {
-                dst: neg1,
-                value: -1,
-            });
-            let r1 = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: r1,
-                cond: gt,
-                if_true: one,
-                if_false: z,
-            });
-            let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: r,
-                cond: lt,
-                if_true: neg1,
-                if_false: r1,
-            });
-            Ok(r)
-        }
-        ScalarKind::Uint => {
-            let x = ctx.ensure_expr(arg)?;
-            let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-            let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtU {
-                dst: gt,
-                lhs: x,
-                rhs: z,
-            });
-            let one = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
-            let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
-                dst: r,
-                cond: gt,
-                if_true: one,
-                if_false: z,
-            });
-            Ok(r)
-        }
-        _ => Err(LowerError::UnsupportedExpression(String::from(
-            "sign non-numeric",
-        ))),
-    }
-}
-
-fn lower_fract(ctx: &mut LowerCtx<'_>, arg: Handle<naga::Expression>) -> Result<VReg, LowerError> {
-    let x = ctx.ensure_expr(arg)?;
-    let fl = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Ffloor { dst: fl, src: x });
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: r,
-        lhs: x,
-        rhs: fl,
-    });
-    Ok(r)
-}
-
-fn lower_inverse_sqrt(
-    ctx: &mut LowerCtx<'_>,
-    arg: Handle<naga::Expression>,
-) -> Result<VReg, LowerError> {
-    let x = ctx.ensure_expr(arg)?;
-    let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
-    let one = fconst(ctx, 1.0);
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
-        dst: r,
-        lhs: one,
-        rhs: sq,
-    });
-    Ok(r)
-}
-
-fn lower_saturate(
-    ctx: &mut LowerCtx<'_>,
-    arg: Handle<naga::Expression>,
-) -> Result<VReg, LowerError> {
-    let x = ctx.ensure_expr(arg)?;
-    let z = fconst(ctx, 0.0);
-    let one = fconst(ctx, 1.0);
-    let t = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmax {
-        dst: t,
-        lhs: x,
-        rhs: z,
-    });
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmin {
-        dst: r,
-        lhs: t,
-        rhs: one,
-    });
-    Ok(r)
-}
-
-fn lower_radians(
-    ctx: &mut LowerCtx<'_>,
-    arg: Handle<naga::Expression>,
-) -> Result<VReg, LowerError> {
-    let x = ctx.ensure_expr(arg)?;
-    let factor = fconst(ctx, core::f32::consts::PI / 180.0);
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: r,
-        lhs: x,
-        rhs: factor,
-    });
-    Ok(r)
-}
-
-fn lower_degrees(
-    ctx: &mut LowerCtx<'_>,
-    arg: Handle<naga::Expression>,
-) -> Result<VReg, LowerError> {
-    let x = ctx.ensure_expr(arg)?;
-    let factor = fconst(ctx, 180.0 / core::f32::consts::PI);
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: r,
-        lhs: x,
-        rhs: factor,
-    });
-    Ok(r)
-}
-
-fn std_math_unary(
-    ctx: &mut LowerCtx<'_>,
-    name: &'static str,
-    arg: Handle<naga::Expression>,
-) -> Result<VReg, LowerError> {
-    let s = ctx.ensure_expr(arg)?;
-    push_import_call(ctx, "glsl", name, &[s])
-}
-
-fn std_math_binary(
-    ctx: &mut LowerCtx<'_>,
-    name: &'static str,
-    a: Handle<naga::Expression>,
-    b: Option<Handle<naga::Expression>>,
-) -> Result<VReg, LowerError> {
-    let b = b.ok_or_else(|| LowerError::Internal(format!("{name} missing arg")))?;
-    let av = ctx.ensure_expr(a)?;
-    let bv = ctx.ensure_expr(b)?;
-    push_import_call(ctx, "glsl", name, &[av, bv])
-}
-
-fn lower_ldexp_import(
-    ctx: &mut LowerCtx<'_>,
-    x: Handle<naga::Expression>,
-    e: Option<Handle<naga::Expression>>,
-) -> Result<VReg, LowerError> {
-    let e = e.ok_or_else(|| LowerError::Internal(String::from("ldexp")))?;
-    let xv = ctx.ensure_expr(x)?;
-    let ev = ctx.ensure_expr(e)?;
-    push_import_call(ctx, "glsl", "ldexp", &[xv, ev])
-}
-
-fn push_import_call(
-    ctx: &mut LowerCtx<'_>,
-    module: &'static str,
-    name: &'static str,
-    args: &[VReg],
-) -> Result<VReg, LowerError> {
-    let key = format!("{module}::{name}");
-    let callee = ctx
-        .import_map
-        .get(&key)
-        .copied()
-        .ok_or_else(|| LowerError::Internal(format!("missing import {key}")))?;
-    let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push_call(callee, args, &[r]);
-    Ok(r)
-}
-
-fn emit_fsub_fmul_pair(
-    ctx: &mut LowerCtx<'_>,
-    a1: VReg,
-    b1: VReg,
-    a2: VReg,
-    b2: VReg,
-) -> Result<VReg, LowerError> {
-    let p1 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: p1,
-        lhs: a1,
-        rhs: b1,
-    });
-    let p2 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
-        dst: p2,
-        lhs: a2,
-        rhs: b2,
-    });
-    let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
-        dst: d,
-        lhs: p1,
-        rhs: p2,
-    });
-    Ok(d)
-}
-
-fn emit_cross(ctx: &mut LowerCtx<'_>, a: &[VReg], b: &[VReg]) -> Result<VRegVec, LowerError> {
-    let x = emit_fsub_fmul_pair(ctx, a[1], b[2], a[2], b[1])?;
-    let y = emit_fsub_fmul_pair(ctx, a[2], b[0], a[0], b[2])?;
-    let z = emit_fsub_fmul_pair(ctx, a[0], b[1], a[1], b[0])?;
-    Ok(smallvec::smallvec![x, y, z])
-}
-
-fn vat(v: &[VReg], i: usize) -> VReg {
-    v[i.min(v.len().saturating_sub(1))]
-}
-
-fn lower_math_per_component(
+fn lower_math_vectorized(
     ctx: &mut LowerCtx<'_>,
     fun: MathFunction,
     arg: Handle<naga::Expression>,
@@ -1079,47 +171,7 @@ fn lower_math_per_component(
     let _ = arg3;
     let k0 = expr_scalar_kind(ctx.module, ctx.func, arg)?;
     match fun {
-        MathFunction::Abs => match k0 {
-            ScalarKind::Float => {
-                let vs = ctx.ensure_expr_vec(arg)?;
-                let mut o = VRegVec::new();
-                for s in vs {
-                    let d = ctx.fb.alloc_vreg(IrType::F32);
-                    ctx.fb.push(Op::Fabs { dst: d, src: s });
-                    o.push(d);
-                }
-                Ok(o)
-            }
-            ScalarKind::Sint => {
-                let vs = ctx.ensure_expr_vec(arg)?;
-                let mut o = VRegVec::new();
-                for s in vs {
-                    let z = ctx.fb.alloc_vreg(IrType::I32);
-                    ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-                    let neg = ctx.fb.alloc_vreg(IrType::I32);
-                    ctx.fb.push(Op::Ineg { dst: neg, src: s });
-                    let lt = ctx.fb.alloc_vreg(IrType::I32);
-                    ctx.fb.push(Op::IltS {
-                        dst: lt,
-                        lhs: s,
-                        rhs: z,
-                    });
-                    let d = ctx.fb.alloc_vreg(IrType::I32);
-                    ctx.fb.push(Op::Select {
-                        dst: d,
-                        cond: lt,
-                        if_true: neg,
-                        if_false: s,
-                    });
-                    o.push(d);
-                }
-                Ok(o)
-            }
-            ScalarKind::Uint => ctx.ensure_expr_vec(arg),
-            _ => Err(LowerError::UnsupportedExpression(String::from(
-                "abs on non-numeric vector",
-            ))),
-        },
+        MathFunction::Abs => map_unary_vregs(ctx, k0, arg, |ctx, k, s| emit_abs(ctx, k, s)),
         MathFunction::Sqrt => std_math_unary_vec(ctx, "lpir", "sqrt", arg),
         MathFunction::Floor => unary_float_op_vec(ctx, arg, |fb, d, s| {
             fb.push(Op::Ffloor { dst: d, src: s });
@@ -1133,72 +185,9 @@ fn lower_math_per_component(
         }),
         MathFunction::Min | MathFunction::Max => {
             let is_min = matches!(fun, MathFunction::Min);
-            let b = arg1.ok_or_else(|| LowerError::Internal(String::from("min/max")))?;
-            let a = ctx.ensure_expr_vec(arg)?;
-            let b = ctx.ensure_expr_vec(b)?;
-            let n = a.len().max(b.len());
-            match k0 {
-                ScalarKind::Float => {
-                    let mut o = VRegVec::new();
-                    for i in 0..n {
-                        let lhs = vat(&a, i);
-                        let rhs = vat(&b, i);
-                        let d = ctx.fb.alloc_vreg(IrType::F32);
-                        if is_min {
-                            ctx.fb.push(Op::Fmin { dst: d, lhs, rhs });
-                        } else {
-                            ctx.fb.push(Op::Fmax { dst: d, lhs, rhs });
-                        }
-                        o.push(d);
-                    }
-                    Ok(o)
-                }
-                ScalarKind::Sint => minmax_int_vec(ctx, &a, &b, n, is_min, true),
-                ScalarKind::Uint => minmax_int_vec(ctx, &a, &b, n, is_min, false),
-                _ => Err(LowerError::UnsupportedExpression(String::from(
-                    "min/max vector non-numeric",
-                ))),
-            }
+            lower_min_max_vec(ctx, arg, arg1, k0, is_min)
         }
-        MathFunction::Mix => {
-            if k0 != ScalarKind::Float {
-                return Err(LowerError::UnsupportedExpression(String::from(
-                    "mix non-float vector",
-                )));
-            }
-            let y = arg1.ok_or_else(|| LowerError::Internal(String::from("mix")))?;
-            let t = arg2.ok_or_else(|| LowerError::Internal(String::from("mix")))?;
-            let x = ctx.ensure_expr_vec(arg)?;
-            let yv = ctx.ensure_expr_vec(y)?;
-            let tv = ctx.ensure_expr_vec(t)?;
-            let n = x.len().max(yv.len()).max(tv.len());
-            let mut o = VRegVec::new();
-            for i in 0..n {
-                let xv = vat(&x, i);
-                let y0 = vat(&yv, i);
-                let t0 = vat(&tv, i);
-                let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
-                    dst: d,
-                    lhs: y0,
-                    rhs: xv,
-                });
-                let m = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
-                    dst: m,
-                    lhs: d,
-                    rhs: t0,
-                });
-                let r = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fadd {
-                    dst: r,
-                    lhs: xv,
-                    rhs: m,
-                });
-                o.push(r);
-            }
-            Ok(o)
-        }
+        MathFunction::Mix => lower_mix_vec(ctx, arg, arg1, arg2, k0),
         MathFunction::SmoothStep => smoothstep_vec(ctx, arg, arg1, arg2),
         MathFunction::Step => step_vec(ctx, arg, arg1),
         MathFunction::Fma => fma_vec(ctx, arg, arg1, arg2),
@@ -1242,111 +231,240 @@ fn lower_math_per_component(
     }
 }
 
-fn unary_float_op_vec(
+fn map_unary_vregs(
     ctx: &mut LowerCtx<'_>,
+    k: ScalarKind,
     arg: Handle<naga::Expression>,
-    mut emit: impl FnMut(&mut lpir::FunctionBuilder, VReg, VReg),
+    mut f: impl FnMut(&mut LowerCtx<'_>, ScalarKind, VReg) -> Result<VReg, LowerError>,
 ) -> Result<VRegVec, LowerError> {
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
     for s in vs {
-        let d = ctx.fb.alloc_vreg(IrType::F32);
-        emit(&mut ctx.fb, d, s);
-        o.push(d);
+        o.push(f(ctx, k, s)?);
     }
     Ok(o)
 }
 
-fn std_math_unary_vec(
-    ctx: &mut LowerCtx<'_>,
-    module: &'static str,
-    name: &'static str,
-    arg: Handle<naga::Expression>,
-) -> Result<VRegVec, LowerError> {
-    let vs = ctx.ensure_expr_vec(arg)?;
-    let mut o = VRegVec::new();
-    for s in vs {
-        o.push(push_import_call(ctx, module, name, &[s])?);
+fn emit_abs(ctx: &mut LowerCtx<'_>, k: ScalarKind, s: VReg) -> Result<VReg, LowerError> {
+    match k {
+        ScalarKind::Float => {
+            let d = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(Op::Fabs { dst: d, src: s });
+            Ok(d)
+        }
+        ScalarKind::Sint => {
+            let z = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            let neg = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Ineg { dst: neg, src: s });
+            let lt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IltS {
+                dst: lt,
+                lhs: s,
+                rhs: z,
+            });
+            let d = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: d,
+                cond: lt,
+                if_true: neg,
+                if_false: s,
+            });
+            Ok(d)
+        }
+        ScalarKind::Uint => Ok(s),
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "abs on non-numeric scalar",
+        ))),
     }
-    Ok(o)
 }
 
-fn std_math_binary_vec(
+fn emit_min_max_k(
     ctx: &mut LowerCtx<'_>,
-    name: &'static str,
-    a: Handle<naga::Expression>,
-    b: Option<Handle<naga::Expression>>,
-) -> Result<VRegVec, LowerError> {
-    let b = b.ok_or_else(|| LowerError::Internal(format!("{name} missing arg")))?;
-    let av = ctx.ensure_expr_vec(a)?;
-    let bv = ctx.ensure_expr_vec(b)?;
-    let n = av.len().max(bv.len());
-    let mut o = VRegVec::new();
-    for i in 0..n {
-        o.push(push_import_call(
-            ctx,
-            "glsl",
-            name,
-            &[vat(&av, i), vat(&bv, i)],
-        )?);
-    }
-    Ok(o)
-}
-
-fn minmax_int_vec(
-    ctx: &mut LowerCtx<'_>,
-    a: &[VReg],
-    b: &[VReg],
-    n: usize,
+    k: ScalarKind,
+    lhs: VReg,
+    rhs: VReg,
     is_min: bool,
-    signed: bool,
-) -> Result<VRegVec, LowerError> {
-    let mut o = VRegVec::new();
-    for i in 0..n {
-        let lhs = vat(a, i);
-        let rhs = vat(b, i);
-        let cmp = ctx.fb.alloc_vreg(IrType::I32);
-        if signed {
+) -> Result<VReg, LowerError> {
+    match k {
+        ScalarKind::Float => {
+            let d = ctx.fb.alloc_vreg(IrType::F32);
+            if is_min {
+                ctx.fb.push(Op::Fmin { dst: d, lhs, rhs });
+            } else {
+                ctx.fb.push(Op::Fmax { dst: d, lhs, rhs });
+            }
+            Ok(d)
+        }
+        ScalarKind::Sint => {
+            let cmp = ctx.fb.alloc_vreg(IrType::I32);
             if is_min {
                 ctx.fb.push(Op::IltS { dst: cmp, lhs, rhs });
             } else {
                 ctx.fb.push(Op::IgtS { dst: cmp, lhs, rhs });
             }
-        } else if is_min {
-            ctx.fb.push(Op::IltU { dst: cmp, lhs, rhs });
-        } else {
-            ctx.fb.push(Op::IgtU { dst: cmp, lhs, rhs });
+            let d = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: d,
+                cond: cmp,
+                if_true: lhs,
+                if_false: rhs,
+            });
+            Ok(d)
         }
-        let d = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Select {
-            dst: d,
-            cond: cmp,
-            if_true: lhs,
-            if_false: rhs,
-        });
-        o.push(d);
+        ScalarKind::Uint => {
+            let cmp = ctx.fb.alloc_vreg(IrType::I32);
+            if is_min {
+                ctx.fb.push(Op::IltU { dst: cmp, lhs, rhs });
+            } else {
+                ctx.fb.push(Op::IgtU { dst: cmp, lhs, rhs });
+            }
+            let d = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: d,
+                cond: cmp,
+                if_true: lhs,
+                if_false: rhs,
+            });
+            Ok(d)
+        }
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "min/max on non-numeric",
+        ))),
+    }
+}
+
+fn lower_min_max_scalar(
+    ctx: &mut LowerCtx<'_>,
+    a: Handle<naga::Expression>,
+    b: Option<Handle<naga::Expression>>,
+    k: ScalarKind,
+    is_min: bool,
+) -> Result<VReg, LowerError> {
+    let b = b.ok_or_else(|| LowerError::Internal(String::from("min/max missing arg")))?;
+    let lk = expr_scalar_kind(ctx.module, ctx.func, a)?;
+    let rk = expr_scalar_kind(ctx.module, ctx.func, b)?;
+    if lk != rk || lk != k {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "min/max operand mismatch",
+        )));
+    }
+    let lhs = ctx.ensure_expr(a)?;
+    let rhs = ctx.ensure_expr(b)?;
+    emit_min_max_k(ctx, k, lhs, rhs, is_min)
+}
+
+fn lower_min_max_vec(
+    ctx: &mut LowerCtx<'_>,
+    arg: Handle<naga::Expression>,
+    arg1: Option<Handle<naga::Expression>>,
+    k0: ScalarKind,
+    is_min: bool,
+) -> Result<VRegVec, LowerError> {
+    let b = arg1.ok_or_else(|| LowerError::Internal(String::from("min/max")))?;
+    let lk = expr_scalar_kind(ctx.module, ctx.func, arg)?;
+    let rk = expr_scalar_kind(ctx.module, ctx.func, b)?;
+    if lk != rk || lk != k0 {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "min/max operand mismatch",
+        )));
+    }
+    let a = ctx.ensure_expr_vec(arg)?;
+    let b = ctx.ensure_expr_vec(b)?;
+    let n = a.len().max(b.len());
+    match k0 {
+        ScalarKind::Float | ScalarKind::Sint | ScalarKind::Uint => {
+            let mut o = VRegVec::new();
+            for i in 0..n {
+                o.push(emit_min_max_k(ctx, k0, vat(&a, i), vat(&b, i), is_min)?);
+            }
+            Ok(o)
+        }
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "min/max vector non-numeric",
+        ))),
+    }
+}
+
+fn emit_mix_float(ctx: &mut LowerCtx<'_>, xv: VReg, yv: VReg, tv: VReg) -> VReg {
+    let d = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fsub {
+        dst: d,
+        lhs: yv,
+        rhs: xv,
+    });
+    let m = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmul {
+        dst: m,
+        lhs: d,
+        rhs: tv,
+    });
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fadd {
+        dst: r,
+        lhs: xv,
+        rhs: m,
+    });
+    r
+}
+
+fn lower_mix_scalar(
+    ctx: &mut LowerCtx<'_>,
+    x: Handle<naga::Expression>,
+    y: Option<Handle<naga::Expression>>,
+    t: Option<Handle<naga::Expression>>,
+    k: ScalarKind,
+) -> Result<VReg, LowerError> {
+    let y = y.ok_or_else(|| LowerError::Internal(String::from("mix missing y")))?;
+    let t = t.ok_or_else(|| LowerError::Internal(String::from("mix missing t")))?;
+    if k != ScalarKind::Float {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "mix non-float",
+        )));
+    }
+    let xv = ctx.ensure_expr(x)?;
+    let yv = ctx.ensure_expr(y)?;
+    let tv = ctx.ensure_expr(t)?;
+    Ok(emit_mix_float(ctx, xv, yv, tv))
+}
+
+fn lower_mix_vec(
+    ctx: &mut LowerCtx<'_>,
+    arg: Handle<naga::Expression>,
+    arg1: Option<Handle<naga::Expression>>,
+    arg2: Option<Handle<naga::Expression>>,
+    k0: ScalarKind,
+) -> Result<VRegVec, LowerError> {
+    if k0 != ScalarKind::Float {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "mix non-float vector",
+        )));
+    }
+    let y = arg1.ok_or_else(|| LowerError::Internal(String::from("mix")))?;
+    let t = arg2.ok_or_else(|| LowerError::Internal(String::from("mix")))?;
+    let x = ctx.ensure_expr_vec(arg)?;
+    let yv = ctx.ensure_expr_vec(y)?;
+    let tv = ctx.ensure_expr_vec(t)?;
+    let n = x.len().max(yv.len()).max(tv.len());
+    let mut o = VRegVec::new();
+    for i in 0..n {
+        o.push(emit_mix_float(ctx, vat(&x, i), vat(&yv, i), vat(&tv, i)));
     }
     Ok(o)
 }
 
-fn smoothstep_vec(
+fn lower_smoothstep_scalar(
     ctx: &mut LowerCtx<'_>,
     e0: Handle<naga::Expression>,
     e1: Option<Handle<naga::Expression>>,
     x: Option<Handle<naga::Expression>>,
-) -> Result<VRegVec, LowerError> {
+) -> Result<VReg, LowerError> {
     let e1 = e1.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
     let x = x.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
-    let e0v = ctx.ensure_expr_vec(e0)?;
-    let e1v = ctx.ensure_expr_vec(e1)?;
-    let xv = ctx.ensure_expr_vec(x)?;
-    let n = e0v.len().max(e1v.len()).max(xv.len());
-    let mut o = VRegVec::new();
-    for i in 0..n {
-        let r = lower_smoothstep_vregs(ctx, vat(&e0v, i), vat(&e1v, i), vat(&xv, i))?;
-        o.push(r);
-    }
-    Ok(o)
+    let e0v = ctx.ensure_expr(e0)?;
+    let e1v = ctx.ensure_expr(e1)?;
+    let xv = ctx.ensure_expr(x)?;
+    lower_smoothstep_vregs(ctx, e0v, e1v, xv)
 }
 
 fn lower_smoothstep_vregs(
@@ -1416,6 +534,417 @@ fn lower_smoothstep_vregs(
     Ok(r)
 }
 
+fn lower_step_scalar(
+    ctx: &mut LowerCtx<'_>,
+    edge: Handle<naga::Expression>,
+    x: Option<Handle<naga::Expression>>,
+) -> Result<VReg, LowerError> {
+    let x = x.ok_or_else(|| LowerError::Internal(String::from("step")))?;
+    let ev = ctx.ensure_expr(edge)?;
+    let xv = ctx.ensure_expr(x)?;
+    Ok(emit_step_vregs(ctx, ev, xv))
+}
+
+fn emit_step_vregs(ctx: &mut LowerCtx<'_>, ev: VReg, xv: VReg) -> VReg {
+    let cmp = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::Fge {
+        dst: cmp,
+        lhs: xv,
+        rhs: ev,
+    });
+    let one = fconst(ctx, 1.0);
+    let zero = fconst(ctx, 0.0);
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Select {
+        dst: r,
+        cond: cmp,
+        if_true: one,
+        if_false: zero,
+    });
+    r
+}
+
+fn lower_fma_scalar(
+    ctx: &mut LowerCtx<'_>,
+    a: Handle<naga::Expression>,
+    b: Option<Handle<naga::Expression>>,
+    c: Option<Handle<naga::Expression>>,
+) -> Result<VReg, LowerError> {
+    let b = b.ok_or_else(|| LowerError::Internal(String::from("fma")))?;
+    let c = c.ok_or_else(|| LowerError::Internal(String::from("fma")))?;
+    let av = ctx.ensure_expr(a)?;
+    let bv = ctx.ensure_expr(b)?;
+    let cv = ctx.ensure_expr(c)?;
+    Ok(emit_fma_vregs(ctx, av, bv, cv))
+}
+
+fn emit_fma_vregs(ctx: &mut LowerCtx<'_>, av: VReg, bv: VReg, cv: VReg) -> VReg {
+    let m = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmul {
+        dst: m,
+        lhs: av,
+        rhs: bv,
+    });
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fadd {
+        dst: r,
+        lhs: m,
+        rhs: cv,
+    });
+    r
+}
+
+fn lower_clamp_scalar(
+    ctx: &mut LowerCtx<'_>,
+    x: Handle<naga::Expression>,
+    lo: Option<Handle<naga::Expression>>,
+    hi: Option<Handle<naga::Expression>>,
+    k: ScalarKind,
+) -> Result<VReg, LowerError> {
+    let lo = lo.ok_or_else(|| LowerError::Internal(String::from("clamp")))?;
+    let hi = hi.ok_or_else(|| LowerError::Internal(String::from("clamp")))?;
+    match k {
+        ScalarKind::Float => {
+            let xv = ctx.ensure_expr(x)?;
+            let lov = ctx.ensure_expr(lo)?;
+            let hiv = ctx.ensure_expr(hi)?;
+            Ok(emit_clamp_float(ctx, xv, lov, hiv))
+        }
+        ScalarKind::Sint => {
+            let xv = ctx.ensure_expr(x)?;
+            let lov = ctx.ensure_expr(lo)?;
+            let hiv = ctx.ensure_expr(hi)?;
+            Ok(emit_clamp_int(ctx, xv, lov, hiv, true))
+        }
+        ScalarKind::Uint => {
+            let xv = ctx.ensure_expr(x)?;
+            let lov = ctx.ensure_expr(lo)?;
+            let hiv = ctx.ensure_expr(hi)?;
+            Ok(emit_clamp_int(ctx, xv, lov, hiv, false))
+        }
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "clamp non-numeric",
+        ))),
+    }
+}
+
+fn emit_clamp_float(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg) -> VReg {
+    let t = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmax {
+        dst: t,
+        lhs: xv,
+        rhs: lov,
+    });
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmin {
+        dst: r,
+        lhs: t,
+        rhs: hiv,
+    });
+    r
+}
+
+fn emit_clamp_int(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg, signed: bool) -> VReg {
+    let lt = ctx.fb.alloc_vreg(IrType::I32);
+    if signed {
+        ctx.fb.push(Op::IltS {
+            dst: lt,
+            lhs: xv,
+            rhs: lov,
+        });
+    } else {
+        ctx.fb.push(Op::IltU {
+            dst: lt,
+            lhs: xv,
+            rhs: lov,
+        });
+    }
+    let t = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::Select {
+        dst: t,
+        cond: lt,
+        if_true: lov,
+        if_false: xv,
+    });
+    let gt = ctx.fb.alloc_vreg(IrType::I32);
+    if signed {
+        ctx.fb.push(Op::IgtS {
+            dst: gt,
+            lhs: t,
+            rhs: hiv,
+        });
+    } else {
+        ctx.fb.push(Op::IgtU {
+            dst: gt,
+            lhs: t,
+            rhs: hiv,
+        });
+    }
+    let r = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::Select {
+        dst: r,
+        cond: gt,
+        if_true: hiv,
+        if_false: t,
+    });
+    r
+}
+
+fn emit_sign(ctx: &mut LowerCtx<'_>, k: ScalarKind, x: VReg) -> Result<VReg, LowerError> {
+    match k {
+        ScalarKind::Float => {
+            let zero = fconst(ctx, 0.0);
+            let one = fconst(ctx, 1.0);
+            let neg1 = fconst(ctx, -1.0);
+            let gt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Fgt {
+                dst: gt,
+                lhs: x,
+                rhs: zero,
+            });
+            let lt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Flt {
+                dst: lt,
+                lhs: x,
+                rhs: zero,
+            });
+            let z = fconst(ctx, 0.0);
+            let r1 = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(Op::Select {
+                dst: r1,
+                cond: gt,
+                if_true: one,
+                if_false: z,
+            });
+            let r = ctx.fb.alloc_vreg(IrType::F32);
+            ctx.fb.push(Op::Select {
+                dst: r,
+                cond: lt,
+                if_true: neg1,
+                if_false: r1,
+            });
+            Ok(r)
+        }
+        ScalarKind::Sint => {
+            let z = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            let gt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IgtS {
+                dst: gt,
+                lhs: x,
+                rhs: z,
+            });
+            let lt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IltS {
+                dst: lt,
+                lhs: x,
+                rhs: z,
+            });
+            let one = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
+            let neg1 = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 {
+                dst: neg1,
+                value: -1,
+            });
+            let r1 = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: r1,
+                cond: gt,
+                if_true: one,
+                if_false: z,
+            });
+            let r = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: r,
+                cond: lt,
+                if_true: neg1,
+                if_false: r1,
+            });
+            Ok(r)
+        }
+        ScalarKind::Uint => {
+            let z = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            let gt = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IgtU {
+                dst: gt,
+                lhs: x,
+                rhs: z,
+            });
+            let one = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
+            let r = ctx.fb.alloc_vreg(IrType::I32);
+            ctx.fb.push(Op::Select {
+                dst: r,
+                cond: gt,
+                if_true: one,
+                if_false: z,
+            });
+            Ok(r)
+        }
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "sign non-numeric",
+        ))),
+    }
+}
+
+fn emit_fract_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError> {
+    let fl = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Ffloor { dst: fl, src: x });
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fsub {
+        dst: r,
+        lhs: x,
+        rhs: fl,
+    });
+    Ok(r)
+}
+
+fn emit_inverse_sqrt_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError> {
+    let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
+    let one = fconst(ctx, 1.0);
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fdiv {
+        dst: r,
+        lhs: one,
+        rhs: sq,
+    });
+    Ok(r)
+}
+
+fn emit_saturate_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError> {
+    let z = fconst(ctx, 0.0);
+    let one = fconst(ctx, 1.0);
+    let t = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmax {
+        dst: t,
+        lhs: x,
+        rhs: z,
+    });
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmin {
+        dst: r,
+        lhs: t,
+        rhs: one,
+    });
+    Ok(r)
+}
+
+fn emit_scale_f32(ctx: &mut LowerCtx<'_>, x: VReg, factor: f32) -> Result<VReg, LowerError> {
+    let fac = fconst(ctx, factor);
+    let r = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(Op::Fmul {
+        dst: r,
+        lhs: x,
+        rhs: fac,
+    });
+    Ok(r)
+}
+
+fn std_math_unary(
+    ctx: &mut LowerCtx<'_>,
+    name: &'static str,
+    arg: Handle<naga::Expression>,
+) -> Result<VReg, LowerError> {
+    let s = ctx.ensure_expr(arg)?;
+    push_import_call(ctx, "glsl", name, &[s])
+}
+
+fn std_math_binary(
+    ctx: &mut LowerCtx<'_>,
+    name: &'static str,
+    a: Handle<naga::Expression>,
+    b: Option<Handle<naga::Expression>>,
+) -> Result<VReg, LowerError> {
+    let b = b.ok_or_else(|| LowerError::Internal(format!("{name} missing arg")))?;
+    let av = ctx.ensure_expr(a)?;
+    let bv = ctx.ensure_expr(b)?;
+    push_import_call(ctx, "glsl", name, &[av, bv])
+}
+
+fn lower_ldexp_import(
+    ctx: &mut LowerCtx<'_>,
+    x: Handle<naga::Expression>,
+    e: Option<Handle<naga::Expression>>,
+) -> Result<VReg, LowerError> {
+    let e = e.ok_or_else(|| LowerError::Internal(String::from("ldexp")))?;
+    let xv = ctx.ensure_expr(x)?;
+    let ev = ctx.ensure_expr(e)?;
+    push_import_call(ctx, "glsl", "ldexp", &[xv, ev])
+}
+
+fn unary_float_op_vec(
+    ctx: &mut LowerCtx<'_>,
+    arg: Handle<naga::Expression>,
+    mut emit: impl FnMut(&mut lpir::FunctionBuilder, VReg, VReg),
+) -> Result<VRegVec, LowerError> {
+    let vs = ctx.ensure_expr_vec(arg)?;
+    let mut o = VRegVec::new();
+    for s in vs {
+        let d = ctx.fb.alloc_vreg(IrType::F32);
+        emit(&mut ctx.fb, d, s);
+        o.push(d);
+    }
+    Ok(o)
+}
+
+fn std_math_unary_vec(
+    ctx: &mut LowerCtx<'_>,
+    module: &'static str,
+    name: &'static str,
+    arg: Handle<naga::Expression>,
+) -> Result<VRegVec, LowerError> {
+    let vs = ctx.ensure_expr_vec(arg)?;
+    let mut o = VRegVec::new();
+    for s in vs {
+        o.push(push_import_call(ctx, module, name, &[s])?);
+    }
+    Ok(o)
+}
+
+fn std_math_binary_vec(
+    ctx: &mut LowerCtx<'_>,
+    name: &'static str,
+    a: Handle<naga::Expression>,
+    b: Option<Handle<naga::Expression>>,
+) -> Result<VRegVec, LowerError> {
+    let b = b.ok_or_else(|| LowerError::Internal(format!("{name} missing arg")))?;
+    let av = ctx.ensure_expr_vec(a)?;
+    let bv = ctx.ensure_expr_vec(b)?;
+    let n = av.len().max(bv.len());
+    let mut o = VRegVec::new();
+    for i in 0..n {
+        o.push(push_import_call(
+            ctx,
+            "glsl",
+            name,
+            &[vat(&av, i), vat(&bv, i)],
+        )?);
+    }
+    Ok(o)
+}
+
+fn smoothstep_vec(
+    ctx: &mut LowerCtx<'_>,
+    e0: Handle<naga::Expression>,
+    e1: Option<Handle<naga::Expression>>,
+    x: Option<Handle<naga::Expression>>,
+) -> Result<VRegVec, LowerError> {
+    let e1 = e1.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
+    let x = x.ok_or_else(|| LowerError::Internal(String::from("smoothstep")))?;
+    let e0v = ctx.ensure_expr_vec(e0)?;
+    let e1v = ctx.ensure_expr_vec(e1)?;
+    let xv = ctx.ensure_expr_vec(x)?;
+    let n = e0v.len().max(e1v.len()).max(xv.len());
+    let mut o = VRegVec::new();
+    for i in 0..n {
+        let r = lower_smoothstep_vregs(ctx, vat(&e0v, i), vat(&e1v, i), vat(&xv, i))?;
+        o.push(r);
+    }
+    Ok(o)
+}
+
 fn step_vec(
     ctx: &mut LowerCtx<'_>,
     edge: Handle<naga::Expression>,
@@ -1427,22 +956,7 @@ fn step_vec(
     let n = ev.len().max(xv.len());
     let mut o = VRegVec::new();
     for i in 0..n {
-        let cmp = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Fge {
-            dst: cmp,
-            lhs: vat(&xv, i),
-            rhs: vat(&ev, i),
-        });
-        let one = fconst(ctx, 1.0);
-        let zero = fconst(ctx, 0.0);
-        let r = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Select {
-            dst: r,
-            cond: cmp,
-            if_true: one,
-            if_false: zero,
-        });
-        o.push(r);
+        o.push(emit_step_vregs(ctx, vat(&ev, i), vat(&xv, i)));
     }
     Ok(o)
 }
@@ -1461,19 +975,7 @@ fn fma_vec(
     let n = av.len().max(bv.len()).max(cv.len());
     let mut o = VRegVec::new();
     for i in 0..n {
-        let m = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmul {
-            dst: m,
-            lhs: vat(&av, i),
-            rhs: vat(&bv, i),
-        });
-        let r = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fadd {
-            dst: r,
-            lhs: m,
-            rhs: vat(&cv, i),
-        });
-        o.push(r);
+        o.push(emit_fma_vregs(ctx, vat(&av, i), vat(&bv, i), vat(&cv, i)));
     }
     Ok(o)
 }
@@ -1495,88 +997,32 @@ fn clamp_vec(
         ScalarKind::Float => {
             let mut o = VRegVec::new();
             for i in 0..n {
-                let t = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmax {
-                    dst: t,
-                    lhs: vat(&xv, i),
-                    rhs: vat(&lov, i),
-                });
-                let r = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmin {
-                    dst: r,
-                    lhs: t,
-                    rhs: vat(&hiv, i),
-                });
-                o.push(r);
+                o.push(emit_clamp_float(
+                    ctx,
+                    vat(&xv, i),
+                    vat(&lov, i),
+                    vat(&hiv, i),
+                ));
             }
             Ok(o)
         }
-        ScalarKind::Sint => clamp_int_vec(ctx, &xv, &lov, &hiv, n, true),
-        ScalarKind::Uint => clamp_int_vec(ctx, &xv, &lov, &hiv, n, false),
+        ScalarKind::Sint | ScalarKind::Uint => {
+            let mut o = VRegVec::new();
+            for i in 0..n {
+                o.push(emit_clamp_int(
+                    ctx,
+                    vat(&xv, i),
+                    vat(&lov, i),
+                    vat(&hiv, i),
+                    k == ScalarKind::Sint,
+                ));
+            }
+            Ok(o)
+        }
         _ => Err(LowerError::UnsupportedExpression(String::from(
             "clamp vector non-numeric",
         ))),
     }
-}
-
-fn clamp_int_vec(
-    ctx: &mut LowerCtx<'_>,
-    xv: &[VReg],
-    lov: &[VReg],
-    hiv: &[VReg],
-    n: usize,
-    signed: bool,
-) -> Result<VRegVec, LowerError> {
-    let mut o = VRegVec::new();
-    for i in 0..n {
-        let x0 = vat(xv, i);
-        let lo0 = vat(lov, i);
-        let hi0 = vat(hiv, i);
-        let lt = ctx.fb.alloc_vreg(IrType::I32);
-        if signed {
-            ctx.fb.push(Op::IltS {
-                dst: lt,
-                lhs: x0,
-                rhs: lo0,
-            });
-        } else {
-            ctx.fb.push(Op::IltU {
-                dst: lt,
-                lhs: x0,
-                rhs: lo0,
-            });
-        }
-        let t = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Select {
-            dst: t,
-            cond: lt,
-            if_true: lo0,
-            if_false: x0,
-        });
-        let gt = ctx.fb.alloc_vreg(IrType::I32);
-        if signed {
-            ctx.fb.push(Op::IgtS {
-                dst: gt,
-                lhs: t,
-                rhs: hi0,
-            });
-        } else {
-            ctx.fb.push(Op::IgtU {
-                dst: gt,
-                lhs: t,
-                rhs: hi0,
-            });
-        }
-        let r = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Select {
-            dst: r,
-            cond: gt,
-            if_true: hi0,
-            if_false: t,
-        });
-        o.push(r);
-    }
-    Ok(o)
 }
 
 fn sign_vec(
@@ -1586,109 +1032,8 @@ fn sign_vec(
 ) -> Result<VRegVec, LowerError> {
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
-    match k {
-        ScalarKind::Float => {
-            for x in vs {
-                let zero = fconst(ctx, 0.0);
-                let one = fconst(ctx, 1.0);
-                let neg1 = fconst(ctx, -1.0);
-                let gt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Fgt {
-                    dst: gt,
-                    lhs: x,
-                    rhs: zero,
-                });
-                let lt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Flt {
-                    dst: lt,
-                    lhs: x,
-                    rhs: zero,
-                });
-                let z = fconst(ctx, 0.0);
-                let r1 = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
-                    dst: r1,
-                    cond: gt,
-                    if_true: one,
-                    if_false: z,
-                });
-                let r = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
-                    dst: r,
-                    cond: lt,
-                    if_true: neg1,
-                    if_false: r1,
-                });
-                o.push(r);
-            }
-        }
-        ScalarKind::Sint => {
-            for x in vs {
-                let z = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-                let gt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IgtS {
-                    dst: gt,
-                    lhs: x,
-                    rhs: z,
-                });
-                let lt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IltS {
-                    dst: lt,
-                    lhs: x,
-                    rhs: z,
-                });
-                let one = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
-                let neg1 = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 {
-                    dst: neg1,
-                    value: -1,
-                });
-                let r1 = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Select {
-                    dst: r1,
-                    cond: gt,
-                    if_true: one,
-                    if_false: z,
-                });
-                let r = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Select {
-                    dst: r,
-                    cond: lt,
-                    if_true: neg1,
-                    if_false: r1,
-                });
-                o.push(r);
-            }
-        }
-        ScalarKind::Uint => {
-            for x in vs {
-                let z = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-                let gt = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IgtU {
-                    dst: gt,
-                    lhs: x,
-                    rhs: z,
-                });
-                let one = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
-                let r = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::Select {
-                    dst: r,
-                    cond: gt,
-                    if_true: one,
-                    if_false: z,
-                });
-                o.push(r);
-            }
-        }
-        _ => {
-            return Err(LowerError::UnsupportedExpression(String::from(
-                "sign vector non-numeric",
-            )));
-        }
+    for x in vs {
+        o.push(emit_sign(ctx, k, x)?);
     }
     Ok(o)
 }
@@ -1700,15 +1045,7 @@ fn inverse_sqrt_vec(
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
     for x in vs {
-        let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
-        let one = fconst(ctx, 1.0);
-        let r = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fdiv {
-            dst: r,
-            lhs: one,
-            rhs: sq,
-        });
-        o.push(r);
+        o.push(emit_inverse_sqrt_f32(ctx, x)?);
     }
     Ok(o)
 }
@@ -1720,21 +1057,7 @@ fn saturate_vec(
     let vs = ctx.ensure_expr_vec(arg)?;
     let mut o = VRegVec::new();
     for x in vs {
-        let z = fconst(ctx, 0.0);
-        let one = fconst(ctx, 1.0);
-        let t = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmax {
-            dst: t,
-            lhs: x,
-            rhs: z,
-        });
-        let r = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmin {
-            dst: r,
-            lhs: t,
-            rhs: one,
-        });
-        o.push(r);
+        o.push(emit_saturate_f32(ctx, x)?);
     }
     Ok(o)
 }
@@ -1745,16 +1068,9 @@ fn scale_vec_f32(
     factor: f32,
 ) -> Result<VRegVec, LowerError> {
     let vs = ctx.ensure_expr_vec(arg)?;
-    let f = fconst(ctx, factor);
     let mut o = VRegVec::new();
     for x in vs {
-        let r = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmul {
-            dst: r,
-            lhs: x,
-            rhs: f,
-        });
-        o.push(r);
+        o.push(emit_scale_f32(ctx, x, factor)?);
     }
     Ok(o)
 }
@@ -1778,36 +1094,4 @@ fn ldexp_vec(
         )?);
     }
     Ok(o)
-}
-
-fn fconst(ctx: &mut LowerCtx<'_>, value: f32) -> VReg {
-    let v = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FconstF32 { dst: v, value });
-    v
-}
-
-fn binary_op_maxes_dispatch_width(op: BinaryOperator) -> bool {
-    matches!(
-        op,
-        BinaryOperator::Add
-            | BinaryOperator::Subtract
-            | BinaryOperator::Multiply
-            | BinaryOperator::Divide
-            | BinaryOperator::Modulo
-    )
-}
-
-/// Component width for scalar vs vector math dispatch (see `lower_math_vec` default arm).
-fn math_dispatch_width_expr(
-    module: &Module,
-    func: &Function,
-    expr: Handle<naga::Expression>,
-) -> Result<usize, LowerError> {
-    match &func.expressions[expr] {
-        Expression::Binary { op, left, right } if binary_op_maxes_dispatch_width(*op) => {
-            Ok(math_dispatch_width_expr(module, func, *left)?
-                .max(math_dispatch_width_expr(module, func, *right)?))
-        }
-        _ => Ok(naga_type_width(&expr_type_inner(module, func, expr)?)),
-    }
 }
