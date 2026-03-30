@@ -4,7 +4,9 @@
 // Extended builtins: trunc, round, ceil, mod, exp, log, exp2, log2, degrees, asin, acos.
 
 const float T = trunc(2.7);
-const float R = round(2.5);
+// `round(2.5)` in a const expression is const-folded by Naga with ties-to-even; use `round(3.5)`
+// so the folded value is 4 on both Naga and GLSL half-away-from-zero (see `builtins/common-round.glsl` for runtime `round(2.5)`).
+const float R = round(3.5);
 const float C = ceil(2.1);
 const float M = mod(5.0, 2.0);
 
@@ -12,9 +14,7 @@ float test_builtin_trunc_round_ceil_mod() {
     return T + R + C + M;
 }
 
-// @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
-// run: test_builtin_trunc_round_ceil_mod() ~= 9.0
+// run: test_builtin_trunc_round_ceil_mod() ~= 10.0
 
 const float E = exp(0.0);
 const float L = log(1.0);

@@ -558,6 +558,15 @@ pub(crate) fn coerce_assignment_vregs(
     srcs: VRegVec,
 ) -> Result<VRegVec, LowerError> {
     let dst_tys = crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?;
+    // Naga lowers some scalar casts (e.g. `float(bvec2)`) as per-lane vector `Select`/math; the
+    // declared type is still scalar. When scalar kinds already match, use the first lane.
+    if dst_tys.len() == 1 && srcs.len() > 1 {
+        let src_k = expr_scalar_kind(ctx.module, ctx.func, value_expr)?;
+        let dst_k = root_scalar_kind(dst_ty_inner)?;
+        if src_k == dst_k {
+            return Ok(smallvec::smallvec![srcs[0]]);
+        }
+    }
     if dst_tys.len() != srcs.len() {
         return Err(LowerError::Internal(format!(
             "assignment component count {} vs {}",

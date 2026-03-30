@@ -21,8 +21,16 @@ pub(crate) fn lower_as_vec(
     if src_k == target {
         return Ok(inner_vs);
     }
+    // GLSL 4.x: cast to a *scalar* numeric type from bvecN uses only the first component.
+    // Naga types `Expression::As` as scalar; `lower_expr_vec(inner)` still has N lanes for bvecN.
+    let src_regs: &[VReg] =
+        if src_k == ScalarKind::Bool && target != ScalarKind::Bool && inner_vs.len() > 1 {
+            &inner_vs[..1]
+        } else {
+            &inner_vs
+        };
     let mut result = VRegVec::new();
-    for &src in &inner_vs {
+    for &src in src_regs {
         let v = lower_as_scalar(ctx, src, src_k, target)?;
         result.push(v);
     }
