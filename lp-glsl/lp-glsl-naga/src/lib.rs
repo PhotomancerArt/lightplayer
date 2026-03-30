@@ -20,6 +20,7 @@ use naga::{
 
 mod expr_scalar;
 pub mod lower;
+mod lower_access;
 mod lower_ctx;
 mod lower_error;
 mod lower_expr;

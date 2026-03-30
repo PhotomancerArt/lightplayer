@@ -164,6 +164,44 @@ pub(crate) fn expr_type_inner(
                 ))),
             }
         }
+        // Same value shape as `AccessIndex`; index is dynamic (bounds checked at runtime if needed).
+        Expression::Access { base, index: _ } => {
+            let base_ty = expr_type_inner(module, func, *base)?;
+            match base_ty {
+                TypeInner::Vector { scalar, .. } => Ok(TypeInner::Scalar(scalar)),
+                TypeInner::Matrix { rows, scalar, .. } => {
+                    Ok(TypeInner::Vector { size: rows, scalar })
+                }
+                TypeInner::Pointer { base: ty_h, space } => match &module.types[ty_h].inner {
+                    TypeInner::Vector { scalar, .. } => Ok(TypeInner::ValuePointer {
+                        size: None,
+                        scalar: *scalar,
+                        space,
+                    }),
+                    TypeInner::Matrix { rows, scalar, .. } => Ok(TypeInner::ValuePointer {
+                        size: Some(*rows),
+                        scalar: *scalar,
+                        space,
+                    }),
+                    TypeInner::Array { base: elt, .. } => Ok(module.types[*elt].inner.clone()),
+                    _ => Err(LowerError::UnsupportedExpression(String::from(
+                        "Access base pointer not vector/matrix/array",
+                    ))),
+                },
+                TypeInner::ValuePointer {
+                    size: Some(_vec_size),
+                    scalar,
+                    space,
+                } => Ok(TypeInner::ValuePointer {
+                    size: None,
+                    scalar,
+                    space,
+                }),
+                other => Err(LowerError::UnsupportedExpression(format!(
+                    "Access on unsupported base {other:?}"
+                ))),
+            }
+        }
         Expression::Binary { op, left, .. } => match op {
             BinaryOperator::Equal
             | BinaryOperator::NotEqual

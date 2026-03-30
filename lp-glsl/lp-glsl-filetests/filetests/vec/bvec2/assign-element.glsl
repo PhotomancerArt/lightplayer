@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Assign Element: bvec2.x = bool, bvec2[0] = bool - single component assignment
@@ -12,7 +11,6 @@ bvec2 test_bvec2_assign_element_x() {
     return a;
 }
 
-// @unimplemented(backend=jit)
 // run: test_bvec2_assign_element_x() == bvec2(true, false)
 
 bvec2 test_bvec2_assign_element_y() {

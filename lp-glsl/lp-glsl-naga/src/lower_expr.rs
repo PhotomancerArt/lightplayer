@@ -52,7 +52,9 @@ fn lower_expr_vec_uncached(
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
             Expression::LocalVariable(lv) => ctx.resolve_local(*lv),
             // Subscripted locals (`m[i][j]`) are pointers in Naga; value lives in vregs.
-            Expression::AccessIndex { .. } => lower_expr_vec(ctx, *pointer),
+            Expression::AccessIndex { .. } | Expression::Access { .. } => {
+                lower_expr_vec(ctx, *pointer)
+            }
             Expression::FunctionArgument(i) => {
                 let idx = *i;
                 let Some(&base_ty_h) = ctx.pointer_args.get(&idx) else {
@@ -201,9 +203,32 @@ fn lower_expr_vec_uncached(
                 ))),
             }
         }
-        Expression::Access { .. } => Err(LowerError::UnsupportedExpression(String::from(
-            "dynamic vector access not supported",
-        ))),
+        Expression::Access { base, .. } => {
+            if matches!(&ctx.func.expressions[*base], Expression::Access { .. }) {
+                let col_vs = lower_expr_vec(ctx, *base)?;
+                let Expression::Access { index, .. } = &ctx.func.expressions[expr] else {
+                    return Err(LowerError::Internal(String::from("Access shape")));
+                };
+                let index_v = ctx.ensure_expr(*index)?;
+                let res_ty = expr_type_inner(ctx.module, ctx.func, expr)?;
+                let scalar = match res_ty {
+                    TypeInner::Scalar(s) => s,
+                    TypeInner::ValuePointer {
+                        size: None, scalar, ..
+                    } => scalar,
+                    _ => {
+                        return Err(LowerError::UnsupportedExpression(format!(
+                            "nested Access: expected scalar or scalar value pointer, got {res_ty:?}"
+                        )));
+                    }
+                };
+                let t = naga_scalar_to_ir_type(scalar.kind)?;
+                let out = crate::lower_access::select_lane_dynamic(ctx, &col_vs, index_v, t)?;
+                Ok(smallvec::smallvec![out])
+            } else {
+                crate::lower_access::lower_access_expr_vec(ctx, expr)
+            }
+        }
         Expression::ZeroValue(ty_h) => lower_zero_value_vec(ctx, *ty_h),
         Expression::Constant(h) => {
             let init = ctx.module.constants[*h].init;

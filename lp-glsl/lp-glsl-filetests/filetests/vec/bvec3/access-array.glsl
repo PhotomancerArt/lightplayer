@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Access Array: bvec3[0], bvec3[1], bvec3[2] - array-style indexing
@@ -11,7 +10,6 @@ bool test_bvec3_access_array_index_0() {
     return a[0];
 }
 
-// @unimplemented(backend=jit)
 // run: test_bvec3_access_array_index_0() == true
 
 bool test_bvec3_access_array_index_1() {

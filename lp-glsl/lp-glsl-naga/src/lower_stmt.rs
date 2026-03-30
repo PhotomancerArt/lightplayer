@@ -9,6 +9,7 @@ use lpir::{IrType, Op, SlotId};
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
 use crate::expr_scalar::expr_type_inner;
+use crate::lower_access;
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
@@ -107,44 +108,68 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             }
         },
         Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
+            Expression::Access { .. } => lower_access::store_through_access(ctx, *pointer, *value),
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
             Expression::AccessIndex { base, index } => match &ctx.func.expressions[*base] {
                 Expression::LocalVariable(lv) => {
                     let dsts = ctx.resolve_local(*lv)?;
-                    let comp = *index as usize;
-                    if comp >= dsts.len() {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "AccessIndex {comp} out of range (len {})",
-                            dsts.len()
-                        )));
-                    }
                     let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
-                    let scalar_inner = match lv_ty {
-                        TypeInner::Vector { scalar, .. } => TypeInner::Scalar(*scalar),
-                        TypeInner::Matrix { .. } => {
-                            return Err(LowerError::UnsupportedStatement(String::from(
-                                "store to matrix column not supported (use element store m[i][j])",
-                            )));
+                    match lv_ty {
+                        TypeInner::Vector { scalar, .. } => {
+                            let comp = *index as usize;
+                            if comp >= dsts.len() {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "AccessIndex {comp} out of range (len {})",
+                                    dsts.len()
+                                )));
+                            }
+                            let scalar_inner = TypeInner::Scalar(*scalar);
+                            let raw = ctx.ensure_expr_vec(*value)?;
+                            let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                            if srcs.len() != 1 {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "component store expects one scalar, got {} values",
+                                    srcs.len()
+                                )));
+                            }
+                            ctx.fb.push(Op::Copy {
+                                dst: dsts[comp],
+                                src: srcs[0],
+                            });
+                            Ok(())
                         }
-                        _ => {
-                            return Err(LowerError::UnsupportedStatement(String::from(
-                                "component store on non-vector local",
-                            )));
+                        TypeInner::Matrix {
+                            columns,
+                            rows,
+                            scalar,
+                        } => {
+                            let ncols = crate::lower_ctx::vector_size_usize(*columns);
+                            let nrows = crate::lower_ctx::vector_size_usize(*rows);
+                            let col = *index as usize;
+                            if col >= ncols {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "matrix column AccessIndex {col} out of range (cols {ncols})"
+                                )));
+                            }
+                            let col_ty = TypeInner::Vector {
+                                size: *rows,
+                                scalar: *scalar,
+                            };
+                            let raw = ctx.ensure_expr_vec(*value)?;
+                            let srcs = coerce_assignment_vregs(ctx, &col_ty, *value, raw)?;
+                            for r in 0..nrows {
+                                let flat_i = col * nrows + r;
+                                ctx.fb.push(Op::Copy {
+                                    dst: dsts[flat_i],
+                                    src: srcs[r],
+                                });
+                            }
+                            Ok(())
                         }
-                    };
-                    let raw = ctx.ensure_expr_vec(*value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
-                    if srcs.len() != 1 {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "component store expects one scalar, got {} values",
-                            srcs.len()
-                        )));
+                        _ => Err(LowerError::UnsupportedStatement(String::from(
+                            "AccessIndex store on non-vector non-matrix local",
+                        ))),
                     }
-                    ctx.fb.push(Op::Copy {
-                        dst: dsts[comp],
-                        src: srcs[0],
-                    });
-                    Ok(())
                 }
                 Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
                     let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;

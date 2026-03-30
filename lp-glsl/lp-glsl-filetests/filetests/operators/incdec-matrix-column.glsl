@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Pre-increment (++m[0]) - mat2 columns
@@ -11,7 +10,6 @@ float test_preinc_mat2_column_0() {
     return result.x + result.y + m[0].x + m[0].y + m[1].x + m[1].y;
 }
 
-// @unimplemented(backend=jit)
 // run: test_preinc_mat2_column_0() ~= 17.0
 
 float test_preinc_mat2_column_1() {
