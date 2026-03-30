@@ -101,6 +101,26 @@ mod tests {
     }
 
     #[test]
+    fn prepared_source_user_line_alignment() {
+        let first = super::user_snippet_first_physical_line();
+        let prep = super::prepared_glsl_for_compile("//marker\n");
+        let phys = prep
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains("//marker"))
+            .map(|(i, _)| i + 1)
+            .expect("marker line");
+        assert_eq!(phys, first);
+    }
+
+    #[test]
+    fn float_main_does_not_get_duplicate_void_main_suffix() {
+        let src = "float main() { return 1.0; }\n";
+        let prep = super::prepared_glsl_for_compile(src);
+        assert!(!prep.contains("void main()"));
+    }
+
+    #[test]
     fn naga_module_accessible() {
         let src = "float f() { return 1.0; }";
         let result = compile(src).unwrap();
@@ -248,28 +268,49 @@ impl fmt::Display for CompileError {
 
 impl core::error::Error for CompileError {}
 
+/// LPFX preamble and `#line 1` sent to Naga before the user snippet (same layout as [`compile`]).
+const LPFX_PREFIX: &str = concat!(
+    "#version 450 core\n",
+    include_str!("lpfx_prologue.glsl"),
+    "\n#line 1\n",
+);
+
 fn prepend_lpfx_prototypes(source: &str) -> String {
-    const PREAMBLE: &str = "#version 450 core\n";
-    let mut s = String::from(PREAMBLE);
-    s.push_str(include_str!("lpfx_prologue.glsl"));
-    s.push_str("\n#line 1\n");
+    let mut s = String::from(LPFX_PREFIX);
     s.push_str(source);
     s
 }
 
-/// Parse GLSL and collect named function metadata.
-pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
-    let source = prepend_lpfx_prototypes(source);
-    let source = ensure_vertex_entry_point(&source);
-    let module = parse_glsl(&source)?;
+/// 1-based physical line where the user snippet's line 1 begins in sources from
+/// [`prepared_glsl_for_compile`] (after `#line 1`, before any synthesized `void main()` suffix).
+pub fn user_snippet_first_physical_line() -> usize {
+    LPFX_PREFIX.lines().count() + 1
+}
+
+/// Full GLSL source passed to Naga: LPFX preamble, user snippet, then optional synthesized
+/// `void main() {}` when the user did not define `void main`.
+pub fn prepared_glsl_for_compile(user_snippet: &str) -> String {
+    let source = prepend_lpfx_prototypes(user_snippet);
+    ensure_vertex_entry_point(&source)
+}
+
+/// Wrap a parsed [`Module`] the same way as [`compile`] after parsing.
+pub fn naga_module_from_parsed(module: Module) -> Result<NagaModule, CompileError> {
     let functions = extract_functions(&module)?;
     Ok(NagaModule { module, functions })
+}
+
+/// Parse GLSL and collect named function metadata.
+pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
+    let source = prepared_glsl_for_compile(source);
+    let module = parse_glsl(&source)?;
+    naga_module_from_parsed(module)
 }
 
 /// Naga's GLSL frontend expects a shader entry point. Filetests and snippets only define helpers;
 /// append an empty `main` when missing.
 fn ensure_vertex_entry_point(source: &str) -> String {
-    if source.contains("void main") {
+    if glsl_source_declares_main(source) {
         return String::from(source);
     }
     let mut s = String::from(source);
@@ -278,6 +319,16 @@ fn ensure_vertex_entry_point(source: &str) -> String {
     }
     s.push_str("void main() {}\n");
     s
+}
+
+fn glsl_source_declares_main(source: &str) -> bool {
+    source.lines().any(|line| {
+        let t = line.trim_start();
+        if t.starts_with("//") {
+            return false;
+        }
+        t.split_whitespace().any(|tok| tok.starts_with("main("))
+    })
 }
 
 fn parse_glsl(source: &str) -> Result<Module, CompileError> {
@@ -394,6 +445,26 @@ fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslTyp
                 _ => Err(CompileError::UnsupportedType(format!(
                     "vector {:?} {:?}",
                     size, scalar.kind
+                ))),
+            }
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar,
+        } => {
+            if scalar.kind != ScalarKind::Float || scalar.width != 4 {
+                return Err(CompileError::UnsupportedType(format!(
+                    "matrix scalar {:?} width {}",
+                    scalar.kind, scalar.width
+                )));
+            }
+            match (columns, rows) {
+                (VectorSize::Bi, VectorSize::Bi) => Ok(GlslType::Mat2),
+                (VectorSize::Tri, VectorSize::Tri) => Ok(GlslType::Mat3),
+                (VectorSize::Quad, VectorSize::Quad) => Ok(GlslType::Mat4),
+                _ => Err(CompileError::UnsupportedType(format!(
+                    "matrix {columns:?}x{rows:?}"
                 ))),
             }
         }

@@ -4,8 +4,8 @@ use alloc::format;
 use alloc::string::String;
 
 use naga::{
-    BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module, Scalar,
-    ScalarKind, TypeInner, VectorSize,
+    BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module,
+    RelationalFunction, Scalar, ScalarKind, TypeInner, VectorSize,
 };
 
 use crate::lower_ctx::vector_size_usize;
@@ -369,6 +369,14 @@ pub(crate) fn expr_scalar_kind(
             MathFunction::Cross => Ok(ScalarKind::Float),
             MathFunction::Transpose | MathFunction::Inverse => expr_scalar_kind(module, func, *arg),
             _ => expr_scalar_kind(module, func, *arg),
+        },
+        Expression::Relational { fun, argument } => match fun {
+            RelationalFunction::All | RelationalFunction::Any => {
+                expr_scalar_kind(module, func, *argument)
+            }
+            RelationalFunction::IsNan | RelationalFunction::IsInf => {
+                expr_scalar_kind(module, func, *argument)
+            }
         },
         _ => Err(LowerError::UnsupportedExpression(format!(
             "cannot infer scalar kind for {:?}",
