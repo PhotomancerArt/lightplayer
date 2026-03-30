@@ -25,6 +25,9 @@ pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec
         GlslType::Vec4 | GlslType::IVec4 | GlslType::UVec4 | GlslType::BVec4 => {
             alloc::vec![component_vt(ty, float_mode); 4]
         }
+        GlslType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
+        GlslType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
+        GlslType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
     }
 }
 
