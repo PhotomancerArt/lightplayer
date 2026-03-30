@@ -46,12 +46,10 @@ pub(crate) struct EmitCtx<'a> {
 
 pub(crate) enum CtrlFrame {
     If {
-        then_block: Block,
         else_block: Block,
         merge_block: Block,
     },
     Else {
-        else_block: Block,
         merge_block: Block,
     },
     Loop {
@@ -66,12 +64,10 @@ pub(crate) enum CtrlFrame {
         merge_block: Block,
     },
     Case {
-        body_block: Block,
         merge_block: Block,
         next_case_block: Block,
     },
     Default {
-        entry_block: Block,
         merge_block: Block,
     },
 }

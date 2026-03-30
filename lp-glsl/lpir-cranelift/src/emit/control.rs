@@ -9,6 +9,24 @@ use lpir::op::Op;
 use super::{CtrlFrame, switch_to_unreachable_tail, use_v};
 use crate::error::CompileError;
 
+/// If the current block exists, is not `target`, and has no terminator yet, insert a `jump` to
+/// `target`. The `cur == target` guard prevents accidental self-loops (e.g. Switch End when
+/// Default End already placed us on `merge_block`).
+fn jump_if_unterminated(builder: &mut FunctionBuilder, target: Block) {
+    if let Some(cur) = builder.current_block() {
+        if cur == target {
+            return;
+        }
+        let needs = match builder.func.layout.last_inst(cur) {
+            None => true,
+            Some(last) => !builder.func.dfg.insts[last].opcode().is_terminator(),
+        };
+        if needs {
+            builder.ins().jump(target, &[]);
+        }
+    }
+}
+
 pub(crate) fn maybe_enter_loop_continue_region(
     builder: &mut FunctionBuilder,
     ctrl_stack: &[CtrlFrame],
@@ -57,7 +75,6 @@ pub(crate) fn emit_control(
             builder.ins().brif(pred, then_block, &[], else_block, &[]);
             builder.switch_to_block(then_block);
             ctrl_stack.push(CtrlFrame::If {
-                then_block,
                 else_block,
                 merge_block,
             });
@@ -65,18 +82,12 @@ pub(crate) fn emit_control(
         }
         Op::Else => match ctrl_stack.pop() {
             Some(CtrlFrame::If {
-                then_block,
                 else_block,
                 merge_block,
             }) => {
-                if builder.current_block() == Some(then_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(else_block);
-                ctrl_stack.push(CtrlFrame::Else {
-                    else_block,
-                    merge_block,
-                });
+                ctrl_stack.push(CtrlFrame::Else { merge_block });
                 Ok(true)
             }
             _ => Err(CompileError::unsupported("else without matching if")),
@@ -149,7 +160,6 @@ pub(crate) fn emit_control(
                 .brif(cmp, body_block, &[], next_case_block, &[]);
             builder.switch_to_block(body_block);
             ctrl_stack.push(CtrlFrame::Case {
-                body_block,
                 merge_block,
                 next_case_block,
             });
@@ -157,36 +167,25 @@ pub(crate) fn emit_control(
         }
         Op::DefaultStart { .. } => {
             let (_, merge_block) = find_innermost_switch(ctrl_stack)?;
-            let entry_block = builder
-                .current_block()
-                .ok_or_else(|| CompileError::unsupported("default outside block"))?;
-            ctrl_stack.push(CtrlFrame::Default {
-                entry_block,
-                merge_block,
-            });
+            if builder.current_block().is_none() {
+                return Err(CompileError::unsupported("default outside block"));
+            }
+            ctrl_stack.push(CtrlFrame::Default { merge_block });
             Ok(true)
         }
         Op::End => match ctrl_stack.pop() {
             Some(CtrlFrame::If {
-                then_block,
                 else_block,
                 merge_block,
             }) => {
-                if builder.current_block() == Some(then_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(else_block);
                 builder.ins().jump(merge_block, &[]);
                 builder.switch_to_block(merge_block);
                 Ok(true)
             }
-            Some(CtrlFrame::Else {
-                else_block,
-                merge_block,
-            }) => {
-                if builder.current_block() == Some(else_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+            Some(CtrlFrame::Else { merge_block }) => {
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(merge_block);
                 Ok(true)
             }
@@ -195,43 +194,25 @@ pub(crate) fn emit_control(
                 exit_block,
                 ..
             }) => {
-                if let Some(cur) = builder.current_block() {
-                    let needs_back = match builder.func.layout.last_inst(cur) {
-                        None => true,
-                        Some(last) => !builder.func.dfg.insts[last].opcode().is_terminator(),
-                    };
-                    if needs_back {
-                        builder.ins().jump(header_block, &[]);
-                    }
-                }
+                jump_if_unterminated(builder, header_block);
                 builder.switch_to_block(exit_block);
                 Ok(true)
             }
             Some(CtrlFrame::Case {
-                body_block,
                 merge_block,
                 next_case_block,
             }) => {
-                if builder.current_block() == Some(body_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(next_case_block);
                 Ok(true)
             }
-            Some(CtrlFrame::Default {
-                entry_block,
-                merge_block,
-            }) => {
-                if builder.current_block() == Some(entry_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+            Some(CtrlFrame::Default { merge_block }) => {
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(merge_block);
                 Ok(true)
             }
             Some(CtrlFrame::Switch { merge_block, .. }) => {
-                if builder.current_block() != Some(merge_block) {
-                    builder.ins().jump(merge_block, &[]);
-                }
+                jump_if_unterminated(builder, merge_block);
                 builder.switch_to_block(merge_block);
                 Ok(true)
             }
