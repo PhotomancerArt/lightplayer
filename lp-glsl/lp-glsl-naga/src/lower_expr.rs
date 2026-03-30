@@ -155,6 +155,42 @@ fn lower_expr_vec_uncached(
             Ok(result)
         }
         Expression::AccessIndex { base, index } => {
+            if let Some((lv, ops)) =
+                crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
+            {
+                if let Some(info) = ctx.array_map.get(&lv).cloned() {
+                    if ops.len() == info.dimensions.len() {
+                        if ops.iter().all(|o| {
+                            matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
+                        }) {
+                            use crate::lower_array_multidim::SubscriptOperand::Const as SConst;
+                            let idxs: alloc::vec::Vec<u32> = ops
+                                .iter()
+                                .map(|o| match o {
+                                    SConst(c) => *c,
+                                    _ => 0,
+                                })
+                                .collect();
+                            let flat = crate::lower_array_multidim::flat_index_const_clamped(
+                                &info.dimensions,
+                                &idxs,
+                            )?;
+                            return crate::lower_array::load_array_element_const(ctx, &info, flat);
+                        }
+                        let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
+                            ctx,
+                            &info.dimensions,
+                            &ops,
+                        )?;
+                        return crate::lower_array::load_array_element_dynamic(ctx, &info, flat_v);
+                    }
+                    if ops.len() < info.dimensions.len() {
+                        return Err(LowerError::UnsupportedExpression(String::from(
+                            "partial indexing of multi-dimensional array as rvalue is not supported",
+                        )));
+                    }
+                }
+            }
             let base_inner = expr_type_inner(ctx.module, ctx.func, *base)?;
             match base_inner {
                 TypeInner::Vector { .. } => {
@@ -211,15 +247,6 @@ fn lower_expr_vec_uncached(
                             let start = (*index as usize) * n;
                             Ok(m[start..start + n].into())
                         }
-                        TypeInner::Array { .. } => {
-                            let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
-                                return Err(LowerError::UnsupportedExpression(String::from(
-                                    "AccessIndex: array pointer base must be LocalVariable",
-                                )));
-                            };
-                            let info = ctx.resolve_array(*lv)?.clone();
-                            crate::lower_array::load_array_element_const(ctx, &info, *index)
-                        }
                         _ => Err(LowerError::UnsupportedExpression(format!(
                             "AccessIndex on pointer to {inner:?}"
                         ))),
@@ -243,7 +270,30 @@ fn lower_expr_vec_uncached(
             }
         }
         Expression::Access { base, .. } => {
-            if matches!(&ctx.func.expressions[*base], Expression::Access { .. }) {
+            // Handle multi-dimensional array access chains (Access/AccessIndex mixed).
+            let base_expr = &ctx.func.expressions[*base];
+            let is_access_chain = matches!(base_expr, Expression::Access { .. });
+            let is_mixed_chain = matches!(base_expr, Expression::AccessIndex { .. });
+            if is_access_chain || is_mixed_chain {
+                // Try mixed Access/AccessIndex chain first for arrays.
+                if let Some((lv, _)) =
+                    crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
+                {
+                    if ctx.array_map.contains_key(&lv) {
+                        return crate::lower_access::lower_access_expr_vec(ctx, expr);
+                    }
+                }
+                // Fall back to pure Access chain (matrices/vectors).
+                if is_access_chain {
+                    if let Some((lv, _)) =
+                        crate::lower_array_multidim::peel_access_chain(ctx.func, expr)
+                    {
+                        if ctx.array_map.contains_key(&lv) {
+                            return crate::lower_access::lower_access_expr_vec(ctx, expr);
+                        }
+                    }
+                }
+                // Not an array - handle as matrix/vector dynamic index.
                 let col_vs = lower_expr_vec(ctx, *base)?;
                 let Expression::Access { index, .. } = &ctx.func.expressions[expr] else {
                     return Err(LowerError::Internal(String::from("Access shape")));

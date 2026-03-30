@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use lpir::IrType;
 use naga::{
-    BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module,
+    ArraySize, BinaryOperator, Expression, Function, Handle, Literal, MathFunction, Module,
     RelationalFunction, Scalar, ScalarKind, TypeInner, VectorSize,
 };
 use smallvec::SmallVec;
@@ -205,6 +205,19 @@ pub(crate) fn expr_type_inner(
                     }
                     Ok(TypeInner::Vector { size: rows, scalar })
                 }
+                // `int a[2][3]; a[0]` → `AccessIndex` on nested array value (not a pointer).
+                // NOTE: Allow index == size; values >= size are clamped at runtime.
+                TypeInner::Array {
+                    base: elt, size, ..
+                } => {
+                    let _in_bounds = match size {
+                        ArraySize::Constant(nz) => *index <= nz.get(),
+                        ArraySize::Pending(_) | ArraySize::Dynamic => true,
+                    };
+                    // We allow index == size for runtime clamp compatibility.
+                    // The lowering will clamp with `min(index, size - 1)`.
+                    Ok(module.types[elt].inner.clone())
+                }
                 TypeInner::Pointer { base, space } => match &module.types[base].inner {
                     TypeInner::Vector { size, scalar } => {
                         if *index >= vector_size_usize(*size) as u32 {
@@ -269,6 +282,7 @@ pub(crate) fn expr_type_inner(
                 TypeInner::Matrix { rows, scalar, .. } => {
                     Ok(TypeInner::Vector { size: rows, scalar })
                 }
+                TypeInner::Array { base: elt, .. } => Ok(module.types[elt].inner.clone()),
                 TypeInner::Pointer { base: ty_h, space } => match &module.types[ty_h].inner {
                     TypeInner::Vector { scalar, .. } => Ok(TypeInner::ValuePointer {
                         size: None,

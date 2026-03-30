@@ -2,15 +2,90 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lpir::{IrType, Op, VReg};
-use naga::{Expression, Handle, Module};
+use naga::{Expression, Function, Handle, Module};
 
 use crate::lower_ctx::{ArrayInfo, LowerCtx, VRegVec, naga_type_to_ir_types};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 
 /// Clamp dynamic index to `[0, element_count-1]` (v1 safety; see `docs/design/arrays.md`).
+/// Build flat element index from mixed const/dynamic subscripts (row-major).
+pub(crate) fn emit_row_major_flat_from_operands(
+    ctx: &mut LowerCtx<'_>,
+    dimensions: &[u32],
+    ops: &[crate::lower_array_multidim::SubscriptOperand],
+) -> Result<VReg, LowerError> {
+    if dimensions.len() != ops.len() {
+        return Err(LowerError::Internal(format!(
+            "emit_row_major_flat_from_operands: dim {} vs ops {}",
+            dimensions.len(),
+            ops.len()
+        )));
+    }
+    let mut vregs = Vec::new();
+    for (d, op) in dimensions.iter().zip(ops.iter()) {
+        let v = match op {
+            crate::lower_array_multidim::SubscriptOperand::Const(c) => {
+                let cc = (*c).min(*d - 1);
+                let vreg = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(Op::IconstI32 {
+                    dst: vreg,
+                    value: cc as i32,
+                });
+                vreg
+            }
+            crate::lower_array_multidim::SubscriptOperand::Dynamic(h) => {
+                let raw = ctx.ensure_expr(*h)?;
+                clamp_array_index(ctx, raw, *d)?
+            }
+        };
+        vregs.push(v);
+    }
+    emit_row_major_flat_index_vregs(ctx, dimensions, &vregs)
+}
+
+/// Row-major linear element index from per-axis dynamic indices (each axis clamped).
+pub(crate) fn emit_row_major_flat_index_vregs(
+    ctx: &mut LowerCtx<'_>,
+    dimensions: &[u32],
+    index_v: &[VReg],
+) -> Result<VReg, LowerError> {
+    if dimensions.is_empty() || dimensions.len() != index_v.len() {
+        return Err(LowerError::Internal(format!(
+            "emit_row_major_flat_index_vregs: dim {} vs idx {}",
+            dimensions.len(),
+            index_v.len()
+        )));
+    }
+    let mut acc = clamp_array_index(ctx, index_v[0], dimensions[0])?;
+    for k in 1..dimensions.len() {
+        let dk = dimensions[k];
+        let dim_v = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(Op::IconstI32 {
+            dst: dim_v,
+            value: dk as i32,
+        });
+        let prod = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(Op::Imul {
+            dst: prod,
+            lhs: acc,
+            rhs: dim_v,
+        });
+        let ik = clamp_array_index(ctx, index_v[k], dk)?;
+        let sum = ctx.fb.alloc_vreg(IrType::I32);
+        ctx.fb.push(Op::Iadd {
+            dst: sum,
+            lhs: prod,
+            rhs: ik,
+        });
+        acc = sum;
+    }
+    Ok(acc)
+}
+
 pub(crate) fn clamp_array_index(
     ctx: &mut LowerCtx<'_>,
     index_v: VReg,
@@ -85,12 +160,12 @@ pub(crate) fn zero_fill_array_slot(
     module: &Module,
     info: &ArrayInfo,
 ) -> Result<(), LowerError> {
-    let elem_inner = &module.types[info.element_ty].inner;
+    let elem_inner = &module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     let base = array_slot_base_fb(fb, info.slot);
 
     for i in 0..info.element_count {
-        let byte_off = i.checked_mul(info.stride).ok_or_else(|| {
+        let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
             LowerError::Internal(String::from("zero_fill_array_slot: stride overflow"))
         })?;
         for (j, ty) in ir_tys.iter().enumerate() {
@@ -133,11 +208,11 @@ pub(crate) fn load_array_element_const(
     }
     // Match dynamic clamp: OOB constant indices clamp to the last element (see `clamp_array_index`).
     let index = index.min(info.element_count - 1);
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     let base = array_slot_base(ctx, info.slot);
     let byte_off = index
-        .checked_mul(info.stride)
+        .checked_mul(info.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("load_array_element_const: overflow")))?;
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
@@ -161,7 +236,7 @@ pub(crate) fn load_array_element_dynamic(
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::IconstI32 {
         dst: stride_v,
-        value: info.stride as i32,
+        value: info.leaf_stride as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::Imul {
@@ -177,7 +252,7 @@ pub(crate) fn load_array_element_dynamic(
         rhs: byte_off,
     });
 
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
@@ -204,7 +279,7 @@ pub(crate) fn store_array_element_const(
         )));
     }
     let index = index.min(info.element_count - 1);
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, elem_inner, value_expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
@@ -217,7 +292,7 @@ pub(crate) fn store_array_element_const(
     }
     let base = array_slot_base(ctx, info.slot);
     let byte_off = index
-        .checked_mul(info.stride)
+        .checked_mul(info.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("store_array_element_const: overflow")))?;
     for (j, &src) in srcs.iter().enumerate() {
         ctx.fb.push(Op::Store {
@@ -239,7 +314,7 @@ pub(crate) fn store_array_element_dynamic(
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::IconstI32 {
         dst: stride_v,
-        value: info.stride as i32,
+        value: info.leaf_stride as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::Imul {
@@ -255,7 +330,7 @@ pub(crate) fn store_array_element_dynamic(
         rhs: byte_off,
     });
 
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
     let srcs = coerce_assignment_vregs(ctx, elem_inner, value_expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
@@ -283,21 +358,22 @@ pub(crate) fn lower_array_initializer(
 ) -> Result<(), LowerError> {
     match &ctx.func.expressions[init_h] {
         Expression::ZeroValue(_) => zero_fill_array(ctx, ctx.module, info),
-        Expression::Compose { components, .. } => {
-            if components.len() as u32 > info.element_count {
+        Expression::Compose { .. } => {
+            let flat_components = collect_flat_compose_components(ctx.func, init_h)?;
+            if flat_components.len() as u32 > info.element_count {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "array initializer: too many elements",
                 )));
             }
             let base = array_slot_base(ctx, info.slot);
-            for (i, &comp) in components.iter().enumerate() {
+            for (i, &comp) in flat_components.iter().enumerate() {
                 let byte_off = (i as u32)
-                    .checked_mul(info.stride)
+                    .checked_mul(info.leaf_stride)
                     .ok_or_else(|| LowerError::Internal(String::from("init: byte_off overflow")))?;
                 store_element_at_byte_offset(ctx, info, base, byte_off, comp)?;
             }
-            for i in components.len() as u32..info.element_count {
-                let byte_off = i.checked_mul(info.stride).ok_or_else(|| {
+            for i in flat_components.len() as u32..info.element_count {
+                let byte_off = i.checked_mul(info.leaf_stride).ok_or_else(|| {
                     LowerError::Internal(String::from("init: tail byte_off overflow"))
                 })?;
                 zero_element_at_byte_offset(ctx, info, base, byte_off)?;
@@ -311,6 +387,35 @@ pub(crate) fn lower_array_initializer(
     }
 }
 
+/// Flatten `{a,b}` or nested `{{a,b},{c,d}}` into leaf initializer expressions (row-major).
+fn collect_flat_compose_components(
+    func: &Function,
+    init_h: Handle<Expression>,
+) -> Result<Vec<Handle<Expression>>, LowerError> {
+    match &func.expressions[init_h] {
+        Expression::Compose { components, .. } => {
+            if components.is_empty() {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "empty array initializer list",
+                )));
+            }
+            let nested_row = matches!(&func.expressions[components[0]], Expression::Compose { .. });
+            if nested_row {
+                let mut flat = Vec::new();
+                for &c in components.iter() {
+                    flat.extend(collect_flat_compose_components(func, c)?);
+                }
+                Ok(flat)
+            } else {
+                Ok(components.iter().copied().collect())
+            }
+        }
+        _ => Err(LowerError::UnsupportedExpression(String::from(
+            "expected `{ ... }` array initializer",
+        ))),
+    }
+}
+
 fn store_element_at_byte_offset(
     ctx: &mut LowerCtx<'_>,
     info: &ArrayInfo,
@@ -318,7 +423,7 @@ fn store_element_at_byte_offset(
     byte_off: u32,
     expr: Handle<Expression>,
 ) -> Result<(), LowerError> {
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(expr)?;
     let srcs = coerce_assignment_vregs(ctx, elem_inner, expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
@@ -345,7 +450,7 @@ fn zero_element_at_byte_offset(
     base: VReg,
     byte_off: u32,
 ) -> Result<(), LowerError> {
-    let elem_inner = &ctx.module.types[info.element_ty].inner;
+    let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     for (j, ty) in ir_tys.iter().enumerate() {
         let z = ctx.fb.alloc_vreg(*ty);

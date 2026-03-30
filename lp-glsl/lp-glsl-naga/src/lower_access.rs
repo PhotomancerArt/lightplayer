@@ -267,6 +267,40 @@ pub(crate) fn lower_access_expr_vec(
     ctx: &mut LowerCtx<'_>,
     access_h: Handle<Expression>,
 ) -> Result<VRegVec, LowerError> {
+    // Try mixed Access/AccessIndex chain first for multi-dimensional arrays.
+    if let Some((lv, ops)) =
+        crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
+    {
+        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+            if ops.len() == info.dimensions.len() {
+                let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
+                    ctx,
+                    &info.dimensions,
+                    &ops,
+                )?;
+                return crate::lower_array::load_array_element_dynamic(ctx, &info, flat_v);
+            }
+        }
+    }
+    // Try pure Access chain (for backwards compatibility).
+    if let Some((lv, idx_handles)) =
+        crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
+    {
+        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+            if idx_handles.len() == info.dimensions.len() {
+                let mut vregs = alloc::vec::Vec::new();
+                for &h in &idx_handles {
+                    vregs.push(ctx.ensure_expr(h)?);
+                }
+                let flat = crate::lower_array::emit_row_major_flat_index_vregs(
+                    ctx,
+                    &info.dimensions,
+                    &vregs,
+                )?;
+                return crate::lower_array::load_array_element_dynamic(ctx, &info, flat);
+            }
+        }
+    }
     let Expression::Access { base, index } = &ctx.func.expressions[access_h] else {
         return Err(LowerError::Internal(String::from(
             "lower_access_expr_vec: not Access",
@@ -336,6 +370,40 @@ pub(crate) fn store_through_access(
     access_h: Handle<Expression>,
     value: Handle<Expression>,
 ) -> Result<(), LowerError> {
+    // Try mixed Access/AccessIndex chain first for multi-dimensional arrays.
+    if let Some((lv, ops)) =
+        crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
+    {
+        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+            if ops.len() == info.dimensions.len() {
+                let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
+                    ctx,
+                    &info.dimensions,
+                    &ops,
+                )?;
+                return crate::lower_array::store_array_element_dynamic(ctx, &info, flat_v, value);
+            }
+        }
+    }
+    // Try pure Access chain (for backwards compatibility).
+    if let Some((lv, idx_handles)) =
+        crate::lower_array_multidim::peel_access_chain(ctx.func, access_h)
+    {
+        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+            if idx_handles.len() == info.dimensions.len() {
+                let mut vregs = alloc::vec::Vec::new();
+                for &h in &idx_handles {
+                    vregs.push(ctx.ensure_expr(h)?);
+                }
+                let flat = crate::lower_array::emit_row_major_flat_index_vregs(
+                    ctx,
+                    &info.dimensions,
+                    &vregs,
+                )?;
+                return crate::lower_array::store_array_element_dynamic(ctx, &info, flat, value);
+            }
+        }
+    }
     let Expression::Access { base, index } = &ctx.func.expressions[access_h] else {
         return Err(LowerError::Internal(String::from(
             "store_through_access: not Access",

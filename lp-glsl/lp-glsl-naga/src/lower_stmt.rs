@@ -110,157 +110,176 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
         Statement::Store { pointer, value } => match &ctx.func.expressions[*pointer] {
             Expression::Access { .. } => lower_access::store_through_access(ctx, *pointer, *value),
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
-            Expression::AccessIndex { base, index } => match &ctx.func.expressions[*base] {
-                Expression::LocalVariable(lv) => {
-                    if let Some(info) = ctx.array_map.get(lv).cloned() {
-                        return crate::lower_array::store_array_element_const(
-                            ctx, &info, *index, *value,
-                        );
-                    }
-                    let dsts = ctx.resolve_local(*lv)?;
-                    let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
-                    match lv_ty {
-                        TypeInner::Vector { scalar, .. } => {
-                            let comp = *index as usize;
-                            if comp >= dsts.len() {
-                                return Err(LowerError::UnsupportedStatement(format!(
-                                    "AccessIndex {comp} out of range (len {})",
-                                    dsts.len()
-                                )));
-                            }
-                            let scalar_inner = TypeInner::Scalar(*scalar);
-                            let raw = ctx.ensure_expr_vec(*value)?;
-                            let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
-                            if srcs.len() != 1 {
-                                return Err(LowerError::UnsupportedStatement(format!(
-                                    "component store expects one scalar, got {} values",
-                                    srcs.len()
-                                )));
-                            }
-                            ctx.fb.push(Op::Copy {
-                                dst: dsts[comp],
-                                src: srcs[0],
-                            });
-                            Ok(())
+            Expression::AccessIndex { .. } => {
+                if let Some((lv, idxs)) =
+                    crate::lower_array_multidim::peel_access_index_chain(ctx.func, *pointer)
+                {
+                    if let Some(info) = ctx.array_map.get(&lv).cloned() {
+                        if idxs.len() == info.dimensions.len() {
+                            let flat = crate::lower_array_multidim::flat_index_const_clamped(
+                                &info.dimensions,
+                                &idxs,
+                            )?;
+                            return crate::lower_array::store_array_element_const(
+                                ctx, &info, flat, *value,
+                            );
                         }
-                        TypeInner::Matrix {
+                    }
+                }
+                let Expression::AccessIndex { base, index } = &ctx.func.expressions[*pointer]
+                else {
+                    return Err(LowerError::Internal(String::from(
+                        "AccessIndex store shape",
+                    )));
+                };
+                match &ctx.func.expressions[*base] {
+                    Expression::LocalVariable(lv) => {
+                        let dsts = ctx.resolve_local(*lv)?;
+                        let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                        match lv_ty {
+                            TypeInner::Vector { scalar, .. } => {
+                                let comp = *index as usize;
+                                if comp >= dsts.len() {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "AccessIndex {comp} out of range (len {})",
+                                        dsts.len()
+                                    )));
+                                }
+                                let scalar_inner = TypeInner::Scalar(*scalar);
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                                if srcs.len() != 1 {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "component store expects one scalar, got {} values",
+                                        srcs.len()
+                                    )));
+                                }
+                                ctx.fb.push(Op::Copy {
+                                    dst: dsts[comp],
+                                    src: srcs[0],
+                                });
+                                Ok(())
+                            }
+                            TypeInner::Matrix {
+                                columns,
+                                rows,
+                                scalar,
+                            } => {
+                                let ncols = crate::lower_ctx::vector_size_usize(*columns);
+                                let nrows = crate::lower_ctx::vector_size_usize(*rows);
+                                let col = *index as usize;
+                                if col >= ncols {
+                                    return Err(LowerError::UnsupportedStatement(format!(
+                                        "matrix column AccessIndex {col} out of range (cols {ncols})"
+                                    )));
+                                }
+                                let col_ty = TypeInner::Vector {
+                                    size: *rows,
+                                    scalar: *scalar,
+                                };
+                                let raw = ctx.ensure_expr_vec(*value)?;
+                                let srcs = coerce_assignment_vregs(ctx, &col_ty, *value, raw)?;
+                                for r in 0..nrows {
+                                    let flat_i = col * nrows + r;
+                                    ctx.fb.push(Op::Copy {
+                                        dst: dsts[flat_i],
+                                        src: srcs[r],
+                                    });
+                                }
+                                Ok(())
+                            }
+                            _ => Err(LowerError::UnsupportedStatement(String::from(
+                                "AccessIndex store on non-vector non-matrix local",
+                            ))),
+                        }
+                    }
+                    Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
+                        let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;
+                        let dst_inner = match store_ty {
+                            TypeInner::ValuePointer {
+                                size: None, scalar, ..
+                            } => TypeInner::Scalar(scalar),
+                            TypeInner::Scalar(s) => TypeInner::Scalar(s),
+                            other => {
+                                return Err(LowerError::UnsupportedStatement(format!(
+                                    "component store through parameter pointer: expected scalar target, got {other:?}"
+                                )));
+                            }
+                        };
+                        let addr = ctx.arg_vregs_for(*arg_i)?[0];
+                        let raw = ctx.ensure_expr_vec(*value)?;
+                        let srcs = coerce_assignment_vregs(ctx, &dst_inner, *value, raw)?;
+                        if srcs.len() != 1 {
+                            return Err(LowerError::UnsupportedStatement(format!(
+                                "component store expects one scalar, got {} values",
+                                srcs.len()
+                            )));
+                        }
+                        ctx.fb.push(Op::Store {
+                            base: addr,
+                            offset: *index * 4,
+                            value: srcs[0],
+                        });
+                        Ok(())
+                    }
+                    Expression::AccessIndex {
+                        base: col_base,
+                        index: col_idx,
+                    } => {
+                        let Expression::LocalVariable(lv) = &ctx.func.expressions[*col_base] else {
+                            return Err(LowerError::UnsupportedStatement(String::from(
+                                "matrix element store: expected local matrix",
+                            )));
+                        };
+                        let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                        let TypeInner::Matrix {
                             columns,
                             rows,
                             scalar,
-                        } => {
-                            let ncols = crate::lower_ctx::vector_size_usize(*columns);
-                            let nrows = crate::lower_ctx::vector_size_usize(*rows);
-                            let col = *index as usize;
-                            if col >= ncols {
-                                return Err(LowerError::UnsupportedStatement(format!(
-                                    "matrix column AccessIndex {col} out of range (cols {ncols})"
-                                )));
-                            }
-                            let col_ty = TypeInner::Vector {
-                                size: *rows,
-                                scalar: *scalar,
-                            };
-                            let raw = ctx.ensure_expr_vec(*value)?;
-                            let srcs = coerce_assignment_vregs(ctx, &col_ty, *value, raw)?;
-                            for r in 0..nrows {
-                                let flat_i = col * nrows + r;
-                                ctx.fb.push(Op::Copy {
-                                    dst: dsts[flat_i],
-                                    src: srcs[r],
-                                });
-                            }
-                            Ok(())
-                        }
-                        _ => Err(LowerError::UnsupportedStatement(String::from(
-                            "AccessIndex store on non-vector non-matrix local",
-                        ))),
-                    }
-                }
-                Expression::FunctionArgument(arg_i) if ctx.pointer_args.contains_key(arg_i) => {
-                    let store_ty = expr_type_inner(ctx.module, ctx.func, *pointer)?;
-                    let dst_inner = match store_ty {
-                        TypeInner::ValuePointer {
-                            size: None, scalar, ..
-                        } => TypeInner::Scalar(scalar),
-                        TypeInner::Scalar(s) => TypeInner::Scalar(s),
-                        other => {
+                        } = lv_ty
+                        else {
+                            return Err(LowerError::UnsupportedStatement(String::from(
+                                "nested AccessIndex store base is not a matrix local",
+                            )));
+                        };
+                        let nrows = crate::lower_ctx::vector_size_usize(*rows);
+                        let ncols = crate::lower_ctx::vector_size_usize(*columns);
+                        let col = *col_idx as usize;
+                        let row = *index as usize;
+                        if col >= ncols || row >= nrows {
                             return Err(LowerError::UnsupportedStatement(format!(
-                                "component store through parameter pointer: expected scalar target, got {other:?}"
+                                "matrix store index out of range col {col} row {row} (mat {ncols}x{nrows})"
                             )));
                         }
-                    };
-                    let addr = ctx.arg_vregs_for(*arg_i)?[0];
-                    let raw = ctx.ensure_expr_vec(*value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &dst_inner, *value, raw)?;
-                    if srcs.len() != 1 {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "component store expects one scalar, got {} values",
-                            srcs.len()
-                        )));
+                        let flat_i = col * nrows + row;
+                        let dsts = ctx.resolve_local(*lv)?;
+                        if flat_i >= dsts.len() {
+                            return Err(LowerError::UnsupportedStatement(format!(
+                                "matrix flat index {flat_i} out of range (len {})",
+                                dsts.len()
+                            )));
+                        }
+                        let scalar_inner = TypeInner::Scalar(*scalar);
+                        let raw = ctx.ensure_expr_vec(*value)?;
+                        let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                        if srcs.len() != 1 {
+                            return Err(LowerError::UnsupportedStatement(format!(
+                                "matrix element store expects one scalar, got {} values",
+                                srcs.len()
+                            )));
+                        }
+                        ctx.fb.push(Op::Copy {
+                            dst: dsts[flat_i],
+                            src: srcs[0],
+                        });
+                        Ok(())
                     }
-                    ctx.fb.push(Op::Store {
-                        base: addr,
-                        offset: *index * 4,
-                        value: srcs[0],
-                    });
-                    Ok(())
+                    _ => Err(LowerError::UnsupportedStatement(String::from(
+                        "store to non-local pointer",
+                    ))),
                 }
-                Expression::AccessIndex {
-                    base: col_base,
-                    index: col_idx,
-                } => {
-                    let Expression::LocalVariable(lv) = &ctx.func.expressions[*col_base] else {
-                        return Err(LowerError::UnsupportedStatement(String::from(
-                            "matrix element store: expected local matrix",
-                        )));
-                    };
-                    let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
-                    let TypeInner::Matrix {
-                        columns,
-                        rows,
-                        scalar,
-                    } = lv_ty
-                    else {
-                        return Err(LowerError::UnsupportedStatement(String::from(
-                            "nested AccessIndex store base is not a matrix local",
-                        )));
-                    };
-                    let nrows = crate::lower_ctx::vector_size_usize(*rows);
-                    let ncols = crate::lower_ctx::vector_size_usize(*columns);
-                    let col = *col_idx as usize;
-                    let row = *index as usize;
-                    if col >= ncols || row >= nrows {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "matrix store index out of range col {col} row {row} (mat {ncols}x{nrows})"
-                        )));
-                    }
-                    let flat_i = col * nrows + row;
-                    let dsts = ctx.resolve_local(*lv)?;
-                    if flat_i >= dsts.len() {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "matrix flat index {flat_i} out of range (len {})",
-                            dsts.len()
-                        )));
-                    }
-                    let scalar_inner = TypeInner::Scalar(*scalar);
-                    let raw = ctx.ensure_expr_vec(*value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
-                    if srcs.len() != 1 {
-                        return Err(LowerError::UnsupportedStatement(format!(
-                            "matrix element store expects one scalar, got {} values",
-                            srcs.len()
-                        )));
-                    }
-                    ctx.fb.push(Op::Copy {
-                        dst: dsts[flat_i],
-                        src: srcs[0],
-                    });
-                    Ok(())
-                }
-                _ => Err(LowerError::UnsupportedStatement(String::from(
-                    "store to non-local pointer",
-                ))),
-            },
+            }
             Expression::LocalVariable(lv) => {
                 let dsts = ctx.resolve_local(*lv)?;
                 let dst_inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;

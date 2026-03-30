@@ -8,8 +8,7 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, SlotId, VReg};
 use naga::{
-    AddressSpace, ArraySize, Expression, Function, Handle, LocalVariable, Module, Statement, Type,
-    TypeInner,
+    AddressSpace, Expression, Function, Handle, LocalVariable, Module, Statement, Type, TypeInner,
 };
 use smallvec::SmallVec;
 
@@ -27,8 +26,11 @@ pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 #[derive(Clone, Debug)]
 pub(crate) struct ArrayInfo {
     pub slot: SlotId,
-    pub element_ty: Handle<Type>,
-    pub stride: u32,
+    /// Outer dimension first, e.g. `[2, 3]` for `int[2][3]`.
+    pub dimensions: SmallVec<[u32; 4]>,
+    pub leaf_element_ty: Handle<Type>,
+    pub leaf_stride: u32,
+    /// Product of [`Self::dimensions`]; leaf slots in row-major order.
     pub element_count: u32,
 }
 
@@ -107,36 +109,16 @@ impl<'a> LowerCtx<'a> {
                 continue;
             }
             match &module.types[var.ty].inner {
-                TypeInner::Array {
-                    base: elem_ty,
-                    size,
-                    stride,
-                } => {
-                    let element_count = match size {
-                        ArraySize::Constant(nz) => nz.get(),
-                        ArraySize::Pending(_) | ArraySize::Dynamic => {
-                            let Some(init_h) = var.init else {
-                                return Err(LowerError::UnsupportedType(String::from(
-                                    "unsized local array requires an initializer",
-                                )));
-                            };
-                            match &func.expressions[init_h] {
-                                Expression::Compose { components, .. } => {
-                                    u32::try_from(components.len()).map_err(|_| {
-                                        LowerError::Internal(String::from(
-                                            "inferred array length overflows u32",
-                                        ))
-                                    })?
-                                }
-                                _ => {
-                                    return Err(LowerError::UnsupportedType(String::from(
-                                        "array size must be constant or inferable from `{ ... }` init",
-                                    )));
-                                }
-                            }
-                        }
-                    };
-                    let total = element_count.checked_mul(*stride).ok_or_else(|| {
+                TypeInner::Array { .. } => {
+                    let (dimensions, leaf_ty, leaf_stride) =
+                        crate::lower_array_multidim::flatten_local_array_shape(module, func, &var)?;
+                    let element_count = dimensions
+                        .iter()
+                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from("array element count overflow"))
+                        })?;
+                    let total = element_count.checked_mul(leaf_stride).ok_or_else(|| {
                         LowerError::Internal(String::from("array slot size overflow"))
                     })?;
                     let slot = fb.alloc_slot(total);
@@ -144,8 +126,9 @@ impl<'a> LowerCtx<'a> {
                         lv_handle,
                         ArrayInfo {
                             slot,
-                            element_ty: *elem_ty,
-                            stride: *stride,
+                            dimensions,
+                            leaf_element_ty: leaf_ty,
+                            leaf_stride,
                             element_count,
                         },
                     );
@@ -248,6 +231,7 @@ impl<'a> LowerCtx<'a> {
             .ok_or_else(|| LowerError::Internal(format!("unknown local variable {lv:?}")))
     }
 
+    #[allow(dead_code, reason = "call lowering and tooling")]
     pub(crate) fn resolve_array(
         &self,
         lv: Handle<LocalVariable>,

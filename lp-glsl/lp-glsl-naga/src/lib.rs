@@ -13,6 +13,7 @@ pub use naga;
 pub mod lower;
 mod lower_access;
 mod lower_array;
+mod lower_array_multidim;
 mod lower_binary;
 mod lower_cast;
 mod lower_ctx;
