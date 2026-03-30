@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: equal(uvec3, uvec3) -> bvec3 (component-wise)

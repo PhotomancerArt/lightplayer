@@ -66,5 +66,4 @@ float test_float_divide_large_numbers() {
     return a / b;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_float_divide_large_numbers() ~= 32.768

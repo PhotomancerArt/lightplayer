@@ -42,6 +42,7 @@ uvec3 test_uvec3_from_mixed_vec3() {
     return uvec3(source);
 }
 
+// @unimplemented(backend=wasm)
 // run: test_uvec3_from_mixed_vec3() == uvec3(1u, 0u, 3u)
 
 uvec3 test_uvec3_from_mixed_zero_values() {

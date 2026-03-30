@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Assign Swizzle: bvec2.xy = bvec2 - multi-component swizzle assignment

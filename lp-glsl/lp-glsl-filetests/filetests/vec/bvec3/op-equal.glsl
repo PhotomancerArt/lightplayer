@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: == operator -> bool (aggregate), equal(bvec3, bvec3) -> bvec3 (component-wise)

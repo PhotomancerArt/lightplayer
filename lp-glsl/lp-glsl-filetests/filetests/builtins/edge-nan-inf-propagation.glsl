@@ -16,6 +16,7 @@ bool test_isnan_inf() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {

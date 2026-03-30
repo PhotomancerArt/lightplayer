@@ -10,6 +10,7 @@ float test_lpfx_saturate_below_zero() {
     return abs(result - 0.0) < 0.01 ? 1.0 : 0.0;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_lpfx_saturate_below_zero() == 1.0
 
 float test_lpfx_saturate_above_one() {

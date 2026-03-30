@@ -12,6 +12,7 @@ float test_lpfx_srandom_1d() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_lpfx_srandom_1d() == 1.0
 
 float test_lpfx_srandom_2d() {

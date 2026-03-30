@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Const read path only. Write rejection is tested in const/errors/const-write-error.glsl.
@@ -28,6 +27,7 @@ mat2 test_edge_const_write_error_mat() {
     return IDENTITY * 2.0;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_edge_const_write_error_mat() ~= mat2(2.0, 0.0, 0.0, 2.0)
 float test_edge_const_write_error_calculations() {
     float radius = 5.0;

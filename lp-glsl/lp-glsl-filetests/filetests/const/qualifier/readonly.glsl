@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Const variables are read-only after initialization; reading is allowed.
@@ -34,6 +33,7 @@ mat2 test_const_readonly_mat2() {
     return IDENTITY_MATRIX * 2.0;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0)
 float test_const_readonly_calculations() {
     float radius = 5.0;

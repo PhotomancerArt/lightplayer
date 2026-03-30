@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Const variables must be initialized at declaration.
@@ -46,4 +45,5 @@ mat2 test_const_must_init_mat2() {
     return MATRIX_CONST;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_const_must_init_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)

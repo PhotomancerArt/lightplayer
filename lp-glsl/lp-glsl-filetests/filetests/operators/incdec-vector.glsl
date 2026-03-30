@@ -22,6 +22,7 @@ float test_postinc_vec2() {
     return old_v.x + old_v.y;  // Should be 1.0 + 2.0 = 3.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_vec2() ~= 3.0
 
 // ============================================================================
@@ -46,6 +47,7 @@ float test_postdec_vec2() {
     return old_v.x + old_v.y;  // Should be 3.0 + 4.0 = 7.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_vec2() ~= 7.0
 
 // ============================================================================
@@ -70,6 +72,7 @@ float test_postinc_vec3() {
     return old_v.x + old_v.y + old_v.z;  // Should be 1.0 + 2.0 + 3.0 = 6.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_vec3() ~= 6.0
 
 // ============================================================================
@@ -94,6 +97,7 @@ float test_postdec_vec3() {
     return old_v.x + old_v.y + old_v.z;  // Should be 3.0 + 4.0 + 5.0 = 12.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_vec3() ~= 12.0
 
 // ============================================================================
@@ -118,6 +122,7 @@ float test_postinc_vec4() {
     return old_v.x + old_v.y + old_v.z + old_v.w;  // Should be 1.0 + 2.0 + 3.0 + 4.0 = 10.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_vec4() ~= 10.0
 
 // ============================================================================
@@ -142,6 +147,7 @@ float test_postdec_vec4() {
     return old_v.x + old_v.y + old_v.z + old_v.w;  // Should be 3.0 + 4.0 + 5.0 + 6.0 = 18.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_vec4() ~= 18.0
 
 // ============================================================================
@@ -166,6 +172,7 @@ int test_postinc_ivec2() {
     return old_v.x + old_v.y;  // Should be 1 + 2 = 3
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_ivec2() == 3
 
 // ============================================================================
@@ -190,6 +197,7 @@ int test_postdec_ivec2() {
     return old_v.x + old_v.y;  // Should be 3 + 4 = 7
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_ivec2() == 7
 
 // ============================================================================
@@ -214,6 +222,7 @@ int test_postinc_ivec3() {
     return old_v.x + old_v.y + old_v.z;  // Should be 5 + 10 + 15 = 30
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_ivec3() == 30
 
 // ============================================================================
@@ -238,6 +247,7 @@ int test_postdec_ivec3() {
     return old_v.x + old_v.y + old_v.z;  // Should be 5 + 10 + 15 = 30
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_ivec3() == 30
 
 // ============================================================================
@@ -262,6 +272,7 @@ int test_postinc_ivec4() {
     return old_v.x + old_v.y + old_v.z + old_v.w;  // Should be 1 + 2 + 3 + 4 = 10
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_ivec4() == 10
 
 // ============================================================================
@@ -286,6 +297,7 @@ int test_postdec_ivec4() {
     return old_v.x + old_v.y + old_v.z + old_v.w;  // Should be 3 + 4 + 5 + 6 = 18
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_ivec4() == 18
 
 

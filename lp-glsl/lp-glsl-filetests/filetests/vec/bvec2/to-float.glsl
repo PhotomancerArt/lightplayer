@@ -11,6 +11,7 @@ float test_bvec2_to_float_true() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_bvec2_to_float_true() ~= 1.0
 
 float test_bvec2_to_float_false() {

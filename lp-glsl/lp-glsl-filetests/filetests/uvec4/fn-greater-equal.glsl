@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Greater Than Equal: greaterThanEqual(uvec4, uvec4) -> bvec4 (component-wise)

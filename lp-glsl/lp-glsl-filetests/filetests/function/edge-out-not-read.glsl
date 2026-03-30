@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Out Parameters Not Read: Can assign to out without reading first
@@ -124,4 +123,5 @@ mat2 test_edge_out_matrix_not_read() {
     return m;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_edge_out_matrix_not_read() ~= mat2(1.0, 2.0, 3.0, 4.0)

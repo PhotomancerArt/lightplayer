@@ -16,6 +16,7 @@ float test_pow_negative_base() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {

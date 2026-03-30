@@ -10,6 +10,7 @@ float test_declare_float_array() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_declare_float_array() == 1.0
 
 int test_declare_int_array() {

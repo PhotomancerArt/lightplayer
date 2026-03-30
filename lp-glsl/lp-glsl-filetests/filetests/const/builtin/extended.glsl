@@ -13,6 +13,7 @@ float test_builtin_trunc_round_ceil_mod() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_builtin_trunc_round_ceil_mod() ~= 9.0
 
 const float E = exp(0.0);

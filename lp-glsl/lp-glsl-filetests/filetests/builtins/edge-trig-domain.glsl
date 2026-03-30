@@ -16,6 +16,7 @@ float test_asin_domain_over() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {

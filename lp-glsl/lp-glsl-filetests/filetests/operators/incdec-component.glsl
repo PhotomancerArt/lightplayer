@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Pre-increment (++v.x) - Single component
@@ -55,6 +54,7 @@ float test_postinc_component_x() {
     return old_x + v.x;  // Should be 1.0 + 2.0 = 3.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_component_x() ~= 3.0
 
 float test_postinc_component_y() {
@@ -63,6 +63,7 @@ float test_postinc_component_y() {
     return old_y + v.y;  // Should be 2.0 + 3.0 = 5.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_component_y() ~= 5.0
 
 float test_postinc_component_z() {
@@ -71,6 +72,7 @@ float test_postinc_component_z() {
     return old_z + v.z;  // Should be 3.0 + 4.0 = 7.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_component_z() ~= 7.0
 
 float test_postinc_component_w() {
@@ -79,6 +81,7 @@ float test_postinc_component_w() {
     return old_w + v.w;  // Should be 4.0 + 5.0 = 9.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_component_w() ~= 9.0
 
 int test_postinc_component_int() {
@@ -87,6 +90,7 @@ int test_postinc_component_int() {
     return old_x + v.x;  // Should be 5 + 6 = 11
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_component_int() == 11
 
 // ============================================================================
@@ -143,6 +147,7 @@ float test_postdec_component_x() {
     return old_x + v.x;  // Should be 3.0 + 2.0 = 5.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_component_x() ~= 5.0
 
 float test_postdec_component_y() {
@@ -151,6 +156,7 @@ float test_postdec_component_y() {
     return old_y + v.y;  // Should be 4.0 + 3.0 = 7.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_component_y() ~= 7.0
 
 float test_postdec_component_z() {
@@ -159,6 +165,7 @@ float test_postdec_component_z() {
     return old_z + v.z;  // Should be 5.0 + 4.0 = 9.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_component_z() ~= 9.0
 
 float test_postdec_component_w() {
@@ -167,6 +174,7 @@ float test_postdec_component_w() {
     return old_w + v.w;  // Should be 6.0 + 5.0 = 11.0
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_component_w() ~= 11.0
 
 int test_postdec_component_int() {
@@ -175,6 +183,7 @@ int test_postdec_component_int() {
     return old_x + v.x;  // Should be 5 + 4 = 9
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_component_int() == 9
 
 // ============================================================================

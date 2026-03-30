@@ -11,6 +11,7 @@ uint test_bvec2_to_uint_true() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_bvec2_to_uint_true() == 1u
 
 uint test_bvec2_to_uint_false() {

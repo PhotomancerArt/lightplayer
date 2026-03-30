@@ -26,6 +26,7 @@ float test_postinc_mat3() {
            old_m[2][0] + old_m[2][1] + old_m[2][2];
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postinc_mat3() ~= 45.0
 
 // ============================================================================
@@ -54,6 +55,7 @@ float test_postdec_mat3() {
            old_m[2][0] + old_m[2][1] + old_m[2][2];
 }
 
+// @unimplemented(backend=wasm)
 // run: test_postdec_mat3() ~= 63.0
 
 

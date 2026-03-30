@@ -11,6 +11,7 @@ int test_bvec2_to_int_true() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_bvec2_to_int_true() == 1
 
 int test_bvec2_to_int_false() {

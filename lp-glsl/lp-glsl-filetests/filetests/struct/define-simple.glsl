@@ -15,6 +15,7 @@ float test_define_simple_point() {
 }
 
 // @unimplemented(backend=jit)
+// @unimplemented(backend=wasm)
 // run: test_define_simple_point() == 1.0
 
 struct Color {

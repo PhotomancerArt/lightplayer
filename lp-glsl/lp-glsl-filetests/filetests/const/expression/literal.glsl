@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // Literal values as const initializers.
@@ -32,4 +31,5 @@ mat2 test_literal_mat2() {
     return M2;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_literal_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)

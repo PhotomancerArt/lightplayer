@@ -3,7 +3,6 @@
 //   lp-glsl-filetests-gen-app vec/vec4/op-equal --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Equal: == operator -> bool (aggregate), equal(vec4, vec4) -> bvec4 (component-wise)

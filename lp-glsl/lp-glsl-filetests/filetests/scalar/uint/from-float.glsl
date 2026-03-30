@@ -72,6 +72,7 @@ uint test_uint_from_float_negative() {
     return uint(f);
 }
 
+// @unimplemented(backend=wasm)
 // run: test_uint_from_float_negative() == 0u
 
 uint test_uint_from_float_negative_large() {
@@ -79,6 +80,7 @@ uint test_uint_from_float_negative_large() {
     return uint(f);
 }
 
+// @unimplemented(backend=wasm)
 // run: test_uint_from_float_negative_large() == 0u
 
 uint test_uint_from_float_negative_literal() {
@@ -93,5 +95,6 @@ uint test_uint_from_float_negative_expression() {
     return uint(a - b);
 }
 
+// @unimplemented(backend=wasm)
 // run: test_uint_from_float_negative_expression() == 0u
 

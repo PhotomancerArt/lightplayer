@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Not Equal: != operator -> bool (aggregate), notEqual(bvec2, bvec2) -> bvec2 (component-wise)

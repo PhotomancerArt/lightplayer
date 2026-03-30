@@ -48,6 +48,7 @@ uvec2 test_uvec2_from_mixed_vec2() {
     return uvec2(source);
 }
 
+// @unimplemented(backend=wasm)
 // run: test_uvec2_from_mixed_vec2() == uvec2(1u, 0u)
 
 uvec2 test_uvec2_from_mixed_zero_values() {

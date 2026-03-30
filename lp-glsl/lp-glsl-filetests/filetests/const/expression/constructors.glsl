@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // Constructors whose arguments are constant expressions.
@@ -28,4 +27,5 @@ mat2 test_constructors_matrix() {
     return SCALED_IDENTITY;
 }
 
+// @unimplemented(backend=wasm)
 // run: test_constructors_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0)
