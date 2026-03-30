@@ -72,7 +72,6 @@ int test_declare_2d_access_inner() {
     return arr[1][1]; // Should be 4 (second row, second column)
 }
 
-// @unimplemented()
 // run: test_declare_2d_access_inner() == 4
 
 float test_declare_3d_access() {

@@ -88,8 +88,10 @@ pub(crate) fn peel_array_subscript_chain(
                 expr = *base;
             }
             Expression::LocalVariable(lv) => {
-                // AccessIndex chains: collected outer-to-inner, already in correct order.
-                // Return outer index first for correct flat index calculation.
+                // Walking from the full r-value toward `LocalVariable`, each step pushes this
+                // bracket's index. For `arr[row][col]` that yields `[col, row]` — opposite of GLSL
+                // left-to-right order, which must align with `dimensions` (outermost first).
+                ops.reverse();
                 return Some((*lv, ops));
             }
             _ => return None,
@@ -189,6 +191,10 @@ pub(crate) fn flatten_local_array_shape(
     })?;
     let min_layout_stride = ir_components.saturating_mul(4);
     let leaf_stride = leaf_stride.max(min_layout_stride);
+
+    // Naga nests `T[a][b]` so the type walk collects sizes inner-to-outer (`[b, a]`).
+    // GLSL / stack layout use outermost (`a`) first in `dimensions` and in `arr[i][j]`.
+    dimensions.reverse();
 
     Ok((dimensions, leaf_ty, leaf_stride))
 }

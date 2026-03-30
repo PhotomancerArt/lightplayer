@@ -511,13 +511,16 @@ pub(crate) fn scan_naga_multidim_array_length_literals(
         if info.dimensions.len() < 2 {
             continue;
         }
-        let naga_outer = info.dimensions[0];
-        let glsl_first = *info.dimensions.last().expect("dims");
-        if naga_outer == glsl_first {
+        // With dimensions in GLSL order (outer first):
+        // - Naga emits the inner dimension (what used to be dimensions[0] in Naga's type tree)
+        // - GLSL wants the outer dimension (dimensions[0] in our representation)
+        let glsl_outer = info.dimensions[0];
+        let naga_emitted = *info.dimensions.last().expect("dims");
+        if glsl_outer == naga_emitted {
             continue;
         }
-        let wrong = naga_outer;
-        let correct = glsl_first;
+        let wrong = naga_emitted;
+        let correct = glsl_outer;
         let Expression::Literal(Literal::U32(n)) = e1 else {
             continue;
         };
@@ -604,7 +607,7 @@ pub(crate) fn lower_array_length(
     let info = ctx.array_map.get(&lv).ok_or_else(|| {
         LowerError::UnsupportedExpression(String::from("ArrayLength: not a stack-slot array local"))
     })?;
-    let len = *info.dimensions.last().expect("array dimensions") as i32;
+    let len = *info.dimensions.first().expect("array dimensions") as i32;
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     ctx.fb.push(Op::IconstI32 { dst, value: len });
     Ok(smallvec![dst])
