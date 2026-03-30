@@ -169,6 +169,9 @@ fn to_frontend_type(ty: &GlslType) -> Type {
         GlslType::BVec2 => Type::BVec2,
         GlslType::BVec3 => Type::BVec3,
         GlslType::BVec4 => Type::BVec4,
+        GlslType::Mat2 => Type::Mat2,
+        GlslType::Mat3 => Type::Mat3,
+        GlslType::Mat4 => Type::Mat4,
     }
 }
 

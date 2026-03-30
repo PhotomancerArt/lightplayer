@@ -45,6 +45,9 @@ fn lpir_glsl_type_to_core(t: &GlslType) -> Type {
         GlslType::BVec2 => Type::BVec2,
         GlslType::BVec3 => Type::BVec3,
         GlslType::BVec4 => Type::BVec4,
+        GlslType::Mat2 => Type::Mat2,
+        GlslType::Mat3 => Type::Mat3,
+        GlslType::Mat4 => Type::Mat4,
     }
 }
 
@@ -113,6 +116,41 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
         (BVec2, GlslValue::BVec2(a)) => GlslQ32::BVec2(a[0], a[1]),
         (BVec3, GlslValue::BVec3(a)) => GlslQ32::BVec3(a[0], a[1], a[2]),
         (BVec4, GlslValue::BVec4(a)) => GlslQ32::BVec4(a[0], a[1], a[2], a[3]),
+        (Mat2, GlslValue::Mat2x2(m)) => GlslQ32::Mat2([
+            m[0][0] as f64,
+            m[0][1] as f64,
+            m[1][0] as f64,
+            m[1][1] as f64,
+        ]),
+        (Mat3, GlslValue::Mat3x3(m)) => GlslQ32::Mat3([
+            m[0][0] as f64,
+            m[0][1] as f64,
+            m[0][2] as f64,
+            m[1][0] as f64,
+            m[1][1] as f64,
+            m[1][2] as f64,
+            m[2][0] as f64,
+            m[2][1] as f64,
+            m[2][2] as f64,
+        ]),
+        (Mat4, GlslValue::Mat4x4(m)) => GlslQ32::Mat4([
+            m[0][0] as f64,
+            m[0][1] as f64,
+            m[0][2] as f64,
+            m[0][3] as f64,
+            m[1][0] as f64,
+            m[1][1] as f64,
+            m[1][2] as f64,
+            m[1][3] as f64,
+            m[2][0] as f64,
+            m[2][1] as f64,
+            m[2][2] as f64,
+            m[2][3] as f64,
+            m[3][0] as f64,
+            m[3][1] as f64,
+            m[3][2] as f64,
+            m[3][3] as f64,
+        ]),
         _ => return Err(err()),
     })
 }
@@ -355,4 +393,41 @@ pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
             format!("unexpected bvec return: {:?}", ret.value),
         )),
     }
+}
+
+pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
+    exec: &mut E,
+    name: &str,
+    args: &[GlslValue],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, GlslError> {
+    let sig = find_gfn(exec.signatures_map(), name)?;
+    let ok = matches!(
+        (&sig.return_type, rows, cols),
+        (Type::Mat2, 2, 2) | (Type::Mat3, 3, 3) | (Type::Mat4, 4, 4)
+    );
+    if !ok {
+        return Err(GlslError::new(
+            ErrorCode::E0400,
+            format!(
+                "call_mat: function '{}' returns {:?}, expected mat{rows}x{cols}",
+                name, sig.return_type
+            ),
+        ));
+    }
+    let n = cols * rows;
+    let ret = exec.call_q32_ret(name, args)?;
+    let flat: Vec<f32> = match &ret.value {
+        Some(GlslQ32::Mat2(a)) if n == 4 => a.iter().map(|x| *x as f32).collect(),
+        Some(GlslQ32::Mat3(a)) if n == 9 => a.iter().map(|x| *x as f32).collect(),
+        Some(GlslQ32::Mat4(a)) if n == 16 => a.iter().map(|x| *x as f32).collect(),
+        other => {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!("unexpected matrix return: {other:?}"),
+            ));
+        }
+    };
+    Ok(flat)
 }

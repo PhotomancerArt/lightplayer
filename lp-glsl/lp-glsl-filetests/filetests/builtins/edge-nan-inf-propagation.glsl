@@ -1,5 +1,5 @@
 // test run
-// @unimplemented(backend=wasm)
+// @unsupported(float_mode=q32, reason="Q32 has no IEEE NaN or Inf; special-value propagation differs from float")
 
 // ============================================================================
 // NaN and Inf propagation tests
@@ -8,6 +8,7 @@
 
 // Note: These tests document expected behavior with special values
 // The actual results may vary between implementations
+// On float_mode=q32 these are skipped (see file-level @unsupported).
 
 bool test_isnan_inf() {
     // isnan with positive infinity should be false
@@ -42,7 +43,6 @@ float test_sin_inf() {
     return sin(1.0 / 0.0);
 }
 
-// @unimplemented()
 // run: test_sin_inf() ~= 0.0
 
 float test_cos_inf() {
@@ -50,7 +50,6 @@ float test_cos_inf() {
     return cos(1.0 / 0.0);
 }
 
-// @unimplemented()
 // run: test_cos_inf() ~= 0.0
 
 float test_log_inf() {
@@ -58,7 +57,6 @@ float test_log_inf() {
     return log(1.0 / 0.0);
 }
 
-// @unimplemented()
 // run: test_log_inf() ~= 0.0
 
 float test_exp_inf() {
@@ -66,7 +64,6 @@ float test_exp_inf() {
     return exp(1.0 / 0.0);
 }
 
-// @unimplemented()
 // run: test_exp_inf() ~= 0.0
 
 float test_sqrt_inf() {
@@ -74,7 +71,6 @@ float test_sqrt_inf() {
     return sqrt(1.0 / 0.0);
 }
 
-// @unimplemented()
 // run: test_sqrt_inf() ~= 0.0
 
 vec2 test_nan_propagation() {
@@ -83,7 +79,6 @@ vec2 test_nan_propagation() {
     return vec2(nan_val + 1.0, nan_val * 2.0);
 }
 
-// @unimplemented()
 // run: test_nan_propagation() ~= vec2(0.0, 0.0)
 
 vec2 test_inf_propagation() {
@@ -92,9 +87,6 @@ vec2 test_inf_propagation() {
     return vec2(inf_val + 1.0, inf_val * 2.0);
 }
 
-// @unimplemented()
 // run: test_inf_propagation() ~= vec2(0.0, 0.0)
-
-
 
 

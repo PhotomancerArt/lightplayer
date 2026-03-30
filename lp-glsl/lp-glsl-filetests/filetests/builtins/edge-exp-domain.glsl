@@ -1,4 +1,5 @@
 // test run
+// @unsupported(float_mode=q32, reason="Q32 fixed-point is not IEEE float; exp/log/pow domain UB differs from f32")
 
 // ============================================================================
 // Exponential domain error tests
@@ -7,13 +8,13 @@
 
 // Note: These tests document expected undefined behavior
 // The actual results may vary between implementations
+// On float_mode=q32 these are skipped (see file-level @unsupported).
 
 float test_pow_negative_base() {
     // pow(-2.0, 3.0) - x < 0, undefined behavior
     return pow(-2.0, 3.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {
@@ -21,7 +22,6 @@ float test_pow_zero_negative_exponent() {
     return pow(0.0, -1.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
 float test_pow_zero_zero() {
@@ -29,7 +29,6 @@ float test_pow_zero_zero() {
     return pow(0.0, 0.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_pow_zero_zero() ~= 0.0
 
 float test_log_zero() {
@@ -37,7 +36,6 @@ float test_log_zero() {
     return log(0.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_log_zero() ~= 0.0
 
 float test_log_negative() {
@@ -45,7 +43,6 @@ float test_log_negative() {
     return log(-1.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_log_negative() ~= 0.0
 
 float test_log2_zero() {
@@ -53,7 +50,6 @@ float test_log2_zero() {
     return log2(0.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_log2_zero() ~= 0.0
 
 float test_log2_negative() {
@@ -61,7 +57,6 @@ float test_log2_negative() {
     return log2(-1.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_log2_negative() ~= 0.0
 
 float test_sqrt_negative() {
@@ -69,7 +64,6 @@ float test_sqrt_negative() {
     return sqrt(-1.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_sqrt_negative() ~= 0.0
 
 float test_inversesqrt_zero() {
@@ -77,7 +71,6 @@ float test_inversesqrt_zero() {
     return inversesqrt(0.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_inversesqrt_zero() ~= 0.0
 
 float test_inversesqrt_negative() {
@@ -85,9 +78,6 @@ float test_inversesqrt_negative() {
     return inversesqrt(-1.0);
 }
 
-// @broken(backend=wasm, float_mode=q32, reason="Q32 UB differs from f32 placeholder")
 // run: test_inversesqrt_negative() ~= 0.0
-
-
 
 
