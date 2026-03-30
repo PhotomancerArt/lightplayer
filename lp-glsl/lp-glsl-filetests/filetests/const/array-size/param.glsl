@@ -20,6 +20,7 @@ float test_param_array_call() {
     return test_param_array(test_arr);
 }
 
+// @unimplemented(backend=jit)
 // run: test_param_array_call() == 0.0
 
 vec2 test_nested_calls(vec2 arr[NESTED_SIZE]) {

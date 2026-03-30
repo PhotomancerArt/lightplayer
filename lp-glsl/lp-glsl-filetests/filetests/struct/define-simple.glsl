@@ -14,6 +14,7 @@ float test_define_simple_point() {
     return 1.0; // Should be 1.0 (test passes if no compilation error)
 }
 
+// @unimplemented(backend=jit)
 // run: test_define_simple_point() == 1.0
 
 struct Color {

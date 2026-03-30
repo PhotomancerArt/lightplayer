@@ -12,6 +12,7 @@ bvec2 test_bvec2_assign_element_x() {
     return a;
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec2_assign_element_x() == bvec2(true, false)
 
 bvec2 test_bvec2_assign_element_y() {

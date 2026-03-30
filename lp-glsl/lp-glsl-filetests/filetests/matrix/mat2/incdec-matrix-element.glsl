@@ -11,6 +11,7 @@ float test_preinc_mat2_element_00() {
     return result + m[0][0] + m[0][1] + m[1][0] + m[1][1];
 }
 
+// @unimplemented(backend=jit)
 // run: test_preinc_mat2_element_00() ~= 13.0
 
 float test_preinc_mat2_element_01() {

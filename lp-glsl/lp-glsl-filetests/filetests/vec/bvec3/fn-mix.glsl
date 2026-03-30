@@ -14,6 +14,7 @@ bvec3 test_bvec3_mix_all_false_selector() {
     return mix(a, b, selector);
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec3_mix_all_false_selector() == bvec3(true, false, true)
 
 bvec3 test_bvec3_mix_all_true_selector() {

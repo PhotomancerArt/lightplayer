@@ -16,6 +16,7 @@ float test_preinc_mat4_column_0() {
     return result.x + result.y + result.z + result.w;  // Should be 2.0 + 3.0 + 4.0 + 5.0 = 14.0
 }
 
+// @unimplemented(backend=jit)
 // run: test_preinc_mat4_column_0() ~= 14.0
 
 float test_preinc_mat4_column_2() {

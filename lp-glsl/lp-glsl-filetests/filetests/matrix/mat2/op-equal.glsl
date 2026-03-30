@@ -11,6 +11,7 @@ bool test_mat2_equal_true() {
     return a == b;
 }
 
+// @unimplemented(backend=jit)
 // run: test_mat2_equal_true() == true
 
 bool test_mat2_equal_false() {

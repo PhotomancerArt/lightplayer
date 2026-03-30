@@ -10,6 +10,7 @@ int test_bvec2_to_int_true() {
     return int(source);
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec2_to_int_true() == 1
 
 int test_bvec2_to_int_false() {

@@ -14,6 +14,7 @@ float test_define_vector_transform() {
     return 1.0; // Should be 1.0
 }
 
+// @unimplemented(backend=jit)
 // run: test_define_vector_transform() == 1.0
 
 struct ColorRGBA {

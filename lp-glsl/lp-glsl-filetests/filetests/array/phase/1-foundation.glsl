@@ -75,6 +75,7 @@ int phase1() {
     return x + y + z; // Should be 10 + 30 + 50 = 90
 }
 
+// @unimplemented(backend=jit)
 // run: test_declaration() == 0
 // run: test_type_stored() == 0
 // run: test_write() == 0

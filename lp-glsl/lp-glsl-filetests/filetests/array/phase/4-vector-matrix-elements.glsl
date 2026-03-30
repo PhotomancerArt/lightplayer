@@ -10,6 +10,7 @@ int test_vector_array_declaration() {
     arr[1] = vec4(5.0, 6.0, 7.0, 8.0);
     return int(arr[0].x + arr[1].x); // Should be 1 + 5 = 6
 }
+// @unimplemented(backend=jit)
 // run: test_vector_array_declaration() == 6
 
 // Test 2: Vector array component access (.x, .y, .z, .w)

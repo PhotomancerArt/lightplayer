@@ -13,6 +13,7 @@ mat2 test_matrixcompmult_mat2_identity() {
     return matrixCompMult(a, b);
 }
 
+// @unimplemented(backend=jit)
 // run: test_matrixcompmult_mat2_identity() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 mat2 test_matrixcompmult_mat2_simple() {

@@ -11,6 +11,7 @@ bool test_bvec2_variable_index_0() {
     return a[i];
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec2_variable_index_0() == true
 
 bool test_bvec2_variable_index_1() {

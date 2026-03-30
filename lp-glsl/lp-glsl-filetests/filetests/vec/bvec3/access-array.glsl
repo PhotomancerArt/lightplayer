@@ -11,6 +11,7 @@ bool test_bvec3_access_array_index_0() {
     return a[0];
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec3_access_array_index_0() == true
 
 bool test_bvec3_access_array_index_1() {

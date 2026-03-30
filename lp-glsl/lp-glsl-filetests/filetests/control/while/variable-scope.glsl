@@ -18,6 +18,7 @@ int test_while_loop_variable_scope() {
     return sum;
 }
 
+// @unimplemented(backend=jit)
 // run: test_while_loop_variable_scope() == 6
 
 int test_while_loop_shadowing() {

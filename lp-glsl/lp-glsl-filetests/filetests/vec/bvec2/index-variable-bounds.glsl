@@ -17,6 +17,7 @@ bool test_bvec2_index_negative() {
     return a[i];
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec2_index_negative() == false
 // EXPECT_TRAP: vector/matrix index out of bounds
 

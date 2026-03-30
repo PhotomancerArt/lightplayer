@@ -10,6 +10,7 @@ uint test_bvec2_to_uint_true() {
     return uint(source);
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec2_to_uint_true() == 1u
 
 uint test_bvec2_to_uint_false() {

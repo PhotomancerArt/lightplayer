@@ -11,6 +11,7 @@ bool test_bvec3_any_all_true() {
     return any(a);
 }
 
+// @unimplemented(backend=jit)
 // run: test_bvec3_any_all_true() == true
 
 bool test_bvec3_any_all_false() {

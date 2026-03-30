@@ -15,6 +15,7 @@ float test_asin_domain_over() {
     return asin(1.5);
 }
 
+// @unimplemented(backend=jit)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {

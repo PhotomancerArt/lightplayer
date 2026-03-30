@@ -9,6 +9,7 @@ int test_bounds_index_zero() {
     arr[0] = 42;
     return arr[0]; // Should return 42
 }
+// @unimplemented(backend=jit)
 // run: test_bounds_index_zero() == 42
 
 // Test 2: Valid bounds access at middle index

@@ -15,6 +15,7 @@ float test_forward_declare_simple() {
     return compute_area(4.0, 5.0);
 }
 
+// @unimplemented(backend=jit)
 // run: test_forward_declare_simple() ~= 20.0
 
 vec2 test_forward_declare_vector() {

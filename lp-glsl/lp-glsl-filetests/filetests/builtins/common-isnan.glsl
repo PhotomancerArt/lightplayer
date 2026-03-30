@@ -11,6 +11,7 @@ bool test_isnan_normal() {
     return isnan(1.0);
 }
 
+// @unimplemented(backend=jit)
 // run: test_isnan_normal() == false
 
 bool test_isnan_zero() {

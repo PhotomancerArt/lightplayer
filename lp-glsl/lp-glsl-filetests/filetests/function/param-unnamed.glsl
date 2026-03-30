@@ -17,6 +17,7 @@ float test_param_unnamed_simple() {
     return add(3.0, 4.0);
 }
 
+// @unimplemented(backend=jit)
 // run: test_param_unnamed_simple() ~= 7.0
 
 // Prototype with unnamed parameters

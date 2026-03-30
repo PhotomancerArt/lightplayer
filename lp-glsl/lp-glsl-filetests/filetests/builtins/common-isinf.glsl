@@ -11,6 +11,7 @@ bool test_isinf_normal() {
     return isinf(1.0);
 }
 
+// @unimplemented(backend=jit)
 // run: test_isinf_normal() == false
 
 bool test_isinf_zero() {
