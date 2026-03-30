@@ -41,14 +41,13 @@ pub(crate) fn maybe_enter_loop_continue_region(
             ..
         } = frame
         {
+            let _ = header_block;
             if op_idx == *continue_pc
                 && *continue_pc > *loop_start_pc + 1
                 && *header_block != *continue_block
             {
-                if builder.current_block() == Some(*header_block) {
-                    builder.ins().jump(*continue_block, &[]);
-                    builder.switch_to_block(*continue_block);
-                }
+                jump_if_unterminated(builder, *continue_block);
+                builder.switch_to_block(*continue_block);
                 break;
             }
         }

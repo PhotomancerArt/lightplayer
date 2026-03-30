@@ -471,6 +471,44 @@ func @double_swap(v0:f32, v1:f32) -> (f32, f32) {
     }
 
     #[test]
+    fn test_loop_continue() {
+        let ir = parse_module(
+            r"func @skip_twos(v0:i32) -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
+  loop {
+    v3:i32 = ige_s v2, v0
+    if v3 {
+      break
+    }
+    v4:i32 = ieq_imm v2, 2
+    if v4 {
+      v2 = iadd_imm v2, 1
+      continue
+    }
+    v1 = iadd v1, v2
+    v2 = iadd_imm v2, 1
+    continuing:
+  }
+  return v1
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        // sum 0..5 skipping 2: 0+1+3+4 = 8
+        assert_eq!(f(5), 8);
+    }
+
+    #[test]
     fn test_call_in_loop() {
         let ir = parse_module(
             r"func @add1(v0:i32) -> i32 {
