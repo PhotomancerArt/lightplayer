@@ -359,7 +359,10 @@ pub(crate) fn lower_array_initializer(
     match &ctx.func.expressions[init_h] {
         Expression::ZeroValue(_) => zero_fill_array(ctx, ctx.module, info),
         Expression::Compose { .. } => {
-            let flat_components = collect_flat_compose_components(ctx.func, init_h)?;
+            // For multi-dimensional arrays, flatten nested Compose expressions.
+            // Depth = dimensions.len() - 1 = number of nesting levels to flatten.
+            let depth = info.dimensions.len().saturating_sub(1);
+            let flat_components = collect_flat_compose_components(ctx.func, init_h, depth)?;
             if flat_components.len() as u32 > info.element_count {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "array initializer: too many elements",
@@ -388,9 +391,12 @@ pub(crate) fn lower_array_initializer(
 }
 
 /// Flatten `{a,b}` or nested `{{a,b},{c,d}}` into leaf initializer expressions (row-major).
+/// Only flattens for multi-dimensional arrays where inner components represent sub-arrays.
+/// For 1D arrays of vectors/matrices, preserves components as leaf elements.
 fn collect_flat_compose_components(
     func: &Function,
     init_h: Handle<Expression>,
+    depth: usize,
 ) -> Result<Vec<Handle<Expression>>, LowerError> {
     match &func.expressions[init_h] {
         Expression::Compose { components, .. } => {
@@ -399,15 +405,20 @@ fn collect_flat_compose_components(
                     "empty array initializer list",
                 )));
             }
-            let nested_row = matches!(&func.expressions[components[0]], Expression::Compose { .. });
-            if nested_row {
+            // If any component is not Compose, we're at leaf level - don't flatten.
+            let any_non_compose = components
+                .iter()
+                .any(|&c| !matches!(&func.expressions[c], Expression::Compose { .. }));
+            if any_non_compose || depth == 0 {
+                // Leaf level: components are the final elements (scalars or composite types)
+                Ok(components.iter().copied().collect())
+            } else {
+                // Inner level of multi-dimensional array: recursively flatten.
                 let mut flat = Vec::new();
                 for &c in components.iter() {
-                    flat.extend(collect_flat_compose_components(func, c)?);
+                    flat.extend(collect_flat_compose_components(func, c, depth - 1)?);
                 }
                 Ok(flat)
-            } else {
-                Ok(components.iter().copied().collect())
             }
         }
         _ => Err(LowerError::UnsupportedExpression(String::from(
