@@ -98,7 +98,7 @@ pub fn run(
                     directive.line_number,
                 );
                 let error_msg = format!("failed to generate test GLSL: {e}");
-                eprintln!("{error_msg}");
+                eprintln_if_detail(output_mode, &error_msg);
                 errors.push(e.context(error_msg));
                 continue;
             }
@@ -120,7 +120,7 @@ pub fn run(
                     &mut unexpected_pass_lines,
                     directive.line_number,
                 );
-                let formatted_error = format_compilation_error(
+                let err = format_compilation_error(
                     e,
                     &test_glsl_result,
                     directive.line_number,
@@ -128,8 +128,8 @@ pub fn run(
                     &relative_path,
                     output_mode,
                 );
-                eprintln!("{formatted_error}");
-                errors.push(anyhow::anyhow!("{formatted_error}"));
+                eprintln_if_detail(output_mode, &err);
+                errors.push(err);
                 continue;
             }
         };
@@ -159,7 +159,7 @@ pub fn run(
                         "failed to parse function call: {}",
                         directive.expression_str
                     );
-                    eprintln!("{error_msg}");
+                    eprintln_if_detail(output_mode, &error_msg);
                     errors.push(e.context(error_msg));
                     continue;
                 }
@@ -178,7 +178,7 @@ pub fn run(
                     directive.line_number,
                 );
                 let error_msg = format!("failed to parse function arguments: {arg_strings:?}");
-                eprintln!("{error_msg}");
+                eprintln_if_detail(output_mode, &error_msg);
                 errors.push(e.context(error_msg));
                 continue;
             }
@@ -219,7 +219,7 @@ pub fn run(
                     output_mode,
                     Some(&directive.expression_str),
                 );
-                eprintln!("{error_msg}");
+                eprintln_if_detail(output_mode, &error_msg);
                 errors.push(anyhow::anyhow!("{error_msg}"));
                 continue;
             }
@@ -254,7 +254,7 @@ pub fn run(
                         output_mode,
                         Some(&directive.expression_str),
                     );
-                    eprintln!("{formatted_error}");
+                    eprintln_if_detail(output_mode, &formatted_error);
                     errors.push(anyhow::anyhow!("{formatted_error}"));
                     continue;
                 } else {
@@ -279,7 +279,7 @@ pub fn run(
                         output_mode,
                         Some(&directive.expression_str),
                     );
-                    eprintln!("{formatted_error}");
+                    eprintln_if_detail(output_mode, &formatted_error);
                     errors.push(anyhow::anyhow!("{formatted_error}"));
                     continue;
                 }
@@ -312,7 +312,7 @@ pub fn run(
                             output_mode,
                             Some(&directive.expression_str),
                         );
-                        eprintln!("{formatted_error}");
+                        eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
                         continue;
                     }
@@ -341,7 +341,7 @@ pub fn run(
                             output_mode,
                             Some(&directive.expression_str),
                         );
-                        eprintln!("{formatted_error}");
+                        eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
                         continue;
                     }
@@ -374,7 +374,7 @@ pub fn run(
                         );
                         let error_msg =
                             format!("failed to parse expected value: {}", directive.expected_str);
-                        eprintln!("{error_msg}");
+                        eprintln_if_detail(output_mode, &error_msg);
                         errors.push(e.context(error_msg));
                         continue;
                     }
@@ -494,7 +494,7 @@ pub fn run(
                                 directive.expression_str, op_str, directive.expected_str
                             )),
                         );
-                        eprintln!("{formatted_error}");
+                        eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
                         // }
                     }
@@ -572,9 +572,9 @@ fn format_compilation_error(
 /// 2. V-code (DEBUG mode only)
 /// 3. Transformed CLIF (DEBUG mode only)
 /// 4. Raw CLIF (DEBUG mode only)
-/// 5. Test GLSL (always shown)
-/// 6. Error details (filename:<line>, error message)
-/// 7. Rerun commands (with and without DEBUG)
+/// 5. Test GLSL (detail / debug output only; omitted in summary mode)
+/// 6. Error details (error message)
+/// 7. Rerun command(s): one line in summary mode; detail mode adds DEBUG rerun
 fn format_error(
     _error_type: ErrorType,
     error_message: &str,
@@ -623,33 +623,39 @@ fn format_error(
         }
     }
 
-    // Test GLSL (always shown if available)
-    if let Some(glsl) = test_glsl {
-        parts.push(format_code_block(glsl));
+    // Test GLSL (detail / debug only — too noisy for multi-file summary runs)
+    if output_mode.show_full_output() {
+        if let Some(glsl) = test_glsl {
+            parts.push(format_code_block(glsl));
+        }
     }
 
     // Error details (just the error message, filename:line removed)
     parts.push(error_message.to_string());
 
-    // Rerun commands
-    let rerun_title = if colors::should_color() {
-        format!("{}{}{}", colors::BOLD, "Rerun this test:", colors::RESET)
-    } else {
-        "Rerun this test:".to_string()
-    };
-    let debug_title = if colors::should_color() {
+    // Rerun
+    let rerun_section = if output_mode.show_full_output() {
+        let rerun_title = if colors::should_color() {
+            format!("{}{}{}", colors::BOLD, "Rerun this test:", colors::RESET)
+        } else {
+            "Rerun this test:".to_string()
+        };
+        let debug_title = if colors::should_color() {
+            format!(
+                "{}{}{}",
+                colors::BOLD,
+                "Rerun with debugging:",
+                colors::RESET
+            )
+        } else {
+            "Rerun with debugging:".to_string()
+        };
         format!(
-            "{}{}{}",
-            colors::BOLD,
-            "Rerun with debugging:",
-            colors::RESET
+            "{rerun_title}\n  scripts/glsl-filetests.sh {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh {filename}:{line_number}"
         )
     } else {
-        "Rerun with debugging:".to_string()
+        format!("scripts/glsl-filetests.sh {filename}:{line_number}")
     };
-    let rerun_section = format!(
-        "{rerun_title}\n  scripts/glsl-filetests.sh {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh {filename}:{line_number}"
-    );
     parts.push(rerun_section);
 
     parts.join("\n\n")
@@ -696,4 +702,10 @@ fn format_code_block(source: &str) -> String {
         .map(|(i, line)| format!("{:width$} | {}", i + 1, line, width = max_line_num_width))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn eprintln_if_detail(output_mode: OutputMode, msg: impl std::fmt::Display) {
+    if output_mode.show_full_output() {
+        eprintln!("{msg}");
+    }
 }

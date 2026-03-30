@@ -43,6 +43,9 @@ pub enum Reply {
         failed_lines: Vec<usize>,
         /// Whole-file compile failed (summary mode) before executing `// run:` directives.
         compile_failed: bool,
+        /// False if `run_filetest_with_line_filter` returned `Err` or the worker panicked.
+        /// Then `stats` are usually from `count_test_cases` (totals only, no pass/fail).
+        harness_completed: bool,
     },
 }
 
@@ -67,13 +70,17 @@ impl ConcurrentRunner {
         let request_mutex = Arc::new(Mutex::new(request_rx));
         let (reply_tx, reply_rx) = channel();
 
+        // Default to a single worker: host JIT / LPIR codegen uses a global lock; one panicking
+        // test poisons it and every other concurrent job fails with misleading `count_test_cases`
+        // stats until the process exits. Override with `LP_FILETESTS_THREADS` when debugging
+        // parallelism.
         let num_threads = std::env::var("LP_FILETESTS_THREADS")
             .ok()
             .and_then(|s| {
                 use std::str::FromStr;
                 usize::from_str(&s).ok().filter(|&n| n > 0)
             })
-            .unwrap_or_else(|| num_cpus::get());
+            .unwrap_or(1);
 
         let handles = (0..num_threads)
             .map(|num| worker_thread(num, request_mutex.clone(), reply_tx.clone()))
@@ -172,6 +179,7 @@ fn worker_thread(
                     unexpected_pass_lines,
                     failed_lines,
                     compile_failed,
+                    harness_completed,
                 ) = match catch_unwind(std::panic::AssertUnwindSafe(|| {
                     crate::run_filetest_with_line_filter(
                         path.as_path(),
@@ -180,8 +188,14 @@ fn worker_thread(
                         &targets,
                     )
                 })) {
-                    Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf),
+                    Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf, true),
                     Ok(Err(e)) => {
+                        if std::env::var("LP_FILETESTS_HARNESS_LOG").is_ok() {
+                            eprintln!(
+                                "[filetests worker] run_filetest Err for {}: {e:#}",
+                                path.display()
+                            );
+                        }
                         let error_stats = crate::count_test_cases(path.as_path(), line_filter);
                         (
                             Err(e),
@@ -189,6 +203,7 @@ fn worker_thread(
                             error_stats,
                             Vec::new(),
                             Vec::new(),
+                            false,
                             false,
                         )
                     }
@@ -208,6 +223,13 @@ fn worker_thread(
                         let short_msg = panic_msg.lines().next().unwrap_or("panic").to_string();
 
                         // Count test cases even on panic so we can show stats
+                        if std::env::var("LP_FILETESTS_HARNESS_LOG").is_ok() {
+                            eprintln!(
+                                "[filetests worker] panic running {}: {short_msg}",
+                                path.display()
+                            );
+                        }
+
                         let panic_stats = crate::count_test_cases(path.as_path(), line_filter);
 
                         (
@@ -216,6 +238,7 @@ fn worker_thread(
                             panic_stats,
                             Vec::new(),
                             Vec::new(),
+                            false,
                             false,
                         )
                     }
@@ -230,6 +253,7 @@ fn worker_thread(
                         unexpected_pass_lines,
                         failed_lines,
                         compile_failed,
+                        harness_completed,
                     })
                     .unwrap();
             }

@@ -369,45 +369,55 @@ pub fn run(
             relative_path_str
         };
 
-        let (_result, per_target, stats, unexpected_pass_lines, failed_lines, compile_failed) =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_filetest_with_line_filter(
-                    &spec.path,
-                    spec.line_number,
-                    output_mode,
-                    &active_targets,
-                )
-            })) {
-                Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf),
-                Ok(Err(e)) => (
-                    Err(e),
+        let (
+            _result,
+            per_target,
+            stats,
+            unexpected_pass_lines,
+            failed_lines,
+            compile_failed,
+            harness_completed,
+        ) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_filetest_with_line_filter(
+                &spec.path,
+                spec.line_number,
+                output_mode,
+                &active_targets,
+            )
+        })) {
+            Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf, true),
+            Ok(Err(e)) => (
+                Err(e),
+                BTreeMap::new(),
+                count_test_cases(&spec.path, spec.line_number),
+                Vec::new(),
+                Vec::new(),
+                false,
+                false,
+            ),
+            Err(e) => {
+                let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
+                    msg.clone()
+                } else if let Some(msg) = e.downcast_ref::<&'static str>() {
+                    msg.to_string()
+                } else {
+                    format!("{e:?}")
+                };
+                (
+                    Err(anyhow::anyhow!("panicked: {panic_msg}")),
                     BTreeMap::new(),
-                    test_run::TestCaseStats::default(),
+                    count_test_cases(&spec.path, spec.line_number),
                     Vec::new(),
                     Vec::new(),
                     false,
-                ),
-                Err(e) => {
-                    let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
-                        msg.clone()
-                    } else if let Some(msg) = e.downcast_ref::<&'static str>() {
-                        msg.to_string()
-                    } else {
-                        format!("{e:?}")
-                    };
-                    (
-                        Err(anyhow::anyhow!("panicked: {panic_msg}")),
-                        BTreeMap::new(),
-                        test_run::TestCaseStats::default(),
-                        Vec::new(),
-                        Vec::new(),
-                        false,
-                    )
-                }
-            };
+                    false,
+                )
+            }
+        };
 
-        // Check if file actually failed (has unexpected failures, unexpected passes, or whole-file compile failure)
-        let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
+        // Check if file actually failed
+        let file_actually_failed =
+            !harness_completed || stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
 
         if !file_actually_failed {
             println!(
@@ -549,6 +559,8 @@ pub fn run(
         unexpected_pass_lines: Vec<usize>,
         failed_lines: Vec<usize>,
         compile_failed: bool,
+        /// False when the worker did not finish `run_filetest_with_line_filter` successfully.
+        harness_completed: bool,
     }
 
     struct FailedTest {
@@ -566,6 +578,7 @@ pub fn run(
             unexpected_pass_lines: Vec::new(),
             failed_lines: Vec::new(),
             compile_failed: false,
+            harness_completed: false,
         })
         .collect();
 
@@ -607,6 +620,7 @@ pub fn run(
                 unexpected_pass_lines,
                 failed_lines,
                 compile_failed,
+                harness_completed,
                 result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
@@ -614,6 +628,7 @@ pub fn run(
             tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
             tests[jobid].failed_lines = failed_lines;
             tests[jobid].compile_failed = compile_failed;
+            tests[jobid].harness_completed = harness_completed;
             tests[jobid].state = TestState::Done;
             for (name, s) in per_target {
                 per_target_aggregate.entry(name).or_default().add(s);
@@ -633,16 +648,21 @@ pub fn run(
 
                 let stats = &tests[reported_tests].stats;
                 let compile_failed = tests[reported_tests].compile_failed;
+                let harness_completed = tests[reported_tests].harness_completed;
                 total_test_cases += stats.total;
-                passed_test_cases += stats.passed;
-                failed_test_cases += stats.failed;
-                expect_fail_test_cases += stats.expected_failure();
-                unexpected_pass_test_cases += stats.unexpected_pass;
+                if harness_completed {
+                    passed_test_cases += stats.passed;
+                    failed_test_cases += stats.failed;
+                    expect_fail_test_cases += stats.expected_failure();
+                    unexpected_pass_test_cases += stats.unexpected_pass;
+                }
 
                 // Determine color for counts based on pass/fail ratio
                 let counts_color = if stats.total > 0 {
                     let denominator = stats.passed + stats.failed;
-                    if denominator == 0 {
+                    if !harness_completed {
+                        colors::RED
+                    } else if denominator == 0 {
                         // All tests are expected failures - yellow
                         colors::YELLOW
                     } else if stats.passed == denominator {
@@ -661,11 +681,13 @@ pub fn run(
 
                 let has_unexpected_failures = stats.failed > 0;
                 let (counts_str, parentheticals) =
-                    format_file_counts(stats, has_unexpected_failures);
+                    format_file_counts(stats, has_unexpected_failures, harness_completed);
 
                 // Determine if this file actually failed (unexpected failures/passes or whole-file compile error)
-                let file_actually_failed =
-                    stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
+                let file_actually_failed = !harness_completed
+                    || stats.failed > 0
+                    || stats.unexpected_pass > 0
+                    || compile_failed;
 
                 // Choose status marker and color based on whether file actually failed
                 let (status_marker, should_mark_failed) = if file_actually_failed {
@@ -736,6 +758,7 @@ pub fn run(
                 unexpected_pass_lines,
                 failed_lines,
                 compile_failed,
+                harness_completed,
                 result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
@@ -743,6 +766,7 @@ pub fn run(
             tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
             tests[jobid].failed_lines = failed_lines;
             tests[jobid].compile_failed = compile_failed;
+            tests[jobid].harness_completed = harness_completed;
             tests[jobid].state = TestState::Done;
             for (name, s) in per_target {
                 per_target_aggregate.entry(name).or_default().add(s);
@@ -758,6 +782,7 @@ pub fn run(
                 unexpected_pass_lines,
                 failed_lines,
                 compile_failed,
+                harness_completed,
                 result: _,
             }) = concurrent_runner.get()
             {
@@ -766,6 +791,7 @@ pub fn run(
                 tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
                 tests[jobid].failed_lines = failed_lines;
                 tests[jobid].compile_failed = compile_failed;
+                tests[jobid].harness_completed = harness_completed;
                 tests[jobid].state = TestState::Done;
                 for (name, s) in per_target {
                     per_target_aggregate.entry(name).or_default().add(s);
@@ -1036,6 +1062,7 @@ fn relative_path(path: &Path, filetests_dir: &Path) -> String {
 fn format_file_counts(
     stats: &test_run::TestCaseStats,
     has_unexpected_failures: bool,
+    harness_completed: bool,
 ) -> (String, String) {
     // Denominator excludes expected-fail tests (only count non-marked tests)
     let denominator = stats.passed + stats.failed;
@@ -1046,7 +1073,10 @@ fn format_file_counts(
         stats.passed
     };
 
-    let counts_str = if denominator > 0 {
+    let counts_str = if !harness_completed && stats.total > 0 {
+        // Worker used `count_test_cases` only (panic or `run_filetest` error): avoid `0/total`.
+        format!("--/{total:2}", total = stats.total)
+    } else if denominator > 0 {
         format!("{numerator:2}/{denominator:2}")
     } else if stats.total > 0 {
         // No ordinary pass/fail mix: every case is @unsupported or an expected-failure
@@ -1082,6 +1112,9 @@ fn format_file_counts(
         } else {
             suffix_parts.push(part);
         }
+    }
+    if !harness_completed && stats.total > 0 {
+        suffix_parts.push("(harness error; LP_FILETESTS_HARNESS_LOG=1)".to_string());
     }
 
     let parentheticals = if suffix_parts.is_empty() {

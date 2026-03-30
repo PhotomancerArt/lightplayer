@@ -9,11 +9,13 @@ mod imp {
 
     static LPIR_CRANELIFT_CODEGEN: OnceLock<Mutex<()>> = OnceLock::new();
 
+    /// Acquire the codegen serialization lock, recovering from poison if a previous holder panicked.
     pub(crate) fn codegen_guard() -> MutexGuard<'static, ()> {
-        LPIR_CRANELIFT_CODEGEN
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("LPIR Cranelift codegen mutex poisoned")
+        let mutex = LPIR_CRANELIFT_CODEGEN.get_or_init(|| Mutex::new(()));
+        mutex.lock().unwrap_or_else(|poisoned| {
+            mutex.clear_poison();
+            poisoned.into_inner()
+        })
     }
 }
 

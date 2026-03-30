@@ -1,6 +1,7 @@
 //! Run test implementation.
 
 pub mod compile;
+pub mod config;
 pub mod execution;
 pub mod lpir_jit_executable;
 pub mod lpir_rv32_executable;

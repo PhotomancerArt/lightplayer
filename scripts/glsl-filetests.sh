@@ -111,8 +111,8 @@ ENVIRONMENT:
     DEBUG=1             Show debug output (CLIF, WAT) when a test fails
     LP_FIX_XFAIL=1      Same as --fix; remove annotations from newly passing tests
     LP_MARK_UNIMPLEMENTED=1  Same as --mark-unimplemented
-    LP_FILETESTS_THREADS=N   Worker threads for the test runner (default: CPU count).
-                        If you still see crashes with parallel JIT, try N=1.
+    LP_FILETESTS_THREADS=N   Worker threads for concurrent filetests (default: 1).
+                        Raise N for throughput once JIT codegen is thread-safe; see lp-glsl-filetests concurrent runner.
 
 PATTERNS:
     Patterns can be filenames, glob patterns, or directory paths.

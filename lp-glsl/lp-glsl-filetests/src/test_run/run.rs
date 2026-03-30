@@ -3,7 +3,7 @@
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
 use crate::target::Target;
-use crate::test_run::{TestCaseStats, run_detail, run_summary};
+use crate::test_run::{TestCaseStats, config, run_detail, run_summary};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -61,6 +61,9 @@ pub fn run_test_file_with_line_filter(
 
     for target in targets {
         let (result, stats, unexpected_pass, failed_lines, compile_failed) = match output_mode {
+            OutputMode::Summary if config::SUMMARY_COMPILE_PER_DIRECTIVE => {
+                run_detail::run(test_file, path, line_filter, OutputMode::Summary, target)?
+            }
             OutputMode::Summary => run_summary::run(test_file, path, line_filter, target)?,
             OutputMode::Detail | OutputMode::Debug => {
                 run_detail::run(test_file, path, line_filter, output_mode, target)?
