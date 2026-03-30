@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
-use crate::target::{Backend, DEFAULT_TARGETS, Target};
+use crate::target::{Backend, DEFAULT_TARGETS, Target, parse_target_filters};
 
 /// Adds `@unimplemented(backend=…)` for one run-test file: file-level when the whole module
 /// failed to compile in summary mode; otherwise before each failing `// run:`. Returns how many
@@ -71,7 +71,7 @@ fn mark_unimplemented_expectations_for_file(
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
     let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
-    let (result, _, _, _, _, _) =
+    let (result, _, _, _, _, _, _) =
         run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets)?;
     result
 }
@@ -115,8 +115,9 @@ pub fn run_filetest_with_line_filter(
     Result<()>,
     test_run::PerTargetStats,
     test_run::TestCaseStats,
-    Vec<usize>,
-    Vec<usize>,
+    std::collections::BTreeMap<String, Vec<usize>>,
+    std::collections::BTreeMap<String, Vec<usize>>,
+    std::collections::BTreeMap<String, bool>,
     bool,
 )> {
     // Count test cases early, even if parsing fails later
@@ -130,8 +131,9 @@ pub fn run_filetest_with_line_filter(
                 Err(e),
                 BTreeMap::new(),
                 early_stats,
-                Vec::new(),
-                Vec::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
                 false,
             ));
         }
@@ -169,12 +171,25 @@ pub fn run_filetest_with_line_filter(
     if test_file.test_types.contains(&parse::TestType::Error) {
         let (result, stats, unexpected_pass_lines, failed_lines) =
             test_error::run_error_test(&test_file, path)?;
+        let mut up_map = BTreeMap::new();
+        for t in targets {
+            if !unexpected_pass_lines.is_empty() {
+                up_map.insert(t.name(), unexpected_pass_lines.clone());
+            }
+        }
+        let mut fl_map = BTreeMap::new();
+        for t in targets {
+            if !failed_lines.is_empty() {
+                fl_map.insert(t.name(), failed_lines.clone());
+            }
+        }
         return Ok((
             result,
             BTreeMap::new(),
             stats,
-            unexpected_pass_lines,
-            failed_lines,
+            up_map,
+            fl_map,
+            BTreeMap::new(),
             false,
         ));
     }
@@ -185,20 +200,28 @@ pub fn run_filetest_with_line_filter(
         .iter()
         .any(|t| matches!(t, parse::TestType::Run))
     {
-        let (result, per_target, stats, unexpected_pass_lines, failed_lines, compile_failed) =
-            test_run::run_test_file_with_line_filter(
-                &test_file,
-                path,
-                line_filter,
-                output_mode,
-                targets,
-            )?;
+        let (
+            result,
+            per_target,
+            stats,
+            unexpected_pass_by_target,
+            failed_lines_by_target,
+            compile_failed_by_target,
+            compile_failed,
+        ) = test_run::run_test_file_with_line_filter(
+            &test_file,
+            path,
+            line_filter,
+            output_mode,
+            targets,
+        )?;
         Ok((
             result,
             per_target,
             stats,
-            unexpected_pass_lines,
-            failed_lines,
+            unexpected_pass_by_target,
+            failed_lines_by_target,
+            compile_failed_by_target,
             compile_failed,
         ))
     } else {
@@ -206,8 +229,9 @@ pub fn run_filetest_with_line_filter(
             Ok(()),
             BTreeMap::new(),
             test_run::TestCaseStats::default(),
-            Vec::new(),
-            Vec::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
             false,
         ))
     }
@@ -238,14 +262,14 @@ struct FileSpec {
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
 ///
 /// `mark_unimplemented` adds `@unimplemented(backend=…)` to failing tests (mirrors `--fix` for the
-/// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Requires a single
-/// `--target` (or default `jit.q32`). With `--yes`, skips the interactive confirmation.
+/// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Applies per active
+/// target when multiple are selected. With `--yes`, skips the interactive confirmation.
 pub fn run(
     files: &[String],
     fix_xfail: bool,
     mark_unimplemented: bool,
     mark_unimplemented_yes: bool,
-    target_filter: Option<&'static Target>,
+    target_spec: Option<&str>,
     force_summary: bool,
 ) -> anyhow::Result<()> {
     // Check environment variable if flag not provided
@@ -286,17 +310,16 @@ pub fn run(
             );
         }
     }
-    let active_targets: Vec<&Target> = if let Some(t) = target_filter {
-        vec![t]
+    let active_targets: Vec<&Target> = if let Some(spec) = target_spec {
+        parse_target_filters(spec).map_err(anyhow::Error::msg)?
     } else {
         DEFAULT_TARGETS.iter().collect()
     };
-
-    if mark_unimplemented && active_targets.len() != 1 {
-        anyhow::bail!(
-            "--mark-unimplemented requires exactly one target; pass e.g. --target jit.q32"
-        );
-    }
+    let target_name_width = active_targets
+        .iter()
+        .map(|t| t.name().len())
+        .max()
+        .unwrap_or(0);
 
     let filetests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let mut test_specs = Vec::new();
@@ -373,8 +396,9 @@ pub fn run(
             _result,
             per_target,
             stats,
-            unexpected_pass_lines,
-            failed_lines,
+            unexpected_pass_by_target,
+            failed_lines_by_target,
+            compile_failed_by_target,
             compile_failed,
             harness_completed,
         ) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -385,13 +409,14 @@ pub fn run(
                 &active_targets,
             )
         })) {
-            Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf, true),
+            Ok(Ok((r, pt, s, up, fl, cfm, cf))) => (r, pt, s, up, fl, cfm, cf, true),
             Ok(Err(e)) => (
                 Err(e),
                 BTreeMap::new(),
                 count_test_cases(&spec.path, spec.line_number),
-                Vec::new(),
-                Vec::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
                 false,
                 false,
             ),
@@ -407,8 +432,9 @@ pub fn run(
                     Err(anyhow::anyhow!("panicked: {panic_msg}")),
                     BTreeMap::new(),
                     count_test_cases(&spec.path, spec.line_number),
-                    Vec::new(),
-                    Vec::new(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
                     false,
                     false,
                 )
@@ -419,11 +445,74 @@ pub fn run(
         let file_actually_failed =
             !harness_completed || stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
 
+        let show_target_col = active_targets.len() > 1 && target_name_width > 0;
+        let target_col_w = target_name_width.max(8);
+
         if !file_actually_failed {
-            println!(
-                "{}",
-                colors::colorize(&format!("✓ {display_path}"), colors::GREEN)
-            );
+            if show_target_col {
+                for t in &active_targets {
+                    let tn = t.name();
+                    let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    let line_failed =
+                        per_target_file_line_failed(harness_completed, &tstats, compile_failed_t);
+                    let (status_marker, _) = if line_failed {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::RED, "✗", colors::RESET)
+                            } else {
+                                "✗ ".to_string()
+                            },
+                            true,
+                        )
+                    } else {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
+                            } else {
+                                "✓ ".to_string()
+                            },
+                            false,
+                        )
+                    };
+                    let counts_color = if tstats.total > 0 {
+                        let denominator = tstats.passed + tstats.failed;
+                        if !harness_completed {
+                            colors::RED
+                        } else if denominator == 0 {
+                            colors::YELLOW
+                        } else if tstats.passed == denominator {
+                            colors::GREEN
+                        } else if tstats.passed > 0 {
+                            colors::YELLOW
+                        } else {
+                            colors::RED
+                        }
+                    } else {
+                        colors::GREEN
+                    };
+                    let has_unexpected_failures = tstats.failed > 0;
+                    let (counts_str, parentheticals) =
+                        format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                    let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                        format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                    } else {
+                        counts_str.clone()
+                    };
+                    print_filetest_status_line(
+                        &status_marker,
+                        &counts_colored,
+                        Some((&tn, target_col_w)),
+                        &display_path,
+                        &parentheticals,
+                    );
+                }
+            } else {
+                println!(
+                    "{}",
+                    colors::colorize(&format!("✓ {display_path}"), colors::GREEN)
+                );
+            }
             let elapsed = start_time.elapsed();
             println!(
                 "\n{}",
@@ -441,31 +530,76 @@ pub fn run(
                 )
             );
 
-            // Remove markers if fix is enabled
-            if fix_xfail && !unexpected_pass_lines.is_empty() {
-                let target = active_targets.first().expect("active_targets non-empty");
-                let file_update = util::file_update::FileUpdate::new(&spec.path);
-                if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
-                    eprintln!("Warning: failed to remove file-level annotations: {e}");
-                }
-                let mut sorted = unexpected_pass_lines.clone();
-                sorted.sort_unstable();
-                for line_number in sorted {
-                    if let Err(e) = file_update.remove_annotation(line_number) {
-                        eprintln!(
-                            "Warning: failed to remove annotation from line {line_number}: {e}"
-                        );
-                    }
-                }
+            if fix_xfail && !unexpected_pass_by_target.is_empty() {
+                apply_unexpected_pass_fixes(&spec.path, &unexpected_pass_by_target);
             }
 
             return Ok(());
         } else {
-            // File failed - show error details
-            println!(
-                "{}",
-                colors::colorize(&format!("✗ {display_path}"), colors::RED)
-            );
+            if show_target_col {
+                for t in &active_targets {
+                    let tn = t.name();
+                    let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    let line_failed =
+                        per_target_file_line_failed(harness_completed, &tstats, compile_failed_t);
+                    let (status_marker, _) = if line_failed {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::RED, "✗", colors::RESET)
+                            } else {
+                                "✗ ".to_string()
+                            },
+                            true,
+                        )
+                    } else {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
+                            } else {
+                                "✓ ".to_string()
+                            },
+                            false,
+                        )
+                    };
+                    let counts_color = if tstats.total > 0 {
+                        let denominator = tstats.passed + tstats.failed;
+                        if !harness_completed {
+                            colors::RED
+                        } else if denominator == 0 {
+                            colors::YELLOW
+                        } else if tstats.passed == denominator {
+                            colors::GREEN
+                        } else if tstats.passed > 0 {
+                            colors::YELLOW
+                        } else {
+                            colors::RED
+                        }
+                    } else {
+                        colors::GREEN
+                    };
+                    let has_unexpected_failures = tstats.failed > 0;
+                    let (counts_str, parentheticals) =
+                        format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                    let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                        format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                    } else {
+                        counts_str.clone()
+                    };
+                    print_filetest_status_line(
+                        &status_marker,
+                        &counts_colored,
+                        Some((&tn, target_col_w)),
+                        &display_path,
+                        &parentheticals,
+                    );
+                }
+            } else {
+                println!(
+                    "{}",
+                    colors::colorize(&format!("✗ {display_path}"), colors::RED)
+                );
+            }
             let elapsed = start_time.elapsed();
             println!(
                 "\n{}",
@@ -483,22 +617,12 @@ pub fn run(
                 )
             );
 
-            // Exit with error - show failure reason if available
             if let Err(e) = &_result {
                 eprintln!("\n{e}");
             }
             if stats.unexpected_pass > 0 {
                 if fix_xfail {
-                    let target = active_targets.first().expect("active_targets non-empty");
-                    let file_update = util::file_update::FileUpdate::new(&spec.path);
-                    if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
-                        eprintln!("Warning: failed to remove file-level annotations: {e}");
-                    }
-                    let mut sorted = unexpected_pass_lines.clone();
-                    sorted.sort_unstable();
-                    for line_number in sorted {
-                        let _ = file_update.remove_annotation(line_number);
-                    }
+                    apply_unexpected_pass_fixes(&spec.path, &unexpected_pass_by_target);
                     anyhow::bail!(
                         "{} test case(s) marked [expect-fail] are now passing. Markers removed.",
                         stats.unexpected_pass
@@ -511,27 +635,38 @@ pub fn run(
                 }
             }
             if mark_unimplemented {
-                let target = *active_targets.first().expect("active_targets non-empty");
                 let use_file_level = matches!(output_mode, OutputMode::Summary);
-                let needs_mark = compile_failed || !failed_lines.is_empty();
-                if needs_mark {
-                    let n = mark_unimplemented_expectations_for_file(
-                        &spec.path,
-                        &failed_lines,
-                        compile_failed,
-                        use_file_level,
-                        target,
-                    )?;
-                    if n > 0 {
-                        println!(
-                            "\n{}",
-                            colors::colorize(
-                                "Marked baseline @unimplemented. Re-run filetests to verify green.",
-                                colors::GREEN
-                            )
-                        );
-                        return Ok(());
+                let mut total_marks = 0usize;
+                let mut any_needs_mark = false;
+                for t in &active_targets {
+                    let tn = t.name();
+                    let failed_lines = failed_lines_by_target
+                        .get(&tn)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    if compile_failed_t || !failed_lines.is_empty() {
+                        any_needs_mark = true;
+                        total_marks += mark_unimplemented_expectations_for_file(
+                            &spec.path,
+                            failed_lines,
+                            compile_failed_t,
+                            use_file_level,
+                            t,
+                        )?;
                     }
+                }
+                if total_marks > 0 {
+                    println!(
+                        "\n{}",
+                        colors::colorize(
+                            "Marked baseline @unimplemented. Re-run filetests to verify green.",
+                            colors::GREEN
+                        )
+                    );
+                    return Ok(());
+                }
+                if any_needs_mark {
                     anyhow::bail!(
                         "--mark-unimplemented: failures remain but no new markers were added (already annotated?)"
                     );
@@ -556,8 +691,9 @@ pub fn run(
         state: TestState,
         per_target: test_run::PerTargetStats,
         stats: test_run::TestCaseStats,
-        unexpected_pass_lines: Vec<usize>,
-        failed_lines: Vec<usize>,
+        unexpected_pass_by_target: BTreeMap<String, Vec<usize>>,
+        failed_lines_by_target: BTreeMap<String, Vec<usize>>,
+        compile_failed_by_target: BTreeMap<String, bool>,
         compile_failed: bool,
         /// False when the worker did not finish `run_filetest_with_line_filter` successfully.
         harness_completed: bool,
@@ -575,12 +711,16 @@ pub fn run(
             state: TestState::New,
             per_target: BTreeMap::new(),
             stats: test_run::TestCaseStats::default(),
-            unexpected_pass_lines: Vec::new(),
-            failed_lines: Vec::new(),
+            unexpected_pass_by_target: BTreeMap::new(),
+            failed_lines_by_target: BTreeMap::new(),
+            compile_failed_by_target: BTreeMap::new(),
             compile_failed: false,
             harness_completed: false,
         })
         .collect();
+
+    let show_target_col = active_targets.len() > 1 && target_name_width > 0;
+    let target_col_w = target_name_width.max(8);
 
     let mut per_target_aggregate: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
     let mut concurrent_runner = ConcurrentRunner::new();
@@ -617,16 +757,18 @@ pub fn run(
                 jobid,
                 per_target,
                 stats,
-                unexpected_pass_lines,
-                failed_lines,
+                unexpected_pass_by_target,
+                failed_lines_by_target,
+                compile_failed_by_target,
                 compile_failed,
                 harness_completed,
                 result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
-            tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-            tests[jobid].failed_lines = failed_lines;
+            tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
+            tests[jobid].failed_lines_by_target = failed_lines_by_target;
+            tests[jobid].compile_failed_by_target = compile_failed_by_target;
             tests[jobid].compile_failed = compile_failed;
             tests[jobid].harness_completed = harness_completed;
             tests[jobid].state = TestState::Done;
@@ -649,6 +791,8 @@ pub fn run(
                 let stats = &tests[reported_tests].stats;
                 let compile_failed = tests[reported_tests].compile_failed;
                 let harness_completed = tests[reported_tests].harness_completed;
+                let per_target = &tests[reported_tests].per_target;
+                let compile_failed_by_target = &tests[reported_tests].compile_failed_by_target;
                 total_test_cases += stats.total;
                 if harness_completed {
                     passed_test_cases += stats.passed;
@@ -657,79 +801,119 @@ pub fn run(
                     unexpected_pass_test_cases += stats.unexpected_pass;
                 }
 
-                // Determine color for counts based on pass/fail ratio
-                let counts_color = if stats.total > 0 {
-                    let denominator = stats.passed + stats.failed;
-                    if !harness_completed {
-                        colors::RED
-                    } else if denominator == 0 {
-                        // All tests are expected failures - yellow
-                        colors::YELLOW
-                    } else if stats.passed == denominator {
-                        // All passed - green
-                        colors::GREEN
-                    } else if stats.passed > 0 {
-                        // Some passed - yellow
-                        colors::YELLOW
-                    } else {
-                        // All failed - red
-                        colors::RED
-                    }
-                } else {
-                    colors::GREEN // Default to green if no test cases
-                };
-
-                let has_unexpected_failures = stats.failed > 0;
-                let (counts_str, parentheticals) =
-                    format_file_counts(stats, has_unexpected_failures, harness_completed);
-
                 // Determine if this file actually failed (unexpected failures/passes or whole-file compile error)
                 let file_actually_failed = !harness_completed
                     || stats.failed > 0
                     || stats.unexpected_pass > 0
                     || compile_failed;
 
-                // Choose status marker and color based on whether file actually failed
-                let (status_marker, should_mark_failed) = if file_actually_failed {
-                    (
-                        if colors::should_color() {
-                            format!("{}{}{} ", colors::RED, "✗", colors::RESET)
-                        } else {
-                            "✗ ".to_string()
-                        },
-                        true,
-                    )
-                } else {
-                    (
-                        if colors::should_color() {
+                let should_mark_failed = file_actually_failed;
+
+                if show_target_col {
+                    for t in &active_targets {
+                        let tn = t.name();
+                        let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                        let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                        let line_failed = per_target_file_line_failed(
+                            harness_completed,
+                            &tstats,
+                            compile_failed_t,
+                        );
+                        let status_marker = if line_failed {
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::RED, "✗", colors::RESET)
+                            } else {
+                                "✗ ".to_string()
+                            }
+                        } else if colors::should_color() {
                             format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
                         } else {
                             "✓ ".to_string()
-                        },
-                        false,
-                    )
-                };
-
-                let counts_colored = if colors::should_color() && !counts_str.is_empty() {
-                    format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                        };
+                        let counts_color = if tstats.total > 0 {
+                            let denominator = tstats.passed + tstats.failed;
+                            if !harness_completed {
+                                colors::RED
+                            } else if denominator == 0 {
+                                colors::YELLOW
+                            } else if tstats.passed == denominator {
+                                colors::GREEN
+                            } else if tstats.passed > 0 {
+                                colors::YELLOW
+                            } else {
+                                colors::RED
+                            }
+                        } else {
+                            colors::GREEN
+                        };
+                        let has_unexpected_failures = tstats.failed > 0;
+                        let (counts_str, parentheticals) =
+                            format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                        let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                            format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                        } else {
+                            counts_str.clone()
+                        };
+                        print_filetest_status_line(
+                            &status_marker,
+                            &counts_colored,
+                            Some((&tn, target_col_w)),
+                            &display_path,
+                            &parentheticals,
+                        );
+                    }
                 } else {
-                    counts_str.clone()
-                };
-                let path_colored = if colors::should_color() {
-                    format!(
-                        "{status_marker}{counts_colored} {}{}{}{}",
-                        colors::DIM,
-                        display_path,
-                        colors::RESET,
-                        parentheticals
-                    )
-                } else {
-                    format!("{status_marker}{counts_colored} {display_path}{parentheticals}")
-                };
-                println!("{path_colored}");
-                // Flush stdout to ensure output appears immediately
-                use std::io::Write;
-                let _ = std::io::stdout().flush();
+                    let counts_color = if stats.total > 0 {
+                        let denominator = stats.passed + stats.failed;
+                        if !harness_completed {
+                            colors::RED
+                        } else if denominator == 0 {
+                            colors::YELLOW
+                        } else if stats.passed == denominator {
+                            colors::GREEN
+                        } else if stats.passed > 0 {
+                            colors::YELLOW
+                        } else {
+                            colors::RED
+                        }
+                    } else {
+                        colors::GREEN
+                    };
+                    let has_unexpected_failures = stats.failed > 0;
+                    let (counts_str, parentheticals) =
+                        format_file_counts(stats, has_unexpected_failures, harness_completed);
+                    let (status_marker, _) = if file_actually_failed {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::RED, "✗", colors::RESET)
+                            } else {
+                                "✗ ".to_string()
+                            },
+                            true,
+                        )
+                    } else {
+                        (
+                            if colors::should_color() {
+                                format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
+                            } else {
+                                "✓ ".to_string()
+                            },
+                            false,
+                        )
+                    };
+                    let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                        format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                    } else {
+                        counts_str.clone()
+                    };
+                    print_filetest_status_line(
+                        &status_marker,
+                        &counts_colored,
+                        None,
+                        &display_path,
+                        &parentheticals,
+                    );
+                }
 
                 if should_mark_failed {
                     failed += 1;
@@ -755,16 +939,18 @@ pub fn run(
                 jobid,
                 per_target,
                 stats,
-                unexpected_pass_lines,
-                failed_lines,
+                unexpected_pass_by_target,
+                failed_lines_by_target,
+                compile_failed_by_target,
                 compile_failed,
                 harness_completed,
                 result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
-            tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-            tests[jobid].failed_lines = failed_lines;
+            tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
+            tests[jobid].failed_lines_by_target = failed_lines_by_target;
+            tests[jobid].compile_failed_by_target = compile_failed_by_target;
             tests[jobid].compile_failed = compile_failed;
             tests[jobid].harness_completed = harness_completed;
             tests[jobid].state = TestState::Done;
@@ -779,8 +965,9 @@ pub fn run(
                 jobid,
                 per_target,
                 stats,
-                unexpected_pass_lines,
-                failed_lines,
+                unexpected_pass_by_target,
+                failed_lines_by_target,
+                compile_failed_by_target,
                 compile_failed,
                 harness_completed,
                 result: _,
@@ -788,8 +975,9 @@ pub fn run(
             {
                 tests[jobid].per_target = per_target.clone();
                 tests[jobid].stats = stats;
-                tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
-                tests[jobid].failed_lines = failed_lines;
+                tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
+                tests[jobid].failed_lines_by_target = failed_lines_by_target;
+                tests[jobid].compile_failed_by_target = compile_failed_by_target;
                 tests[jobid].compile_failed = compile_failed;
                 tests[jobid].harness_completed = harness_completed;
                 tests[jobid].state = TestState::Done;
@@ -830,51 +1018,10 @@ pub fn run(
         }
     }
 
-    // Collect all unexpected passes for marker removal
-    let mut all_unexpected_passes: Vec<(PathBuf, usize)> = Vec::new();
-    for test in &tests {
-        for line_number in &test.unexpected_pass_lines {
-            all_unexpected_passes.push((test.spec.path.clone(), *line_number));
-        }
-    }
-
-    // Remove markers if fix is enabled
-    if fix_xfail && !all_unexpected_passes.is_empty() {
-        use std::collections::{HashMap, HashSet};
-        let unique_paths: HashSet<&PathBuf> =
-            all_unexpected_passes.iter().map(|(p, _)| p).collect();
-        let target = active_targets.first().expect("active_targets non-empty");
-
-        let mut file_updates: HashMap<PathBuf, util::file_update::FileUpdate> = HashMap::new();
-        for path in unique_paths {
-            let file_update = file_updates
-                .entry(path.clone())
-                .or_insert_with(|| util::file_update::FileUpdate::new(path));
-            if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
-                eprintln!(
-                    "Warning: failed to remove file-level annotations from {}: {}",
-                    path.display(),
-                    e
-                );
-            }
-        }
-
-        let mut by_path: HashMap<PathBuf, Vec<usize>> = HashMap::new();
-        for (path, line_number) in &all_unexpected_passes {
-            by_path.entry(path.clone()).or_default().push(*line_number);
-        }
-        for (path, mut line_numbers) in by_path {
-            line_numbers.sort_unstable();
-            let file_update = file_updates.get(&path).expect("FileUpdate exists");
-            for line_number in line_numbers {
-                if let Err(e) = file_update.remove_annotation(line_number) {
-                    eprintln!(
-                        "Warning: failed to remove annotation from {}:{}: {}",
-                        path.display(),
-                        line_number,
-                        e
-                    );
-                }
+    if fix_xfail {
+        for test in &tests {
+            if !test.unexpected_pass_by_target.is_empty() {
+                apply_unexpected_pass_fixes(&test.spec.path, &test.unexpected_pass_by_target);
             }
         }
     }
@@ -902,21 +1049,28 @@ pub fn run(
     }
 
     if mark_unimplemented {
-        let target = *active_targets.first().expect("active_targets non-empty");
         let use_file_level = matches!(output_mode, OutputMode::Summary);
         let mut total_marks = 0usize;
         for test in &tests {
-            let needs_mark = test.compile_failed || !test.failed_lines.is_empty();
-            if !needs_mark {
-                continue;
+            for t in &active_targets {
+                let tn = t.name();
+                let failed_lines = test
+                    .failed_lines_by_target
+                    .get(&tn)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let compile_failed_t = *test.compile_failed_by_target.get(&tn).unwrap_or(&false);
+                if !compile_failed_t && failed_lines.is_empty() {
+                    continue;
+                }
+                total_marks += mark_unimplemented_expectations_for_file(
+                    &test.spec.path,
+                    failed_lines,
+                    compile_failed_t,
+                    use_file_level,
+                    t,
+                )?;
             }
-            total_marks += mark_unimplemented_expectations_for_file(
-                &test.spec.path,
-                &test.failed_lines,
-                test.compile_failed,
-                use_file_level,
-                target,
-            )?;
         }
         if total_marks > 0 {
             println!(
@@ -1058,6 +1212,102 @@ fn relative_path(path: &Path, filetests_dir: &Path) -> String {
         .to_string_lossy()
         .to_string()
 }
+
+fn per_target_file_line_failed(
+    harness_completed: bool,
+    tstats: &test_run::TestCaseStats,
+    compile_failed_t: bool,
+) -> bool {
+    !harness_completed || tstats.failed > 0 || tstats.unexpected_pass > 0 || compile_failed_t
+}
+
+fn print_filetest_status_line(
+    status_marker: &str,
+    counts_colored: &str,
+    target_column: Option<(&str, usize)>,
+    display_path: &str,
+    parentheticals: &str,
+) {
+    let body = if let Some((name, width)) = target_column {
+        if colors::should_color() {
+            format!(
+                "{status_marker}{counts_colored} {name:>width$}  {}{}{}{}",
+                colors::DIM,
+                display_path,
+                colors::RESET,
+                parentheticals
+            )
+        } else {
+            format!(
+                "{status_marker}{counts_colored} {name:>width$}  {display_path}{parentheticals}"
+            )
+        }
+    } else if colors::should_color() {
+        format!(
+            "{status_marker}{counts_colored} {}{}{}{}",
+            colors::DIM,
+            display_path,
+            colors::RESET,
+            parentheticals
+        )
+    } else {
+        format!("{status_marker}{counts_colored} {display_path}{parentheticals}")
+    };
+    println!("{body}");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+}
+
+fn apply_unexpected_pass_fixes(
+    path: &Path,
+    unexpected_pass_by_target: &BTreeMap<String, Vec<usize>>,
+) {
+    let mut target_names: Vec<&str> = unexpected_pass_by_target
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
+    target_names.sort_unstable();
+    target_names.dedup();
+
+    let file_update = util::file_update::FileUpdate::new(path);
+    for tn in target_names {
+        let Ok(target) = Target::from_name(tn) else {
+            continue;
+        };
+        if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
+            eprintln!("Warning: failed to remove file-level annotations: {e}");
+        }
+    }
+
+    let mut events: Vec<(usize, &str)> = Vec::new();
+    for (target_name, lines) in unexpected_pass_by_target {
+        for &ln in lines {
+            events.push((ln, target_name.as_str()));
+        }
+    }
+    events.sort_by_key(|(ln, _)| *ln);
+
+    let mut i = 0;
+    while i < events.len() {
+        let line = events[i].0;
+        let mut group: Vec<&str> = Vec::new();
+        while i < events.len() && events[i].0 == line {
+            group.push(events[i].1);
+            i += 1;
+        }
+        group.sort_unstable();
+        group.dedup();
+        for tn in group {
+            let Ok(target) = Target::from_name(tn) else {
+                continue;
+            };
+            if let Err(e) = file_update.remove_annotation_matching_target(line, target) {
+                eprintln!("Warning: failed to remove annotation from line {line}: {e}");
+            }
+        }
+    }
+}
+
 /// Format per-file test counts with expected-fail information.
 fn format_file_counts(
     stats: &test_run::TestCaseStats,

@@ -101,7 +101,7 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
-    --target NAME       Run only the specified target (jit.q32, wasm.q32, rv32.q32)
+    --target SPEC       Run target(s): comma-separated, backend shorthand (jit,wasm,rv32), or full names (jit.q32)
     --summary           Force summary mode even for a single test file
     --fix               Remove @unimplemented annotations from tests that now pass
     --mark-unimplemented  Add @unimplemented(backend=…) to failing tests (baseline); use with --target

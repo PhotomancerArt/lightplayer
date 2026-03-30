@@ -27,7 +27,8 @@ struct TestOptions {
     /// With --mark-unimplemented, skip typing `yes` (non-interactive)
     #[arg(long)]
     assume_yes: bool,
-    /// Run only the specified target (e.g. jit.q32, wasm.q32, rv32.q32)
+    /// Run only the specified target(s): comma-separated and/or backend shorthand (jit, wasm, rv32)
+    /// or full names (jit.q32). Example: `--target wasm,jit` or `--target rv32`.
     #[arg(long)]
     target: Option<String>,
     /// Force summary mode even for a single test file
@@ -47,23 +48,13 @@ fn main() -> anyhow::Result<()> {
             } else {
                 t.files
             };
-            let target_filter = if let Some(ref name) = t.target {
-                match lp_glsl_filetests::target::Target::from_name(name) {
-                    Ok(t) => Some(t),
-                    Err(e) => {
-                        eprintln!("{e}");
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                None
-            };
+            let target_spec = t.target.as_deref();
             lp_glsl_filetests::run(
                 &files,
                 t.fix,
                 t.mark_unimplemented,
                 t.assume_yes,
-                target_filter,
+                target_spec,
                 t.summary,
             )?;
         }

@@ -13,8 +13,9 @@ pub type PerTargetStats = BTreeMap<String, TestCaseStats>;
 
 /// Run all tests in a test file with optional line number filtering.
 /// Iterates over the given targets; if the file has @unsupported for all targets, skips.
-/// Returns the combined result, per-target stats, aggregated stats, unexpected pass lines, failed
-/// lines, and whether any target hit a whole-file compile failure (summary mode only).
+/// Returns the combined result, per-target stats, aggregated stats, unexpected-pass lines per
+/// target, failed lines per target, compile-failed per target, and whether any target had a
+/// whole-file compile failure (summary mode only).
 pub fn run_test_file_with_line_filter(
     test_file: &TestFile,
     path: &Path,
@@ -25,8 +26,9 @@ pub fn run_test_file_with_line_filter(
     Result<()>,
     PerTargetStats,
     TestCaseStats,
-    Vec<usize>,
-    Vec<usize>,
+    BTreeMap<String, Vec<usize>>,
+    BTreeMap<String, Vec<usize>>,
+    BTreeMap<String, bool>,
     bool,
 )> {
     let is_test_run = test_file.test_types.contains(&crate::parse::TestType::Run);
@@ -35,8 +37,9 @@ pub fn run_test_file_with_line_filter(
             Ok(()),
             BTreeMap::new(),
             TestCaseStats::default(),
-            Vec::new(),
-            Vec::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
             false,
         ));
     }
@@ -46,17 +49,18 @@ pub fn run_test_file_with_line_filter(
             Ok(()),
             BTreeMap::new(),
             TestCaseStats::default(),
-            Vec::new(),
-            Vec::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
             false,
         ));
     }
 
     let mut combined_stats = TestCaseStats::default();
     let mut per_target = BTreeMap::new();
-    let mut all_unexpected_pass = Vec::new();
-    let mut all_failed_lines = Vec::new();
-    let mut any_compile_failed = false;
+    let mut unexpected_pass_by_target: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut failed_lines_by_target: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut compile_failed_by_target: BTreeMap<String, bool> = BTreeMap::new();
     let mut overall_result = Ok(());
 
     for target in targets {
@@ -69,10 +73,10 @@ pub fn run_test_file_with_line_filter(
                 run_detail::run(test_file, path, line_filter, output_mode, target)?
             }
         };
-        any_compile_failed |= compile_failed;
 
         let target_name = target.name();
         per_target.insert(target_name.clone(), stats);
+        compile_failed_by_target.insert(target_name.clone(), compile_failed);
 
         combined_stats.passed += stats.passed;
         combined_stats.failed += stats.failed;
@@ -82,20 +86,27 @@ pub fn run_test_file_with_line_filter(
         combined_stats.unexpected_pass += stats.unexpected_pass;
         combined_stats.unsupported += stats.unsupported;
 
-        all_unexpected_pass.extend(unexpected_pass);
-        all_failed_lines.extend(failed_lines);
+        if !unexpected_pass.is_empty() {
+            unexpected_pass_by_target.insert(target_name.clone(), unexpected_pass);
+        }
+        if !failed_lines.is_empty() {
+            failed_lines_by_target.insert(target_name.clone(), failed_lines);
+        }
 
         if overall_result.is_ok() && result.is_err() {
             overall_result = result;
         }
     }
 
+    let any_compile_failed = compile_failed_by_target.values().any(|&cf| cf);
+
     Ok((
         overall_result,
         per_target,
         combined_stats,
-        all_unexpected_pass,
-        all_failed_lines,
+        unexpected_pass_by_target,
+        failed_lines_by_target,
+        compile_failed_by_target,
         any_compile_failed,
     ))
 }
@@ -103,7 +114,7 @@ pub fn run_test_file_with_line_filter(
 /// Run all tests in a test file (single target for backward compat).
 pub fn run_test_file(test_file: &TestFile, path: &Path) -> Result<()> {
     let targets: Vec<&Target> = crate::target::DEFAULT_TARGETS.iter().collect();
-    let (result, _, _, _, _, _) =
+    let (result, _, _, _, _, _, _) =
         run_test_file_with_line_filter(test_file, path, None, OutputMode::Detail, &targets)?;
     result
 }

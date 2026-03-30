@@ -37,11 +37,13 @@ pub enum Reply {
         per_target: PerTargetStats,
         /// Test case statistics (aggregated).
         stats: TestCaseStats,
-        /// Line numbers with unexpected passes.
-        unexpected_pass_lines: Vec<usize>,
-        /// Line numbers that failed.
-        failed_lines: Vec<usize>,
+        /// Line numbers with unexpected passes per target (e.g. "jit.q32").
+        unexpected_pass_by_target: BTreeMap<String, Vec<usize>>,
+        /// Line numbers that failed per target.
+        failed_lines_by_target: BTreeMap<String, Vec<usize>>,
         /// Whole-file compile failed (summary mode) before executing `// run:` directives.
+        compile_failed_by_target: BTreeMap<String, bool>,
+        /// True if any target had a whole-file compile failure.
         compile_failed: bool,
         /// False if `run_filetest_with_line_filter` returned `Err` or the worker panicked.
         /// Then `stats` are usually from `count_test_cases` (totals only, no pass/fail).
@@ -176,8 +178,9 @@ fn worker_thread(
                     result,
                     per_target,
                     stats,
-                    unexpected_pass_lines,
-                    failed_lines,
+                    unexpected_pass_by_target,
+                    failed_lines_by_target,
+                    compile_failed_by_target,
                     compile_failed,
                     harness_completed,
                 ) = match catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -188,7 +191,7 @@ fn worker_thread(
                         &targets,
                     )
                 })) {
-                    Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf, true),
+                    Ok(Ok((r, pt, s, up, fl, cfmap, cf))) => (r, pt, s, up, fl, cfmap, cf, true),
                     Ok(Err(e)) => {
                         if std::env::var("LP_FILETESTS_HARNESS_LOG").is_ok() {
                             eprintln!(
@@ -201,8 +204,9 @@ fn worker_thread(
                             Err(e),
                             BTreeMap::new(),
                             error_stats,
-                            Vec::new(),
-                            Vec::new(),
+                            BTreeMap::new(),
+                            BTreeMap::new(),
+                            BTreeMap::new(),
                             false,
                             false,
                         )
@@ -236,8 +240,9 @@ fn worker_thread(
                             Err(anyhow::anyhow!("panicked: {short_msg}")),
                             BTreeMap::new(),
                             panic_stats,
-                            Vec::new(),
-                            Vec::new(),
+                            BTreeMap::new(),
+                            BTreeMap::new(),
+                            BTreeMap::new(),
                             false,
                             false,
                         )
@@ -250,8 +255,9 @@ fn worker_thread(
                         result,
                         per_target,
                         stats,
-                        unexpected_pass_lines,
-                        failed_lines,
+                        unexpected_pass_by_target,
+                        failed_lines_by_target,
+                        compile_failed_by_target,
                         compile_failed,
                         harness_completed,
                     })
