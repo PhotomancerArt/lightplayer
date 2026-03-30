@@ -86,7 +86,7 @@ fn operand_as_ptr(
 ) -> Value {
     let val = use_v(builder, vars, v);
     if ctx
-        .vreg_is_stack_addr
+        .vreg_wide_addr
         .get(v.0 as usize)
         .copied()
         .unwrap_or(false)

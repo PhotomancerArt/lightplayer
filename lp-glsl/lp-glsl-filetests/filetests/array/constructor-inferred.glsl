@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Inferred-size Array Constructors
@@ -10,7 +9,6 @@ float test_constructor_inferred_float() {
     return arr[3]; // Should be 4.0
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_float() ~= 4.0
 
 int test_constructor_inferred_int() {
@@ -18,7 +16,6 @@ int test_constructor_inferred_int() {
     return arr[1]; // Should be 20
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_int() == 20
 
 uint test_constructor_inferred_uint() {
@@ -26,7 +23,6 @@ uint test_constructor_inferred_uint() {
     return arr[4]; // Should be 5u
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_uint() == 5u
 
 bool test_constructor_inferred_bool() {
@@ -34,7 +30,6 @@ bool test_constructor_inferred_bool() {
     return arr[2]; // Should be true
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_bool() == true
 
 vec2 test_constructor_inferred_vec2() {
@@ -42,7 +37,6 @@ vec2 test_constructor_inferred_vec2() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_vec2() ~= vec2(3.0, 4.0)
 
 vec3 test_constructor_inferred_vec3() {
@@ -50,7 +44,6 @@ vec3 test_constructor_inferred_vec3() {
     return arr[0]; // Should be vec3(1.0, 2.0, 3.0)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 ivec3 test_constructor_inferred_ivec3() {
@@ -58,7 +51,6 @@ ivec3 test_constructor_inferred_ivec3() {
     return arr[2]; // Should be ivec3(7, 8, 9)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_ivec3() == ivec3(7, 8, 9)
 
 uvec4 test_constructor_inferred_uvec4() {
@@ -66,7 +58,6 @@ uvec4 test_constructor_inferred_uvec4() {
     return arr[1]; // Should be uvec4(5u, 6u, 7u, 8u)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_uvec4() == uvec4(5u, 6u, 7u, 8u)
 
 bvec2 test_constructor_inferred_bvec2() {
@@ -82,7 +73,6 @@ float test_constructor_inferred_single_element() {
     return arr[0]; // Should be 42.0
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_single_element() ~= 42.0
 
 int test_constructor_inferred_empty() {
@@ -98,5 +88,4 @@ vec2 test_constructor_inferred_mixed_conversions() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_mixed_conversions() ~= vec2(3.0, 4.0)

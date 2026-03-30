@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Explicit-size Array Constructors
@@ -10,7 +9,6 @@ float test_constructor_explicit_float() {
     return arr[0]; // Should be 1.0
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_float() ~= 1.0
 
 int test_constructor_explicit_int() {
@@ -18,7 +16,6 @@ int test_constructor_explicit_int() {
     return arr[2]; // Should be 30
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_int() == 30
 
 uint test_constructor_explicit_uint() {
@@ -26,7 +23,6 @@ uint test_constructor_explicit_uint() {
     return arr[1]; // Should be 10u
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_uint() == 10u
 
 bool test_constructor_explicit_bool() {
@@ -42,7 +38,6 @@ vec2 test_constructor_explicit_vec2() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_vec2() ~= vec2(3.0, 4.0)
 
 vec3 test_constructor_explicit_vec3() {
@@ -50,7 +45,6 @@ vec3 test_constructor_explicit_vec3() {
     return arr[0]; // Should be vec3(1.0, 2.0, 3.0)
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 ivec2 test_constructor_explicit_ivec2() {
@@ -58,7 +52,6 @@ ivec2 test_constructor_explicit_ivec2() {
     return arr[2]; // Should be ivec2(5, 6)
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_ivec2() == ivec2(5, 6)
 
 uvec3 test_constructor_explicit_uvec3() {
@@ -66,7 +59,6 @@ uvec3 test_constructor_explicit_uvec3() {
     return arr[1]; // Should be uvec3(4u, 5u, 6u)
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_uvec3() == uvec3(4u, 5u, 6u)
 
 bvec4 test_constructor_explicit_bvec4() {
@@ -74,7 +66,6 @@ bvec4 test_constructor_explicit_bvec4() {
     return arr[0]; // Should be bvec4(true, false, true, false)
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_bvec4() == bvec4(true, false, true, false)
 
 float test_constructor_explicit_mixed_types() {
@@ -82,7 +73,6 @@ float test_constructor_explicit_mixed_types() {
     return arr[1]; // Should be 2.5
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_mixed_types() ~= 2.5
 
 int test_constructor_explicit_scalar_to_vector_array() {
@@ -90,5 +80,4 @@ int test_constructor_explicit_scalar_to_vector_array() {
     return int(arr[1].x); // Should be 3
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_scalar_to_vector_array() == 3

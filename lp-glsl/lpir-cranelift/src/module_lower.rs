@@ -10,7 +10,6 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
 use lpir::module::IrModule;
-use lpir::op::Op;
 
 use crate::builtins::{self, LpirBuiltinFuncIds};
 use crate::compile_options::{CompileOptions, MemoryStrategy};
@@ -186,23 +185,14 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                 fnearest: module.declare_func_in_func(ids.fnearest, builder.func),
             });
 
-            let mut vreg_is_stack_addr = vec![false; f.vreg_types.len()];
-            for op in &f.body {
-                if let Op::SlotAddr { dst, .. } = op {
-                    let i = dst.0 as usize;
-                    if let Some(slot) = vreg_is_stack_addr.get_mut(i) {
-                        *slot = true;
-                    }
-                }
-            }
-
+            let vreg_wide_addr = emit::vreg_wide_addr_chain(f);
             let emit_ctx = emit::EmitCtx {
                 func_refs: &func_refs,
                 import_func_refs: &import_func_refs,
                 slots: &slots,
                 ir,
                 pointer_type,
-                vreg_is_stack_addr,
+                vreg_wide_addr,
                 float_mode: mode,
                 lpir_builtins,
                 uses_struct_return,

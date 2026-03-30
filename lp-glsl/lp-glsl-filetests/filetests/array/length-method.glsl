@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Length Method (.length())
@@ -10,7 +9,6 @@ int test_length_method_float_array() {
     return arr.length(); // Should be 5
 }
 
-// @unimplemented()
 // run: test_length_method_float_array() == 5
 
 int test_length_method_int_array() {
@@ -18,7 +16,6 @@ int test_length_method_int_array() {
     return arr.length(); // Should be 3
 }
 
-// @unimplemented()
 // run: test_length_method_int_array() == 3
 
 int test_length_method_vec2_array() {
@@ -26,7 +23,6 @@ int test_length_method_vec2_array() {
     return arr.length(); // Should be 4
 }
 
-// @unimplemented()
 // run: test_length_method_vec2_array() == 4
 
 int test_length_method_bool_array() {
@@ -34,7 +30,6 @@ int test_length_method_bool_array() {
     return arr.length(); // Should be 6
 }
 
-// @unimplemented()
 // run: test_length_method_bool_array() == 6
 
 int test_length_method_uvec3_array() {
@@ -42,7 +37,6 @@ int test_length_method_uvec3_array() {
     return arr.length(); // Should be 2
 }
 
-// @unimplemented()
 // run: test_length_method_uvec3_array() == 2
 
 int test_length_method_empty_array() {
@@ -58,7 +52,6 @@ int test_length_method_large_array() {
     return arr.length(); // Should be 100
 }
 
-// @unimplemented()
 // run: test_length_method_large_array() == 100
 
 int test_length_method_in_expression() {
@@ -66,7 +59,6 @@ int test_length_method_in_expression() {
     return int(arr.length() / 2); // 7 / 2 = 3 (integer division)
 }
 
-// @unimplemented()
 // run: test_length_method_in_expression() == 3
 
 int test_length_method_multidimensional() {
@@ -94,5 +86,4 @@ float test_length_method_as_float() {
     return float(arr.length()); // Should be 3.0
 }
 
-// @unimplemented()
 // run: test_length_method_as_float() ~= 3.0

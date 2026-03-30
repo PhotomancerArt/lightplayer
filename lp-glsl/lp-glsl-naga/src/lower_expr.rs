@@ -53,6 +53,11 @@ fn lower_expr_vec_uncached(
         Expression::FunctionArgument(i) => ctx.arg_vregs_for(*i),
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
             Expression::LocalVariable(lv) => {
+                if ctx.array_map.contains_key(lv) {
+                    return Err(LowerError::UnsupportedExpression(String::from(
+                        "Load of whole array local is not supported",
+                    )));
+                }
                 // Snapshot into fresh VRegs so the loaded value does not alias the local's
                 // mutable slots (needed for postfix ++/-- and any use-after-store of the same
                 // Load expression handle).
@@ -205,6 +210,15 @@ fn lower_expr_vec_uncached(
                             let n = vector_size_usize(*rows);
                             let start = (*index as usize) * n;
                             Ok(m[start..start + n].into())
+                        }
+                        TypeInner::Array { .. } => {
+                            let Expression::LocalVariable(lv) = &ctx.func.expressions[*base] else {
+                                return Err(LowerError::UnsupportedExpression(String::from(
+                                    "AccessIndex: array pointer base must be LocalVariable",
+                                )));
+                            };
+                            let info = ctx.resolve_array(*lv)?.clone();
+                            crate::lower_array::load_array_element_const(ctx, &info, *index)
                         }
                         _ => Err(LowerError::UnsupportedExpression(format!(
                             "AccessIndex on pointer to {inner:?}"

@@ -9,8 +9,6 @@ float test_declare_float_array() {
     return 1.0; // Declaration test - no runtime behavior
 }
 
-// @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
 // run: test_declare_float_array() == 1.0
 
 int test_declare_int_array() {

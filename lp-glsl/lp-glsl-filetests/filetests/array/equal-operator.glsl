@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Equality Operator (==)
@@ -11,7 +10,6 @@ bool test_equal_operator_float_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
-// @unimplemented()
 // run: test_equal_operator_float_arrays_true() == true
 
 bool test_equal_operator_int_arrays_true() {
@@ -84,7 +82,6 @@ bool test_equal_operator_different_sizes() {
     return true; // Just return true to indicate test passes
 }
 
-// @unimplemented()
 // run: test_equal_operator_different_sizes() == true
 
 bool test_equal_operator_after_assignment() {

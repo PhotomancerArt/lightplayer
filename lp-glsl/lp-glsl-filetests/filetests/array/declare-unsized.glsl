@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Unsized Array Declarations (must be initialized)
@@ -10,7 +9,6 @@ float test_declare_unsized_float_array() {
     return arr[0]; // Should be 1.0
 }
 
-// @unimplemented()
 // run: test_declare_unsized_float_array() ~= 1.0
 
 int test_declare_unsized_int_array() {
@@ -18,7 +16,6 @@ int test_declare_unsized_int_array() {
     return arr[1]; // Should be 20
 }
 
-// @unimplemented()
 // run: test_declare_unsized_int_array() == 20
 
 uint test_declare_unsized_uint_array() {
@@ -26,7 +23,6 @@ uint test_declare_unsized_uint_array() {
     return arr[2]; // Should be 15u
 }
 
-// @unimplemented()
 // run: test_declare_unsized_uint_array() == 15u
 
 bool test_declare_unsized_bool_array() {
@@ -42,7 +38,6 @@ vec2 test_declare_unsized_vec2_array() {
     return arr[0]; // Should be vec2(1.0, 2.0)
 }
 
-// @unimplemented()
 // run: test_declare_unsized_vec2_array() ~= vec2(1.0, 2.0)
 
 vec3 test_declare_unsized_vec3_array() {
@@ -50,7 +45,6 @@ vec3 test_declare_unsized_vec3_array() {
     return arr[1]; // Should be vec3(4.0, 5.0, 6.0)
 }
 
-// @unimplemented()
 // run: test_declare_unsized_vec3_array() ~= vec3(4.0, 5.0, 6.0)
 
 ivec2 test_declare_unsized_ivec2_array() {
@@ -58,7 +52,6 @@ ivec2 test_declare_unsized_ivec2_array() {
     return arr[2]; // Should be ivec2(5, 6)
 }
 
-// @unimplemented()
 // run: test_declare_unsized_ivec2_array() == ivec2(5, 6)
 
 bvec3 test_declare_unsized_bvec3_array() {
@@ -66,7 +59,6 @@ bvec3 test_declare_unsized_bvec3_array() {
     return arr[0]; // Should be bvec3(true, false, true)
 }
 
-// @unimplemented()
 // run: test_declare_unsized_bvec3_array() == bvec3(true, false, true)
 
 float test_declare_unsized_empty_array() {
@@ -82,5 +74,4 @@ int test_declare_unsized_single_element() {
     return arr[0]; // Should be 42
 }
 
-// @unimplemented()
 // run: test_declare_unsized_single_element() == 42

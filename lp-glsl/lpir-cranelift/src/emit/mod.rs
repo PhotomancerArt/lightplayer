@@ -8,6 +8,7 @@ use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::FloatMode;
 use lpir::module::{IrFunction, IrModule};
+use lpir::op::Op;
 use lpir::types::{IrType, VReg};
 
 use crate::error::CompileError;
@@ -34,8 +35,8 @@ pub(crate) struct EmitCtx<'a> {
     pub slots: &'a [StackSlot],
     pub ir: &'a IrModule,
     pub pointer_type: types::Type,
-    /// `true` for VRegs defined by `slot_addr` — use [`Self::pointer_type`] for their SSA variable.
-    pub vreg_is_stack_addr: Vec<bool>,
+    /// `SlotAddr` definition and transitive `Iadd` results use native pointer SSA type (see `vreg_wide_addr_chain`).
+    pub vreg_wide_addr: Vec<bool>,
     pub float_mode: FloatMode,
     pub lpir_builtins: Option<LpirBuiltinRefs>,
     /// This function uses Cranelift `StructReturn` (RISC-V32: >2 scalar returns).
@@ -147,6 +148,23 @@ pub(crate) fn bool_to_i32(builder: &mut FunctionBuilder, b: Value) -> Value {
     builder.ins().uextend(types::I32, b)
 }
 
+/// Marks vregs whose SSA type is [`EmitCtx::pointer_type`]: stack slot addresses and `base + offset` chains.
+pub(crate) fn vreg_wide_addr_chain(func: &IrFunction) -> Vec<bool> {
+    let mut wide = vec![false; func.vreg_types.len()];
+    for op in &func.body {
+        match op {
+            Op::SlotAddr { dst, .. } => wide[dst.0 as usize] = true,
+            Op::Iadd { dst, lhs, rhs } => {
+                if wide[lhs.0 as usize] || wide[rhs.0 as usize] {
+                    wide[dst.0 as usize] = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    wide
+}
+
 /// After an instruction that ends the current block (`return`, `jump`, etc.), switch to a fresh
 /// block sealed with `trap` so `FunctionBuilder` invariants hold and later ops (e.g. `End`) do not
 /// append to a filled block.
@@ -163,7 +181,7 @@ pub fn translate_function(
 ) -> Result<(), CompileError> {
     let mut vars = Vec::with_capacity(func.vreg_types.len());
     for (i, ty) in func.vreg_types.iter().enumerate() {
-        let ct = if ctx.vreg_is_stack_addr.get(i).copied().unwrap_or(false) {
+        let ct = if ctx.vreg_wide_addr.get(i).copied().unwrap_or(false) {
             ctx.pointer_type
         } else {
             ir_type_for_mode(*ty, ctx.float_mode)

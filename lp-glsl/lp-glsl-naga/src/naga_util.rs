@@ -110,8 +110,9 @@ pub(crate) fn type_handle_scalar_kind(
     match &module.types[ty].inner {
         TypeInner::Scalar(s) => Ok(s.kind),
         TypeInner::Vector { scalar, .. } | TypeInner::Matrix { scalar, .. } => Ok(scalar.kind),
+        TypeInner::Array { base, .. } => type_handle_scalar_kind(module, *base),
         _ => Err(LowerError::UnsupportedType(String::from(
-            "expected scalar, vector, or matrix type",
+            "expected scalar, vector, matrix, or array type",
         ))),
     }
 }
@@ -155,6 +156,10 @@ pub(crate) fn expr_type_inner(
                 Some(size) => TypeInner::Vector { size, scalar },
                 None => TypeInner::Scalar(scalar),
             }),
+            // `AccessIndex` / `Access` on pointer-to-array is typed as the element value, not `ValuePointer`.
+            ty @ (TypeInner::Scalar(_) | TypeInner::Vector { .. } | TypeInner::Matrix { .. }) => {
+                Ok(ty.clone())
+            }
             _ => Err(LowerError::UnsupportedExpression(String::from(
                 "Load from non-pointer",
             ))),

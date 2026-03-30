@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Element Assignment
@@ -11,7 +10,6 @@ float test_assign_element_float_array() {
     return arr[1]; // Should be 99.0
 }
 
-// @unimplemented()
 // run: test_assign_element_float_array() ~= 99.0
 
 int test_assign_element_int_array() {
@@ -20,7 +18,6 @@ int test_assign_element_int_array() {
     return arr[0]; // Should be 100
 }
 
-// @unimplemented()
 // run: test_assign_element_int_array() == 100
 
 uint test_assign_element_uint_array() {
@@ -29,7 +26,6 @@ uint test_assign_element_uint_array() {
     return arr[2]; // Should be 99u
 }
 
-// @unimplemented()
 // run: test_assign_element_uint_array() == 99u
 
 bool test_assign_element_bool_array() {
@@ -38,7 +34,6 @@ bool test_assign_element_bool_array() {
     return arr[1]; // Should be true
 }
 
-// @unimplemented()
 // run: test_assign_element_bool_array() == true
 
 vec2 test_assign_element_vec2_array() {
@@ -47,7 +42,6 @@ vec2 test_assign_element_vec2_array() {
     return arr[0]; // Should be vec2(10.0, 20.0)
 }
 
-// @unimplemented()
 // run: test_assign_element_vec2_array() ~= vec2(10.0, 20.0)
 
 vec3 test_assign_element_vec3_array() {
@@ -56,7 +50,6 @@ vec3 test_assign_element_vec3_array() {
     return arr[1]; // Should be vec3(100.0, 200.0, 300.0)
 }
 
-// @unimplemented()
 // run: test_assign_element_vec3_array() ~= vec3(100.0, 200.0, 300.0)
 
 ivec2 test_assign_element_ivec2_array() {
@@ -65,7 +58,6 @@ ivec2 test_assign_element_ivec2_array() {
     return arr[1]; // Should be ivec2(30, 40)
 }
 
-// @unimplemented()
 // run: test_assign_element_ivec2_array() == ivec2(30, 40)
 
 float test_assign_element_verify_unchanged() {
@@ -74,7 +66,6 @@ float test_assign_element_verify_unchanged() {
     return arr[0] + arr[2] + arr[3]; // other elements unchanged: 1.0 + 3.0 + 4.0 = 8.0
 }
 
-// @unimplemented()
 // run: test_assign_element_verify_unchanged() ~= 8.0
 
 vec2 test_assign_element_variable_index() {
@@ -84,7 +75,6 @@ vec2 test_assign_element_variable_index() {
     return arr[2]; // Should be vec2(99.0, 88.0)
 }
 
-// @unimplemented()
 // run: test_assign_element_variable_index() ~= vec2(99.0, 88.0)
 
 int test_assign_element_multiple() {
@@ -95,5 +85,4 @@ int test_assign_element_multiple() {
     return arr[0] + arr[1] + arr[2] + arr[3] + arr[4]; // 10 + 2 + 30 + 4 + 50 = 96
 }
 
-// @unimplemented()
 // run: test_assign_element_multiple() == 96

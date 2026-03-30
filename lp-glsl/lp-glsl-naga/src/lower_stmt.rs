@@ -112,6 +112,11 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             // `v.x = …`: Naga uses `Store(AccessIndex(…), value)`, not `Store(LocalVariable, …)`.
             Expression::AccessIndex { base, index } => match &ctx.func.expressions[*base] {
                 Expression::LocalVariable(lv) => {
+                    if let Some(info) = ctx.array_map.get(lv).cloned() {
+                        return crate::lower_array::store_array_element_const(
+                            ctx, &info, *index, *value,
+                        );
+                    }
                     let dsts = ctx.resolve_local(*lv)?;
                     let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
                     match lv_ty {

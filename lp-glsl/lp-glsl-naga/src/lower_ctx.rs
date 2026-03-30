@@ -6,9 +6,10 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, VReg};
+use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, SlotId, VReg};
 use naga::{
-    AddressSpace, Expression, Function, Handle, LocalVariable, Module, Statement, Type, TypeInner,
+    AddressSpace, ArraySize, Expression, Function, Handle, LocalVariable, Module, Statement, Type,
+    TypeInner,
 };
 use smallvec::SmallVec;
 
@@ -22,6 +23,15 @@ pub(crate) use crate::naga_util::{
 
 pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 
+/// Stack [`SlotId`] metadata for one array-typed [`LocalVariable`].
+#[derive(Clone, Debug)]
+pub(crate) struct ArrayInfo {
+    pub slot: SlotId,
+    pub element_ty: Handle<Type>,
+    pub stride: u32,
+    pub element_count: u32,
+}
+
 #[allow(
     dead_code,
     reason = "reserved for call lowering and cross-function checks"
@@ -33,6 +43,7 @@ pub(crate) struct LowerCtx<'a> {
     pub ir_module: Option<&'a IrModule>,
     pub expr_cache: Vec<Option<VRegVec>>,
     pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
+    pub array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>,
     pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
     /// VRegs per function argument index (flattened scalars).
     pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
@@ -90,17 +101,76 @@ impl<'a> LowerCtx<'a> {
         }
 
         let mut local_map: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
+        let mut array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo> = BTreeMap::new();
         for (lv_handle, var) in func.local_variables.iter() {
             if param_aliases.contains_key(&lv_handle) {
                 continue;
             }
-            let inner = &module.types[var.ty].inner;
-            let tys = naga_type_to_ir_types(inner)?;
-            let mut vregs = VRegVec::new();
-            for ty in &tys {
-                vregs.push(fb.alloc_vreg(*ty));
+            match &module.types[var.ty].inner {
+                TypeInner::Array {
+                    base: elem_ty,
+                    size,
+                    stride,
+                } => {
+                    let element_count = match size {
+                        ArraySize::Constant(nz) => nz.get(),
+                        ArraySize::Pending(_) | ArraySize::Dynamic => {
+                            let Some(init_h) = var.init else {
+                                return Err(LowerError::UnsupportedType(String::from(
+                                    "unsized local array requires an initializer",
+                                )));
+                            };
+                            match &func.expressions[init_h] {
+                                Expression::Compose { components, .. } => {
+                                    u32::try_from(components.len()).map_err(|_| {
+                                        LowerError::Internal(String::from(
+                                            "inferred array length overflows u32",
+                                        ))
+                                    })?
+                                }
+                                _ => {
+                                    return Err(LowerError::UnsupportedType(String::from(
+                                        "array size must be constant or inferable from `{ ... }` init",
+                                    )));
+                                }
+                            }
+                        }
+                    };
+                    let total = element_count.checked_mul(*stride).ok_or_else(|| {
+                        LowerError::Internal(String::from("array slot size overflow"))
+                    })?;
+                    let slot = fb.alloc_slot(total);
+                    array_map.insert(
+                        lv_handle,
+                        ArrayInfo {
+                            slot,
+                            element_ty: *elem_ty,
+                            stride: *stride,
+                            element_count,
+                        },
+                    );
+                }
+                _ => {
+                    let inner = &module.types[var.ty].inner;
+                    let tys = naga_type_to_ir_types(inner)?;
+                    let mut vregs = VRegVec::new();
+                    for ty in &tys {
+                        vregs.push(fb.alloc_vreg(*ty));
+                    }
+                    local_map.insert(lv_handle, vregs);
+                }
             }
-            local_map.insert(lv_handle, vregs);
+        }
+
+        for (lv_handle, var) in func.local_variables.iter() {
+            if param_aliases.contains_key(&lv_handle) {
+                continue;
+            }
+            if let Some(info) = array_map.get(&lv_handle) {
+                if var.init.is_none() {
+                    crate::lower_array::zero_fill_array_slot(&mut fb, module, info)?;
+                }
+            }
         }
 
         let expr_cache = vec![None; func.expressions.len()];
@@ -112,6 +182,7 @@ impl<'a> LowerCtx<'a> {
             ir_module: None,
             expr_cache,
             local_map,
+            array_map,
             param_aliases,
             arg_vregs,
             pointer_args,
@@ -128,6 +199,10 @@ impl<'a> LowerCtx<'a> {
             let Some(init_h) = var.init else {
                 continue;
             };
+            if let Some(info) = ctx.array_map.get(&lv_handle).cloned() {
+                crate::lower_array::lower_array_initializer(&mut ctx, &info, init_h)?;
+                continue;
+            }
             let dsts = ctx.local_map.get(&lv_handle).cloned().ok_or_else(|| {
                 LowerError::Internal(format!("local init for missing vreg {lv_handle:?}"))
             })?;
@@ -159,6 +234,11 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(crate) fn resolve_local(&self, lv: Handle<LocalVariable>) -> Result<VRegVec, LowerError> {
+        if self.array_map.contains_key(&lv) {
+            return Err(LowerError::Internal(format!(
+                "local {lv:?} is an array (use slot lowering)"
+            )));
+        }
         if let Some(v) = self.param_aliases.get(&lv) {
             return Ok(v.clone());
         }
@@ -166,6 +246,15 @@ impl<'a> LowerCtx<'a> {
             .get(&lv)
             .cloned()
             .ok_or_else(|| LowerError::Internal(format!("unknown local variable {lv:?}")))
+    }
+
+    pub(crate) fn resolve_array(
+        &self,
+        lv: Handle<LocalVariable>,
+    ) -> Result<&ArrayInfo, LowerError> {
+        self.array_map
+            .get(&lv)
+            .ok_or_else(|| LowerError::Internal(format!("local {lv:?} is not an array")))
     }
 
     pub(crate) fn ensure_expr_vec(

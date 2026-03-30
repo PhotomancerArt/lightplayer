@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Phase 1: Foundation - Basic 1D scalar arrays with literal int sizes
 // Stack allocation, pointer-based storage, basic read/write access
@@ -75,7 +74,6 @@ int phase1() {
     return x + y + z; // Should be 10 + 30 + 50 = 90
 }
 
-// @unimplemented(backend=jit)
 // run: test_declaration() == 0
 // run: test_type_stored() == 0
 // run: test_write() == 0

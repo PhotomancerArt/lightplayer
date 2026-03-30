@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Constant Index Access
@@ -10,7 +9,6 @@ float test_index_constant_float_array() {
     return arr[0]; // first element
 }
 
-// @unimplemented()
 // run: test_index_constant_float_array() ~= 10.0
 
 int test_index_constant_int_array() {
@@ -18,7 +16,6 @@ int test_index_constant_int_array() {
     return arr[1]; // second element
 }
 
-// @unimplemented()
 // run: test_index_constant_int_array() == 2
 
 uint test_index_constant_uint_array() {
@@ -26,7 +23,6 @@ uint test_index_constant_uint_array() {
     return arr[2]; // third element
 }
 
-// @unimplemented()
 // run: test_index_constant_uint_array() == 30u
 
 bool test_index_constant_bool_array() {
@@ -42,7 +38,6 @@ vec2 test_index_constant_vec2_array() {
     return arr[2]; // third element
 }
 
-// @unimplemented()
 // run: test_index_constant_vec2_array() ~= vec2(5.0, 6.0)
 
 vec3 test_index_constant_vec3_array() {
@@ -50,7 +45,6 @@ vec3 test_index_constant_vec3_array() {
     return arr[0]; // first element
 }
 
-// @unimplemented()
 // run: test_index_constant_vec3_array() ~= vec3(1.0, 2.0, 3.0)
 
 ivec3 test_index_constant_ivec3_array() {
@@ -58,7 +52,6 @@ ivec3 test_index_constant_ivec3_array() {
     return arr[1]; // second element
 }
 
-// @unimplemented()
 // run: test_index_constant_ivec3_array() == ivec3(4, 5, 6)
 
 uvec4 test_index_constant_uvec4_array() {
@@ -66,7 +59,6 @@ uvec4 test_index_constant_uvec4_array() {
     return arr[1]; // second element
 }
 
-// @unimplemented()
 // run: test_index_constant_uvec4_array() == uvec4(5u, 6u, 7u, 8u)
 
 bvec2 test_index_constant_bvec2_array() {
@@ -88,7 +80,6 @@ float test_index_constant_all_indices() {
     return sum; // Should be 1500.0
 }
 
-// @unimplemented()
 // run: test_index_constant_all_indices() ~= 1500.0
 
 int test_index_constant_repeated_access() {
@@ -96,5 +87,4 @@ int test_index_constant_repeated_access() {
     return arr[1] + arr[2] + arr[0]; // 10 + 15 + 5 = 30
 }
 
-// @unimplemented()
 // run: test_index_constant_repeated_access() == 30

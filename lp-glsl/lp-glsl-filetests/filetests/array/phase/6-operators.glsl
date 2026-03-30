@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Phase 6: Verify All Operators - Increment/decrement, compound assignment, binary/unary ops
 
@@ -12,7 +11,6 @@ int test_post_increment_decrement() {
 
     return x + y + arr[0] + arr[1]; // Should be 10 + 20 + 11 + 19 = 60
 }
-// @unimplemented()
 // run: test_post_increment_decrement() == 60
 
 // Test 2: Pre-increment and pre-decrement operators
@@ -24,7 +22,6 @@ int test_pre_increment_decrement() {
 
     return x + y + arr[0] + arr[1]; // Should be 11 + 19 + 11 + 19 = 60
 }
-// @unimplemented()
 // run: test_pre_increment_decrement() == 60
 
 // Test 3: Compound assignment operators
@@ -37,7 +34,6 @@ int test_compound_assignment() {
 
     return arr[0] + arr[1] + arr[2]; // Should be 15 + 17 + 60 = 92
 }
-// @unimplemented()
 // run: test_compound_assignment() == 92
 
 // Test 4: Binary operations on array elements
@@ -51,7 +47,6 @@ int test_binary_operations() {
 
     return x + y + z + w; // Should be 30 + 20 + 40 + 10 = 100
 }
-// @unimplemented()
 // run: test_binary_operations() == 100
 
 // Test 5: Unary operations on array elements
@@ -64,7 +59,6 @@ int test_unary_operations() {
 
     return x + y + z; // Should be -10 + (-20) + (-30) = -60
 }
-// @unimplemented()
 // run: test_unary_operations() == -60
 
 // Test 6: Mixed increment/decrement and assignment
@@ -78,7 +72,6 @@ int test_mixed_increment_assignment() {
 
     return arr[0] + arr[1]; // Should be 16 + 18 = 34
 }
-// @unimplemented()
 // run: test_mixed_increment_assignment() == 34
 
 // Phase 6 integration test: All operators together
@@ -107,6 +100,5 @@ int phase6() {
 
     return x + y + z + a + b; // 33 + 43 + 30 - 15 + 18 = 109
 }
-// @unimplemented()
 // run: phase6() == 109
 

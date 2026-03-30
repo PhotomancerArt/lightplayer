@@ -172,7 +172,18 @@ pub(crate) fn emit_scalar(
         Op::Iadd { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().iadd(a, b));
+            def_v_expr(builder, vars, *dst, |bd| {
+                let ta = bd.func.dfg.value_type(a);
+                let tb = bd.func.dfg.value_type(b);
+                let (a, b) = if ta == tb {
+                    (a, b)
+                } else if ta.bits() > tb.bits() {
+                    (a, bd.ins().uextend(ta, b))
+                } else {
+                    (bd.ins().uextend(tb, a), b)
+                };
+                bd.ins().iadd(a, b)
+            });
         }
         Op::Isub { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);

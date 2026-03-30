@@ -275,6 +275,9 @@ pub(crate) fn lower_access_expr_vec(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
+            if let Some(info) = ctx.array_map.get(lv).cloned() {
+                return crate::lower_array::load_array_element_dynamic(ctx, &info, index_v);
+            }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
             match *inner {
                 TypeInner::Vector { scalar, .. } => {
@@ -341,6 +344,9 @@ pub(crate) fn store_through_access(
     let index_v = ctx.ensure_expr(*index)?;
     match &ctx.func.expressions[*base] {
         Expression::LocalVariable(lv) => {
+            if let Some(info) = ctx.array_map.get(lv).cloned() {
+                return crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value);
+            }
             let inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
             let dsts = ctx.resolve_local(*lv)?;
             match *inner {
