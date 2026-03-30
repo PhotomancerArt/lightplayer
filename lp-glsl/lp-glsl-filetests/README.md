@@ -22,7 +22,7 @@ scripts/glsl-filetests.sh --target rv32.q32
 just test-filetests
 ```
 
-`just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script three times: default (`jit.q32`), then `wasm.q32`, then `rv32.q32`. Ensure `just build-ci` (or a full build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
+`just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script three times: default (`rv32.q32` + `wasm.q32`), then `jit.q32`. Ensure `just build-ci` (or a full build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
 
 **Parallelism:** concurrent filetests default to **1** worker (host JIT shares a global codegen lock). Set `LP_FILETESTS_THREADS=N` to experiment with more (see `scripts/glsl-filetests.sh --help`).
 
@@ -30,7 +30,7 @@ just test-filetests
 
 `cargo test` does **not** run the corpus by default. The integration test in `tests/filetests.rs` is marked `#[ignore]` so it stays out of the normal Rust test suite.
 
-To run it explicitly (uses `DEFAULT_TARGETS` = `jit.q32` only, same as the script with no `--target`):
+To run it explicitly (uses `DEFAULT_TARGETS` = `rv32.q32` + `wasm.q32`, same as the script with no `--target`):
 
 ```bash
 cd lp2025/lp-glsl
@@ -92,7 +92,7 @@ int add_int(int a, int b) {
 - `// target <backend>.<format>` — file-level default target (e.g. `jit.q32`, `wasm.q32`, `rv32.q32`).
 - Per-directive filters: `// @jit`, `// @wasm`, `// @rv32` (see parser / plan docs).
 
-**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`jit.q32` only**. CI runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
+**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32.q32` + `wasm.q32`**. CI runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
 
 ### Run directives
 
