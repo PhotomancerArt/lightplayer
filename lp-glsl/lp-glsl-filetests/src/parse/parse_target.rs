@@ -1,7 +1,7 @@
 //! Parse legacy `// target` directive.
 //!
 //! We silently skip these lines for backward compatibility. Target selection is now
-//! handled via annotations (`@unimplemented`, `@ignore`, etc.) and the CLI `--target` flag.
+//! handled via annotations (`@unimplemented`, `@unsupported`, etc.) and the CLI `--target` flag.
 
 /// Parse target directive from a line. Returns `Some` if the line matches; caller skips it.
 pub fn parse_target_directive(line: &str) -> Option<String> {

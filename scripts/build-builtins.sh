@@ -6,12 +6,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIGHTPLAYER_DIR="$WORKSPACE_ROOT/lp-glsl"
-BUILTINS_APP="$LIGHTPLAYER_DIR/apps/lp-glsl-builtins-emu-app"
 TARGET="riscv32imac-unknown-none-elf"
 OUTPUT_DIR="$WORKSPACE_ROOT/target/$TARGET/release"
 BINARY="$OUTPUT_DIR/lp-glsl-builtins-emu-app"
-BUILTINS_SRC_DIR="$LIGHTPLAYER_DIR/crates/lp-glsl-builtins/src/builtins"
-BUILTIN_GEN_DIR="$LIGHTPLAYER_DIR/apps/lp-glsl-builtin-gen-app"
+BUILTINS_SRC_DIR="$LIGHTPLAYER_DIR/lp-glsl-builtins/src/builtins"
+BUILTIN_GEN_DIR="$LIGHTPLAYER_DIR/lp-glsl-builtins-gen-app"
 HASH_FILE="$WORKSPACE_ROOT/.builtins-source-hash"
 
 # Compute hash of all builtin source files and generator

@@ -1,4 +1,4 @@
-//! Parse @unimplemented, @broken, @ignore annotation lines.
+//! Parse @unimplemented, @broken, @unsupported annotation lines.
 
 use crate::target::{Annotation, AnnotationKind, Backend, ExecMode, FloatMode, Isa, TargetFilter};
 use anyhow::{Result, anyhow};
@@ -37,9 +37,9 @@ fn parse_annotation_kind(s: &str, line_number: usize) -> Result<AnnotationKind> 
     match s.trim() {
         "unimplemented" => Ok(AnnotationKind::Unimplemented),
         "broken" => Ok(AnnotationKind::Broken),
-        "ignore" => Ok(AnnotationKind::Ignore),
+        "unsupported" => Ok(AnnotationKind::Unsupported),
         other => Err(anyhow!(
-            "line {line_number}: invalid annotation kind '{other}', expected unimplemented, broken, or ignore"
+            "line {line_number}: invalid annotation kind '{other}', expected unimplemented, broken, or unsupported"
         )),
     }
 }
@@ -191,17 +191,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ignore() {
-        let ann = parse_annotation_line("// @ignore(backend=wasm)", 1)
+    fn test_parse_unsupported() {
+        let ann = parse_annotation_line("// @unsupported(backend=wasm)", 1)
             .unwrap()
             .unwrap();
-        assert!(matches!(ann.kind, AnnotationKind::Ignore));
+        assert!(matches!(ann.kind, AnnotationKind::Unsupported));
     }
 
     #[test]
     fn test_parse_all_filter_fields() {
         let ann = parse_annotation_line(
-            "// @ignore(backend=rv32, float_mode=q32, isa=riscv32, exec_mode=emulator)",
+            "// @unsupported(backend=rv32, float_mode=q32, isa=riscv32, exec_mode=emulator)",
             1,
         )
         .unwrap()

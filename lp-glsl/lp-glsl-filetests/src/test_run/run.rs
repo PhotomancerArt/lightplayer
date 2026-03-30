@@ -12,7 +12,7 @@ use std::path::Path;
 pub type PerTargetStats = BTreeMap<String, TestCaseStats>;
 
 /// Run all tests in a test file with optional line number filtering.
-/// Iterates over the given targets; if the file has @ignore for all targets, skips.
+/// Iterates over the given targets; if the file has @unsupported for all targets, skips.
 /// Returns the combined result, per-target stats, aggregated stats, unexpected pass lines, and failed lines.
 pub fn run_test_file_with_line_filter(
     test_file: &TestFile,
@@ -71,7 +71,7 @@ pub fn run_test_file_with_line_filter(
         combined_stats.unimplemented += stats.unimplemented;
         combined_stats.broken += stats.broken;
         combined_stats.unexpected_pass += stats.unexpected_pass;
-        combined_stats.skipped += stats.skipped;
+        combined_stats.unsupported += stats.unsupported;
 
         all_unexpected_pass.extend(unexpected_pass);
         all_failed_lines.extend(failed_lines);

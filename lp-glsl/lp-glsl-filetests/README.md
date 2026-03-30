@@ -49,9 +49,17 @@ cd lp-glsl/lp-glsl-filetests
 cargo test --test filetests -- --ignored
 ```
 
-## Skipped vs failed (especially `wasm.q32`)
+## Unsupported vs failed (especially `wasm.q32`)
 
-Summary lines like `0/10 … (10 skipped)` mean the file or directive has `// @ignore(backend=wasm)` (or another target filter), not that assertions failed. Those cases are usually **not implemented** on that backend yet. They are **expected** until the backend catches up.
+Summary lines like `0/10 … (10 unsupported)` mean the file or directive has
+`// @unsupported(backend=wasm)` (or another target filter): the test is **not run** for that
+target because the case is **not applicable by design** on that backend (e.g. NaN semantics on
+Q32, or a path we do not intend to implement there). This is not an assertion failure.
+
+- **`@unimplemented(...)`** — temporary gap; we expect the test to **pass** once the feature is
+  implemented (failure is expected until then).
+- **`@broken(...)`** — known bug or wrong expectation until fixed.
+- **`@unsupported(...)`** — permanent “not on this target” (skip; does not count as pass or fail).
 
 Failures are reported with expected vs actual values. Use `scripts/glsl-filetests.sh --target wasm.q32` (or `jit.q32` / `rv32.q32`) to focus one backend.
 

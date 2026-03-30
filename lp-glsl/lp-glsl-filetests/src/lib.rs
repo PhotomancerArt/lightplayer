@@ -950,9 +950,9 @@ fn format_file_counts(
     let counts_str = if denominator > 0 {
         format!("{numerator:2}/{denominator:2}")
     } else if stats.total > 0 {
-        // No ordinary pass/fail mix: every case is skipped or an expected-failure
+        // No ordinary pass/fail mix: every case is @unsupported or an expected-failure
         // disposition. Show accounted/total so we do not print misleading `0/total`.
-        let accounted = stats.passed + stats.skipped + stats.expected_failure();
+        let accounted = stats.passed + stats.unsupported + stats.expected_failure();
         format!("{accounted:2}/{total:2}", total = stats.total)
     } else {
         String::new()
@@ -963,8 +963,8 @@ fn format_file_counts(
     if !has_unexpected_failures && stats.expected_failure() > 0 {
         suffix_parts.push(format!("({} expected-failure)", stats.expected_failure()));
     }
-    if stats.skipped > 0 {
-        suffix_parts.push(format!("({} skipped)", stats.skipped));
+    if stats.unsupported > 0 {
+        suffix_parts.push(format!("({} unsupported)", stats.unsupported));
     }
     if stats.failed > 0 {
         // Show unexpected failure count (red)

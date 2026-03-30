@@ -3,7 +3,7 @@ name = "lpir-cranelift"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Experimental LPIR → Cranelift JIT (Stage II)"
+description = "LPIR → Cranelift codegen and JIT (RISC-V); optional GLSL via lp-glsl-naga"
 build = "build.rs"
 
 [lints]

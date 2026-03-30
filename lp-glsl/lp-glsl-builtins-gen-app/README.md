@@ -1,51 +1,48 @@
 # lp-glsl-builtins-gen-app
 
-Code generator that automatically generates boilerplate code for builtin functions by scanning the
-`lp-glsl-builtins` crate.
+Scans **`lp-glsl-builtins`** (`src/builtins/glsl/`, `lpir/`, `lpfx/`) and emits the glue every
+other crate expects: **`BuiltinId`**, Cranelift ABI glue, WASM import metadata, and `mod.rs`
+stubs so the compiler and tests stay in sync.
 
-## Overview
+## Generated outputs
 
-This tool eliminates manual maintenance of boilerplate code when adding new builtin functions. It
-scans `lp-glsl/lp-glsl-builtins/src/q32/` for function definitions and generates:
+| Output | Purpose |
+|--------|---------|
+| `lp-glsl-builtin-ids/src/glsl_builtin_mapping.rs` | GLSL / LPIR / LPFX name → `BuiltinId` (WASM Q32 overloads, etc.) |
+| `lp-glsl-builtin-ids/src/lib.rs` | `BuiltinId` enum and helpers |
+| `lpir-cranelift/src/generated_builtin_abi.rs` | Cranelift lowering: symbol names and signatures |
+| `lp-glsl-builtins-emu-app/src/builtin_refs.rs` | Force-link all builtins for RV32 emu |
+| `lp-glsl-builtins-wasm/src/builtin_refs.rs` | Same for `wasm32` cdylib |
+| `lp-glsl-builtins/src/builtins/glsl/mod.rs` | `mod` list for GLSL builtins |
+| `lp-glsl-builtins/src/builtins/lpir/mod.rs` | `mod` list for LPIR builtins |
+| `lp-glsl-wasm/src/emit/builtin_wasm_import_types.rs` | WASM import typing for Q32 builtins |
 
-- **registry.rs**: `BuiltinId` enum, `name()`, `signature()`, `all()`, and `get_function_pointer()`
-  methods
-- **builtin_refs.rs**: Function references to prevent dead code elimination in
-  `lp-glsl-builtins-emu-app`
-- **mod.rs**: Module declarations and `pub use` statements for all builtin functions
-- **mapping.rs**: `map_testcase_to_builtin()` function mapping testcase names to `BuiltinId` (in `backend/builtins/`)
-
-All generated files include clear headers indicating they are auto-generated and how to regenerate
-them.
+Headers in generated files state that they are auto-generated and how to regenerate.
 
 ## Usage
 
-Run the generator manually:
+From the **repository root** (workspace root):
 
 ```bash
-cd lp-glsl
-cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-glsl-builtins-gen-app/Cargo.toml
+cargo run -p lp-glsl-builtins-gen-app
 ```
 
-The generator is automatically invoked by `scripts/build-builtins.sh` before building, so manual
-runs are typically not necessary.
+The app resolves the `lp-glsl/` directory (sibling layout under the workspace) and writes paths
+relative to that layout.
 
-## How It Works
+`scripts/build-builtins.sh` runs this generator when builtin sources or the generator change (see
+hash paths in that script), then builds `lp-glsl-builtins-emu-app` and `lp-glsl-builtins-wasm`.
 
-1. Scans `crates/lp-glsl-builtins/src/q32/*.rs` (excluding `mod.rs` and `test_helpers.rs`)
-2. Parses Rust source files using `syn` to find `#[unsafe(no_mangle)] pub extern "C" fn __lp_q32_*`
-   declarations
-3. Extracts function metadata: name, parameter count, symbol name
-4. Generates enum variant names (e.g., `__lp_q32_sqrt` → `Q32Sqrt`)
-5. Writes generated code to appropriate locations
+## How discovery works
 
-## Adding New Builtins
+1. Walk `lp-glsl-builtins/src/builtins/{glsl,lpir,lpfx}/` for `#[unsafe(no_mangle)] pub extern "C"`
+   functions (naming convention `__lp_q32_*` and related).
+2. Parse with `syn`, build `BuiltinInfo` (symbol, module path, arity, etc.).
+3. For LPFX, additional parsing under `builtins/lpfx/` feeds overload tables in
+   `glsl_builtin_mapping.rs`.
+4. Emit the files above, then run `cargo +nightly fmt` on the workspace root for the touched paths.
 
-When adding a new builtin function:
+## Adding builtins
 
-1. Create the function implementation in `crates/lp-glsl-builtins/src/q32/your_function.rs`
-2. Run the build script: `scripts/build-builtins.sh`
-3. The generator will automatically update all boilerplate files
-
-No manual editing of registry, mod.rs, or other boilerplate files is required.
-
+Implement in `lp-glsl-builtins`, then run `cargo run -p lp-glsl-builtins-gen-app` (or
+`scripts/build-builtins.sh`). Do not hand-edit generated files.

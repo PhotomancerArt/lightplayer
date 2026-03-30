@@ -42,7 +42,7 @@ pub fn run(
             let mut failed_lines = Vec::new();
             let mut unimplemented_count = 0;
             let mut broken_count = 0;
-            let mut skipped_count = 0;
+            let mut unsupported_count = 0;
             for directive in &test_file.run_directives {
                 if let Some(filter_line) = line_filter {
                     if directive.line_number != filter_line {
@@ -52,11 +52,14 @@ pub fn run(
                 let disposition =
                     directive_disposition(&test_file.annotations, &directive.annotations, target);
                 match &disposition {
-                    Disposition::Skip => skipped_count += 1,
+                    Disposition::Skip => unsupported_count += 1,
+                    Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
+                        unsupported_count += 1;
+                    }
                     Disposition::ExpectFailure(AnnotationKind::Unimplemented) => {
                         unimplemented_count += 1;
                     }
-                    Disposition::ExpectFailure(AnnotationKind::Broken | AnnotationKind::Ignore) => {
+                    Disposition::ExpectFailure(AnnotationKind::Broken) => {
                         broken_count += 1;
                     }
                     Disposition::ExpectSuccess => failed_lines.push(directive.line_number),
@@ -65,7 +68,7 @@ pub fn run(
             stats.failed = failed_lines.len();
             stats.unimplemented = unimplemented_count;
             stats.broken = broken_count;
-            stats.skipped = skipped_count;
+            stats.unsupported = unsupported_count;
             stats.passed = 0;
             return Ok((
                 Err(anyhow::anyhow!(

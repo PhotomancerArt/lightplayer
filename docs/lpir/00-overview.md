@@ -4,7 +4,7 @@ This spec defines LightPlayer Intermediate Representation (LPIR), its role in th
 
 ## What LPIR is
 
-LPIR (LightPlayer Intermediate Representation) is a flat, scalarized, non-SSA intermediate representation with structured control flow and virtual registers. It acts the connection between the Naga-based GLSL frontend and target-specific backends (WebAssembly today; Cranelift planned).
+LPIR (LightPlayer Intermediate Representation) is a flat, scalarized, non-SSA intermediate representation with structured control flow and virtual registers. It sits between the Naga-based GLSL frontend and target-specific backends (Cranelift for native RISC-V / host JIT, WebAssembly for browser preview, and an in-crate interpreter for testing).
 
 ## Source language
 
@@ -41,15 +41,16 @@ naga::Module (expression arena + statements)
   ▼
 IrFunction { body: Vec<Op>, vreg_count, vreg_types }
   │
-  ┌──────┴──────┐
-  ▼             ▼
-WASM emitter   Cranelift emitter (planned)
-(mode-aware)   (mode-aware)
-  ▼             ▼
-.wasm bytes    machine code
+  ┌──────────┼──────────┐
+  ▼          ▼          ▼
+Cranelift   WASM       Interpreter
+emitter    emitter    (lpir::interp)
+  ▼          ▼          ▼
+machine    .wasm      test results
+code       bytes
 ```
 
-Lowering is **mode-unaware**: it does not encode f32 vs fixed-point (Q32) choice. Emitters are **mode-aware**: they interpret the same LPIR under the selected numeric mode.
+Lowering is **mode-unaware**: it does not encode f32 vs fixed-point (Q32) choice. Emitters are **mode-aware**: they interpret the same LPIR under the selected numeric mode. The interpreter (`lpir::interp`) runs LPIR directly for testing without invoking any backend.
 
 ## IR classification
 
@@ -128,10 +129,10 @@ The LightPlayer GLSL stack is organized as follows:
 
 ```
 lp-glsl/
-├── lpir/                    # LPIR core library
-├── lp-glsl-naga/            # Naga → LPIR lowering
-├── lp-glsl-wasm/            # LPIR → WebAssembly emission
-└── lp-glsl-cranelift/       # LPIR → Cranelift emission (planned)
+├── lpir/                    # LPIR core library (types, ops, builder, parser, printer, interpreter, validator)
+├── lp-glsl-naga/            # Naga → LPIR lowering (GLSL frontend)
+├── lpir-cranelift/          # LPIR → Cranelift → native machine code (RISC-V / host JIT)
+└── lp-glsl-wasm/            # LPIR → WebAssembly emission (browser preview)
 ```
 
-The names and boundaries may evolve; this layout reflects the intended separation of concerns: IR definition, frontend lowering, and per-target emission.
+This layout reflects the separation of concerns: IR definition, frontend lowering, and per-target emission. See [`lp-glsl/CRATES.md`](../../lp-glsl/CRATES.md) for the full crate index.

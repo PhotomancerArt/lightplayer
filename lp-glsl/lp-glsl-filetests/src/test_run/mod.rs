@@ -33,8 +33,8 @@ pub struct TestCaseStats {
     pub broken: usize,
     /// Tests annotated @unimplemented/@broken that unexpectedly passed.
     pub unexpected_pass: usize,
-    /// Tests annotated @ignore that were skipped.
-    pub skipped: usize,
+    /// Tests annotated @unsupported for this target (skipped — not applicable by design).
+    pub unsupported: usize,
 }
 
 impl TestCaseStats {
@@ -52,7 +52,7 @@ impl TestCaseStats {
         self.unimplemented += o.unimplemented;
         self.broken += o.broken;
         self.unexpected_pass += o.unexpected_pass;
-        self.skipped += o.skipped;
+        self.unsupported += o.unsupported;
     }
 }
 
@@ -67,7 +67,11 @@ pub fn record_result(
 ) {
     match (&disposition, passed) {
         (Disposition::Skip, _) => {
-            stats.skipped += 1;
+            stats.unsupported += 1;
+        }
+        (Disposition::ExpectFailure(AnnotationKind::Unsupported), _) => {
+            // Defensive: Unsupported normally maps to Skip in directive_disposition.
+            stats.unsupported += 1;
         }
         (Disposition::ExpectFailure(_), true) => {
             stats.unexpected_pass += 1;
@@ -76,7 +80,7 @@ pub fn record_result(
         (Disposition::ExpectFailure(AnnotationKind::Unimplemented), false) => {
             stats.unimplemented += 1;
         }
-        (Disposition::ExpectFailure(AnnotationKind::Broken | AnnotationKind::Ignore), false) => {
+        (Disposition::ExpectFailure(AnnotationKind::Broken), false) => {
             stats.broken += 1;
         }
         (Disposition::ExpectSuccess, true) => {

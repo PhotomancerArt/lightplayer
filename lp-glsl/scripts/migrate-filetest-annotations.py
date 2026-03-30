@@ -8,7 +8,7 @@ import sys
 FILETESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "lp-glsl-filetests", "filetests")
 
 # Files known to work on wasm (none - wasm backend has many gaps).
-# Previously listed files were incorrect; use @unimplemented or @ignore as needed.
+# Previously listed files were incorrect; use @unimplemented or @unsupported as needed.
 WASM_OK_FILES = set()
 
 
