@@ -485,6 +485,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
         Op::FtoiSatU { dst, src } => unary(out, st, ind, "ftoi_sat_u", *dst, *src),
         Op::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
         Op::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
+        Op::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
         Op::Select {
             dst,
             cond,

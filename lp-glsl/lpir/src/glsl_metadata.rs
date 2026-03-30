@@ -1,4 +1,7 @@
 //! GLSL-facing metadata for JIT / WASM calls (qualifiers, logical types).
+//!
+//! Matrix types use **column-major** component order (same as GLSL / Naga scalarization):
+//! `mat2` is 4 float words `[col0row0, col0row1, col1row0, col1row1]`, etc.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -11,7 +14,7 @@ pub enum GlslParamQualifier {
     InOut,
 }
 
-/// Logical GLSL type (scalar or vector) for one parameter or return.
+/// Logical GLSL type (scalar, vector, or square matrix) for one parameter or return.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GlslType {
     Void,
@@ -31,6 +34,9 @@ pub enum GlslType {
     BVec2,
     BVec3,
     BVec4,
+    Mat2,
+    Mat3,
+    Mat4,
 }
 
 /// One GLSL parameter after lowering (pointee type for `out` / `inout` pointers).

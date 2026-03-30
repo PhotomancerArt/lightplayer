@@ -650,6 +650,10 @@ fn eval_op(
             let v = val_i32(get_reg(regs, *src)?)? as u32 as f32;
             set_reg(regs, *dst, Value::F32(v))?;
         }
+        Op::FfromI32Bits { dst, src } => {
+            let v = val_i32(get_reg(regs, *src)?)?;
+            set_reg(regs, *dst, Value::F32(f32::from_bits(v as u32)))?;
+        }
         Op::Select {
             dst,
             cond,

@@ -933,6 +933,10 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<Op, ParseError> {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
+        "ffrom_i32_bits" => Ok(Op::FfromI32Bits {
+            dst,
+            src: parse_vreg_token(parts[1])?,
+        }),
         "slot_addr" => {
             let name = parts[1].trim();
             let n = name

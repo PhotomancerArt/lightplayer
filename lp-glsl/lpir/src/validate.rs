@@ -505,7 +505,8 @@ fn check_op_operands_defined(
         Op::FtoiSatS { src, .. }
         | Op::FtoiSatU { src, .. }
         | Op::ItofS { src, .. }
-        | Op::ItofU { src, .. } => check(*src, "src"),
+        | Op::ItofU { src, .. }
+        | Op::FfromI32Bits { src, .. } => check(*src, "src"),
         Op::Select {
             cond,
             if_true,
@@ -612,7 +613,8 @@ fn check_opcode_dst_types(
         | Op::Fnearest { dst, .. }
         | Op::FconstF32 { dst, .. }
         | Op::ItofS { dst, .. }
-        | Op::ItofU { dst, .. } => expect(*dst, IrType::F32, "float op result"),
+        | Op::ItofU { dst, .. }
+        | Op::FfromI32Bits { dst, .. } => expect(*dst, IrType::F32, "float op result"),
 
         Op::Iadd { dst, .. }
         | Op::Isub { dst, .. }
@@ -778,7 +780,8 @@ fn mark_op_defs(func: &IrFunction, op: &Op, defined: &mut [bool]) {
         Op::FtoiSatS { dst, .. }
         | Op::FtoiSatU { dst, .. }
         | Op::ItofS { dst, .. }
-        | Op::ItofU { dst, .. } => mark(*dst, defined),
+        | Op::ItofU { dst, .. }
+        | Op::FfromI32Bits { dst, .. } => mark(*dst, defined),
         Op::Select { dst, .. } | Op::Copy { dst, .. } => mark(*dst, defined),
         Op::SlotAddr { dst, .. } | Op::Load { dst, .. } => mark(*dst, defined),
         Op::Call { results, .. } => {

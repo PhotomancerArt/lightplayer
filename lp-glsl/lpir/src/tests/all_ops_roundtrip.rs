@@ -163,6 +163,11 @@ pub(crate) fn module_all_ops() -> IrModule {
     b.push(Op::ItofS { dst: itfs, src: i1 });
     let itfu = b.alloc_vreg(IrType::F32);
     b.push(Op::ItofU { dst: itfu, src: i2 });
+    let fbits_d = b.alloc_vreg(IrType::F32);
+    b.push(Op::FfromI32Bits {
+        dst: fbits_d,
+        src: i1,
+    });
 
     let sel_c = b.alloc_vreg(IrType::I32);
     b.push(Op::IconstI32 {

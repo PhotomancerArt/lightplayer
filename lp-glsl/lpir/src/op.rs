@@ -294,6 +294,12 @@ pub enum Op {
         dst: VReg,
         src: VReg,
     },
+    /// Reinterpret [`IrType::I32`] bits as [`IrType::F32`] (Q32 lanes stay raw `i32`;
+    /// native F32 uses an `i32`→`f32` bitcast).
+    FfromI32Bits {
+        dst: VReg,
+        src: VReg,
+    },
 
     // --- Select / copy ---
     Select {
