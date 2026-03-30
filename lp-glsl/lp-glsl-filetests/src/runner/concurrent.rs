@@ -41,6 +41,8 @@ pub enum Reply {
         unexpected_pass_lines: Vec<usize>,
         /// Line numbers that failed.
         failed_lines: Vec<usize>,
+        /// Whole-file compile failed (summary mode) before executing `// run:` directives.
+        compile_failed: bool,
     },
 }
 
@@ -163,47 +165,61 @@ fn worker_thread(
                 };
 
                 // Use AssertUnwindSafe to allow catching panics from code that isn't unwind-safe
-                let (result, per_target, stats, unexpected_pass_lines, failed_lines) =
-                    match catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        crate::run_filetest_with_line_filter(
-                            path.as_path(),
-                            line_filter,
-                            output_mode,
-                            &targets,
+                let (
+                    result,
+                    per_target,
+                    stats,
+                    unexpected_pass_lines,
+                    failed_lines,
+                    compile_failed,
+                ) = match catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::run_filetest_with_line_filter(
+                        path.as_path(),
+                        line_filter,
+                        output_mode,
+                        &targets,
+                    )
+                })) {
+                    Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf),
+                    Ok(Err(e)) => {
+                        let error_stats = crate::count_test_cases(path.as_path(), line_filter);
+                        (
+                            Err(e),
+                            BTreeMap::new(),
+                            error_stats,
+                            Vec::new(),
+                            Vec::new(),
+                            false,
                         )
-                    })) {
-                        Ok(Ok((r, pt, s, up, fl))) => (r, pt, s, up, fl),
-                        Ok(Err(e)) => {
-                            let error_stats = crate::count_test_cases(path.as_path(), line_filter);
-                            (Err(e), BTreeMap::new(), error_stats, Vec::new(), Vec::new())
-                        }
-                        Err(e) => {
-                            // The test panicked, leaving us a `Box<Any>`.
-                            // Panics are usually strings or &str.
-                            let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
-                                msg.clone()
-                            } else if let Some(msg) = e.downcast_ref::<&'static str>() {
-                                msg.to_string()
-                            } else {
-                                // Try to format the panic payload as debug string
-                                format!("{e:?}")
-                            };
+                    }
+                    Err(e) => {
+                        // The test panicked, leaving us a `Box<Any>`.
+                        // Panics are usually strings or &str.
+                        let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
+                            msg.clone()
+                        } else if let Some(msg) = e.downcast_ref::<&'static str>() {
+                            msg.to_string()
+                        } else {
+                            // Try to format the panic payload as debug string
+                            format!("{e:?}")
+                        };
 
-                            // Extract just the essential panic message (first line usually)
-                            let short_msg = panic_msg.lines().next().unwrap_or("panic").to_string();
+                        // Extract just the essential panic message (first line usually)
+                        let short_msg = panic_msg.lines().next().unwrap_or("panic").to_string();
 
-                            // Count test cases even on panic so we can show stats
-                            let panic_stats = crate::count_test_cases(path.as_path(), line_filter);
+                        // Count test cases even on panic so we can show stats
+                        let panic_stats = crate::count_test_cases(path.as_path(), line_filter);
 
-                            (
-                                Err(anyhow::anyhow!("panicked: {short_msg}")),
-                                BTreeMap::new(),
-                                panic_stats,
-                                Vec::new(),
-                                Vec::new(),
-                            )
-                        }
-                    };
+                        (
+                            Err(anyhow::anyhow!("panicked: {short_msg}")),
+                            BTreeMap::new(),
+                            panic_stats,
+                            Vec::new(),
+                            Vec::new(),
+                            false,
+                        )
+                    }
+                };
 
                 replies
                     .send(Reply::Done {
@@ -213,6 +229,7 @@ fn worker_thread(
                         stats,
                         unexpected_pass_lines,
                         failed_lines,
+                        compile_failed,
                     })
                     .unwrap();
             }

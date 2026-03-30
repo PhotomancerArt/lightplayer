@@ -14,13 +14,14 @@ use std::path::Path;
 use crate::util::format_glsl_value;
 
 /// Run tests in summary mode: compile all functions once and reuse the same emulator.
-/// Returns result, stats, list of line numbers that had unexpected passes, and list of line numbers that failed.
+/// Returns result, stats, unexpected-pass lines, failed lines, and whether whole-file compilation
+/// failed before any `// run:` executed.
 pub fn run(
     test_file: &TestFile,
     path: &Path,
     line_filter: Option<usize>,
     target: &Target,
-) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>)> {
+) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>, bool)> {
     let filetests_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let relative_path = path
         .strip_prefix(&filetests_dir)
@@ -77,6 +78,7 @@ pub fn run(
                 stats,
                 Vec::new(),
                 failed_lines,
+                true,
             ));
         }
     };
@@ -340,5 +342,5 @@ pub fn run(
         Ok(())
     };
 
-    Ok((result, stats, unexpected_pass_lines, failed_lines))
+    Ok((result, stats, unexpected_pass_lines, failed_lines, false))
 }

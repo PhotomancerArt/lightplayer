@@ -11,7 +11,7 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::target::Target;
+use crate::target::{AnnotationKind, Target};
 
 /// A helper struct to update a file in-place as test expectations are
 /// automatically updated.
@@ -120,6 +120,84 @@ impl FileUpdate {
 
         fs::write(&self.path, new_test)?;
         Ok(())
+    }
+
+    /// `true` if the line immediately before this `// run:` already has `@unimplemented` matching
+    /// `target` (uses `line_diff` like [`add_annotation`]).
+    pub fn per_directive_unimplemented_present(
+        &self,
+        run_line_1based: usize,
+        target: &Target,
+    ) -> Result<bool> {
+        let old_test = fs::read_to_string(&self.path)?;
+        let all_lines: Vec<&str> = old_test.lines().collect();
+        let run_line_idx =
+            (((run_line_1based - 1) as isize) + self.line_diff.get()).max(0) as usize;
+        if run_line_idx == 0 {
+            return Ok(false);
+        }
+        let prev = all_lines[run_line_idx - 1];
+        if let Ok(Some(ann)) =
+            parse_annotation::parse_annotation_line(prev, run_line_1based.saturating_sub(1))
+        {
+            return Ok(ann.kind == AnnotationKind::Unimplemented && ann.filter.matches(target));
+        }
+        Ok(false)
+    }
+
+    /// Insert `// @unimplemented(backend=…)` before the first `// run:` if none exists at file
+    /// level for `target`. Returns `Ok(true)` if a line was added, `Ok(false)` if already present.
+    pub fn ensure_file_level_unimplemented(&self, target: &Target) -> Result<bool> {
+        let annotation = format!(
+            "// @unimplemented(backend={})",
+            match target.backend {
+                crate::target::Backend::Jit => "jit",
+                crate::target::Backend::Rv32 => "rv32",
+                crate::target::Backend::Wasm => "wasm",
+            }
+        );
+
+        let old_test = fs::read_to_string(&self.path)?;
+        let all_lines: Vec<&str> = old_test.lines().collect();
+        let mut first_run_idx: Option<usize> = None;
+        for (i, line) in all_lines.iter().enumerate() {
+            if line.trim().starts_with("// run:") {
+                first_run_idx = Some(i);
+                break;
+            }
+        }
+        let Some(first_run_idx) = first_run_idx else {
+            bail!("no // run: directive in {}", self.path.display());
+        };
+
+        for line in &all_lines[..first_run_idx] {
+            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, 1) {
+                if ann.kind == AnnotationKind::Unimplemented && ann.filter.matches(target) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        let indent = all_lines[first_run_idx]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect::<String>();
+        let new_line = format!("{indent}{annotation}");
+
+        let mut new_test = String::new();
+        for i in 0..first_run_idx {
+            new_test.push_str(all_lines[i]);
+            new_test.push('\n');
+        }
+        new_test.push_str(&new_line);
+        new_test.push('\n');
+        for i in first_run_idx..all_lines.len() {
+            new_test.push_str(all_lines[i]);
+            new_test.push('\n');
+        }
+
+        fs::write(&self.path, new_test)?;
+        Ok(true)
     }
 
     /// Add an annotation line before the run directive at the given line number.

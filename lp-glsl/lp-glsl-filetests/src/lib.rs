@@ -25,12 +25,53 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
-use crate::target::{DEFAULT_TARGETS, Target};
+use crate::target::{Backend, DEFAULT_TARGETS, Target};
+
+/// Adds `@unimplemented(backend=…)` for one run-test file: file-level when the whole module
+/// failed to compile in summary mode; otherwise before each failing `// run:`. Returns how many
+/// marker operations were applied (0 if already annotated).
+fn mark_unimplemented_expectations_for_file(
+    path: &Path,
+    failed_lines: &[usize],
+    compile_failed: bool,
+    use_file_level_for_compile_fail: bool,
+    target: &Target,
+) -> anyhow::Result<usize> {
+    let ann = format!(
+        "// @unimplemented(backend={})",
+        match target.backend {
+            Backend::Jit => "jit",
+            Backend::Rv32 => "rv32",
+            Backend::Wasm => "wasm",
+        }
+    );
+    let mut n = 0;
+    if compile_failed && use_file_level_for_compile_fail {
+        let u = util::file_update::FileUpdate::new(path);
+        if u.ensure_file_level_unimplemented(target)? {
+            n += 1;
+        }
+        return Ok(n);
+    }
+
+    let u = util::file_update::FileUpdate::new(path);
+    let mut sorted: Vec<usize> = failed_lines.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    for line in sorted {
+        if u.per_directive_unimplemented_present(line, target)? {
+            continue;
+        }
+        u.add_annotation(line, &ann)?;
+        n += 1;
+    }
+    Ok(n)
+}
 
 /// Run a single filetest.
 pub fn run_filetest(path: &Path) -> Result<()> {
     let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
-    let (result, _, _, _, _) =
+    let (result, _, _, _, _, _) =
         run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets)?;
     result
 }
@@ -63,7 +104,8 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 }
 
 /// Run a single filetest with optional line number filtering.
-/// Returns the result, per-target stats, combined stats, and line numbers with unexpected passes.
+/// Returns the result, per-target stats, combined stats, unexpected-pass lines, failed lines, and
+/// whether any target had a whole-file compile failure (summary mode).
 pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
@@ -75,6 +117,7 @@ pub fn run_filetest_with_line_filter(
     test_run::TestCaseStats,
     Vec<usize>,
     Vec<usize>,
+    bool,
 )> {
     // Count test cases early, even if parsing fails later
     let early_stats = count_test_cases(path, line_filter);
@@ -83,7 +126,14 @@ pub fn run_filetest_with_line_filter(
         Ok(tf) => tf,
         Err(e) => {
             // Return error but preserve the test case count we already computed
-            return Ok((Err(e), BTreeMap::new(), early_stats, Vec::new(), Vec::new()));
+            return Ok((
+                Err(e),
+                BTreeMap::new(),
+                early_stats,
+                Vec::new(),
+                Vec::new(),
+                false,
+            ));
         }
     };
 
@@ -125,6 +175,7 @@ pub fn run_filetest_with_line_filter(
             stats,
             unexpected_pass_lines,
             failed_lines,
+            false,
         ));
     }
 
@@ -134,7 +185,7 @@ pub fn run_filetest_with_line_filter(
         .iter()
         .any(|t| matches!(t, parse::TestType::Run))
     {
-        let (result, per_target, stats, unexpected_pass_lines, failed_lines) =
+        let (result, per_target, stats, unexpected_pass_lines, failed_lines, compile_failed) =
             test_run::run_test_file_with_line_filter(
                 &test_file,
                 path,
@@ -148,6 +199,7 @@ pub fn run_filetest_with_line_filter(
             stats,
             unexpected_pass_lines,
             failed_lines,
+            compile_failed,
         ))
     } else {
         Ok((
@@ -156,6 +208,7 @@ pub fn run_filetest_with_line_filter(
             test_run::TestCaseStats::default(),
             Vec::new(),
             Vec::new(),
+            false,
         ))
     }
 }
@@ -183,9 +236,15 @@ struct FileSpec {
 ///
 /// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
+///
+/// `mark_unimplemented` adds `@unimplemented(backend=…)` to failing tests (mirrors `--fix` for the
+/// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Requires a single
+/// `--target` (or default `jit.q32`). With `--yes`, skips the interactive confirmation.
 pub fn run(
     files: &[String],
     fix_xfail: bool,
+    mark_unimplemented: bool,
+    mark_unimplemented_yes: bool,
     target_filter: Option<&'static Target>,
     force_summary: bool,
 ) -> anyhow::Result<()> {
@@ -195,32 +254,23 @@ pub fn run(
             .map(|v| v == "1")
             .unwrap_or(false);
 
-    // Check for baseline marking feature
-    let mark_failing_expected = std::env::var("LP_MARK_FAILING_TESTS_EXPECTED")
-        .map(|v| v == "1")
-        .unwrap_or(false);
+    let mark_unimplemented = mark_unimplemented
+        || std::env::var("LP_MARK_UNIMPLEMENTED")
+            .map(|v| v == "1")
+            .unwrap_or(false);
 
-    if mark_failing_expected {
-        // Show stern warning and require confirmation
+    if mark_unimplemented && !mark_unimplemented_yes {
         println!(
             "\n{}",
             colors::colorize(
-                "WARNING: This will mark ALL currently failing tests with @unimplemented() annotations.",
+                "WARNING: This will add @unimplemented(backend=…) to failing tests (file-level for whole-file compile failures in summary mode, or per // run: otherwise).",
                 colors::RED
             )
         );
         println!(
             "{}",
             colors::colorize(
-                "This should only be done when establishing a baseline for expected-fail tracking.",
-                colors::YELLOW
-            )
-        );
-        println!();
-        println!(
-            "{}",
-            colors::colorize(
-                "This operation will modify test files. Make sure you have committed your changes.",
+                "Use only when establishing a milestone baseline. Commit before running.",
                 colors::YELLOW
             )
         );
@@ -230,10 +280,10 @@ pub fn run(
 
         let mut confirmation = String::new();
         std::io::stdin().read_line(&mut confirmation)?;
-        let confirmation = confirmation.trim();
-
-        if confirmation != "yes" {
-            anyhow::bail!("Baseline marking cancelled. Type 'yes' exactly to confirm.");
+        if confirmation.trim() != "yes" {
+            anyhow::bail!(
+                "Cancelled. Type 'yes' exactly to confirm, or pass --yes to skip this prompt."
+            );
         }
     }
     let active_targets: Vec<&Target> = if let Some(t) = target_filter {
@@ -241,6 +291,12 @@ pub fn run(
     } else {
         DEFAULT_TARGETS.iter().collect()
     };
+
+    if mark_unimplemented && active_targets.len() != 1 {
+        anyhow::bail!(
+            "--mark-unimplemented requires exactly one target; pass e.g. --target jit.q32"
+        );
+    }
 
     let filetests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let mut test_specs = Vec::new();
@@ -313,7 +369,7 @@ pub fn run(
             relative_path_str
         };
 
-        let (_result, per_target, stats, unexpected_pass_lines, _failed_lines) =
+        let (_result, per_target, stats, unexpected_pass_lines, failed_lines, compile_failed) =
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_filetest_with_line_filter(
                     &spec.path,
@@ -322,13 +378,14 @@ pub fn run(
                     &active_targets,
                 )
             })) {
-                Ok(Ok((r, pt, s, up, fl))) => (r, pt, s, up, fl),
+                Ok(Ok((r, pt, s, up, fl, cf))) => (r, pt, s, up, fl, cf),
                 Ok(Err(e)) => (
                     Err(e),
                     BTreeMap::new(),
                     test_run::TestCaseStats::default(),
                     Vec::new(),
                     Vec::new(),
+                    false,
                 ),
                 Err(e) => {
                     let panic_msg = if let Some(msg) = e.downcast_ref::<String>() {
@@ -344,12 +401,13 @@ pub fn run(
                         test_run::TestCaseStats::default(),
                         Vec::new(),
                         Vec::new(),
+                        false,
                     )
                 }
             };
 
-        // Check if file actually failed (has unexpected failures or unexpected passes)
-        let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0;
+        // Check if file actually failed (has unexpected failures, unexpected passes, or whole-file compile failure)
+        let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
 
         if !file_actually_failed {
             println!(
@@ -442,6 +500,33 @@ pub fn run(
                     );
                 }
             }
+            if mark_unimplemented {
+                let target = *active_targets.first().expect("active_targets non-empty");
+                let use_file_level = matches!(output_mode, OutputMode::Summary);
+                let needs_mark = compile_failed || !failed_lines.is_empty();
+                if needs_mark {
+                    let n = mark_unimplemented_expectations_for_file(
+                        &spec.path,
+                        &failed_lines,
+                        compile_failed,
+                        use_file_level,
+                        target,
+                    )?;
+                    if n > 0 {
+                        println!(
+                            "\n{}",
+                            colors::colorize(
+                                "Marked baseline @unimplemented. Re-run filetests to verify green.",
+                                colors::GREEN
+                            )
+                        );
+                        return Ok(());
+                    }
+                    anyhow::bail!(
+                        "--mark-unimplemented: failures remain but no new markers were added (already annotated?)"
+                    );
+                }
+            }
             anyhow::bail!("1 test file(s) failed");
         }
     }
@@ -463,6 +548,7 @@ pub fn run(
         stats: test_run::TestCaseStats,
         unexpected_pass_lines: Vec<usize>,
         failed_lines: Vec<usize>,
+        compile_failed: bool,
     }
 
     struct FailedTest {
@@ -479,6 +565,7 @@ pub fn run(
             stats: test_run::TestCaseStats::default(),
             unexpected_pass_lines: Vec::new(),
             failed_lines: Vec::new(),
+            compile_failed: false,
         })
         .collect();
 
@@ -519,12 +606,14 @@ pub fn run(
                 stats,
                 unexpected_pass_lines,
                 failed_lines,
-                ..
+                compile_failed,
+                result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
             tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
             tests[jobid].failed_lines = failed_lines;
+            tests[jobid].compile_failed = compile_failed;
             tests[jobid].state = TestState::Done;
             for (name, s) in per_target {
                 per_target_aggregate.entry(name).or_default().add(s);
@@ -543,6 +632,7 @@ pub fn run(
                 };
 
                 let stats = &tests[reported_tests].stats;
+                let compile_failed = tests[reported_tests].compile_failed;
                 total_test_cases += stats.total;
                 passed_test_cases += stats.passed;
                 failed_test_cases += stats.failed;
@@ -573,8 +663,9 @@ pub fn run(
                 let (counts_str, parentheticals) =
                     format_file_counts(stats, has_unexpected_failures);
 
-                // Determine if this file actually failed (has unexpected failures or unexpected passes)
-                let file_actually_failed = stats.failed > 0 || stats.unexpected_pass > 0;
+                // Determine if this file actually failed (unexpected failures/passes or whole-file compile error)
+                let file_actually_failed =
+                    stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
 
                 // Choose status marker and color based on whether file actually failed
                 let (status_marker, should_mark_failed) = if file_actually_failed {
@@ -644,12 +735,14 @@ pub fn run(
                 stats,
                 unexpected_pass_lines,
                 failed_lines,
-                ..
+                compile_failed,
+                result: _,
             } = reply;
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
             tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
             tests[jobid].failed_lines = failed_lines;
+            tests[jobid].compile_failed = compile_failed;
             tests[jobid].state = TestState::Done;
             for (name, s) in per_target {
                 per_target_aggregate.entry(name).or_default().add(s);
@@ -664,13 +757,15 @@ pub fn run(
                 stats,
                 unexpected_pass_lines,
                 failed_lines,
-                ..
+                compile_failed,
+                result: _,
             }) = concurrent_runner.get()
             {
                 tests[jobid].per_target = per_target.clone();
                 tests[jobid].stats = stats;
                 tests[jobid].unexpected_pass_lines = unexpected_pass_lines;
                 tests[jobid].failed_lines = failed_lines;
+                tests[jobid].compile_failed = compile_failed;
                 tests[jobid].state = TestState::Done;
                 for (name, s) in per_target {
                     per_target_aggregate.entry(name).or_default().add(s);
@@ -758,49 +853,6 @@ pub fn run(
         }
     }
 
-    // Baseline marking: mark all failing tests with [expect-fail]
-    if mark_failing_expected {
-        // Collect specific failing directives (unexpected failures, not expected ones)
-        let mut failing_directives: Vec<(PathBuf, usize)> = Vec::new();
-        for test in &tests {
-            for line_number in &test.failed_lines {
-                failing_directives.push((test.spec.path.clone(), *line_number));
-            }
-        }
-
-        if !failing_directives.is_empty() {
-            println!(
-                "\nMarking {} failing test directive(s) with @unimplemented()...",
-                failing_directives.len()
-            );
-            use std::collections::HashMap;
-            let mut file_updates: HashMap<PathBuf, util::file_update::FileUpdate> = HashMap::new();
-            let mut total_marked = 0;
-
-            for (file_path, line_number) in &failing_directives {
-                let file_update = file_updates
-                    .entry(file_path.clone())
-                    .or_insert_with(|| util::file_update::FileUpdate::new(file_path));
-
-                // Mark this specific directive that failed
-                if let Err(e) = file_update.add_annotation(*line_number, "// @unimplemented()") {
-                    eprintln!(
-                        "Warning: failed to add @unimplemented() annotation to {}:{}: {}",
-                        file_path.display(),
-                        line_number,
-                        e
-                    );
-                } else {
-                    total_marked += 1;
-                }
-            }
-
-            println!("Marked {total_marked} test directive(s) with @unimplemented()");
-        } else {
-            println!("\nNo failing tests to mark.");
-        }
-    }
-
     println!(
         "\n{}",
         format_results_summary(
@@ -816,6 +868,53 @@ pub fn run(
             &per_target_aggregate,
         )
     );
+
+    if mark_unimplemented && unexpected_pass_test_cases > 0 {
+        anyhow::bail!(
+            "cannot use --mark-unimplemented when there are unexpected passes; use --fix first"
+        );
+    }
+
+    if mark_unimplemented {
+        let target = *active_targets.first().expect("active_targets non-empty");
+        let use_file_level = matches!(output_mode, OutputMode::Summary);
+        let mut total_marks = 0usize;
+        for test in &tests {
+            let needs_mark = test.compile_failed || !test.failed_lines.is_empty();
+            if !needs_mark {
+                continue;
+            }
+            total_marks += mark_unimplemented_expectations_for_file(
+                &test.spec.path,
+                &test.failed_lines,
+                test.compile_failed,
+                use_file_level,
+                target,
+            )?;
+        }
+        if total_marks > 0 {
+            println!(
+                "\n{}",
+                colors::colorize(
+                    &format!(
+                        "Applied {total_marks} baseline @unimplemented marker(s). Re-run filetests to verify green."
+                    ),
+                    colors::GREEN,
+                )
+            );
+            return Ok(());
+        }
+        if failed > 0 {
+            anyhow::bail!(
+                "--mark-unimplemented: failures found but no new markers were added (already annotated?)"
+            );
+        }
+        println!(
+            "\n{}",
+            colors::colorize("No failing tests needed marking.", colors::YELLOW)
+        );
+        return Ok(());
+    }
 
     // Exit with error if there are unexpected failures or unexpected passes
     if failed > 0 {

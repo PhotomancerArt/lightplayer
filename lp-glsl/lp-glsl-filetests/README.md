@@ -118,6 +118,23 @@ int add_int(int a, int b) {
 - Similar discovery, parsing, execution, and BLESS-style updates (`CRANELIFT_TEST_BLESS=1`).
 - Differences: GLSL instead of CLIF, `~=` for floats, comment-based directives.
 
+## Baseline: mark current failures `@unimplemented`
+
+To make the default `jit.q32` run exit **0** while gaps remain (so each milestone only shows new
+regressions), use the filetests app with **exactly one** `--target` and `--mark-unimplemented`.
+You will be prompted to type `yes`, or pass `--assume-yes` for scripts.
+
+```bash
+cd lp2025/lp-glsl
+cargo run -p lp-glsl-filetests-app -- test --target jit.q32 --mark-unimplemented --assume-yes
+# or: LP_MARK_UNIMPLEMENTED=1 with the same binary (still requires single target)
+```
+
+Whole-file compile failures in **summary** mode get one file-level
+`// @unimplemented(backend=jit)` before the first `// run:`. Per-directive failures get a marker
+line immediately before each failing `// run:`. Re-run the suite after marking; use `--fix` /
+`LP_FIX_XFAIL=1` to remove markers when a test starts passing.
+
 ## BLESS mode
 
 Update expectations in place when outputs change intentionally:

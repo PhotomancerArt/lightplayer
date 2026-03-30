@@ -68,6 +68,18 @@ while [[ $# -gt 0 ]]; do
     SUMMARY_ARG=("--summary")
     shift
     ;;
+  --fix)
+    TEST_ARGS+=("--fix")
+    shift
+    ;;
+  --mark-unimplemented)
+    TEST_ARGS+=("--mark-unimplemented")
+    shift
+    ;;
+  --assume-yes)
+    TEST_ARGS+=("--assume-yes")
+    shift
+    ;;
   *)
     TEST_ARGS+=("$1")
     shift
@@ -92,10 +104,13 @@ OPTIONS:
     --target NAME       Run only the specified target (jit.q32, wasm.q32, rv32.q32)
     --summary           Force summary mode even for a single test file
     --fix               Remove @unimplemented annotations from tests that now pass
+    --mark-unimplemented  Add @unimplemented(backend=…) to failing tests (baseline); use with --target
+    --assume-yes        With --mark-unimplemented, skip the interactive confirmation
 
 ENVIRONMENT:
     DEBUG=1             Show debug output (CLIF, WAT) when a test fails
     LP_FIX_XFAIL=1      Same as --fix; remove annotations from newly passing tests
+    LP_MARK_UNIMPLEMENTED=1  Same as --mark-unimplemented
     LP_FILETESTS_THREADS=N   Worker threads for the test runner (default: CPU count).
                         If you still see crashes with parallel JIT, try N=1.
 
@@ -127,6 +142,9 @@ EXAMPLES:
 
     # Fix unexpected passes: remove @unimplemented from tests that now pass
     glsl-filetests.sh --target wasm.q32 --fix
+
+    # Baseline: mark all current failures @unimplemented(backend=jit), then re-run to get exit 0
+    glsl-filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
 
 PATTERN SYNTAX:
     *         Matches any sequence of characters

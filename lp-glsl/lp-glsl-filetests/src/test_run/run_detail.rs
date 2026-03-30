@@ -19,14 +19,15 @@ use crate::colors;
 use crate::util::format_glsl_value;
 
 /// Run tests in detail mode: compile per test case with function filtering.
-/// Returns result, stats, and list of line numbers that had unexpected passes.
+/// Returns result, stats, unexpected-pass lines, failed lines, and `compile_failed` (always `false`
+/// — this mode compiles per directive; use summary mode for whole-file compile failures).
 pub fn run(
     test_file: &TestFile,
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
     target: &Target,
-) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>)> {
+) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>, bool)> {
     // Read the original file lines to pass to test glsl generation
     let file_contents = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read {}: {}", path.display(), e))?;
@@ -526,7 +527,7 @@ pub fn run(
         Ok(())
     };
 
-    Ok((result, stats, unexpected_pass_lines, failed_lines))
+    Ok((result, stats, unexpected_pass_lines, failed_lines, false))
 }
 
 /// Error type for unified error formatting.

@@ -21,6 +21,12 @@ struct TestOptions {
     /// Automatically remove annotations from tests that now pass
     #[arg(long)]
     fix: bool,
+    /// Add @unimplemented(backend=…) to failing tests (baseline for milestone work); requires a single --target
+    #[arg(long)]
+    mark_unimplemented: bool,
+    /// With --mark-unimplemented, skip typing `yes` (non-interactive)
+    #[arg(long)]
+    assume_yes: bool,
     /// Run only the specified target (e.g. jit.q32, wasm.q32, rv32.q32)
     #[arg(long)]
     target: Option<String>,
@@ -52,7 +58,14 @@ fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            lp_glsl_filetests::run(&files, t.fix, target_filter, t.summary)?;
+            lp_glsl_filetests::run(
+                &files,
+                t.fix,
+                t.mark_unimplemented,
+                t.assume_yes,
+                target_filter,
+                t.summary,
+            )?;
         }
     }
 
