@@ -46,6 +46,9 @@ pub(crate) struct LowerCtx<'a> {
     pub expr_cache: Vec<Option<VRegVec>>,
     pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
     pub array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>,
+    /// Naga emits `.length()` on multi-dim arrays as the outer type-tree size, not GLSL's leftmost `[]`.
+    /// Pairs `Load(array)` + `Literal(U32)` (and chained `Literal(I32)` copies) get corrected values here.
+    pub(crate) array_length_literal_fixes: BTreeMap<Handle<Expression>, i32>,
     pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
     /// VRegs per function argument index (flattened scalars).
     pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
@@ -157,6 +160,8 @@ impl<'a> LowerCtx<'a> {
         }
 
         let expr_cache = vec![None; func.expressions.len()];
+        let array_length_literal_fixes =
+            crate::lower_array::scan_naga_multidim_array_length_literals(func, &array_map);
 
         let mut ctx = Self {
             fb,
@@ -166,6 +171,7 @@ impl<'a> LowerCtx<'a> {
             expr_cache,
             local_map,
             array_map,
+            array_length_literal_fixes,
             param_aliases,
             arg_vregs,
             pointer_args,

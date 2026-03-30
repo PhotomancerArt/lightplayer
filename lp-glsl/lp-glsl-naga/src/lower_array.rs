@@ -1,13 +1,19 @@
 //! Stack-slot arrays: zero-fill, initializer lists, indexed load/store with bounds clamping.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{IrType, Op, VReg};
-use naga::{Expression, Function, Handle, Module};
+use smallvec::smallvec;
 
-use crate::lower_ctx::{ArrayInfo, LowerCtx, VRegVec, naga_type_to_ir_types};
+use lpir::{IrType, Op, VReg};
+use naga::{
+    BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind,
+    TypeInner,
+};
+
+use crate::lower_ctx::{ArrayInfo, LowerCtx, VRegVec, naga_type_to_ir_types, vector_size_usize};
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 
@@ -473,4 +479,323 @@ fn zero_element_at_byte_offset(
         });
     }
     Ok(())
+}
+
+/// Naga's GLSL front-end emits `.length()` on multi-dim arrays as `dimensions[0]` (type-tree outer);
+/// GLSL uses the leftmost `[]` size, which matches `dimensions[last]` in our shape walk.
+pub(crate) fn scan_naga_multidim_array_length_literals(
+    func: &Function,
+    array_map: &BTreeMap<Handle<LocalVariable>, ArrayInfo>,
+) -> BTreeMap<Handle<Expression>, i32> {
+    let mut fixes = BTreeMap::new();
+    let entries: Vec<(usize, Handle<Expression>, &Expression)> = func
+        .expressions
+        .iter()
+        .map(|(h, e)| (h.index(), h, e))
+        .collect();
+    for w in entries.windows(2) {
+        let (i0, _h0, e0) = w[0];
+        let (i1, h1, e1) = w[1];
+        if i0 + 1 != i1 {
+            continue;
+        }
+        let Expression::Load { pointer } = e0 else {
+            continue;
+        };
+        let Expression::LocalVariable(lv) = &func.expressions[*pointer] else {
+            continue;
+        };
+        let Some(info) = array_map.get(lv) else {
+            continue;
+        };
+        if info.dimensions.len() < 2 {
+            continue;
+        }
+        let naga_outer = info.dimensions[0];
+        let glsl_first = *info.dimensions.last().expect("dims");
+        if naga_outer == glsl_first {
+            continue;
+        }
+        let wrong = naga_outer;
+        let correct = glsl_first;
+        let Expression::Literal(Literal::U32(n)) = e1 else {
+            continue;
+        };
+        if *n != wrong {
+            continue;
+        }
+        fixes.insert(h1, correct as i32);
+        let mut next_idx = i1 + 1;
+        while next_idx < func.expressions.len() {
+            let mut hit = None;
+            for (h, e) in func.expressions.iter() {
+                if h.index() == next_idx {
+                    hit = Some((h, e));
+                    break;
+                }
+            }
+            let Some((h, e)) = hit else {
+                break;
+            };
+            match e {
+                Expression::Literal(Literal::I32(v)) if *v == wrong as i32 => {
+                    fixes.insert(h, correct as i32);
+                    next_idx += 1;
+                }
+                _ => break,
+            }
+        }
+    }
+    fixes
+}
+
+pub(crate) fn peel_array_local_value(
+    func: &Function,
+    expr: Handle<Expression>,
+) -> Option<Handle<LocalVariable>> {
+    match &func.expressions[expr] {
+        Expression::LocalVariable(lv) => Some(*lv),
+        Expression::Load { pointer } => match &func.expressions[*pointer] {
+            Expression::LocalVariable(lv) => Some(*lv),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// GLSL `.length()` / [`Expression::ArrayLength`]: size of the leftmost `[]` for the array value.
+/// Copy one stack-slot array to another (same shape); used for whole-array assignment.
+pub(crate) fn copy_stack_array_slots(
+    ctx: &mut LowerCtx<'_>,
+    dst: &ArrayInfo,
+    src: &ArrayInfo,
+) -> Result<(), LowerError> {
+    if dst.element_count != src.element_count
+        || dst.leaf_stride != src.leaf_stride
+        || dst.leaf_element_ty != src.leaf_element_ty
+    {
+        return Err(LowerError::UnsupportedStatement(String::from(
+            "array copy: shape mismatch",
+        )));
+    }
+    let sz = dst
+        .element_count
+        .checked_mul(dst.leaf_stride)
+        .ok_or_else(|| LowerError::Internal(String::from("array copy: size overflow")))?;
+    let dst_addr = array_slot_base(ctx, dst.slot);
+    let src_addr = array_slot_base(ctx, src.slot);
+    ctx.fb.push(Op::Memcpy {
+        dst_addr,
+        src_addr,
+        size: sz,
+    });
+    Ok(())
+}
+
+pub(crate) fn lower_array_length(
+    ctx: &mut LowerCtx<'_>,
+    array_expr: Handle<Expression>,
+) -> Result<VRegVec, LowerError> {
+    let lv = peel_array_local_value(ctx.func, array_expr).ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from(
+            "ArrayLength: expected local array (pointer)",
+        ))
+    })?;
+    let info = ctx.array_map.get(&lv).ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from("ArrayLength: not a stack-slot array local"))
+    })?;
+    let len = *info.dimensions.last().expect("array dimensions") as i32;
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::IconstI32 { dst, value: len });
+    Ok(smallvec![dst])
+}
+
+pub(crate) fn lower_array_equality_vec(
+    ctx: &mut LowerCtx<'_>,
+    op: BinaryOperator,
+    left: Handle<Expression>,
+    right: Handle<Expression>,
+) -> Result<VRegVec, LowerError> {
+    if !matches!(op, BinaryOperator::Equal | BinaryOperator::NotEqual) {
+        return Err(LowerError::Internal(String::from(
+            "lower_array_equality_vec: not equality",
+        )));
+    }
+    let ll = peel_array_local_value(ctx.func, left).ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from("array ==: expected local array value"))
+    })?;
+    let rr = peel_array_local_value(ctx.func, right).ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from("array ==: expected local array value"))
+    })?;
+    let il = ctx.array_map.get(&ll).cloned().ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from("array ==: left not a stack array"))
+    })?;
+    let ir = ctx.array_map.get(&rr).cloned().ok_or_else(|| {
+        LowerError::UnsupportedExpression(String::from("array ==: right not a stack array"))
+    })?;
+    if il.element_count != ir.element_count || il.leaf_element_ty != ir.leaf_element_ty {
+        return Err(LowerError::UnsupportedExpression(String::from(
+            "array ==: shape mismatch",
+        )));
+    }
+    let leaf_inner = &ctx.module.types[il.leaf_element_ty].inner;
+    let n = il.element_count;
+    if n == 0 {
+        let v = ctx.fb.alloc_vreg(IrType::I32);
+        let val = match op {
+            BinaryOperator::Equal => 1,
+            BinaryOperator::NotEqual => 0,
+            _ => 0,
+        };
+        ctx.fb.push(Op::IconstI32 { dst: v, value: val });
+        return Ok(smallvec![v]);
+    }
+    let mut acc: Option<VReg> = None;
+    for i in 0..n {
+        let lvs = load_array_element_const(ctx, &il, i)?;
+        let rvs = load_array_element_const(ctx, &ir, i)?;
+        let cmp = compare_leaf_elements(ctx, op, &lvs, &rvs, leaf_inner)?;
+        acc = Some(match acc {
+            None => cmp,
+            Some(a) => match op {
+                BinaryOperator::Equal => emit_i32_and(ctx, a, cmp)?,
+                BinaryOperator::NotEqual => emit_i32_or(ctx, a, cmp)?,
+                _ => return Err(LowerError::Internal(String::from("array eq op"))),
+            },
+        });
+    }
+    Ok(smallvec![acc.expect("non-empty fold")])
+}
+
+fn emit_i32_and(ctx: &mut LowerCtx<'_>, a: VReg, b: VReg) -> Result<VReg, LowerError> {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::Iand {
+        dst,
+        lhs: a,
+        rhs: b,
+    });
+    Ok(dst)
+}
+
+fn emit_i32_or(ctx: &mut LowerCtx<'_>, a: VReg, b: VReg) -> Result<VReg, LowerError> {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(Op::Ior {
+        dst,
+        lhs: a,
+        rhs: b,
+    });
+    Ok(dst)
+}
+
+fn compare_leaf_elements(
+    ctx: &mut LowerCtx<'_>,
+    array_op: BinaryOperator,
+    left: &VRegVec,
+    right: &VRegVec,
+    leaf_inner: &TypeInner,
+) -> Result<VReg, LowerError> {
+    let elem_op = array_op;
+    match *leaf_inner {
+        TypeInner::Scalar(scalar) => {
+            if left.len() != 1 || right.len() != 1 {
+                return Err(LowerError::Internal(String::from(
+                    "scalar leaf width mismatch",
+                )));
+            }
+            scalar_cmp_vreg(ctx, elem_op, left[0], right[0], scalar.kind)
+        }
+        TypeInner::Vector { size, scalar } => {
+            let n = vector_size_usize(size);
+            if left.len() != n || right.len() != n {
+                return Err(LowerError::Internal(String::from(
+                    "vector leaf width mismatch",
+                )));
+            }
+            let mut acc: Option<VReg> = None;
+            for j in 0..n {
+                let c = scalar_cmp_vreg(ctx, elem_op, left[j], right[j], scalar.kind)?;
+                acc = Some(match acc {
+                    None => c,
+                    Some(a) => match array_op {
+                        BinaryOperator::Equal => emit_i32_and(ctx, a, c)?,
+                        BinaryOperator::NotEqual => emit_i32_or(ctx, a, c)?,
+                        _ => {
+                            return Err(LowerError::Internal(String::from(
+                                "compare_leaf vector fold",
+                            )));
+                        }
+                    },
+                });
+            }
+            Ok(acc.expect("vector compare"))
+        }
+        TypeInner::Matrix {
+            columns,
+            rows,
+            scalar,
+        } => {
+            let n = vector_size_usize(columns) * vector_size_usize(rows);
+            if left.len() != n || right.len() != n {
+                return Err(LowerError::Internal(String::from(
+                    "matrix leaf width mismatch",
+                )));
+            }
+            let mut acc: Option<VReg> = None;
+            for j in 0..n {
+                let c = scalar_cmp_vreg(ctx, elem_op, left[j], right[j], scalar.kind)?;
+                acc = Some(match acc {
+                    None => c,
+                    Some(a) => match array_op {
+                        BinaryOperator::Equal => emit_i32_and(ctx, a, c)?,
+                        BinaryOperator::NotEqual => emit_i32_or(ctx, a, c)?,
+                        _ => {
+                            return Err(LowerError::Internal(String::from(
+                                "compare_leaf matrix fold",
+                            )));
+                        }
+                    },
+                });
+            }
+            Ok(acc.expect("matrix compare"))
+        }
+        _ => Err(LowerError::UnsupportedExpression(format!(
+            "array ==: unsupported leaf {leaf_inner:?}"
+        ))),
+    }
+}
+
+fn scalar_cmp_vreg(
+    ctx: &mut LowerCtx<'_>,
+    op: BinaryOperator,
+    lhs: VReg,
+    rhs: VReg,
+    kind: ScalarKind,
+) -> Result<VReg, LowerError> {
+    let dst = ctx.fb.alloc_vreg(IrType::I32);
+    match kind {
+        ScalarKind::Float => match op {
+            BinaryOperator::Equal => ctx.fb.push(Op::Feq { dst, lhs, rhs }),
+            BinaryOperator::NotEqual => ctx.fb.push(Op::Fne { dst, lhs, rhs }),
+            _ => {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "scalar_cmp float op",
+                )));
+            }
+        },
+        ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => match op {
+            BinaryOperator::Equal => ctx.fb.push(Op::Ieq { dst, lhs, rhs }),
+            BinaryOperator::NotEqual => ctx.fb.push(Op::Ine { dst, lhs, rhs }),
+            _ => {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "scalar_cmp int/bool op",
+                )));
+            }
+        },
+        ScalarKind::AbstractInt | ScalarKind::AbstractFloat => {
+            return Err(LowerError::UnsupportedType(String::from(
+                "abstract in array compare",
+            )));
+        }
+    }
+    Ok(dst)
 }

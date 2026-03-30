@@ -9,6 +9,7 @@ use naga::{ArraySize, Expression, Function, Handle, LocalVariable, Module, Type,
 use smallvec::SmallVec;
 
 use crate::lower_error::LowerError;
+use crate::naga_util::naga_type_to_ir_types;
 
 /// Row-major flat index with per-axis clamping (matches v1 clamp semantics).
 pub(crate) fn flat_index_const_clamped(
@@ -113,6 +114,9 @@ pub(crate) fn peel_access_index_chain(
 }
 
 /// Walk nested `TypeInner::Array`, outermost dimension first; returns leaf type and byte stride per leaf.
+///
+/// NOTE: The leaf stride is rounded up to 4 bytes to ensure 4-byte alignment for RV32 loads/stores.
+/// This means bool arrays use 4 bytes per element instead of 1, but maintains alignment.
 pub(crate) fn flatten_local_array_shape(
     module: &Module,
     func: &Function,
@@ -160,7 +164,9 @@ pub(crate) fn flatten_local_array_shape(
                         cur_ty = *base;
                     }
                     _ => {
-                        break (*base, stride_v);
+                        // Round up stride to 4 bytes for alignment (RV32 requires 4-byte aligned loads)
+                        let aligned_stride = stride_v.max(4);
+                        break (*base, aligned_stride);
                     }
                 }
             }
@@ -171,6 +177,18 @@ pub(crate) fn flatten_local_array_shape(
             }
         }
     };
+
+    // Naga's array stride can be smaller than our stack layout: we place each scalar component at
+    // `byte_off + j * 4` (see `store_array_element_const`). Ensure consecutive elements do not overlap
+    // (e.g. `bvec4[2]` must stride by 16 bytes, not 4).
+    let leaf_inner = &module.types[leaf_ty].inner;
+    let ir_components = u32::try_from(naga_type_to_ir_types(leaf_inner)?.len()).map_err(|_| {
+        LowerError::Internal(String::from(
+            "flatten_local_array_shape: IR component count overflows u32",
+        ))
+    })?;
+    let min_layout_stride = ir_components.saturating_mul(4);
+    let leaf_stride = leaf_stride.max(min_layout_stride);
 
     Ok((dimensions, leaf_ty, leaf_stride))
 }

@@ -140,6 +140,10 @@ pub(crate) fn expr_type_inner(
             base: func.local_variables[*lv].ty,
             space: naga::AddressSpace::Function,
         }),
+        Expression::ArrayLength(_) => Ok(TypeInner::Scalar(Scalar {
+            kind: ScalarKind::Uint,
+            width: 4,
+        })),
         Expression::Load { pointer } => match expr_type_inner(module, func, *pointer)? {
             TypeInner::Pointer { base, space: _ } => {
                 if let TypeInner::Atomic(scalar) = module.types[base].inner {
@@ -559,6 +563,7 @@ pub(crate) fn expr_scalar_kind(
             RelationalFunction::All | RelationalFunction::Any => Ok(ScalarKind::Bool),
             RelationalFunction::IsNan | RelationalFunction::IsInf => Ok(ScalarKind::Bool),
         },
+        Expression::ArrayLength(_) => Ok(ScalarKind::Uint),
         _ => Err(LowerError::UnsupportedExpression(format!(
             "cannot infer scalar kind for {:?}",
             func.expressions[expr]

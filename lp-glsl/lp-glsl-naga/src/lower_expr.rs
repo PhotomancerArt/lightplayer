@@ -324,10 +324,27 @@ fn lower_expr_vec_uncached(
             lower_global_expr_vec(ctx, init)
         }
         Expression::Literal(l) => {
+            if let Some(fix) = ctx.array_length_literal_fixes.get(&expr) {
+                let v = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(Op::IconstI32 {
+                    dst: v,
+                    value: *fix,
+                });
+                return Ok(smallvec::smallvec![v]);
+            }
             let v = push_literal(&mut ctx.fb, l)?;
             Ok(smallvec::smallvec![v])
         }
         Expression::Binary { op, left, right } => {
+            if matches!(op, BinaryOperator::Equal | BinaryOperator::NotEqual) {
+                let left_inner = expr_type_inner(ctx.module, ctx.func, *left)?;
+                let right_inner = expr_type_inner(ctx.module, ctx.func, *right)?;
+                if let (TypeInner::Array { .. }, TypeInner::Array { .. }) =
+                    (&left_inner, &right_inner)
+                {
+                    return crate::lower_array::lower_array_equality_vec(ctx, *op, *left, *right);
+                }
+            }
             if *op == BinaryOperator::Multiply {
                 let li = expr_type_inner(ctx.module, ctx.func, *left)?;
                 let ri = expr_type_inner(ctx.module, ctx.func, *right)?;
@@ -409,6 +426,7 @@ fn lower_expr_vec_uncached(
             arg3,
         } => lower_math::lower_math_vec(ctx, *fun, *arg, *arg1, *arg2, *arg3),
         Expression::Relational { fun, argument } => lower_relational(ctx, *fun, *argument),
+        Expression::ArrayLength(array_h) => crate::lower_array::lower_array_length(ctx, *array_h),
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),

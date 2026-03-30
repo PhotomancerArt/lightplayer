@@ -30,7 +30,6 @@ bool test_constructor_explicit_bool() {
     return arr[1]; // Should be false
 }
 
-// @unimplemented()
 // run: test_constructor_explicit_bool() == false
 
 vec2 test_constructor_explicit_vec2() {

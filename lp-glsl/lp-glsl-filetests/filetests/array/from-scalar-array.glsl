@@ -30,7 +30,6 @@ bool test_from_scalar_bool_array() {
     return arr[1]; // Should be false
 }
 
-// @unimplemented()
 // run: test_from_scalar_bool_array() == false
 
 float test_from_scalar_mixed_conversions() {

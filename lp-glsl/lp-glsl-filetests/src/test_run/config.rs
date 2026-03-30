@@ -5,4 +5,4 @@
 /// handles mixed-feature files so suite runs can use a single compile per file again.
 ///
 /// For a runtime toggle without rebuilding, an environment variable could be added here later.
-pub const SUMMARY_COMPILE_PER_DIRECTIVE: bool = true;
+pub const SUMMARY_COMPILE_PER_DIRECTIVE: bool = false;

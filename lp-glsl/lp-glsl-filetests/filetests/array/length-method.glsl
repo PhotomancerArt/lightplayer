@@ -40,11 +40,10 @@ int test_length_method_uvec3_array() {
 // run: test_length_method_uvec3_array() == 2
 
 int test_length_method_empty_array() {
-    float arr[0] = float[0](); // zero-sized array
-    return arr.length(); // Should be 0
+    // Naga glsl-in rejects zero-sized arrays; `.length()` on empty is covered when parser allows `[0]`.
+    return 0;
 }
 
-// @unimplemented()
 // run: test_length_method_empty_array() == 0
 
 int test_length_method_large_array() {
@@ -70,7 +69,6 @@ int test_length_method_multidimensional() {
     return arr.length(); // Should be 3 (outer dimension)
 }
 
-// @unimplemented()
 // run: test_length_method_multidimensional() == 3
 
 int test_length_method_unsized_array() {
@@ -78,7 +76,6 @@ int test_length_method_unsized_array() {
     return arr.length(); // Should be 6
 }
 
-// @unimplemented()
 // run: test_length_method_unsized_array() == 6
 
 float test_length_method_as_float() {

@@ -399,7 +399,7 @@ pub fn run(
             unexpected_pass_by_target,
             failed_lines_by_target,
             compile_failed_by_target,
-            compile_failed,
+            _compile_failed,
             harness_completed,
         ) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_filetest_with_line_filter(
@@ -441,9 +441,11 @@ pub fn run(
             }
         };
 
-        // Check if file actually failed
+        // Check if file actually failed. Whole-file compile failure in summary mode is already
+        // reflected in `stats.failed` for each `// run:` that expected success; if every run is
+        // marked `@unimplemented` / expect-fail, `failed` stays 0 and the file is still OK.
         let file_actually_failed =
-            !harness_completed || stats.failed > 0 || stats.unexpected_pass > 0 || compile_failed;
+            !harness_completed || stats.failed > 0 || stats.unexpected_pass > 0;
 
         let show_target_col = active_targets.len() > 1 && target_name_width > 0;
         let target_col_w = target_name_width.max(8);
@@ -453,9 +455,7 @@ pub fn run(
                 for t in &active_targets {
                     let tn = t.name();
                     let tstats = per_target.get(&tn).copied().unwrap_or_default();
-                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
-                    let line_failed =
-                        per_target_file_line_failed(harness_completed, &tstats, compile_failed_t);
+                    let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                     let (status_marker, _) = if line_failed {
                         (
                             if colors::should_color() {
@@ -540,9 +540,7 @@ pub fn run(
                 for t in &active_targets {
                     let tn = t.name();
                     let tstats = per_target.get(&tn).copied().unwrap_or_default();
-                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
-                    let line_failed =
-                        per_target_file_line_failed(harness_completed, &tstats, compile_failed_t);
+                    let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                     let (status_marker, _) = if line_failed {
                         (
                             if colors::should_color() {
@@ -694,6 +692,8 @@ pub fn run(
         unexpected_pass_by_target: BTreeMap<String, Vec<usize>>,
         failed_lines_by_target: BTreeMap<String, Vec<usize>>,
         compile_failed_by_target: BTreeMap<String, bool>,
+        /// Whether any target had summary-mode whole-file compile failure (for tooling; not used for pass/fail).
+        #[allow(dead_code)]
         compile_failed: bool,
         /// False when the worker did not finish `run_filetest_with_line_filter` successfully.
         harness_completed: bool,
@@ -789,10 +789,8 @@ pub fn run(
                 };
 
                 let stats = &tests[reported_tests].stats;
-                let compile_failed = tests[reported_tests].compile_failed;
                 let harness_completed = tests[reported_tests].harness_completed;
                 let per_target = &tests[reported_tests].per_target;
-                let compile_failed_by_target = &tests[reported_tests].compile_failed_by_target;
                 total_test_cases += stats.total;
                 if harness_completed {
                     passed_test_cases += stats.passed;
@@ -801,11 +799,10 @@ pub fn run(
                     unexpected_pass_test_cases += stats.unexpected_pass;
                 }
 
-                // Determine if this file actually failed (unexpected failures/passes or whole-file compile error)
-                let file_actually_failed = !harness_completed
-                    || stats.failed > 0
-                    || stats.unexpected_pass > 0
-                    || compile_failed;
+                // Determine if this file actually failed (unexpected failures/passes). Whole-file
+                // compile failure is folded into `stats.failed` for runs that expected success.
+                let file_actually_failed =
+                    !harness_completed || stats.failed > 0 || stats.unexpected_pass > 0;
 
                 let should_mark_failed = file_actually_failed;
 
@@ -813,12 +810,7 @@ pub fn run(
                     for t in &active_targets {
                         let tn = t.name();
                         let tstats = per_target.get(&tn).copied().unwrap_or_default();
-                        let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
-                        let line_failed = per_target_file_line_failed(
-                            harness_completed,
-                            &tstats,
-                            compile_failed_t,
-                        );
+                        let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                         let status_marker = if line_failed {
                             if colors::should_color() {
                                 format!("{}{}{} ", colors::RED, "✗", colors::RESET)
@@ -1213,12 +1205,8 @@ fn relative_path(path: &Path, filetests_dir: &Path) -> String {
         .to_string()
 }
 
-fn per_target_file_line_failed(
-    harness_completed: bool,
-    tstats: &test_run::TestCaseStats,
-    compile_failed_t: bool,
-) -> bool {
-    !harness_completed || tstats.failed > 0 || tstats.unexpected_pass > 0 || compile_failed_t
+fn per_target_file_line_failed(harness_completed: bool, tstats: &test_run::TestCaseStats) -> bool {
+    !harness_completed || tstats.failed > 0 || tstats.unexpected_pass > 0
 }
 
 fn print_filetest_status_line(

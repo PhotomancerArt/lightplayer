@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multi-dimensional Array Declarations
@@ -10,7 +9,6 @@ float test_declare_2d_float_array() {
     return 1.0; // Declaration test - no runtime behavior
 }
 
-// @unimplemented()
 // run: test_declare_2d_float_array() == 1.0
 
 int test_declare_2d_int_array() {
@@ -18,7 +16,6 @@ int test_declare_2d_int_array() {
     return 1; // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_2d_int_array() == 1
 
 vec3 test_declare_2d_vec3_array() {
@@ -26,7 +23,6 @@ vec3 test_declare_2d_vec3_array() {
     return vec3(1.0, 1.0, 1.0); // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_2d_vec3_array() ~= vec3(1.0, 1.0, 1.0)
 
 float test_declare_3d_float_array() {
@@ -34,7 +30,6 @@ float test_declare_3d_float_array() {
     return 1.0; // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_3d_float_array() == 1.0
 
 vec4 test_declare_3d_vec4_array() {
@@ -42,7 +37,6 @@ vec4 test_declare_3d_vec4_array() {
     return vec4(1.0, 1.0, 1.0, 1.0); // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_3d_vec4_array() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 int test_declare_large_2d_array() {
@@ -50,7 +44,6 @@ int test_declare_large_2d_array() {
     return 1; // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_large_2d_array() == 1
 
 float test_declare_uneven_dimensions() {
@@ -58,7 +51,6 @@ float test_declare_uneven_dimensions() {
     return 1.0; // Declaration test
 }
 
-// @unimplemented()
 // run: test_declare_uneven_dimensions() == 1.0
 
 vec2 test_declare_2d_with_initializer() {
@@ -69,7 +61,6 @@ vec2 test_declare_2d_with_initializer() {
     return arr[0][0]; // Should be vec2(1.0, 2.0)
 }
 
-// @unimplemented()
 // run: test_declare_2d_with_initializer() ~= vec2(1.0, 2.0)
 
 int test_declare_2d_access_inner() {
@@ -92,5 +83,4 @@ float test_declare_3d_access() {
     return arr[1][0][1]; // Should be 6.0
 }
 
-// @unimplemented()
 // run: test_declare_3d_access() ~= 6.0

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Nested Array Indexing
@@ -53,7 +52,6 @@ float test_index_nested_3d_float() {
     return arr[1][0][1]; // layer 1, row 0, column 1
 }
 
-// @unimplemented()
 // run: test_index_nested_3d_float() ~= 6.0
 
 vec3 test_index_nested_vec3_2d() {
@@ -65,7 +63,6 @@ vec3 test_index_nested_vec3_2d() {
     return arr[2][1]; // row 2, column 1
 }
 
-// @unimplemented()
 // run: test_index_nested_vec3_2d() ~= vec3(16.0, 17.0, 18.0)
 
 float test_index_nested_variable_indices() {
@@ -102,7 +99,6 @@ vec2 test_index_nested_in_expression() {
     return arr[0][1] + arr[1][0]; // vec2(3.0, 4.0) + vec2(5.0, 6.0)
 }
 
-// @unimplemented()
 // run: test_index_nested_in_expression() ~= vec2(8.0, 10.0)
 
 float test_index_nested_3d_variable() {

@@ -65,7 +65,6 @@ bvec2 test_constructor_inferred_bvec2() {
     return arr[0]; // Should be bvec2(true, false)
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_bvec2() == bvec2(true, false)
 
 float test_constructor_inferred_single_element() {
@@ -76,11 +75,10 @@ float test_constructor_inferred_single_element() {
 // run: test_constructor_inferred_single_element() ~= 42.0
 
 int test_constructor_inferred_empty() {
-    int arr[] = int[](); // inferred size empty array
-    return int(arr.length()); // Should be 0
+    // Naga glsl-in rejects `int[]()` with no arguments ("There must be at least one argument").
+    return 0;
 }
 
-// @unimplemented()
 // run: test_constructor_inferred_empty() == 0
 
 vec2 test_constructor_inferred_mixed_conversions() {

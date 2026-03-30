@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Whole Array Assignment
@@ -12,7 +11,6 @@ float test_assign_whole_float_array() {
     return arr1[1]; // Should be 20.0
 }
 
-// @unimplemented()
 // run: test_assign_whole_float_array() ~= 20.0
 
 int test_assign_whole_int_array() {
@@ -22,7 +20,6 @@ int test_assign_whole_int_array() {
     return arr1[0] + arr1[3]; // 5 + 8 = 13
 }
 
-// @unimplemented()
 // run: test_assign_whole_int_array() == 13
 
 vec2 test_assign_whole_vec2_array() {
@@ -32,7 +29,6 @@ vec2 test_assign_whole_vec2_array() {
     return arr1[1]; // Should be vec2(30.0, 40.0)
 }
 
-// @unimplemented()
 // run: test_assign_whole_vec2_array() ~= vec2(30.0, 40.0)
 
 vec3 test_assign_whole_vec3_array() {
@@ -42,7 +38,6 @@ vec3 test_assign_whole_vec3_array() {
     return arr1[2]; // Should be vec3(30.0, 30.0, 30.0)
 }
 
-// @unimplemented()
 // run: test_assign_whole_vec3_array() ~= vec3(30.0, 30.0, 30.0)
 
 ivec3 test_assign_whole_ivec3_array() {
@@ -52,7 +47,6 @@ ivec3 test_assign_whole_ivec3_array() {
     return arr1[0]; // Should be ivec3(10, 10, 10)
 }
 
-// @unimplemented()
 // run: test_assign_whole_ivec3_array() == ivec3(10, 10, 10)
 
 bvec4 test_assign_whole_bvec4_array() {
@@ -62,7 +56,6 @@ bvec4 test_assign_whole_bvec4_array() {
     return arr1[1]; // Should be bvec4(true, true, true, true)
 }
 
-// @unimplemented()
 // run: test_assign_whole_bvec4_array() == bvec4(true, true, true, true)
 
 float test_assign_whole_array_expression() {
@@ -71,7 +64,6 @@ float test_assign_whole_array_expression() {
     return arr1[2]; // Should be 300.0
 }
 
-// @unimplemented()
 // run: test_assign_whole_array_expression() ~= 300.0
 
 vec2 test_assign_whole_array_in_function() {
@@ -81,7 +73,6 @@ vec2 test_assign_whole_array_in_function() {
     return arr1[0] + arr1[1]; // vec2(5.0, 5.0) + vec2(6.0, 6.0) = vec2(11.0, 11.0)
 }
 
-// @unimplemented()
 // run: test_assign_whole_array_in_function() ~= vec2(11.0, 11.0)
 
 int test_assign_whole_array_return() {
@@ -91,7 +82,6 @@ int test_assign_whole_array_return() {
     return arr[0] + arr[1] + arr[2]; // 7 + 8 + 9 = 24
 }
 
-// @unimplemented()
 // run: test_assign_whole_array_return() == 24
 
 float test_assign_whole_array_self() {
@@ -100,5 +90,4 @@ float test_assign_whole_array_self() {
     return arr[3]; // Should be 4.0
 }
 
-// @unimplemented()
 // run: test_assign_whole_array_self() ~= 4.0

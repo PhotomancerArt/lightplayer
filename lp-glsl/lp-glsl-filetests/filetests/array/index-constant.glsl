@@ -30,7 +30,6 @@ bool test_index_constant_bool_array() {
     return arr[1]; // second element
 }
 
-// @unimplemented()
 // run: test_index_constant_bool_array() == false
 
 vec2 test_index_constant_vec2_array() {
@@ -66,7 +65,6 @@ bvec2 test_index_constant_bvec2_array() {
     return arr[0]; // first element
 }
 
-// @unimplemented()
 // run: test_index_constant_bvec2_array() == bvec2(true, false)
 
 float test_index_constant_all_indices() {

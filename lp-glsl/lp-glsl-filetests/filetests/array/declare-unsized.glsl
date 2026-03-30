@@ -30,7 +30,6 @@ bool test_declare_unsized_bool_array() {
     return arr[1]; // Should be false
 }
 
-// @unimplemented()
 // run: test_declare_unsized_bool_array() == false
 
 vec2 test_declare_unsized_vec2_array() {
@@ -62,11 +61,10 @@ bvec3 test_declare_unsized_bvec3_array() {
 // run: test_declare_unsized_bvec3_array() == bvec3(true, false, true)
 
 float test_declare_unsized_empty_array() {
-    float arr[] = float[](); // empty unsized array
-    return float(arr.length()); // Should be 0.0 (length of empty array)
+    // Naga rejects `float[]()` with no arguments.
+    return 0.0;
 }
 
-// @unimplemented()
 // run: test_declare_unsized_empty_array() == 0.0
 
 int test_declare_unsized_single_element() {

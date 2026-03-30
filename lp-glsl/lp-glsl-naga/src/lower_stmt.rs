@@ -281,6 +281,35 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 }
             }
             Expression::LocalVariable(lv) => {
+                if let Some(dst_info) = ctx.array_map.get(lv).cloned() {
+                    match &ctx.func.expressions[*value] {
+                        Expression::Compose { .. } | Expression::ZeroValue(_) => {
+                            return crate::lower_array::lower_array_initializer(
+                                ctx, &dst_info, *value,
+                            );
+                        }
+                        _ => {
+                            let src_lv = crate::lower_array::peel_array_local_value(
+                                ctx.func,
+                                *value,
+                            )
+                            .ok_or_else(|| {
+                                LowerError::UnsupportedStatement(String::from(
+                                    "array assignment: rhs must be another stack array or constructor",
+                                ))
+                            })?;
+                            let src_info =
+                                ctx.array_map.get(&src_lv).cloned().ok_or_else(|| {
+                                    LowerError::UnsupportedStatement(String::from(
+                                        "array assignment: rhs not a stack array",
+                                    ))
+                                })?;
+                            return crate::lower_array::copy_stack_array_slots(
+                                ctx, &dst_info, &src_info,
+                            );
+                        }
+                    }
+                }
                 let dsts = ctx.resolve_local(*lv)?;
                 let dst_inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
                 let raw = ctx.ensure_expr_vec(*value)?;
