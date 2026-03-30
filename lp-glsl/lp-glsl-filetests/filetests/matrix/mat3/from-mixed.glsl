@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: mat3 constructors with mixed types - must provide exactly 9 components

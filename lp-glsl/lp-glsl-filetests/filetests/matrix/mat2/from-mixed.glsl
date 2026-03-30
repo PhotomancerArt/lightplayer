@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Mixed: mat2(vec2, float, float) - construct matrix from mixed types

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply Assign: mat4 *= mat4 (matrix multiplication) or mat4 *= float (component-wise)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add: mat4 + mat4 -> mat4 (component-wise)

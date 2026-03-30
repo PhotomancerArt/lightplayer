@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Vectors: mat4(vec4, vec4, vec4, vec4) - construct matrix from column vectors

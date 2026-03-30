@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Matrix: mat4(mat2) or mat4(mat3) - construct from smaller matrices

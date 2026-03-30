@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // From Scalar: mat2(float) - creates diagonal matrix

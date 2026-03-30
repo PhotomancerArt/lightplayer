@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply: mat3 * mat3 -> mat3 (matrix multiplication)

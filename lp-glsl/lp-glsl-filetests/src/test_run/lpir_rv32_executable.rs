@@ -16,8 +16,8 @@ use lpir_cranelift::{GlslQ32, GlslReturn};
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_uvec_from_q32, call_vec_from_q32, impl_call_void,
-    map_call_err, signatures_from_meta,
+    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32, call_vec_from_q32,
+    impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
@@ -147,15 +147,12 @@ impl GlslExecutable for LpirRv32Executable {
 
     fn call_mat(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _rows: usize,
-        _cols: usize,
+        name: &str,
+        args: &[GlslValue],
+        rows: usize,
+        cols: usize,
     ) -> Result<Vec<f32>, GlslError> {
-        Err(GlslError::new(
-            lp_glsl_diagnostics::ErrorCode::E0400,
-            "RV32 filetests: matrix returns not wired for GlslExecutable yet",
-        ))
+        call_mat_from_q32(self, name, args, rows, cols)
     }
 
     fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {

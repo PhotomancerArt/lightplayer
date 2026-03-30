@@ -469,15 +469,44 @@ impl GlslExecutable for WasmExecutable {
 
     fn call_mat(
         &mut self,
-        _name: &str,
-        _args: &[GlslValue],
-        _rows: usize,
-        _cols: usize,
+        name: &str,
+        args: &[GlslValue],
+        rows: usize,
+        cols: usize,
     ) -> Result<Vec<f32>, GlslError> {
-        Err(GlslError::new(
-            ErrorCode::E0400,
-            "WASM: matrices not yet supported",
-        ))
+        let export_info = self.exports.get(name).ok_or_else(|| {
+            GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+        })?;
+        let ok = matches!(
+            (&export_info.return_type, rows, cols),
+            (GlslType::Mat2, 2, 2) | (GlslType::Mat3, 3, 3) | (GlslType::Mat4, 4, 4)
+        );
+        if !ok {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_mat: function '{name}' returns {:?}, expected mat{rows}x{cols}",
+                    export_info.return_type
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        let fm = self.float_mode;
+        results
+            .into_iter()
+            .map(|r| match (r, fm) {
+                (wasmtime::Val::I32(i), lp_glsl_naga::FloatMode::Q32) => {
+                    Ok(i as f32 / Q16_16_SCALE)
+                }
+                (wasmtime::Val::F32(bits), lp_glsl_naga::FloatMode::F32) => {
+                    Ok(f32::from_bits(bits))
+                }
+                _ => Err(GlslError::new(
+                    ErrorCode::E0400,
+                    format!("WASM: unexpected result type in mat call (float_mode={fm:?})"),
+                )),
+            })
+            .collect()
     }
 
     fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {

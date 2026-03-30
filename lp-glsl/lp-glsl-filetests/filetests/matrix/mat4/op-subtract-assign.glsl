@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Subtract Assign: mat4 -= mat4 (component-wise subtraction)

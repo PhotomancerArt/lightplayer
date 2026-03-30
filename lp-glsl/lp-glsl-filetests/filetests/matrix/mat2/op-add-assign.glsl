@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add Assign: mat2 += mat2 (component-wise addition)

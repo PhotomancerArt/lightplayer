@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Divide Assign: mat2 /= mat2 (component-wise division) or mat2 /= float (component-wise)
@@ -11,7 +10,6 @@ mat2 test_mat2_divide_assign_matrix() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_matrix() ~= mat2(3.0, 2.0, 2.0, 2.0)
 
 mat2 test_mat2_divide_assign_matrix_identity() {
@@ -20,7 +18,6 @@ mat2 test_mat2_divide_assign_matrix_identity() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_matrix_identity() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 mat2 test_mat2_divide_assign_matrix_variables() {
@@ -30,7 +27,6 @@ mat2 test_mat2_divide_assign_matrix_variables() {
     return a;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_matrix_variables() ~= mat2(5.0, 5.0, 5.0, 5.0)
 
 mat2 test_mat2_divide_assign_matrix_expressions() {
@@ -39,7 +35,6 @@ mat2 test_mat2_divide_assign_matrix_expressions() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_matrix_expressions() ~= mat2(8.0, 12.0, 16.0, 20.0)
 
 mat2 test_mat2_divide_assign_scalar() {
@@ -48,7 +43,6 @@ mat2 test_mat2_divide_assign_scalar() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar() ~= mat2(5.0, 10.0, 15.0, 20.0)
 
 mat2 test_mat2_divide_assign_scalar_one() {
@@ -57,7 +51,6 @@ mat2 test_mat2_divide_assign_scalar_one() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar_one() ~= mat2(5.0, 10.0, 15.0, 20.0)
 
 mat2 test_mat2_divide_assign_scalar_variables() {
@@ -67,7 +60,6 @@ mat2 test_mat2_divide_assign_scalar_variables() {
     return a;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar_variables() ~= mat2(4.0, 6.0, 8.0, 10.0)
 
 mat2 test_mat2_divide_assign_scalar_expressions() {
@@ -76,7 +68,6 @@ mat2 test_mat2_divide_assign_scalar_expressions() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar_expressions() ~= mat2(2.0, 3.0, 4.0, 5.0)
 
 mat2 test_mat2_divide_assign_scalar_negative() {
@@ -85,7 +76,6 @@ mat2 test_mat2_divide_assign_scalar_negative() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar_negative() ~= mat2(-5.0, -10.0, -15.0, -20.0)
 
 mat2 test_mat2_divide_assign_scalar_fractional() {
@@ -94,7 +84,6 @@ mat2 test_mat2_divide_assign_scalar_fractional() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_assign_scalar_fractional() ~= mat2(20.0, 40.0, 60.0, 80.0)
 
 

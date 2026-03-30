@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Divide: mat2 / mat2 -> mat2 (component-wise)
@@ -12,7 +11,6 @@ mat2 test_mat2_divide_simple() {
     return a / b;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_simple() ~= mat2(3.0, 2.0, 2.0, 2.0)
 
 mat2 test_mat2_divide_identity() {
@@ -21,7 +19,6 @@ mat2 test_mat2_divide_identity() {
     return a / b;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_identity() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 mat2 test_mat2_divide_variables() {
@@ -30,14 +27,12 @@ mat2 test_mat2_divide_variables() {
     return a / b;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_variables() ~= mat2(5.0, 5.0, 5.0, 5.0)
 
 mat2 test_mat2_divide_expressions() {
     return mat2(8.0, 12.0, 16.0, 20.0) / mat2(2.0, 3.0, 4.0, 5.0);
 }
 
-// @unimplemented()
 // run: test_mat2_divide_expressions() ~= mat2(4.0, 4.0, 4.0, 4.0)
 
 mat2 test_mat2_divide_in_assignment() {
@@ -46,7 +41,6 @@ mat2 test_mat2_divide_in_assignment() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_in_assignment() ~= mat2(5.0, 5.0, 5.0, 5.0)
 
 mat2 test_mat2_divide_scalar() {
@@ -54,7 +48,6 @@ mat2 test_mat2_divide_scalar() {
     return a / 2.0;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_scalar() ~= mat2(5.0, 10.0, 15.0, 20.0)
 
 mat2 test_mat2_divide_scalar_variables() {
@@ -63,14 +56,12 @@ mat2 test_mat2_divide_scalar_variables() {
     return a / s;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_scalar_variables() ~= mat2(4.0, 6.0, 8.0, 10.0)
 
 mat2 test_mat2_divide_scalar_expressions() {
     return mat2(16.0, 24.0, 32.0, 40.0) / (4.0 * 2.0);
 }
 
-// @unimplemented()
 // run: test_mat2_divide_scalar_expressions() ~= mat2(2.0, 3.0, 4.0, 5.0)
 
 mat2 test_mat2_divide_scalar_assignment() {
@@ -79,7 +70,6 @@ mat2 test_mat2_divide_scalar_assignment() {
     return result;
 }
 
-// @unimplemented()
 // run: test_mat2_divide_scalar_assignment() ~= mat2(2.0, 3.0, 4.0, 5.0)
 
 
