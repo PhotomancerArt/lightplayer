@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int test_incdec_edge_cases() {
     int x = 5;

@@ -50,10 +50,33 @@ fn lower_expr_vec_uncached(
     match &ctx.func.expressions[expr] {
         Expression::FunctionArgument(i) => ctx.arg_vregs_for(*i),
         Expression::Load { pointer } => match &ctx.func.expressions[*pointer] {
-            Expression::LocalVariable(lv) => ctx.resolve_local(*lv),
+            Expression::LocalVariable(lv) => {
+                // Snapshot into fresh VRegs so the loaded value does not alias the local's
+                // mutable slots (needed for postfix ++/-- and any use-after-store of the same
+                // Load expression handle).
+                let srcs = ctx.resolve_local(*lv)?;
+                let lv_ty = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                let ir_tys = crate::lower_ctx::naga_type_to_ir_types(lv_ty)?;
+                if srcs.len() != ir_tys.len() {
+                    return Err(LowerError::Internal(format!(
+                        "Load local: {} vregs vs {} IR types for {:?}",
+                        srcs.len(),
+                        ir_tys.len(),
+                        lv
+                    )));
+                }
+                let mut snapped = VRegVec::new();
+                for (&src, ty) in srcs.iter().zip(ir_tys.iter()) {
+                    let dst = ctx.fb.alloc_vreg(*ty);
+                    ctx.fb.push(Op::Copy { dst, src });
+                    snapped.push(dst);
+                }
+                Ok(snapped)
+            }
             // Subscripted locals (`m[i][j]`) are pointers in Naga; value lives in vregs.
             Expression::AccessIndex { .. } | Expression::Access { .. } => {
-                lower_expr_vec(ctx, *pointer)
+                let vs = lower_expr_vec(ctx, *pointer)?;
+                snapshot_load_result_vregs(ctx, expr, vs)
             }
             Expression::FunctionArgument(i) => {
                 let idx = *i;
@@ -969,4 +992,31 @@ fn lower_relational(
             Ok(out)
         }
     }
+}
+
+/// Copy a `Load`'s lowered value into fresh VRegs when the load uses a sub-pointer (`v.x`,
+/// `m[i]`, …) that aliases the owning aggregate's mutable slots (same motivation as
+/// [`Expression::LocalVariable`] loads above).
+fn snapshot_load_result_vregs(
+    ctx: &mut LowerCtx<'_>,
+    load_expr: Handle<Expression>,
+    srcs: VRegVec,
+) -> Result<VRegVec, LowerError> {
+    let value_inner = expr_type_inner(ctx.module, ctx.func, load_expr)?;
+    let ir_tys = crate::lower_ctx::naga_type_to_ir_types(&value_inner)?;
+    if srcs.len() != ir_tys.len() {
+        return Err(LowerError::Internal(format!(
+            "Load snapshot: {} vregs vs {} types for {:?}",
+            srcs.len(),
+            ir_tys.len(),
+            load_expr
+        )));
+    }
+    let mut out = VRegVec::new();
+    for (&src, ty) in srcs.iter().zip(ir_tys.iter()) {
+        let dst = ctx.fb.alloc_vreg(*ty);
+        ctx.fb.push(Op::Copy { dst, src });
+        out.push(dst);
+    }
+    Ok(out)
 }

@@ -38,7 +38,6 @@ int test_postinc_scalar_int() {
     return old_x + x;  // Should return 5 + 6 = 11
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_int() == 11
 
 int test_postinc_scalar_int_zero() {
@@ -47,7 +46,6 @@ int test_postinc_scalar_int_zero() {
     return old_x + x;  // Should return 0 + 1 = 1
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_int_zero() == 1
 
 int test_postinc_scalar_int_negative() {
@@ -56,7 +54,6 @@ int test_postinc_scalar_int_negative() {
     return old_x + x;  // Should return -5 + -4 = -9
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_int_negative() == -9
 
 // ============================================================================
@@ -97,7 +94,6 @@ int test_postdec_scalar_int() {
     return old_x + x;  // Should return 8 + 7 = 15
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_int() == 15
 
 int test_postdec_scalar_int_zero() {
@@ -106,7 +102,6 @@ int test_postdec_scalar_int_zero() {
     return old_x + x;  // Should return 0 + -1 = -1
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_int_zero() == -1
 
 int test_postdec_scalar_int_negative() {
@@ -115,7 +110,6 @@ int test_postdec_scalar_int_negative() {
     return old_x + x;  // Should return -5 + -6 = -11
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_int_negative() == -11
 
 // ============================================================================
@@ -156,7 +150,6 @@ float test_postinc_scalar_float() {
     return old_x + x;  // Should be 3.5 + 4.5 = 8.0
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_float() ~= 8.0
 
 float test_postinc_scalar_float_zero() {
@@ -165,7 +158,6 @@ float test_postinc_scalar_float_zero() {
     return old_x + x;  // Should be 0.0 + 1.0 = 1.0
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_float_zero() ~= 1.0
 
 float test_postinc_scalar_float_negative() {
@@ -174,7 +166,6 @@ float test_postinc_scalar_float_negative() {
     return old_x + x;  // Should be -2.5 + -1.5 = -4.0
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_scalar_float_negative() ~= -4.0
 
 // ============================================================================
@@ -215,7 +206,6 @@ float test_postdec_scalar_float() {
     return old_x + x;  // Should be 5.2 + 4.2 = 9.4
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_float() ~= 9.4
 
 float test_postdec_scalar_float_zero() {
@@ -224,7 +214,6 @@ float test_postdec_scalar_float_zero() {
     return old_x + x;  // Should be 0.0 + -1.0 = -1.0
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_float_zero() ~= -1.0
 
 float test_postdec_scalar_float_negative() {
@@ -233,7 +222,6 @@ float test_postdec_scalar_float_negative() {
     return old_x + x;  // Should be -2.5 + -3.5 = -6.0
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_scalar_float_negative() ~= -6.0
 
 

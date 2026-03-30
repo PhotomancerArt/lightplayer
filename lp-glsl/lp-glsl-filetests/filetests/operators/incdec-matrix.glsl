@@ -22,7 +22,6 @@ float test_postinc_mat2() {
     return old_m[0][0] + old_m[0][1] + old_m[1][0] + old_m[1][1];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_mat2() ~= 10.0
 
 // ============================================================================
@@ -47,7 +46,6 @@ float test_postdec_mat2() {
     return old_m[0][0] + old_m[0][1] + old_m[1][0] + old_m[1][1];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_mat2() ~= 18.0
 
 // ============================================================================
@@ -76,7 +74,6 @@ float test_postinc_mat3() {
            old_m[2][0] + old_m[2][1] + old_m[2][2];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_mat3() ~= 45.0
 
 // ============================================================================
@@ -105,7 +102,6 @@ float test_postdec_mat3() {
            old_m[2][0] + old_m[2][1] + old_m[2][2];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_mat3() ~= 63.0
 
 // ============================================================================
@@ -146,7 +142,6 @@ float test_postinc_mat4() {
            old_m[3][0] + old_m[3][1] + old_m[3][2] + old_m[3][3];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postinc_mat4() ~= 136.0
 
 // ============================================================================
@@ -187,7 +182,6 @@ float test_postdec_mat4() {
            old_m[3][0] + old_m[3][1] + old_m[3][2] + old_m[3][3];
 }
 
-// @unimplemented(backend=wasm)
 // run: test_postdec_mat4() ~= 168.0
 
 
