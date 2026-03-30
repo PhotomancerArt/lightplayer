@@ -16,7 +16,6 @@ int test_ternary_vec2() {
     return int(result.x + result.y);
 }
 
-// @unimplemented()
 // run: test_ternary_vec2() == 3
 
 int test_ternary_vec3() {
@@ -27,7 +26,6 @@ int test_ternary_vec3() {
     return int(result.x + result.y + result.z);
 }
 
-// @unimplemented()
 // run: test_ternary_vec3() == 15
 
 int test_ternary_vec4() {
@@ -38,7 +36,6 @@ int test_ternary_vec4() {
     return int(result.x + result.y);
 }
 
-// @unimplemented()
 // run: test_ternary_vec4() == 3
 
 int test_ternary_ivec2() {
@@ -49,7 +46,6 @@ int test_ternary_ivec2() {
     return result.x + result.y;
 }
 
-// @unimplemented()
 // run: test_ternary_ivec2() == 70
 
 int test_ternary_bvec2() {
@@ -60,7 +56,6 @@ int test_ternary_bvec2() {
     return (result.x ? 1 : 0) + (result.y ? 1 : 0);
 }
 
-// @unimplemented()
 // run: test_ternary_bvec2() == 1
 
 // Matrix types
@@ -72,7 +67,6 @@ int test_ternary_mat2() {
     return int(result[0][0] + result[1][1]);
 }
 
-// @unimplemented()
 // run: test_ternary_mat2() == 5
 
 int test_ternary_mat3() {
@@ -83,7 +77,6 @@ int test_ternary_mat3() {
     return int(result[0][0] * 10.0);
 }
 
-// @unimplemented()
 // run: test_ternary_mat3() == 20
 
 // Structure types
@@ -142,7 +135,6 @@ int test_ternary_vec_component() {
     return int(result);
 }
 
-// @unimplemented()
 // run: test_ternary_vec_component() == 5
 
 // Nested with different types
@@ -156,7 +148,6 @@ int test_ternary_nested_types() {
     return int(result.x + result.y);
 }
 
-// @unimplemented()
 // run: test_ternary_nested_types() == 7
 
 
