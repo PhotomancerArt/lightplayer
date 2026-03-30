@@ -8,9 +8,11 @@ const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
 /// Uses native Rust division. Handles division by zero by saturating to max/min fixed-point values.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fdiv_q32(dividend: i32, divisor: i32) -> i32 {
-    // Handle division by zero: saturate to max/min based on sign
+    // Division by zero: 0/0 → 0; nonzero/0 → saturate by sign (see docs/design/q32.md)
     if divisor == 0 {
-        if dividend >= 0 {
+        if dividend == 0 {
+            return 0;
+        } else if dividend > 0 {
             return MAX_FIXED;
         } else {
             return MIN_FIXED;
@@ -95,6 +97,8 @@ mod tests {
             result_neg, MIN_FIXED,
             "Negative / 0 should saturate to MIN_FIXED"
         );
+
+        assert_eq!(__lp_lpir_fdiv_q32(0, 0), 0, "0 / 0 should return 0");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 // test run
 // @unimplemented(backend=wasm)
+// @unsupported(float_mode=q32, reason="Q32 has no Inf encoding; isinf is always false; tests expect IEEE infinities from 1.0/0.0")
 
 // ============================================================================
 // isinf(): Is infinity function
@@ -11,7 +12,6 @@ bool test_isinf_normal() {
     return isinf(1.0);
 }
 
-// @unimplemented(backend=jit)
 // run: test_isinf_normal() == false
 
 bool test_isinf_zero() {

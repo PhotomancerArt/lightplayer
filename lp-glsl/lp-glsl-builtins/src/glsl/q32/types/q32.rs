@@ -9,26 +9,42 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAss
 const SHIFT: i32 = 16;
 const ONE: i32 = 1 << SHIFT;
 const HALF: i32 = ONE / 2;
+/// Maximum representable Q16.16 raw value (not `i32::MAX`).
+const Q32_MAX_RAW: i32 = 0x7FFF_FFFF;
+
+/// Saturate `i64` to the Q16.16 representable raw range.
+#[inline(always)]
+fn sat_i64_to_q32_raw(wide: i64) -> i32 {
+    sat_i64_const(wide)
+}
+
+const fn sat_i64_const(wide: i64) -> i32 {
+    if wide > Q32_MAX_RAW as i64 {
+        Q32_MAX_RAW
+    } else if wide < i32::MIN as i64 {
+        i32::MIN
+    } else {
+        wide as i32
+    }
+}
 
 /// Fixed-point number (Q16.16 format)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Q32(pub i32);
 
 impl Q32 {
-    // 2π ≈ 6.28318530718 in 16.16
-    pub const E: Q32 = Q32(178145);
+    pub const ZERO: Q32 = Q32(0);
     pub const HALF: Q32 = Q32(HALF);
     pub const ONE: Q32 = Q32(ONE);
-    // e ≈ 2.71828182846 in 16.16
-    pub const PHI: Q32 = Q32(106039);
-    // Mathematical constants
+    /// π ≈ 3.14159265
     pub const PI: Q32 = Q32(205887);
-    pub const SHIFT: i32 = SHIFT;
-    // π ≈ 3.14159265359 in 16.16
+    /// 2π ≈ 6.28318531
     pub const TAU: Q32 = Q32(411774);
-    pub const ZERO: Q32 = Q32(0);
-
-    // φ ≈ 1.61803398875 in 16.16 (golden ratio)
+    /// e ≈ 2.71828183 (Euler's number)
+    pub const E: Q32 = Q32(178145);
+    /// φ ≈ 1.61803399 (golden ratio)
+    pub const PHI: Q32 = Q32(106039);
+    pub const SHIFT: i32 = SHIFT;
 
     /// Create a Fixed from a raw fixed-point value
     #[inline(always)]
@@ -81,7 +97,7 @@ impl Q32 {
     /// Return the absolute value
     #[inline(always)]
     pub fn abs(self) -> Q32 {
-        Q32(self.0.abs())
+        Q32(self.0.wrapping_abs())
     }
 
     /// Check if value is zero
@@ -96,7 +112,7 @@ impl Q32 {
         Q32(self.0 & (ONE - 1))
     }
 
-    /// Get the integer part (floor)
+    /// Integer part: floor toward −∞ (`raw >> 16`; see `docs/design/q32.md`).
     #[inline(always)]
     pub const fn to_i32(self) -> i32 {
         self.0 >> Self::SHIFT
@@ -120,10 +136,11 @@ impl Q32 {
         scaled.clamp(0, 65535) as u16
     }
 
-    /// Multiply by an integer (more efficient than converting to Fixed first)
+    /// Multiply by an integer (saturating, matches Q32 × scalar semantics)
     #[inline]
     pub const fn mul_int(self, i: i32) -> Q32 {
-        Q32(self.0 * i)
+        let wide = self.0 as i64 * i as i64;
+        Q32(sat_i64_const(wide))
     }
 
     /// Linear interpolation
@@ -143,7 +160,8 @@ impl Add for Q32 {
 
     #[inline(always)]
     fn add(self, rhs: Self) -> Self {
-        Q32(self.0 + rhs.0)
+        let wide = self.0 as i64 + rhs.0 as i64;
+        Q32(sat_i64_to_q32_raw(wide))
     }
 }
 
@@ -152,7 +170,8 @@ impl Sub for Q32 {
 
     #[inline(always)]
     fn sub(self, rhs: Self) -> Self {
-        Q32(self.0 - rhs.0)
+        let wide = self.0 as i64 - rhs.0 as i64;
+        Q32(sat_i64_to_q32_raw(wide))
     }
 }
 
@@ -161,7 +180,8 @@ impl Mul for Q32 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        Q32(((self.0 as i64 * rhs.0 as i64) >> Self::SHIFT) as i32)
+        let wide = (self.0 as i64 * rhs.0 as i64) >> SHIFT;
+        Q32(sat_i64_to_q32_raw(wide))
     }
 }
 
@@ -170,11 +190,17 @@ impl Div for Q32 {
 
     #[inline(always)]
     fn div(self, rhs: Self) -> Self {
-        if rhs.0 != 0 {
-            Q32(((self.0 as i64 * ONE as i64) / rhs.0 as i64) as i32)
-        } else {
-            Q32(0)
+        if rhs.0 == 0 {
+            if self.0 == 0 {
+                return Q32(0);
+            } else if self.0 > 0 {
+                return Q32(Q32_MAX_RAW);
+            } else {
+                return Q32(i32::MIN);
+            }
         }
+        let wide = ((self.0 as i64) << SHIFT) / rhs.0 as i64;
+        Q32(sat_i64_to_q32_raw(wide))
     }
 }
 
@@ -203,14 +229,14 @@ impl Neg for Q32 {
 impl AddAssign for Q32 {
     #[inline(always)]
     fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
+        *self = *self + rhs;
     }
 }
 
 impl SubAssign for Q32 {
     #[inline(always)]
     fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
+        *self = *self - rhs;
     }
 }
 
@@ -502,5 +528,145 @@ mod tests {
         let mut b = Q32::from_f32(6.0);
         b /= Q32::from_f32(2.0);
         assert!((b.to_f32() - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_from_fixed_roundtrip() {
+        assert_eq!(Q32::from_fixed(65536).to_f32(), 1.0);
+        assert_eq!(Q32::from_fixed(-65536).to_f32(), -1.0);
+        assert_eq!(Q32::from_fixed(0).to_f32(), 0.0);
+    }
+
+    #[test]
+    fn test_to_i32_floor() {
+        assert_eq!(Q32::from_f32(1.9).to_i32(), 1);
+        assert_eq!(Q32::from_f32(-1.9).to_i32(), -2);
+        assert_eq!(Q32::from_f32(0.5).to_i32(), 0);
+        assert_eq!(Q32::from_f32(-0.5).to_i32(), -1);
+    }
+
+    #[test]
+    fn test_add_saturates_positive() {
+        let big = Q32::from_f32(30000.0);
+        let result = big + big;
+        assert_eq!(result.0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_add_saturates_negative() {
+        let big_neg = Q32::from_f32(-30000.0);
+        let result = big_neg + big_neg;
+        assert_eq!(result.0, i32::MIN);
+    }
+
+    #[test]
+    fn test_sub_saturates() {
+        let big = Q32::from_f32(30000.0);
+        let big_neg = Q32::from_f32(-30000.0);
+        let result = big - big_neg;
+        assert_eq!(result.0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_mul_saturates_positive() {
+        let big = Q32::from_f32(1000.0);
+        let result = big * big;
+        assert_eq!(result.0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_mul_saturates_negative() {
+        let big = Q32::from_f32(1000.0);
+        let big_neg = Q32::from_f32(-1000.0);
+        let result = big * big_neg;
+        assert_eq!(result.0, i32::MIN);
+    }
+
+    #[test]
+    fn test_div_zero_by_zero() {
+        assert_eq!((Q32::ZERO / Q32::ZERO).0, 0);
+    }
+
+    #[test]
+    fn test_div_positive_by_zero() {
+        assert_eq!((Q32::ONE / Q32::ZERO).0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_div_negative_by_zero() {
+        assert_eq!((-Q32::ONE / Q32::ZERO).0, i32::MIN);
+    }
+
+    #[test]
+    fn test_div_saturates_overflow() {
+        let big = Q32::from_f32(30000.0);
+        let small = Q32::from_f32(0.001);
+        let result = big / small;
+        assert_eq!(result.0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_rem_by_zero() {
+        assert_eq!((Q32::ONE % Q32::ZERO).0, 0);
+    }
+
+    #[test]
+    fn test_rem_basic() {
+        let result = Q32::from_f32(7.0) % Q32::from_f32(3.0);
+        assert!((result.to_f32() - 1.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn test_abs() {
+        assert_eq!(Q32::from_f32(5.0).abs().to_f32(), 5.0);
+        assert_eq!(Q32::from_f32(-5.0).abs().to_f32(), 5.0);
+        assert_eq!(Q32::ZERO.abs().to_f32(), 0.0);
+    }
+
+    #[test]
+    fn test_is_zero() {
+        assert!(Q32::ZERO.is_zero());
+        assert!(!Q32::ONE.is_zero());
+    }
+
+    #[test]
+    fn test_frac() {
+        assert!((Q32::from_f32(1.75).frac().to_f32() - 0.75).abs() < 0.02);
+        assert_eq!(Q32::from_f32(2.0).frac().to_f32(), 0.0);
+    }
+
+    #[test]
+    fn test_to_u16_clamped() {
+        assert_eq!(Q32::from_f32(0.0).to_u16_clamped(), 0);
+        assert_eq!(Q32::from_f32(1.0).to_u16_clamped(), 65535);
+        assert!((Q32::from_f32(0.5).to_u16_clamped() as i32 - 32767).abs() <= 1);
+        assert_eq!(Q32::from_f32(-1.0).to_u16_clamped(), 0);
+    }
+
+    #[test]
+    fn test_mul_int_saturates() {
+        let big = Q32::from_f32(20000.0);
+        let result = big.mul_int(4);
+        assert_eq!(result.0, Q32_MAX_RAW);
+    }
+
+    #[test]
+    fn test_constant_pi() {
+        assert!((Q32::PI.to_f32() - core::f32::consts::PI).abs() < 0.002);
+    }
+
+    #[test]
+    fn test_constant_tau() {
+        assert!((Q32::TAU.to_f32() - core::f32::consts::TAU).abs() < 0.003);
+    }
+
+    #[test]
+    fn test_constant_e() {
+        assert!((Q32::E.to_f32() - core::f32::consts::E).abs() < 0.002);
+    }
+
+    #[test]
+    fn test_constant_phi() {
+        assert!((Q32::PHI.to_f32() - 1.618034_f32).abs() < 0.002);
     }
 }

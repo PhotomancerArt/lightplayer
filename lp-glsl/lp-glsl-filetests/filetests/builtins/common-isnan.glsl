@@ -1,5 +1,6 @@
 // test run
 // @unimplemented(backend=wasm)
+// @unsupported(float_mode=q32, reason="Q32 has no NaN; tests use 1.0/0.0 intermediates that are not IEEE Inf on Q32")
 
 // ============================================================================
 // isnan(): Is NaN function
@@ -11,7 +12,6 @@ bool test_isnan_normal() {
     return isnan(1.0);
 }
 
-// @unimplemented(backend=jit)
 // run: test_isnan_normal() == false
 
 bool test_isnan_zero() {
