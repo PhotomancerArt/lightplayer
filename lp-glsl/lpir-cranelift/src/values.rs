@@ -26,6 +26,10 @@ pub enum GlslQ32 {
     BVec2(bool, bool),
     BVec3(bool, bool, bool),
     BVec4(bool, bool, bool, bool),
+    /// Column-major `mat2` components (4 floats).
+    Mat2([f64; 4]),
+    Mat3([f64; 9]),
+    Mat4([f64; 16]),
 }
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).
@@ -67,6 +71,9 @@ pub(crate) fn glsl_component_count(ty: &GlslType) -> usize {
         GlslType::Vec2 | GlslType::IVec2 | GlslType::UVec2 | GlslType::BVec2 => 2,
         GlslType::Vec3 | GlslType::IVec3 | GlslType::UVec3 | GlslType::BVec3 => 3,
         GlslType::Vec4 | GlslType::IVec4 | GlslType::UVec4 | GlslType::BVec4 => 4,
+        GlslType::Mat2 => 4,
+        GlslType::Mat3 => 9,
+        GlslType::Mat4 => 16,
     }
 }
 
@@ -125,6 +132,16 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
             if *d { 1 } else { 0 },
         ]),
 
+        (GlslType::Mat2, GlslQ32::Mat2(a)) => {
+            Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
+        }
+        (GlslType::Mat3, GlslQ32::Mat3(a)) => {
+            Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
+        }
+        (GlslType::Mat4, GlslQ32::Mat4(a)) => {
+            Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
+        }
+
         (expected, got) => Err(CallError::TypeMismatch(format!(
             "argument type mismatch: expected {:?}, got {:?}",
             expected,
@@ -151,6 +168,9 @@ fn got_ty_name(v: &GlslQ32) -> &'static str {
         GlslQ32::BVec2(..) => "BVec2",
         GlslQ32::BVec3(..) => "BVec3",
         GlslQ32::BVec4(..) => "BVec4",
+        GlslQ32::Mat2(_) => "Mat2",
+        GlslQ32::Mat3(_) => "Mat3",
+        GlslQ32::Mat4(_) => "Mat4",
     }
 }
 
@@ -203,5 +223,40 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
         GlslType::BVec4 => {
             GlslQ32::BVec4(words[0] != 0, words[1] != 0, words[2] != 0, words[3] != 0)
         }
+        GlslType::Mat2 => GlslQ32::Mat2([
+            crate::q32::q32_to_f64(words[0]),
+            crate::q32::q32_to_f64(words[1]),
+            crate::q32::q32_to_f64(words[2]),
+            crate::q32::q32_to_f64(words[3]),
+        ]),
+        GlslType::Mat3 => GlslQ32::Mat3([
+            crate::q32::q32_to_f64(words[0]),
+            crate::q32::q32_to_f64(words[1]),
+            crate::q32::q32_to_f64(words[2]),
+            crate::q32::q32_to_f64(words[3]),
+            crate::q32::q32_to_f64(words[4]),
+            crate::q32::q32_to_f64(words[5]),
+            crate::q32::q32_to_f64(words[6]),
+            crate::q32::q32_to_f64(words[7]),
+            crate::q32::q32_to_f64(words[8]),
+        ]),
+        GlslType::Mat4 => GlslQ32::Mat4([
+            crate::q32::q32_to_f64(words[0]),
+            crate::q32::q32_to_f64(words[1]),
+            crate::q32::q32_to_f64(words[2]),
+            crate::q32::q32_to_f64(words[3]),
+            crate::q32::q32_to_f64(words[4]),
+            crate::q32::q32_to_f64(words[5]),
+            crate::q32::q32_to_f64(words[6]),
+            crate::q32::q32_to_f64(words[7]),
+            crate::q32::q32_to_f64(words[8]),
+            crate::q32::q32_to_f64(words[9]),
+            crate::q32::q32_to_f64(words[10]),
+            crate::q32::q32_to_f64(words[11]),
+            crate::q32::q32_to_f64(words[12]),
+            crate::q32::q32_to_f64(words[13]),
+            crate::q32::q32_to_f64(words[14]),
+            crate::q32::q32_to_f64(words[15]),
+        ]),
     })
 }

@@ -1,7 +1,7 @@
 use super::{EmitCtx, bool_to_i32, def_v, def_v_expr, use_v};
 use crate::error::CompileError;
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
-use cranelift_codegen::ir::{InstBuilder, types};
+use cranelift_codegen::ir::{InstBuilder, StackSlotData, StackSlotKind, types};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::FloatMode;
 use lpir::module::IrFunction;
@@ -487,6 +487,24 @@ pub(crate) fn emit_scalar(
                 FloatMode::Q32 => {
                     let out = crate::q32::emit_from_uint(builder, a);
                     def_v(builder, vars, *dst, out);
+                }
+            }
+        }
+        Op::FfromI32Bits { dst, src } => {
+            let bits = use_v(builder, vars, *src);
+            match ctx.float_mode {
+                FloatMode::Q32 => {
+                    def_v(builder, vars, *dst, bits);
+                }
+                FloatMode::F32 => {
+                    let slot = builder.func.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        4,
+                        4,
+                    ));
+                    builder.ins().stack_store(bits, slot, 0);
+                    let f = builder.ins().stack_load(types::F32, slot, 0);
+                    def_v(builder, vars, *dst, f);
                 }
             }
         }

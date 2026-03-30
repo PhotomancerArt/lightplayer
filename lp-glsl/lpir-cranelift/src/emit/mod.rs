@@ -77,9 +77,19 @@ pub(crate) enum CtrlFrame {
 }
 
 /// RISC-V32 cannot return >2 scalars in registers; use a hidden StructReturn pointer (Cranelift #9510).
+///
+/// On host ISAs, the Level-3 invoke shim only models up to four GPR returns, so larger multi-return
+/// (e.g. `mat3`/`mat4`) also uses `StructReturn` with a caller-allocated buffer.
 pub(crate) fn signature_uses_struct_return(isa: &dyn TargetIsa, func: &IrFunction) -> bool {
     use target_lexicon::Architecture;
-    matches!(isa.triple().architecture, Architecture::Riscv32(_)) && func.return_types.len() > 2
+    let n = func.return_types.len();
+    if n == 0 {
+        return false;
+    }
+    match isa.triple().architecture {
+        Architecture::Riscv32(_) => n > 2,
+        _ => n > 4,
+    }
 }
 
 /// Build the Cranelift [`Signature`] for `func`, including RISC-V32 StructReturn when required.

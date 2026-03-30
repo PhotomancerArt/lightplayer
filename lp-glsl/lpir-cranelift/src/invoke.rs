@@ -29,9 +29,16 @@ struct CRet4 {
     v3: i32,
 }
 
-/// RISC-V32: hidden StructReturn pointer (`a0`) plus user `i32` args; callee writes `out.len()` words.
-#[cfg(target_arch = "riscv32")]
-unsafe fn invoke_riscv32_struct_return_buf(
+/// System V / RISC-V32: hidden StructReturn pointer as the first `extern "C"` argument (`a0` /
+/// `rdi`) plus user `i32` args; callee writes `out.len()` words.
+#[cfg(any(
+    target_arch = "riscv32",
+    all(
+        target_arch = "x86_64",
+        not(all(target_os = "windows", target_env = "msvc"))
+    )
+))]
+unsafe fn invoke_sysv_struct_return_buf(
     code: *const u8,
     args: &[i32],
     out: &mut [i32],
@@ -86,6 +93,217 @@ unsafe fn invoke_riscv32_struct_return_buf(
     Ok(())
 }
 
+/// AArch64: StructReturn pointer in `x8`; user arguments in `x0`…`x7`.
+#[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
+unsafe fn aarch64_invoke_struct_return_buf(
+    code: *const u8,
+    args: &[i32],
+    out: &mut [i32],
+) -> Result<(), CallError> {
+    use core::arch::asm;
+    let buf = out.as_mut_ptr() as u64;
+    match args.len() {
+        0 => unsafe {
+            asm!(
+                "blr {}",
+                in(reg) code,
+                in("x8") buf,
+                clobber_abi("C"),
+            );
+        },
+        1 => {
+            let a0 = args[0] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        2 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        3 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        4 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            let a3 = args[3] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    in("x3") a3,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        5 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            let a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    in("x3") a3,
+                    in("x4") a4,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        6 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            let a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    in("x3") a3,
+                    in("x4") a4,
+                    in("x5") a5,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        7 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            let a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    in("x3") a3,
+                    in("x4") a4,
+                    in("x5") a5,
+                    in("x6") a6,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        8 => {
+            let a0 = args[0] as i64 as u64;
+            let a1 = args[1] as i64 as u64;
+            let a2 = args[2] as i64 as u64;
+            let a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            unsafe {
+                asm!(
+                    "blr {}",
+                    in(reg) code,
+                    in("x8") buf,
+                    in("x0") a0,
+                    in("x1") a1,
+                    in("x2") a2,
+                    in("x3") a3,
+                    in("x4") a4,
+                    in("x5") a5,
+                    in("x6") a6,
+                    in("x7") a7,
+                    clobber_abi("C"),
+                );
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+unsafe fn invoke_struct_return_dispatch(
+    code: *const u8,
+    args: &[i32],
+    out: &mut [i32],
+) -> Result<(), CallError> {
+    #[cfg(target_arch = "riscv32")]
+    {
+        return unsafe { invoke_sysv_struct_return_buf(code, args, out) };
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        not(all(target_os = "windows", target_env = "msvc"))
+    ))]
+    {
+        return unsafe { invoke_sysv_struct_return_buf(code, args, out) };
+    }
+    #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
+    {
+        return unsafe { aarch64_invoke_struct_return_buf(code, args, out) };
+    }
+    #[cfg(not(any(
+        target_arch = "riscv32",
+        all(
+            target_arch = "x86_64",
+            not(all(target_os = "windows", target_env = "msvc"))
+        ),
+        all(target_arch = "aarch64", not(target_os = "windows")),
+    )))]
+    {
+        let _ = (code, args, out);
+        Err(CallError::Unsupported(
+            "StructReturn JIT invoke is not implemented for this host target".into(),
+        ))
+    }
+}
+
 /// Call a finalized JIT function passing `i32` scalars and collecting `i32` return words.
 ///
 /// # Safety
@@ -126,23 +344,15 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
             "more than 8 scalar arguments not supported by invoke shim".into(),
         ));
     }
+
+    if uses_struct_return {
+        return unsafe { invoke_struct_return_dispatch(code, args, out) };
+    }
+
     if n_ret > 4 {
         return Err(CallError::Unsupported(
             "more than 4 scalar returns not supported by invoke shim".into(),
         ));
-    }
-
-    if uses_struct_return {
-        #[cfg(target_arch = "riscv32")]
-        {
-            return unsafe { invoke_riscv32_struct_return_buf(code, args, out) };
-        }
-        #[cfg(not(target_arch = "riscv32"))]
-        {
-            return Err(CallError::Unsupported(
-                "StructReturn JIT calls are only supported on riscv32".into(),
-            ));
-        }
     }
 
     match n_ret {
