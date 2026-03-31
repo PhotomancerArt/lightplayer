@@ -14,7 +14,6 @@ float test_lpfx_rgb2hsv_pure_red() {
     return valid ? 1.0 : 0.0;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_lpfx_rgb2hsv_pure_red() == 1.0
 
 float test_lpfx_rgb2hsv_black() {

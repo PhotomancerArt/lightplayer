@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use lpir::IrFunction;
 use wasm_encoder::{InstructionSink, MemArg};
 
-const FRAME_ALIGN: u32 = 16;
+pub(crate) const FRAME_ALIGN: u32 = 16;
 
 /// Initial value for the shadow stack pointer global (`$sp`).
 pub(crate) const SHADOW_STACK_BASE: i32 = 65536;

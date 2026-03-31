@@ -1,5 +1,6 @@
 //! LPIR → WASM emission (Stage V).
 
+mod builtin_wasm_import_types;
 mod control;
 mod func;
 mod imports;
@@ -33,6 +34,8 @@ pub(crate) struct FuncEmitCtx<'a> {
     pub sp_global: Option<u32>,
     pub frame_size: u32,
     pub slot_offsets: &'a [u32],
+    /// Byte offset from `$sp` after prologue for result-pointer builtin scratch (after slots).
+    pub result_buffer_base_offset: u32,
 }
 
 pub(crate) fn emit_module(
@@ -47,7 +50,7 @@ pub(crate) fn emit_module(
     let mut import_fn_types = Vec::new();
 
     for decl in &filtered.decls {
-        let (params, results) = imports::import_decl_val_types(decl, options.float_mode);
+        let (params, results) = imports::import_decl_val_types(decl, options.float_mode)?;
         types.ty().function(params, results);
         import_fn_types.push(next_type);
         next_type += 1;
@@ -76,6 +79,8 @@ pub(crate) fn emit_module(
     let _ = next_type;
 
     let any_slots = ir.functions.iter().any(|f| !f.slots.is_empty());
+    let needs_result_ptr_calls = imports::module_needs_result_ptr_calls(ir);
+    let needs_shadow_stack = any_slots || needs_result_ptr_calls;
     let mut import_section = ImportSection::new();
     let needs_memory = !filtered.decls.is_empty()
         || ir.functions.iter().any(|f| f.uses_memory())
@@ -107,7 +112,7 @@ pub(crate) fn emit_module(
     }
 
     let mut exports = ExportSection::new();
-    if any_slots {
+    if needs_shadow_stack {
         exports.export(
             crate::module::SHADOW_STACK_GLOBAL_EXPORT,
             ExportKind::Global,
@@ -131,9 +136,9 @@ pub(crate) fn emit_module(
     };
 
     // $sp is global index 0 — only valid while it's the sole WASM global.
-    let sp_global = if any_slots { Some(0u32) } else { None };
+    let sp_global = if needs_shadow_stack { Some(0u32) } else { None };
     let mut globals = GlobalSection::new();
-    if any_slots {
+    if needs_shadow_stack {
         globals.global(
             GlobalType {
                 val_type: ValType::I32,
@@ -167,7 +172,7 @@ pub(crate) fn emit_module(
     module.section(&exports);
     module.section(&code);
 
-    let shadow_stack_base = if any_slots {
+    let shadow_stack_base = if needs_shadow_stack {
         Some(memory::SHADOW_STACK_BASE)
     } else {
         None

@@ -11,7 +11,7 @@ use lp_glsl_builtin_ids::{
     lpir_q32_builtin_id,
 };
 use lp_glsl_naga::FloatMode;
-use lpir::{CalleeRef, ImportDecl, IrModule, IrType, Op};
+use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, Op};
 
 /// After pruning: WASM import function index `i` corresponds to `filtered[i]`.
 pub(crate) struct FilteredImports {
@@ -146,18 +146,62 @@ pub(crate) fn build_filtered_imports(ir: &IrModule) -> Result<FilteredImports, S
     })
 }
 
+/// True if any user function calls an import that uses the result-pointer WASM ABI
+/// (non-scalar return via hidden pointer; callee has zero WASM results).
+pub(crate) fn module_needs_result_ptr_calls(ir: &IrModule) -> bool {
+    let n = ir.imports.len() as u32;
+    for f in &ir.functions {
+        for op in &f.body {
+            if let Op::Call { callee, .. } = op {
+                if callee.0 < n && import_uses_result_pointer_abi(ir, callee.0 as usize) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Whether `ir.imports[import_idx]` uses result-pointer calling convention in WASM.
+pub(crate) fn import_uses_result_pointer_abi(ir: &IrModule, import_idx: usize) -> bool {
+    let decl = match ir.imports.get(import_idx) {
+        Some(d) => d,
+        None => return false,
+    };
+    if decl.return_types.is_empty() {
+        return false;
+    }
+    let Ok(bid) = resolve_builtin_id(decl) else {
+        return false;
+    };
+    let (_params, wasm_results) = super::builtin_wasm_import_types::wasm_import_val_types(bid);
+    wasm_results.is_empty()
+}
+
+/// Max byte size of temporary result buffer needed for result-pointer builtin calls in `f`.
+pub(crate) fn max_result_ptr_buffer_bytes(ir: &IrModule, f: &IrFunction) -> u32 {
+    let n = ir.imports.len() as u32;
+    let mut max_b = 0u32;
+    for op in &f.body {
+        if let Op::Call {
+            callee, results, ..
+        } = op
+        {
+            if callee.0 < n && import_uses_result_pointer_abi(ir, callee.0 as usize) {
+                let count = f.pool_slice(*results).len() as u32;
+                max_b = max_b.max(count.saturating_mul(4));
+            }
+        }
+    }
+    max_b
+}
+
 pub(crate) fn import_decl_val_types(
     decl: &ImportDecl,
-    mode: FloatMode,
-) -> (Vec<wasm_encoder::ValType>, Vec<wasm_encoder::ValType>) {
-    let map = |t: IrType| match (t, mode) {
-        (IrType::I32, _) => wasm_encoder::ValType::I32,
-        (IrType::F32, FloatMode::Q32) => wasm_encoder::ValType::I32,
-        (IrType::F32, FloatMode::F32) => wasm_encoder::ValType::F32,
-    };
-    let params = decl.param_types.iter().copied().map(map).collect();
-    let results = decl.return_types.iter().copied().map(map).collect();
-    (params, results)
+    _mode: FloatMode,
+) -> Result<(Vec<wasm_encoder::ValType>, Vec<wasm_encoder::ValType>), String> {
+    let bid = resolve_builtin_id(decl)?;
+    Ok(super::builtin_wasm_import_types::wasm_import_val_types(bid))
 }
 
 pub(crate) fn builtins_wasm_name(decl: &ImportDecl) -> Result<&'static str, String> {

@@ -190,3 +190,53 @@ fn lpfx_strip_suffix(func_name: &str) -> Result<&str, CompileError> {
     })?;
     Ok(base)
 }
+
+/// Check if an import declaration refers to a builtin that uses the manual
+/// result-pointer ABI (LPFX functions that return vectors via out-pointer).
+///
+/// These builtins follow the FFI contract: non-scalar returns use an explicit
+/// result pointer to avoid complex cross-language ABI issues with struct returns.
+/// The Cranelift signature is `fn(*mut T, args...) -> ()` but LPIR expects
+/// multiple return values that must be loaded from the result buffer.
+pub(crate) fn is_import_result_ptr_builtin(decl: &ImportDecl, pointer_type: types::Type) -> bool {
+    // Only LPFX module uses result-pointer pattern
+    if decl.module_name != "lpfx" {
+        return false;
+    }
+
+    // Resolve to BuiltinId to check the actual Cranelift signature
+    let Ok(bid) = resolve_lpfx_builtin(decl) else {
+        return false;
+    };
+
+    // Get the Cranelift signature for this builtin
+    let sig = cranelift_sig_for_builtin(bid, pointer_type, CallConv::SystemV);
+
+    // Result-pointer pattern: Cranelift returns void (empty), but LPIR expects multiple returns
+    sig.returns.is_empty() && !decl.return_types.is_empty()
+}
+
+/// Resolve an LPFX import declaration to a BuiltinId.
+fn resolve_lpfx_builtin(decl: &ImportDecl) -> Result<BuiltinId, CompileError> {
+    // LPFX builtins are named like "lpfx_hsv2rgb_123" where 123 is the naga function index.
+    // Extract the base name (everything before the last underscore+number).
+    let base_name = decl
+        .func_name
+        .rsplit_once('_')
+        .and_then(|(prefix, suffix)| {
+            // Verify suffix is numeric (function index)
+            if suffix.chars().all(|c| c.is_ascii_digit()) {
+                Some(prefix)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(&decl.func_name);
+
+    // Parse the GLSL parameter kinds from the declaration
+    let kinds = lpfx_glsl_kinds_from_decl(decl)?;
+
+    // Look up the BuiltinId using the same mapping as the GLSL builtin resolution
+    glsl_lpfx_q32_builtin_id(base_name, &kinds)
+        .ok_or_else(|| CompileError::unsupported(format!("unknown LPFX builtin `{base_name}`")))
+}

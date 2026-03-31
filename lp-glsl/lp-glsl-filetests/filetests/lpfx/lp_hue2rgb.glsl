@@ -11,7 +11,6 @@ float test_lpfx_hue2rgb_red() {
     return is_red ? 1.0 : 0.0;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_lpfx_hue2rgb_red() == 1.0
 
 float test_lpfx_hue2rgb_green() {

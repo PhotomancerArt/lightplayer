@@ -8,6 +8,7 @@ use lpir::{IrFunction, IrModule, IrType, Op};
 use wasm_encoder::{Function, InstructionSink, ValType};
 
 use crate::emit::control::{self, CtrlEntry, WasmOpenDepth};
+use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::ops::emit_op;
 use crate::emit::{EmitCtx, FuncEmitCtx};
@@ -73,10 +74,19 @@ pub(crate) fn encode_ir_function(
     };
 
     let slot_offsets = memory::slot_offsets(f);
-    let frame_size = memory::aligned_frame_size(f);
+    let slot_frame = memory::aligned_frame_size(f);
+    let result_buf = imports::max_result_ptr_buffer_bytes(ir, f);
+    let (frame_size, result_buffer_base_offset) = if result_buf > 0 {
+        (
+            memory::align_up(slot_frame.saturating_add(result_buf), memory::FRAME_ALIGN),
+            slot_frame,
+        )
+    } else {
+        (slot_frame, 0u32)
+    };
     if frame_size > 0 && sp_global.is_none() {
         return Err(String::from(
-            "function has slots but module has no $sp global",
+            "function needs shadow stack (slots or result-pointer calls) but module has no $sp global",
         ));
     }
 
@@ -86,6 +96,7 @@ pub(crate) fn encode_ir_function(
         sp_global,
         frame_size,
         slot_offsets: slot_offsets.as_slice(),
+        result_buffer_base_offset,
     };
 
     let mut wasm_fn = Function::new_with_locals_types(local_types);

@@ -385,13 +385,41 @@ pub(crate) fn emit_op(
             args,
             results,
         } => {
-            for v in func.pool_slice(*args) {
-                sink.local_get(v.0);
-            }
             let idx = wasm_func_index(fctx, *callee)?;
-            sink.call(idx);
-            for r in func.pool_slice(*results).iter().rev() {
-                sink.local_set(r.0);
+            let callee_usize = callee.0 as usize;
+            let is_result_ptr = callee_usize < fctx.module.full_import_count as usize
+                && imports::import_uses_result_pointer_abi(ir, callee_usize);
+
+            if is_result_ptr {
+                let sp = fctx.sp_global.ok_or_else(|| {
+                    String::from("result-pointer builtin call without $sp global")
+                })?;
+                let base_off = i32::try_from(fctx.result_buffer_base_offset).unwrap_or(i32::MAX);
+
+                // Hidden result pointer is the first argument (matches `extern "C"` builtins).
+                sink.global_get(sp).i32_const(base_off).i32_add();
+                for v in func.pool_slice(*args) {
+                    sink.local_get(v.0);
+                }
+                sink.call(idx);
+
+                let m = memory::mem_arg0(0, 2);
+                for (i, r) in func.pool_slice(*results).iter().enumerate() {
+                    let off = base_off.saturating_add(i32::try_from(i * 4).unwrap_or(i32::MAX));
+                    sink.global_get(sp)
+                        .i32_const(off)
+                        .i32_add()
+                        .i32_load(m)
+                        .local_set(r.0);
+                }
+            } else {
+                for v in func.pool_slice(*args) {
+                    sink.local_get(v.0);
+                }
+                sink.call(idx);
+                for r in func.pool_slice(*results).iter().rev() {
+                    sink.local_set(r.0);
+                }
             }
         }
         Op::FconstF32 { dst, value } => match fm {
