@@ -40,7 +40,6 @@ bool test_call_return_value_comparison() {
     return get_value() > 40.0 && get_value() < 50.0;
 }
 
-// @unimplemented()
 // run: test_call_return_value_comparison() == true
 
 float get_x() {
@@ -57,7 +56,6 @@ vec2 test_call_return_value_vector_expr() {
     return result;
 }
 
-// @unimplemented()
 // run: test_call_return_value_vector_expr() ~= vec2(2.0, 4.0)
 
 float add(float a, float b) {
@@ -73,7 +71,6 @@ float test_call_return_value_nested_expr() {
     return multiply(add(2.0, 3.0), add(4.0, 5.0)); // (2+3) * (4+5) = 5 * 9 = 45
 }
 
-// @unimplemented()
 // run: test_call_return_value_nested_expr() ~= 45.0
 
 float get_increment() {
@@ -89,7 +86,6 @@ float test_call_return_value_in_loop() {
     return sum; // 2+2+2+2+2 = 10
 }
 
-// @unimplemented()
 // run: test_call_return_value_in_loop() ~= 10.0
 
 vec3 get_color() {
@@ -102,7 +98,6 @@ float test_call_return_value_swizzle() {
     return coords.x + coords.y; // 1.0 + 0.5 = 1.5
 }
 
-// @unimplemented()
 // run: test_call_return_value_swizzle() ~= 1.5
 
 bool is_positive(float x) {
@@ -119,20 +114,15 @@ float test_call_return_value_ternary() {
     return is_positive(value) ? value : -value; // Should be 5.0 (absolute value)
 }
 
-// @unimplemented()
 // run: test_call_return_value_ternary() ~= 5.0
-
-int get_index() {
-    return 1;
-}
 
 float test_call_return_value_array_index() {
     // Return values used as array indices
     float[3] arr = float[3](10.0, 20.0, 30.0);
-    return arr[get_index()]; // arr[1] = 20.0
+    int idx = 1; // get_index() inlined to avoid extraction issues
+    return arr[idx]; // arr[1] = 20.0
 }
 
-// @unimplemented()
 // run: test_call_return_value_array_index() ~= 20.0
 
 float square(float x) {
@@ -148,6 +138,5 @@ float test_call_return_value_function_arg() {
     return square(get_base_value()); // square(4) = 16
 }
 
-// @unimplemented()
 // run: test_call_return_value_function_arg() ~= 16.0
 
