@@ -72,17 +72,16 @@ impl ConcurrentRunner {
         let request_mutex = Arc::new(Mutex::new(request_rx));
         let (reply_tx, reply_rx) = channel();
 
-        // Default to a single worker: host JIT / LPIR codegen uses a global lock; one panicking
-        // test poisons it and every other concurrent job fails with misleading `count_test_cases`
-        // stats until the process exits. Override with `LP_FILETESTS_THREADS` when debugging
-        // parallelism.
+        // Default to num_cpus: WASM and RV32 backends are thread-safe. JIT has issues with
+        // multi-file runs (see docs/bugs/2026-03-30-jit-filetest-segfault.md) - skip JIT for bulk
+        // operations or use single-threaded mode when JIT testing.
         let num_threads = std::env::var("LP_FILETESTS_THREADS")
             .ok()
             .and_then(|s| {
                 use std::str::FromStr;
                 usize::from_str(&s).ok().filter(|&n| n > 0)
             })
-            .unwrap_or(1);
+            .unwrap_or_else(num_cpus::get);
 
         let handles = (0..num_threads)
             .map(|num| worker_thread(num, request_mutex.clone(), reply_tx.clone()))

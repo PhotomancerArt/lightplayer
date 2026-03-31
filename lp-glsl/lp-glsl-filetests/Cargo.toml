@@ -25,6 +25,7 @@ wasmprinter = "0.245"
 anyhow = { workspace = true }
 regex = { workspace = true }
 walkdir = "2"
+num_cpus = "1"
 glob = { workspace = true }
 glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, features = ["std"] }
 

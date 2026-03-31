@@ -110,23 +110,35 @@ CRASH HAPPENS HERE
 - `lp-glsl-filetests/src/runner/concurrent.rs` - Worker thread lifecycle
 - `lpir-cranelift/src/process_sync.rs` - Codegen serialization (existing lock)
 
+## Decision
+
+**WASM and RV32 are the primary targets for bulk testing.** The JIT backend is primarily for debugging and single-file tests. The default thread count has been restored to `num_cpus::get()` for parallel execution of WASM/RV32 tests.
+
 ## Workarounds
 
-### Option 1: Use WASM Backend (Recommended for bulk operations)
+### Option 1: Use WASM or RV32 Backend (Recommended for bulk operations)
 ```bash
-scripts/glsl-filetests.sh --target wasm.q32 'array/*.glsl' --fix
+# WASM (default includes wasm.q32)
+scripts/glsl-filetests.sh 'array/*.glsl' --fix
+
+# RV32 only
+scripts/glsl-filetests.sh --target rv32.q32 'array/*.glsl' --fix
+
+# Both
+scripts/glsl-filetests.sh --target wasm.q32,rv32.q32 'array/*.glsl' --fix
 ```
 
-### Option 2: Iterate Single Files
+### Option 2: Single-threaded for JIT
+```bash
+# Use LP_FILETESTS_THREADS=1 when testing JIT specifically
+LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh --target jit.q32 'array/*.glsl'
+```
+
+### Option 3: Iterate Single Files for JIT
 ```bash
 for f in array/*.glsl; do
-    scripts/glsl-filetests.sh "$f" --fix || true
+    scripts/glsl-filetests.sh --target jit.q32 "$f" || true
 done
-```
-
-### Option 3: Use Smaller Batches
-```bash
-scripts/glsl-filetests.sh 'array/phase/*.glsl' --fix
 ```
 
 ## Investigation Needed
@@ -151,9 +163,18 @@ To pinpoint the crash location:
 
 ## Impact
 
-- **Severity**: Medium (workarounds exist, not blocking)
-- **Affected**: Developer workflow with JIT backend and multiple files
-- **Not Affected**: CI (uses WASM), single-file testing, embedded targets
+- **Severity**: Low (workarounds exist, JIT not primary target for bulk tests)
+- **Affected**: JIT backend with multiple files when using >1 thread
+- **Not Affected**: 
+  - WASM/RV32 backends (primary for bulk testing)
+  - CI (uses WASM)
+  - Single-file JIT testing
+  - Embedded targets (no JIT)
+
+## Notes
+
+- Default thread count was temporarily set to 1 to avoid this issue, but has been restored to `num_cpus::get()` since WASM/RV32 are the primary bulk-test targets
+- The `LP_FILETESTS_THREADS` env var can be used to force single-threaded mode when JIT testing is needed
 
 ## References
 

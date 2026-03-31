@@ -24,7 +24,7 @@ just test-filetests
 
 `just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script three times: default (`rv32.q32` + `wasm.q32`), then `jit.q32`. Ensure `just build-ci` (or a full build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
 
-**Parallelism:** concurrent filetests default to **1** worker (host JIT shares a global codegen lock). Set `LP_FILETESTS_THREADS=N` to experiment with more (see `scripts/glsl-filetests.sh --help`).
+**Parallelism:** filetests default to **num_cpus** workers. WASM and RV32 backends are fully thread-safe. JIT backend has issues with multi-file runs; use `LP_FILETESTS_THREADS=1` when testing JIT specifically (see `docs/bugs/2026-03-30-jit-filetest-segfault.md`).
 
 ### Integration test harness (`#[ignore]`)
 
