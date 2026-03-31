@@ -702,6 +702,7 @@ pub fn run(
     struct FailedTest {
         path: PathBuf,
         line_number: Option<usize>,
+        target: String,
     }
 
     let mut tests: Vec<TestEntry> = test_specs
@@ -853,6 +854,13 @@ pub fn run(
                             &display_path,
                             &parentheticals,
                         );
+                        if line_failed {
+                            failed_tests.push(FailedTest {
+                                path: spec.path.clone(),
+                                line_number: spec.line_number,
+                                target: tn,
+                            });
+                        }
                     }
                 } else {
                     let counts_color = if stats.total > 0 {
@@ -905,14 +913,23 @@ pub fn run(
                         &display_path,
                         &parentheticals,
                     );
+                    // When not showing target columns, still track per-target failures
+                    for t in &active_targets {
+                        let tn = t.name();
+                        let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                        let line_failed = per_target_file_line_failed(harness_completed, &tstats);
+                        if line_failed {
+                            failed_tests.push(FailedTest {
+                                path: spec.path.clone(),
+                                line_number: spec.line_number,
+                                target: tn,
+                            });
+                        }
+                    }
                 }
 
                 if should_mark_failed {
                     failed += 1;
-                    failed_tests.push(FailedTest {
-                        path: spec.path.clone(),
-                        line_number: spec.line_number,
-                    });
                 } else {
                     passed += 1;
                 }
@@ -999,13 +1016,17 @@ pub fn run(
             };
             if colors::should_color() {
                 println!(
-                    "scripts/glsl-filetests.sh {}{}{}",
+                    "scripts/glsl-filetests.sh {}{}{} --target {}",
                     colors::DIM,
                     test_path,
-                    colors::RESET
+                    colors::RESET,
+                    failed_test.target
                 );
             } else {
-                println!("scripts/glsl-filetests.sh {test_path}");
+                println!(
+                    "scripts/glsl-filetests.sh {test_path} --target {}",
+                    failed_test.target
+                );
             }
         }
     }

@@ -127,6 +127,7 @@ pub fn run(
                     &directive.expression_str,
                     &relative_path,
                     output_mode,
+                    target,
                 );
                 eprintln_if_detail(output_mode, &err);
                 errors.push(err);
@@ -218,6 +219,7 @@ pub fn run(
                     Some(&*executable),
                     output_mode,
                     Some(&directive.expression_str),
+                    target,
                 );
                 eprintln_if_detail(output_mode, &error_msg);
                 errors.push(anyhow::anyhow!("{error_msg}"));
@@ -253,6 +255,7 @@ pub fn run(
                         Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
+                        target,
                     );
                     eprintln_if_detail(output_mode, &formatted_error);
                     errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -278,6 +281,7 @@ pub fn run(
                         Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
+                        target,
                     );
                     eprintln_if_detail(output_mode, &formatted_error);
                     errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -311,6 +315,7 @@ pub fn run(
                             Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
+                            target,
                         );
                         eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -340,6 +345,7 @@ pub fn run(
                             Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
+                            target,
                         );
                         eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -493,6 +499,7 @@ pub fn run(
                                 "{}() {} {}",
                                 directive.expression_str, op_str, directive.expected_str
                             )),
+                            target,
                         );
                         eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -548,6 +555,7 @@ fn format_compilation_error(
     expression: &str,
     relative_path: &str,
     output_mode: OutputMode,
+    target: &Target,
 ) -> anyhow::Error {
     anyhow::anyhow!(
         "{}",
@@ -562,6 +570,7 @@ fn format_compilation_error(
             None, // No executable for compilation errors
             output_mode,
             Some(expression),
+            target,
         )
     )
 }
@@ -584,6 +593,7 @@ fn format_error(
     executable: Option<&dyn GlslExecutable>,
     output_mode: OutputMode,
     _test_expression: Option<&str>,
+    target: &Target,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -634,6 +644,7 @@ fn format_error(
     parts.push(error_message.to_string());
 
     // Rerun
+    let target_name = target.name();
     let rerun_section = if output_mode.show_full_output() {
         let rerun_title = if colors::should_color() {
             format!("{}{}{}", colors::BOLD, "Rerun this test:", colors::RESET)
@@ -651,10 +662,10 @@ fn format_error(
             "Rerun with debugging:".to_string()
         };
         format!(
-            "{rerun_title}\n  scripts/glsl-filetests.sh {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh {filename}:{line_number}"
+            "{rerun_title}\n  scripts/glsl-filetests.sh {filename}:{line_number} --target {target_name}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh {filename}:{line_number} --target {target_name}"
         )
     } else {
-        format!("scripts/glsl-filetests.sh {filename}:{line_number}")
+        format!("scripts/glsl-filetests.sh {filename}:{line_number} --target {target_name}")
     };
     parts.push(rerun_section);
 
