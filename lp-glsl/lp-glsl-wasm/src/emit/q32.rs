@@ -6,6 +6,9 @@ const Q16_16_SCALE: f32 = 65536.0;
 pub(crate) const Q32_MIN: i64 = i32::MIN as i64;
 pub(crate) const Q32_MAX: i64 = i32::MAX as i64;
 
+const MAX_FIXED: i32 = 0x7FFF_FFFF; // Maximum representable fixed-point value
+const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
+
 /// Convert float to Q16.16 `i32`, clamping to a representable range.
 pub(crate) fn f32_to_q16_16(v: f32) -> i32 {
     let clamped = v.clamp(-32768.0, 32767.99998);
@@ -84,6 +87,35 @@ pub(crate) fn emit_q32_fmul(
 }
 
 pub(crate) fn emit_q32_fdiv(sink: &mut InstructionSink<'_>, lhs: u32, rhs: u32, dst: u32) {
+    let t = BlockType::Result(ValType::I32);
+
+    // Check if divisor is zero
+    sink.local_get(rhs)
+        .i32_const(0)
+        .i32_eq()
+        .if_(t);
+    // Divisor is zero - handle saturation based on dividend sign
+    sink.local_get(lhs)
+        .i32_const(0)
+        .i32_eq()
+        .if_(t);
+    // 0 / 0 = 0
+    sink.i32_const(0);
+    sink.else_();
+    // nonzero / 0 - saturate based on sign
+    sink.local_get(lhs)
+        .i32_const(0)
+        .i32_lt_s()
+        .if_(t);
+    // negative / 0 = MIN_FIXED
+    sink.i32_const(MIN_FIXED);
+    sink.else_();
+    // positive / 0 = MAX_FIXED
+    sink.i32_const(MAX_FIXED);
+    sink.end();
+    sink.end();
+    sink.else_();
+    // Divisor is non-zero - perform normal division
     sink.local_get(lhs)
         .i64_extend_i32_s()
         .i64_const(16)
@@ -91,8 +123,9 @@ pub(crate) fn emit_q32_fdiv(sink: &mut InstructionSink<'_>, lhs: u32, rhs: u32, 
         .local_get(rhs)
         .i64_extend_i32_s()
         .i64_div_s()
-        .i32_wrap_i64()
-        .local_set(dst);
+        .i32_wrap_i64();
+    sink.end();
+    sink.local_set(dst);
 }
 
 pub(crate) fn emit_q32_fabs(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
