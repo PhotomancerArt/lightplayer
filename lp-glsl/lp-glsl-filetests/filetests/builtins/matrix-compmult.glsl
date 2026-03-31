@@ -1,23 +1,24 @@
 // test run
-// @unimplemented(backend=wasm)
+// @unsupported(reason="Naga GLSL frontend limitation - matrixCompMult not recognized")
 
 // ============================================================================
 // matrixCompMult(): Matrix component-wise multiply function
 // matrixCompMult(mat, mat) - component-wise matrix multiply
+//
+// Note: matrixCompMult IS a valid GLSL builtin per Khronos spec:
+// https://registry.khronos.org/OpenGL-Refpages/gl4/html/matrixCompMult.xhtml
+// This test is unsupported because Naga's GLSL frontend doesn't recognize it.
 // ============================================================================
 
 mat2 test_matrixcompmult_mat2_identity() {
-    // matrixCompMult with identity matrices
     mat2 a = mat2(1.0, 0.0, 0.0, 1.0);
     mat2 b = mat2(1.0, 0.0, 0.0, 1.0);
     return matrixCompMult(a, b);
 }
 
-// @unimplemented(backend=jit)
 // run: test_matrixcompmult_mat2_identity() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 mat2 test_matrixcompmult_mat2_simple() {
-    // matrixCompMult with simple 2x2 matrices
     mat2 a = mat2(2.0, 3.0, 4.0, 5.0);
     mat2 b = mat2(1.0, 2.0, 3.0, 4.0);
     return matrixCompMult(a, b);
@@ -26,7 +27,6 @@ mat2 test_matrixcompmult_mat2_simple() {
 // run: test_matrixcompmult_mat2_simple() ~= mat2(2.0, 6.0, 12.0, 20.0)
 
 mat3 test_matrixcompmult_mat3() {
-    // matrixCompMult with 3x3 matrices
     mat3 a = mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
     mat3 b = mat3(2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0);
     return matrixCompMult(a, b);
@@ -35,17 +35,14 @@ mat3 test_matrixcompmult_mat3() {
 // run: test_matrixcompmult_mat3() ~= mat3(2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0)
 
 mat4 test_matrixcompmult_mat4() {
-    // matrixCompMult with 4x4 matrices
     mat4 a = mat4(1.0);
     mat4 b = mat4(3.0);
     return matrixCompMult(a, b);
 }
 
-// @unimplemented()
 // run: test_matrixcompmult_mat4() ~= mat4(3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0)
 
 mat2 test_matrixcompmult_mat2_zeros() {
-    // matrixCompMult resulting in zeros
     mat2 a = mat2(1.0, 2.0, 3.0, 4.0);
     mat2 b = mat2(0.0, 0.0, 0.0, 0.0);
     return matrixCompMult(a, b);
@@ -54,7 +51,6 @@ mat2 test_matrixcompmult_mat2_zeros() {
 // run: test_matrixcompmult_mat2_zeros() ~= mat2(0.0, 0.0, 0.0, 0.0)
 
 mat2 test_matrixcompmult_mat2_negative() {
-    // matrixCompMult with negative values
     mat2 a = mat2(-1.0, 2.0, -3.0, 4.0);
     mat2 b = mat2(2.0, -3.0, 4.0, -5.0);
     return matrixCompMult(a, b);
