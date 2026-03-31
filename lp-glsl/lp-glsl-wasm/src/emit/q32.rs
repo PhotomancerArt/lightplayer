@@ -90,23 +90,14 @@ pub(crate) fn emit_q32_fdiv(sink: &mut InstructionSink<'_>, lhs: u32, rhs: u32, 
     let t = BlockType::Result(ValType::I32);
 
     // Check if divisor is zero
-    sink.local_get(rhs)
-        .i32_const(0)
-        .i32_eq()
-        .if_(t);
+    sink.local_get(rhs).i32_const(0).i32_eq().if_(t);
     // Divisor is zero - handle saturation based on dividend sign
-    sink.local_get(lhs)
-        .i32_const(0)
-        .i32_eq()
-        .if_(t);
+    sink.local_get(lhs).i32_const(0).i32_eq().if_(t);
     // 0 / 0 = 0
     sink.i32_const(0);
     sink.else_();
     // nonzero / 0 - saturate based on sign
-    sink.local_get(lhs)
-        .i32_const(0)
-        .i32_lt_s()
-        .if_(t);
+    sink.local_get(lhs).i32_const(0).i32_lt_s().if_(t);
     // negative / 0 = MIN_FIXED
     sink.i32_const(MIN_FIXED);
     sink.else_();

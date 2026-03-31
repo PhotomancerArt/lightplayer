@@ -16,8 +16,8 @@ use lpir_cranelift::{GlslQ32, GlslReturn};
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32, call_vec_from_q32,
-    impl_call_void, map_call_err, signatures_from_meta,
+    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
+    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
