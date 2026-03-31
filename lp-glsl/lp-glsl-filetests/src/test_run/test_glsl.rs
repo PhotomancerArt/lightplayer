@@ -777,4 +777,58 @@ float test() { return 1.0; }
         // Should return empty or just the function itself
         assert!(filtered.is_empty() || !filtered.contains("test"));
     }
+
+    #[test]
+    fn test_single_line_function_extraction() {
+        let source = r#"// test run
+float sum_1(float a) { return a; }
+float sum_2(float a, float b) { return a + b; }
+float sum_3(float a, float b, float c) { return a + b + c; }
+float test() {
+    return sum_1(1.0) + sum_2(1.0, 2.0) + sum_3(1.0, 2.0, 3.0);
+}
+"#;
+
+        let parse_result = TranslationUnit::parse(source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, source, "test").unwrap();
+
+        // Should include all helper functions
+        assert!(filtered.contains("test"), "Missing test");
+        assert!(filtered.contains("sum_1"), "Missing sum_1. Filtered:\n{}", filtered);
+        assert!(filtered.contains("sum_2"), "Missing sum_2. Filtered:\n{}", filtered);
+        assert!(filtered.contains("sum_3"), "Missing sum_3. Filtered:\n{}", filtered);
+    }
+
+    #[test]
+    fn test_single_line_function_extraction_with_preamble_skip() {
+        // This simulates what happens in generate_test_glsl when // test run is skipped
+        let original_source = r#"// test run
+float sum_1(float a) { return a; }
+float sum_2(float a, float b) { return a + b; }
+float sum_3(float a, float b, float c) { return a + b + c; }
+float test() {
+    return sum_1(1.0) + sum_2(1.0, 2.0) + sum_3(1.0, 2.0, 3.0);
+}
+// run: test() ~= 12.0
+"#;
+
+        // Simulate extract_code_before_directive - skip // test run and // run:
+        let extracted_source = r#"float sum_1(float a) { return a; }
+float sum_2(float a, float b) { return a + b; }
+float sum_3(float a, float b, float c) { return a + b + c; }
+float test() {
+    return sum_1(1.0) + sum_2(1.0, 2.0) + sum_3(1.0, 2.0, 3.0);
+}
+"#;
+
+        // Parse the EXTRACTED source, not the original
+        let parse_result = TranslationUnit::parse(extracted_source).unwrap();
+        let filtered = glsl_for_fn_graph(&parse_result, extracted_source, "test").unwrap();
+
+        // Should include all helper functions
+        assert!(filtered.contains("test"), "Missing test. Filtered:\n{}", filtered);
+        assert!(filtered.contains("sum_1"), "Missing sum_1. Filtered:\n{}", filtered);
+        assert!(filtered.contains("sum_2"), "Missing sum_2. Filtered:\n{}", filtered);
+        assert!(filtered.contains("sum_3"), "Missing sum_3. Filtered:\n{}", filtered);
+    }
 }
