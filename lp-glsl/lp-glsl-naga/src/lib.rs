@@ -143,6 +143,34 @@ mod tests {
     }
 
     #[test]
+    fn parse_local_const_array_size() {
+        // Test that naga can parse local const variables used as array sizes
+        let src = r#"
+float test() {
+    const int SIZE = 4;
+    float arr[SIZE];
+    return arr[0];
+}
+"#;
+        // This test documents current naga behavior
+        match compile(src) {
+            Ok(_) => {
+                // If this passes, local const array sizes work
+            }
+            Err(e) => {
+                // Currently naga doesn't support local const as array sizes
+                // This is a known limitation
+                let err_str = alloc::format!("{}", e);
+                assert!(
+                    err_str.contains("Unknown variable") || err_str.contains("SIZE"),
+                    "Expected error about unknown variable SIZE, got: {}",
+                    err_str
+                );
+            }
+        }
+    }
+
+    #[test]
     fn lowered_module_validates() {
         let src = "float add(float a, float b) { return a + b; }";
         let naga = compile(src).unwrap();

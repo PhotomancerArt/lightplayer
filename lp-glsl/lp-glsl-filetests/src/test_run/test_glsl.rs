@@ -61,11 +61,12 @@ fn extract_code_before_directive(
     for line in file_lines.iter() {
         let trimmed = line.trim();
 
-        // Skip directive lines (test, target, run directives)
+        // Skip directive lines (test, target, run directives, and @ annotations)
         if trimmed.starts_with("// test")
             || trimmed.starts_with("// target")
             || trimmed.starts_with("// #run:")
             || trimmed.starts_with("// run:")
+            || trimmed.starts_with("// @")
         {
             continue;
         }
@@ -545,7 +546,12 @@ fn extract_functions_from_source_using_ast(
             let start_line = byte_offset_to_line(source, span.offset)?;
             let end_line = byte_offset_to_line(source, end_offset.saturating_sub(1))?;
 
-            function_ranges.push((start_line, end_line));
+            // The parser's span may not correctly cover all statements (e.g., local const
+            // declarations used as array sizes). Expand the range to ensure we capture
+            // the complete function body by finding the actual closing brace.
+            let expanded_end = expand_function_range(&source_lines, start_line, end_line);
+
+            function_ranges.push((start_line, expanded_end));
         }
     }
 
@@ -623,6 +629,41 @@ fn extract_functions_from_source_using_ast(
     }
 
     Ok(result.trim().to_string())
+}
+
+/// Expand the function range to ensure the complete function body is included.
+/// The parser's span may not correctly cover all statements (e.g., local const
+/// declarations used as array sizes), so we scan from the span-reported end
+/// to find the actual closing brace of the function.
+fn expand_function_range(source_lines: &[&str], start_line: usize, end_line: usize) -> usize {
+    // Convert to 0-indexed for array access
+    let start_idx = start_line.saturating_sub(1);
+    let _end_idx = end_line.saturating_sub(1).min(source_lines.len().saturating_sub(1));
+
+    // Count braces from the start of the function to find where it actually ends
+    let mut brace_count = 0i32;
+    let mut found_first_brace = false;
+
+    for i in start_idx..source_lines.len() {
+        let line = source_lines[i];
+
+        for c in line.chars() {
+            if c == '{' {
+                brace_count += 1;
+                found_first_brace = true;
+            } else if c == '}' {
+                brace_count -= 1;
+                if found_first_brace && brace_count == 0 {
+                    // Found the matching closing brace for the function
+                    // Return 1-indexed line number
+                    return i + 1;
+                }
+            }
+        }
+    }
+
+    // If we couldn't find the closing brace, return the original end
+    end_line
 }
 
 /// Convert a byte offset in source to a line number (1-indexed).
