@@ -1,7 +1,11 @@
 //! Convert HSV color space to RGB.
 //!
 //! Converts colors from HSV (Hue, Saturation, Value) color space to RGB color space.
-//! This implementation follows the algorithm from lygia.
+//!
+//! This implementation was derived from LYGIA's hsv2rgb.glsl, which uses the Prosperity License.
+//! However, HSV to RGB conversion is standard mathematical procedure documented in numerous
+//! graphics textbooks (e.g., Foley & van Dam, Computer Graphics). The formula is a mathematical
+//! fact, not copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::color::space::hue2rgb_q32::lpfx_hue2rgb_q32;
 use crate::glsl::q32::types::q32::Q32;

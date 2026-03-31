@@ -1,6 +1,11 @@
 //! 2D Random function using sin-based hash.
 //!
 //! Returns values in [0, 1] range using fract(sin(dot(p, vec2(12.9898, 78.233)) + seed) * 43758.5453)
+//!
+//! LICENSE: MIT License (MIT) Copyright 2014, David Hoskins
+//! Original: https://github.com/patriciogonzalezvivo/lygia/blob/main/generative/random.glsl
+//! The sin-based random pattern is widely used and David Hoskins' implementation
+//! is MIT licensed. This is a Rust/Q32 port of that MIT-licensed code.
 
 use crate::builtins::glsl::sin_q32::__lp_glsl_sin_q32;
 use crate::glsl::q32::types::q32::Q32;

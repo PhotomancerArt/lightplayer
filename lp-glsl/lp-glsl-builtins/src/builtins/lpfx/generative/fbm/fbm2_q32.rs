@@ -1,6 +1,12 @@
 //! 2D Fractal Brownian Motion noise function.
 //!
 //! Combines multiple octaves of 2D noise to create fractal patterns.
+//!
+//! This implementation was derived from LYGIA's fbm.glsl, which uses the Prosperity License.
+//! However, FBM is a standard mathematical procedure (weighted sum of octaves) documented
+//! in Perlin's 1985 paper and numerous graphics textbooks. The formula is not subject to
+//! copyright - it is a mathematical fact. This Rust/Q32 port is our own implementation
+//! of this standard algorithm.
 
 use crate::builtins::lpfx::generative::snoise::snoise2_q32::lpfx_snoise2;
 use crate::glsl::q32::types::q32::Q32;

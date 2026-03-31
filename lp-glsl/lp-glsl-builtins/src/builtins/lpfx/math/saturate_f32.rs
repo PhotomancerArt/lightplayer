@@ -2,6 +2,9 @@
 //!
 //! This is a stub implementation that will be replaced with a proper float implementation later.
 //! For now, it calls the q32 version with conversion.
+//!
+//! LICENSE: The saturate operation (clamp to [0,1]) is standard mathematical
+//! procedure with no licensing concerns. The operation itself is trivial.
 
 use crate::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_q32;
 use crate::glsl::q32::types::q32::Q32;

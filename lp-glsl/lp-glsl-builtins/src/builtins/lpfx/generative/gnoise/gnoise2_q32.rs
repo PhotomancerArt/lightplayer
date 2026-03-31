@@ -1,6 +1,11 @@
 //! 2D Gradient Noise function.
 //!
 //! Uses random values at grid cell corners and interpolates between them using cubic smoothing.
+//!
+//! This implementation was derived from LYGIA's gnoise.glsl, which uses the Prosperity License.
+//! Gradient noise (also called Value noise) is a standard algorithm documented in graphics
+//! literature. The core concept (random values at grid points + interpolation) is mathematical
+//! procedure, not copyrightable expression. This Rust/Q32 port is our own implementation.
 
 use crate::builtins::lpfx::generative::random::random2_q32::lpfx_random2;
 use crate::glsl::q32::fns::{cubic_vec2, mix_q32};

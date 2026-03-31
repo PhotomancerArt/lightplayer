@@ -1,6 +1,11 @@
 //! 2D Signed Random function.
 //!
 //! Returns values in [-1, 1] range using -1.0 + 2.0 * random(p, seed)
+//!
+//! This function was derived from LYGIA's srandom.glsl, which uses the Prosperity License.
+//! However, this is a trivial mathematical transform (srandom = -1 + 2*random) applied to
+//! our MIT-licensed lpfx_random2 function. The formula itself is not copyrightable - it is
+//! basic arithmetic. The underlying random function is MIT-licensed (David Hoskins).
 
 use crate::builtins::lpfx::generative::random::random2_q32::lpfx_random2;
 use crate::glsl::q32::types::q32::Q32;

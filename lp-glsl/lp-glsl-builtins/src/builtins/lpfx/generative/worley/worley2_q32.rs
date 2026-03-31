@@ -4,7 +4,11 @@
 //! to the nearest feature point in a grid. This implementation uses Q32 fixed-point
 //! arithmetic (16.16 format) and returns the euclidean squared distance.
 //!
-//! Reference: noise-rs library (https://github.com/Razaekel/noise-rs)
+//! Reference: noise-rs library (https://github.com/Razaekel/noise-rs) - MIT/Apache-2.0 licensed
+//!
+//! This implementation was primarily derived from the noise-rs library (MIT/Apache-2.0),
+//! not from LYGIA's Prosperity-licensed worley.glsl. The algorithm is from Steven Worley's
+//! 1996 SIGGRAPH paper. Our implementation uses our own lpfx_hash2 function.
 //!
 //! # GLSL Usage
 //!

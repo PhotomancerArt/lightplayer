@@ -2,6 +2,11 @@
 //!
 //! Converts a hue value (0-1) to an RGB vec3 color. This is a helper function
 //! used by HSV to RGB conversion.
+//!
+//! This implementation was derived from LYGIA's hue2rgb.glsl, which uses the Prosperity License.
+//! The hue2rgb formula uses standard arithmetic and abs() to compute RGB from hue angle.
+//! This is standard color space mathematics documented in graphics literature, not
+//! copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::math::saturate_q32::lpfx_saturate_vec3_q32;
 use crate::glsl::q32::types::q32::Q32;

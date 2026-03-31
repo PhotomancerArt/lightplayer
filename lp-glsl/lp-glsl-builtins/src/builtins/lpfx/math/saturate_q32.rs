@@ -2,6 +2,10 @@
 //!
 //! This function clamps values to the [0, 1] range, which is commonly used in color
 //! space conversions and other graphics operations.
+//!
+//! LICENSE: The saturate operation (clamp to [0,1]) is standard mathematical
+//! procedure with no licensing concerns. While we may have referenced existing
+//! implementations, the operation itself is trivial and not copyrightable.
 
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;

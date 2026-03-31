@@ -6,6 +6,9 @@
 //!
 //! Credit: noiz library (github.com/ElliottjPierce/noiz)
 //!
+//! LICENSE: The noiz library uses MIT license. The hash algorithm is a standard
+//! bit-mixing hash pattern. See: https://github.com/ElliottjPierce/noiz
+//!
 //! # GLSL Usage
 //!
 //! These functions are callable from GLSL shaders using the `lpfx_hash` name:

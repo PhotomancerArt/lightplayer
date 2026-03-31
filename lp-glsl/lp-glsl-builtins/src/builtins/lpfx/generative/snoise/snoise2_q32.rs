@@ -5,6 +5,11 @@
 //!
 //! Reference: noise-rs library and Stefan Gustavson's Simplex noise implementation
 //!
+//! LICENSE: Stefan Gustavson and Ian McEwan's Simplex noise implementation is
+//! MIT licensed: https://github.com/stegu/webgl-noise
+//! This Rust/Q32 port was derived from their algorithm, which LYGIA also distributes
+//! under MIT license (not Prosperity License).
+//!
 //! # GLSL Usage
 //!
 //! This function is callable from GLSL shaders using the `lpfx_snoise` name:

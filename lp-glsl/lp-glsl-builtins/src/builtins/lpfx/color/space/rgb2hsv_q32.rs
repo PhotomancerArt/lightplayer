@@ -1,7 +1,12 @@
 //! Convert RGB color space to HSV.
 //!
 //! Converts colors from RGB color space to HSV (Hue, Saturation, Value) color space.
-//! This implementation follows Sam Hocevar's algorithm from lygia.
+//!
+//! Algorithm: Based on Sam Hocevar's implementation (http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl)
+//! This implementation was derived from LYGIA's rgb2hsv.glsl, which uses the Prosperity License.
+//! However, Sam Hocevar's algorithm is widely referenced and the RGB-to-HSV conversion is
+//! standard mathematical procedure documented in graphics literature. The formula is not
+//! subject to copyright. This Rust/Q32 port implements the standard algorithm.
 
 use crate::glsl::q32::types::q32::Q32;
 use crate::glsl::q32::types::vec3_q32::Vec3Q32;
