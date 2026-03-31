@@ -155,12 +155,10 @@ fn lower_expr_vec_uncached(
             Ok(result)
         }
         Expression::AccessIndex { base, index } => {
-            if let Some((lv, ops)) =
+            if let Some((root, ops)) =
                 crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
             {
-                // `ArraySlot::Param` (pointer array formals) uses the same path via
-                // [`crate::lower_array::array_storage_base_vreg`].
-                if let Some(info) = ctx.array_map.get(&lv).cloned() {
+                if let Some(info) = ctx.array_info_for_subscript_root(root)? {
                     if ops.len() == info.dimensions.len() {
                         if ops.iter().all(|o| {
                             matches!(o, crate::lower_array_multidim::SubscriptOperand::Const(_))
@@ -278,10 +276,10 @@ fn lower_expr_vec_uncached(
             let is_mixed_chain = matches!(base_expr, Expression::AccessIndex { .. });
             if is_access_chain || is_mixed_chain {
                 // Try mixed Access/AccessIndex chain first for arrays.
-                if let Some((lv, _)) =
+                if let Some((root, _)) =
                     crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, expr)
                 {
-                    if ctx.array_map.contains_key(&lv) {
+                    if ctx.array_info_for_subscript_root(root)?.is_some() {
                         return crate::lower_access::lower_access_expr_vec(ctx, expr);
                     }
                 }

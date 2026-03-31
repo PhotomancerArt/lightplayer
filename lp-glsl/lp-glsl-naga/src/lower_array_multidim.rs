@@ -67,7 +67,15 @@ pub(crate) enum SubscriptOperand {
     Dynamic(Handle<Expression>),
 }
 
-/// Mixed `Access` / `AccessIndex` chain ending at [`LocalVariable`] (outer index first in vector).
+/// Root of a peeled `Access` / `AccessIndex` array chain: stack local or `out` / `inout` array param.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ArraySubscriptRoot {
+    Local(Handle<LocalVariable>),
+    /// Function argument index; must be in [`crate::lower_ctx::LowerCtx::pointer_args`] with array pointee.
+    Param(u32),
+}
+
+/// Mixed `Access` / `AccessIndex` chain ending at [`LocalVariable`] or array pointer [`Expression::FunctionArgument`] (outer index first in vector).
 ///
 /// NOTE: Unlike `peel_access_chain` which needs to reverse because Access chains
 /// are stored inner-to-outer, AccessIndex chains appear to be stored outer-to-inner
@@ -75,7 +83,7 @@ pub(crate) enum SubscriptOperand {
 pub(crate) fn peel_array_subscript_chain(
     func: &Function,
     mut expr: Handle<Expression>,
-) -> Option<(Handle<LocalVariable>, Vec<SubscriptOperand>)> {
+) -> Option<(ArraySubscriptRoot, Vec<SubscriptOperand>)> {
     let mut ops = Vec::new();
     loop {
         match &func.expressions[expr] {
@@ -92,7 +100,11 @@ pub(crate) fn peel_array_subscript_chain(
                 // bracket's index. For `arr[row][col]` that yields `[col, row]` — opposite of GLSL
                 // left-to-right order, which must align with `dimensions` (outermost first).
                 ops.reverse();
-                return Some((*lv, ops));
+                return Some((ArraySubscriptRoot::Local(*lv), ops));
+            }
+            Expression::FunctionArgument(arg_i) => {
+                ops.reverse();
+                return Some((ArraySubscriptRoot::Param(*arg_i), ops));
             }
             _ => return None,
         }
@@ -104,7 +116,10 @@ pub(crate) fn peel_access_index_chain(
     func: &Function,
     expr: Handle<Expression>,
 ) -> Option<(Handle<LocalVariable>, SmallVec<[u32; 4]>)> {
-    let (lv, ops) = peel_array_subscript_chain(func, expr)?;
+    let (root, ops) = peel_array_subscript_chain(func, expr)?;
+    let ArraySubscriptRoot::Local(lv) = root else {
+        return None;
+    };
     let mut indices = SmallVec::<[u32; 4]>::new();
     for op in ops {
         match op {

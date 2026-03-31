@@ -76,7 +76,7 @@ int phase7() {
 // run: phase7() == 15
 
 // ============================================================================
-// Future: out and inout array parameters (not yet implemented)
+// out and inout array parameters
 // ============================================================================
 
 // Helper: Fill array with incrementing values starting from base
@@ -92,7 +92,6 @@ int test_array_out_parameter() {
     fill_array_out(arr, 10);
     return arr[0] + arr[1] + arr[2]; // Should be 10 + 11 + 12 = 33
 }
-// @unimplemented()
 // run: test_array_out_parameter() == 33
 
 // Helper: Double each element in place
@@ -109,7 +108,6 @@ int test_array_inout_parameter() {
     double_array_inout(arr);
     return arr[0] + arr[1] + arr[2] + arr[3]; // Should be 2+4+6+8 = 20
 }
-// @unimplemented()
 // run: test_array_inout_parameter() == 20
 
 // Helper: Sum array into accumulator (inout) and write differences to deltas (out)
@@ -131,11 +129,10 @@ int test_array_mixed_parameters() {
     // deltas = [50, 40, 30]
     return accumulator + deltas[0] + deltas[1] + deltas[2]; // 65+50+40+30 = 185
 }
-// @unimplemented()
 // run: test_array_mixed_parameters() == 185
 
 // ============================================================================
-// Future: Multi-dimensional array parameters (not yet implemented)
+// Multi-dimensional array parameters
 // ============================================================================
 
 // Helper: Sum all elements of 2D array
@@ -170,6 +167,5 @@ int test_2d_array_inout() {
     // mat should now be {{1, 3}, {2, 4}}
     return mat[0][0] + mat[0][1] + mat[1][0] + mat[1][1]; // 1+3+2+4 = 10
 }
-// @unimplemented()
 // run: test_2d_array_inout() == 10
 

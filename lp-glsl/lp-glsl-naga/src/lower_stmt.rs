@@ -126,6 +126,31 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                         }
                     }
                 }
+                if let Some((root, ops)) =
+                    crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, *pointer)
+                {
+                    use crate::lower_array_multidim::SubscriptOperand;
+                    if ops.iter().all(|o| matches!(o, SubscriptOperand::Const(_))) {
+                        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
+                            let idxs: Vec<u32> = ops
+                                .iter()
+                                .map(|o| match o {
+                                    SubscriptOperand::Const(c) => *c,
+                                    SubscriptOperand::Dynamic(_) => 0,
+                                })
+                                .collect();
+                            if idxs.len() == info.dimensions.len() {
+                                let flat = crate::lower_array_multidim::flat_index_const_clamped(
+                                    &info.dimensions,
+                                    &idxs,
+                                )?;
+                                return crate::lower_array::store_array_element_const(
+                                    ctx, &info, flat, *value,
+                                );
+                            }
+                        }
+                    }
+                }
                 let Expression::AccessIndex { base, index } = &ctx.func.expressions[*pointer]
                 else {
                     return Err(LowerError::Internal(String::from(
@@ -471,21 +496,27 @@ fn lower_user_call(
         let callee_inner = &ctx.module.types[callee_arg.ty].inner;
         if let TypeInner::Pointer { base, .. } = callee_inner {
             let lv = call_arg_pointer_local(ctx.func, arg_h)?;
-            let local_vregs = ctx.resolve_local(lv)?;
-            let base_inner = &ctx.module.types[*base].inner;
-            let ir_tys = naga_type_to_ir_types(base_inner)?;
-            let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
-            let addr = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::SlotAddr { dst: addr, slot });
-            for (j, &src) in local_vregs.iter().enumerate() {
-                ctx.fb.push(Op::Store {
-                    base: addr,
-                    offset: (j * 4) as u32,
-                    value: src,
-                });
+            if let Some(info) = ctx.array_map.get(&lv).cloned() {
+                // Stack array already lives in a slot; pass that address (no temp slot / vreg marshal).
+                let addr = crate::lower_array::array_storage_base_vreg(ctx, &info.slot)?;
+                arg_vs.push(addr);
+            } else {
+                let local_vregs = ctx.resolve_local(lv)?;
+                let base_inner = &ctx.module.types[*base].inner;
+                let ir_tys = naga_type_to_ir_types(base_inner)?;
+                let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
+                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+                for (j, &src) in local_vregs.iter().enumerate() {
+                    ctx.fb.push(Op::Store {
+                        base: addr,
+                        offset: (j * 4) as u32,
+                        value: src,
+                    });
+                }
+                arg_vs.push(addr);
+                inout_copybacks.push((lv, slot));
             }
-            arg_vs.push(addr);
-            inout_copybacks.push((lv, slot));
         } else if matches!(
             &ctx.module.types[callee_arg.ty].inner,
             TypeInner::Array { .. }

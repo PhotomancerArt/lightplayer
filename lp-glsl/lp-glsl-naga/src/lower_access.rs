@@ -268,10 +268,10 @@ pub(crate) fn lower_access_expr_vec(
     access_h: Handle<Expression>,
 ) -> Result<VRegVec, LowerError> {
     // Try mixed Access/AccessIndex chain first for multi-dimensional arrays.
-    if let Some((lv, ops)) =
+    if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
             if ops.len() == info.dimensions.len() {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
@@ -353,6 +353,26 @@ pub(crate) fn lower_access_expr_vec(
                     let vs = load_inout_vector_lanes(ctx, *arg_i, n, scalar)?;
                     matrix_column_dynamic(ctx, &vs, index_v, columns, rows, scalar)
                 }
+                TypeInner::Array { .. } => {
+                    let (dimensions, leaf_ty, leaf_stride) =
+                        crate::lower_array_multidim::flatten_array_type_shape(ctx.module, pointee)?;
+                    let element_count = dimensions
+                        .iter()
+                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from(
+                                "Access load: array element count overflow",
+                            ))
+                        })?;
+                    let info = crate::lower_ctx::ArrayInfo {
+                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
+                        dimensions,
+                        leaf_element_ty: leaf_ty,
+                        leaf_stride,
+                        element_count,
+                    };
+                    crate::lower_array::load_array_element_dynamic(ctx, &info, index_v)
+                }
                 _ => Err(LowerError::UnsupportedExpression(String::from(
                     "Access on unsupported pointer argument type",
                 ))),
@@ -371,10 +391,10 @@ pub(crate) fn store_through_access(
     value: Handle<Expression>,
 ) -> Result<(), LowerError> {
     // Try mixed Access/AccessIndex chain first for multi-dimensional arrays.
-    if let Some((lv, ops)) =
+    if let Some((root, ops)) =
         crate::lower_array_multidim::peel_array_subscript_chain(ctx.func, access_h)
     {
-        if let Some(info) = ctx.array_map.get(&lv).cloned() {
+        if let Some(info) = ctx.array_info_for_subscript_root(root)? {
             if ops.len() == info.dimensions.len() {
                 let flat_v = crate::lower_array::emit_row_major_flat_from_operands(
                     ctx,
@@ -503,8 +523,28 @@ pub(crate) fn store_through_access(
                     store_inout_vector_lanes(ctx, *arg_i, &vs)?;
                     Ok(())
                 }
+                TypeInner::Array { .. } => {
+                    let (dimensions, leaf_ty, leaf_stride) =
+                        crate::lower_array_multidim::flatten_array_type_shape(ctx.module, pointee)?;
+                    let element_count = dimensions
+                        .iter()
+                        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                        .ok_or_else(|| {
+                            LowerError::Internal(String::from(
+                                "Access store: array element count overflow",
+                            ))
+                        })?;
+                    let info = crate::lower_ctx::ArrayInfo {
+                        slot: crate::lower_ctx::ArraySlot::Param(*arg_i),
+                        dimensions,
+                        leaf_element_ty: leaf_ty,
+                        leaf_stride,
+                        element_count,
+                    };
+                    crate::lower_array::store_array_element_dynamic(ctx, &info, index_v, value)
+                }
                 _ => Err(LowerError::UnsupportedStatement(String::from(
-                    "Access store: inout matrix column not implemented for pointer arg",
+                    "Access store: unsupported pointer arg pointee for dynamic subscript",
                 ))),
             }
         }

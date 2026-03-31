@@ -26,8 +26,7 @@ pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ArraySlot {
     Local(SlotId),
-    /// Reserved for future pointer-to-array formals (`out` / `inout`); lowering uses `ArraySlot::Local` for `in T[]` today.
-    #[allow(dead_code)]
+    /// Pointer-to-array formal (`out` / `inout`); base address is [`LowerCtx::arg_vregs`]\[0\].
     Param(u32),
 }
 
@@ -264,6 +263,42 @@ impl<'a> LowerCtx<'a> {
         self.array_map
             .get(&lv)
             .ok_or_else(|| LowerError::Internal(format!("local {lv:?} is not an array")))
+    }
+
+    /// [`ArrayInfo`] for a peeled subscript chain root (stack array or pointer-to-array param).
+    pub(crate) fn array_info_for_subscript_root(
+        &self,
+        root: crate::lower_array_multidim::ArraySubscriptRoot,
+    ) -> Result<Option<ArrayInfo>, LowerError> {
+        use crate::lower_array_multidim::ArraySubscriptRoot;
+        match root {
+            ArraySubscriptRoot::Local(lv) => Ok(self.array_map.get(&lv).cloned()),
+            ArraySubscriptRoot::Param(arg_i) => {
+                let Some(&pointee) = self.pointer_args.get(&arg_i) else {
+                    return Ok(None);
+                };
+                if !matches!(self.module.types[pointee].inner, TypeInner::Array { .. }) {
+                    return Ok(None);
+                }
+                let (dimensions, leaf_ty, leaf_stride) =
+                    crate::lower_array_multidim::flatten_array_type_shape(self.module, pointee)?;
+                let element_count = dimensions
+                    .iter()
+                    .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+                    .ok_or_else(|| {
+                        LowerError::Internal(String::from(
+                            "array_info_for_subscript_root: element count overflow",
+                        ))
+                    })?;
+                Ok(Some(ArrayInfo {
+                    slot: ArraySlot::Param(arg_i),
+                    dimensions,
+                    leaf_element_ty: leaf_ty,
+                    leaf_stride,
+                    element_count,
+                }))
+            }
+        }
     }
 
     pub(crate) fn ensure_expr_vec(
