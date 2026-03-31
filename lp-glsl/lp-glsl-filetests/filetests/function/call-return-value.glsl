@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Using Return Values: Function calls in expressions and assignments
@@ -15,7 +14,6 @@ float test_call_return_value_assignment() {
     return pi;
 }
 
-// @unimplemented()
 // run: test_call_return_value_assignment() ~= 3.14159
 
 float get_base() {
@@ -31,7 +29,6 @@ float test_call_return_value_arithmetic() {
     return get_base() * get_multiplier() + 5.0; // 10 * 3 + 5 = 35
 }
 
-// @unimplemented()
 // run: test_call_return_value_arithmetic() ~= 35.0
 
 float get_value() {

@@ -33,7 +33,6 @@ mat2 test_const_readonly_mat2() {
     return IDENTITY_MATRIX * 2.0;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_const_readonly_mat2() ~= mat2(2.0, 0.0, 0.0, 2.0)
 float test_const_readonly_calculations() {
     float radius = 5.0;

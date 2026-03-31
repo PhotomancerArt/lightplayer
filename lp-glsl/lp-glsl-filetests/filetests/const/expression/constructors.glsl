@@ -27,5 +27,4 @@ mat2 test_constructors_matrix() {
     return SCALED_IDENTITY;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_constructors_matrix() ~= mat2(2.0, 0.0, 0.0, 2.0)

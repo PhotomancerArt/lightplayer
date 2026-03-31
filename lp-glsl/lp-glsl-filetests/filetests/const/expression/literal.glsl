@@ -31,5 +31,4 @@ mat2 test_literal_mat2() {
     return M2;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_literal_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
