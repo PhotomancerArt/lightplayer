@@ -606,7 +606,11 @@ fn parse_int_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<i32>, G
                 use glsl::syntax::UnaryOp;
                 if let UnaryOp::Minus = *op {
                     match **unary_expr {
-                        Expr::IntConst(n, _) => components.push(-n),
+                        Expr::IntConst(n, _) => {
+                            // Handle edge case: -2147483648 (i32::MIN) is valid as a literal
+                            // but negating it overflows. The value is already the correct i32.
+                            components.push(n.wrapping_neg());
+                        }
                         Expr::UIntConst(n, _) => {
                             // -5u wraps to large positive in signed, but we'll just negate as i32
                             components.push(-(n as i32));
