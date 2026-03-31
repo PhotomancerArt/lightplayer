@@ -1327,10 +1327,23 @@ fn format_file_counts(
 
     // Build suffix with expected-fail/unexpected info, with colors
     let mut suffix_parts = Vec::new();
-    if !has_unexpected_failures && stats.expected_failure() > 0 {
-        suffix_parts.push(format!("({} expected-failure)", stats.expected_failure()));
-    }
-    if stats.unsupported > 0 {
+    if !has_unexpected_failures {
+        // Show breakdown of expected failures by type
+        let mut ef_parts = Vec::new();
+        if stats.unimplemented > 0 {
+            ef_parts.push(format!("{} unimplemented", stats.unimplemented));
+        }
+        if stats.broken > 0 {
+            ef_parts.push(format!("{} broken", stats.broken));
+        }
+        if stats.unsupported > 0 {
+            ef_parts.push(format!("{} unsupported", stats.unsupported));
+        }
+        if !ef_parts.is_empty() {
+            suffix_parts.push(format!("({})", ef_parts.join(", ")));
+        }
+    } else if stats.unsupported > 0 {
+        // Show unsupported count when there are unexpected failures too
         suffix_parts.push(format!("({} unsupported)", stats.unsupported));
     }
     if stats.failed > 0 {
@@ -1382,13 +1395,14 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
     let col_fail = 6;
     let col_unimpl = 7;
     let col_broken = 7;
+    let col_unsupported = 11;
 
     let mut out = String::new();
 
     // Header
     let header = format!(
-        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_broken$}",
-        "", "pass", "fail", "unimpl", "broken"
+        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_broken$}  {:>col_unsupported$}",
+        "", "pass", "fail", "unimpl", "broken", "unsupported"
     );
     if with_color {
         out.push_str(&format!("{}{}{}\n", colors::DIM, header, colors::RESET));
@@ -1401,6 +1415,7 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
         let fail_pad = format!("{:>col_fail$}", s.failed);
         let unimpl_pad = format!("{:>col_unimpl$}", s.unimplemented);
         let broken_pad = format!("{:>col_broken$}", s.broken);
+        let unsupported_pad = format!("{:>col_unsupported$}", s.unsupported);
 
         let pass_cell = if with_color {
             format!("{}{pass_pad}{}", colors::GREEN, colors::RESET)
@@ -1426,8 +1441,14 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
             broken_pad
         };
 
+        let unsupported_cell = if s.unsupported > 0 && with_color {
+            format!("{}{unsupported_pad}{}", colors::YELLOW, colors::RESET)
+        } else {
+            unsupported_pad
+        };
+
         out.push_str(&format!(
-            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {broken_cell}\n"
+            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {broken_cell}  {unsupported_cell}\n"
         ));
     }
 
