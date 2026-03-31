@@ -1271,21 +1271,9 @@ fn apply_unexpected_pass_fixes(
     path: &Path,
     unexpected_pass_by_target: &BTreeMap<String, Vec<usize>>,
 ) {
-    let mut target_names: Vec<&str> = unexpected_pass_by_target
-        .keys()
-        .map(|s| s.as_str())
-        .collect();
-    target_names.sort_unstable();
-    target_names.dedup();
-
     let file_update = util::file_update::FileUpdate::new(path);
-    for tn in target_names {
-        let Ok(target) = Target::from_name(tn) else {
-            continue;
-        };
-        if let Err(e) = file_update.remove_file_level_annotations_matching(target) {
-            eprintln!("Warning: failed to remove file-level annotations: {e}");
-        }
+    if let Err(e) = file_update.remove_all_file_level_unimplemented_annotations() {
+        eprintln!("Warning: failed to remove file-level @unimplemented annotations: {e}");
     }
 
     let mut events: Vec<(usize, &str)> = Vec::new();

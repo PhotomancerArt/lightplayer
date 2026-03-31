@@ -11,7 +11,37 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::target::{AnnotationKind, Target};
+use crate::target::{Annotation, AnnotationKind, Target};
+
+/// Line indices of `// @…` annotations in the file-level prefix (see [`crate::parse::parse_test_file`]):
+/// before the first `// run:` and before the first non-empty non-comment line.
+fn file_level_annotation_indices(
+    all_lines: &[&str],
+    mut keep_annotation: impl FnMut(&Annotation) -> bool,
+) -> Vec<usize> {
+    let first_run = all_lines
+        .iter()
+        .position(|line| line.trim().starts_with("// run:"))
+        .unwrap_or(all_lines.len());
+    let mut seen_glsl = false;
+    let mut indices = Vec::new();
+    for i in 0..first_run {
+        let line = all_lines[i];
+        let trimmed = line.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with("//") {
+            seen_glsl = true;
+        }
+        if seen_glsl {
+            continue;
+        }
+        if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, i + 1) {
+            if keep_annotation(&ann) {
+                indices.push(i);
+            }
+        }
+    }
+    indices
+}
 
 /// A helper struct to update a file in-place as test expectations are
 /// automatically updated.
@@ -406,24 +436,47 @@ impl FileUpdate {
         self.remove_annotation(line_number)
     }
 
+    /// Remove every file-level `// @unimplemented(...)` line, regardless of backend or other
+    /// filter fields. File-level matches [`crate::parse::parse_test_file`]: annotations that appear
+    /// before any `// run:` and before the first non-empty line that is not a `//` comment.
+    ///
+    /// Does not remove `@broken` or `@unsupported`. Updates [`Self::line_diff`] like
+    /// [`Self::remove_file_level_annotations_matching`].
+    pub fn remove_all_file_level_unimplemented_annotations(&self) -> Result<()> {
+        let old_test = fs::read_to_string(&self.path)?;
+        let all_lines: Vec<&str> = old_test.lines().collect();
+        let indices_to_remove = file_level_annotation_indices(&all_lines, |ann| {
+            matches!(ann.kind, AnnotationKind::Unimplemented)
+        });
+
+        if indices_to_remove.is_empty() {
+            return Ok(());
+        }
+
+        let skip: std::collections::HashSet<usize> = indices_to_remove.iter().copied().collect();
+        let mut new_test = String::new();
+        for (i, line) in all_lines.iter().enumerate() {
+            if skip.contains(&i) {
+                continue;
+            }
+            new_test.push_str(line);
+            new_test.push('\n');
+        }
+
+        let removed = indices_to_remove.len() as isize;
+        self.line_diff.set(self.line_diff.get() - removed);
+        fs::write(&self.path, new_test)?;
+        Ok(())
+    }
+
     /// Remove file-level annotations (at top of file, before first run directive)
     /// that match the target. Used when tests with file-level @unimplemented(backend=wasm)
     /// now pass. Updates line_diff so subsequent remove_annotation calls use correct indices.
     pub fn remove_file_level_annotations_matching(&self, target: &Target) -> Result<()> {
         let old_test = fs::read_to_string(&self.path)?;
         let all_lines: Vec<&str> = old_test.lines().collect();
-        let mut indices_to_remove: Vec<usize> = Vec::new();
-        for (i, line) in all_lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("// run:") {
-                break;
-            }
-            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, i + 1) {
-                if ann.filter.matches(target) {
-                    indices_to_remove.push(i);
-                }
-            }
-        }
+        let indices_to_remove =
+            file_level_annotation_indices(&all_lines, |ann| ann.filter.matches(target));
         if indices_to_remove.is_empty() {
             return Ok(());
         }
@@ -551,5 +604,105 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format_float(m[3][3]) // column 3
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::target::Target;
+
+    fn temp_glsl(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lp_file_update_test_{}_{}",
+            std::process::id(),
+            name
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir.join("sample.glsl")
+    }
+
+    #[test]
+    fn remove_all_file_level_unimplemented_strips_backend_wasm_header() {
+        let path = temp_glsl("wasm_header");
+        let content = r"// test run
+// @unimplemented(backend=wasm)
+
+float one() { return 1.0; }
+// run: one() ~= 1.0
+";
+        fs::write(&path, content).expect("write");
+        let u = FileUpdate::new(&path);
+        u.remove_all_file_level_unimplemented_annotations()
+            .expect("remove header");
+        let out = fs::read_to_string(&path).expect("read");
+        assert!(
+            !out.contains("@unimplemented"),
+            "expected wasm-only header removed: {out}"
+        );
+        assert!(
+            out.contains("// run:"),
+            "run directive should remain: {out}"
+        );
+    }
+
+    #[test]
+    fn remove_all_file_level_unimplemented_keeps_broken_header() {
+        let path = temp_glsl("broken_header");
+        let content = r"// test run
+// @broken()
+
+float one() { return 1.0; }
+// run: one() ~= 1.0
+";
+        fs::write(&path, content).expect("write");
+        let u = FileUpdate::new(&path);
+        u.remove_all_file_level_unimplemented_annotations()
+            .expect("noop ok");
+        let out = fs::read_to_string(&path).expect("read");
+        assert!(out.contains("// @broken()"));
+    }
+
+    #[test]
+    fn remove_all_file_level_unimplemented_does_not_touch_per_run_annotations() {
+        let path = temp_glsl("per_run");
+        let content = r"// test run
+
+float one() { return 1.0; }
+// @unimplemented()
+// run: one() ~= 1.0
+";
+        fs::write(&path, content).expect("write");
+        let u = FileUpdate::new(&path);
+        u.remove_all_file_level_unimplemented_annotations()
+            .expect("remove");
+        let out = fs::read_to_string(&path).expect("read");
+        assert!(
+            out.contains("// @unimplemented()"),
+            "per-run marker must remain: {out}"
+        );
+    }
+
+    #[test]
+    fn remove_file_level_then_per_run_matching_rv32_updates_line_diff() {
+        let path = temp_glsl("fix_order");
+        let content = r"// test run
+// @unimplemented(backend=wasm)
+
+float one() { return 1.0; }
+// @unimplemented()
+// run: one() ~= 1.0
+";
+        fs::write(&path, content).expect("write");
+        let u = FileUpdate::new(&path);
+        u.remove_all_file_level_unimplemented_annotations()
+            .expect("strip wasm header");
+        let rv32 = Target::from_name("rv32.q32").expect("rv32 target");
+        u.remove_annotation_matching_target(6, rv32)
+            .expect("strip per-run");
+        let out = fs::read_to_string(&path).expect("read");
+        assert!(!out.contains("@unimplemented"), "all lifted: {out}");
+        assert!(out.contains("// run: one()"));
     }
 }
