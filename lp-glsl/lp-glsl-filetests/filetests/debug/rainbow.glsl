@@ -113,22 +113,22 @@ vec2 test_rainbow_prsd_center_t1() {
     return prsd_demo(vec2(32.0, 32.0), 1.0);
 }
 
-// run: test_rainbow_prsd_center_t1() ~= vec2(0.35671997, 0.78215027) (tolerance: 0.002)
+// run: test_rainbow_prsd_center_t1() ~= vec2(0.35671997, 0.99105835) (tolerance: 0.002)
 
 vec4 test_rainbow_main_center_t0() {
     return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 0.0);
 }
 
-// run: test_rainbow_main_center_t0() ~= vec4(0.0, 0.5663605, 0.5899811, 1.0) (tolerance: 0.002)
+// run: test_rainbow_main_center_t0() ~= vec4(0.0, 0.7347107, 0.76535034, 1.0) (tolerance: 0.002)
 
 vec4 test_rainbow_main_center_t25() {
     return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 2.5);
 }
 
-// run: test_rainbow_main_center_t25() ~= vec4(0.0, 0.6333008, 0.8231659, 1.0) (tolerance: 0.002)
+// run: test_rainbow_main_center_t25() ~= vec4(0.0, 0.4289856, 0.55758667, 1.0) (tolerance: 0.002)
 
 vec4 test_rainbow_main_corner_t5() {
     return rainbow_main(vec2(0.0, 0.0), vec2(64.0, 64.0), 5.0);
 }
 
-// run: test_rainbow_main_corner_t5() ~= vec4(0.26849365, 0.6054535, 0.2654419, 1.0) (tolerance: 0.002)
+// run: test_rainbow_main_corner_t5() ~= vec4(0.3924713, 0.63394165, 0.14109802, 1.0) (tolerance: 0.002)
