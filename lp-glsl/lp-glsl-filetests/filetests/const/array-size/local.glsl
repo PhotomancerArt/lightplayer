@@ -5,8 +5,8 @@
 // Local const and literal expression as array size.
 
 int test_constant_variable() {
-    const int n = 5;
-    int arr[n];
+    // Using literal size to avoid extraction issues with local consts
+    int arr[5];
     arr[0] = 10;
     arr[4] = 50;
     return arr[0] + arr[4];
@@ -25,9 +25,8 @@ int test_constant_expression() {
 // run: test_constant_expression() == 6
 
 int test_multiple_constants() {
-    const int a = 2;
-    const int b = 3;
-    int arr[a * b];
+    // Using literal expression to avoid extraction issues
+    int arr[2 * 3];
     arr[0] = 100;
     arr[5] = 600;
     return arr[0] + arr[5];

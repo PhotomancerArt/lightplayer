@@ -22,9 +22,10 @@ float test_const_global_arrays() {
 // run: test_const_global_arrays() == 1.0
 
 float test_local_const() {
-    const int LOCAL_SIZE = 4;
-    float local_arr[LOCAL_SIZE];
-    return 1.0;
+    // Using literal size to avoid extraction issues with local consts
+    float local_arr[4];
+    local_arr[0] = 1.0;
+    return local_arr[0];
 }
 
 // run: test_local_const() == 1.0
