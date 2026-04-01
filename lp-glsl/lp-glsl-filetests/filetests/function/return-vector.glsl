@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Vector Return Types: vec2, vec3, vec4, ivec2, ivec3, ivec4, etc.

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int test_postinc_vec3() {
     ivec3 v = ivec3(5, 10, 15);

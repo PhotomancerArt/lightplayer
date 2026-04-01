@@ -90,12 +90,11 @@ vec2 clamp_vector(vec2 v, float max_len) {
 }
 
 vec2 test_return_early_vector() {
-    // Early return with vectors - uses unimplemented length()/normalize() builtins
+    // Early return with vectors using length()/normalize() builtins
     vec2 long_vector = vec2(10.0, 0.0);
     return clamp_vector(long_vector, 5.0);
 }
 
-// @unimplemented(backend=wasm)
 // run: test_return_early_vector() ~= vec2(5.0, 0.0)
 
 int index_of(int[4] arr, int target) {

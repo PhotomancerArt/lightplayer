@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float test_postdec_scalar_float() {
     float x = 5.2;

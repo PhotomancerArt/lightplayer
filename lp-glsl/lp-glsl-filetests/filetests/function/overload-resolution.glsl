@@ -55,7 +55,6 @@ float test_overload_resolution_vector_promotion() {
     return length_func_vec3(vec3(1.0, 0.0, 0.0)); // Should match vec3 overload
 }
 
-// @unimplemented(backend=wasm)
 // run: test_overload_resolution_vector_promotion() ~= 21.0
 
 float mix_func_float(float a, float b) {

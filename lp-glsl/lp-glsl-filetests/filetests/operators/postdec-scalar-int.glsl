@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int test_postdec_scalar_int() {
     int x = 8;

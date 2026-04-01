@@ -24,6 +24,9 @@ pub(crate) struct FilteredImports {
 fn collect_used_import_indices(ir: &IrModule) -> BTreeSet<u32> {
     let n = ir.imports.len() as u32;
     let mut used = BTreeSet::new();
+    let mut needs_lpir_sqrt = false;
+    let mut needs_glsl_round = false;
+
     for f in &ir.functions {
         for op in &f.body {
             if let Op::Call { callee, .. } = op {
@@ -31,9 +34,37 @@ fn collect_used_import_indices(ir: &IrModule) -> BTreeSet<u32> {
                     used.insert(callee.0);
                 }
             }
+            // Track LPIR ops that resolve to builtin calls at emit time (Q32 mode)
+            if matches!(op, Op::Fsqrt { .. }) {
+                needs_lpir_sqrt = true;
+            }
+            if matches!(op, Op::Fnearest { .. }) {
+                needs_glsl_round = true;
+            }
         }
     }
+
+    // Add imports for LPIR ops that call builtins in Q32 mode
+    if needs_lpir_sqrt {
+        if let Some(idx) = find_import_index(ir, "lpir", "sqrt") {
+            used.insert(idx);
+        }
+    }
+    if needs_glsl_round {
+        if let Some(idx) = find_import_index(ir, "glsl", "round") {
+            used.insert(idx);
+        }
+    }
+
     used
+}
+
+fn find_import_index(ir: &IrModule, module: &str, func_name: &str) -> Option<u32> {
+    ir.imports
+        .iter()
+        .enumerate()
+        .find(|(_, d)| d.module_name == module && d.func_name == func_name)
+        .map(|(i, _)| i as u32)
 }
 
 fn ir_params_to_glsl_kinds(params: &[IrType]) -> Vec<GlslParamKind> {

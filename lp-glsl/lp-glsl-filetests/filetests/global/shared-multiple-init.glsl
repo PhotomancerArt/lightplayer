@@ -32,7 +32,6 @@ mat2 test_shared_multiple_init_rotate() {
     return SHARED_ROTATE_90;
 }
 
-// @unimplemented(backend=wasm)
 // run: test_shared_multiple_init_rotate() ~= mat2(0.0, -1.0, 1.0, 0.0)
 
 vec2 test_shared_multiple_init_apply_rotate() {

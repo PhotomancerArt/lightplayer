@@ -17,7 +17,6 @@ int test_bvec2_ctrl_while_any() {
 }
 
 // @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
 // run: test_bvec2_ctrl_while_any() == 1
 
 int test_bvec2_ctrl_while_all() {

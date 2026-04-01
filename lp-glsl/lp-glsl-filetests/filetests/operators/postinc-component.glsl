@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float test_postinc_component() {
     vec2 v = vec2(1.0, 2.0);

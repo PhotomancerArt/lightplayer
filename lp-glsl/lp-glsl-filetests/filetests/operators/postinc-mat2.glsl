@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float test_postinc_mat2() {
     mat2 m = mat2(1.0, 2.0, 3.0, 4.0);
