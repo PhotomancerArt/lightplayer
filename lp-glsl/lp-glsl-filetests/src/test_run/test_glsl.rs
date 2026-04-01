@@ -4,7 +4,7 @@ use anyhow::Result;
 use glsl::parser::Parse;
 use glsl::syntax::TranslationUnit;
 use glsl::syntax::{CompoundStatement, Expr, ExternalDeclaration, SimpleStatement, Statement};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 /// Result of test GLSL code generation.
 pub struct TestGlslResult {
@@ -578,8 +578,27 @@ fn extract_functions_from_source_using_ast(
     }
 
     // Preamble: lines before the first kept function (prototypes, const), but **not** bodies of
-    // unrelated user functions (they may call helpers we did not include).
+    // unrelated user functions (they may call helpers we did not include), and **not** forward
+    // declarations of functions that are not being kept (to avoid declared-but-not-defined errors).
     if min_func_start > 1 {
+        // Collect names of unkept functions
+        let unkept_func_names: HashSet<String> = ast
+            .0
+            .0
+            .iter()
+            .filter_map(|decl| {
+                if let ExternalDeclaration::FunctionDefinition(f) = decl {
+                    let name = f.prototype.name.name.clone();
+                    if function_names.contains(&name) {
+                        return None;
+                    }
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let unkept_body_ranges: Vec<(usize, usize)> = ast
             .0
             .0
@@ -606,11 +625,65 @@ fn extract_functions_from_source_using_ast(
             })
             .collect();
 
+        // Collect forward declaration lines for both kept and unkept functions in the preamble
+        // We'll only keep the first forward declaration for each kept function
+        let mut forward_decl_lines: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+
+        for (line_idx, line) in source_lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+            if line_num >= min_func_start {
+                break; // Only look in preamble
+            }
+            // Check if this line looks like a function prototype (forward declaration)
+            // Strip comments first since they might contain ';' or '('
+            let without_comment = if let Some(idx) = line.find("//") {
+                &line[..idx]
+            } else {
+                line
+            };
+            let trimmed = without_comment.trim();
+            let is_candidate = trimmed.ends_with(';') && trimmed.contains('(') && !trimmed.contains('{');
+            if is_candidate {
+                // Try to extract the function name - it's the last word before '('
+                if let Some(name_end) = trimmed.find('(') {
+                    let before_paren = &trimmed[..name_end];
+                    // The function name is the last whitespace-separated word
+                    if let Some(name) = before_paren.split_whitespace().last() {
+                        if !name.is_empty() {
+                            forward_decl_lines.entry(name.to_string()).or_default().push(line_num);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Determine which forward declaration lines to exclude:
+        // 1. All forward declarations of unkept functions
+        // 2. Duplicate forward declarations of kept functions (keep only the first)
+        let mut excluded_forward_decl_lines: HashSet<usize> = HashSet::new();
+        for (name, lines) in forward_decl_lines {
+            if unkept_func_names.contains(&name) {
+                // Exclude all forward declarations of unkept functions
+                for line in lines {
+                    excluded_forward_decl_lines.insert(line);
+                }
+            } else {
+                // For kept functions, exclude duplicates (keep only the first)
+                for line in lines.iter().skip(1) {
+                    excluded_forward_decl_lines.insert(*line);
+                }
+            }
+        }
+
         for line_1 in 1..min_func_start {
             if unkept_body_ranges
                 .iter()
                 .any(|(s, e)| line_1 >= *s && line_1 <= *e)
             {
+                continue;
+            }
+            // Skip forward declarations that should be excluded
+            if excluded_forward_decl_lines.contains(&line_1) {
                 continue;
             }
             let idx = line_1.saturating_sub(1);

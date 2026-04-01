@@ -2,7 +2,7 @@
 
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
-use crate::target::{Disposition, Target, directive_disposition};
+use crate::target::{AnnotationKind, Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
 use lp_glsl_exec::GlslExecutable;
 
@@ -53,6 +53,58 @@ pub fn run(
     // let file_update = FileUpdate::new(path);
 
     let mut stats = TestCaseStats::default();
+
+    // Check file-level annotations first - if the whole file is marked as unimplemented,
+    // broken, or unsupported for this target, skip compilation entirely.
+    for ann in &test_file.annotations {
+        if ann.filter.matches(target) {
+            match ann.kind {
+                AnnotationKind::Unsupported => {
+                    // Count all directives as unsupported
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        stats.total += 1;
+                        stats.unsupported += 1;
+                    }
+                    return Ok((
+                        Ok(()),
+                        stats,
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                    ));
+                }
+                AnnotationKind::Unimplemented | AnnotationKind::Broken => {
+                    // Count all directives as unimplemented/broken
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        stats.total += 1;
+                        if ann.kind == AnnotationKind::Unimplemented {
+                            stats.unimplemented += 1;
+                        } else {
+                            stats.broken += 1;
+                        }
+                    }
+                    return Ok((
+                        Ok(()),
+                        stats,
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+
     let mut errors = Vec::new();
     let mut unexpected_pass_lines = Vec::new();
     let mut failed_lines = Vec::new();

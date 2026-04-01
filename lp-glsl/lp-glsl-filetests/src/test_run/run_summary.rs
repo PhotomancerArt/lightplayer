@@ -31,6 +31,57 @@ pub fn run(
 
     let mut stats = TestCaseStats::default();
 
+    // Check file-level annotations first - if the whole file is marked as unimplemented,
+    // broken, or unsupported for this target, skip compilation entirely.
+    for ann in &test_file.annotations {
+        if ann.filter.matches(target) {
+            match ann.kind {
+                AnnotationKind::Unsupported => {
+                    // Count all directives as unsupported
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        stats.total += 1;
+                        stats.unsupported += 1;
+                    }
+                    return Ok((
+                        Ok(()),
+                        stats,
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                    ));
+                }
+                AnnotationKind::Unimplemented | AnnotationKind::Broken => {
+                    // Count all directives as unimplemented/broken
+                    for directive in &test_file.run_directives {
+                        if let Some(filter_line) = line_filter {
+                            if directive.line_number != filter_line {
+                                continue;
+                            }
+                        }
+                        stats.total += 1;
+                        if ann.kind == AnnotationKind::Unimplemented {
+                            stats.unimplemented += 1;
+                        } else {
+                            stats.broken += 1;
+                        }
+                    }
+                    return Ok((
+                        Ok(()),
+                        stats,
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+
     let log_level = LogLevel::None;
     let mut executable = match compile::compile_for_target(
         &test_file.glsl_source,
