@@ -44,13 +44,23 @@ fn vreg_val_ty(func: &IrFunction, reg: lpir::VReg, mode: FloatMode) -> Result<Va
 pub(crate) fn emit_op(
     sink: &mut InstructionSink<'_>,
     ctrl: &mut Vec<CtrlEntry>,
-    fctx: &FuncEmitCtx<'_>,
+    fctx: &mut FuncEmitCtx<'_>,
     ir: &IrModule,
     func: &IrFunction,
     _pc: usize,
     op: &Op,
     wasm_open: &mut WasmOpenDepth,
 ) -> Result<(), String> {
+    // In unreachable mode, only process structural ops needed for stack balance.
+    let is_structural = matches!(
+        op,
+        Op::End | Op::Else | Op::SwitchStart { .. } | Op::CaseStart { .. } | Op::DefaultStart { .. }
+    );
+    
+    
+    if fctx.unreachable_mode && !is_structural {
+        return Ok(());
+    }
     let fm = fctx.module.options.float_mode;
     match op {
         Op::Iadd { dst, lhs, rhs } => {
@@ -268,13 +278,17 @@ pub(crate) fn emit_op(
             *wasm_open += 1;
             ctrl.push(CtrlEntry::If);
         }
-        Op::Else => match ctrl.pop() {
-            Some(CtrlEntry::If) => {
-                sink.else_();
-                ctrl.push(CtrlEntry::Else);
+        Op::Else => {
+            match ctrl.pop() {
+                Some(CtrlEntry::If) => {
+                    sink.else_();
+                    ctrl.push(CtrlEntry::Else);
+                    // When entering else branch, code is reachable again
+                    fctx.unreachable_mode = false;
+                }
+                _ => return Err(String::from("`else` without matching `if`")),
             }
-            _ => return Err(String::from("`else` without matching `if`")),
-        },
+        }
         Op::End => {
             if ctrl.is_empty() {
                 // `return` may have already emitted matching `end`s via [`unwind_ctrl_after_return`].
@@ -297,10 +311,14 @@ pub(crate) fn emit_op(
                 ctrl.pop();
                 return Ok(());
             }
+            
+            
             match ctrl.pop() {
                 Some(CtrlEntry::If) | Some(CtrlEntry::Else) => {
                     sink.end();
                     *wasm_open = wasm_open.saturating_sub(1);
+                    // After closing an if/else block, subsequent code is reachable again.
+                    fctx.unreachable_mode = false;
                 }
                 Some(CtrlEntry::Loop { .. }) => {
                     sink.br(0);
@@ -379,6 +397,9 @@ pub(crate) fn emit_op(
             }
             sink.return_();
             unwind_ctrl_after_return(sink, ctrl, wasm_open);
+            // Mark subsequent code as unreachable. The control stack will be
+            // drained by subsequent Op::End ops which still run to balance blocks.
+            fctx.unreachable_mode = true;
         }
         Op::Call {
             callee,

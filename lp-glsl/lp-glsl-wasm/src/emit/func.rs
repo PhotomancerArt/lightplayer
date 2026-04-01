@@ -90,13 +90,14 @@ pub(crate) fn encode_ir_function(
         ));
     }
 
-    let func_ctx = FuncEmitCtx {
+    let mut func_ctx = FuncEmitCtx {
         module: ctx,
         i64_scratch,
         sp_global,
         frame_size,
         slot_offsets: slot_offsets.as_slice(),
         result_buffer_base_offset,
+        unreachable_mode: false,
     };
 
     let mut wasm_fn = Function::new_with_locals_types(local_types);
@@ -105,7 +106,7 @@ pub(crate) fn encode_ir_function(
     emit_function_ops(
         wasm_fn.instructions(),
         &mut ctrl,
-        &func_ctx,
+        &mut func_ctx,
         ir,
         f,
         &mut wasm_open,
@@ -116,7 +117,7 @@ pub(crate) fn encode_ir_function(
 fn emit_function_ops(
     mut sink: InstructionSink<'_>,
     ctrl: &mut Vec<CtrlEntry>,
-    fctx: &FuncEmitCtx<'_>,
+    fctx: &mut FuncEmitCtx<'_>,
     ir: &IrModule,
     f: &IrFunction,
     wasm_open: &mut WasmOpenDepth,

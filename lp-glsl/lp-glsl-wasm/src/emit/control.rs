@@ -108,60 +108,13 @@ pub(crate) fn innermost_switch_selector(ctrl: &[CtrlEntry]) -> Result<u32, Strin
 /// Returning from an `if` **then** branch must not emit `end` before the matching `Else` op:
 /// LPIR still emits `else` / `end` for the same `if`, and WASM requires `else` to pair with the open `if`.
 pub(crate) fn unwind_ctrl_after_return(
-    sink: &mut InstructionSink<'_>,
-    ctrl: &mut Vec<CtrlEntry>,
-    wasm_open: &mut WasmOpenDepth,
+    _sink: &mut InstructionSink<'_>,
+    _ctrl: &mut Vec<CtrlEntry>,
+    _wasm_open: &mut WasmOpenDepth,
 ) {
-    loop {
-        let Some(e) = ctrl.pop() else {
-            break;
-        };
-        match e {
-            CtrlEntry::SwitchCaseArm => {
-                sink.end();
-                *wasm_open = wasm_open.saturating_sub(1);
-                break;
-            }
-            CtrlEntry::SwitchDefaultArm => {
-                match ctrl.pop() {
-                    Some(CtrlEntry::Switch { .. }) => {
-                        sink.end();
-                        *wasm_open = wasm_open.saturating_sub(1);
-                        // Closing the merge `block` after `return` leaves `[]`; the function still
-                        // has `(result i32)` so fallthrough to the implicit body `end` must not be
-                        // typed as empty.
-                        sink.unreachable();
-                    }
-                    Some(other) => ctrl.push(other),
-                    None => {}
-                }
-                break;
-            }
-            CtrlEntry::If => {
-                ctrl.push(CtrlEntry::If);
-                break;
-            }
-            CtrlEntry::Else => {
-                sink.end();
-                *wasm_open = wasm_open.saturating_sub(1);
-            }
-            CtrlEntry::Loop { inner_closed, .. } => {
-                if !inner_closed {
-                    sink.end();
-                    *wasm_open = wasm_open.saturating_sub(1);
-                }
-                sink.br(0);
-                sink.end();
-                sink.end();
-                *wasm_open = wasm_open.saturating_sub(2);
-                break;
-            }
-            CtrlEntry::Switch { .. } => {
-                ctrl.push(e);
-                break;
-            }
-        }
-    }
+    // Simplified: don't emit anything here.
+    // The unreachable_mode flag will cause Op::End handlers to emit
+    // the necessary ends and balance the stack.
 }
 
 pub(crate) fn switch_merge_open_depth(ctrl: &[CtrlEntry]) -> Result<WasmOpenDepth, String> {

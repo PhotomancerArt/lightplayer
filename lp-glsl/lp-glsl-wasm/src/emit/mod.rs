@@ -36,6 +36,9 @@ pub(crate) struct FuncEmitCtx<'a> {
     pub slot_offsets: &'a [u32],
     /// Byte offset from `$sp` after prologue for result-pointer builtin scratch (after slots).
     pub result_buffer_base_offset: u32,
+    /// After a return instruction, code is unreachable. Skip non-structural ops
+    /// to avoid stack type errors, but still process End/Else for control stack balance.
+    pub unreachable_mode: bool,
 }
 
 pub(crate) fn emit_module(
