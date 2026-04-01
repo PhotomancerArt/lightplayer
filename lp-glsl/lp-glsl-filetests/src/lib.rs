@@ -1311,25 +1311,15 @@ fn format_file_counts(
     has_unexpected_failures: bool,
     harness_completed: bool,
 ) -> (String, String) {
-    // Denominator excludes expected-fail tests (only count non-marked tests)
-    let denominator = stats.passed + stats.failed;
-    let numerator = if stats.unexpected_pass > 0 {
-        // Show over 100% when there are unexpected passes
-        stats.passed + stats.unexpected_pass
-    } else {
-        stats.passed
-    };
-
     let counts_str = if !harness_completed && stats.total > 0 {
         // Worker used `count_test_cases` only (panic or `run_filetest` error): avoid `0/total`.
         format!("--/{total:2}", total = stats.total)
-    } else if denominator > 0 {
-        format!("{numerator:2}/{denominator:2}")
     } else if stats.total > 0 {
-        // No ordinary pass/fail mix: every case is @unsupported or an expected-failure
-        // disposition. Show accounted/total so we do not print misleading `0/total`.
-        let accounted = stats.passed + stats.unsupported + stats.expected_failure();
-        format!("{accounted:2}/{total:2}", total = stats.total)
+        // Always `passed / total` over every `// run:` line. Using `passed + failed` as the
+        // denominator made the same file show different totals per target (e.g. rv32 compile fail
+        // counts only ExpectSuccess lines as `failed`, while wasm file-level @unimplemented counts
+        // all lines in `total` with `failed == 0`).
+        format!("{:2}/{:2}", stats.passed, stats.total)
     } else {
         String::new()
     };

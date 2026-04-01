@@ -49,8 +49,7 @@ float test_forward_declare_in_expression() {
     return compute_area(3.0, 4.0) * 2.0;
 }
 
-// @unimplemented()
-// run: test_forward_declare_in_expression() ~= 48.0
+// run: test_forward_declare_in_expression() ~= 24.0
 
 // Multiple forward declarations (allowed)
 float add_numbers(float a, float b);

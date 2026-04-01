@@ -101,6 +101,7 @@ pub fn run(
                         continue;
                     }
                 }
+                stats.total += 1;
                 let disposition =
                     directive_disposition(&test_file.annotations, &directive.annotations, target);
                 match &disposition {
