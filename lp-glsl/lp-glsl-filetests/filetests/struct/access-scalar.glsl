@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Scalar Member Access
@@ -15,7 +14,9 @@ float test_access_scalar_point_x() {
     return p.x; // Access x member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_point_x() ~= 1.0
 
 float test_access_scalar_point_y() {
@@ -23,7 +24,9 @@ float test_access_scalar_point_y() {
     return p.y; // Access y member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_point_y() ~= 4.0
 
 struct Color {
@@ -37,7 +40,9 @@ float test_access_scalar_color_r() {
     return c.r; // Access r member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_color_r() ~= 0.1
 
 float test_access_scalar_color_g() {
@@ -45,7 +50,9 @@ float test_access_scalar_color_g() {
     return c.g; // Access g member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_color_g() ~= 0.7
 
 float test_access_scalar_color_b() {
@@ -53,7 +60,9 @@ float test_access_scalar_color_b() {
     return c.b; // Access b member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_color_b() ~= 0.0
 
 struct Triangle {
@@ -67,7 +76,9 @@ float test_access_scalar_triangle_a() {
     return t.a; // Access a member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_triangle_a() ~= 3.0
 
 float test_access_scalar_triangle_sum() {
@@ -75,7 +86,9 @@ float test_access_scalar_triangle_sum() {
     return t.a + t.b + t.c; // Access all members
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_triangle_sum() ~= 6.0
 
 struct Person {
@@ -89,7 +102,9 @@ int test_access_scalar_person_age() {
     return p.age; // Access age member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_person_age() == 25
 
 float test_access_scalar_person_height() {
@@ -97,7 +112,9 @@ float test_access_scalar_person_height() {
     return p.height; // Access height member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_person_height() ~= 180.0
 
 bool test_access_scalar_person_is_student() {
@@ -105,7 +122,9 @@ bool test_access_scalar_person_is_student() {
     return p.isStudent; // Access isStudent member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_person_is_student() == true
 
 struct Circle {
@@ -117,7 +136,9 @@ float test_access_scalar_circle_radius() {
     return c.radius; // Access radius member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_circle_radius() ~= 10.0
 
 struct EmptyData {
@@ -129,5 +150,7 @@ int test_access_scalar_empty_data_id() {
     return d.id; // Access id member
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_scalar_empty_data_id() == 42

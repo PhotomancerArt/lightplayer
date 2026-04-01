@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 bool both_true(bool a, bool b);
 

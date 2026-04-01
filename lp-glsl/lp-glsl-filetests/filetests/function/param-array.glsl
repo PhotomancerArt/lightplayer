@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Parameters: Arrays passed to functions
@@ -15,7 +14,9 @@ float test_param_array_sum() {
     return sum_array(data);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_sum() ~= 6.0
 
 void double_elements(inout float[4] arr) {
@@ -32,7 +33,9 @@ void test_param_array_modify() {
     // values should now be [2.0, 4.0, 6.0, 8.0]
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_modify() == 0.0
 
 int product(int[3] arr) {
@@ -45,7 +48,9 @@ float test_param_array_int() {
     return float(product(factors));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_int() ~= 24.0
 
 vec2 sum_vectors_arr(vec2[2] arr) {
@@ -58,7 +63,9 @@ vec2 test_param_array_vector() {
     return sum_vectors_arr(vectors);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_vector() ~= vec2(4.0, 6.0)
 
 float average(const float[5] arr) {
@@ -71,7 +78,9 @@ float test_param_array_const() {
     return average(data);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_const() ~= 30.0
 
 void fill_sequence(out int[4] arr) {
@@ -87,7 +96,9 @@ void test_param_array_out() {
     // sequence should be [1, 2, 3, 4]
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_out() == 0.0
 
 void increment_elements(inout float[3] arr, float amount) {
@@ -103,7 +114,9 @@ float test_param_array_inout() {
     return values[0] + values[1] + values[2]; // 11 + 12 + 13 = 36
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_inout() ~= 36.0
 
 float sum2_arr(float[2] arr) {
@@ -121,7 +134,9 @@ float test_param_array_different_sizes() {
     return sum2_arr(arr2) + sum3_arr(arr3); // 11 + 6 = 17
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_different_sizes() ~= 17.0
 
 bool all_true_arr(bool[3] arr) {
@@ -134,5 +149,7 @@ bool test_param_array_bool() {
     return all_true_arr(flags);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_param_array_bool() == false

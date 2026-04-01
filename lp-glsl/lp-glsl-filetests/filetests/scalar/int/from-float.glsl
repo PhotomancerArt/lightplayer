@@ -30,7 +30,7 @@ int test_int_from_float_negative_truncate() {
     return int(f);
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_int_from_float_negative_truncate() == -1
 
 int test_int_from_float_positive_high() {
@@ -45,7 +45,7 @@ int test_int_from_float_negative_low() {
     return int(f);
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_int_from_float_negative_low() == -2
 
 int test_int_from_float_literal_zero() {
@@ -80,6 +80,6 @@ int test_int_from_float_expression_negative() {
     return int(a - b);
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_int_from_float_expression_negative() == -2
 

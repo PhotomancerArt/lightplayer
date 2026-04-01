@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant integral expression"
 // Const in struct array field sizes.
@@ -23,5 +22,7 @@ float test_struct_field_access() {
     return s.values[0];
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_struct_field_access() == 1.0

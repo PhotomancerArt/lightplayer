@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float complex_calc(float base, int exp, bool enable);
 

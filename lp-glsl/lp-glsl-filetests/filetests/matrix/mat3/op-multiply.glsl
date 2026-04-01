@@ -20,7 +20,9 @@ mat3 test_mat3_multiply_scale() {
     return a * b;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat3_multiply_scale() ~= mat3(2.0, 4.0, 6.0, 12.0, 15.0, 18.0, 28.0, 32.0, 36.0)
 
 mat3 test_mat3_multiply_simple() {
@@ -32,7 +34,9 @@ mat3 test_mat3_multiply_simple() {
     // Result depends on actual matrix multiplication calculation
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat3_multiply_simple() ~= mat3(30.0, 24.0, 18.0, 84.0, 69.0, 54.0, 138.0, 114.0, 90.0)
 
 mat3 test_mat3_multiply_zero() {
@@ -56,7 +60,9 @@ mat3 test_mat3_multiply_expressions() {
     // Result depends on matrix multiplication
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat3_multiply_expressions() ~= mat3(2.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.0, 1.0, 1.0)
 
 mat3 test_mat3_multiply_in_assignment() {
@@ -75,5 +81,7 @@ mat3 test_mat3_multiply_commutative() {
     // This will show that A*B != B*A for these matrices
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat3_multiply_commutative() ~= mat3(0.0, 2.0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, 0.0)

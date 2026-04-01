@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Edge In Write Error: Writing to input globals is a compile error
@@ -24,7 +23,9 @@ float test_edge_in_write_error_read() {
     return vertex_time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -32,7 +33,9 @@ int test_edge_in_write_error_int() {
     return vertex_id + 10;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -40,7 +43,9 @@ vec2 test_edge_in_write_error_vec2() {
     return tex_coord * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -48,7 +53,9 @@ vec3 test_edge_in_write_error_vec3() {
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -56,7 +63,9 @@ vec4 test_edge_in_write_error_vec4() {
     return vertex_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -69,7 +78,9 @@ float test_edge_in_write_error_calculations() {
            elevated_position.x + elevated_position.y + elevated_position.z;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -85,5 +96,7 @@ vec4 test_edge_in_write_error_vertex_processing() {
     return processed_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

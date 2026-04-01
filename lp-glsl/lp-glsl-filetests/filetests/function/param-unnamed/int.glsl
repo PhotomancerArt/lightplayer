@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 int max_value(int a, int b);
 

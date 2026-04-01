@@ -60,7 +60,9 @@ mat4 test_mat4_from_scalar_large_value() {
     return mat4(1000000.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat4_from_scalar_large_value() ~= mat4(32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0, 0.0, 0.0, 0.0, 0.0, 32767.0)
 
 mat4 test_mat4_from_scalar_fractional() {

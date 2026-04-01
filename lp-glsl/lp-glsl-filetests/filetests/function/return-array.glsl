@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Array Return Types: Arrays must be explicitly sized
@@ -14,7 +13,9 @@ float[3] test_return_array_float() {
     return get_float_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_float() ~= float[3](1.0, 2.0, 3.0)
 
 int[2] get_int_array() {
@@ -26,7 +27,9 @@ int[2] test_return_array_int() {
     return get_int_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_int() == int[2](10, 20)
 
 vec2[2] get_vector_array() {
@@ -38,7 +41,9 @@ vec2[2] test_return_array_vector() {
     return get_vector_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_vector() ~= vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))
 
 float[4] generate_sequence(float start, float step) {
@@ -50,7 +55,9 @@ float[4] test_return_array_calculated() {
     return generate_sequence(1.0, 0.5);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_calculated() ~= float[4](1.0, 1.5, 2.0, 2.5)
 
 int[3] double_values(int[3] arr) {
@@ -63,7 +70,9 @@ int[3] test_return_array_processed() {
     return double_values(input);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_processed() == int[3](2, 4, 6)
 
 float[5] reverse_array(float[5] arr) {
@@ -76,7 +85,9 @@ float[5] test_return_array_reverse() {
     return reverse_array(input);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_reverse() ~= float[5](5.0, 4.0, 3.0, 2.0, 1.0)
 
 bool[3] get_bool_array() {
@@ -88,7 +99,9 @@ bool[3] test_return_array_bool() {
     return get_bool_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_bool() == bool[3](true, false, true)
 
 float[2] sum_arrays(float[2] a, float[2] b) {
@@ -102,7 +115,9 @@ float[2] test_return_array_sum() {
     return sum_arrays(arr1, arr2);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_sum() ~= float[2](4.0, 6.0)
 
 mat2[2] get_matrix_array() {
@@ -114,5 +129,7 @@ mat2[2] test_return_array_matrix() {
     return get_matrix_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_return_array_matrix() ~= mat2[2](mat2(1.0), mat2(2.0))

@@ -25,29 +25,43 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
-use crate::target::{Backend, DEFAULT_TARGETS, Target, parse_target_filters};
+use crate::target::{
+    DEFAULT_TARGETS, Disposition, Target, directive_disposition, parse_target_filters,
+};
 
-/// Adds `@unimplemented(backend=…)` for one run-test file before each failing `// run:`.
+/// Adds `// @unimplemented(target)` before each failing `// run:` (or before each expect-success
+/// run when the whole file failed to compile).
 /// Returns how many marker operations were applied (0 if already annotated).
 fn mark_unimplemented_expectations_for_file(
     path: &Path,
     failed_lines: &[usize],
     compile_failed: bool,
-    use_file_level_for_compile_fail: bool,
     target: &Target,
 ) -> anyhow::Result<usize> {
-    let ann = format!(
-        "// @unimplemented(backend={})",
-        match target.backend {
-            Backend::Jit => "jit",
-            Backend::Rv32 => "rv32",
-            Backend::Wasm => "wasm",
-        }
-    );
+    let ann = format!("// @unimplemented({})", target.name());
     let mut n = 0;
-    if compile_failed && use_file_level_for_compile_fail {
+
+    if compile_failed {
+        let tf = crate::parse::parse_test_file(path)?;
         let u = util::file_update::FileUpdate::new(path);
-        if u.ensure_file_level_unimplemented(target)? {
+        let mut lines_to_mark: Vec<usize> = tf
+            .run_directives
+            .iter()
+            .filter(|d| {
+                matches!(
+                    directive_disposition(&d.annotations, target),
+                    Disposition::ExpectSuccess
+                )
+            })
+            .map(|d| d.line_number)
+            .collect();
+        lines_to_mark.sort_unstable();
+        lines_to_mark.dedup();
+        for line in lines_to_mark {
+            if u.per_directive_unimplemented_present(line, target)? {
+                continue;
+            }
+            u.add_annotation(line, &ann)?;
             n += 1;
         }
         return Ok(n);
@@ -259,7 +273,7 @@ struct FileSpec {
 /// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
 ///
-/// `mark_unimplemented` adds `@unimplemented(backend=…)` to failing tests (mirrors `--fix` for the
+/// `mark_unimplemented` adds `// @unimplemented(target)` before failing `// run:` lines (mirrors `--fix` for the
 /// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Applies per active
 /// target when multiple are selected. With `--yes`, skips the interactive confirmation.
 pub fn run(
@@ -285,7 +299,7 @@ pub fn run(
         println!(
             "\n{}",
             colors::colorize(
-                "WARNING: This will add @unimplemented(backend=…) to failing tests (per // run:).",
+                "WARNING: This will add // @unimplemented(<target>) before failing // run: lines.",
                 colors::RED
             )
         );
@@ -650,7 +664,6 @@ pub fn run(
                             &spec.path,
                             failed_lines,
                             compile_failed_t,
-                            false,
                             t,
                         )?;
                     }
@@ -1080,7 +1093,6 @@ pub fn run(
                     &test.spec.path,
                     failed_lines,
                     compile_failed_t,
-                    false,
                     t,
                 )?;
             }
@@ -1272,9 +1284,6 @@ fn apply_unexpected_pass_fixes(
     unexpected_pass_by_target: &BTreeMap<String, Vec<usize>>,
 ) {
     let file_update = util::file_update::FileUpdate::new(path);
-    if let Err(e) = file_update.remove_all_file_level_unimplemented_annotations() {
-        eprintln!("Warning: failed to remove file-level @unimplemented annotations: {e}");
-    }
 
     let mut events: Vec<(usize, &str)> = Vec::new();
     for (target_name, lines) in unexpected_pass_by_target {
@@ -1316,9 +1325,7 @@ fn format_file_counts(
         format!("--/{total:2}", total = stats.total)
     } else if stats.total > 0 {
         // Always `passed / total` over every `// run:` line. Using `passed + failed` as the
-        // denominator made the same file show different totals per target (e.g. rv32 compile fail
-        // counts only ExpectSuccess lines as `failed`, while wasm file-level @unimplemented counts
-        // all lines in `total` with `failed == 0`).
+        // denominator made the same file show different totals per target in some edge cases.
         format!("{:2}/{:2}", stats.passed, stats.total)
     } else {
         String::new()
@@ -1331,9 +1338,6 @@ fn format_file_counts(
         let mut ef_parts = Vec::new();
         if stats.unimplemented > 0 {
             ef_parts.push(format!("{} unimplemented", stats.unimplemented));
-        }
-        if stats.broken > 0 {
-            ef_parts.push(format!("{} broken", stats.broken));
         }
         if stats.unsupported > 0 {
             ef_parts.push(format!("{} unsupported", stats.unsupported));
@@ -1393,15 +1397,14 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
     let col_pass = 6;
     let col_fail = 6;
     let col_unimpl = 7;
-    let col_broken = 7;
     let col_unsupported = 11;
 
     let mut out = String::new();
 
     // Header
     let header = format!(
-        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_broken$}  {:>col_unsupported$}",
-        "", "pass", "fail", "unimpl", "broken", "unsupported"
+        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}",
+        "", "pass", "fail", "unimpl", "unsupported"
     );
     if with_color {
         out.push_str(&format!("{}{}{}\n", colors::DIM, header, colors::RESET));
@@ -1413,7 +1416,6 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
         let pass_pad = format!("{:>col_pass$}", s.passed);
         let fail_pad = format!("{:>col_fail$}", s.failed);
         let unimpl_pad = format!("{:>col_unimpl$}", s.unimplemented);
-        let broken_pad = format!("{:>col_broken$}", s.broken);
         let unsupported_pad = format!("{:>col_unsupported$}", s.unsupported);
 
         let pass_cell = if with_color {
@@ -1434,12 +1436,6 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
             unimpl_pad
         };
 
-        let broken_cell = if s.broken > 0 && with_color {
-            format!("{}{broken_pad}{}", colors::YELLOW, colors::RESET)
-        } else {
-            broken_pad
-        };
-
         let unsupported_cell = if s.unsupported > 0 && with_color {
             format!("{}{unsupported_pad}{}", colors::YELLOW, colors::RESET)
         } else {
@@ -1447,7 +1443,7 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
         };
 
         out.push_str(&format!(
-            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {broken_cell}  {unsupported_cell}\n"
+            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}\n"
         ));
     }
 

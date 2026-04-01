@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Vector Global Types: Global variables of vector types (vec2, vec3, vec4, etc.)
@@ -24,7 +23,9 @@ vec2 test_type_vector_vec2() {
     return global_vec2;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_type_vector_vec3() {
@@ -33,7 +34,9 @@ vec3 test_type_vector_vec3() {
     return global_vec3;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_type_vector_vec4() {
@@ -42,7 +45,9 @@ vec4 test_type_vector_vec4() {
     return global_vec4;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 ivec2 test_type_vector_ivec2() {
@@ -51,7 +56,9 @@ ivec2 test_type_vector_ivec2() {
     return vec2(global_ivec2);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_ivec2() ~= vec2(1.0, 2.0)
 
 ivec3 test_type_vector_ivec3() {
@@ -60,7 +67,9 @@ ivec3 test_type_vector_ivec3() {
     return vec3(global_ivec3);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_ivec3() ~= vec3(1.0, 2.0, 3.0)
 
 ivec4 test_type_vector_ivec4() {
@@ -69,7 +78,9 @@ ivec4 test_type_vector_ivec4() {
     return vec4(global_ivec4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_ivec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 uvec2 test_type_vector_uvec2() {
@@ -78,7 +89,9 @@ uvec2 test_type_vector_uvec2() {
     return vec2(global_uvec2);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_uvec2() ~= vec2(1.0, 2.0)
 
 uvec3 test_type_vector_uvec3() {
@@ -87,7 +100,9 @@ uvec3 test_type_vector_uvec3() {
     return vec3(global_uvec3);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_uvec3() ~= vec3(1.0, 2.0, 3.0)
 
 uvec4 test_type_vector_uvec4() {
@@ -96,7 +111,9 @@ uvec4 test_type_vector_uvec4() {
     return vec4(global_uvec4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_uvec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 bvec2 test_type_vector_bvec2() {
@@ -105,7 +122,9 @@ bvec2 test_type_vector_bvec2() {
     return vec2(global_bvec2);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_bvec2() ~= vec2(1.0, 0.0)
 
 bvec3 test_type_vector_bvec3() {
@@ -114,7 +133,9 @@ bvec3 test_type_vector_bvec3() {
     return vec3(global_bvec3);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_bvec3() ~= vec3(1.0, 0.0, 1.0)
 
 bvec4 test_type_vector_bvec4() {
@@ -123,7 +144,9 @@ bvec4 test_type_vector_bvec4() {
     return vec4(global_bvec4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_bvec4() ~= vec4(1.0, 0.0, 1.0, 0.0)
 
 vec2 test_type_vector_operations() {
@@ -134,7 +157,9 @@ vec2 test_type_vector_operations() {
     return global_vec2;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_operations() ~= vec2(3.0, 5.0)
 
 vec3 test_type_vector_swizzle() {
@@ -145,5 +170,7 @@ vec3 test_type_vector_swizzle() {
     return vec3(xy, z);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_vector_swizzle() ~= vec3(1.0, 2.0, 3.0)

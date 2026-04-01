@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Struct Global Types: Global variables of struct types
@@ -34,7 +33,9 @@ float test_type_struct_simple() {
     return global_simple_struct.x + float(global_simple_struct.y);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_simple() ~= 165.0
 
 vec2 test_type_struct_vector() {
@@ -46,7 +47,9 @@ vec2 test_type_struct_vector() {
     return global_vector_struct.position;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_vector() ~= vec2(10.0, 20.0)
 
 vec3 test_type_struct_vector_color() {
@@ -54,7 +57,9 @@ vec3 test_type_struct_vector_color() {
     return global_vector_struct.color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_vector_color() ~= vec3(1.0, 0.5, 0.0)
 
 bool test_type_struct_vector_active() {
@@ -62,7 +67,9 @@ bool test_type_struct_vector_active() {
     return global_vector_struct.active;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_vector_active() == true
 
 float test_type_struct_nested() {
@@ -78,7 +85,9 @@ float test_type_struct_nested() {
            global_nested_struct.vector.position.x;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_nested() ~= 12.0
 
 vec3 test_type_struct_nested_color() {
@@ -86,7 +95,9 @@ vec3 test_type_struct_nested_color() {
     return global_nested_struct.vector.color * global_nested_struct.scale;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_nested_color() ~= vec3(1.6, 1.2, 0.8)
 
 int test_type_struct_nested_y() {
@@ -94,7 +105,9 @@ int test_type_struct_nested_y() {
     return global_nested_struct.simple.y * 2;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_nested_y() == 6
 
 float test_type_struct_operations() {
@@ -108,7 +121,9 @@ float test_type_struct_operations() {
     return global_simple_struct.x + float(global_simple_struct.y);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_operations() ~= 28.0
 
 vec2 test_type_struct_vector_operations() {
@@ -122,5 +137,7 @@ vec2 test_type_struct_vector_operations() {
     return global_vector_struct.position + global_vector_struct.color.xy;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_struct_vector_operations() ~= vec2(3.7, 3.7)

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 void process(float value, int count);
 

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Global Variable Access: Functions can access global variables
@@ -19,7 +18,9 @@ float test_scope_global_read() {
     return get_counter();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_read() ~= 42.0
 
 void increment_counter() {
@@ -34,7 +35,9 @@ void test_scope_global_write() {
     // global_counter should now be 7.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_write() == 0.0
 
 void scale_position(float factor) {
@@ -48,7 +51,9 @@ float test_scope_global_modify() {
     return global_position.x + global_position.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_modify() ~= 10.0
 
 void toggle_flag() {
@@ -66,7 +71,9 @@ bool test_scope_global_flag() {
     return get_flag();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_flag() == false
 
 void add_to_counter(float value) {
@@ -89,7 +96,9 @@ float test_scope_global_multiple() {
     return get_counter_multiple();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_multiple() ~= 10.0
 
 void move_position(vec2 delta) {
@@ -107,7 +116,9 @@ vec2 test_scope_global_vector() {
     return get_position();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_vector() ~= vec2(15.0, 17.0)
 
 float use_local_counter() {
@@ -122,7 +133,9 @@ float test_scope_global_local_shadow() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_local_shadow() ~= 99.0
 
 void accumulate(float value) {
@@ -138,7 +151,9 @@ float test_scope_global_preserve_global() {
     return global_counter;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_preserve_global() ~= 30.0
 
 void set_state(bool new_state) {
@@ -159,5 +174,7 @@ bool test_scope_global_state_machine() {
     return first_check && !second_check && global_flag;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_global_state_machine() == true

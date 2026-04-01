@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // usubBorrow(): Unsigned subtract with borrow function
@@ -14,7 +13,9 @@ uvec2 test_usubborrow_uint_no_borrow() {
     return uvec2(diff, borrow);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u)
 
 uvec2 test_usubborrow_uint_with_borrow() {
@@ -24,7 +25,9 @@ uvec2 test_usubborrow_uint_with_borrow() {
     return uvec2(diff, borrow);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u)
 
 uvec2 test_usubborrow_uint_zero() {
@@ -34,7 +37,9 @@ uvec2 test_usubborrow_uint_zero() {
     return uvec2(diff, borrow);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_usubborrow_uint_zero() == uvec2(0u, 0u)
 
 uvec2 test_usubborrow_uint_equal() {
@@ -44,7 +49,9 @@ uvec2 test_usubborrow_uint_equal() {
     return uvec2(diff, borrow);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_usubborrow_uint_equal() == uvec2(0u, 0u)
 
 uvec4 test_usubborrow_uvec2() {
@@ -54,7 +61,9 @@ uvec4 test_usubborrow_uvec2() {
     return uvec4(diff.x, diff.y, borrow.x, borrow.y);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
 
 

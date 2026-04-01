@@ -77,7 +77,9 @@ mat4 test_mat4_assign_after_operations() {
     return a;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat4_assign_after_operations() ~= mat4(2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 18.0, 19.0, 20.0, 21.0, 14.0, 15.0, 16.0, 17.0)
 
 

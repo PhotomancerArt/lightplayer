@@ -61,7 +61,9 @@ mat3 test_mat3_add_assign_chained() {
     return b;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat3_add_assign_chained() ~= mat3(5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0)
 
 mat3 test_mat3_add_assign_large_values() {

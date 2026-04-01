@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Scalar Global Types: Global variables of scalar types (float, int, uint, bool)
@@ -16,7 +15,9 @@ float test_type_scalar_float() {
     return global_float;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_float() ~= 42.5
 
 int test_type_scalar_int() {
@@ -25,7 +26,9 @@ int test_type_scalar_int() {
     return global_int;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_int() == -123
 
 uint test_type_scalar_uint() {
@@ -34,7 +37,9 @@ uint test_type_scalar_uint() {
     return int(global_uint);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_uint() == 987
 
 bool test_type_scalar_bool() {
@@ -43,7 +48,9 @@ bool test_type_scalar_bool() {
     return global_bool;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_bool() == true
 
 float test_type_scalar_float_operations() {
@@ -54,7 +61,9 @@ float test_type_scalar_float_operations() {
     return global_float;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_float_operations() ~= 25.0
 
 int test_type_scalar_int_operations() {
@@ -65,7 +74,9 @@ int test_type_scalar_int_operations() {
     return global_int;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_int_operations() == 22
 
 uint test_type_scalar_uint_operations() {
@@ -76,7 +87,9 @@ uint test_type_scalar_uint_operations() {
     return int(global_uint);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_uint_operations() == 25
 
 bool test_type_scalar_bool_operations() {
@@ -87,7 +100,9 @@ bool test_type_scalar_bool_operations() {
     return global_bool;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_bool_operations() == true
 
 float test_type_scalar_mixed_operations() {
@@ -100,7 +115,9 @@ float test_type_scalar_mixed_operations() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_mixed_operations() ~= 6.0
 
 bool test_type_scalar_comparison() {
@@ -116,5 +133,7 @@ bool test_type_scalar_comparison() {
     return float_equal && int_equal && uint_equal;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_type_scalar_comparison() == true

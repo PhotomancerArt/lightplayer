@@ -24,7 +24,9 @@ int test_for_loop_expression_modified_in_body() {
     return i;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_for_loop_expression_modified_in_body() == 5
 
 int test_for_loop_expression_break() {

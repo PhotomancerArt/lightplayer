@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // packUnorm*(): Pack normalized values functions
@@ -12,7 +11,9 @@ uint test_packunorm2x16_zeros() {
     return packUnorm2x16(vec2(0.0, 0.0));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm2x16_zeros() == 0u
 
 uint test_packunorm2x16_ones() {
@@ -20,7 +21,9 @@ uint test_packunorm2x16_ones() {
     return packUnorm2x16(vec2(1.0, 1.0));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm2x16_ones() == 4294967295u
 
 uint test_packunorm2x16_half() {
@@ -28,7 +31,9 @@ uint test_packunorm2x16_half() {
     return packUnorm2x16(vec2(0.5, 0.5));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm2x16_half() == 2147516416u
 
 uint test_packunorm4x8_zeros() {
@@ -36,7 +41,9 @@ uint test_packunorm4x8_zeros() {
     return packUnorm4x8(vec4(0.0, 0.0, 0.0, 0.0));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm4x8_zeros() == 0u
 
 uint test_packunorm4x8_ones() {
@@ -44,7 +51,9 @@ uint test_packunorm4x8_ones() {
     return packUnorm4x8(vec4(1.0, 1.0, 1.0, 1.0));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm4x8_ones() == 4294967295u
 
 uint test_packunorm4x8_quarters() {
@@ -52,7 +61,9 @@ uint test_packunorm4x8_quarters() {
     return packUnorm4x8(vec4(0.25, 0.25, 0.25, 0.25));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_packunorm4x8_quarters() == 67372036u
 
 

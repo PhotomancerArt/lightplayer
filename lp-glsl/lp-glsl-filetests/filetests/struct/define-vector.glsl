@@ -14,8 +14,8 @@ float test_define_vector_transform() {
     return 1.0; // Should be 1.0
 }
 
-// @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
+// @unimplemented(jit.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_vector_transform() == 1.0
 
 struct ColorRGBA {
@@ -66,7 +66,7 @@ vec2 test_define_vector_matrix_transform() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_vector_matrix_transform() ~= vec2(1.0, 1.0)
 
 struct Particle {
@@ -81,7 +81,7 @@ float test_define_vector_particle() {
     return 1.0; // Should be 1.0
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_vector_particle() == 1.0
 
 struct BoundingBox {
@@ -94,7 +94,7 @@ int test_define_vector_bounding_box() {
     return 1; // Should be 1
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_vector_bounding_box() == 1
 
 struct Light {
@@ -109,5 +109,5 @@ uint test_define_vector_light() {
     return 1u; // Should be 1u
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_vector_light() == 1u

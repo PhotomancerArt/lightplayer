@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Edge Out Read Error: Reading from output globals may be restricted
@@ -23,7 +22,9 @@ void test_edge_out_read_error_write() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_out_read_error_write() == 0.0
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
@@ -43,7 +44,9 @@ float test_edge_out_read_error_indirect() {
     return 0.0;  // Placeholder
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
 void test_edge_out_read_error_multiple_writes() {
@@ -53,7 +56,9 @@ void test_edge_out_read_error_multiple_writes() {
     fragment_color = vec4(0.0, 0.0, 1.0, 1.0);  // Final value
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
 void test_edge_out_read_error_fragment_output() {
@@ -65,5 +70,7 @@ void test_edge_out_read_error_fragment_output() {
     fragment_depth = 0.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_out_read_error_fragment_output() == 0.0

@@ -25,11 +25,9 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
 
     let lines: Vec<String> = contents.lines().map(|s| s.to_string()).collect();
     let mut test_types = Vec::new();
-    let mut file_annotations = Vec::new();
     let mut run_directives = Vec::new();
     let mut trap_expectations = Vec::new();
     let mut pending_annotations: Vec<crate::target::Annotation> = Vec::new();
-    let mut seen_glsl_code = false;
 
     for (line_num, line) in lines.iter().enumerate() {
         let line_number = line_num + 1;
@@ -44,11 +42,7 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         }
 
         if let Ok(Some(annotation)) = parse_annotation::parse_annotation_line(line, line_number) {
-            if !seen_glsl_code && run_directives.is_empty() {
-                file_annotations.push(annotation);
-            } else {
-                pending_annotations.push(annotation);
-            }
+            pending_annotations.push(annotation);
             continue;
         }
 
@@ -64,11 +58,6 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         if let Some(trap_exp) = parse_trap::parse_trap_expectation(line, line_number)? {
             trap_expectations.push(trap_exp);
             continue;
-        }
-
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("//") {
-            seen_glsl_code = true;
         }
     }
 
@@ -88,7 +77,6 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         run_directives,
         trap_expectations,
         test_types,
-        annotations: file_annotations,
         clif_expectations,
         error_expectations,
     })

@@ -75,7 +75,6 @@ pub fn run_test_file_with_line_filter(
         combined_stats.failed += stats.failed;
         combined_stats.total += stats.total;
         combined_stats.unimplemented += stats.unimplemented;
-        combined_stats.broken += stats.broken;
         combined_stats.unexpected_pass += stats.unexpected_pass;
         combined_stats.unsupported += stats.unsupported;
 

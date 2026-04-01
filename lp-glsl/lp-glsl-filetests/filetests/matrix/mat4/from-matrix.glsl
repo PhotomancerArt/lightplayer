@@ -32,7 +32,9 @@ mat4 test_mat4_from_mat2_expressions() {
     return mat4(m2 * mat2(2.0));
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat4_from_mat2_expressions() ~= mat4(2.0, 4.0, 0.0, 0.0, 6.0, 8.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
 
 mat4 test_mat4_from_mat3_variables() {

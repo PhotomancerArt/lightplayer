@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // In Read-Only: Input global variables are read-only in shader code
@@ -18,7 +17,9 @@ float test_in_readonly_float() {
     return vertex_time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_float() ~= 1.0
 
 int test_in_readonly_int() {
@@ -26,7 +27,9 @@ int test_in_readonly_int() {
     return vertex_id + 100;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_int() == 100
 
 uint test_in_readonly_uint() {
@@ -34,7 +37,9 @@ uint test_in_readonly_uint() {
     return int(instance_id + 50u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_uint() == 50
 
 bool test_in_readonly_bool() {
@@ -42,7 +47,9 @@ bool test_in_readonly_bool() {
     return vertex_selected;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_bool() == false
 
 vec2 test_in_readonly_vec2() {
@@ -50,7 +57,9 @@ vec2 test_in_readonly_vec2() {
     return texture_coord * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_in_readonly_vec3() {
@@ -58,7 +67,9 @@ vec3 test_in_readonly_vec3() {
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_in_readonly_vec4() {
@@ -66,7 +77,9 @@ vec4 test_in_readonly_vec4() {
     return vertex_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_calculations() {
@@ -79,7 +92,9 @@ float test_in_readonly_calculations() {
            offset_position.x + offset_position.y + offset_position.z;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_calculations() ~= 0.3
 
 vec4 test_in_readonly_vertex_processing() {
@@ -95,7 +110,9 @@ vec4 test_in_readonly_vertex_processing() {
     return processed_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_texture_mapping() {
@@ -111,5 +128,7 @@ float test_in_readonly_texture_mapping() {
     return u + v;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_in_readonly_texture_mapping() ~= -2.0

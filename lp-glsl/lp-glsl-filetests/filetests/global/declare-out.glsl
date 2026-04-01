@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Output Global Declarations: Global variables with out qualifier
@@ -19,7 +18,9 @@ void test_declare_out_float() {
     depth = 0.5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_float() == 0.0
 
 void test_declare_out_int() {
@@ -27,7 +28,9 @@ void test_declare_out_int() {
     stencil_value = 128;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_int() == 0.0
 
 void test_declare_out_uint() {
@@ -35,7 +38,9 @@ void test_declare_out_uint() {
     object_id = 42u;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_uint() == 0.0
 
 void test_declare_out_bool() {
@@ -43,7 +48,9 @@ void test_declare_out_bool() {
     visible = true;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_bool() == 0.0
 
 void test_declare_out_vec2() {
@@ -51,7 +58,9 @@ void test_declare_out_vec2() {
     screen_pos = vec2(0.5, 0.5);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_vec2() == 0.0
 
 void test_declare_out_vec3() {
@@ -59,7 +68,9 @@ void test_declare_out_vec3() {
     normal = vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_vec3() == 0.0
 
 void test_declare_out_vec4() {
@@ -67,7 +78,9 @@ void test_declare_out_vec4() {
     frag_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_vec4() == 0.0
 
 void test_declare_out_calculate() {
@@ -78,5 +91,7 @@ void test_declare_out_calculate() {
     visible = true;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_declare_out_calculate() == 0.0

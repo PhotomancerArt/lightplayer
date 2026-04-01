@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Shared Struct Match: Shared structs must have same definition across shaders
@@ -37,7 +36,9 @@ vec3 test_shared_struct_match_light() {
     return shared_light.position + shared_light.color * shared_light.intensity;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_light() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_shared_struct_match_material() {
@@ -49,7 +50,9 @@ vec4 test_shared_struct_match_material() {
     return final_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_shared_struct_match_camera_view() {
@@ -57,7 +60,9 @@ mat4 test_shared_struct_match_camera_view() {
     return shared_camera.view_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_camera_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_shared_struct_match_camera_projection() {
@@ -65,7 +70,9 @@ mat4 test_shared_struct_match_camera_projection() {
     return shared_camera.projection_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_camera_projection() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_shared_struct_match_camera_planes() {
@@ -73,7 +80,9 @@ float test_shared_struct_match_camera_planes() {
     return shared_camera.near_plane + shared_camera.far_plane;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_camera_planes() ~= 0.0
 
 vec4 test_shared_struct_match_combined() {
@@ -91,5 +100,7 @@ vec4 test_shared_struct_match_combined() {
     return lit_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)

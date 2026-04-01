@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Struct Constructors with Nested Struct Members
@@ -20,7 +19,9 @@ float test_constructor_nested_line_start_x() {
     return l.start.x; // Should be 1.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_line_start_x() ~= 1.0
 
 float test_constructor_nested_line_end_y() {
@@ -28,7 +29,9 @@ float test_constructor_nested_line_end_y() {
     return l.end.y; // Should be 8.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_line_end_y() ~= 8.0
 
 struct Color {
@@ -48,7 +51,9 @@ float test_constructor_nested_material_diffuse_r() {
     return m.diffuse.r; // Should be 0.1
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_material_diffuse_r() ~= 0.1
 
 float test_constructor_nested_material_specular_g() {
@@ -56,7 +61,9 @@ float test_constructor_nested_material_specular_g() {
     return m.specular.g; // Should be 0.3
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_material_specular_g() ~= 0.3
 
 float test_constructor_nested_material_shininess() {
@@ -64,7 +71,9 @@ float test_constructor_nested_material_shininess() {
     return m.shininess; // Should be 128.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_material_shininess() ~= 128.0
 
 struct Vector2D {
@@ -82,7 +91,9 @@ float test_constructor_nested_vector3d_xy_x() {
     return v.xy.x; // Should be 1.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_vector3d_xy_x() ~= 1.0
 
 float test_constructor_nested_vector3d_z() {
@@ -90,7 +101,9 @@ float test_constructor_nested_vector3d_z() {
     return v.z; // Should be 6.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_vector3d_z() ~= 6.0
 
 struct Person {
@@ -109,7 +122,9 @@ int test_constructor_nested_family_father_age() {
     return f.father.age; // Should be 45
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_family_father_age() == 45
 
 float test_constructor_nested_family_mother_height() {
@@ -117,7 +132,9 @@ float test_constructor_nested_family_mother_height() {
     return f.mother.height; // Should be 170.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_family_mother_height() ~= 170.0
 
 int test_constructor_nested_family_child_age() {
@@ -125,7 +142,9 @@ int test_constructor_nested_family_child_age() {
     return f.child.age; // Should be 8
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_family_child_age() == 8
 
 struct BoundingBox2D {
@@ -138,7 +157,9 @@ float test_constructor_nested_bounding_box_min_x() {
     return b.min.x; // Should be 0.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_bounding_box_min_x() ~= 0.0
 
 float test_constructor_nested_bounding_box_max_y() {
@@ -146,5 +167,7 @@ float test_constructor_nested_bounding_box_max_y() {
     return b.max.y; // Should be 15.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_nested_bounding_box_max_y() ~= 15.0

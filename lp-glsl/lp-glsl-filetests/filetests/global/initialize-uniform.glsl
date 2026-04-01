@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Uniform Global Initialization: Global variables with uniform qualifier initialized
@@ -23,7 +22,9 @@ float test_initialize_uniform_float() {
     return time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_float() ~= 1.0
 
 int test_initialize_uniform_int() {
@@ -31,7 +32,9 @@ int test_initialize_uniform_int() {
     return count + 5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_int() == 5
 
 vec2 test_initialize_uniform_vec2() {
@@ -39,7 +42,9 @@ vec2 test_initialize_uniform_vec2() {
     return position + vec2(1.0, 1.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_initialize_uniform_vec3() {
@@ -47,7 +52,9 @@ vec3 test_initialize_uniform_vec3() {
     return color * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_initialize_uniform_mat4() {
@@ -55,7 +62,9 @@ mat4 test_initialize_uniform_mat4() {
     return transform;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_initialize_uniform_usage() {
@@ -67,5 +76,7 @@ float test_initialize_uniform_usage() {
     return scaled_time + float(doubled_count) + offset_pos.x + offset_pos.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_initialize_uniform_usage() ~= 2.0

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // modf(): Modf function
@@ -14,7 +13,9 @@ vec2 test_modf_positive() {
     return vec2(f, i);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_positive() ~= vec2(0.7, 3.0)
 
 vec2 test_modf_negative() {
@@ -24,7 +25,9 @@ vec2 test_modf_negative() {
     return vec2(f, i);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_negative() ~= vec2(-0.3, -2.0)
 
 vec2 test_modf_integer() {
@@ -34,7 +37,9 @@ vec2 test_modf_integer() {
     return vec2(f, i);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_integer() ~= vec2(0.0, 5.0)
 
 vec2 test_modf_zero() {
@@ -44,7 +49,9 @@ vec2 test_modf_zero() {
     return vec2(f, i);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_modf_small() {
@@ -54,7 +61,9 @@ vec2 test_modf_small() {
     return vec2(f, i);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_small() ~= vec2(0.1, 0.0)
 
 vec4 test_modf_vec2() {
@@ -64,7 +73,9 @@ vec4 test_modf_vec2() {
     return vec4(f.x, f.y, i.x, i.y);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_vec2() ~= vec4(0.7, -0.3, 3.0, -2.0)
 
 vec4 test_modf_vec3() {
@@ -74,7 +85,9 @@ vec4 test_modf_vec3() {
     return vec4(f.x, f.y, f.z, i.x);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_modf_vec3() ~= vec4(0.5, -0.8, 0.0, 1.0)
 
 

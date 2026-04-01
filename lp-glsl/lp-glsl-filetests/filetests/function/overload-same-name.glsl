@@ -24,7 +24,9 @@ float test_overload_same_name() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_overload_same_name() ~= 21.0
 
 float length_squared_vec2(vec2 v) {
@@ -96,7 +98,9 @@ float test_overload_parameter_count() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_overload_parameter_count() ~= 12.0
 
 float determinant2(mat2 m) {

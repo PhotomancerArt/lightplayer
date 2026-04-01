@@ -22,7 +22,7 @@ bool test_isnan_inf() {
     return isnan(a / b);
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isnan")
+// @unsupported(wasm.q32)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {
@@ -31,7 +31,7 @@ bool test_isnan_neg_inf() {
     return isnan(a / b);
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isnan")
+// @unsupported(wasm.q32)
 // run: test_isnan_neg_inf() == false
 
 bvec2 test_isnan_vec2() {

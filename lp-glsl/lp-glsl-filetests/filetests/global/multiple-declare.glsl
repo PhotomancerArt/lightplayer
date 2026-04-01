@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiple Declarations: Multiple global variable declarations
@@ -39,7 +38,9 @@ float test_multiple_declare_scalars() {
     return global_a + global_b + global_c + float(int_x + int_y + int_z);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_scalars() ~= 66.0
 
 vec2 test_multiple_declare_vectors() {
@@ -55,7 +56,9 @@ vec2 test_multiple_declare_vectors() {
     return vec2_one + vec2_two + vec2_three;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_vectors() ~= vec2(6.0, 6.0)
 
 mat2 test_multiple_declare_matrices() {
@@ -66,7 +69,9 @@ mat2 test_multiple_declare_matrices() {
     return mat2_a + mat2_b;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_matrices() ~= mat2(3.0, 2.0, 3.0, 6.0)
 
 vec4 test_multiple_declare_colors() {
@@ -78,7 +83,9 @@ vec4 test_multiple_declare_colors() {
     return vec4_red + vec4_green + vec4_blue;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_colors() ~= vec4(1.0, 1.0, 1.0, 3.0)
 
 float test_multiple_declare_mixed() {
@@ -95,7 +102,9 @@ float test_multiple_declare_mixed() {
     return scalar1 + scalar2 + vector1.x + vector1.y + vector2.x + vector2.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_mixed() ~= 25.0
 
 int test_multiple_declare_bools() {
@@ -116,5 +125,7 @@ int test_multiple_declare_bools() {
     return result + int(uint_p + uint_q + uint_r);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_multiple_declare_bools() == 602

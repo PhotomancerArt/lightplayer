@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Edge Multiple Qualifiers Error: Multiple storage qualifiers are not allowed
@@ -25,7 +24,9 @@ float test_edge_multiple_qualifiers_error_const() {
     return valid_const * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_const() ~= 6.28
 
 float test_edge_multiple_qualifiers_error_uniform() {
@@ -33,7 +34,9 @@ float test_edge_multiple_qualifiers_error_uniform() {
     return valid_uniform + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
 
 vec2 test_edge_multiple_qualifiers_error_in() {
@@ -41,7 +44,9 @@ vec2 test_edge_multiple_qualifiers_error_in() {
     return valid_in + vec2(1.0, 1.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
 
 void test_edge_multiple_qualifiers_error_out() {
@@ -49,7 +54,9 @@ void test_edge_multiple_qualifiers_error_out() {
     valid_out = vec3(1.0, 0.0, 0.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_out() == 0.0
 
 float test_edge_multiple_qualifiers_error_buffer() {
@@ -58,7 +65,9 @@ float test_edge_multiple_qualifiers_error_buffer() {
     return valid_buffer;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
 
 float test_edge_multiple_qualifiers_error_combined() {
@@ -73,5 +82,7 @@ float test_edge_multiple_qualifiers_error_combined() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_multiple_qualifiers_error_combined() ~= 8.28

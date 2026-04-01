@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Uniform Read-Only: Uniform global variables are read-only in shader code
@@ -20,7 +19,9 @@ float test_uniform_readonly_float() {
     return time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_float() ~= 1.0
 
 int test_uniform_readonly_int() {
@@ -28,7 +29,9 @@ int test_uniform_readonly_int() {
     return frame_count * 2;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_int() == 0
 
 uint test_uniform_readonly_uint() {
@@ -36,7 +39,9 @@ uint test_uniform_readonly_uint() {
     return int(random_seed + 1u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_uint() == 1
 
 bool test_uniform_readonly_bool() {
@@ -44,7 +49,9 @@ bool test_uniform_readonly_bool() {
     return enable_lighting;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_bool() == false
 
 vec2 test_uniform_readonly_vec2() {
@@ -52,7 +59,9 @@ vec2 test_uniform_readonly_vec2() {
     return resolution * 0.5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_uniform_readonly_vec3() {
@@ -60,7 +69,9 @@ vec3 test_uniform_readonly_vec3() {
     return camera_position + vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_uniform_readonly_vec4() {
@@ -68,7 +79,9 @@ vec4 test_uniform_readonly_vec4() {
     return ambient_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_uniform_readonly_mat4() {
@@ -76,7 +89,9 @@ mat4 test_uniform_readonly_mat4() {
     return view_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat3 test_uniform_readonly_mat3() {
@@ -84,7 +99,9 @@ mat3 test_uniform_readonly_mat3() {
     return normal_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_mat3() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_calculations() {
@@ -96,7 +113,9 @@ float test_uniform_readonly_calculations() {
     return scaled_time + half_resolution.x + half_resolution.y + elevated_camera.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_calculations() ~= 10.0
 
 vec4 test_uniform_readonly_lighting() {
@@ -110,7 +129,9 @@ vec4 test_uniform_readonly_lighting() {
     return lighting_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_lighting() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_transform() {
@@ -121,5 +142,7 @@ float test_uniform_readonly_transform() {
     return transformed.x + transformed.y + transformed.z + transformed.w;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_uniform_readonly_transform() ~= 0.0

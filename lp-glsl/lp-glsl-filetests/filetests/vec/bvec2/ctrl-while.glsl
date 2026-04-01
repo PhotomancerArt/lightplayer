@@ -16,7 +16,7 @@ int test_bvec2_ctrl_while_any() {
     return counter;
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
 // run: test_bvec2_ctrl_while_any() == 1
 
 int test_bvec2_ctrl_while_all() {

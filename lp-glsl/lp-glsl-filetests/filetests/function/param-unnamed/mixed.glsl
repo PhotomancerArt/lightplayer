@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float multiply(float, int count);
 

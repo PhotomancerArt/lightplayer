@@ -1,7 +1,4 @@
-//! File update helper for bless mode.
-//!
-//! This module provides a helper struct to update test files in-place when
-//! expectations don't match, matching Cranelift's FileUpdate semantics.
+//! File update helper for bless mode and baseline annotations.
 
 use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
@@ -11,37 +8,7 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::target::{Annotation, AnnotationKind, Target};
-
-/// Line indices of `// @…` annotations in the file-level prefix (see [`crate::parse::parse_test_file`]):
-/// before the first `// run:` and before the first non-empty non-comment line.
-fn file_level_annotation_indices(
-    all_lines: &[&str],
-    mut keep_annotation: impl FnMut(&Annotation) -> bool,
-) -> Vec<usize> {
-    let first_run = all_lines
-        .iter()
-        .position(|line| line.trim().starts_with("// run:"))
-        .unwrap_or(all_lines.len());
-    let mut seen_glsl = false;
-    let mut indices = Vec::new();
-    for i in 0..first_run {
-        let line = all_lines[i];
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("//") {
-            seen_glsl = true;
-        }
-        if seen_glsl {
-            continue;
-        }
-        if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, i + 1) {
-            if keep_annotation(&ann) {
-                indices.push(i);
-            }
-        }
-    }
-    indices
-}
+use crate::target::{AnnotationKind, Target};
 
 /// A helper struct to update a file in-place as test expectations are
 /// automatically updated.
@@ -152,7 +119,7 @@ impl FileUpdate {
         Ok(())
     }
 
-    /// `true` if the line immediately before this `// run:` already has `@unimplemented` matching
+    /// `true` if the line immediately before this `// run:` already has `@unimplemented` for
     /// `target` (uses `line_diff` like [`add_annotation`]).
     pub fn per_directive_unimplemented_present(
         &self,
@@ -170,64 +137,9 @@ impl FileUpdate {
         if let Ok(Some(ann)) =
             parse_annotation::parse_annotation_line(prev, run_line_1based.saturating_sub(1))
         {
-            return Ok(ann.kind == AnnotationKind::Unimplemented && ann.filter.matches(target));
+            return Ok(ann.kind == AnnotationKind::Unimplemented && ann.applies_to(target));
         }
         Ok(false)
-    }
-
-    /// Insert `// @unimplemented(backend=…)` before the first `// run:` if none exists at file
-    /// level for `target`. Returns `Ok(true)` if a line was added, `Ok(false)` if already present.
-    pub fn ensure_file_level_unimplemented(&self, target: &Target) -> Result<bool> {
-        let annotation = format!(
-            "// @unimplemented(backend={})",
-            match target.backend {
-                crate::target::Backend::Jit => "jit",
-                crate::target::Backend::Rv32 => "rv32",
-                crate::target::Backend::Wasm => "wasm",
-            }
-        );
-
-        let old_test = fs::read_to_string(&self.path)?;
-        let all_lines: Vec<&str> = old_test.lines().collect();
-        let mut first_run_idx: Option<usize> = None;
-        for (i, line) in all_lines.iter().enumerate() {
-            if line.trim().starts_with("// run:") {
-                first_run_idx = Some(i);
-                break;
-            }
-        }
-        let Some(first_run_idx) = first_run_idx else {
-            bail!("no // run: directive in {}", self.path.display());
-        };
-
-        for line in &all_lines[..first_run_idx] {
-            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, 1) {
-                if ann.kind == AnnotationKind::Unimplemented && ann.filter.matches(target) {
-                    return Ok(false);
-                }
-            }
-        }
-
-        let indent = all_lines[first_run_idx]
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect::<String>();
-        let new_line = format!("{indent}{annotation}");
-
-        let mut new_test = String::new();
-        for i in 0..first_run_idx {
-            new_test.push_str(all_lines[i]);
-            new_test.push('\n');
-        }
-        new_test.push_str(&new_line);
-        new_test.push('\n');
-        for i in first_run_idx..all_lines.len() {
-            new_test.push_str(all_lines[i]);
-            new_test.push('\n');
-        }
-
-        fs::write(&self.path, new_test)?;
-        Ok(true)
     }
 
     /// Add an annotation line before the run directive at the given line number.
@@ -275,9 +187,12 @@ impl FileUpdate {
     }
 
     /// Add `[expect-fail]` marker to a `// run:` line.
-    /// Deprecated: use add_annotation with "// @unimplemented()" instead.
+    /// Deprecated: use [`add_annotation`](Self::add_annotation) with `// @unimplemented(target)`.
     pub fn add_expect_fail_marker(&self, line_number: usize) -> Result<()> {
-        self.add_annotation(line_number, "// @unimplemented()")
+        for t in crate::target::ALL_TARGETS {
+            self.add_annotation(line_number, &format!("// @unimplemented({})", t.name()))?;
+        }
+        Ok(())
     }
 
     /// Remove annotation line(s) immediately before the run directive at the given line number.
@@ -350,8 +265,8 @@ impl FileUpdate {
         Ok(())
     }
 
-    /// Like [`Self::remove_annotation`], but removes only `// @` lines whose parsed filter matches
-    /// `target`. Other annotations immediately above the same `// run:` are preserved.
+    /// Like [`Self::remove_annotation`], but removes only `// @` lines that apply to `target`.
+    /// Other annotations immediately above the same `// run:` are preserved.
     pub fn remove_annotation_matching_target(
         &self,
         line_number: usize,
@@ -373,6 +288,7 @@ impl FileUpdate {
             bail!("line {line_number} is not a run directive");
         }
 
+        let want = target.name();
         let mut indices_to_remove: Vec<usize> = Vec::new();
         let mut j = run_line_idx;
         while j > 0 {
@@ -381,7 +297,7 @@ impl FileUpdate {
             let prev = line.trim();
             if prev.starts_with("// @") {
                 if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
-                    if ann.filter.matches(target) {
+                    if ann.target == want {
                         indices_to_remove.push(j);
                     }
                 }
@@ -434,64 +350,6 @@ impl FileUpdate {
     /// Deprecated: use remove_annotation instead.
     pub fn remove_expect_fail_marker(&self, line_number: usize) -> Result<()> {
         self.remove_annotation(line_number)
-    }
-
-    /// Remove every file-level `// @unimplemented(...)` line, regardless of backend or other
-    /// filter fields. File-level matches [`crate::parse::parse_test_file`]: annotations that appear
-    /// before any `// run:` and before the first non-empty line that is not a `//` comment.
-    ///
-    /// Does not remove `@broken` or `@unsupported`. Updates [`Self::line_diff`] like
-    /// [`Self::remove_file_level_annotations_matching`].
-    pub fn remove_all_file_level_unimplemented_annotations(&self) -> Result<()> {
-        let old_test = fs::read_to_string(&self.path)?;
-        let all_lines: Vec<&str> = old_test.lines().collect();
-        let indices_to_remove = file_level_annotation_indices(&all_lines, |ann| {
-            matches!(ann.kind, AnnotationKind::Unimplemented)
-        });
-
-        if indices_to_remove.is_empty() {
-            return Ok(());
-        }
-
-        let skip: std::collections::HashSet<usize> = indices_to_remove.iter().copied().collect();
-        let mut new_test = String::new();
-        for (i, line) in all_lines.iter().enumerate() {
-            if skip.contains(&i) {
-                continue;
-            }
-            new_test.push_str(line);
-            new_test.push('\n');
-        }
-
-        let removed = indices_to_remove.len() as isize;
-        self.line_diff.set(self.line_diff.get() - removed);
-        fs::write(&self.path, new_test)?;
-        Ok(())
-    }
-
-    /// Remove file-level annotations (at top of file, before first run directive)
-    /// that match the target. Used when tests with file-level @unimplemented(backend=wasm)
-    /// now pass. Updates line_diff so subsequent remove_annotation calls use correct indices.
-    pub fn remove_file_level_annotations_matching(&self, target: &Target) -> Result<()> {
-        let old_test = fs::read_to_string(&self.path)?;
-        let all_lines: Vec<&str> = old_test.lines().collect();
-        let indices_to_remove =
-            file_level_annotation_indices(&all_lines, |ann| ann.filter.matches(target));
-        if indices_to_remove.is_empty() {
-            return Ok(());
-        }
-        let mut new_test = String::new();
-        for (i, line) in all_lines.iter().enumerate() {
-            if indices_to_remove.contains(&i) {
-                continue;
-            }
-            new_test.push_str(line);
-            new_test.push('\n');
-        }
-        let removed = indices_to_remove.len() as isize;
-        self.line_diff.set(self.line_diff.get() - removed);
-        fs::write(&self.path, new_test)?;
-        Ok(())
     }
 
     /// Update CLIF expectations for a test type (compile or transform.q32).
@@ -550,8 +408,6 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
         GlslValue::BVec3(v) => format!("bvec3({}, {}, {})", v[0], v[1], v[2]),
         GlslValue::BVec4(v) => format!("bvec4({}, {}, {}, {})", v[0], v[1], v[2], v[3]),
         GlslValue::Mat2x2(m) => {
-            // Display in GLSL constructor format: mat2(vec2(col0), vec2(col1))
-            // m[col][row] format, so column 0 is [m[0][0], m[0][1]], column 1 is [m[1][0], m[1][1]]
             format!(
                 "mat2(vec2({}, {}), vec2({}, {}))",
                 format_float(m[0][0]),
@@ -561,47 +417,38 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
             )
         }
         GlslValue::Mat3x3(m) => {
-            // Display in GLSL constructor format: mat3(vec3(col0), vec3(col1), vec3(col2))
-            // m[col][row] format, so column 0 is [m[0][0], m[0][1], m[0][2]]
-            // Column 1: [m[1][0], m[1][1], m[1][2]]
-            // Column 2: [m[2][0], m[2][1], m[2][2]]
             format!(
                 "mat3(vec3({}, {}, {}), vec3({}, {}, {}), vec3({}, {}, {}))",
                 format_float(m[0][0]),
                 format_float(m[0][1]),
-                format_float(m[0][2]), // column 0
+                format_float(m[0][2]),
                 format_float(m[1][0]),
                 format_float(m[1][1]),
-                format_float(m[1][2]), // column 1
+                format_float(m[1][2]),
                 format_float(m[2][0]),
                 format_float(m[2][1]),
-                format_float(m[2][2]) // column 2
+                format_float(m[2][2])
             )
         }
         GlslValue::Mat4x4(m) => {
-            // Display in GLSL constructor format: mat4(vec4(col0), vec4(col1), vec4(col2), vec4(col3))
-            // m[col][row] format, so column 0 is [m[0][0], m[0][1], m[0][2], m[0][3]]
-            // Column 1: [m[1][0], m[1][1], m[1][2], m[1][3]]
-            // Column 2: [m[2][0], m[2][1], m[2][2], m[2][3]]
-            // Column 3: [m[3][0], m[3][1], m[3][2], m[3][3]]
             format!(
                 "mat4(vec4({}, {}, {}, {}), vec4({}, {}, {}, {}), vec4({}, {}, {}, {}), vec4({}, {}, {}, {}))",
                 format_float(m[0][0]),
                 format_float(m[0][1]),
                 format_float(m[0][2]),
-                format_float(m[0][3]), // column 0
+                format_float(m[0][3]),
                 format_float(m[1][0]),
                 format_float(m[1][1]),
                 format_float(m[1][2]),
-                format_float(m[1][3]), // column 1
+                format_float(m[1][3]),
                 format_float(m[2][0]),
                 format_float(m[2][1]),
                 format_float(m[2][2]),
-                format_float(m[2][3]), // column 2
+                format_float(m[2][3]),
                 format_float(m[3][0]),
                 format_float(m[3][1]),
                 format_float(m[3][2]),
-                format_float(m[3][3]) // column 3
+                format_float(m[3][3])
             )
         }
     }
@@ -624,85 +471,22 @@ mod tests {
     }
 
     #[test]
-    fn remove_all_file_level_unimplemented_strips_backend_wasm_header() {
-        let path = temp_glsl("wasm_header");
+    fn remove_annotation_matching_target_strips_one_backend() {
+        let path = temp_glsl("per_target");
         let content = r"// test run
-// @unimplemented(backend=wasm)
 
 float one() { return 1.0; }
+// @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
 // run: one() ~= 1.0
 ";
         fs::write(&path, content).expect("write");
         let u = FileUpdate::new(&path);
-        u.remove_all_file_level_unimplemented_annotations()
-            .expect("remove header");
+        let wasm = Target::from_name("wasm.q32").expect("wasm");
+        u.remove_annotation_matching_target(6, wasm)
+            .expect("strip wasm");
         let out = fs::read_to_string(&path).expect("read");
-        assert!(
-            !out.contains("@unimplemented"),
-            "expected wasm-only header removed: {out}"
-        );
-        assert!(
-            out.contains("// run:"),
-            "run directive should remain: {out}"
-        );
-    }
-
-    #[test]
-    fn remove_all_file_level_unimplemented_keeps_broken_header() {
-        let path = temp_glsl("broken_header");
-        let content = r"// test run
-// @broken()
-
-float one() { return 1.0; }
-// run: one() ~= 1.0
-";
-        fs::write(&path, content).expect("write");
-        let u = FileUpdate::new(&path);
-        u.remove_all_file_level_unimplemented_annotations()
-            .expect("noop ok");
-        let out = fs::read_to_string(&path).expect("read");
-        assert!(out.contains("// @broken()"));
-    }
-
-    #[test]
-    fn remove_all_file_level_unimplemented_does_not_touch_per_run_annotations() {
-        let path = temp_glsl("per_run");
-        let content = r"// test run
-
-float one() { return 1.0; }
-// @unimplemented()
-// run: one() ~= 1.0
-";
-        fs::write(&path, content).expect("write");
-        let u = FileUpdate::new(&path);
-        u.remove_all_file_level_unimplemented_annotations()
-            .expect("remove");
-        let out = fs::read_to_string(&path).expect("read");
-        assert!(
-            out.contains("// @unimplemented()"),
-            "per-run marker must remain: {out}"
-        );
-    }
-
-    #[test]
-    fn remove_file_level_then_per_run_matching_rv32_updates_line_diff() {
-        let path = temp_glsl("fix_order");
-        let content = r"// test run
-// @unimplemented(backend=wasm)
-
-float one() { return 1.0; }
-// @unimplemented()
-// run: one() ~= 1.0
-";
-        fs::write(&path, content).expect("write");
-        let u = FileUpdate::new(&path);
-        u.remove_all_file_level_unimplemented_annotations()
-            .expect("strip wasm header");
-        let rv32 = Target::from_name("rv32.q32").expect("rv32 target");
-        u.remove_annotation_matching_target(6, rv32)
-            .expect("strip per-run");
-        let out = fs::read_to_string(&path).expect("read");
-        assert!(!out.contains("@unimplemented"), "all lifted: {out}");
-        assert!(out.contains("// run: one()"));
+        assert!(!out.contains("wasm.q32"), "wasm ann removed: {out}");
+        assert!(out.contains("rv32.q32"), "rv32 kept: {out}");
     }
 }

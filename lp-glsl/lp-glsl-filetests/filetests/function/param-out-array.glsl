@@ -15,7 +15,7 @@ float test_param_out_array_element() {
     return arr[1];
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
 // run: test_param_out_array_element() ~= 42.0
 
 void set_first_element(out float[3] arr) {

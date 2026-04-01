@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // One prototype + definition per file. Prototype uses the same parameter names as the
 // definition so lowering matches (all-unnamed prototypes like `float add(float,float)` mis-parse).
@@ -14,5 +13,5 @@ float test_param_unnamed_simple() {
     return add(3.0, 4.0);
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
 // run: test_param_unnamed_simple() ~= 7.0

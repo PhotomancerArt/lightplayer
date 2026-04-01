@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Local Variable Shadowing: Local variables can hide global variables
@@ -16,7 +15,9 @@ float test_scope_shadowing_simple() {
     return global_counter;  // Returns 50.0, not 100.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_simple() ~= 50.0
 
 float test_scope_shadowing_verify_global() {
@@ -25,7 +26,9 @@ float test_scope_shadowing_verify_global() {
     return global_counter;  // Should still be 100.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_verify_global() ~= 100.0
 
 vec2 test_scope_shadowing_vector() {
@@ -34,7 +37,9 @@ vec2 test_scope_shadowing_vector() {
     return global_position;  // Returns (1.0, 2.0), not (10.0, 20.0)
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_vector() ~= vec2(1.0, 2.0)
 
 vec2 test_scope_shadowing_verify_global_vector() {
@@ -43,7 +48,9 @@ vec2 test_scope_shadowing_verify_global_vector() {
     return global_position;  // Should still be (10.0, 20.0)
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_verify_global_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_shadowing_bool() {
@@ -52,7 +59,9 @@ bool test_scope_shadowing_bool() {
     return global_flag;  // Returns false, not true
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_bool() == false
 
 bool test_scope_shadowing_verify_global_bool() {
@@ -61,7 +70,9 @@ bool test_scope_shadowing_verify_global_bool() {
     return global_flag;  // Should still be true
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_verify_global_bool() == true
 
 int test_scope_shadowing_int() {
@@ -70,7 +81,9 @@ int test_scope_shadowing_int() {
     return global_value;  // Returns 99, not 42
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_int() == 99
 
 int test_scope_shadowing_verify_global_int() {
@@ -79,7 +92,9 @@ int test_scope_shadowing_verify_global_int() {
     return global_value;  // Should still be 42
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_verify_global_int() == 42
 
 float test_scope_shadowing_in_function() {
@@ -93,7 +108,9 @@ float test_scope_shadowing_in_function() {
     return global_counter;  // Global should be unchanged
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_in_function() ~= 100.0
 
 float test_scope_shadowing_nested() {
@@ -110,5 +127,7 @@ float test_scope_shadowing_nested() {
     return global_counter;  // Global should be unchanged
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_shadowing_nested() ~= 100.0

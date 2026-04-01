@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // bitfieldInsert(): Bitfield insert function
@@ -13,7 +12,9 @@ int test_bitfieldinsert_int_simple() {
     return bitfieldInsert(15, 10, 4, 4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_int_simple() == 175
 
 int test_bitfieldinsert_int_lsb() {
@@ -21,7 +22,9 @@ int test_bitfieldinsert_int_lsb() {
     return bitfieldInsert(240, 3, 0, 4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_int_lsb() == 243
 
 int test_bitfieldinsert_int_msb() {
@@ -29,7 +32,9 @@ int test_bitfieldinsert_int_msb() {
     return bitfieldInsert(15, 12, 4, 4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_int_msb() == 207
 
 uint test_bitfieldinsert_uint_simple() {
@@ -37,7 +42,9 @@ uint test_bitfieldinsert_uint_simple() {
     return bitfieldInsert(15u, 10u, 4, 4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_uint_simple() == 175u
 
 uint test_bitfieldinsert_uint_single_bit() {
@@ -45,7 +52,9 @@ uint test_bitfieldinsert_uint_single_bit() {
     return bitfieldInsert(0u, 1u, 2, 1);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_uint_single_bit() == 4u
 
 ivec2 test_bitfieldinsert_ivec2() {
@@ -53,7 +62,9 @@ ivec2 test_bitfieldinsert_ivec2() {
     return bitfieldInsert(ivec2(15, 240), ivec2(10, 3), 4, 4);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitfieldinsert_ivec2() == ivec2(175, 243)
 
 

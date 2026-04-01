@@ -41,7 +41,9 @@ int test_findmsb_int_negative() {
     return findMSB(-2);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_findmsb_int_negative() == 30
 
 int test_findmsb_int_large() {
@@ -49,7 +51,9 @@ int test_findmsb_int_large() {
     return findMSB(2147483648);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_findmsb_int_large() == 31
 
 uint test_findmsb_uint_zero() {

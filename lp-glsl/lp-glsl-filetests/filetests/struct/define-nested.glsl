@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Struct Definitions with Nested Struct Members
@@ -20,7 +19,9 @@ float test_define_nested_line() {
     return 1.0; // Should be 1.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_line() == 1.0
 
 struct Color {
@@ -40,7 +41,9 @@ int test_define_nested_material() {
     return 1; // Should be 1
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_material() == 1
 
 struct Vector2D {
@@ -58,7 +61,9 @@ uint test_define_nested_vector3d() {
     return 1u; // Should be 1u
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_vector3d() == 1u
 
 struct Person {
@@ -77,7 +82,9 @@ bool test_define_nested_family() {
     return true; // Should be true
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_family() == true
 
 struct BoundingBox2D {
@@ -90,7 +97,9 @@ vec2 test_define_nested_bounding_box2d() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_bounding_box2d() ~= vec2(1.0, 1.0)
 
 struct Node {
@@ -103,7 +112,9 @@ float test_define_nested_node() {
     return 1.0; // We can't test the error, so just return success
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_node() == 1.0
 
 struct TreeNode {
@@ -116,7 +127,9 @@ int test_define_nested_tree_node() {
     return 1; // Should be 1
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_tree_node() == 1
 
 struct ComplexShape {
@@ -130,5 +143,7 @@ uint test_define_nested_complex_shape() {
     return 1u; // Should be 1u
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_nested_complex_shape() == 1u

@@ -22,7 +22,7 @@ bool test_isinf_inf() {
     return isinf(a / b);
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// @unsupported(wasm.q32)
 // run: test_isinf_inf() == false
 
 bool test_isinf_neg_inf() {
@@ -31,7 +31,7 @@ bool test_isinf_neg_inf() {
     return isinf(a / b);
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// @unsupported(wasm.q32)
 // run: test_isinf_neg_inf() == false
 
 bvec2 test_isinf_vec2() {
@@ -40,7 +40,7 @@ bvec2 test_isinf_vec2() {
     return isinf(vec2(p / z, 1.0));
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// @unsupported(wasm.q32)
 // run: test_isinf_vec2() == bvec2(false, false)
 
 bvec3 test_isinf_vec3() {
@@ -49,7 +49,7 @@ bvec3 test_isinf_vec3() {
     return isinf(vec3(1.0, -p / z, 2.0));
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// @unsupported(wasm.q32)
 // run: test_isinf_vec3() == bvec3(false, false, false)
 
 bvec4 test_isinf_vec4() {
@@ -58,5 +58,5 @@ bvec4 test_isinf_vec4() {
     return isinf(vec4(p / z, -p / z, 1.0, 0.0));
 }
 
-// @unsupported(backend=wasm, reason="Wasm traps on float div-by-zero before isinf")
+// @unsupported(wasm.q32)
 // run: test_isinf_vec4() == bvec4(false, false, false, false)

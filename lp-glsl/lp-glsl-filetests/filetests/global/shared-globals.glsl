@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Shared Globals: Shared global variables across shaders (uniforms in ESSL)
@@ -21,7 +20,9 @@ float test_shared_globals_time() {
     return shared_time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_time() ~= 1.0
 
 vec3 test_shared_globals_light() {
@@ -29,7 +30,9 @@ vec3 test_shared_globals_light() {
     return normalize(shared_light_direction);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_light() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_shared_globals_view() {
@@ -37,7 +40,9 @@ mat4 test_shared_globals_view() {
     return shared_view_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 vec4 test_shared_globals_material() {
@@ -45,7 +50,9 @@ vec4 test_shared_globals_material() {
     return shared_material_color * 0.5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 int test_shared_globals_mode() {
@@ -53,7 +60,9 @@ int test_shared_globals_mode() {
     return shared_render_mode + 1;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_mode() == 1
 
 float test_shared_globals_combined() {
@@ -64,5 +73,7 @@ float test_shared_globals_combined() {
     return shared_time + transformed_color.x + lighting_factor + float(shared_render_mode);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_shared_globals_combined() ~= 1.0

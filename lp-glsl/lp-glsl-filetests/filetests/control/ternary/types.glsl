@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Ternary operator with different types
@@ -16,6 +15,7 @@ int test_ternary_vec2() {
     return int(result.x + result.y);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_vec2() == 3
 
 int test_ternary_vec3() {
@@ -26,6 +26,7 @@ int test_ternary_vec3() {
     return int(result.x + result.y + result.z);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_vec3() == 15
 
 int test_ternary_vec4() {
@@ -36,6 +37,7 @@ int test_ternary_vec4() {
     return int(result.x + result.y);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_vec4() == 3
 
 int test_ternary_ivec2() {
@@ -46,6 +48,7 @@ int test_ternary_ivec2() {
     return result.x + result.y;
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_ivec2() == 70
 
 int test_ternary_bvec2() {
@@ -56,6 +59,7 @@ int test_ternary_bvec2() {
     return (result.x ? 1 : 0) + (result.y ? 1 : 0);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_bvec2() == 1
 
 // Matrix types
@@ -67,6 +71,7 @@ int test_ternary_mat2() {
     return int(result[0][0] + result[1][1]);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_mat2() == 5
 
 int test_ternary_mat3() {
@@ -77,6 +82,7 @@ int test_ternary_mat3() {
     return int(result[0][0] * 10.0);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_mat3() == 20
 
 // Structure types
@@ -93,7 +99,9 @@ int test_ternary_struct() {
     return int(result.x + result.y);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_ternary_struct() == 3
 
 struct Color {
@@ -110,7 +118,9 @@ int test_ternary_struct_complex() {
     return int((result.r + result.g + result.b) * 10.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_ternary_struct_complex() == 15
 
 // Array types (if supported)
@@ -123,7 +133,9 @@ int test_ternary_array_element() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_ternary_array_element() == 1
 
 // Mixed vector component access
@@ -135,6 +147,7 @@ int test_ternary_vec_component() {
     return int(result);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_vec_component() == 5
 
 // Nested with different types
@@ -148,6 +161,7 @@ int test_ternary_nested_types() {
     return int(result.x + result.y);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ternary_nested_types() == 7
 
 

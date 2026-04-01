@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Mix: mix(bvec4, bvec4, bvec4) -> bvec4 (component-wise selection)
@@ -14,7 +13,8 @@ bvec4 test_bvec4_mix_all_false_selector() {
     return mix(a, b, selector);
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_all_false_selector() == bvec4(true, false, true, false)
 
 bvec4 test_bvec4_mix_all_true_selector() {
@@ -24,6 +24,7 @@ bvec4 test_bvec4_mix_all_true_selector() {
     return mix(a, b, selector);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_all_true_selector() == bvec4(false, true, false, true)
 
 bvec4 test_bvec4_mix_mixed_selector() {
@@ -33,6 +34,7 @@ bvec4 test_bvec4_mix_mixed_selector() {
     return mix(a, b, selector);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_mixed_selector() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_other_mixed_selector() {
@@ -42,6 +44,7 @@ bvec4 test_bvec4_mix_other_mixed_selector() {
     return mix(a, b, selector);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_other_mixed_selector() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_same_vectors() {
@@ -50,6 +53,7 @@ bvec4 test_bvec4_mix_same_vectors() {
     return mix(a, a, selector);
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_same_vectors() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_in_expression() {
@@ -62,4 +66,5 @@ bvec4 test_bvec4_mix_in_expression() {
     // not((false, false, false, false)) = (true, true, true, true)
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_mix_in_expression() == bvec4(true, true, true, true)

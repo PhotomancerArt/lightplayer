@@ -82,8 +82,6 @@ pub struct TestFile {
     pub trap_expectations: Vec<TrapExpectation>,
     /// Test types requested in this file.
     pub test_types: Vec<TestType>,
-    /// File-level annotations (between // test and first GLSL code).
-    pub annotations: Vec<Annotation>,
     /// CLIF expectations extracted from comments.
     pub clif_expectations: ClifExpectations,
     /// Error expectations for `test error` files (inline `expected-error` / `expected-error-code`).

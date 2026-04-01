@@ -10,7 +10,9 @@ float test_round_half_up() {
     return round(2.5);
 }
 
-// @unsupported(float_mode=q32, reason="Q32 round() tie-breaking differs from half-away-from-zero")
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_round_half_up() ~= 3.0
 
 float test_round_half_down() {
@@ -25,7 +27,9 @@ float test_roundeven_half_up() {
     return roundEven(2.5);
 }
 
-// @unsupported(float_mode=q32, reason="Q32 roundEven tie-breaking differs from IEEE round-to-even")
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_roundeven_half_up() ~= 3.0
 
 float test_roundeven_half_down() {
@@ -47,7 +51,9 @@ float test_large_number_precision() {
     return 1e10 + 1.0;
 }
 
-// @unsupported(float_mode=q32, reason="Q32 fixed-point range cannot represent 1e10 faithfully")
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_large_number_precision() ~= 10000000000.0
 
 float test_subnormal() {
@@ -62,7 +68,9 @@ vec2 test_vec_precision() {
     return vec2(1.0 + 1e-10, 1e10 + 1.0);
 }
 
-// @unsupported(float_mode=q32, reason="Q32 cannot represent 1e10; second lane saturates")
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_vec_precision() ~= vec2(1.0, 10000000000.0)
 
 float test_fma_precision() {

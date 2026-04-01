@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 float compute(float a, float b, float c);
 

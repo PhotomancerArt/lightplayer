@@ -76,12 +76,13 @@ pub fn parse_run_directive(
 
     let mut annotations = Vec::new();
     if legacy_expect_fail {
-        annotations.push(crate::target::Annotation {
-            kind: crate::target::AnnotationKind::Unimplemented,
-            filter: crate::target::TargetFilter::default(),
-            reason: None,
-            line_number,
-        });
+        for t in crate::target::ALL_TARGETS {
+            annotations.push(crate::target::Annotation {
+                kind: crate::target::AnnotationKind::Unimplemented,
+                target: t.name(),
+                line_number,
+            });
+        }
     }
 
     Ok(RunDirective {
@@ -168,7 +169,7 @@ mod tests {
         let dir = parse_run_directive("test() == 1 [expect-fail]", 5, true).unwrap();
         assert_eq!(dir.expression_str, "test()");
         assert_eq!(dir.expected_str, "1");
-        assert_eq!(dir.annotations.len(), 1);
+        assert_eq!(dir.annotations.len(), crate::target::ALL_TARGETS.len());
         assert!(matches!(
             dir.annotations[0].kind,
             crate::target::AnnotationKind::Unimplemented

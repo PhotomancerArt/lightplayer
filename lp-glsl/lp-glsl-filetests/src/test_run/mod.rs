@@ -27,18 +27,16 @@ pub struct TestCaseStats {
     pub total: usize,
     /// Tests annotated @unimplemented that failed as expected.
     pub unimplemented: usize,
-    /// Tests annotated @broken that failed as expected.
-    pub broken: usize,
-    /// Tests annotated @unimplemented/@broken that unexpectedly passed.
+    /// Tests annotated @unimplemented that unexpectedly passed.
     pub unexpected_pass: usize,
     /// Tests annotated @unsupported for this target (skipped — not applicable by design).
     pub unsupported: usize,
 }
 
 impl TestCaseStats {
-    /// Total expected-failure count (unimplemented + broken).
+    /// Total expected-failure count (unimplemented only; unsupported is separate).
     pub fn expected_failure(&self) -> usize {
-        self.unimplemented + self.broken
+        self.unimplemented
     }
 
     /// Add another stats into this one.
@@ -48,7 +46,6 @@ impl TestCaseStats {
         self.failed += o.failed;
         self.total += o.total;
         self.unimplemented += o.unimplemented;
-        self.broken += o.broken;
         self.unexpected_pass += o.unexpected_pass;
         self.unsupported += o.unsupported;
     }
@@ -77,9 +74,6 @@ pub fn record_result(
         }
         (Disposition::ExpectFailure(AnnotationKind::Unimplemented), false) => {
             stats.unimplemented += 1;
-        }
-        (Disposition::ExpectFailure(AnnotationKind::Broken), false) => {
-            stats.broken += 1;
         }
         (Disposition::ExpectSuccess, true) => {
             stats.passed += 1;

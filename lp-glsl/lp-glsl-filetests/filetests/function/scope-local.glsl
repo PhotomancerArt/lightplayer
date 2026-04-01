@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Local Variable Scope: Variables declared in functions
@@ -17,7 +16,9 @@ float test_scope_local_simple() {
     return local_func();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_simple() ~= 42.0
 
 float access_global() {
@@ -30,7 +31,9 @@ float test_scope_local_shadow_global() {
     return access_global();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_shadow_global() ~= 200.0
 
 float process_locals() {
@@ -45,7 +48,9 @@ float test_scope_local_multiple() {
     return process_locals();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_multiple() ~= 3.0
 
 float sum_loop(int n) {
@@ -62,7 +67,9 @@ float test_scope_local_in_loop() {
     return sum_loop(5);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_in_loop() ~= 10.0
 
 float inner_func() {
@@ -80,7 +87,9 @@ float test_scope_local_nested() {
     return outer_func();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_nested() ~= 30.0
 
 float use_params(float param1, float param2) {
@@ -93,7 +102,9 @@ float test_scope_local_parameters() {
     return use_params(2.0, 3.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_parameters() ~= 13.0
 
 float mixed_types() {
@@ -110,7 +121,9 @@ float test_scope_local_types() {
     return mixed_types();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_types() ~= 12.14
 
 float sum_local_array() {
@@ -123,7 +136,9 @@ float test_scope_local_arrays() {
     return sum_local_array();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_arrays() ~= 6.0
 
 struct LocalStruct {
@@ -140,7 +155,9 @@ LocalStruct test_scope_local_struct() {
     return create_local_struct();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_struct() ~= LocalStruct(5.0, 10.0)
 
 float modify_local() {
@@ -155,5 +172,7 @@ float test_scope_local_modification() {
     return modify_local();
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_scope_local_modification() ~= 13.0

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // umulExtended(): Unsigned multiply extended function
@@ -14,7 +13,9 @@ uvec4 test_umulextended_uint_small() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_umulextended_uint_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_umulextended_uint_medium() {
@@ -24,7 +25,9 @@ uvec4 test_umulextended_uint_medium() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_umulextended_uint_medium() == uvec4(1410065408u, 2u, 0u, 0u)
 
 uvec4 test_umulextended_uint_large() {
@@ -34,7 +37,9 @@ uvec4 test_umulextended_uint_large() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_umulextended_uint_large() == uvec4(0u, 1u, 0u, 0u)
 
 uvec4 test_umulextended_uint_max() {
@@ -44,7 +49,9 @@ uvec4 test_umulextended_uint_max() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
 

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Simple Whole Struct Assignment
@@ -17,7 +16,9 @@ float test_assign_simple_point() {
     return p1.x; // Should be 3.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_point() ~= 3.0
 
 float test_assign_simple_point_y() {
@@ -27,7 +28,9 @@ float test_assign_simple_point_y() {
     return p1.y; // Should be 8.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_point_y() ~= 8.0
 
 struct Color {
@@ -43,7 +46,9 @@ float test_assign_simple_color() {
     return c1.g; // Should be 0.5
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_color() ~= 0.5
 
 struct Transform {
@@ -58,7 +63,9 @@ vec3 test_assign_simple_transform_position() {
     return t1.position; // Should be vec3(7.0, 8.0, 9.0)
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_transform_position() ~= vec3(7.0, 8.0, 9.0)
 
 vec3 test_assign_simple_transform_rotation() {
@@ -68,7 +75,9 @@ vec3 test_assign_simple_transform_rotation() {
     return t1.rotation; // Should be vec3(0.1, 0.2, 0.3)
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_transform_rotation() ~= vec3(0.1, 0.2, 0.3)
 
 struct Person {
@@ -84,7 +93,9 @@ int test_assign_simple_person_age() {
     return p1.age; // Should be 30
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_person_age() == 30
 
 float test_assign_simple_person_height() {
@@ -94,7 +105,9 @@ float test_assign_simple_person_height() {
     return p1.height; // Should be 190.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_person_height() ~= 190.0
 
 bool test_assign_simple_person_student() {
@@ -104,7 +117,9 @@ bool test_assign_simple_person_student() {
     return p1.isStudent; // Should be false
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_person_student() == false
 
 struct Line {
@@ -119,7 +134,9 @@ float test_assign_simple_line_nested() {
     return l1.start.x; // Should be 5.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_line_nested() ~= 5.0
 
 float test_assign_simple_line_nested_end_y() {
@@ -129,7 +146,9 @@ float test_assign_simple_line_nested_end_y() {
     return l1.end.y; // Should be 40.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_line_nested_end_y() ~= 40.0
 
 struct EmptyData {
@@ -143,5 +162,7 @@ int test_assign_simple_empty_data() {
     return d1.id; // Should be 99
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_assign_simple_empty_data() == 99

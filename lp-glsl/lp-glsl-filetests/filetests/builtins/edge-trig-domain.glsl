@@ -1,5 +1,4 @@
 // test run
-// @unsupported(float_mode=q32, reason="Q32 fixed-point is not IEEE float; trig domain UB differs from f32")
 
 // ============================================================================
 // Trigonometric domain error tests
@@ -15,8 +14,11 @@ float test_asin_domain_over() {
     return asin(1.5);
 }
 
-// @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
+// @unimplemented(jit.q32)
+// @unimplemented(wasm.q32)
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {
@@ -24,6 +26,9 @@ float test_asin_domain_under() {
     return asin(-1.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_asin_domain_under() ~= 0.0
 
 float test_acos_domain_over() {
@@ -31,6 +36,9 @@ float test_acos_domain_over() {
     return acos(1.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_acos_domain_over() ~= 0.0
 
 float test_acos_domain_under() {
@@ -38,6 +46,9 @@ float test_acos_domain_under() {
     return acos(-1.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_acos_domain_under() ~= 0.0
 
 float test_atan2_zero_zero() {
@@ -45,6 +56,9 @@ float test_atan2_zero_zero() {
     return atan(0.0, 0.0);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_atan2_zero_zero() ~= 0.0
 
 float test_acosh_domain_under() {
@@ -52,6 +66,9 @@ float test_acosh_domain_under() {
     return acosh(0.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_acosh_domain_under() ~= 0.0
 
 float test_atanh_domain_over() {
@@ -59,6 +76,9 @@ float test_atanh_domain_over() {
     return atanh(1.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_atanh_domain_over() ~= 0.0
 
 float test_atanh_domain_under() {
@@ -66,6 +86,9 @@ float test_atanh_domain_under() {
     return atanh(-1.5);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_atanh_domain_under() ~= 0.0
 
 float test_atanh_domain_one() {
@@ -73,6 +96,9 @@ float test_atanh_domain_one() {
     return atanh(1.0);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_atanh_domain_one() ~= 0.0
 
 float test_atanh_domain_neg_one() {
@@ -80,6 +106,9 @@ float test_atanh_domain_neg_one() {
     return atanh(-1.0);
 }
 
+// @unsupported(jit.q32)
+// @unsupported(rv32.q32)
+// @unsupported(wasm.q32)
 // run: test_atanh_domain_neg_one() ~= 0.0
 
 

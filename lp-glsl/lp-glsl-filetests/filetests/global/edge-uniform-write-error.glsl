@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Edge Uniform Write Error: Writing to uniform globals may be a compile error
@@ -24,7 +23,9 @@ float test_edge_uniform_write_error_read() {
     return time + 1.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_read() ~= 1.0
 
 int test_edge_uniform_write_error_int() {
@@ -32,7 +33,9 @@ int test_edge_uniform_write_error_int() {
     return count + 5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_int() == 5
 
 vec2 test_edge_uniform_write_error_vec2() {
@@ -40,7 +43,9 @@ vec2 test_edge_uniform_write_error_vec2() {
     return position * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_uniform_write_error_vec3() {
@@ -48,7 +53,9 @@ vec3 test_edge_uniform_write_error_vec3() {
     return color + vec3(0.1, 0.1, 0.1);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_vec3() ~= vec3(0.1, 0.1, 0.1)
 
 mat4 test_edge_uniform_write_error_mat4() {
@@ -56,7 +63,9 @@ mat4 test_edge_uniform_write_error_mat4() {
     return transform;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_edge_uniform_write_error_calculations() {
@@ -68,5 +77,7 @@ float test_edge_uniform_write_error_calculations() {
     return scaled_time + offset_pos.x + offset_pos.y + bright_color.x;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_uniform_write_error_calculations() ~= 2.7

@@ -38,7 +38,9 @@ uint test_bitcount_uint_zero() {
     return bitCount(0u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitcount_uint_zero() == 0
 
 uint test_bitcount_uint_one() {
@@ -46,7 +48,9 @@ uint test_bitcount_uint_one() {
     return bitCount(1u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitcount_uint_one() == 1
 
 uint test_bitcount_uint_full() {
@@ -54,7 +58,9 @@ uint test_bitcount_uint_full() {
     return bitCount(4294967295u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitcount_uint_full() == 32
 
 uint test_bitcount_uint_pattern() {
@@ -62,7 +68,9 @@ uint test_bitcount_uint_pattern() {
     return bitCount(170u);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_bitcount_uint_pattern() == 4
 
 ivec2 test_bitcount_ivec2() {

@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Global Variable Write Access: Writing to global variables
@@ -23,7 +22,9 @@ void test_access_write_float() {
     global_float = 42.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_float() == 0.0
 
 void test_access_write_int() {
@@ -31,7 +32,9 @@ void test_access_write_int() {
     global_int = -123;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_int() == 0.0
 
 void test_access_write_uint() {
@@ -39,7 +42,9 @@ void test_access_write_uint() {
     global_uint = 987u;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_uint() == 0.0
 
 void test_access_write_bool() {
@@ -47,7 +52,9 @@ void test_access_write_bool() {
     global_bool = true;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_bool() == 0.0
 
 void test_access_write_vec2() {
@@ -55,7 +62,9 @@ void test_access_write_vec2() {
     global_vec2 = vec2(1.0, 2.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_vec2() == 0.0
 
 void test_access_write_vec3() {
@@ -63,7 +72,9 @@ void test_access_write_vec3() {
     global_vec3 = vec3(1.0, 2.0, 3.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_vec3() == 0.0
 
 void test_access_write_vec4() {
@@ -71,7 +82,9 @@ void test_access_write_vec4() {
     global_vec4 = vec4(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_vec4() == 0.0
 
 void test_access_write_mat2() {
@@ -79,7 +92,9 @@ void test_access_write_mat2() {
     global_mat2 = mat2(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_mat2() == 0.0
 
 void test_access_write_out() {
@@ -87,7 +102,9 @@ void test_access_write_out() {
     out_depth = 0.5;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_out() == 0.0
 
 void test_access_write_buffer() {
@@ -98,7 +115,9 @@ void test_access_write_buffer() {
     buffer_data[3] = 20.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_buffer() == 0.0
 
 void test_access_write_shared() {
@@ -106,7 +125,9 @@ void test_access_write_shared() {
     shared_counter = 42.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_shared() == 0.0
 
 float test_access_write_read() {
@@ -118,5 +139,7 @@ float test_access_write_read() {
     return global_float + float(global_int) + global_vec2.x + global_vec2.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_write_read() ~= 157.0

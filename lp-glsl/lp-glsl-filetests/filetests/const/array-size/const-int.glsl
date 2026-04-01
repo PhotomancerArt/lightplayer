@@ -17,7 +17,7 @@ float test_const_global_arrays() {
     return 1.0;
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
 // run: test_const_global_arrays() == 1.0
 
 float test_local_const() {

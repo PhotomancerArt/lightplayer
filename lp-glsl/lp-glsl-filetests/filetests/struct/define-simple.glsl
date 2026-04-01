@@ -14,8 +14,8 @@ float test_define_simple_point() {
     return 1.0; // Should be 1.0 (test passes if no compilation error)
 }
 
-// @unimplemented(backend=jit)
-// @unimplemented(backend=wasm)
+// @unimplemented(jit.q32)
+// @unimplemented(wasm.q32)
 // run: test_define_simple_point() == 1.0
 
 struct Color {
@@ -55,7 +55,7 @@ bool test_define_simple_person() {
     return true; // Should be true
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_simple_person() == true
 
 struct Vector2D {
@@ -68,7 +68,7 @@ vec2 test_define_simple_vector2d() {
     return vec2(1.0, 1.0); // Should be vec2(1.0, 1.0)
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_simple_vector2d() ~= vec2(1.0, 1.0)
 
 struct Circle {
@@ -80,7 +80,7 @@ float test_define_simple_circle() {
     return 1.0; // Should be 1.0
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_simple_circle() == 1.0
 
 struct EmptyData {
@@ -92,5 +92,5 @@ int test_define_simple_empty_data() {
     return 1; // Should be 1
 }
 
-// @unimplemented(backend=wasm)
+// @unimplemented(wasm.q32)
 // run: test_define_simple_empty_data() == 1

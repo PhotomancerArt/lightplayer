@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Lvalue Required for Out/Inout: out/inout require lvalues (variables)
@@ -16,7 +15,9 @@ float test_edge_lvalue_out_variable() {
     return value;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_variable() ~= 42.0
 
 void set_vector(out vec2 result) {
@@ -30,7 +31,9 @@ vec2 test_edge_lvalue_out_vector() {
     return vec;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0)
 
 void modify_value(inout float value) {
@@ -44,7 +47,9 @@ float test_edge_lvalue_inout_variable() {
     return x;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_inout_variable() ~= 10.0
 
 /*
@@ -56,7 +61,9 @@ float test_edge_lvalue_out_expression() {
     return 0.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_expression() ~= 0.0
 */
 
@@ -68,7 +75,9 @@ float test_edge_lvalue_inout_literal() {
     return 0.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_inout_literal() ~= 0.0
 */
 
@@ -83,7 +92,9 @@ float test_edge_lvalue_out_array_element() {
     return arr[1];
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_array_element() ~= 99.0
 
 void scale_component(inout float component) {
@@ -97,7 +108,9 @@ float test_edge_lvalue_inout_swizzle() {
     return vec.y;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_inout_swizzle() ~= 6.0
 
 /*
@@ -108,7 +121,9 @@ float test_edge_lvalue_out_function_call() {
     return 0.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_function_call() ~= 0.0
 */
 
@@ -127,7 +142,9 @@ float test_edge_lvalue_out_struct_field() {
     return d.value;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_struct_field() ~= 123.0
 
 void increment(inout int value) {
@@ -141,5 +158,7 @@ int test_edge_lvalue_inout_int() {
     return x;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_edge_lvalue_inout_int() == 11

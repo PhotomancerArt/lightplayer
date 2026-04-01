@@ -48,67 +48,44 @@ pub fn run(
 
     let mut stats = TestCaseStats::default();
 
-    // Check file-level annotations first - if the whole file is marked as unimplemented,
-    // broken, or unsupported for this target, skip compilation entirely.
-    for ann in &test_file.annotations {
-        if ann.filter.matches(target) {
-            match ann.kind {
-                AnnotationKind::Unsupported => {
-                    // Count all directives as unsupported
-                    for directive in &test_file.run_directives {
-                        if let Some(filter_line) = line_filter {
-                            if directive.line_number != filter_line {
-                                continue;
-                            }
-                        }
-                        stats.total += 1;
-                        stats.unsupported += 1;
-                        eprintln_detail_skipped_run_directive(
-                            output_mode,
-                            &relative_path,
-                            directive,
-                            target,
-                            "unsupported",
-                        );
-                    }
-                    return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
-                }
-                AnnotationKind::Unimplemented | AnnotationKind::Broken => {
-                    // Count all directives as unimplemented/broken
-                    let label = if ann.kind == AnnotationKind::Unimplemented {
-                        "unimplemented"
-                    } else {
-                        "broken"
-                    };
-                    for directive in &test_file.run_directives {
-                        if let Some(filter_line) = line_filter {
-                            if directive.line_number != filter_line {
-                                continue;
-                            }
-                        }
-                        stats.total += 1;
-                        if ann.kind == AnnotationKind::Unimplemented {
-                            stats.unimplemented += 1;
-                        } else {
-                            stats.broken += 1;
-                        }
-                        eprintln_detail_skipped_run_directive(
-                            output_mode,
-                            &relative_path,
-                            directive,
-                            target,
-                            label,
-                        );
-                    }
-                    return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
-                }
-            }
-        }
-    }
-
     let mut errors = Vec::new();
     let mut unexpected_pass_lines = Vec::new();
     let mut failed_lines = Vec::new();
+
+    // If every selected `// run:` is `@unsupported` for this target, skip compilation (same idea
+    // as the old file-level `@unsupported`, but without a separate attachment model).
+    let mut eligible_runs = 0usize;
+    let mut all_unsupported = true;
+    for directive in &test_file.run_directives {
+        if let Some(filter_line) = test_line_filter {
+            if directive.line_number != filter_line {
+                continue;
+            }
+        }
+        eligible_runs += 1;
+        if directive_disposition(&directive.annotations, target) != Disposition::Skip {
+            all_unsupported = false;
+        }
+    }
+    if eligible_runs > 0 && all_unsupported {
+        for directive in &test_file.run_directives {
+            if let Some(filter_line) = test_line_filter {
+                if directive.line_number != filter_line {
+                    continue;
+                }
+            }
+            stats.total += 1;
+            stats.unsupported += 1;
+            eprintln_detail_skipped_run_directive(
+                output_mode,
+                &relative_path,
+                directive,
+                target,
+                "unsupported",
+            );
+        }
+        return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
+    }
 
     let mut executable = match compile::compile_for_target(
         &test_file.glsl_source,
@@ -120,7 +97,6 @@ pub fn run(
         Err(e) => {
             let mut compile_failed_lines = Vec::new();
             let mut unimplemented_count = 0;
-            let mut broken_count = 0;
             let mut unsupported_count = 0;
             for directive in &test_file.run_directives {
                 if let Some(filter_line) = test_line_filter {
@@ -129,8 +105,7 @@ pub fn run(
                     }
                 }
                 stats.total += 1;
-                let disposition =
-                    directive_disposition(&test_file.annotations, &directive.annotations, target);
+                let disposition = directive_disposition(&directive.annotations, target);
                 match &disposition {
                     Disposition::Skip => unsupported_count += 1,
                     Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
@@ -139,15 +114,11 @@ pub fn run(
                     Disposition::ExpectFailure(AnnotationKind::Unimplemented) => {
                         unimplemented_count += 1;
                     }
-                    Disposition::ExpectFailure(AnnotationKind::Broken) => {
-                        broken_count += 1;
-                    }
                     Disposition::ExpectSuccess => compile_failed_lines.push(directive.line_number),
                 }
             }
             stats.failed = compile_failed_lines.len();
             stats.unimplemented = unimplemented_count;
-            stats.broken = broken_count;
             stats.unsupported = unsupported_count;
             stats.passed = 0;
             return Ok((
@@ -172,8 +143,7 @@ pub fn run(
         }
 
         stats.total += 1;
-        let disposition =
-            directive_disposition(&test_file.annotations, &directive.annotations, target);
+        let disposition = directive_disposition(&directive.annotations, target);
         if disposition == Disposition::Skip {
             record_result(
                 disposition,

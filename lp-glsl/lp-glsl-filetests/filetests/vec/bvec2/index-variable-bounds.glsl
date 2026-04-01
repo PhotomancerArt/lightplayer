@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Variable Indexing: Out-of-bounds indices (should trap)
@@ -17,7 +16,8 @@ bool test_bvec2_index_negative() {
     return a[i];
 }
 
-// @unimplemented(backend=jit)
+// @unimplemented(jit.q32)
+// @unimplemented(wasm.q32)
 // run: test_bvec2_index_negative() == false
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -27,6 +27,7 @@ bool test_bvec2_index_too_large() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec2_index_too_large() == false
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -36,6 +37,7 @@ bool test_bvec3_index_negative() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec3_index_negative() == false
 // EXPECT_TRAP_CODE: 1
 
@@ -45,6 +47,7 @@ bool test_bvec3_index_too_large() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec3_index_too_large() == false
 // EXPECT_TRAP_CODE: 1
 
@@ -54,6 +57,7 @@ bool test_bvec4_index_negative() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_index_negative() == false
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -63,6 +67,7 @@ bool test_bvec4_index_too_large() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_bvec4_index_too_large() == false
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -72,6 +77,7 @@ int test_ivec2_index_negative() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ivec2_index_negative() == 0
 // EXPECT_TRAP_CODE: 1
 
@@ -81,6 +87,7 @@ int test_ivec2_index_too_large() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_ivec2_index_too_large() == 0
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -90,6 +97,7 @@ float test_vec2_index_negative() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_vec2_index_negative() == 0.0
 // EXPECT_TRAP: vector/matrix index out of bounds
 
@@ -99,6 +107,7 @@ float test_vec2_index_too_large() {
     return a[i];
 }
 
+// @unimplemented(wasm.q32)
 // run: test_vec2_index_too_large() == 0.0
 // EXPECT_TRAP_CODE: 1
 

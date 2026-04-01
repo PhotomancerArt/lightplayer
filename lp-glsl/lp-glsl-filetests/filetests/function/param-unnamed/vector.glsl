@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 vec2 combine(vec2 a, vec2 b);
 

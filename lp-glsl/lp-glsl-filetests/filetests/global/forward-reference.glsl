@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Forward Reference: Forward reference rules for global variables
@@ -13,7 +12,9 @@ float test_forward_reference_use_before_declare() {
     return global_after_function + 10.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_forward_reference_use_before_declare() ~= 10.0
 
 // Global declaration comes after function definition
@@ -24,7 +25,9 @@ float test_forward_reference_after_declare() {
     return global_after_function * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_forward_reference_after_declare() ~= 84.0
 
 // Multiple globals with forward references
@@ -36,7 +39,9 @@ vec2 test_forward_reference_vec() {
     return global_vec_after + vec2(1.0, 1.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_forward_reference_vec() ~= vec2(1.0, 1.0)
 
 mat3 test_forward_reference_mat() {
@@ -44,7 +49,9 @@ mat3 test_forward_reference_mat() {
     return global_mat_after * 2.0;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_forward_reference_mat() ~= mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
 
 // Declarations after function definitions
@@ -60,5 +67,7 @@ float test_forward_reference_complex() {
     return scalar_result + vec_result.x + vec_result.y + mat_result[0][0];
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_forward_reference_complex() ~= 58.0

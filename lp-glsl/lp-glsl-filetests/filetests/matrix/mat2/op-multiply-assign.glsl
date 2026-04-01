@@ -35,7 +35,9 @@ mat2 test_mat2_multiply_assign_matrix_expressions() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_mat2_multiply_assign_matrix_expressions() ~= mat2(2.0, 2.0, 1.0, 2.0)
 
 mat2 test_mat2_multiply_assign_scalar() {

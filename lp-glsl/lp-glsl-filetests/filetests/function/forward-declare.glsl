@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Forward Declarations: Declare before define, multiple prototypes allowed

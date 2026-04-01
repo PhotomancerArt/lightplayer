@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Simple Struct Constructors (scalar members)
@@ -15,7 +14,9 @@ float test_constructor_simple_point() {
     return p.x; // Should be 1.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_point() ~= 1.0
 
 int test_constructor_simple_point_y() {
@@ -23,7 +24,9 @@ int test_constructor_simple_point_y() {
     return int(p.y); // Should be 4
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_point_y() == 4
 
 struct Color {
@@ -37,7 +40,9 @@ float test_constructor_simple_color() {
     return c.g; // Should be 0.7
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_color() ~= 0.7
 
 struct Triangle {
@@ -51,7 +56,9 @@ float test_constructor_simple_triangle() {
     return t.a + t.b + t.c; // 3.0 + 4.0 + 5.0 = 12.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_triangle() ~= 12.0
 
 struct Person {
@@ -65,7 +72,9 @@ int test_constructor_simple_person() {
     return p.age; // Should be 25
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_person() == 25
 
 float test_constructor_simple_person_height() {
@@ -73,7 +82,9 @@ float test_constructor_simple_person_height() {
     return p.height; // Should be 180.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_person_height() ~= 180.0
 
 bool test_constructor_simple_person_student() {
@@ -81,7 +92,9 @@ bool test_constructor_simple_person_student() {
     return p.isStudent; // Should be true
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_person_student() == true
 
 struct Circle {
@@ -93,7 +106,9 @@ float test_constructor_simple_circle() {
     return c.radius; // Should be 10.0
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_circle() ~= 10.0
 
 struct EmptyData {
@@ -105,5 +120,7 @@ int test_constructor_simple_empty_data() {
     return d.id; // Should be 42
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_constructor_simple_empty_data() == 42

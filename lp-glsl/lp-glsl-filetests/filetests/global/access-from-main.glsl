@@ -1,5 +1,4 @@
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Global Variable Access from Main: Accessing globals from main function
@@ -15,7 +14,9 @@ float test_access_from_main_read() {
     return global_counter + global_color.x + global_color.y + global_color.z;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_read() ~= 0.0
 
 void test_access_from_main_write() {
@@ -26,7 +27,9 @@ void test_access_from_main_write() {
     global_matrix = mat2(2.0, 0.0, 0.0, 2.0);
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_write() == 0.0
 
 float test_access_from_main_verify_write() {
@@ -35,7 +38,9 @@ float test_access_from_main_verify_write() {
     return global_counter + global_color.r + global_color.g + global_color.b;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_verify_write() ~= 43.5
 
 bool test_access_from_main_flag() {
@@ -46,7 +51,9 @@ bool test_access_from_main_flag() {
     return global_enabled;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_flag() == false
 
 mat2 test_access_from_main_matrix() {
@@ -56,7 +63,9 @@ mat2 test_access_from_main_matrix() {
     return global_matrix;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 float test_access_from_main_calculations() {
@@ -74,7 +83,9 @@ float test_access_from_main_calculations() {
     return global_counter;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_calculations() ~= 22.0
 
 vec3 test_access_from_main_vector_ops() {
@@ -86,7 +97,9 @@ vec3 test_access_from_main_vector_ops() {
     return global_color;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_vector_ops() ~= vec3(1.1, 1.2, 1.3)
 
 float test_access_from_main_mixed() {
@@ -104,5 +117,7 @@ float test_access_from_main_mixed() {
     return result;
 }
 
-// @unimplemented()
+// @unimplemented(jit.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
 // run: test_access_from_main_mixed() ~= 15.0
