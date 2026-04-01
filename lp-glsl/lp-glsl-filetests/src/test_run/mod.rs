@@ -1,7 +1,6 @@
 //! Run test implementation.
 
 pub mod compile;
-pub mod config;
 pub mod execution;
 pub mod lpir_jit_executable;
 pub mod lpir_rv32_executable;
@@ -9,8 +8,6 @@ pub mod parse_assert;
 pub mod q32_exec_common;
 pub mod run;
 pub mod run_detail;
-pub mod run_summary;
-pub mod test_glsl;
 pub mod wasm_link;
 pub mod wasm_runner;
 

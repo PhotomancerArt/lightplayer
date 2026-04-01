@@ -43,7 +43,6 @@ SHOW_HELP=false
 SHOW_LIST=false
 REGEN_GEN_FILES=false
 TARGET_ARG=()
-SUMMARY_ARG=()
 TEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -65,7 +64,7 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   --summary)
-    SUMMARY_ARG=("--summary")
+    TEST_ARGS+=("--concise")
     shift
     ;;
   --fix)
@@ -78,6 +77,18 @@ while [[ $# -gt 0 ]]; do
     ;;
   --assume-yes)
     TEST_ARGS+=("--assume-yes")
+    shift
+    ;;
+  --debug)
+    TEST_ARGS+=("--debug")
+    shift
+    ;;
+  --concise)
+    TEST_ARGS+=("--concise")
+    shift
+    ;;
+  --detail)
+    TEST_ARGS+=("--detail")
     shift
     ;;
   *)
@@ -102,7 +113,10 @@ OPTIONS:
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
     --target SPEC       Run target(s): comma-separated, backend shorthand (jit,wasm,rv32), or full names (jit.q32)
-    --summary           Force summary mode even for a single test file
+    --summary           Same as --concise (alias for the wrapper script)
+    --debug             Full output plus CLIF/disassembly on failure (same as DEBUG=1)
+    --concise           Minimal output even for a single file
+    --detail            Verbose per-// run: output even for many files
     --fix               Remove @unimplemented annotations from tests that now pass
     --mark-unimplemented  Add @unimplemented(backend=…) to failing tests (baseline); use with --target
     --assume-yes        With --mark-unimplemented, skip the interactive confirmation
@@ -253,4 +267,4 @@ fi
 # This ensures cargo run picks up all compilation changes in the lp-glsl workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
-cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${SUMMARY_ARG[@]}" "${TEST_ARGS[@]}"
+cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"

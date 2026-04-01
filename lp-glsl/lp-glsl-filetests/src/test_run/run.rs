@@ -1,9 +1,9 @@
-//! Main delegator for run tests (chooses summary vs detail).
+//! Main delegator for run tests.
 
 use crate::output_mode::OutputMode;
 use crate::parse::TestFile;
 use crate::target::Target;
-use crate::test_run::{TestCaseStats, config, run_detail, run_summary};
+use crate::test_run::{TestCaseStats, run_detail};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,7 +15,7 @@ pub type PerTargetStats = BTreeMap<String, TestCaseStats>;
 /// Iterates over the given targets; if the file has @unsupported for all targets, skips.
 /// Returns the combined result, per-target stats, aggregated stats, unexpected-pass lines per
 /// target, failed lines per target, compile-failed per target, and whether any target had a
-/// whole-file compile failure (summary mode only).
+/// whole-file compile failure.
 pub fn run_test_file_with_line_filter(
     test_file: &TestFile,
     path: &Path,
@@ -64,15 +64,8 @@ pub fn run_test_file_with_line_filter(
     let mut overall_result = Ok(());
 
     for target in targets {
-        let (result, stats, unexpected_pass, failed_lines, compile_failed) = match output_mode {
-            OutputMode::Summary if config::SUMMARY_COMPILE_PER_DIRECTIVE => {
-                run_detail::run(test_file, path, line_filter, OutputMode::Summary, target)?
-            }
-            OutputMode::Summary => run_summary::run(test_file, path, line_filter, target)?,
-            OutputMode::Detail | OutputMode::Debug => {
-                run_detail::run(test_file, path, line_filter, output_mode, target)?
-            }
-        };
+        let (result, stats, unexpected_pass, failed_lines, compile_failed) =
+            run_detail::run(test_file, path, line_filter, output_mode, target)?;
 
         let target_name = target.name();
         per_target.insert(target_name.clone(), stats);

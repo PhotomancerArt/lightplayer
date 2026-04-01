@@ -1,7 +1,7 @@
-//! Detail mode: compile per test case.
+//! Detail mode: compile the full file once, then run each `// run:` directive.
 
 use crate::output_mode::OutputMode;
-use crate::parse::TestFile;
+use crate::parse::{RunDirective, TestFile};
 use crate::target::{AnnotationKind, Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
 use lp_glsl_exec::GlslExecutable;
@@ -10,7 +10,6 @@ use crate::test_run::compile;
 use crate::test_run::execution;
 use crate::test_run::parse_assert;
 use crate::test_run::record_result;
-use crate::test_run::test_glsl;
 use anyhow::Result;
 use lp_riscv_emu::LogLevel;
 use std::path::Path;
@@ -18,9 +17,9 @@ use std::path::Path;
 use crate::colors;
 use crate::util::format_glsl_value;
 
-/// Run tests in detail mode: compile per test case with function filtering.
-/// Returns result, stats, unexpected-pass lines, failed lines, and `compile_failed` (always `false`
-/// — this mode compiles per directive; use summary mode for whole-file compile failures).
+/// Run tests in detail mode: compile the full translation unit once, then execute each directive.
+/// Returns result, stats, unexpected-pass lines, failed lines, and whether whole-file compilation
+/// failed before any `// run:` executed.
 pub fn run(
     test_file: &TestFile,
     path: &Path,
@@ -28,11 +27,6 @@ pub fn run(
     output_mode: OutputMode,
     target: &Target,
 ) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>, bool)> {
-    // Read the original file lines to pass to test glsl generation
-    let file_contents = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read {}: {}", path.display(), e))?;
-    let file_lines: Vec<String> = file_contents.lines().map(|s| s.to_string()).collect();
-
     // Compute relative path for rerun command
     let filetests_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
     let relative_path = path
@@ -69,17 +63,23 @@ pub fn run(
                         }
                         stats.total += 1;
                         stats.unsupported += 1;
+                        eprintln_detail_skipped_run_directive(
+                            output_mode,
+                            &relative_path,
+                            directive,
+                            target,
+                            "unsupported",
+                        );
                     }
-                    return Ok((
-                        Ok(()),
-                        stats,
-                        Vec::new(),
-                        Vec::new(),
-                        false,
-                    ));
+                    return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
                 }
                 AnnotationKind::Unimplemented | AnnotationKind::Broken => {
                     // Count all directives as unimplemented/broken
+                    let label = if ann.kind == AnnotationKind::Unimplemented {
+                        "unimplemented"
+                    } else {
+                        "broken"
+                    };
                     for directive in &test_file.run_directives {
                         if let Some(filter_line) = line_filter {
                             if directive.line_number != filter_line {
@@ -92,14 +92,15 @@ pub fn run(
                         } else {
                             stats.broken += 1;
                         }
+                        eprintln_detail_skipped_run_directive(
+                            output_mode,
+                            &relative_path,
+                            directive,
+                            target,
+                            label,
+                        );
                     }
-                    return Ok((
-                        Ok(()),
-                        stats,
-                        Vec::new(),
-                        Vec::new(),
-                        false,
-                    ));
+                    return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
                 }
             }
         }
@@ -109,7 +110,59 @@ pub fn run(
     let mut unexpected_pass_lines = Vec::new();
     let mut failed_lines = Vec::new();
 
-    // Process each run directive
+    let mut executable = match compile::compile_for_target(
+        &test_file.glsl_source,
+        target,
+        &relative_path,
+        log_level,
+    ) {
+        Ok(exec) => exec,
+        Err(e) => {
+            let mut compile_failed_lines = Vec::new();
+            let mut unimplemented_count = 0;
+            let mut broken_count = 0;
+            let mut unsupported_count = 0;
+            for directive in &test_file.run_directives {
+                if let Some(filter_line) = test_line_filter {
+                    if directive.line_number != filter_line {
+                        continue;
+                    }
+                }
+                stats.total += 1;
+                let disposition =
+                    directive_disposition(&test_file.annotations, &directive.annotations, target);
+                match &disposition {
+                    Disposition::Skip => unsupported_count += 1,
+                    Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
+                        unsupported_count += 1;
+                    }
+                    Disposition::ExpectFailure(AnnotationKind::Unimplemented) => {
+                        unimplemented_count += 1;
+                    }
+                    Disposition::ExpectFailure(AnnotationKind::Broken) => {
+                        broken_count += 1;
+                    }
+                    Disposition::ExpectSuccess => compile_failed_lines.push(directive.line_number),
+                }
+            }
+            stats.failed = compile_failed_lines.len();
+            stats.unimplemented = unimplemented_count;
+            stats.broken = broken_count;
+            stats.unsupported = unsupported_count;
+            stats.passed = 0;
+            return Ok((
+                Err(anyhow::anyhow!(
+                    "Compilation failed for test file {relative_path}:\n\n{e}"
+                )),
+                stats,
+                Vec::new(),
+                compile_failed_lines,
+                true,
+            ));
+        }
+    };
+
+    // Process each run directive (reuse one compiled executable)
     for directive in &test_file.run_directives {
         // Filter by line number if TEST_LINE is set
         if let Some(filter_line) = test_line_filter {
@@ -130,64 +183,15 @@ pub fn run(
                 &mut unexpected_pass_lines,
                 directive.line_number,
             );
+            eprintln_detail_skipped_run_directive(
+                output_mode,
+                &relative_path,
+                directive,
+                target,
+                "unsupported",
+            );
             continue;
         }
-
-        // Generate test GLSL code with span information
-        let test_glsl_result = match test_glsl::generate_test_glsl(
-            &file_lines,
-            directive.line_number,
-            &directive.expression_str,
-        ) {
-            Ok(result) => result,
-            Err(e) => {
-                record_result(
-                    disposition,
-                    false,
-                    &mut stats,
-                    &mut failed_lines,
-                    &mut unexpected_pass_lines,
-                    directive.line_number,
-                );
-                let error_msg = format!("failed to generate test GLSL: {e}");
-                eprintln_if_detail(output_mode, &error_msg);
-                errors.push(e.context(error_msg));
-                continue;
-            }
-        };
-
-        let executable = match compile::compile_for_target(
-            &test_glsl_result.source,
-            target,
-            &relative_path,
-            log_level,
-        ) {
-            Ok(exec) => exec,
-            Err(e) => {
-                record_result(
-                    disposition,
-                    false,
-                    &mut stats,
-                    &mut failed_lines,
-                    &mut unexpected_pass_lines,
-                    directive.line_number,
-                );
-                let err = format_compilation_error(
-                    e,
-                    &test_glsl_result,
-                    directive.line_number,
-                    &directive.expression_str,
-                    &relative_path,
-                    output_mode,
-                    target,
-                );
-                eprintln_if_detail(output_mode, &err);
-                errors.push(err);
-                continue;
-            }
-        };
-
-        let mut executable = executable;
 
         // Check if this test expects a trap
         // Trap expectations can be on the same line or the immediately following line
@@ -267,7 +271,7 @@ pub fn run(
                     ),
                     &relative_path,
                     directive.line_number,
-                    Some(&test_glsl_result.source),
+                    Some(test_file.glsl_source.as_str()),
                     Some(&*executable),
                     output_mode,
                     Some(&directive.expression_str),
@@ -303,7 +307,7 @@ pub fn run(
                         ),
                         &relative_path,
                         directive.line_number,
-                        Some(&test_glsl_result.source),
+                        Some(test_file.glsl_source.as_str()),
                         Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
@@ -329,7 +333,7 @@ pub fn run(
                         &error_msg,
                         &relative_path,
                         directive.line_number,
-                        Some(&test_glsl_result.source),
+                        Some(test_file.glsl_source.as_str()),
                         Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
@@ -363,7 +367,7 @@ pub fn run(
                             ),
                             &relative_path,
                             directive.line_number,
-                            Some(&test_glsl_result.source),
+                            Some(test_file.glsl_source.as_str()),
                             Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
@@ -393,7 +397,7 @@ pub fn run(
                             ),
                             &relative_path,
                             directive.line_number,
-                            Some(&test_glsl_result.source),
+                            Some(test_file.glsl_source.as_str()),
                             Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
@@ -544,7 +548,7 @@ pub fn run(
                             &error_msg,
                             &relative_path,
                             directive.line_number,
-                            Some(&test_glsl_result.source),
+                            Some(test_file.glsl_source.as_str()),
                             Some(&*executable),
                             output_mode,
                             Some(&format!(
@@ -591,40 +595,11 @@ pub fn run(
 
 /// Error type for unified error formatting.
 enum ErrorType {
-    Compilation,
     ExecutionTrap,
     ComparisonFailure,
     TrapMismatch,
     UnexpectedTrap,
     ExpectedTrapGotValue,
-}
-
-/// Format a compilation error with test GLSL code context.
-fn format_compilation_error(
-    error: impl std::fmt::Display,
-    test_glsl: &test_glsl::TestGlslResult,
-    directive_line: usize,
-    expression: &str,
-    relative_path: &str,
-    output_mode: OutputMode,
-    target: &Target,
-) -> anyhow::Error {
-    anyhow::anyhow!(
-        "{}",
-        format_error(
-            ErrorType::Compilation,
-            &format!(
-                "Compilation failed for test case at line {directive_line}:\n\nTest case: {expression}\n\n{error}"
-            ),
-            relative_path,
-            directive_line,
-            Some(&test_glsl.source),
-            None, // No executable for compilation errors
-            output_mode,
-            Some(expression),
-            target,
-        )
-    )
 }
 
 /// Format error with consistent section ordering.
@@ -633,9 +608,9 @@ fn format_compilation_error(
 /// 2. V-code (DEBUG mode only)
 /// 3. Transformed CLIF (DEBUG mode only)
 /// 4. Raw CLIF (DEBUG mode only)
-/// 5. Test GLSL (detail / debug output only; omitted in summary mode)
+/// 5. Test GLSL
 /// 6. Error details (error message)
-/// 7. Rerun command(s): one line in summary mode; detail mode adds DEBUG rerun
+/// 7. Rerun command(s) with DEBUG variant
 fn format_error(
     _error_type: ErrorType,
     error_message: &str,
@@ -685,7 +660,7 @@ fn format_error(
         }
     }
 
-    // Test GLSL (detail / debug only — too noisy for multi-file summary runs)
+    // Test GLSL
     if output_mode.show_full_output() {
         if let Some(glsl) = test_glsl {
             parts.push(format_code_block(glsl));
@@ -741,10 +716,8 @@ fn extract_error_message(error_str: &str) -> String {
 
 /// Format source code as a code block with line numbers for better readability.
 ///
-/// Trims leading and trailing whitespace-only lines. The text is usually
-/// [`test_glsl::TestGlslResult::source`]: a slice of the test file with other
-/// functions' bodies removed but blank lines between sections kept, which
-/// otherwise produces long runs of empty numbered lines in failure output.
+/// Trims leading and trailing whitespace-only lines. The text is usually the full
+/// file GLSL source so failure output can show context without huge empty runs.
 fn format_code_block(source: &str) -> String {
     let lines: Vec<&str> = source.lines().collect();
     let start = lines
@@ -770,5 +743,56 @@ fn format_code_block(source: &str) -> String {
 fn eprintln_if_detail(output_mode: OutputMode, msg: impl std::fmt::Display) {
     if output_mode.show_full_output() {
         eprintln!("{msg}");
+    }
+}
+
+/// Per-`// run:` line when the directive is not executed (file-level skip or unsupported), in
+/// detail output — mirrors the value-pass line so single-target runs match multi-target output.
+fn eprintln_detail_skipped_run_directive(
+    output_mode: OutputMode,
+    relative_path: &str,
+    directive: &RunDirective,
+    target: &Target,
+    outcome_label: &str,
+) {
+    if !output_mode.show_full_output() {
+        return;
+    }
+    let filename_only = Path::new(relative_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(relative_path)
+        .to_string();
+    let file_line = format!("{}:{}", filename_only, directive.line_number);
+    let op_str = match directive.comparison {
+        crate::parse::test_type::ComparisonOp::Exact => "==",
+        crate::parse::test_type::ComparisonOp::Approx => "~=",
+    };
+    let tolerance_str = directive
+        .tolerance
+        .map(|t| format!(" (tolerance: {t})"))
+        .unwrap_or_default();
+    let body = format!(
+        "{} {} {}{} ({}, {})",
+        directive.expression_str,
+        op_str,
+        directive.expected_str,
+        tolerance_str,
+        outcome_label,
+        target.name()
+    );
+    if colors::should_color() {
+        eprintln!(
+            "{}{}{}{}  {}{}{}",
+            colors::YELLOW,
+            "✓ ",
+            file_line,
+            colors::RESET,
+            colors::DIM,
+            body,
+            colors::RESET
+        );
+    } else {
+        eprintln!("✓ {file_line}  {body}");
     }
 }

@@ -27,9 +27,8 @@ use walkdir::WalkDir;
 
 use crate::target::{Backend, DEFAULT_TARGETS, Target, parse_target_filters};
 
-/// Adds `@unimplemented(backend=…)` for one run-test file: file-level when the whole module
-/// failed to compile in summary mode; otherwise before each failing `// run:`. Returns how many
-/// marker operations were applied (0 if already annotated).
+/// Adds `@unimplemented(backend=…)` for one run-test file before each failing `// run:`.
+/// Returns how many marker operations were applied (0 if already annotated).
 fn mark_unimplemented_expectations_for_file(
     path: &Path,
     failed_lines: &[usize],
@@ -105,7 +104,7 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 
 /// Run a single filetest with optional line number filtering.
 /// Returns the result, per-target stats, combined stats, unexpected-pass lines, failed lines, and
-/// whether any target had a whole-file compile failure (summary mode).
+/// whether any target had a whole-file compile failure.
 pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
@@ -254,9 +253,8 @@ struct FileSpec {
 ///
 /// Directories are scanned recursively for test cases ending in `.glsl`.
 ///
-/// Mode is determined by test count:
-/// - Single test (1 file): Full detailed output with all error information
-/// - Multiple tests (>1 file): Minimal output with colored checkmarks
+/// Output verbosity is resolved by [`OutputMode::resolve`]: optional `--debug` / `--concise` /
+/// `--detail`, then `DEBUG=1`, then single file → detail, multiple files → concise.
 ///
 /// `fix_xfail` enables automatic removal of `[expect-fail]` markers from tests that pass.
 /// Can also be enabled via `LP_FIX_XFAIL=1` environment variable.
@@ -270,7 +268,7 @@ pub fn run(
     mark_unimplemented: bool,
     mark_unimplemented_yes: bool,
     target_spec: Option<&str>,
-    force_summary: bool,
+    output_override: Option<OutputMode>,
 ) -> anyhow::Result<()> {
     // Check environment variable if flag not provided
     let fix_xfail = fix_xfail
@@ -287,7 +285,7 @@ pub fn run(
         println!(
             "\n{}",
             colors::colorize(
-                "WARNING: This will add @unimplemented(backend=…) to failing tests (file-level for whole-file compile failures in summary mode, or per // run: otherwise).",
+                "WARNING: This will add @unimplemented(backend=…) to failing tests (per // run:).",
                 colors::RED
             )
         );
@@ -379,7 +377,11 @@ pub fn run(
     println!("Running {} test file(s)...\n", test_specs.len());
 
     let start_time = Instant::now();
-    let output_mode = OutputMode::from_test_count(test_specs.len(), force_summary);
+    let output_mode = OutputMode::resolve(
+        output_override,
+        OutputMode::env_wants_debug(),
+        test_specs.len(),
+    );
 
     // Use sequential execution for single test, concurrent for multiple tests
     if test_specs.len() == 1 {
@@ -441,7 +443,7 @@ pub fn run(
             }
         };
 
-        // Check if file actually failed. Whole-file compile failure in summary mode is already
+        // Check if file actually failed. Whole-file compile failure is already
         // reflected in `stats.failed` for each `// run:` that expected success; if every run is
         // marked `@unimplemented` / expect-fail, `failed` stays 0 and the file is still OK.
         let file_actually_failed =
@@ -633,7 +635,6 @@ pub fn run(
                 }
             }
             if mark_unimplemented {
-                let use_file_level = matches!(output_mode, OutputMode::Summary);
                 let mut total_marks = 0usize;
                 let mut any_needs_mark = false;
                 for t in &active_targets {
@@ -649,7 +650,7 @@ pub fn run(
                             &spec.path,
                             failed_lines,
                             compile_failed_t,
-                            use_file_level,
+                            false,
                             t,
                         )?;
                     }
@@ -692,7 +693,7 @@ pub fn run(
         unexpected_pass_by_target: BTreeMap<String, Vec<usize>>,
         failed_lines_by_target: BTreeMap<String, Vec<usize>>,
         compile_failed_by_target: BTreeMap<String, bool>,
-        /// Whether any target had summary-mode whole-file compile failure (for tooling; not used for pass/fail).
+        /// Whether any target had whole-file compile failure (for tooling; not used for pass/fail).
         #[allow(dead_code)]
         compile_failed: bool,
         /// False when the worker did not finish `run_filetest_with_line_filter` successfully.
@@ -1062,7 +1063,6 @@ pub fn run(
     }
 
     if mark_unimplemented {
-        let use_file_level = matches!(output_mode, OutputMode::Summary);
         let mut total_marks = 0usize;
         for test in &tests {
             for t in &active_targets {
@@ -1080,7 +1080,7 @@ pub fn run(
                     &test.spec.path,
                     failed_lines,
                     compile_failed_t,
-                    use_file_level,
+                    false,
                     t,
                 )?;
             }

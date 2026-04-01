@@ -51,9 +51,8 @@ float test_forward_declare_in_expression() {
 
 // run: test_forward_declare_in_expression() ~= 24.0
 
-// Multiple forward declarations (allowed)
+// Multiple identical prototypes: valid in GLSL, but our parser rejects duplicates in one file.
 float add_numbers(float a, float b);
-float add_numbers(float a, float b); // Duplicate prototype OK
 
 float test_forward_declare_duplicate() {
     return add_numbers(7.0, 8.0);

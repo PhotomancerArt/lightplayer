@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use lp_glsl_filetests::output_mode::OutputMode;
 
 /// lp-glsl filetest utility.
 #[derive(Parser)]
@@ -11,6 +12,34 @@ struct Cli {
 enum Commands {
     /// Run GLSL filetests
     Test(TestOptions),
+}
+
+#[derive(Args)]
+#[group(id = "output_mode", multiple = false)]
+struct OutputModeCli {
+    /// Full output plus CLIF/disassembly/emulator sections on failure (same as DEBUG=1)
+    #[arg(long, group = "output_mode")]
+    debug: bool,
+    /// Minimal output even for a single file
+    #[arg(long, group = "output_mode")]
+    concise: bool,
+    /// Verbose per-`// run:` output even when running many files
+    #[arg(long, group = "output_mode")]
+    detail: bool,
+}
+
+impl OutputModeCli {
+    fn as_override(&self) -> Option<OutputMode> {
+        if self.debug {
+            Some(OutputMode::Debug)
+        } else if self.concise {
+            Some(OutputMode::Concise)
+        } else if self.detail {
+            Some(OutputMode::Detail)
+        } else {
+            None
+        }
+    }
 }
 
 /// Run GLSL filetests
@@ -31,9 +60,8 @@ struct TestOptions {
     /// or full names (jit.q32). Example: `--target wasm,jit` or `--target rv32`.
     #[arg(long)]
     target: Option<String>,
-    /// Force summary mode even for a single test file
-    #[arg(long)]
-    summary: bool,
+    #[command(flatten)]
+    output_mode: OutputModeCli,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -49,13 +77,14 @@ fn main() -> anyhow::Result<()> {
                 t.files
             };
             let target_spec = t.target.as_deref();
+            let output_override = t.output_mode.as_override();
             lp_glsl_filetests::run(
                 &files,
                 t.fix,
                 t.mark_unimplemented,
                 t.assume_yes,
                 target_spec,
-                t.summary,
+                output_override,
             )?;
         }
     }
