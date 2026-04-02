@@ -112,7 +112,7 @@ impl Annotation {
 }
 
 /// How to handle a test for a given target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
     /// Run and expect success.
     ExpectSuccess,

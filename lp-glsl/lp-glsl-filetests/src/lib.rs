@@ -415,7 +415,7 @@ pub fn run(
             unexpected_pass_by_target,
             failed_lines_by_target,
             compile_failed_by_target,
-            _compile_failed,
+            any_compile_failed,
             harness_completed,
         ) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_filetest_with_line_filter(
@@ -508,8 +508,13 @@ pub fn run(
                         colors::GREEN
                     };
                     let has_unexpected_failures = tstats.failed > 0;
-                    let (counts_str, parentheticals) =
-                        format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    let (counts_str, parentheticals) = format_file_counts(
+                        &tstats,
+                        has_unexpected_failures,
+                        harness_completed,
+                        compile_failed_t,
+                    );
                     let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                         format!("{}{}{}", counts_color, counts_str, colors::RESET)
                     } else {
@@ -524,12 +529,50 @@ pub fn run(
                     );
                 }
             } else {
-                println!(
-                    "{}",
-                    colors::colorize(&format!("✓ {display_path}"), colors::GREEN)
+                let counts_color = if stats.total > 0 {
+                    let denominator = stats.passed + stats.failed;
+                    if !harness_completed {
+                        colors::RED
+                    } else if denominator == 0 {
+                        colors::YELLOW
+                    } else if stats.passed == denominator {
+                        colors::GREEN
+                    } else if stats.passed > 0 {
+                        colors::YELLOW
+                    } else {
+                        colors::RED
+                    }
+                } else {
+                    colors::GREEN
+                };
+                let has_unexpected_failures = stats.failed > 0;
+                let (counts_str, parentheticals) = format_file_counts(
+                    &stats,
+                    has_unexpected_failures,
+                    harness_completed,
+                    any_compile_failed,
+                );
+                let status_marker = if colors::should_color() {
+                    format!("{}{}{} ", colors::GREEN, "✓", colors::RESET)
+                } else {
+                    "✓ ".to_string()
+                };
+                let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                    format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                } else {
+                    counts_str.clone()
+                };
+                print_filetest_status_line(
+                    &status_marker,
+                    &counts_colored,
+                    None,
+                    &display_path,
+                    &parentheticals,
                 );
             }
             let elapsed = start_time.elapsed();
+            let compile_fail_table =
+                compile_fail_counts_for_table(&per_target, &compile_failed_by_target);
             println!(
                 "\n{}",
                 format_results_summary(
@@ -543,6 +586,7 @@ pub fn run(
                     stats.unexpected_pass,
                     fix_xfail,
                     &per_target,
+                    &compile_fail_table,
                 )
             );
 
@@ -593,8 +637,13 @@ pub fn run(
                         colors::GREEN
                     };
                     let has_unexpected_failures = tstats.failed > 0;
-                    let (counts_str, parentheticals) =
-                        format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                    let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                    let (counts_str, parentheticals) = format_file_counts(
+                        &tstats,
+                        has_unexpected_failures,
+                        harness_completed,
+                        compile_failed_t,
+                    );
                     let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                         format!("{}{}{}", counts_color, counts_str, colors::RESET)
                     } else {
@@ -609,12 +658,50 @@ pub fn run(
                     );
                 }
             } else {
-                println!(
-                    "{}",
-                    colors::colorize(&format!("✗ {display_path}"), colors::RED)
+                let counts_color = if stats.total > 0 {
+                    let denominator = stats.passed + stats.failed;
+                    if !harness_completed {
+                        colors::RED
+                    } else if denominator == 0 {
+                        colors::YELLOW
+                    } else if stats.passed == denominator {
+                        colors::GREEN
+                    } else if stats.passed > 0 {
+                        colors::YELLOW
+                    } else {
+                        colors::RED
+                    }
+                } else {
+                    colors::GREEN
+                };
+                let has_unexpected_failures = stats.failed > 0;
+                let (counts_str, parentheticals) = format_file_counts(
+                    &stats,
+                    has_unexpected_failures,
+                    harness_completed,
+                    any_compile_failed,
+                );
+                let status_marker = if colors::should_color() {
+                    format!("{}{}{} ", colors::RED, "✗", colors::RESET)
+                } else {
+                    "✗ ".to_string()
+                };
+                let counts_colored = if colors::should_color() && !counts_str.is_empty() {
+                    format!("{}{}{}", counts_color, counts_str, colors::RESET)
+                } else {
+                    counts_str.clone()
+                };
+                print_filetest_status_line(
+                    &status_marker,
+                    &counts_colored,
+                    None,
+                    &display_path,
+                    &parentheticals,
                 );
             }
             let elapsed = start_time.elapsed();
+            let compile_fail_table =
+                compile_fail_counts_for_table(&per_target, &compile_failed_by_target);
             println!(
                 "\n{}",
                 format_results_summary(
@@ -628,6 +715,7 @@ pub fn run(
                     stats.unexpected_pass,
                     fix_xfail,
                     &per_target,
+                    &compile_fail_table,
                 )
             );
 
@@ -738,6 +826,7 @@ pub fn run(
     let target_col_w = target_name_width.max(8);
 
     let mut per_target_aggregate: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
+    let mut per_target_compile_fail_files: BTreeMap<String, usize> = BTreeMap::new();
     let mut concurrent_runner = ConcurrentRunner::new();
     let mut next_test = 0;
     let mut reported_tests = 0;
@@ -779,6 +868,13 @@ pub fn run(
                 harness_completed,
                 result: _,
             } = reply;
+            for (name, cf) in &compile_failed_by_target {
+                if *cf {
+                    *per_target_compile_fail_files
+                        .entry(name.clone())
+                        .or_default() += 1;
+                }
+            }
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
             tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
@@ -806,6 +902,8 @@ pub fn run(
                 let stats = &tests[reported_tests].stats;
                 let harness_completed = tests[reported_tests].harness_completed;
                 let per_target = &tests[reported_tests].per_target;
+                let compile_failed_by_target = &tests[reported_tests].compile_failed_by_target;
+                let any_compile_failed = tests[reported_tests].compile_failed;
                 total_test_cases += stats.total;
                 if harness_completed {
                     passed_test_cases += stats.passed;
@@ -854,8 +952,13 @@ pub fn run(
                             colors::GREEN
                         };
                         let has_unexpected_failures = tstats.failed > 0;
-                        let (counts_str, parentheticals) =
-                            format_file_counts(&tstats, has_unexpected_failures, harness_completed);
+                        let compile_failed_t = *compile_failed_by_target.get(&tn).unwrap_or(&false);
+                        let (counts_str, parentheticals) = format_file_counts(
+                            &tstats,
+                            has_unexpected_failures,
+                            harness_completed,
+                            compile_failed_t,
+                        );
                         let counts_colored = if colors::should_color() && !counts_str.is_empty() {
                             format!("{}{}{}", counts_color, counts_str, colors::RESET)
                         } else {
@@ -894,8 +997,12 @@ pub fn run(
                         colors::GREEN
                     };
                     let has_unexpected_failures = stats.failed > 0;
-                    let (counts_str, parentheticals) =
-                        format_file_counts(stats, has_unexpected_failures, harness_completed);
+                    let (counts_str, parentheticals) = format_file_counts(
+                        stats,
+                        has_unexpected_failures,
+                        harness_completed,
+                        any_compile_failed,
+                    );
                     let (status_marker, _) = if file_actually_failed {
                         (
                             if colors::should_color() {
@@ -969,6 +1076,13 @@ pub fn run(
                 harness_completed,
                 result: _,
             } = reply;
+            for (name, cf) in &compile_failed_by_target {
+                if *cf {
+                    *per_target_compile_fail_files
+                        .entry(name.clone())
+                        .or_default() += 1;
+                }
+            }
             tests[jobid].per_target = per_target.clone();
             tests[jobid].stats = stats;
             tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
@@ -996,6 +1110,13 @@ pub fn run(
                 result: _,
             }) = concurrent_runner.get()
             {
+                for (name, cf) in &compile_failed_by_target {
+                    if *cf {
+                        *per_target_compile_fail_files
+                            .entry(name.clone())
+                            .or_default() += 1;
+                    }
+                }
                 tests[jobid].per_target = per_target.clone();
                 tests[jobid].stats = stats;
                 tests[jobid].unexpected_pass_by_target = unexpected_pass_by_target;
@@ -1066,6 +1187,7 @@ pub fn run(
             unexpected_pass_test_cases,
             fix_xfail,
             &per_target_aggregate,
+            &per_target_compile_fail_files,
         )
     );
 
@@ -1314,11 +1436,30 @@ fn apply_unexpected_pass_fixes(
     }
 }
 
+/// Per-target compile-fail counts for the summary table (single-file: 0 or 1 per target).
+fn compile_fail_counts_for_table(
+    per_target: &BTreeMap<String, test_run::TestCaseStats>,
+    compile_failed_by_target: &BTreeMap<String, bool>,
+) -> BTreeMap<String, usize> {
+    per_target
+        .keys()
+        .map(|name| {
+            let n = if compile_failed_by_target.get(name).copied().unwrap_or(false) {
+                1
+            } else {
+                0
+            };
+            (name.clone(), n)
+        })
+        .collect()
+}
+
 /// Format per-file test counts with expected-fail information.
 fn format_file_counts(
     stats: &test_run::TestCaseStats,
     has_unexpected_failures: bool,
     harness_completed: bool,
+    whole_file_compile_failed: bool,
 ) -> (String, String) {
     let counts_str = if !harness_completed && stats.total > 0 {
         // Worker used `count_test_cases` only (panic or `run_filetest` error): avoid `0/total`.
@@ -1333,6 +1474,14 @@ fn format_file_counts(
 
     // Build suffix with expected-fail/unexpected info, with colors
     let mut suffix_parts = Vec::new();
+    if whole_file_compile_failed {
+        let part = "(compile-fail)";
+        suffix_parts.push(if colors::should_color() {
+            format!("{}{}{}", colors::YELLOW, part, colors::RESET)
+        } else {
+            part.to_string()
+        });
+    }
     if !has_unexpected_failures {
         // Show breakdown of expected failures by type
         let mut ef_parts = Vec::new();
@@ -1381,7 +1530,10 @@ fn format_file_counts(
 }
 
 /// Format per-target table for summary. Returns empty string if no per-target data.
-fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -> String {
+fn format_target_table(
+    per_target: &BTreeMap<String, test_run::TestCaseStats>,
+    compile_fail_files: &BTreeMap<String, usize>,
+) -> String {
     if per_target.is_empty() {
         return String::new();
     }
@@ -1398,13 +1550,14 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
     let col_fail = 6;
     let col_unimpl = 7;
     let col_unsupported = 11;
+    let col_compile_fail = 12;
 
     let mut out = String::new();
 
     // Header
     let header = format!(
-        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}",
-        "", "pass", "fail", "unimpl", "unsupported"
+        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}",
+        "", "pass", "fail", "unimpl", "unsupported", "compile-fail"
     );
     if with_color {
         out.push_str(&format!("{}{}{}\n", colors::DIM, header, colors::RESET));
@@ -1413,10 +1566,12 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
     }
 
     for (name, s) in per_target {
+        let cf = compile_fail_files.get(name).copied().unwrap_or(0);
         let pass_pad = format!("{:>col_pass$}", s.passed);
         let fail_pad = format!("{:>col_fail$}", s.failed);
         let unimpl_pad = format!("{:>col_unimpl$}", s.unimplemented);
         let unsupported_pad = format!("{:>col_unsupported$}", s.unsupported);
+        let compile_fail_pad = format!("{:>col_compile_fail$}", cf);
 
         let pass_cell = if with_color {
             format!("{}{pass_pad}{}", colors::GREEN, colors::RESET)
@@ -1442,8 +1597,14 @@ fn format_target_table(per_target: &BTreeMap<String, test_run::TestCaseStats>) -
             unsupported_pad
         };
 
+        let compile_fail_cell = if cf > 0 && with_color {
+            format!("{}{compile_fail_pad}{}", colors::YELLOW, colors::RESET)
+        } else {
+            compile_fail_pad
+        };
+
         out.push_str(&format!(
-            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}\n"
+            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}\n"
         ));
     }
 
@@ -1462,6 +1623,7 @@ fn format_results_summary(
     unexpected_pass_count: usize,
     fix_enabled: bool,
     per_target: &BTreeMap<String, test_run::TestCaseStats>,
+    compile_fail_files: &BTreeMap<String, usize>,
 ) -> String {
     let seconds = elapsed.as_secs_f64();
     let time_str = if seconds < 1.0 {
@@ -1486,7 +1648,7 @@ fn format_results_summary(
     let mut result = String::new();
 
     if !per_target.is_empty() {
-        result.push_str(&format_target_table(per_target));
+        result.push_str(&format_target_table(per_target, compile_fail_files));
         result.push('\n');
     }
 
@@ -1562,5 +1724,36 @@ fn format_results_summary(
             result.push_str(&removal_msg);
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod format_summary_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn format_file_counts_compile_failed_before_unimplemented() {
+        let mut stats = test_run::TestCaseStats::default();
+        stats.total = 6;
+        stats.unimplemented = 6;
+        let (_, parentheticals) = format_file_counts(&stats, false, true, true);
+        let cf = parentheticals
+            .find("compile failed")
+            .expect("compile failed");
+        let un = parentheticals
+            .find("6 unimplemented")
+            .expect("6 unimplemented");
+        assert!(cf < un, "parentheticals={parentheticals:?}");
+    }
+
+    #[test]
+    fn compile_fail_counts_for_table_maps_targets() {
+        let mut per_target: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
+        per_target.insert("wasm.q32".to_string(), test_run::TestCaseStats::default());
+        let mut cf: BTreeMap<String, bool> = BTreeMap::new();
+        cf.insert("wasm.q32".to_string(), true);
+        let m = compile_fail_counts_for_table(&per_target, &cf);
+        assert_eq!(m.get("wasm.q32").copied(), Some(1));
     }
 }

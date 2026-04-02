@@ -121,10 +121,17 @@ pub fn run(
             stats.unimplemented = unimplemented_count;
             stats.unsupported = unsupported_count;
             stats.passed = 0;
+            let compile_err = format!("Compilation failed for test file {relative_path}:\n\n{e:#}");
+            // In Detail/Debug, print the compiler error on stderr; concise multi-file runs rely on
+            // per-file `(compile-fail)` parentheticals and the summary table instead.
+            if output_mode.show_full_output()
+                && compile_failed_lines.is_empty()
+                && (unimplemented_count > 0 || unsupported_count > 0)
+            {
+                eprintln!("{compile_err}");
+            }
             return Ok((
-                Err(anyhow::anyhow!(
-                    "Compilation failed for test file {relative_path}:\n\n{e}"
-                )),
+                Err(anyhow::anyhow!(compile_err)),
                 stats,
                 Vec::new(),
                 compile_failed_lines,
@@ -710,6 +717,8 @@ fn format_code_block(source: &str) -> String {
         .join("\n")
 }
 
+/// Per-`// run:` diagnostic on parse/execute/compare failure (Detail/Debug only; concise runs use
+/// per-file status lines and the summary table).
 fn eprintln_if_detail(output_mode: OutputMode, msg: impl std::fmt::Display) {
     if output_mode.show_full_output() {
         eprintln!("{msg}");
