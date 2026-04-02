@@ -2,7 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use lp_glsl_core::FunctionSignature;
+use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_values::GlslValue;
 
@@ -50,6 +50,15 @@ pub trait GlslExecutable {
         rows: usize,
         cols: usize,
     ) -> Result<Vec<f32>, GlslError>;
+
+    /// Call a function that returns a fixed-size array; one [`GlslValue`] per array element.
+    fn call_array(
+        &mut self,
+        name: &str,
+        args: &[GlslValue],
+        elem_ty: &Type,
+        len: usize,
+    ) -> Result<Vec<GlslValue>, GlslError>;
 
     fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature>;
 

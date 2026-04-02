@@ -328,23 +328,7 @@ fn array_ty_flat_ir_types(
     module: &Module,
     array_ty: Handle<Type>,
 ) -> Result<Vec<IrType>, LowerError> {
-    let (dimensions, leaf_ty, _) =
-        crate::lower_array_multidim::flatten_array_type_shape(module, array_ty)?;
-    let element_count = dimensions
-        .iter()
-        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
-        .ok_or_else(|| {
-            LowerError::Internal(String::from("array_ty_flat_ir_types: count overflow"))
-        })?;
-    let leaf_inner = &module.types[leaf_ty].inner;
-    let leaf_tys = naga_type_to_ir_types(leaf_inner)?;
-    let mut out = Vec::new();
-    for _ in 0..element_count {
-        for ty in leaf_tys.iter() {
-            out.push(*ty);
-        }
-    }
-    Ok(out)
+    crate::naga_util::array_type_flat_ir_types(module, array_ty)
 }
 
 fn scan_param_argument_indices(

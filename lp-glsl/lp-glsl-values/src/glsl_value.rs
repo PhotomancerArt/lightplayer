@@ -3,7 +3,7 @@
 use glsl::syntax::{Expr, JumpStatement, SimpleStatement, Statement};
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 
-use alloc::{format, vec::Vec};
+use alloc::{boxed::Box, format, vec::Vec};
 
 /// Truncate f32 toward zero (no_std compatible)
 /// Casts to i32 which truncates toward zero, then to i64
@@ -52,6 +52,8 @@ pub enum GlslValue {
     Mat2x2([[f32; 2]; 2]), // [[col0_row0, col0_row1], [col1_row0, col1_row1]]
     Mat3x3([[f32; 3]; 3]), // [[col0_row0, col0_row1, col0_row2], [col1_row0, ...], ...]
     Mat4x4([[f32; 4]; 4]), // [[col0_row0, col0_row1, col0_row2, col0_row3], [col1_row0, ...], ...]
+    /// Fixed-size array; elements use the same recursive shape (scalars, vectors, matrices, nested arrays).
+    Array(Box<[GlslValue]>),
 }
 
 impl GlslValue {
@@ -191,6 +193,9 @@ impl GlslValue {
                                         }
                                     }
                                     "mat2" => {
+                                        if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
+                                            return Ok(GlslValue::Mat2x2([[s, 0.0], [0.0, s]]));
+                                        }
                                         if let Ok(m) = parse_matrix_constructor(args, 2) {
                                             return Ok(GlslValue::Mat2x2([
                                                 [m[0][0], m[0][1]],
@@ -199,6 +204,13 @@ impl GlslValue {
                                         }
                                     }
                                     "mat3" => {
+                                        if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
+                                            return Ok(GlslValue::Mat3x3([
+                                                [s, 0.0, 0.0],
+                                                [0.0, s, 0.0],
+                                                [0.0, 0.0, s],
+                                            ]));
+                                        }
                                         if let Ok(m) = parse_matrix_constructor(args, 3) {
                                             return Ok(GlslValue::Mat3x3([
                                                 [m[0][0], m[0][1], m[0][2]],
@@ -208,6 +220,14 @@ impl GlslValue {
                                         }
                                     }
                                     "mat4" => {
+                                        if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
+                                            return Ok(GlslValue::Mat4x4([
+                                                [s, 0.0, 0.0, 0.0],
+                                                [0.0, s, 0.0, 0.0],
+                                                [0.0, 0.0, s, 0.0],
+                                                [0.0, 0.0, 0.0, s],
+                                            ]));
+                                        }
                                         if let Ok(m) = parse_matrix_constructor(args, 4) {
                                             return Ok(GlslValue::Mat4x4([
                                                 [m[0][0], m[0][1], m[0][2], m[0][3]],
@@ -264,6 +284,9 @@ impl GlslValue {
             (GlslValue::Mat2x2(a), GlslValue::Mat2x2(b)) => a == b,
             (GlslValue::Mat3x3(a), GlslValue::Mat3x3(b)) => a == b,
             (GlslValue::Mat4x4(a), GlslValue::Mat4x4(b)) => a == b,
+            (GlslValue::Array(a), GlslValue::Array(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.eq(y))
+            }
             _ => false, // Type mismatch
         }
     }
@@ -314,6 +337,12 @@ impl GlslValue {
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
+            (GlslValue::Array(a), GlslValue::Array(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(x, y)| x.approx_eq(y, tolerance))
+            }
             _ => false, // Type mismatch
         }
     }
@@ -324,6 +353,30 @@ impl GlslValue {
     /// Approximate equality with default tolerance
     pub fn approx_eq_default(&self, other: &Self) -> bool {
         self.approx_eq(other, Self::DEFAULT_TOLERANCE)
+    }
+}
+
+/// Single scalar argument to `mat2(s)` / `mat3(s)` / `mat4(s)` (diagonal matrix).
+fn parse_diagonal_matrix_scalar_arg(args: &[Expr]) -> Option<f32> {
+    if args.len() != 1 {
+        return None;
+    }
+    match &args[0] {
+        Expr::FloatConst(f, _) => Some(*f),
+        Expr::IntConst(n, _) => Some(*n as f32),
+        Expr::Unary(op, unary_expr, _) => {
+            use glsl::syntax::UnaryOp;
+            if let UnaryOp::Minus = *op {
+                match **unary_expr {
+                    Expr::FloatConst(f, _) => Some(-f),
+                    Expr::IntConst(n, _) => Some(-(n as f32)),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 

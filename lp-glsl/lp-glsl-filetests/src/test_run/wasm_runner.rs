@@ -10,7 +10,7 @@ use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
-use wasmtime::{Config, Engine, Instance, Store};
+use wasmtime::{Config, Engine, Instance, Store, Val};
 
 use crate::test_run::wasm_link;
 
@@ -106,11 +106,7 @@ impl WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = export_info.params.clone();
-        let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
-        for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
-        }
+        let wasm_args = build_wasm_args(export_info, args, self.float_mode)?;
 
         let result_types = glsl_type_to_wasm_components(&export_info.return_type, self.float_mode);
         let mut results: Vec<wasmtime::Val> = result_types
@@ -178,44 +174,331 @@ fn to_frontend_type(ty: &GlslType) -> Type {
     }
 }
 
-fn glsl_value_to_wasm(
-    v: &GlslValue,
-    expected: WasmValType,
-    float_mode: lp_glsl_naga::FloatMode,
-) -> Result<wasmtime::Val, GlslError> {
-    use wasmtime::Val;
+fn encode_f32_wasm(f: f32, fm: lp_glsl_naga::FloatMode) -> Val {
+    match fm {
+        lp_glsl_naga::FloatMode::Q32 => Val::I32((f * Q16_16_SCALE) as i32),
+        lp_glsl_naga::FloatMode::F32 => Val::F32(f.to_bits()),
+    }
+}
 
-    match expected {
-        WasmValType::I32 => match v {
-            GlslValue::I32(x) => Ok(Val::I32(*x)),
-            GlslValue::U32(x) => Ok(Val::I32(*x as i32)),
-            GlslValue::Bool(b) => Ok(Val::I32(if *b { 1 } else { 0 })),
-            GlslValue::F32(f) => {
-                if matches!(float_mode, lp_glsl_naga::FloatMode::Q32) {
-                    Ok(Val::I32((*f * Q16_16_SCALE) as i32))
-                } else {
-                    Err(GlslError::new(
-                        ErrorCode::E0400,
-                        format!("float arg in i32 slot requires Q32 mode"),
-                    ))
+fn wasm_val_to_f32(v: &Val, fm: lp_glsl_naga::FloatMode) -> Result<f32, GlslError> {
+    match (v, fm) {
+        (Val::I32(i), lp_glsl_naga::FloatMode::Q32) => Ok(*i as f32 / Q16_16_SCALE),
+        (Val::F32(bits), lp_glsl_naga::FloatMode::F32) => Ok(f32::from_bits(*bits)),
+        _ => Err(GlslError::new(
+            ErrorCode::E0400,
+            format!("WASM: unexpected value for float (float_mode={fm:?})"),
+        )),
+    }
+}
+
+/// Flatten a logical [`GlslValue`] to WASM values for `ty` (matches [`glsl_type_to_wasm_components`] order).
+fn glsl_value_to_wasm_flat(
+    ty: &GlslType,
+    v: &GlslValue,
+    fm: lp_glsl_naga::FloatMode,
+) -> Result<Vec<Val>, GlslError> {
+    use GlslType::*;
+    Ok(match (ty, v) {
+        (Float, GlslValue::F32(f)) => vec![encode_f32_wasm(*f, fm)],
+        (Int, GlslValue::I32(i)) => vec![Val::I32(*i)],
+        (UInt, GlslValue::U32(u)) => vec![Val::I32(*u as i32)],
+        (Bool, GlslValue::Bool(b)) => vec![Val::I32(if *b { 1 } else { 0 })],
+        (Vec2, GlslValue::Vec2(a)) => vec![encode_f32_wasm(a[0], fm), encode_f32_wasm(a[1], fm)],
+        (Vec3, GlslValue::Vec3(a)) => vec![
+            encode_f32_wasm(a[0], fm),
+            encode_f32_wasm(a[1], fm),
+            encode_f32_wasm(a[2], fm),
+        ],
+        (Vec4, GlslValue::Vec4(a)) => vec![
+            encode_f32_wasm(a[0], fm),
+            encode_f32_wasm(a[1], fm),
+            encode_f32_wasm(a[2], fm),
+            encode_f32_wasm(a[3], fm),
+        ],
+        (IVec2, GlslValue::IVec2(a)) => vec![Val::I32(a[0]), Val::I32(a[1])],
+        (IVec3, GlslValue::IVec3(a)) => vec![Val::I32(a[0]), Val::I32(a[1]), Val::I32(a[2])],
+        (IVec4, GlslValue::IVec4(a)) => vec![
+            Val::I32(a[0]),
+            Val::I32(a[1]),
+            Val::I32(a[2]),
+            Val::I32(a[3]),
+        ],
+        (UVec2, GlslValue::UVec2(a)) => vec![Val::I32(a[0] as i32), Val::I32(a[1] as i32)],
+        (UVec3, GlslValue::UVec3(a)) => vec![
+            Val::I32(a[0] as i32),
+            Val::I32(a[1] as i32),
+            Val::I32(a[2] as i32),
+        ],
+        (UVec4, GlslValue::UVec4(a)) => vec![
+            Val::I32(a[0] as i32),
+            Val::I32(a[1] as i32),
+            Val::I32(a[2] as i32),
+            Val::I32(a[3] as i32),
+        ],
+        (BVec2, GlslValue::BVec2(a)) => vec![
+            Val::I32(if a[0] { 1 } else { 0 }),
+            Val::I32(if a[1] { 1 } else { 0 }),
+        ],
+        (BVec3, GlslValue::BVec3(a)) => vec![
+            Val::I32(if a[0] { 1 } else { 0 }),
+            Val::I32(if a[1] { 1 } else { 0 }),
+            Val::I32(if a[2] { 1 } else { 0 }),
+        ],
+        (BVec4, GlslValue::BVec4(a)) => vec![
+            Val::I32(if a[0] { 1 } else { 0 }),
+            Val::I32(if a[1] { 1 } else { 0 }),
+            Val::I32(if a[2] { 1 } else { 0 }),
+            Val::I32(if a[3] { 1 } else { 0 }),
+        ],
+        (Mat2, GlslValue::Mat2x2(m)) => vec![
+            encode_f32_wasm(m[0][0], fm),
+            encode_f32_wasm(m[0][1], fm),
+            encode_f32_wasm(m[1][0], fm),
+            encode_f32_wasm(m[1][1], fm),
+        ],
+        (Mat3, GlslValue::Mat3x3(m)) => {
+            let mut v = Vec::with_capacity(9);
+            for col in m.iter() {
+                for x in col.iter() {
+                    v.push(encode_f32_wasm(*x, fm));
                 }
+            }
+            v
+        }
+        (Mat4, GlslValue::Mat4x4(m)) => {
+            let mut v = Vec::with_capacity(16);
+            for col in m.iter() {
+                for x in col.iter() {
+                    v.push(encode_f32_wasm(*x, fm));
+                }
+            }
+            v
+        }
+        (Array { element, len }, GlslValue::Array(items)) => {
+            if items.len() != *len as usize {
+                return Err(GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "array value length {} does not match type length {}",
+                        items.len(),
+                        len
+                    ),
+                ));
+            }
+            let mut out = Vec::new();
+            for it in items.iter() {
+                out.extend(glsl_value_to_wasm_flat(element, it, fm)?);
+            }
+            out
+        }
+        _ => {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!("WASM: value {v:?} does not match parameter type {ty:?}"),
+            ));
+        }
+    })
+}
+
+fn build_wasm_args(
+    export_info: &WasmExport,
+    args: &[GlslValue],
+    fm: lp_glsl_naga::FloatMode,
+) -> Result<Vec<Val>, GlslError> {
+    if args.len() != export_info.param_types.len() {
+        return Err(GlslError::new(
+            ErrorCode::E0400,
+            format!(
+                "wrong argument count: expected {}, got {}",
+                export_info.param_types.len(),
+                args.len()
+            ),
+        ));
+    }
+    let mut wasm_args = Vec::new();
+    for (v, ty) in args.iter().zip(export_info.param_types.iter()) {
+        wasm_args.extend(glsl_value_to_wasm_flat(ty, v, fm)?);
+    }
+    if wasm_args.len() != export_info.params.len() {
+        return Err(GlslError::new(
+            ErrorCode::E0400,
+            format!(
+                "internal: flattened arg count {} != export param slots {}",
+                wasm_args.len(),
+                export_info.params.len()
+            ),
+        ));
+    }
+    Ok(wasm_args)
+}
+
+/// Decode flattened WASM result values into a [`GlslValue`]; returns `(value, slots_consumed)`.
+fn wasm_vals_to_glsl_value(
+    ty: &GlslType,
+    vals: &[Val],
+    fm: lp_glsl_naga::FloatMode,
+) -> Result<(GlslValue, usize), GlslError> {
+    use GlslType::*;
+    match ty {
+        Void => Err(GlslError::new(
+            ErrorCode::E0400,
+            "WASM: void type in wasm_vals_to_glsl_value",
+        )),
+        Float => {
+            let f = wasm_val_to_f32(&vals[0], fm)?;
+            Ok((GlslValue::F32(f), 1))
+        }
+        Int => match vals.first() {
+            Some(Val::I32(i)) => Ok((GlslValue::I32(*i), 1)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 for int return",
+            )),
+        },
+        UInt => match vals.first() {
+            Some(Val::I32(i)) => Ok((GlslValue::U32(*i as u32), 1)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 for uint return",
+            )),
+        },
+        Bool => match vals.first() {
+            Some(Val::I32(i)) => Ok((GlslValue::Bool(*i != 0), 1)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 for bool return",
+            )),
+        },
+        Vec2 => {
+            let a = wasm_val_to_f32(&vals[0], fm)?;
+            let b = wasm_val_to_f32(&vals[1], fm)?;
+            Ok((GlslValue::Vec2([a, b]), 2))
+        }
+        Vec3 => {
+            let a = wasm_val_to_f32(&vals[0], fm)?;
+            let b = wasm_val_to_f32(&vals[1], fm)?;
+            let c = wasm_val_to_f32(&vals[2], fm)?;
+            Ok((GlslValue::Vec3([a, b, c]), 3))
+        }
+        Vec4 => {
+            let a = wasm_val_to_f32(&vals[0], fm)?;
+            let b = wasm_val_to_f32(&vals[1], fm)?;
+            let c = wasm_val_to_f32(&vals[2], fm)?;
+            let d = wasm_val_to_f32(&vals[3], fm)?;
+            Ok((GlslValue::Vec4([a, b, c, d]), 4))
+        }
+        IVec2 => match (&vals[0], &vals[1]) {
+            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::IVec2([*a, *b]), 2)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 pair for ivec2",
+            )),
+        },
+        IVec3 => match (&vals[0], &vals[1], &vals[2]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c)) => Ok((GlslValue::IVec3([*a, *b, *c]), 3)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 triple for ivec3",
+            )),
+        },
+        IVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
+                Ok((GlslValue::IVec4([*a, *b, *c, *d]), 4))
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
-                format!("unsupported GlslValue {v:?} for i32 param"),
+                "WASM: expected four i32 for ivec4",
             )),
         },
-        WasmValType::F32 => match v {
-            GlslValue::F32(f) => Ok(Val::F32(f.to_bits())),
+        UVec2 => match (&vals[0], &vals[1]) {
+            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::UVec2([*a as u32, *b as u32]), 2)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
-                format!("expected f32, got {v:?}"),
+                "WASM: expected i32 pair for uvec2",
             )),
         },
-        _ => Err(GlslError::new(
-            ErrorCode::E0400,
-            format!("unsupported WASM param type {expected:?}"),
-        )),
+        UVec3 => match (&vals[0], &vals[1], &vals[2]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c)) => {
+                Ok((GlslValue::UVec3([*a as u32, *b as u32, *c as u32]), 3))
+            }
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 triple for uvec3",
+            )),
+        },
+        UVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => Ok((
+                GlslValue::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
+                4,
+            )),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected four i32 for uvec4",
+            )),
+        },
+        BVec2 => match (&vals[0], &vals[1]) {
+            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::BVec2([*a != 0, *b != 0]), 2)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 pair for bvec2",
+            )),
+        },
+        BVec3 => match (&vals[0], &vals[1], &vals[2]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c)) => {
+                Ok((GlslValue::BVec3([*a != 0, *b != 0, *c != 0]), 3))
+            }
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected i32 triple for bvec3",
+            )),
+        },
+        BVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
+            (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
+                Ok((GlslValue::BVec4([*a != 0, *b != 0, *c != 0, *d != 0]), 4))
+            }
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: expected four i32 for bvec4",
+            )),
+        },
+        Mat2 => {
+            let mut col0 = [0f32; 2];
+            let mut col1 = [0f32; 2];
+            col0[0] = wasm_val_to_f32(&vals[0], fm)?;
+            col0[1] = wasm_val_to_f32(&vals[1], fm)?;
+            col1[0] = wasm_val_to_f32(&vals[2], fm)?;
+            col1[1] = wasm_val_to_f32(&vals[3], fm)?;
+            Ok((GlslValue::Mat2x2([col0, col1]), 4))
+        }
+        Mat3 => {
+            let mut m = [[0f32; 3]; 3];
+            for col in 0..3 {
+                for row in 0..3 {
+                    m[col][row] = wasm_val_to_f32(&vals[col * 3 + row], fm)?;
+                }
+            }
+            Ok((GlslValue::Mat3x3(m), 9))
+        }
+        Mat4 => {
+            let mut m = [[0f32; 4]; 4];
+            for col in 0..4 {
+                for row in 0..4 {
+                    m[col][row] = wasm_val_to_f32(&vals[col * 4 + row], fm)?;
+                }
+            }
+            Ok((GlslValue::Mat4x4(m), 16))
+        }
+        Array { element, len } => {
+            let mut off = 0;
+            let mut elems = Vec::with_capacity(*len as usize);
+            for _ in 0..*len {
+                let (v, n) = wasm_vals_to_glsl_value(element, &vals[off..], fm)?;
+                off += n;
+                elems.push(v);
+            }
+            Ok((GlslValue::Array(elems.into_boxed_slice()), off))
+        }
     }
 }
 
@@ -231,11 +514,7 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = export_info.params.clone();
-        let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
-        for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
-        }
+        let wasm_args = build_wasm_args(export_info, args, self.float_mode)?;
 
         self.prepare_call()?;
         func.call(&mut self.store, &wasm_args, &mut [])
@@ -254,11 +533,7 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = export_info.params.clone();
-        let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
-        for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
-        }
+        let wasm_args = build_wasm_args(export_info, args, self.float_mode)?;
 
         self.prepare_call()?;
         let mut results = [wasmtime::Val::I32(0)];
@@ -286,11 +561,7 @@ impl GlslExecutable for WasmExecutable {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
 
-        let param_types: Vec<WasmValType> = export_info.params.clone();
-        let mut wasm_args: Vec<wasmtime::Val> = Vec::with_capacity(args.len());
-        for (v, t) in args.iter().zip(param_types.iter()) {
-            wasm_args.push(glsl_value_to_wasm(v, *t, self.float_mode)?);
-        }
+        let wasm_args = build_wasm_args(export_info, args, self.float_mode)?;
 
         let return_type = export_info.return_type.clone();
         self.prepare_call()?;
@@ -507,6 +778,50 @@ impl GlslExecutable for WasmExecutable {
                 )),
             })
             .collect()
+    }
+
+    fn call_array(
+        &mut self,
+        name: &str,
+        args: &[GlslValue],
+        elem_ty: &Type,
+        len: usize,
+    ) -> Result<Vec<GlslValue>, GlslError> {
+        let return_type = self
+            .exports
+            .get(name)
+            .map(|e| e.return_type.clone())
+            .ok_or_else(|| {
+                GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
+            })?;
+        let expected = Type::Array(Box::new(elem_ty.clone()), len);
+        if to_frontend_type(&return_type) != expected {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "call_array: function '{name}' returns {:?}, expected {:?}",
+                    return_type, expected
+                ),
+            ));
+        }
+        let results = self.call_wasm_multi(name, args)?;
+        let (val, consumed) = wasm_vals_to_glsl_value(&return_type, &results, self.float_mode)?;
+        if consumed != results.len() {
+            return Err(GlslError::new(
+                ErrorCode::E0400,
+                format!(
+                    "WASM: return slot count mismatch: decoded {consumed}, got {}",
+                    results.len()
+                ),
+            ));
+        }
+        match val {
+            GlslValue::Array(items) => Ok(Vec::from(items)),
+            _ => Err(GlslError::new(
+                ErrorCode::E0400,
+                "WASM: internal: array return was not decoded as Array",
+            )),
+        }
     }
 
     fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {

@@ -91,6 +91,44 @@ pub(crate) fn naga_type_width(inner: &TypeInner) -> usize {
     }
 }
 
+/// Flatten a fixed-size Naga array type (including multidimensional) to one LPIR register type per
+/// scalar component, row-major — same layout as [`crate::lower_ctx`] uses for array `in` parameters.
+/// Scalar/vector/matrix via [`naga_type_to_ir_types`]; fixed-size arrays flattened like parameters.
+pub(crate) fn ir_types_for_naga_type(
+    module: &Module,
+    ty: Handle<naga::Type>,
+) -> Result<Vec<IrType>, LowerError> {
+    let inner = &module.types[ty].inner;
+    if matches!(inner, TypeInner::Array { .. }) {
+        array_type_flat_ir_types(module, ty)
+    } else {
+        Ok(naga_type_to_ir_types(inner)?.to_vec())
+    }
+}
+
+pub(crate) fn array_type_flat_ir_types(
+    module: &Module,
+    array_ty: Handle<naga::Type>,
+) -> Result<Vec<IrType>, LowerError> {
+    let (dimensions, leaf_ty, _) =
+        crate::lower_array_multidim::flatten_array_type_shape(module, array_ty)?;
+    let element_count = dimensions
+        .iter()
+        .try_fold(1u32, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| {
+            LowerError::Internal(String::from("array_type_flat_ir_types: count overflow"))
+        })?;
+    let leaf_inner = &module.types[leaf_ty].inner;
+    let leaf_tys = naga_type_to_ir_types(leaf_inner)?;
+    let mut out = Vec::new();
+    for _ in 0..element_count {
+        for ty in leaf_tys.iter() {
+            out.push(*ty);
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) fn func_return_ir_types(
     module: &Module,
     func: &Function,
@@ -99,6 +137,9 @@ pub(crate) fn func_return_ir_types(
         return Ok(Vec::new());
     };
     let inner = &module.types[res.ty].inner;
+    if matches!(inner, TypeInner::Array { .. }) {
+        return array_type_flat_ir_types(module, res.ty);
+    }
     let tys = naga_type_to_ir_types(inner)?;
     Ok(tys.to_vec())
 }

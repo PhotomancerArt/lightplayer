@@ -309,7 +309,7 @@ pub(crate) fn store_array_element_const(
     let index = index.min(info.element_count - 1);
     let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
-    let srcs = coerce_assignment_vregs(ctx, elem_inner, value_expr, raw)?;
+    let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::UnsupportedStatement(format!(
@@ -360,7 +360,7 @@ pub(crate) fn store_array_element_dynamic(
 
     let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(value_expr)?;
-    let srcs = coerce_assignment_vregs(ctx, elem_inner, value_expr, raw)?;
+    let srcs = coerce_assignment_vregs(ctx, None, elem_inner, value_expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::UnsupportedStatement(format!(
@@ -464,7 +464,7 @@ fn store_element_at_byte_offset(
 ) -> Result<(), LowerError> {
     let elem_inner = &ctx.module.types[info.leaf_element_ty].inner;
     let raw = ctx.ensure_expr_vec(expr)?;
-    let srcs = coerce_assignment_vregs(ctx, elem_inner, expr, raw)?;
+    let srcs = coerce_assignment_vregs(ctx, None, elem_inner, expr, raw)?;
     let ir_tys = naga_type_to_ir_types(elem_inner)?;
     if srcs.len() != ir_tys.len() {
         return Err(LowerError::UnsupportedStatement(format!(

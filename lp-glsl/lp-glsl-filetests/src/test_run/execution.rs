@@ -12,9 +12,11 @@ pub fn execute_function(
     name: &str,
     args: &[GlslValue],
 ) -> Result<GlslValue> {
-    let sig = executable
+    let return_ty = executable
         .get_function_signature(name)
-        .ok_or_else(|| anyhow::anyhow!("function '{name}' not found"))?;
+        .ok_or_else(|| anyhow::anyhow!("function '{name}' not found"))?
+        .return_type
+        .clone();
 
     fn format_error(
         e: lp_glsl_diagnostics::GlslError,
@@ -28,7 +30,7 @@ pub fn execute_function(
         }
     }
 
-    match &sig.return_type {
+    match return_ty {
         Type::Float => executable
             .call_f32(name, args)
             .map(GlslValue::F32)
@@ -118,7 +120,11 @@ pub fn execute_function(
             .call_void(name, args)
             .map(|_| GlslValue::F32(0.0))
             .map_err(|e| format_error(e, executable)),
-        _ => anyhow::bail!("unsupported return type: {:?}", sig.return_type),
+        Type::Array(elem_ty, len) => executable
+            .call_array(name, args, elem_ty.as_ref(), len)
+            .map(|elements| GlslValue::Array(elements.into_boxed_slice()))
+            .map_err(|e| format_error(e, executable)),
+        other => anyhow::bail!("unsupported return type: {:?}", other),
     }
 }
 

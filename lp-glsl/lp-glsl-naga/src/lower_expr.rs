@@ -2,6 +2,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use lpir::{IrType, Op, VReg};
 use naga::{
     BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind, TypeInner,
@@ -13,7 +14,7 @@ use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_us
 use crate::lower_error::LowerError;
 use crate::lower_math;
 use crate::lower_unary::lower_unary_vec;
-use crate::naga_util::{expr_scalar_kind, expr_type_inner};
+use crate::naga_util::{expr_scalar_kind, expr_type_inner, type_handle_scalar_kind};
 
 pub(crate) fn lower_expr_vec(
     ctx: &mut LowerCtx<'_>,
@@ -633,19 +634,30 @@ fn lower_select_vec(
 }
 
 /// Coerce a lowered value to match a local/result type (implicit conversion on assignment/return).
+///
+/// When `dst_ty_handle` is `Some`, layout (including fixed-size arrays) uses that type handle.
+/// When `None`, `dst_ty_inner` must not be a top-level `Array` — use [`TypeInner`] only for
+/// synthetic scalar/vector/matrix shapes.
 pub(crate) fn coerce_assignment_vregs(
     ctx: &mut LowerCtx<'_>,
+    dst_ty_handle: Option<Handle<naga::Type>>,
     dst_ty_inner: &TypeInner,
     value_expr: Handle<Expression>,
     srcs: VRegVec,
 ) -> Result<VRegVec, LowerError> {
-    let dst_tys = crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?;
+    let dst_tys: Vec<IrType> = match dst_ty_handle {
+        Some(h) => crate::naga_util::ir_types_for_naga_type(ctx.module, h)?,
+        None => crate::lower_ctx::naga_type_to_ir_types(dst_ty_inner)?.to_vec(),
+    };
+    let dst_scalar_kind = match dst_ty_handle {
+        Some(h) => type_handle_scalar_kind(ctx.module, h)?,
+        None => root_scalar_kind(dst_ty_inner)?,
+    };
     // Naga lowers some scalar casts (e.g. `float(bvec2)`) as per-lane vector `Select`/math; the
     // declared type is still scalar. When scalar kinds already match, use the first lane.
     if dst_tys.len() == 1 && srcs.len() > 1 {
         let src_k = expr_scalar_kind(ctx.module, ctx.func, value_expr)?;
-        let dst_k = root_scalar_kind(dst_ty_inner)?;
-        if src_k == dst_k {
+        if src_k == dst_scalar_kind {
             return Ok(smallvec::smallvec![srcs[0]]);
         }
     }
@@ -657,7 +669,7 @@ pub(crate) fn coerce_assignment_vregs(
         )));
     }
     let src_k = expr_scalar_kind(ctx.module, ctx.func, value_expr)?;
-    let dst_k = root_scalar_kind(dst_ty_inner)?;
+    let dst_k = dst_scalar_kind;
     if src_k == dst_k {
         return Ok(srcs);
     }

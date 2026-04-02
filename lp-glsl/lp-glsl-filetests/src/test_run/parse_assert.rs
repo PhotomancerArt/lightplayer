@@ -4,6 +4,139 @@ use crate::parse::test_type::ComparisonOp;
 use anyhow::Result;
 use lp_glsl_values::GlslValue;
 
+/// Bases for `type[size](...)` array constructors (longer names first).
+const TYPED_ARRAY_BASES: &[&str] = &[
+    "ivec4", "uvec4", "bvec4", "ivec3", "uvec3", "bvec3", "ivec2", "uvec2", "bvec2", "vec4",
+    "vec3", "vec2", "uint", "bool", "int", "float", "mat4", "mat3", "mat2",
+];
+
+fn parse_typed_array_prefix(s: &str) -> Option<(&str, &str)> {
+    for base in TYPED_ARRAY_BASES {
+        if let Some(rest) = s.strip_prefix(base) {
+            if rest.starts_with('[') {
+                return Some((*base, rest));
+            }
+        }
+    }
+    None
+}
+
+/// Content after `(`, find matching `)` and return inner slice (not including parens).
+fn paren_contents(s: &str) -> Result<&str> {
+    let mut depth = 1usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(&s[..i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    Err(anyhow::anyhow!("unclosed '(' in constructor"))
+}
+
+/// Parse `[N](...)` after the type name; `rest` begins with `[`.
+fn parse_array_size_and_constructor_args(rest: &str) -> Result<(usize, &str)> {
+    let rest = rest
+        .strip_prefix('[')
+        .ok_or_else(|| anyhow::anyhow!("internal: expected '['"))?;
+    let rb = rest
+        .find(']')
+        .ok_or_else(|| anyhow::anyhow!("unclosed '[' in array type"))?;
+    let size: usize = rest[..rb]
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid array size"))?;
+    let after = rest[rb + 1..].trim_start();
+    let after_paren = after
+        .strip_prefix('(')
+        .ok_or_else(|| anyhow::anyhow!("expected '(' after array size"))?;
+    let inner = paren_contents(after_paren)?;
+    Ok((size, inner))
+}
+
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let t = s[start..i].trim();
+                if !t.is_empty() {
+                    parts.push(t);
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let t = s[start..].trim();
+    if !t.is_empty() {
+        parts.push(t);
+    }
+    parts
+}
+
+fn array_element_matches_base(base: &str, v: &GlslValue) -> bool {
+    match base {
+        "float" => matches!(v, GlslValue::F32(_)),
+        "int" => matches!(v, GlslValue::I32(_)),
+        "uint" => matches!(v, GlslValue::U32(_)),
+        "bool" => matches!(v, GlslValue::Bool(_)),
+        "vec2" => matches!(v, GlslValue::Vec2(_)),
+        "vec3" => matches!(v, GlslValue::Vec3(_)),
+        "vec4" => matches!(v, GlslValue::Vec4(_)),
+        "ivec2" => matches!(v, GlslValue::IVec2(_)),
+        "ivec3" => matches!(v, GlslValue::IVec3(_)),
+        "ivec4" => matches!(v, GlslValue::IVec4(_)),
+        "uvec2" => matches!(v, GlslValue::UVec2(_)),
+        "uvec3" => matches!(v, GlslValue::UVec3(_)),
+        "uvec4" => matches!(v, GlslValue::UVec4(_)),
+        "bvec2" => matches!(v, GlslValue::BVec2(_)),
+        "bvec3" => matches!(v, GlslValue::BVec3(_)),
+        "bvec4" => matches!(v, GlslValue::BVec4(_)),
+        "mat2" => matches!(v, GlslValue::Mat2x2(_)),
+        "mat3" => matches!(v, GlslValue::Mat3x3(_)),
+        "mat4" => matches!(v, GlslValue::Mat4x4(_)),
+        _ => false,
+    }
+}
+
+/// If `s` is a `type[N](...)` array constructor, parse and return `Some(Ok(value))`.
+/// Returns `Ok(None)` if the string does not start with a known array type prefix.
+fn parse_typed_array_constructor(s: &str) -> Result<Option<GlslValue>> {
+    let s = s.trim();
+    let Some((base, rest)) = parse_typed_array_prefix(s) else {
+        return Ok(None);
+    };
+    let (size, inner) = parse_array_size_and_constructor_args(rest)?;
+    let parts = split_top_level_commas(inner);
+    if parts.len() != size {
+        return Err(anyhow::anyhow!(
+            "array constructor expects {} elements, got {}",
+            size,
+            parts.len()
+        ));
+    }
+    let mut elems = Vec::with_capacity(size);
+    for p in parts {
+        let v = parse_glsl_value(p)?;
+        if !array_element_matches_base(base, &v) {
+            return Err(anyhow::anyhow!(
+                "array element type mismatch for base `{base}`: got {v:?}"
+            ));
+        }
+        elems.push(v);
+    }
+    Ok(Some(GlslValue::Array(elems.into_boxed_slice())))
+}
+
 /// Parse a GLSL value from a string.
 /// Supports scalars, vectors, and matrices.
 pub fn parse_glsl_value(s: &str) -> Result<GlslValue> {
@@ -32,6 +165,11 @@ pub fn parse_glsl_value(s: &str) -> Result<GlslValue> {
         "true" => return Ok(GlslValue::Bool(true)),
         "false" => return Ok(GlslValue::Bool(false)),
         _ => {}
+    }
+
+    // Typed array constructors: float[3](1.0, 2.0, 3.0), vec2[2](...)
+    if let Some(v) = parse_typed_array_constructor(s)? {
+        return Ok(v);
     }
 
     // Try parsing as vector or matrix constructor using GlslValue::parse

@@ -97,7 +97,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 let mut vs = ctx.ensure_expr_vec(*expr)?;
                 if let Some(res) = &ctx.func.result {
                     let dst_inner = &ctx.module.types[res.ty].inner;
-                    vs = coerce_assignment_vregs(ctx, dst_inner, *expr, vs)?;
+                    vs = coerce_assignment_vregs(ctx, Some(res.ty), dst_inner, *expr, vs)?;
                 }
                 ctx.fb.push_return(&vs);
                 Ok(())
@@ -173,7 +173,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 let scalar_inner = TypeInner::Scalar(*scalar);
                                 let raw = ctx.ensure_expr_vec(*value)?;
                                 let srcs =
-                                    coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                                    coerce_assignment_vregs(ctx, None, &scalar_inner, *value, raw)?;
                                 if srcs.len() != 1 {
                                     return Err(LowerError::UnsupportedStatement(format!(
                                         "component store expects one scalar, got {} values",
@@ -204,7 +204,8 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                     scalar: *scalar,
                                 };
                                 let raw = ctx.ensure_expr_vec(*value)?;
-                                let srcs = coerce_assignment_vregs(ctx, &col_ty, *value, raw)?;
+                                let srcs =
+                                    coerce_assignment_vregs(ctx, None, &col_ty, *value, raw)?;
                                 for r in 0..nrows {
                                     let flat_i = col * nrows + r;
                                     ctx.fb.push(Op::Copy {
@@ -234,7 +235,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                         };
                         let addr = ctx.arg_vregs_for(*arg_i)?[0];
                         let raw = ctx.ensure_expr_vec(*value)?;
-                        let srcs = coerce_assignment_vregs(ctx, &dst_inner, *value, raw)?;
+                        let srcs = coerce_assignment_vregs(ctx, None, &dst_inner, *value, raw)?;
                         if srcs.len() != 1 {
                             return Err(LowerError::UnsupportedStatement(format!(
                                 "component store expects one scalar, got {} values",
@@ -287,7 +288,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                         }
                         let scalar_inner = TypeInner::Scalar(*scalar);
                         let raw = ctx.ensure_expr_vec(*value)?;
-                        let srcs = coerce_assignment_vregs(ctx, &scalar_inner, *value, raw)?;
+                        let srcs = coerce_assignment_vregs(ctx, None, &scalar_inner, *value, raw)?;
                         if srcs.len() != 1 {
                             return Err(LowerError::UnsupportedStatement(format!(
                                 "matrix element store expects one scalar, got {} values",
@@ -342,9 +343,10 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                     }
                 }
                 let dsts = ctx.resolve_local(*lv)?;
-                let dst_inner = &ctx.module.types[ctx.func.local_variables[*lv].ty].inner;
+                let lv_ty = ctx.func.local_variables[*lv].ty;
+                let dst_inner = &ctx.module.types[lv_ty].inner;
                 let raw = ctx.ensure_expr_vec(*value)?;
-                let srcs = coerce_assignment_vregs(ctx, dst_inner, *value, raw)?;
+                let srcs = coerce_assignment_vregs(ctx, Some(lv_ty), dst_inner, *value, raw)?;
                 if dsts.len() != srcs.len() {
                     return Err(LowerError::UnsupportedStatement(format!(
                         "Store component mismatch {} vs {}",
@@ -541,7 +543,11 @@ fn lower_user_call(
             .as_ref()
             .ok_or_else(|| LowerError::Internal(String::from("call result for void function")))?;
         let inner = &ctx.module.types[res_ty.ty].inner;
-        let ir_tys = naga_type_to_ir_types(inner)?;
+        let ir_tys: Vec<IrType> = if matches!(inner, TypeInner::Array { .. }) {
+            crate::naga_util::array_type_flat_ir_types(ctx.module, res_ty.ty)?
+        } else {
+            naga_type_to_ir_types(inner)?.to_vec()
+        };
         let mut vregs = VRegVec::new();
         for ty in &ir_tys {
             let v = ctx.fb.alloc_vreg(*ty);

@@ -30,6 +30,8 @@ pub enum GlslQ32 {
     Mat2([f64; 4]),
     Mat3([f64; 9]),
     Mat4([f64; 16]),
+    /// Fixed-size array; ABI matches flattened element scalars in order.
+    Array(Vec<GlslQ32>),
 }
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).
@@ -145,9 +147,25 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
             Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
         }
 
-        (GlslType::Array { .. }, _) => Err(CallError::Unsupported(String::from(
-            "array arguments are not supported by Level-1 call() yet",
-        ))),
+        (GlslType::Array { element, len }, GlslQ32::Array(items)) => {
+            if items.len() != *len as usize {
+                return Err(CallError::TypeMismatch(format!(
+                    "array argument length mismatch: expected {}, got {}",
+                    len,
+                    items.len()
+                )));
+            }
+            let sub = GlslParamMeta {
+                name: String::new(),
+                qualifier: param.qualifier,
+                ty: element.as_ref().clone(),
+            };
+            let mut out = Vec::new();
+            for it in items {
+                out.extend(flatten_q32_arg(&sub, it)?);
+            }
+            Ok(out)
+        }
 
         (expected, got) => Err(CallError::TypeMismatch(format!(
             "argument type mismatch: expected {:?}, got {:?}",
@@ -178,6 +196,7 @@ fn got_ty_name(v: &GlslQ32) -> &'static str {
         GlslQ32::Mat2(_) => "Mat2",
         GlslQ32::Mat3(_) => "Mat3",
         GlslQ32::Mat4(_) => "Mat4",
+        GlslQ32::Array(_) => "Array",
     }
 }
 
@@ -265,10 +284,15 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
             crate::q32::q32_to_f64(words[14]),
             crate::q32::q32_to_f64(words[15]),
         ]),
-        GlslType::Array { .. } => {
-            return Err(CallError::Unsupported(String::from(
-                "array return values are not supported by Level-1 decode yet",
-            )));
+        GlslType::Array { element, len } => {
+            let per = glsl_component_count(element);
+            let mut elems = Vec::with_capacity(*len as usize);
+            for i in 0..(*len as usize) {
+                let start = i * per;
+                let end = start + per;
+                elems.push(decode_q32_return(element, &words[start..end])?);
+            }
+            GlslQ32::Array(elems)
         }
     })
 }

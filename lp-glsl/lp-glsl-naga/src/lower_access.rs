@@ -441,7 +441,7 @@ pub(crate) fn store_through_access(
                 TypeInner::Vector { scalar, .. } => {
                     let scalar_inner = TypeInner::Scalar(scalar);
                     let raw = ctx.ensure_expr_vec(value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &scalar_inner, value, raw)?;
+                    let srcs = coerce_assignment_vregs(ctx, None, &scalar_inner, value, raw)?;
                     if srcs.len() != 1 {
                         return Err(LowerError::UnsupportedStatement(format!(
                             "vector component store expects 1 value, got {}",
@@ -456,7 +456,7 @@ pub(crate) fn store_through_access(
                     let nrows = vector_size_usize(rows);
                     let col_ty = TypeInner::Vector { size: rows, scalar };
                     let raw = ctx.ensure_expr_vec(value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &col_ty, value, raw)?;
+                    let srcs = coerce_assignment_vregs(ctx, None, &col_ty, value, raw)?;
                     let lane_ty = naga_scalar_to_ir_type(scalar.kind)?;
                     store_matrix_column_dynamic(ctx, &dsts, index_v, nrows, &srcs, lane_ty)?;
                     Ok(())
@@ -492,7 +492,7 @@ pub(crate) fn store_through_access(
             let dsts = ctx.resolve_local(*lv)?;
             let scalar_inner = TypeInner::Scalar(*scalar);
             let raw = ctx.ensure_expr_vec(value)?;
-            let srcs = coerce_assignment_vregs(ctx, &scalar_inner, value, raw)?;
+            let srcs = coerce_assignment_vregs(ctx, None, &scalar_inner, value, raw)?;
             if srcs.len() != 1 {
                 return Err(LowerError::UnsupportedStatement(format!(
                     "matrix element store expects 1 value, got {}",
@@ -512,7 +512,7 @@ pub(crate) fn store_through_access(
                     let vs = load_inout_vector_lanes(ctx, *arg_i, n, scalar)?;
                     let scalar_inner = TypeInner::Scalar(scalar);
                     let raw = ctx.ensure_expr_vec(value)?;
-                    let srcs = coerce_assignment_vregs(ctx, &scalar_inner, value, raw)?;
+                    let srcs = coerce_assignment_vregs(ctx, None, &scalar_inner, value, raw)?;
                     if srcs.len() != 1 {
                         return Err(LowerError::UnsupportedStatement(String::from(
                             "vector pointer store: expected one scalar",

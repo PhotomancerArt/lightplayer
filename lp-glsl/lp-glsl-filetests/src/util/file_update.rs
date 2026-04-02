@@ -451,7 +451,46 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format_float(m[3][3])
             )
         }
+        GlslValue::Array(items) => {
+            if items.is_empty() {
+                return "float[0]()".to_string();
+            }
+            let inner = items
+                .iter()
+                .map(format_glsl_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            match glsl_array_type_prefix(items.first()) {
+                Some(base) => format!("{}[{}]({})", base, items.len(), inner),
+                None => format!("[{inner}]"),
+            }
+        }
     }
+}
+
+fn glsl_array_type_prefix(elem: Option<&GlslValue>) -> Option<&'static str> {
+    Some(match elem? {
+        GlslValue::F32(_) => "float",
+        GlslValue::I32(_) => "int",
+        GlslValue::U32(_) => "uint",
+        GlslValue::Bool(_) => "bool",
+        GlslValue::Vec2(_) => "vec2",
+        GlslValue::Vec3(_) => "vec3",
+        GlslValue::Vec4(_) => "vec4",
+        GlslValue::IVec2(_) => "ivec2",
+        GlslValue::IVec3(_) => "ivec3",
+        GlslValue::IVec4(_) => "ivec4",
+        GlslValue::UVec2(_) => "uvec2",
+        GlslValue::UVec3(_) => "uvec3",
+        GlslValue::UVec4(_) => "uvec4",
+        GlslValue::BVec2(_) => "bvec2",
+        GlslValue::BVec3(_) => "bvec3",
+        GlslValue::BVec4(_) => "bvec4",
+        GlslValue::Mat2x2(_) => "mat2",
+        GlslValue::Mat3x3(_) => "mat3",
+        GlslValue::Mat4x4(_) => "mat4",
+        GlslValue::Array(_) => return None,
+    })
 }
 
 #[cfg(test)]
