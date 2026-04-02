@@ -5,7 +5,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lpir::{IrType, Op, VReg};
 use naga::{
-    BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind, TypeInner,
+    ArraySize, BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind,
+    TypeInner,
 };
 
 use crate::lower_binary::lower_binary_vec;
@@ -264,6 +265,45 @@ fn lower_expr_vec_uncached(
                         ))
                     })?;
                     Ok(smallvec::smallvec![v])
+                }
+                // Value array: `in` / `const in T[n] arr` (flattened vregs), or `arr[i]` on a nested
+                // array rvalue after an outer `AccessIndex`.
+                TypeInner::Array {
+                    base: elem_ty_h,
+                    size,
+                    ..
+                } => {
+                    let n = match size {
+                        ArraySize::Constant(nz) => nz.get(),
+                        ArraySize::Pending(_) | ArraySize::Dynamic => {
+                            return Err(LowerError::UnsupportedExpression(String::from(
+                                "AccessIndex on dynamically-sized array value",
+                            )));
+                        }
+                    };
+                    if n == 0 {
+                        return Err(LowerError::UnsupportedExpression(String::from(
+                            "AccessIndex on zero-sized array",
+                        )));
+                    }
+                    let elem_inner = &ctx.module.types[elem_ty_h].inner;
+                    let elem_ir_count = crate::lower_ctx::naga_type_to_ir_types(elem_inner)?.len();
+                    let base_vs = lower_expr_vec(ctx, *base)?;
+                    let total = (n as usize).checked_mul(elem_ir_count).ok_or_else(|| {
+                        LowerError::Internal(String::from("AccessIndex array: vreg count overflow"))
+                    })?;
+                    if base_vs.len() != total {
+                        return Err(LowerError::Internal(format!(
+                            "AccessIndex array: base has {} vregs, expected {} ({} × {} components)",
+                            base_vs.len(),
+                            total,
+                            n,
+                            elem_ir_count
+                        )));
+                    }
+                    let i = (*index as usize).min(n as usize - 1);
+                    let start = i * elem_ir_count;
+                    Ok(base_vs[start..start + elem_ir_count].into())
                 }
                 _ => Err(LowerError::UnsupportedExpression(format!(
                     "AccessIndex on {base_inner:?}"
