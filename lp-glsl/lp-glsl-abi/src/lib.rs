@@ -33,6 +33,6 @@ pub use path_resolve::PathError;
 pub use value::GlslValue;
 pub use value_path::GlslValuePathError;
 pub use vmcontext::{
-    VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_GLOBALS_DEFAULTS_OFFSET,
-    VMCTX_OFFSET_TRAP_HANDLER, VmContextHeader, minimal_vmcontext,
+    DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
+    VMCTX_OFFSET_TRAP_HANDLER, VmContext, VmContextHeader, minimal_vmcontext,
 };

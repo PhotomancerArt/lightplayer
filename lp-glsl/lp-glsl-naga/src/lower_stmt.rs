@@ -479,6 +479,24 @@ fn lower_user_call(
         return lower_lpfx::lower_lpfx_call(ctx, callee, arguments, result);
     }
     if f.body.is_empty() {
+        if name == "__lp_get_fuel" {
+            if let Some(res_h) = result {
+                let key = "vm::__lp_get_fuel";
+                let callee = ctx
+                    .import_map
+                    .get(key)
+                    .copied()
+                    .ok_or_else(|| LowerError::Internal(format!("missing import {key}")))?;
+                let r = ctx.fb.alloc_vreg(IrType::I32);
+                ctx.fb.push_call(callee, &[VMCTX_VREG], &[r]);
+                let mut vregs = VRegVec::new();
+                vregs.push(r);
+                if let Some(slot) = ctx.expr_cache.get_mut(res_h.index()) {
+                    *slot = Some(vregs);
+                }
+            }
+            return Ok(());
+        }
         if result.is_some() {
             return Err(LowerError::Internal(String::from(
                 "call to empty-bodied function with result",

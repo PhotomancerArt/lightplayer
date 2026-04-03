@@ -57,39 +57,43 @@ pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, GlslModuleMeta), Low
 
 fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> {
     let mut m = BTreeMap::new();
-    let mut reg = |module: &str, name: &str, params: &[IrType], rets: &[IrType]| {
-        let r = mb.add_import(ImportDecl {
-            module_name: String::from(module),
-            func_name: String::from(name),
-            param_types: params.to_vec(),
-            return_types: rets.to_vec(),
-            lpfx_glsl_params: None,
-        });
-        m.insert(format!("{module}::{name}"), r);
-    };
+    let mut reg =
+        |module: &str, name: &str, params: &[IrType], rets: &[IrType], needs_vmctx: bool| {
+            let r = mb.add_import(ImportDecl {
+                module_name: String::from(module),
+                func_name: String::from(name),
+                param_types: params.to_vec(),
+                return_types: rets.to_vec(),
+                lpfx_glsl_params: None,
+                needs_vmctx,
+            });
+            m.insert(format!("{module}::{name}"), r);
+        };
     let f1 = &[IrType::F32];
     let r1 = &[IrType::F32];
-    reg("lpir", "sqrt", f1, r1);
-    reg("glsl", "sin", f1, r1);
-    reg("glsl", "cos", f1, r1);
-    reg("glsl", "tan", f1, r1);
-    reg("glsl", "asin", f1, r1);
-    reg("glsl", "acos", f1, r1);
-    reg("glsl", "atan", f1, r1);
-    reg("glsl", "atan2", &[IrType::F32, IrType::F32], r1);
-    reg("glsl", "sinh", f1, r1);
-    reg("glsl", "cosh", f1, r1);
-    reg("glsl", "tanh", f1, r1);
-    reg("glsl", "asinh", f1, r1);
-    reg("glsl", "acosh", f1, r1);
-    reg("glsl", "atanh", f1, r1);
-    reg("glsl", "exp", f1, r1);
-    reg("glsl", "exp2", f1, r1);
-    reg("glsl", "log", f1, r1);
-    reg("glsl", "log2", f1, r1);
-    reg("glsl", "pow", &[IrType::F32, IrType::F32], r1);
-    reg("glsl", "ldexp", &[IrType::F32, IrType::I32], r1);
-    reg("glsl", "round", f1, r1);
+    let u1 = &[IrType::I32];
+    reg("lpir", "sqrt", f1, r1, false);
+    reg("glsl", "sin", f1, r1, false);
+    reg("glsl", "cos", f1, r1, false);
+    reg("glsl", "tan", f1, r1, false);
+    reg("glsl", "asin", f1, r1, false);
+    reg("glsl", "acos", f1, r1, false);
+    reg("glsl", "atan", f1, r1, false);
+    reg("glsl", "atan2", &[IrType::F32, IrType::F32], r1, false);
+    reg("glsl", "sinh", f1, r1, false);
+    reg("glsl", "cosh", f1, r1, false);
+    reg("glsl", "tanh", f1, r1, false);
+    reg("glsl", "asinh", f1, r1, false);
+    reg("glsl", "acosh", f1, r1, false);
+    reg("glsl", "atanh", f1, r1, false);
+    reg("glsl", "exp", f1, r1, false);
+    reg("glsl", "exp2", f1, r1, false);
+    reg("glsl", "log", f1, r1, false);
+    reg("glsl", "log2", f1, r1, false);
+    reg("glsl", "pow", &[IrType::F32, IrType::F32], r1, false);
+    reg("glsl", "ldexp", &[IrType::F32, IrType::I32], r1, false);
+    reg("glsl", "round", f1, r1, false);
+    reg("vm", "__lp_get_fuel", &[], u1, true);
     m
 }
 

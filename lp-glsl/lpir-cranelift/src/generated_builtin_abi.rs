@@ -43,7 +43,8 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpGlslTanhQ32
         | BuiltinId::LpLpirFnearestQ32
         | BuiltinId::LpLpirFsqrtQ32
-        | BuiltinId::LpLpfxSaturateQ32 => {
+        | BuiltinId::LpLpfxSaturateQ32
+        | BuiltinId::LpVmGetFuelQ32 => {
             // extern "C" fn(i32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
@@ -328,6 +329,7 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         lpfx::hash,
         lpfx::math,
         lpir::{fadd_q32, fdiv_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32},
+        vm::get_fuel_q32,
     };
     match builtin {
         BuiltinId::LpGlslAcosQ32 => acos_q32::__lp_glsl_acos_q32 as *const u8,
@@ -542,5 +544,6 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpfxWorley3ValueQ32 => {
             generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32 as *const u8
         }
+        BuiltinId::LpVmGetFuelQ32 => get_fuel_q32::__lp_vm_get_fuel_q32 as *const u8,
     }
 }

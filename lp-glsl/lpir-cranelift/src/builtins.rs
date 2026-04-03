@@ -14,7 +14,7 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_module::{FuncId, Linkage, Module};
 use lp_glsl_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id,
+    lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 use lpir::FloatMode;
 use lpir::module::{ImportDecl, IrModule};
@@ -66,10 +66,21 @@ pub(crate) fn resolve_import(
                 ))
             })
         }
-        ("glsl" | "lpir" | "lpfx", FloatMode::F32) => Err(CompileError::unsupported(format!(
-            "import `{}::{}` requires FloatMode::Q32",
-            decl.module_name, decl.func_name
-        ))),
+        ("vm", FloatMode::Q32) => {
+            let ac = decl.param_types.len();
+            vm_q32_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
+                CompileError::unsupported(format!(
+                    "unsupported vm import `{}` (arity {ac})",
+                    decl.func_name
+                ))
+            })
+        }
+        ("glsl" | "lpir" | "lpfx" | "vm", FloatMode::F32) => {
+            Err(CompileError::unsupported(format!(
+                "import `{}::{}` requires FloatMode::Q32",
+                decl.module_name, decl.func_name
+            )))
+        }
         (m, _) => Err(CompileError::unsupported(format!(
             "unsupported import module `{m}`"
         ))),

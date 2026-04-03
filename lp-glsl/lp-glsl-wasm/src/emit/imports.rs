@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use lp_glsl_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id,
+    lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 use lp_glsl_naga::FloatMode;
 use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, Op};
@@ -138,6 +138,15 @@ fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
                 format!(
                     "unsupported lpfx import `{}` with {:?}",
                     decl.func_name, kinds
+                )
+            })
+        }
+        "vm" => {
+            let ac = decl.param_types.len();
+            vm_q32_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
+                format!(
+                    "unsupported vm import `{}` (arg count {ac})",
+                    decl.func_name
                 )
             })
         }

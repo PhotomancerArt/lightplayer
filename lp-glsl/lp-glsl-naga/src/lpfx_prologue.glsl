@@ -1,4 +1,5 @@
 // LightPlayer LPFX: forward declarations for Naga (bodies are WASM imports).
+uint __lp_get_fuel();
 uint lpfx_hash(uint x, uint seed);
 uint lpfx_hash(uvec2 xy, uint seed);
 uint lpfx_hash(uvec3 xyz, uint seed);

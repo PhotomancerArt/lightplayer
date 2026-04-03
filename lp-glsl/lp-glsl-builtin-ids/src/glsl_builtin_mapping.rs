@@ -76,6 +76,14 @@ pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
     }
 }
 
+/// Map `@vm::*` import name + user-visible argument count to a Q32 builtin.
+pub fn vm_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
+    match (name, arg_count) {
+        ("__lp_get_fuel", 0) => Some(BuiltinId::LpVmGetFuelQ32),
+        _ => None,
+    }
+}
+
 /// Map `lpfx_*` name + parameter type list to the Q32 `BuiltinId`.
 pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {
     match (name, params) {
@@ -200,6 +208,7 @@ pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
 mod glsl_builtin_mapping_tests {
     use super::{
         GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id,
+        vm_q32_builtin_id,
     };
     use crate::BuiltinId;
 
@@ -224,6 +233,14 @@ mod glsl_builtin_mapping_tests {
         assert_eq!(
             lpir_q32_builtin_id("sqrt", 1),
             Some(BuiltinId::LpLpirFsqrtQ32)
+        );
+    }
+
+    #[test]
+    fn vm_get_fuel() {
+        assert_eq!(
+            vm_q32_builtin_id("__lp_get_fuel", 0),
+            Some(BuiltinId::LpVmGetFuelQ32)
         );
     }
 

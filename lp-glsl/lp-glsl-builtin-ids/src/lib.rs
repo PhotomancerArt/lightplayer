@@ -105,6 +105,7 @@ pub enum BuiltinId {
     LpLpfxWorley3Q32,
     LpLpfxWorley3ValueF32,
     LpLpfxWorley3ValueQ32,
+    LpVmGetFuelQ32,
 }
 
 impl BuiltinId {
@@ -206,6 +207,7 @@ impl BuiltinId {
             BuiltinId::LpLpfxWorley3Q32 => "__lp_lpfx_worley3_q32",
             BuiltinId::LpLpfxWorley3ValueF32 => "__lp_lpfx_worley3_value_f32",
             BuiltinId::LpLpfxWorley3ValueQ32 => "__lp_lpfx_worley3_value_q32",
+            BuiltinId::LpVmGetFuelQ32 => "__lp_vm_get_fuel_q32",
         }
     }
 
@@ -307,6 +309,7 @@ impl BuiltinId {
             "__lp_lpfx_worley3_q32" => Some(BuiltinId::LpLpfxWorley3Q32),
             "__lp_lpfx_worley3_value_f32" => Some(BuiltinId::LpLpfxWorley3ValueF32),
             "__lp_lpfx_worley3_value_q32" => Some(BuiltinId::LpLpfxWorley3ValueQ32),
+            "__lp_vm_get_fuel_q32" => Some(BuiltinId::LpVmGetFuelQ32),
             _ => None,
         }
     }
@@ -409,6 +412,7 @@ impl BuiltinId {
             BuiltinId::LpLpfxWorley3Q32,
             BuiltinId::LpLpfxWorley3ValueF32,
             BuiltinId::LpLpfxWorley3ValueQ32,
+            BuiltinId::LpVmGetFuelQ32,
         ]
     }
 
@@ -510,6 +514,7 @@ impl BuiltinId {
             BuiltinId::LpLpfxWorley3Q32 => Module::Lpfx,
             BuiltinId::LpLpfxWorley3ValueF32 => Module::Lpfx,
             BuiltinId::LpLpfxWorley3ValueQ32 => Module::Lpfx,
+            BuiltinId::LpVmGetFuelQ32 => Module::Vm,
         }
     }
 
@@ -611,6 +616,7 @@ impl BuiltinId {
             BuiltinId::LpLpfxWorley3Q32 => "worley3",
             BuiltinId::LpLpfxWorley3ValueF32 => "worley3_value",
             BuiltinId::LpLpfxWorley3ValueQ32 => "worley3_value",
+            BuiltinId::LpVmGetFuelQ32 => "get_fuel",
         }
     }
 
@@ -712,6 +718,109 @@ impl BuiltinId {
             BuiltinId::LpLpfxWorley3Q32 => Some(Mode::Q32),
             BuiltinId::LpLpfxWorley3ValueF32 => Some(Mode::F32),
             BuiltinId::LpLpfxWorley3ValueQ32 => Some(Mode::Q32),
+            BuiltinId::LpVmGetFuelQ32 => Some(Mode::Q32),
+        }
+    }
+
+    pub fn needs_vmctx(&self) -> bool {
+        match self {
+            BuiltinId::LpGlslAcosQ32 => false,
+            BuiltinId::LpGlslAcoshQ32 => false,
+            BuiltinId::LpGlslAsinQ32 => false,
+            BuiltinId::LpGlslAsinhQ32 => false,
+            BuiltinId::LpGlslAtan2Q32 => false,
+            BuiltinId::LpGlslAtanQ32 => false,
+            BuiltinId::LpGlslAtanhQ32 => false,
+            BuiltinId::LpGlslCosQ32 => false,
+            BuiltinId::LpGlslCoshQ32 => false,
+            BuiltinId::LpGlslExp2Q32 => false,
+            BuiltinId::LpGlslExpQ32 => false,
+            BuiltinId::LpGlslFmaQ32 => false,
+            BuiltinId::LpGlslInversesqrtQ32 => false,
+            BuiltinId::LpGlslLdexpQ32 => false,
+            BuiltinId::LpGlslLog2Q32 => false,
+            BuiltinId::LpGlslLogQ32 => false,
+            BuiltinId::LpGlslModQ32 => false,
+            BuiltinId::LpGlslPowQ32 => false,
+            BuiltinId::LpGlslRoundQ32 => false,
+            BuiltinId::LpGlslSinQ32 => false,
+            BuiltinId::LpGlslSinhQ32 => false,
+            BuiltinId::LpGlslTanQ32 => false,
+            BuiltinId::LpGlslTanhQ32 => false,
+            BuiltinId::LpLpirFaddQ32 => false,
+            BuiltinId::LpLpirFdivQ32 => false,
+            BuiltinId::LpLpirFmulQ32 => false,
+            BuiltinId::LpLpirFnearestQ32 => false,
+            BuiltinId::LpLpirFsqrtQ32 => false,
+            BuiltinId::LpLpirFsubQ32 => false,
+            BuiltinId::LpLpfxFbm2F32 => false,
+            BuiltinId::LpLpfxFbm2Q32 => false,
+            BuiltinId::LpLpfxFbm3F32 => false,
+            BuiltinId::LpLpfxFbm3Q32 => false,
+            BuiltinId::LpLpfxFbm3TileF32 => false,
+            BuiltinId::LpLpfxFbm3TileQ32 => false,
+            BuiltinId::LpLpfxGnoise1F32 => false,
+            BuiltinId::LpLpfxGnoise1Q32 => false,
+            BuiltinId::LpLpfxGnoise2F32 => false,
+            BuiltinId::LpLpfxGnoise2Q32 => false,
+            BuiltinId::LpLpfxGnoise3F32 => false,
+            BuiltinId::LpLpfxGnoise3Q32 => false,
+            BuiltinId::LpLpfxGnoise3TileF32 => false,
+            BuiltinId::LpLpfxGnoise3TileQ32 => false,
+            BuiltinId::LpLpfxHash1 => false,
+            BuiltinId::LpLpfxHash2 => false,
+            BuiltinId::LpLpfxHash3 => false,
+            BuiltinId::LpLpfxHsv2rgbF32 => false,
+            BuiltinId::LpLpfxHsv2rgbQ32 => false,
+            BuiltinId::LpLpfxHsv2rgbVec4F32 => false,
+            BuiltinId::LpLpfxHsv2rgbVec4Q32 => false,
+            BuiltinId::LpLpfxHue2rgbF32 => false,
+            BuiltinId::LpLpfxHue2rgbQ32 => false,
+            BuiltinId::LpLpfxPsrdnoise2F32 => false,
+            BuiltinId::LpLpfxPsrdnoise2Q32 => false,
+            BuiltinId::LpLpfxPsrdnoise3F32 => false,
+            BuiltinId::LpLpfxPsrdnoise3Q32 => false,
+            BuiltinId::LpLpfxRandom1F32 => false,
+            BuiltinId::LpLpfxRandom1Q32 => false,
+            BuiltinId::LpLpfxRandom2F32 => false,
+            BuiltinId::LpLpfxRandom2Q32 => false,
+            BuiltinId::LpLpfxRandom3F32 => false,
+            BuiltinId::LpLpfxRandom3Q32 => false,
+            BuiltinId::LpLpfxRgb2hsvF32 => false,
+            BuiltinId::LpLpfxRgb2hsvQ32 => false,
+            BuiltinId::LpLpfxRgb2hsvVec4F32 => false,
+            BuiltinId::LpLpfxRgb2hsvVec4Q32 => false,
+            BuiltinId::LpLpfxSaturateF32 => false,
+            BuiltinId::LpLpfxSaturateQ32 => false,
+            BuiltinId::LpLpfxSaturateVec3F32 => false,
+            BuiltinId::LpLpfxSaturateVec3Q32 => false,
+            BuiltinId::LpLpfxSaturateVec4F32 => false,
+            BuiltinId::LpLpfxSaturateVec4Q32 => false,
+            BuiltinId::LpLpfxSnoise1F32 => false,
+            BuiltinId::LpLpfxSnoise1Q32 => false,
+            BuiltinId::LpLpfxSnoise2F32 => false,
+            BuiltinId::LpLpfxSnoise2Q32 => false,
+            BuiltinId::LpLpfxSnoise3F32 => false,
+            BuiltinId::LpLpfxSnoise3Q32 => false,
+            BuiltinId::LpLpfxSrandom1F32 => false,
+            BuiltinId::LpLpfxSrandom1Q32 => false,
+            BuiltinId::LpLpfxSrandom2F32 => false,
+            BuiltinId::LpLpfxSrandom2Q32 => false,
+            BuiltinId::LpLpfxSrandom3F32 => false,
+            BuiltinId::LpLpfxSrandom3Q32 => false,
+            BuiltinId::LpLpfxSrandom3TileF32 => false,
+            BuiltinId::LpLpfxSrandom3TileQ32 => false,
+            BuiltinId::LpLpfxSrandom3VecF32 => false,
+            BuiltinId::LpLpfxSrandom3VecQ32 => false,
+            BuiltinId::LpLpfxWorley2F32 => false,
+            BuiltinId::LpLpfxWorley2Q32 => false,
+            BuiltinId::LpLpfxWorley2ValueF32 => false,
+            BuiltinId::LpLpfxWorley2ValueQ32 => false,
+            BuiltinId::LpLpfxWorley3F32 => false,
+            BuiltinId::LpLpfxWorley3Q32 => false,
+            BuiltinId::LpLpfxWorley3ValueF32 => false,
+            BuiltinId::LpLpfxWorley3ValueQ32 => false,
+            BuiltinId::LpVmGetFuelQ32 => true,
         }
     }
 }
@@ -721,6 +830,7 @@ impl BuiltinId {
 pub enum Module {
     Lpir,
     Glsl,
+    Vm,
     Lpfx,
 }
 
@@ -737,3 +847,4 @@ pub use glsl_builtin_mapping::GlslParamKind;
 pub use glsl_builtin_mapping::glsl_lpfx_q32_builtin_id;
 pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;
 pub use glsl_builtin_mapping::lpir_q32_builtin_id;
+pub use glsl_builtin_mapping::vm_q32_builtin_id;

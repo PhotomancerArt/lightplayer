@@ -15,6 +15,7 @@ std = ["log/std"]
 test = ["std"]
 
 [dependencies]
+lp-glsl-abi = { path = "../lp-glsl-abi", default-features = false }
 lpfx-impl-macro = { path = "../lpfx-impl-macro" }
 log = { workspace = true, default-features = false }
 

@@ -3770,6 +3770,7 @@ name = "lp-glsl-builtins"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lp-glsl-abi",
  "lpfx-impl-macro",
 ]
 

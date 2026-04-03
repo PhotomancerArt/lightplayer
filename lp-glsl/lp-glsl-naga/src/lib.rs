@@ -181,6 +181,27 @@ float test() {
     }
 
     #[test]
+    fn lower_get_fuel_validates() {
+        // Test that __lp_get_fuel lowering produces valid IR with VMContext import
+        let src = "int f() { return int(__lp_get_fuel()); }";
+        let naga = compile(src).unwrap();
+        let (ir, _) = super::lower(&naga).expect("lower");
+        // Should have 1 user function and 1 import (@vm::__lp_get_fuel)
+        assert_eq!(ir.functions.len(), 1);
+        assert!(
+            ir.imports.iter().any(|i| i.func_name == "__lp_get_fuel"),
+            "missing __lp_get_fuel import"
+        );
+        assert!(
+            ir.imports
+                .iter()
+                .any(|i| i.func_name == "__lp_get_fuel" && i.needs_vmctx),
+            "__lp_get_fuel should need_vmctx"
+        );
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
     fn lower_void_implicit_return_validates() {
         let src = "void f() { }";
         let naga = compile(src).unwrap();

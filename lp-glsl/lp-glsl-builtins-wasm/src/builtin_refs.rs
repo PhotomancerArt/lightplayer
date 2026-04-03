@@ -108,6 +108,7 @@ use lp_glsl_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 use lp_glsl_builtins::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32;
 use lp_glsl_builtins::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
 use lp_glsl_builtins::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
+use lp_glsl_builtins::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
 
 /// Reference all builtin functions to prevent dead code elimination.
 ///
@@ -259,6 +260,7 @@ pub fn ensure_builtins_referenced() {
             __lp_lpfx_worley3_value_f32;
         let _lpfx_worley3_value_q32_fn: extern "C" fn(i32, i32, i32, u32) -> i32 =
             __lp_lpfx_worley3_value_q32;
+        let _vm_get_fuel_q32_fn: extern "C" fn(i32) -> u32 = __lp_vm_get_fuel_q32;
 
         // Force these to be included by using them in a way that can't be optimized away
         // We'll use volatile reads to prevent optimization
@@ -358,5 +360,6 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpfx_worley3_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfx_worley3_value_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfx_worley3_value_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_vm_get_fuel_q32_fn as *const _);
     }
 }

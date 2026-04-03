@@ -332,21 +332,44 @@ fn validate_call(
         return;
     }
 
-    let Some((param_tys, ret_tys)) = callee_signature(module, callee) else {
-        errs.push(err_in_func(
-            fname,
-            op_i,
-            "internal: callee signature missing",
-        ));
-        return;
-    };
-
     let arg_slice = func.pool_slice(args);
     let res_slice = func.pool_slice(results);
 
     if arg_slice.len() != args.count as usize || res_slice.len() != results.count as usize {
         return;
     }
+
+    let mut import_param_scratch: Vec<IrType> = Vec::new();
+    let (param_tys, ret_tys): (&[IrType], &[IrType]) =
+        if let Some(i) = module.callee_as_import(callee) {
+            let imp = &module.imports[i];
+            import_param_scratch.clear();
+            if imp.needs_vmctx {
+                import_param_scratch.push(IrType::I32);
+            }
+            import_param_scratch.extend_from_slice(&imp.param_types);
+            (import_param_scratch.as_slice(), imp.return_types.as_slice())
+        } else if let Some(i) = module.callee_as_function(callee) {
+            let fdef = &module.functions[i];
+            let vm = fdef.vmctx_vreg.0 as usize;
+            let end = vm + 1 + fdef.param_count as usize;
+            if end > fdef.vreg_types.len() {
+                errs.push(err_in_func(
+                    fname,
+                    op_i,
+                    "internal: callee signature missing",
+                ));
+                return;
+            }
+            (&fdef.vreg_types[..end], fdef.return_types.as_slice())
+        } else {
+            errs.push(err_in_func(
+                fname,
+                op_i,
+                "internal: callee signature missing",
+            ));
+            return;
+        };
 
     if param_tys.len() != arg_slice.len() {
         errs.push(err_in_func(
@@ -400,27 +423,6 @@ fn validate_call(
                 ));
             }
         }
-    }
-}
-
-fn callee_signature<'a>(
-    module: &'a IrModule,
-    callee: CalleeRef,
-) -> Option<(&'a [IrType], &'a [IrType])> {
-    if let Some(i) = module.callee_as_import(callee) {
-        let imp = &module.imports[i];
-        Some((&imp.param_types, &imp.return_types))
-    } else if let Some(i) = module.callee_as_function(callee) {
-        let f = &module.functions[i];
-        let vm = f.vmctx_vreg.0 as usize;
-        let end = vm + 1 + f.param_count as usize;
-        if end <= f.vreg_types.len() {
-            Some((&f.vreg_types[..end], &f.return_types))
-        } else {
-            None
-        }
-    } else {
-        None
     }
 }
 

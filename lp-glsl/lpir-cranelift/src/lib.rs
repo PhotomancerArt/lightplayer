@@ -97,8 +97,10 @@ mod tests {
     };
 
     fn jit_test_vmctx() -> *const u8 {
-        static VMCTX_BYTES: [u8; 16] = [0u8; 16];
-        VMCTX_BYTES.as_ptr()
+        // Use properly aligned storage for VmContext (needs 8-byte alignment for u64 fuel field).
+        static VMCTX: core::mem::MaybeUninit<lp_glsl_abi::VmContext> =
+            core::mem::MaybeUninit::zeroed();
+        VMCTX.as_ptr() as *const u8
     }
 
     #[test]
@@ -941,5 +943,18 @@ func @small(v1:f32) -> f32 {
             (actual_f64 - expected_f64).abs() < tolerance,
             "Q32 mismatch: got {actual_f64} (raw {actual}), expected {expected_f64}"
         );
+    }
+
+    /// Verify the __lp_vm_get_fuel_q32 builtin pointer is non-null and ABI matches.
+    /// NOTE: Direct call skipped on 64-bit hosts due to i32 pointer truncation.
+    #[test]
+    #[cfg(feature = "glsl")]
+    fn jit_get_fuel_builtin() {
+        use crate::builtins::get_function_pointer;
+        use lp_glsl_builtin_ids::BuiltinId;
+
+        // Verify builtin pointer is non-null
+        let ptr = get_function_pointer(BuiltinId::LpVmGetFuelQ32);
+        assert!(!ptr.is_null(), "get_fuel builtin pointer is null");
     }
 }

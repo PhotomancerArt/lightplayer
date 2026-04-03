@@ -49,3 +49,4 @@
 pub mod glsl;
 pub mod lpfx;
 pub mod lpir;
+pub mod vm;

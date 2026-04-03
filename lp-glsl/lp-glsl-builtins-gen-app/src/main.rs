@@ -20,6 +20,10 @@ struct BuiltinInfo {
     symbol_name: String,
     function_name: String,
     param_count: usize,
+    /// GLSL/import-visible parameter count (excludes implicit `VmContext` pointer).
+    user_visible_param_count: usize,
+    /// True when the Rust `extern "C"` fn takes `*const VmContext` / `&VmContext` as first param.
+    needs_vmctx: bool,
     file_name: String,
     /// Rust function signature types as strings (e.g., "extern \"C\" fn(f32, u32) -> f32")
     rust_signature: String,
@@ -51,6 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     builtins.extend(
         discover_builtins(&lpfx_dir, &builtins_dir).expect("Failed to discover lpfx builtins"),
     );
+    let vm_dir = builtins_dir.join("vm");
+    builtins
+        .extend(discover_builtins(&vm_dir, &builtins_dir).expect("Failed to discover vm builtins"));
 
     let glsl_map_path = workspace_root
         .join("lp-glsl-builtin-ids")
@@ -119,6 +126,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "LPIR library operations (fixed-point Q32).",
     );
 
+    let vm_builtins: Vec<BuiltinInfo> = builtins
+        .iter()
+        .filter(|b| b.module_path.starts_with("vm::"))
+        .cloned()
+        .collect();
+    let vm_mod_rs_path = workspace_root
+        .join("lp-glsl-builtins")
+        .join("src")
+        .join("builtins")
+        .join("vm")
+        .join("mod.rs");
+    generate_dir_mod_rs(
+        &vm_mod_rs_path,
+        &vm_builtins,
+        "VMContext-aware builtins (fixed-point Q32).",
+    );
+
     let wasm_import_types_path = workspace_root
         .join("lp-glsl-wasm")
         .join("src")
@@ -140,6 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &builtin_refs_wasm_path,
             &glsl_mod_rs_path,
             &lpir_mod_rs_path,
+            &vm_mod_rs_path,
             &glsl_map_path,
             &wasm_import_types_path,
         ],
@@ -238,6 +263,24 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 
     out.push_str(
         "        _ => None,\n    }\n}\n\n\
+         /// Map `@vm::*` import name + user-visible argument count to a Q32 builtin.\n\
+         pub fn vm_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {\n\
+         match (name, arg_count) {\n",
+    );
+
+    for builtin in builtins {
+        if builtin.builtin_module != "vm" {
+            continue;
+        }
+        let import_name = format!("__lp_{}", builtin.builtin_fn_name);
+        out.push_str(&format!(
+            "        (\"{}\", {}) => Some(BuiltinId::{}),\n",
+            import_name, builtin.user_visible_param_count, builtin.enum_variant
+        ));
+    }
+
+    out.push_str(
+        "        _ => None,\n    }\n}\n\n\
          /// Map `lpfx_*` name + parameter type list to the Q32 `BuiltinId`.\n\
          pub fn glsl_lpfx_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<BuiltinId> {\n\
          match (name, params) {\n",
@@ -311,12 +354,18 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
         .find(|b| b.builtin_module == "lpir" && b.builtin_fn_name == "fsqrt")
         .map(|b| b.enum_variant.as_str())
         .expect("lpir fsqrt builtin");
+    let get_fuel_v = builtins
+        .iter()
+        .find(|b| b.builtin_module == "vm" && b.builtin_fn_name == "get_fuel")
+        .map(|b| b.enum_variant.as_str())
+        .expect("vm get_fuel builtin");
 
     out.push_str(&format!(
-        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn lpfx_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfx_q32_builtin_id(\n                \"lpfx_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
+        "#[cfg(test)]\nmod glsl_builtin_mapping_tests {{\n    use crate::BuiltinId;\n    use super::{{glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id, GlslParamKind}};\n\n    #[test]\n    fn q32_sin() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"sin\", 1),\n            Some(BuiltinId::{sin_v})\n        );\n    }}\n\n    #[test]\n    fn q32_atan_two_args_is_atan2_import() {{\n        assert_eq!(\n            glsl_q32_math_builtin_id(\"atan\", 2),\n            Some(BuiltinId::{atan2_v})\n        );\n    }}\n\n    #[test]\n    fn lpir_sqrt() {{\n        assert_eq!(lpir_q32_builtin_id(\"sqrt\", 1), Some(BuiltinId::{sqrt_v}));\n    }}\n\n    #[test]\n    fn vm_get_fuel() {{\n        assert_eq!(\n            vm_q32_builtin_id(\"__lp_get_fuel\", 0),\n            Some(BuiltinId::{get_fuel_v})\n        );\n    }}\n\n    #[test]\n    fn lpfx_fbm_vec2() {{\n        assert_eq!(\n            glsl_lpfx_q32_builtin_id(\n                \"lpfx_fbm\",\n                &[GlslParamKind::Vec2, GlslParamKind::Int, GlslParamKind::UInt],\n            ),\n            Some(BuiltinId::{fbm_v})\n        );\n    }}\n}}\n",
         sin_v = sin_v,
         atan2_v = atan2_v,
         sqrt_v = sqrt_v,
+        get_fuel_v = get_fuel_v,
         fbm_v = fbm_v
     ));
 
@@ -501,6 +550,8 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
         ("lpir", r)
     } else if let Some(r) = after_lp.strip_prefix("glsl_") {
         ("glsl", r)
+    } else if let Some(r) = after_lp.strip_prefix("vm_") {
+        ("vm", r)
     } else if let Some(r) = after_lp.strip_prefix("lpfx_") {
         ("lpfx", r)
     } else {
@@ -535,12 +586,16 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
 
     let param_count = func.sig.inputs.len();
     let rust_signature = format_rust_function_signature(func);
+    let needs_vmctx = rust_signature_contains_vmcontext(&rust_signature) || builtin_module == "vm";
+    let user_visible_param_count = param_count.saturating_sub(usize::from(needs_vmctx));
 
     Some(BuiltinInfo {
         enum_variant,
         symbol_name,
         function_name: func_name,
         param_count,
+        user_visible_param_count,
+        needs_vmctx,
         file_name: file_name.to_string(),
         rust_signature,
         module_path: module_path.to_string(),
@@ -548,6 +603,10 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
         builtin_fn_name,
         builtin_mode,
     })
+}
+
+fn rust_signature_contains_vmcontext(rust_sig: &str) -> bool {
+    rust_sig.contains("VmContext")
 }
 
 /// Format a Rust function signature as a type string
@@ -770,6 +829,7 @@ pub enum BuiltinId {
             let m = match builtin.builtin_module.as_str() {
                 "lpir" => "Module::Lpir",
                 "glsl" => "Module::Glsl",
+                "vm" => "Module::Vm",
                 "lpfx" => "Module::Lpfx",
                 other => panic!("unknown builtin_module: {other}"),
             };
@@ -816,6 +876,21 @@ pub enum BuiltinId {
         }
     }
     output.push_str("        }\n");
+    output.push_str("    }\n\n");
+
+    output.push_str("    pub fn needs_vmctx(&self) -> bool {\n");
+    output.push_str("        match self {\n");
+    if builtins.is_empty() {
+        output.push_str("            BuiltinId::_Placeholder => false,\n");
+    } else {
+        for builtin in builtins {
+            output.push_str(&format!(
+                "            BuiltinId::{} => {},\n",
+                builtin.enum_variant, builtin.needs_vmctx
+            ));
+        }
+    }
+    output.push_str("        }\n");
     output.push_str("    }\n");
     output.push_str("}\n\n");
 
@@ -824,6 +899,7 @@ pub enum BuiltinId {
     output.push_str("pub enum Module {\n");
     output.push_str("    Lpir,\n");
     output.push_str("    Glsl,\n");
+    output.push_str("    Vm,\n");
     output.push_str("    Lpfx,\n");
     output.push_str("}\n\n");
     output.push_str("/// Float ABI for mode-specific builtins.\n");
@@ -837,6 +913,7 @@ pub enum BuiltinId {
     output.push_str("pub use glsl_builtin_mapping::glsl_lpfx_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::glsl_q32_math_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::lpir_q32_builtin_id;\n");
+    output.push_str("pub use glsl_builtin_mapping::vm_q32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::GlslParamKind;\n");
 
     fs::write(path, output).expect("Failed to write builtin-ids lib.rs");
@@ -884,6 +961,10 @@ fn parse_rust_extern_sig(rust_sig: &str) -> (Vec<String>, String) {
 
 fn cranelift_push_for_param_type(ty: &str) -> &'static str {
     let t = ty.trim();
+    // VMContext is passed as I32 in LPIR / Cranelift (not ISA pointer width); see `signature_for_ir_func`.
+    if t.contains("VmContext") {
+        return "sig.params.push(AbiParam::new(types::I32));";
+    }
     if t.contains('*') {
         return "sig.params.push(AbiParam::new(pointer_type));";
     }
@@ -954,6 +1035,7 @@ fn emit_grouped_signature_match_arms(builtins: &[BuiltinInfo]) -> String {
 fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInfo]) {
     let mut glsl_files: BTreeSet<String> = BTreeSet::new();
     let mut lpir_files: BTreeSet<String> = BTreeSet::new();
+    let mut vm_files: BTreeSet<String> = BTreeSet::new();
     let mut lpfx_roots: BTreeSet<String> = BTreeSet::new();
 
     for builtin in builtins {
@@ -964,6 +1046,9 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
             }
             Some("lpir") if components.len() >= 2 => {
                 lpir_files.insert(components[1].to_string());
+            }
+            Some("vm") if components.len() >= 2 => {
+                vm_files.insert(components[1].to_string());
             }
             Some("lpfx") if components.len() >= 2 => {
                 lpfx_roots.insert(format!("lpfx::{}", components[1]));
@@ -983,6 +1068,12 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
         import_parts.push(format!(
             "lpir::{{{}}}",
             lpir_files.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !vm_files.is_empty() {
+        import_parts.push(format!(
+            "vm::{{{}}}",
+            vm_files.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
     import_parts.extend(lpfx_roots);

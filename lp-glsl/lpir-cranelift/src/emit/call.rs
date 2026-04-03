@@ -132,8 +132,8 @@ pub(crate) fn emit_call(
                 }
             }
 
-            // VMContext is already in the Call args from lowering; just pass them through.
-            // Builtins (imports) don't get VMContext, which is correct.
+            // VMContext is already in the Call args from lowering when the callee expects it
+            // (shader functions and `ImportDecl::needs_vmctx` builtins).
             let arg_vals: Vec<_> = func
                 .pool_slice(*args)
                 .iter()

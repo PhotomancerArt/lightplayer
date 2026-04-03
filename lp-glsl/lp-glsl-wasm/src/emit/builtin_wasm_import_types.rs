@@ -411,5 +411,6 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
+        BuiltinId::LpVmGetFuelQ32 => (vec![ValType::I32], vec![ValType::I32]),
     }
 }

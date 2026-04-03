@@ -411,17 +411,22 @@ pub(crate) fn emit_op(
             let idx = wasm_func_index(fctx, *callee)?;
             let callee_usize = callee.0 as usize;
             let is_import = callee_usize < fctx.module.full_import_count as usize;
-            let is_result_ptr = is_import && imports::import_uses_result_pointer_abi(ir, callee_usize);
+            let is_result_ptr =
+                is_import && imports::import_uses_result_pointer_abi(ir, callee_usize);
 
-            // Get the args slice; for imports, skip VMContext (first arg) since imports don't have it
             let all_args = func.pool_slice(*args);
-            let args_to_pass = if is_import && !all_args.is_empty() && all_args[0].0 == 0 {
-                // Import call: skip vreg 0 (VMContext), pass only user args
-                &all_args[1..]
-            } else {
-                // Shader-to-shader call: pass all args including VMContext
-                all_args
-            };
+            let import_needs_vmctx = is_import
+                && ir
+                    .imports
+                    .get(callee_usize)
+                    .map(|d| d.needs_vmctx)
+                    .unwrap_or(false);
+            let args_to_pass =
+                if is_import && !import_needs_vmctx && !all_args.is_empty() && all_args[0].0 == 0 {
+                    &all_args[1..]
+                } else {
+                    all_args
+                };
 
             if is_result_ptr {
                 let sp = fctx.sp_global.ok_or_else(|| {

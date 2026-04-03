@@ -211,6 +211,7 @@ fn build_lpfx_import_decl(
         param_types,
         return_types,
         lpfx_glsl_params,
+        needs_vmctx: false,
     })
 }
 

@@ -170,6 +170,7 @@ fn validate_err_call_arity() {
             param_types: vec![IrType::F32],
             return_types: Vec::new(),
             lpfx_glsl_params: None,
+            needs_vmctx: false,
         }],
         functions: vec![func],
     };

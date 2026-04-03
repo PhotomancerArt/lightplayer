@@ -80,7 +80,7 @@ fn collect_exports(
             params.extend(
                 fi.params
                     .iter()
-                    .flat_map(|p| module::glsl_type_to_wasm_components(&p.ty, options.float_mode))
+                    .flat_map(|p| module::glsl_type_to_wasm_components(&p.ty, options.float_mode)),
             );
             let results = module::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
             WasmExport {
