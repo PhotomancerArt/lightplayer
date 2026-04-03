@@ -53,6 +53,7 @@ pub(crate) fn emit_call(
                     ));
                     let base = builder.ins().stack_addr(ctx.pointer_type, slot, 0);
                     let mut arg_vals: Vec<_> = Vec::with_capacity(1 + func.pool_slice(*args).len());
+                    // NOTE: Order must match signature: sret first, then args (vmctx is in Call args)
                     arg_vals.push(base);
                     for v in func.pool_slice(*args) {
                         arg_vals.push(use_v(builder, vars, *v));
@@ -131,6 +132,8 @@ pub(crate) fn emit_call(
                 }
             }
 
+            // VMContext is already in the Call args from lowering; just pass them through.
+            // Builtins (imports) don't get VMContext, which is correct.
             let arg_vals: Vec<_> = func
                 .pool_slice(*args)
                 .iter()

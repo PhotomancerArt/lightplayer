@@ -20,7 +20,7 @@ mod tests;
 
 pub use builder::{FunctionBuilder, ModuleBuilder};
 pub use interp::{ImportHandler, InterpError, Value, interpret, interpret_with_depth};
-pub use module::{ImportDecl, IrFunction, IrModule, SlotDecl};
+pub use module::{ImportDecl, IrFunction, IrModule, SlotDecl, VMCTX_VREG};
 pub use op::Op;
 pub use parse::{ParseError, parse_module};
 pub use print::print_module;

@@ -30,10 +30,13 @@ pub(crate) struct EmitCtx<'a> {
 /// Per-function state (scratch local, shadow stack, slot layout).
 pub(crate) struct FuncEmitCtx<'a> {
     pub module: &'a EmitCtx<'a>,
+    /// Local index for VMContext pointer. Always Some(0) in current implementation.
+    pub vmctx_local: Option<u32>,
     pub i64_scratch: Option<u32>,
     pub sp_global: Option<u32>,
     pub frame_size: u32,
-    pub slot_offsets: &'a [u32],
+    /// Slot offsets for memory operations. Stored as Vec for ownership.
+    pub slot_offsets: alloc::vec::Vec<u32>,
     /// Byte offset from `$sp` after prologue for result-pointer builtin scratch (after slots).
     pub result_buffer_base_offset: u32,
     /// After a return instruction, code is unreachable. Skip non-structural ops
@@ -140,6 +143,9 @@ pub(crate) fn emit_module(
 
     // $sp is global index 0 — only valid while it's the sole WASM global.
     let sp_global = if needs_shadow_stack { Some(0u32) } else { None };
+
+    // VMContext local index - always 0 (first local in every function)
+    let vmctx_local = Some(0u32);
     let mut globals = GlobalSection::new();
     if needs_shadow_stack {
         globals.global(
@@ -154,7 +160,17 @@ pub(crate) fn emit_module(
 
     let mut code = CodeSection::new();
     for f in &ir.functions {
-        let wasm_fn = func::encode_ir_function(ir, f, &ctx, sp_global)?;
+        let func_ctx = FuncEmitCtx {
+            module: &ctx,
+            vmctx_local,
+            i64_scratch: None, // Will be calculated inside encode_ir_function
+            sp_global,
+            frame_size: 0, // Will be calculated inside encode_ir_function
+            slot_offsets: alloc::vec::Vec::new(),
+            result_buffer_base_offset: 0,
+            unreachable_mode: false,
+        };
+        let wasm_fn = func::encode_ir_function(ir, f, &ctx, func_ctx)?;
         code.function(&wasm_fn);
     }
     if let Some((main_idx, _)) = main_entry {

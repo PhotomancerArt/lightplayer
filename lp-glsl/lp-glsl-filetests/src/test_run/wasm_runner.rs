@@ -335,6 +335,9 @@ fn build_wasm_args(
         ));
     }
     let mut wasm_args = Vec::new();
+    // Prepend VMContext (i32) as first argument for all shader function calls.
+    // VMContext is always the first parameter in the WASM signature.
+    wasm_args.push(Val::I32(0)); // Dummy VMContext pointer
     for (v, ty) in args.iter().zip(export_info.param_types.iter()) {
         wasm_args.extend(glsl_value_to_wasm_flat(ty, v, fm)?);
     }

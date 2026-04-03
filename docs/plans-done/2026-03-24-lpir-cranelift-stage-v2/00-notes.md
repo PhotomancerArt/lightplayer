@@ -3,16 +3,16 @@
 ## Scope of work
 
 - Extend **`lp-glsl-filetests`** for **`lpir-cranelift`**:
-  - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations via
-    **`GlslExecutable`** adapter.
-  - **`rv32.q32`:** GLSL → LPIR → **Stage V1** object + link + emulator → same
-    trait boundary.
+    - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations via
+      **`GlslExecutable`** adapter.
+    - **`rv32.q32`:** GLSL → LPIR → **Stage V1** object + link + emulator → same
+      trait boundary.
 - Keep **`wasm.q32`** (unchanged backend).
 - **Remove the legacy `cranelift.q32` target** and **`Backend::Cranelift`**:
   no `glsl_emu_riscv32` / old AST compiler in the filetest runner.
 - **Drop `lp-glsl-cranelift` from `lp-glsl-filetests` dependencies** by depending
   on **new small crates** (copies; legacy crates unchanged): **`lp-glsl-diagnostics`**,
-  **`lp-glsl-core`**, **`lp-glsl-values`**, **`lp-glsl-exec`**. Implement the trait
+  **`lp-glsl-core`**, **`lp-glsl-abi`**, **`lp-glsl-exec`**. Implement the trait
   in **`lp-glsl-wasm`** and the lpir adapters against **`lp-glsl-exec`**. Old
   **`lp-glsl-cranelift`** keeps its own copies for non-filetests callers until
   Stage VII deletes that crate.
@@ -43,7 +43,7 @@
 
 ### Execution
 
-- **New stack (in repo):** **`lp-glsl-exec`** (`GlslExecutable`), **`lp-glsl-values`**
+- **New stack (in repo):** **`lp-glsl-exec`** (`GlslExecutable`), **`lp-glsl-abi`**
   (`GlslValue`), **`lp-glsl-diagnostics`** (`GlslError`), **`lp-glsl-core`**
   (signatures for the trait). **Legacy:** **`lp-glsl-cranelift`** still holds the
   old trait/value definitions until rewired or removed.
@@ -69,7 +69,7 @@
 **Context:** Filetests must not depend on **`lp-glsl-cranelift`** after legacy
 removal.
 
-**Answer:** **Dedicated crates:** **`lp-glsl-exec`** (trait), **`lp-glsl-values`**
+**Answer:** **Dedicated crates:** **`lp-glsl-exec`** (trait), **`lp-glsl-abi`**
 (value types), plus **`lp-glsl-diagnostics`** / **`lp-glsl-core`** as needed.
 Adapters stay in **`lp-glsl-filetests`** (`lpir_jit_executable`,
 `lpir_rv32_executable`); **`lp-glsl-wasm`** implements the trait without the old
@@ -93,4 +93,4 @@ _(Same as resolved questions above.)_
 - **`rv32.q32`** is LPIR → RV32 emulator; it replaces the old **`cranelift.q32`**
   slot in CI for ISA-level coverage, not a third parallel legacy path.
 - V1 should land before **`rv32.q32`** is fully green; CI can still run **`jit`**
-  + **`wasm`** if **`rv32`** is feature-gated early.
+    + **`wasm`** if **`rv32`** is feature-gated early.

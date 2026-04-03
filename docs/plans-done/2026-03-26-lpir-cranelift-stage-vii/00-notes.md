@@ -12,29 +12,29 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 
 ### Crates to delete outright (old compiler chain)
 
-| Crate | Path | Dependents |
-|-------|------|------------|
-| `lp-glsl-cranelift` | `lp-glsl/lp-glsl-cranelift/` | `esp32-glsl-jit`, `lp-glsl-q32-metrics-app` |
-| `lp-glsl-jit-util` | `lp-glsl/lp-glsl-jit-util/` | `lp-glsl-cranelift`, `esp32-glsl-jit` |
-| `esp32-glsl-jit` | `lp-glsl/esp32-glsl-jit/` | (none) |
-| `lp-glsl-q32-metrics-app` | `lp-glsl/lp-glsl-q32-metrics-app/` | (none) |
+| Crate                     | Path                               | Dependents                                  |
+|---------------------------|------------------------------------|---------------------------------------------|
+| `lp-glsl-cranelift`       | `lp-glsl/lp-glsl-cranelift/`       | `esp32-glsl-jit`, `lp-glsl-q32-metrics-app` |
+| `lp-glsl-jit-util`        | `lp-glsl/lp-glsl-jit-util/`        | `lp-glsl-cranelift`, `esp32-glsl-jit`       |
+| `esp32-glsl-jit`          | `lp-glsl/esp32-glsl-jit/`          | (none)                                      |
+| `lp-glsl-q32-metrics-app` | `lp-glsl/lp-glsl-q32-metrics-app/` | (none)                                      |
 
 ### Crates needing partial cleanup
 
-| Crate | Issue |
-|-------|-------|
+| Crate                      | Issue                                                                                                                                                                                          |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `lp-glsl-builtins-gen-app` | Generates into both `lp-glsl-cranelift` (registry.rs, mapping.rs) **and** `lpir-cranelift` (generated_builtin_abi.rs). Old paths must be removed; `lp-glsl-frontend` dep may become droppable. |
-| `lp-glsl-frontend` | Used by old compiler, filetests, and builtins-gen-app. Filetests + gen-app still depend on it — **not** deletable yet unless those deps are also unwound. |
+| `lp-glsl-frontend`         | Used by old compiler, filetests, and builtins-gen-app. Filetests + gen-app still depend on it — **not** deletable yet unless those deps are also unwound.                                      |
 
 ### Crates kept (new chain / shared)
 
-| Crate | Why kept |
-|-------|----------|
+| Crate                      | Why kept                                                 |
+|----------------------------|----------------------------------------------------------|
 | `lp-glsl-builtins-emu-app` | `lpir-cranelift` build.rs embeds its ELF for riscv32-emu |
-| `lp-glsl-exec` | Filetest runner trait (`GlslExecutable`) |
-| `lp-glsl-values` | Used by exec + filetests |
-| `lp-glsl-diagnostics` | Used by values, exec, filetests |
-| `lp-glsl-frontend` | Filetests + gen-app (see Q1) |
+| `lp-glsl-exec`             | Filetest runner trait (`GlslExecutable`)                 |
+| `lp-glsl-abi`              | Used by exec + filetests                                 |
+| `lp-glsl-diagnostics`      | Used by values, exec, filetests                          |
+| `lp-glsl-frontend`         | Filetests + gen-app (see Q1)                             |
 
 ### Workspace / build references to clean
 
@@ -81,6 +81,7 @@ path still exercised by filetests, keep it for now and note a follow-up. Same
 analysis for `lp-glsl-builtins-gen-app` — it uses `lp_glsl_frontend::semantic::types::Type`.
 
 **Answer:** Delete `lp-glsl-frontend`. Two remaining consumers need migration:
+
 - **Filetests** (`test_glsl.rs`): Replace `CompilationPipeline::parse()` with
   direct `glsl::syntax::TranslationUnit::parse()` — trivial, one call site.
 - **`lp-glsl-builtins-gen-app`**: Uses `FunctionSignature`, `Type`,
@@ -112,6 +113,7 @@ dep becomes unused after removing old generation, drop it. If not, keep it.
 
 **Answer:** Option B (full). Acceptance criteria: `lp-glsl-frontend` is fully
 deleted. This means:
+
 - Remove generation paths that write into `lp-glsl-cranelift/`
 - Inline `FunctionSignature`, `Type`, `extract_function_signature` (and any
   other `lp-glsl-frontend` types) into `lp-glsl-builtins-gen-app` or replace

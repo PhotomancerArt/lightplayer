@@ -20,6 +20,7 @@ use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
+use lp_glsl_abi::VmContextHeader;
 use lpir_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
 
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end.
@@ -258,6 +259,8 @@ impl ShaderRuntime {
         const Q32_SCALE: i32 = 65536;
         let time_q32 = (time * 65536.0 + 0.5) as i32;
         let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
+        let vmctx = VmContextHeader::default();
+        let vmctx_ptr = core::ptr::from_ref(&vmctx).cast::<u8>();
 
         for y in 0..height {
             for x in 0..width {
@@ -271,7 +274,7 @@ impl ShaderRuntime {
                 ];
                 let mut rgba_q32 = [0i32; 4];
                 unsafe {
-                    dc.call_i32_buf(&args, &mut rgba_q32)
+                    dc.call_i32_buf(vmctx_ptr, &args, &mut rgba_q32)
                         .map_err(|e| Error::Other {
                             message: format!("Shader direct call failed: {e}"),
                         })?;

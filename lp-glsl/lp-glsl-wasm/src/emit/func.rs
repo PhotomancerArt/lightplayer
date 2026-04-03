@@ -38,11 +38,17 @@ fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
 }
 
 /// WASM `(params) -> (results)` for `f`'s type section entry.
+///
+/// Note: VMContext (vreg 0, an i32 pointer) is included as the first param to maintain
+/// ABI consistency with Cranelift. The signature is:
+/// - param 0: VMContext (i32 pointer)
+/// - param 1..: user params (vregs 1..param_count+1)
 pub(crate) fn wasm_function_signature(
     f: &IrFunction,
     mode: FloatMode,
 ) -> (Vec<ValType>, Vec<ValType>) {
-    let params: Vec<ValType> = (0..f.param_count as usize)
+    // Include VMContext (vreg 0) + user params (vregs 1..param_count+1)
+    let params: Vec<ValType> = (0..=f.param_count as usize)
         .map(|i| ir_type_to_val(f.vreg_types[i], mode))
         .collect();
     let results: Vec<ValType> = f
@@ -59,21 +65,42 @@ pub(crate) fn encode_ir_function(
     ir: &IrModule,
     f: &IrFunction,
     ctx: &EmitCtx<'_>,
-    sp_global: Option<u32>,
+    mut func_ctx: FuncEmitCtx<'_>,
 ) -> Result<Function, String> {
     let mode = ctx.options.float_mode;
+
+    // Local index mapping:
+    // WASM locals are: [params (from signature)] + [declared locals]
+    // With VMContext as first param, the mapping is:
+    // - WASM local 0: VMContext (first param, vreg 0)
+    // - WASM local 1..param_count+1: user params (vregs 1..param_count+1)
+    // - WASM local param_count+1..: declared locals (vregs param_count+1..)
+    //
+    // So WASM local index = vreg index (since they align)
+    // vreg 0 -> local 0 (VMContext param)
+    // vreg 1 -> local 1 (user param 0)
+    // etc.
+
+    // VMContext local is at index 0 (verified present)
+    let _vmctx_local = func_ctx.vmctx_local.expect("vmctx_local must be set");
+    let sp_global = func_ctx.sp_global;
+
+    // Declared locals: vregs that are not params (vreg index > param_count)
     let mut local_types: Vec<ValType> = Vec::new();
-    for i in f.param_count as usize..f.vreg_types.len() {
+    for i in (f.param_count as usize + 1)..f.vreg_types.len() {
         local_types.push(ir_type_to_val(f.vreg_types[i], mode));
     }
+
     let i64_scratch = if func_needs_i64_scratch(f, mode) {
+        let idx = (f.param_count as usize + 1 + local_types.len()) as u32;
         local_types.push(ValType::I64);
-        Some(f.vreg_types.len() as u32)
+        Some(idx)
     } else {
         None
     };
+    func_ctx.i64_scratch = i64_scratch;
 
-    let slot_offsets = memory::slot_offsets(f);
+    func_ctx.slot_offsets = memory::slot_offsets(f);
     let slot_frame = memory::aligned_frame_size(f);
     let result_buf = imports::max_result_ptr_buffer_bytes(ir, f);
     let (frame_size, result_buffer_base_offset) = if result_buf > 0 {
@@ -90,15 +117,9 @@ pub(crate) fn encode_ir_function(
         ));
     }
 
-    let mut func_ctx = FuncEmitCtx {
-        module: ctx,
-        i64_scratch,
-        sp_global,
-        frame_size,
-        slot_offsets: slot_offsets.as_slice(),
-        result_buffer_base_offset,
-        unreachable_mode: false,
-    };
+    // Update func_ctx with calculated values
+    func_ctx.frame_size = frame_size;
+    func_ctx.result_buffer_base_offset = result_buffer_base_offset;
 
     let mut wasm_fn = Function::new_with_locals_types(local_types);
     let mut ctrl: Vec<CtrlEntry> = Vec::new();

@@ -8,7 +8,7 @@ use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
-use lp_glsl_abi::{GlslModuleMeta, GlslType};
+use lp_glsl_abi::{GlslModuleMeta, GlslType, VmContextHeader};
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
 use lpir::FloatMode;
@@ -84,6 +84,11 @@ pub fn glsl_q32_call_emulated(
             param_count
         )));
     }
+    let header = VmContextHeader::default();
+    let vmctx_word = core::ptr::from_ref(&header) as usize as u32 as i32;
+    let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
+    full.push(vmctx_word);
+    full.extend_from_slice(&flat);
     let isa = riscv32_reference_isa().map_err(|e| CallError::Unsupported(alloc::format!("{e}")))?;
     let sig = emit::signature_for_ir_func(
         ir_func,
@@ -96,7 +101,7 @@ pub fn glsl_q32_call_emulated(
     let entry = *load.symbol_map.get(name).ok_or_else(|| {
         CallError::Unsupported(alloc::format!("symbol `{name}` not in linked RV32 image"))
     })?;
-    let data_args: Vec<DataValue> = flat.iter().copied().map(DataValue::I32).collect();
+    let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
     let mut emu =
         Riscv32Emulator::new(load.code.clone(), load.ram.clone()).with_log_level(LogLevel::None);
     let has_sr = sig
@@ -199,9 +204,9 @@ pub(crate) fn run_loaded_function_i32_with_sig(
         .iter()
         .any(|p| p.purpose == ArgumentPurpose::StructReturn);
     let expected_args = if has_sr {
-        signature.params.len().saturating_sub(1)
+        signature.params.len().saturating_sub(2)
     } else {
-        signature.params.len()
+        signature.params.len().saturating_sub(1)
     };
     if args.len() != expected_args {
         return Err(CompilerError::Codegen(
@@ -213,7 +218,11 @@ pub(crate) fn run_loaded_function_i32_with_sig(
         ));
     }
 
-    let data_args: Vec<DataValue> = args.iter().copied().map(DataValue::I32).collect();
+    let header = VmContextHeader::default();
+    let vmctx_word = core::ptr::from_ref(&header) as usize as u32 as i32;
+    let mut data_args: Vec<DataValue> = Vec::with_capacity(1 + args.len());
+    data_args.push(DataValue::I32(vmctx_word));
+    data_args.extend(args.iter().copied().map(DataValue::I32));
 
     let mut emu = Riscv32Emulator::new(load_info.code.clone(), load_info.ram.clone())
         .with_log_level(LogLevel::None);

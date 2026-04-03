@@ -96,12 +96,17 @@ mod tests {
         jit_from_ir,
     };
 
+    fn jit_test_vmctx() -> *const u8 {
+        static VMCTX_BYTES: [u8; 16] = [0u8; 16];
+        VMCTX_BYTES.as_ptr()
+    }
+
     #[test]
     fn jit_linear_fadd_f32() {
         let ir = parse_module(
-            r"func @add(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fadd v0, v1
-  return v2
+            r"func @add(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
+  return v3
 }
 ",
         )
@@ -116,19 +121,19 @@ mod tests {
         )
         .expect("jit");
         let code_ptr = m.finalized_ptr_by_index(0);
-        let add: extern "C" fn(f32, f32) -> f32 = unsafe { mem::transmute(code_ptr) };
-        assert!((add(1.0, 2.0) - 3.0).abs() < 1e-5);
+        let add: extern "C" fn(*const u8, f32, f32) -> f32 = unsafe { mem::transmute(code_ptr) };
+        assert!((add(jit_test_vmctx(), 1.0, 2.0) - 3.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_if_else() {
         let ir = parse_module(
-            r"func @max(v0:f32, v1:f32) -> f32 {
-  v2:i32 = fgt v0, v1
-  if v2 {
-    return v0
-  } else {
+            r"func @max(v1:f32, v2:f32) -> f32 {
+  v3:i32 = fgt v1, v2
+  if v3 {
     return v1
+  } else {
+    return v2
   }
 }
 ",
@@ -142,22 +147,22 @@ mod tests {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(f32, f32) -> f32 =
+        let f: extern "C" fn(*const u8, f32, f32) -> f32 =
             unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert!((f(3.0, 1.0) - 3.0).abs() < 1e-5);
-        assert!((f(1.0, 5.0) - 5.0).abs() < 1e-5);
+        assert!((f(jit_test_vmctx(), 3.0, 1.0) - 3.0).abs() < 1e-5);
+        assert!((f(jit_test_vmctx(), 1.0, 5.0) - 5.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_if_no_else() {
         let ir = parse_module(
-            r"func @clamp_positive(v0:f32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  v2:i32 = flt v0, v1
-  if v2 {
-    v0 = copy v1
+            r"func @clamp_positive(v1:f32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  v3:i32 = flt v1, v2
+  if v3 {
+    v1 = copy v2
   }
-  return v0
+  return v1
 }
 ",
         )
@@ -170,143 +175,22 @@ mod tests {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(f32) -> f32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert!((f(-3.0) - 0.0).abs() < 1e-5);
-        assert!((f(5.0) - 5.0).abs() < 1e-5);
+        let f: extern "C" fn(*const u8, f32) -> f32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert!((f(jit_test_vmctx(), -3.0) - 0.0).abs() < 1e-5);
+        assert!((f(jit_test_vmctx(), 5.0) - 5.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_loop_countdown_sum() {
         let ir = parse_module(
-            r"func @sum_to_n(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
+            r"func @sum_to_n(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
   loop {
-    br_if_not v0
-    v1 = iadd v1, v0
-    v0 = isub_imm v0, 1
+    br_if_not v1
+    v2 = iadd v2, v1
+    v1 = isub_imm v1, 1
   }
-  return v1
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(5), 15);
-    }
-
-    #[test]
-    fn test_loop_break() {
-        let ir = parse_module(
-            r"func @first_below(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fconst.f32 1.0
-  loop {
-    v3:i32 = flt v0, v1
-    if v3 {
-      break
-    }
-    v0 = fsub v0, v2
-  }
-  return v0
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(f32, f32) -> f32 =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert!((f(10.0, 3.0) - 2.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn test_switch_basic() {
-        let ir = parse_module(
-            r"func @classify(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
-  switch v0 {
-    case 1 {
-      v1 = iconst.i32 10
-    }
-    case 2 {
-      v1 = iconst.i32 20
-    }
-    default {
-      v1 = iconst.i32 -1
-    }
-  }
-  return v1
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(1), 10);
-        assert_eq!(f(2), 20);
-        assert_eq!(f(99), -1);
-    }
-
-    #[test]
-    fn test_switch_no_default() {
-        let ir = parse_module(
-            r"func @map_value(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
-  switch v0 {
-    case 0 {
-      v1 = iconst.i32 100
-    }
-    case 1 {
-      v1 = iconst.i32 200
-    }
-  }
-  return v1
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(0), 100);
-        assert_eq!(f(1), 200);
-        assert_eq!(f(5), 0);
-    }
-
-    #[test]
-    fn test_slot_load_store() {
-        let ir = parse_module(
-            r"func @roundtrip(v0:f32) -> f32 {
-  slot ss0, 4
-  v1:i32 = slot_addr ss0
-  store v1, 0, v0
-  v2:f32 = load v1, 0
   return v2
 }
 ",
@@ -320,21 +204,24 @@ mod tests {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(f32) -> f32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert!((f(42.0) - 42.0).abs() < 1e-5);
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), 5), 15);
     }
 
     #[test]
-    fn test_slot_two_values() {
+    fn test_loop_break() {
         let ir = parse_module(
-            r"func @swap_slot(v0:f32, v1:f32) -> (f32, f32) {
-  slot ss0, 8
-  v2:i32 = slot_addr ss0
-  store v2, 0, v0
-  store v2, 4, v1
-  v3:f32 = load v2, 4
-  v4:f32 = load v2, 0
-  return v3, v4
+            r"func @first_below(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fconst.f32 1.0
+  loop {
+    v4:i32 = flt v1, v2
+    if v4 {
+      break
+    }
+    v1 = fsub v1, v3
+  }
+  return v1
 }
 ",
         )
@@ -347,9 +234,132 @@ mod tests {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(f32, f32) -> (f32, f32) =
+        let f: extern "C" fn(*const u8, f32, f32) -> f32 =
             unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        let (a, b) = f(1.0, 2.0);
+        assert!((f(jit_test_vmctx(), 10.0, 3.0) - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_switch_basic() {
+        let ir = parse_module(
+            r"func @classify(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
+  switch v1 {
+    case 1 {
+      v2 = iconst.i32 10
+    }
+    case 2 {
+      v2 = iconst.i32 20
+    }
+    default {
+      v2 = iconst.i32 -1
+    }
+  }
+  return v2
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), 1), 10);
+        assert_eq!(f(jit_test_vmctx(), 2), 20);
+        assert_eq!(f(jit_test_vmctx(), 99), -1);
+    }
+
+    #[test]
+    fn test_switch_no_default() {
+        let ir = parse_module(
+            r"func @map_value(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
+  switch v1 {
+    case 0 {
+      v2 = iconst.i32 100
+    }
+    case 1 {
+      v2 = iconst.i32 200
+    }
+  }
+  return v2
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), 0), 100);
+        assert_eq!(f(jit_test_vmctx(), 1), 200);
+        assert_eq!(f(jit_test_vmctx(), 5), 0);
+    }
+
+    #[test]
+    fn test_slot_load_store() {
+        let ir = parse_module(
+            r"func @roundtrip(v1:f32) -> f32 {
+  slot ss0, 4
+  v2:i32 = slot_addr ss0
+  store v2, 0, v1
+  v3:f32 = load v2, 0
+  return v3
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, f32) -> f32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert!((f(jit_test_vmctx(), 42.0) - 42.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_slot_two_values() {
+        let ir = parse_module(
+            r"func @swap_slot(v1:f32, v2:f32) -> (f32, f32) {
+  slot ss0, 8
+  v3:i32 = slot_addr ss0
+  store v3, 0, v1
+  store v3, 4, v2
+  v4:f32 = load v3, 4
+  v5:f32 = load v3, 0
+  return v4, v5
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, f32, f32) -> (f32, f32) =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        let (a, b) = f(jit_test_vmctx(), 1.0, 2.0);
         assert!((a - 2.0).abs() < 1e-5);
         assert!((b - 1.0).abs() < 1e-5);
     }
@@ -357,17 +367,17 @@ mod tests {
     #[test]
     fn test_memcpy_slots() {
         let ir = parse_module(
-            r"func @copy_slot(v0:f32, v1:f32) -> (f32, f32) {
+            r"func @copy_slot(v1:f32, v2:f32) -> (f32, f32) {
   slot ss0, 8
   slot ss1, 8
-  v2:i32 = slot_addr ss0
-  store v2, 0, v0
-  store v2, 4, v1
-  v3:i32 = slot_addr ss1
-  memcpy v3, v2, 8
-  v4:f32 = load v3, 0
-  v5:f32 = load v3, 4
-  return v4, v5
+  v3:i32 = slot_addr ss0
+  store v3, 0, v1
+  store v3, 4, v2
+  v4:i32 = slot_addr ss1
+  memcpy v4, v3, 8
+  v5:f32 = load v4, 0
+  v6:f32 = load v4, 4
+  return v5, v6
 }
 ",
         )
@@ -380,9 +390,9 @@ mod tests {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(f32, f32) -> (f32, f32) =
+        let f: extern "C" fn(*const u8, f32, f32) -> (f32, f32) =
             unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        let (a, b) = f(3.0, 7.0);
+        let (a, b) = f(jit_test_vmctx(), 3.0, 7.0);
         assert!((a - 3.0).abs() < 1e-5);
         assert!((b - 7.0).abs() < 1e-5);
     }
@@ -390,14 +400,111 @@ mod tests {
     #[test]
     fn test_local_call() {
         let ir = parse_module(
-            r"func @double(v0:f32) -> f32 {
-  v1:f32 = fadd v0, v0
-  return v1
+            r"func @double(v1:f32) -> f32 {
+  v2:f32 = fadd v1, v1
+  return v2
 }
 
-func @quad(v0:f32) -> f32 {
-  v1:f32 = call @double(v0)
+func @quad(v1:f32) -> f32 {
   v2:f32 = call @double(v1)
+  v3:f32 = call @double(v2)
+  return v3
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let quad: extern "C" fn(*const u8, f32) -> f32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(1)) };
+        assert!((quad(jit_test_vmctx(), 3.0) - 12.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_multi_return_call() {
+        let ir = parse_module(
+            r"func @swap_vals(v1:f32, v2:f32) -> (f32, f32) {
+  return v2, v1
+}
+
+func @double_swap(v1:f32, v2:f32) -> (f32, f32) {
+  v3:f32, v4:f32 = call @swap_vals(v1, v2)
+  v5:f32, v6:f32 = call @swap_vals(v3, v4)
+  return v5, v6
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, f32, f32) -> (f32, f32) =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(1)) };
+        let (a, b) = f(jit_test_vmctx(), 1.0, 2.0);
+        assert!((a - 1.0).abs() < 1e-5 && (b - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_recursive_factorial() {
+        let ir = parse_module(
+            r"func @factorial(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 1
+  v3:i32 = ile_s v1, v2
+  if v3 {
+    return v2
+  }
+  v4:i32 = isub_imm v1, 1
+  v5:i32 = call @factorial(v4)
+  v6:i32 = imul v1, v5
+  return v6
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::F32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), 5), 120);
+    }
+
+    #[test]
+    fn test_loop_continue() {
+        let ir = parse_module(
+            r"func @skip_twos(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
+  loop {
+    v4:i32 = ige_s v3, v1
+    if v4 {
+      break
+    }
+    v5:i32 = ieq_imm v3, 2
+    if v5 {
+      v3 = iadd_imm v3, 1
+      continue
+    }
+    v2 = iadd v2, v3
+    v3 = iadd_imm v3, 1
+    continuing:
+  }
   return v2
 }
 ",
@@ -411,124 +518,29 @@ func @quad(v0:f32) -> f32 {
             },
         )
         .expect("jit");
-        let quad: extern "C" fn(f32) -> f32 =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(1)) };
-        assert!((quad(3.0) - 12.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn test_multi_return_call() {
-        let ir = parse_module(
-            r"func @swap_vals(v0:f32, v1:f32) -> (f32, f32) {
-  return v1, v0
-}
-
-func @double_swap(v0:f32, v1:f32) -> (f32, f32) {
-  v2:f32, v3:f32 = call @swap_vals(v0, v1)
-  v4:f32, v5:f32 = call @swap_vals(v2, v3)
-  return v4, v5
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(f32, f32) -> (f32, f32) =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(1)) };
-        let (a, b) = f(1.0, 2.0);
-        assert!((a - 1.0).abs() < 1e-5 && (b - 2.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn test_recursive_factorial() {
-        let ir = parse_module(
-            r"func @factorial(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 1
-  v2:i32 = ile_s v0, v1
-  if v2 {
-    return v1
-  }
-  v3:i32 = isub_imm v0, 1
-  v4:i32 = call @factorial(v3)
-  v5:i32 = imul v0, v4
-  return v5
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(5), 120);
-    }
-
-    #[test]
-    fn test_loop_continue() {
-        let ir = parse_module(
-            r"func @skip_twos(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
-  v2:i32 = iconst.i32 0
-  loop {
-    v3:i32 = ige_s v2, v0
-    if v3 {
-      break
-    }
-    v4:i32 = ieq_imm v2, 2
-    if v4 {
-      v2 = iadd_imm v2, 1
-      continue
-    }
-    v1 = iadd v1, v2
-    v2 = iadd_imm v2, 1
-    continuing:
-  }
-  return v1
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::F32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
         // sum 0..5 skipping 2: 0+1+3+4 = 8
-        assert_eq!(f(5), 8);
+        assert_eq!(f(jit_test_vmctx(), 5), 8);
     }
 
     #[test]
     fn test_call_in_loop() {
         let ir = parse_module(
-            r"func @add1(v0:i32) -> i32 {
-  v1:i32 = iadd_imm v0, 1
-  return v1
+            r"func @add1(v1:i32) -> i32 {
+  v2:i32 = iadd_imm v1, 1
+  return v2
 }
 
-func @count_up(v0:i32, v1:i32) -> i32 {
+func @count_up(v1:i32, v2:i32) -> i32 {
   loop {
-    v2:i32 = ige_s v0, v1
-    if v2 {
+    v3:i32 = ige_s v1, v2
+    if v3 {
       break
     }
-    v0 = call @add1(v0)
+    v1 = call @add1(v1)
   }
-  return v0
+  return v1
 }
 ",
         )
@@ -541,9 +553,9 @@ func @count_up(v0:i32, v1:i32) -> i32 {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(i32, i32) -> i32 =
+        let f: extern "C" fn(*const u8, i32, i32) -> i32 =
             unsafe { mem::transmute(m.finalized_ptr_by_index(1)) };
-        assert_eq!(f(0, 5), 5);
+        assert_eq!(f(jit_test_vmctx(), 0, 5), 5);
     }
 
     #[test]
@@ -551,9 +563,9 @@ func @count_up(v0:i32, v1:i32) -> i32 {
         let ir = parse_module(
             r"import @glsl::sin(f32) -> f32
 
-func @u(v0:f32) -> f32 {
-  v1:f32 = call @glsl::sin(v0)
-  return v1
+func @u(v1:f32) -> f32 {
+  v2:f32 = call @glsl::sin(v1)
+  return v2
 }
 ",
         )
@@ -578,121 +590,7 @@ func @u(v0:f32) -> f32 {
     fn jit_q32_constant() {
         let ir = parse_module(
             r"func @const_half() -> f32 {
-  v0:f32 = fconst.f32 0.5
-  return v0
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::Q32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn() -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(), 32768);
-    }
-
-    #[test]
-    fn jit_q32_identity() {
-        let ir = parse_module(
-            r"func @identity(v0:f32) -> f32 {
-  return v0
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::Q32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(65536), 65536);
-    }
-
-    #[test]
-    fn jit_q32_fadd_builtin() {
-        let ir = parse_module(
-            r"func @add(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fadd v0, v1
-  return v2
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::Q32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32, i32) -> i32 =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(q32(1.0), q32(2.0)), q32(3.0));
-    }
-
-    #[test]
-    fn jit_q32_fmul_builtin() {
-        let ir = parse_module(
-            r"func @mul(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fmul v0, v1
-  return v2
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::Q32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32, i32) -> i32 =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(q32(2.0), q32(3.0)), q32(6.0));
-    }
-
-    #[test]
-    fn jit_q32_fdiv_builtin() {
-        let ir = parse_module(
-            r"func @div(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fdiv v0, v1
-  return v2
-}
-",
-        )
-        .expect("parse");
-        let m = jit_from_ir(
-            &ir,
-            &CompileOptions {
-                float_mode: FloatMode::Q32,
-                ..Default::default()
-            },
-        )
-        .expect("jit");
-        let f: extern "C" fn(i32, i32) -> i32 =
-            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(q32(6.0), q32(2.0)), q32(3.0));
-    }
-
-    #[test]
-    fn jit_q32_import_sin() {
-        let ir = parse_module(
-            r"import @glsl::sin(f32) -> f32
-
-func @apply_sin(v0:f32) -> f32 {
-  v1:f32 = call @glsl::sin(v0)
+  v1:f32 = fconst.f32 0.5
   return v1
 }
 ",
@@ -706,22 +604,16 @@ func @apply_sin(v0:f32) -> f32 {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_eq!(f(q32(0.0)), q32(0.0));
-        assert_q32_approx(f(q32(core::f32::consts::FRAC_PI_2)), 1.0, 0.02);
+        let f: extern "C" fn(*const u8) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx()), 32768);
     }
 
     #[test]
-    fn jit_q32_quadratic() {
+    fn jit_q32_identity() {
         let ir = parse_module(
-            r"func @quadratic(v0:f32) -> f32 {
-  v1:f32 = fmul v0, v0
-  v2:f32 = fconst.f32 2.0
-  v3:f32 = fmul v2, v0
-  v4:f32 = fadd v1, v3
-  v5:f32 = fconst.f32 1.0
-  v6:f32 = fadd v4, v5
-  return v6
+            r"func @identity(v1:f32) -> f32 {
+  return v1
 }
 ",
         )
@@ -734,8 +626,136 @@ func @apply_sin(v0:f32) -> f32 {
             },
         )
         .expect("jit");
-        let f: extern "C" fn(i32) -> i32 = unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
-        assert_q32_approx(f(q32(3.0)), 16.0, 0.05);
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), 65536), 65536);
+    }
+
+    #[test]
+    fn jit_q32_fadd_builtin() {
+        let ir = parse_module(
+            r"func @add(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
+  return v3
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), q32(1.0), q32(2.0)), q32(3.0));
+    }
+
+    #[test]
+    fn jit_q32_fmul_builtin() {
+        let ir = parse_module(
+            r"func @mul(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fmul v1, v2
+  return v3
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), q32(2.0), q32(3.0)), q32(6.0));
+    }
+
+    #[test]
+    fn jit_q32_fdiv_builtin() {
+        let ir = parse_module(
+            r"func @div(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fdiv v1, v2
+  return v3
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), q32(6.0), q32(2.0)), q32(3.0));
+    }
+
+    #[test]
+    fn jit_q32_import_sin() {
+        let ir = parse_module(
+            r"import @glsl::sin(f32) -> f32
+
+func @apply_sin(v1:f32) -> f32 {
+  v2:f32 = call @glsl::sin(v1)
+  return v2
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_eq!(f(jit_test_vmctx(), q32(0.0)), q32(0.0));
+        assert_q32_approx(
+            f(jit_test_vmctx(), q32(core::f32::consts::FRAC_PI_2)),
+            1.0,
+            0.02,
+        );
+    }
+
+    #[test]
+    fn jit_q32_quadratic() {
+        let ir = parse_module(
+            r"func @quadratic(v1:f32) -> f32 {
+  v2:f32 = fmul v1, v1
+  v3:f32 = fconst.f32 2.0
+  v4:f32 = fmul v3, v1
+  v5:f32 = fadd v2, v4
+  v6:f32 = fconst.f32 1.0
+  v7:f32 = fadd v5, v6
+  return v7
+}
+",
+        )
+        .expect("parse");
+        let m = jit_from_ir(
+            &ir,
+            &CompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+        )
+        .expect("jit");
+        let f: extern "C" fn(*const u8, i32) -> i32 =
+            unsafe { mem::transmute(m.finalized_ptr_by_index(0)) };
+        assert_q32_approx(f(jit_test_vmctx(), q32(3.0)), 16.0, 0.05);
     }
 
     #[test]
@@ -775,7 +795,10 @@ func @apply_sin(v0:f32) -> f32 {
         let dc = m.direct_call("add").expect("direct_call");
         let a = crate::q32::q32_encode_f64(1.25);
         let b = crate::q32::q32_encode_f64(-0.5);
-        let via_direct = unsafe { dc.call_i32(&[a, b]).expect("direct invoke") };
+        let via_direct = unsafe {
+            dc.call_i32(jit_test_vmctx(), &[a, b])
+                .expect("direct invoke")
+        };
         let via_call = m
             .call("add", &[GlslQ32::Float(1.25), GlslQ32::Float(-0.5)])
             .expect("typed call");
@@ -792,9 +815,9 @@ func @apply_sin(v0:f32) -> f32 {
     fn q32_jit_invoke_two_returns() {
         let ir = parse_module(
             r"func @pair() -> (f32, f32) {
-  v0:f32 = fconst.f32 1.0
-  v1:f32 = fconst.f32 2.0
-  return v0, v1
+  v1:f32 = fconst.f32 1.0
+  v2:f32 = fconst.f32 2.0
+  return v1, v2
 }",
         )
         .expect("parse");
@@ -807,8 +830,9 @@ func @apply_sin(v0:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
+        let vm = jit_test_vmctx() as usize as i32;
         let words =
-            unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 2, false).expect("invoke") };
+            unsafe { crate::invoke::invoke_i32_args_returns(p, &[vm], 2, false).expect("invoke") };
         assert_eq!(words.len(), 2, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);
@@ -820,10 +844,10 @@ func @apply_sin(v0:f32) -> f32 {
     fn q32_jit_invoke_three_returns() {
         let ir = parse_module(
             r"func @triple() -> (f32, f32, f32) {
-  v0:f32 = fconst.f32 1.0
-  v1:f32 = fconst.f32 2.0
-  v2:f32 = fconst.f32 0.5
-  return v0, v1, v2
+  v1:f32 = fconst.f32 1.0
+  v2:f32 = fconst.f32 2.0
+  v3:f32 = fconst.f32 0.5
+  return v1, v2, v3
 }",
         )
         .expect("parse");
@@ -836,8 +860,9 @@ func @apply_sin(v0:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
+        let vm = jit_test_vmctx() as usize as i32;
         let words =
-            unsafe { crate::invoke::invoke_i32_args_returns(p, &[], 3, false).expect("invoke") };
+            unsafe { crate::invoke::invoke_i32_args_returns(p, &[vm], 3, false).expect("invoke") };
         assert_eq!(words.len(), 3, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);
@@ -848,10 +873,10 @@ func @apply_sin(v0:f32) -> f32 {
     fn direct_call_i32_buf_matches_call_i32() {
         let ir = parse_module(
             r"func @triple() -> (f32, f32, f32) {
-  v0:f32 = fconst.f32 1.0
-  v1:f32 = fconst.f32 2.0
-  v2:f32 = fconst.f32 0.5
-  return v0, v1, v2
+  v1:f32 = fconst.f32 1.0
+  v2:f32 = fconst.f32 2.0
+  v3:f32 = fconst.f32 0.5
+  return v1, v2, v3
 }",
         )
         .expect("parse");
@@ -864,24 +889,27 @@ func @apply_sin(v0:f32) -> f32 {
         )
         .expect("jit");
         let dc = m.direct_call("triple").expect("direct_call");
-        let via_vec = unsafe { dc.call_i32(&[]).expect("call_i32") };
+        let via_vec = unsafe { dc.call_i32(jit_test_vmctx(), &[]).expect("call_i32") };
         let mut buf = [0i32; 3];
-        unsafe { dc.call_i32_buf(&[], &mut buf).expect("call_i32_buf") };
+        unsafe {
+            dc.call_i32_buf(jit_test_vmctx(), &[], &mut buf)
+                .expect("call_i32_buf")
+        };
         assert_eq!(via_vec.as_slice(), buf.as_slice());
     }
 
     #[test]
     fn low_memory_strategy_compiles() {
         let ir = parse_module(
-            r"func @big(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fadd v0, v1
-  v3:f32 = fadd v2, v0
+            r"func @big(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
   v4:f32 = fadd v3, v1
-  return v4
+  v5:f32 = fadd v4, v2
+  return v5
 }
 
-func @small(v0:f32) -> f32 {
-  return v0
+func @small(v1:f32) -> f32 {
+  return v1
 }
 ",
         )

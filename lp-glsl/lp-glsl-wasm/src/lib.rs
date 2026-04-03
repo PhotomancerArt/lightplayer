@@ -74,17 +74,21 @@ fn collect_exports(
         .iter()
         .zip(naga_module.functions.iter())
         .map(|(ir_f, (_, fi))| {
-            let params: Vec<_> = fi
-                .params
-                .iter()
-                .flat_map(|p| module::glsl_type_to_wasm_components(&p.ty, options.float_mode))
-                .collect();
+            // Build params with VMContext (i32) as first element, followed by user params.
+            // This matches the WASM function signature which includes VMContext.
+            let mut params: Vec<_> = alloc::vec![module::WasmValType::I32]; // VMContext
+            params.extend(
+                fi.params
+                    .iter()
+                    .flat_map(|p| module::glsl_type_to_wasm_components(&p.ty, options.float_mode))
+            );
             let results = module::glsl_type_to_wasm_components(&fi.return_type, options.float_mode);
             WasmExport {
                 name: ir_f.name.clone(),
                 params,
                 results,
                 return_type: fi.return_type.clone(),
+                // param_types is user-visible params only (for test harness arg validation)
                 param_types: fi.params.iter().map(|p| p.ty.clone()).collect(),
             }
         })

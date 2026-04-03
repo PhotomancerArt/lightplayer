@@ -46,45 +46,49 @@ unsafe fn invoke_sysv_struct_return_buf(
     let buf = out.as_mut_ptr();
     unsafe {
         match args.len() {
-            0 => {
-                let f: extern "C" fn(*mut i32) = transmute(code);
-                f(buf);
-            }
             1 => {
-                let f: extern "C" fn(*mut i32, i32) = transmute(code);
-                f(buf, args[0]);
+                let f: extern "C" fn(i32, *mut i32) = transmute(code);
+                f(args[0], buf);
             }
             2 => {
-                let f: extern "C" fn(*mut i32, i32, i32) = transmute(code);
-                f(buf, args[0], args[1]);
+                let f: extern "C" fn(i32, *mut i32, i32) = transmute(code);
+                f(args[0], buf, args[1]);
             }
             3 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32) = transmute(code);
-                f(buf, args[0], args[1], args[2]);
+                let f: extern "C" fn(i32, *mut i32, i32, i32) = transmute(code);
+                f(args[0], buf, args[1], args[2]);
             }
             4 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32, i32) = transmute(code);
-                f(buf, args[0], args[1], args[2], args[3]);
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32) = transmute(code);
+                f(args[0], buf, args[1], args[2], args[3]);
             }
             5 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32) = transmute(code);
-                f(buf, args[0], args[1], args[2], args[3], args[4]);
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32, i32) = transmute(code);
+                f(args[0], buf, args[1], args[2], args[3], args[4]);
             }
             6 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32) = transmute(code);
-                f(buf, args[0], args[1], args[2], args[3], args[4], args[5]);
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32, i32, i32) = transmute(code);
+                f(args[0], buf, args[1], args[2], args[3], args[4], args[5]);
             }
             7 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32, i32) = transmute(code);
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32, i32, i32, i32) = transmute(code);
                 f(
-                    buf, args[0], args[1], args[2], args[3], args[4], args[5], args[6],
+                    args[0], buf, args[1], args[2], args[3], args[4], args[5], args[6],
                 );
             }
             8 => {
-                let f: extern "C" fn(*mut i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32, i32, i32, i32, i32) =
                     transmute(code);
                 f(
-                    buf, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                    args[0], buf, args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                );
+            }
+            9 => {
+                let f: extern "C" fn(i32, *mut i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
+                f(
+                    args[0], buf, args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                    args[8],
                 );
             }
             _ => unreachable!(),
@@ -93,7 +97,7 @@ unsafe fn invoke_sysv_struct_return_buf(
     Ok(())
 }
 
-/// AArch64: StructReturn pointer in `x8`; user arguments in `x0`…`x7`.
+/// AArch64: VMContext and user args in `x0`…`x7`; StructReturn pointer in `x8`.
 #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
 unsafe fn aarch64_invoke_struct_return_buf(
     code: *const u8,
@@ -103,14 +107,6 @@ unsafe fn aarch64_invoke_struct_return_buf(
     use core::arch::asm;
     let buf = out.as_mut_ptr() as u64;
     match args.len() {
-        0 => unsafe {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                in("x8") buf,
-                clobber_abi("C"),
-            );
-        },
         1 => {
             let a0 = args[0] as i64 as u64;
             unsafe {
@@ -339,9 +335,9 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
         )));
     }
 
-    if args.len() > 8 {
+    if args.len() > 9 {
         return Err(CallError::Unsupported(
-            "more than 8 scalar arguments not supported by invoke shim".into(),
+            "more than 9 scalar arguments (vmctx + 8 user) not supported by invoke shim".into(),
         ));
     }
 
@@ -358,10 +354,6 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
     match n_ret {
         0 => {
             match args.len() {
-                0 => {
-                    let f: extern "C" fn() = unsafe { transmute(code) };
-                    f();
-                }
                 1 => {
                     let f: extern "C" fn(i32) = unsafe { transmute(code) };
                     f(args[0]);
@@ -400,16 +392,20 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
                         args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
                     );
                 }
+                9 => {
+                    let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
+                    f(
+                        args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                        args[8],
+                    );
+                }
                 _ => unreachable!(),
             }
             Ok(())
         }
         1 => {
             match args.len() {
-                0 => {
-                    let f: extern "C" fn() -> i32 = unsafe { transmute(code) };
-                    out[0] = f();
-                }
                 1 => {
                     let f: extern "C" fn(i32) -> i32 = unsafe { transmute(code) };
                     out[0] = f(args[0]);
@@ -448,6 +444,14 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
                         unsafe { transmute(code) };
                     out[0] = f(
                         args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                    );
+                }
+                9 => {
+                    let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
+                    out[0] = f(
+                        args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                        args[8],
                     );
                 }
                 _ => unreachable!(),
@@ -494,10 +498,6 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
 fn invoke_cret2(code: *const u8, args: &[i32]) -> CRet2 {
     unsafe {
         match args.len() {
-            0 => {
-                let f: extern "C" fn() -> CRet2 = transmute(code);
-                f()
-            }
             1 => {
                 let f: extern "C" fn(i32) -> CRet2 = transmute(code);
                 f(args[0])
@@ -535,6 +535,13 @@ fn invoke_cret2(code: *const u8, args: &[i32]) -> CRet2 {
                     args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
                 )
             }
+            9 => {
+                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet2 =
+                    transmute(code);
+                f(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                )
+            }
             _ => unreachable!(),
         }
     }
@@ -544,10 +551,6 @@ fn invoke_cret2(code: *const u8, args: &[i32]) -> CRet2 {
 fn invoke_cret3(code: *const u8, args: &[i32]) -> CRet3 {
     unsafe {
         match args.len() {
-            0 => {
-                let f: extern "C" fn() -> CRet3 = transmute(code);
-                f()
-            }
             1 => {
                 let f: extern "C" fn(i32) -> CRet3 = transmute(code);
                 f(args[0])
@@ -585,6 +588,13 @@ fn invoke_cret3(code: *const u8, args: &[i32]) -> CRet3 {
                     args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
                 )
             }
+            9 => {
+                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet3 =
+                    transmute(code);
+                f(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                )
+            }
             _ => unreachable!(),
         }
     }
@@ -594,10 +604,6 @@ fn invoke_cret3(code: *const u8, args: &[i32]) -> CRet3 {
 fn invoke_cret4(code: *const u8, args: &[i32]) -> CRet4 {
     unsafe {
         match args.len() {
-            0 => {
-                let f: extern "C" fn() -> CRet4 = transmute(code);
-                f()
-            }
             1 => {
                 let f: extern "C" fn(i32) -> CRet4 = transmute(code);
                 f(args[0])
@@ -635,6 +641,13 @@ fn invoke_cret4(code: *const u8, args: &[i32]) -> CRet4 {
                     args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
                 )
             }
+            9 => {
+                let f: extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet4 =
+                    transmute(code);
+                f(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                )
+            }
             _ => unreachable!(),
         }
     }
@@ -665,42 +678,6 @@ unsafe fn aarch64_invoke_multi_ret(code: *const u8, args: &[i32], n_ret: usize) 
     let mut r3: u64;
 
     match (args.len(), n_ret) {
-        (0, 2) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            alloc::vec![word64(r0), word64(r1)]
-        }
-        (0, 3) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            alloc::vec![word64(r0), word64(r1), word64(r2)]
-        }
-        (0, 4) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            alloc::vec![word64(r0), word64(r1), word64(r2), word64(r3)]
-        }
         (1, 2) => {
             let mut a0 = args[0] as i64 as u64;
             asm!(
@@ -1115,6 +1092,93 @@ unsafe fn aarch64_invoke_multi_ret(code: *const u8, args: &[i32], n_ret: usize) 
             asm!(
                 "blr {}",
                 in(reg) code,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            alloc::vec![word64(r0), word64(r1), word64(r2), word64(r3)]
+        }
+        (9, 2) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            alloc::vec![word64(r0), word64(r1)]
+        }
+        (9, 3) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            alloc::vec![word64(r0), word64(r1), word64(r2)]
+        }
+        (9, 4) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
                 inlateout("x0") a0 => r0,
                 inlateout("x1") a1 => r1,
                 inlateout("x2") a2 => r2,
@@ -1158,48 +1222,6 @@ unsafe fn aarch64_invoke_multi_ret_buf(
     let mut r3: u64;
 
     match (args.len(), n_ret) {
-        (0, 2) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            out[0] = word64(r0);
-            out[1] = word64(r1);
-        }
-        (0, 3) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            out[0] = word64(r0);
-            out[1] = word64(r1);
-            out[2] = word64(r2);
-        }
-        (0, 4) => {
-            asm!(
-                "blr {}",
-                in(reg) code,
-                lateout("x0") r0,
-                lateout("x1") r1,
-                lateout("x2") r2,
-                lateout("x3") r3,
-                clobber_abi("C"),
-            );
-            out[0] = word64(r0);
-            out[1] = word64(r1);
-            out[2] = word64(r2);
-            out[3] = word64(r3);
-        }
         (1, 2) => {
             let mut a0 = args[0] as i64 as u64;
             asm!(
@@ -1659,6 +1681,99 @@ unsafe fn aarch64_invoke_multi_ret_buf(
             asm!(
                 "blr {}",
                 in(reg) code,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            out[0] = word64(r0);
+            out[1] = word64(r1);
+            out[2] = word64(r2);
+            out[3] = word64(r3);
+        }
+        (9, 2) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            out[0] = word64(r0);
+            out[1] = word64(r1);
+        }
+        (9, 3) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
+                inlateout("x0") a0 => r0,
+                inlateout("x1") a1 => r1,
+                inlateout("x2") a2 => r2,
+                inlateout("x3") a3 => r3,
+                in("x4") a4,
+                in("x5") a5,
+                in("x6") a6,
+                in("x7") a7,
+                clobber_abi("C"),
+            );
+            out[0] = word64(r0);
+            out[1] = word64(r1);
+            out[2] = word64(r2);
+        }
+        (9, 4) => {
+            let mut a0 = args[0] as i64 as u64;
+            let mut a1 = args[1] as i64 as u64;
+            let mut a2 = args[2] as i64 as u64;
+            let mut a3 = args[3] as i64 as u64;
+            let a4 = args[4] as i64 as u64;
+            let a5 = args[5] as i64 as u64;
+            let a6 = args[6] as i64 as u64;
+            let a7 = args[7] as i64 as u64;
+            let a8 = args[8] as i64 as u64;
+            asm!(
+                "sub sp, sp, #16",
+                "str {a8}, [sp]",
+                "blr {code}",
+                "add sp, sp, #16",
+                code = in(reg) code,
+                a8 = in(reg) a8,
                 inlateout("x0") a0 => r0,
                 inlateout("x1") a1 => r1,
                 inlateout("x2") a2 => r2,

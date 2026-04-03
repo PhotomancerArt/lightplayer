@@ -6,6 +6,10 @@ use alloc::vec::Vec;
 use crate::op::Op;
 use crate::types::{CalleeRef, IrType, VReg, VRegRange};
 
+/// VReg that holds the VMContext pointer for the current function. Always [`VReg`] `(0)`;
+/// user parameters use [`VReg`] `(1..)` in [`IrFunction::vreg_types`].
+pub const VMCTX_VREG: VReg = VReg(0);
+
 /// External function declaration (`import @module::name(...)`).
 #[derive(Clone, Debug)]
 pub struct ImportDecl {
@@ -29,6 +33,9 @@ pub struct SlotDecl {
 pub struct IrFunction {
     pub name: String,
     pub is_entry: bool,
+    /// VReg holding the VMContext pointer; always [`VMCTX_VREG`].
+    pub vmctx_vreg: VReg,
+    /// User-visible parameter count (excluding VMContext).
     pub param_count: u16,
     pub return_types: Vec<IrType>,
     pub vreg_types: Vec<IrType>,
@@ -38,6 +45,19 @@ pub struct IrFunction {
 }
 
 impl IrFunction {
+    /// VReg for user parameter `user_index` (`0` = first GLSL parameter).
+    #[inline]
+    pub fn user_param_vreg(&self, user_index: u16) -> VReg {
+        debug_assert!(user_index < self.param_count);
+        VReg(self.vmctx_vreg.0 + 1 + user_index as u32)
+    }
+
+    /// Total parameter slots including VMContext (`1 + param_count`).
+    #[inline]
+    pub fn total_param_slots(&self) -> u16 {
+        1u16.saturating_add(self.param_count)
+    }
+
     /// Slice of [`Self::vreg_pool`] described by `range`.
     pub fn pool_slice(&self, range: VRegRange) -> &[VReg] {
         let start = range.start as usize;

@@ -45,6 +45,11 @@ impl JitModule {
                 param_count
             )));
         }
+        let header = lp_glsl_abi::VmContextHeader::default();
+        let vmctx = core::ptr::from_ref(&header).cast::<u8>();
+        let mut full: alloc::vec::Vec<i32> = alloc::vec::Vec::with_capacity(1 + flat.len());
+        full.push(vmctx as usize as i32);
+        full.extend_from_slice(&flat);
         let sig = self
             .signatures
             .get(name)
@@ -62,7 +67,7 @@ impl JitModule {
             .finalized_ptr(name)
             .ok_or_else(|| CallError::Unsupported("internal: missing finalized pointer".into()))?;
         let words = unsafe {
-            crate::invoke::invoke_i32_args_returns(code, &flat, n_ret, uses_struct_return)?
+            crate::invoke::invoke_i32_args_returns(code, &full, n_ret, uses_struct_return)?
         };
         if gfn.return_type == GlslType::Void {
             return Ok(GlslReturn {

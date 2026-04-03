@@ -88,7 +88,9 @@ pub fn interpret_with_depth(
         .iter()
         .find(|f| f.name == func_name)
         .ok_or_else(|| InterpError::FunctionNotFound(func_name.to_string()))?;
-    exec_func(module, func, args, imports, 0, max_depth)
+    let mut full = alloc::vec![Value::I32(0); 1];
+    full.extend_from_slice(args);
+    exec_func(module, func, &full, imports, 0, max_depth)
 }
 
 fn exec_func(
@@ -102,17 +104,21 @@ fn exec_func(
     if depth > max_depth {
         return Err(InterpError::StackOverflow);
     }
-    if args.len() != func.param_count as usize {
+    let expected = 1usize + func.param_count as usize;
+    if args.len() != expected {
         return Err(InterpError::Internal(format!(
-            "expected {} args, got {}",
+            "expected {} args (vmctx + {} user), got {}",
+            expected,
             func.param_count,
             args.len()
         )));
     }
 
     let mut regs: Vec<Option<Value>> = alloc::vec![None; func.vreg_types.len()];
+    let vm = func.vmctx_vreg.0 as usize;
+    regs[vm] = Some(args[0]);
     for i in 0..func.param_count as usize {
-        regs[i] = Some(args[i]);
+        regs[vm + 1 + i] = Some(args[1 + i]);
     }
 
     let slot_off = slot_offsets(func);
@@ -264,6 +270,13 @@ fn exec_func(
                     imports.call(imp.module_name.as_str(), imp.func_name.as_str(), &call_args)?
                 } else if let Some(fi) = module.callee_as_function(*callee) {
                     let callee_fn = &module.functions[fi];
+                    if call_args.len() != 1 + callee_fn.param_count as usize {
+                        return Err(InterpError::Internal(format!(
+                            "local call arg count {} != 1 + callee param_count {}",
+                            call_args.len(),
+                            callee_fn.param_count
+                        )));
+                    }
                     exec_func(module, callee_fn, &call_args, imports, depth + 1, max_depth)?
                 } else {
                     return Err(InterpError::Internal("bad callee".into()));

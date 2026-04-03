@@ -3736,6 +3736,7 @@ dependencies = [
  "libm",
  "log",
  "lp-engine-client",
+ "lp-glsl-abi",
  "lp-glsl-builtins",
  "lp-model",
  "lp-shared",

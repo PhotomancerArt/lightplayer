@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::builder::{FunctionBuilder, ModuleBuilder};
-use crate::module::{ImportDecl, IrFunction, IrModule};
+use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
 use crate::op::Op;
 use crate::types::{CalleeRef, IrType, SlotId, VReg};
 
@@ -352,7 +352,19 @@ fn parse_function_body(
     if is_entry {
         fb.set_entry();
     }
-    for (_, t) in params {
+    let mut expect_v = VMCTX_VREG.0 + 1;
+    for (v, t) in params {
+        if v.0 != expect_v {
+            return Err(err(
+                1,
+                1,
+                alloc::format!(
+                    "param vreg must be v{expect_v} next (v0 is VMContext); got v{}",
+                    v.0
+                ),
+            ));
+        }
+        expect_v += 1;
         fb.add_param(*t);
     }
     let lines: Vec<&str> = body.lines().collect();

@@ -35,7 +35,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 - Rework **`ShaderRuntime`** (`runtime.rs`): compile via **`lpir_cranelift::jit`** (or
   orchestrated **`lp_glsl_naga` + `jit_from_ir_owned`** if we split for memory),
   store **`JitModule`** (or thin wrapper), implement **`lp_glsl_exec::GlslExecutable`**
-  for the slow path (**`call_vec`** with **`lp_glsl_values::GlslValue`**).
+  for the slow path (**`call_vec`** with **`lp_glsl_abi::GlslValue`**).
 - Replace **`get_direct_call_info`** (not on **`lp_glsl_exec::GlslExecutable`**) with
   **`JitModule::direct_call("main")`** → **`DirectCall`**, or equivalent.
 - Map **`ShaderConfig::glsl_opts`** → **`CompileOptions`** (**`Q32Options`**,
@@ -105,8 +105,8 @@ should not depend on filetests.
 ### Q2 — `glsl_jit_streaming` vs single-shot `jit()`
 
 **Context:** Old path compiles AST per function (streaming). **`lpir-cranelift`**
- **`jit()`** parses/lowers the whole shader then builds one **`JitModule`**. Peak
- memory may differ; VI-A concluded batch **`finalize_definitions`** is fine.
+**`jit()`** parses/lowers the whole shader then builds one **`JitModule`**. Peak
+memory may differ; VI-A concluded batch **`finalize_definitions`** is fine.
 
 **Suggested answers:**
 
@@ -117,8 +117,8 @@ should not depend on filetests.
 ### Q3 — Fast path: `DirectCall::call_i32` vs `call_structreturn_with_args`
 
 **Context:** Today the engine uses **`lp_glsl_jit_util`** + **`cranelift-codegen`**
- types. **`DirectCall::call_i32`** should match the same struct-return layout as
- **`invoke`**.
+types. **`DirectCall::call_i32`** should match the same struct-return layout as
+**`invoke`**.
 
 **Suggested answers:**
 

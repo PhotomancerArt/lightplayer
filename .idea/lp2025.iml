@@ -63,8 +63,8 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-diagnostics/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-exec/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-values/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-abi/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -26,5 +26,5 @@ Conventional Commits, e.g.:
 `feat(filetests): switch to lpir targets; use lp-glsl-exec stack`
 
 Body: default `jit.q32`, CI wasm+rv32, remove legacy cranelift target, wire
-filetests to **`lp-glsl-exec`** / **`lp-glsl-values`**, adapters, docs. Legacy
+filetests to **`lp-glsl-exec`** / **`lp-glsl-abi`**, adapters, docs. Legacy
 **`lp-glsl-frontend`** / **`lp-glsl-cranelift`** unchanged until Stage VII.

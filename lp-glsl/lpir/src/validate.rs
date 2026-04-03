@@ -119,8 +119,15 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
 
     let n = func.vreg_types.len();
     let mut defined = vec![false; n];
-    for i in 0..(func.param_count as usize).min(n) {
-        defined[i] = true;
+    let vm = func.vmctx_vreg.0 as usize;
+    if vm < n {
+        defined[vm] = true;
+    }
+    for i in 0..func.param_count as usize {
+        let j = vm + 1 + i;
+        if j < n {
+            defined[j] = true;
+        }
     }
 
     let mut stack: Vec<StackEntry> = Vec::new();
@@ -405,9 +412,10 @@ fn callee_signature<'a>(
         Some((&imp.param_types, &imp.return_types))
     } else if let Some(i) = module.callee_as_function(callee) {
         let f = &module.functions[i];
-        let n = f.param_count as usize;
-        if n <= f.vreg_types.len() {
-            Some((&f.vreg_types[..n], &f.return_types))
+        let vm = f.vmctx_vreg.0 as usize;
+        let end = vm + 1 + f.param_count as usize;
+        if end <= f.vreg_types.len() {
+            Some((&f.vreg_types[..end], &f.return_types))
         } else {
             None
         }

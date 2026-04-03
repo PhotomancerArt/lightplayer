@@ -1,7 +1,7 @@
 //! Module that exercises every [`crate::op::Op`] variant for print/parse round-trip tests.
 
 use crate::builder::{FunctionBuilder, ModuleBuilder};
-use crate::module::IrModule;
+use crate::module::{IrModule, VMCTX_VREG};
 use crate::op::Op;
 use crate::types::IrType;
 
@@ -259,7 +259,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     b.end_switch();
 
     let call_out = b.alloc_vreg(IrType::I32);
-    b.push_call(id_callee, &[i2], &[call_out]);
+    b.push_call(id_callee, &[VMCTX_VREG, i2], &[call_out]);
 
     b.push_return(&[f1]);
 

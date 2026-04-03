@@ -26,9 +26,9 @@ fn assert_round_trip(src: &str) {
 #[test]
 fn round_trip_simple_add() {
     assert_round_trip(
-        "func @add(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fadd v0, v1
-  return v2
+        "func @add(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
+  return v3
 }
 ",
     );
@@ -37,13 +37,13 @@ fn round_trip_simple_add() {
 #[test]
 fn round_trip_abs() {
     assert_round_trip(
-        "func @abs(v0:f32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  v2:i32 = flt v0, v1
-  if v2 {
-    v0 = fneg v0
+        "func @abs(v1:f32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  v3:i32 = flt v1, v2
+  if v3 {
+    v1 = fneg v1
   }
-  return v0
+  return v1
 }
 ",
     );
@@ -52,12 +52,12 @@ fn round_trip_abs() {
 #[test]
 fn round_trip_max() {
     assert_round_trip(
-        "func @max(v0:f32, v1:f32) -> f32 {
-  v2:i32 = fgt v0, v1
-  if v2 {
-    return v0
-  } else {
+        "func @max(v1:f32, v2:f32) -> f32 {
+  v3:i32 = fgt v1, v2
+  if v3 {
     return v1
+  } else {
+    return v2
   }
 }
 ",
@@ -67,43 +67,15 @@ fn round_trip_max() {
 #[test]
 fn round_trip_sum_to_n() {
     assert_round_trip(
-        "func @sum_to_n(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
-  v2:i32 = iconst.i32 0
-  loop {
-    v3:i32 = ilt_s v2, v0
-    br_if_not v3
-    v1 = iadd v1, v2
-    v4:i32 = iconst.i32 1
-    v2 = iadd v2, v4
-    continue
-  }
-  return v1
-}
-",
-    );
-}
-
-#[test]
-fn round_trip_nested_loops() {
-    assert_round_trip(
-        "func @nested(v0:i32, v1:i32) -> i32 {
+        "func @sum_to_n(v1:i32) -> i32 {
   v2:i32 = iconst.i32 0
   v3:i32 = iconst.i32 0
   loop {
-    v4:i32 = ilt_s v3, v0
+    v4:i32 = ilt_s v3, v1
     br_if_not v4
-    v5:i32 = iconst.i32 0
-    loop {
-      v6:i32 = ilt_s v5, v1
-      br_if_not v6
-      v2 = iadd v2, v5
-      v7:i32 = iconst.i32 1
-      v5 = iadd v5, v7
-      continue
-    }
-    v8:i32 = iconst.i32 1
-    v3 = iadd v3, v8
+    v2 = iadd v2, v3
+    v5:i32 = iconst.i32 1
+    v3 = iadd v3, v5
     continue
   }
   return v2
@@ -113,25 +85,53 @@ fn round_trip_nested_loops() {
 }
 
 #[test]
+fn round_trip_nested_loops() {
+    assert_round_trip(
+        "func @nested(v1:i32, v2:i32) -> i32 {
+  v3:i32 = iconst.i32 0
+  v4:i32 = iconst.i32 0
+  loop {
+    v5:i32 = ilt_s v4, v1
+    br_if_not v5
+    v6:i32 = iconst.i32 0
+    loop {
+      v7:i32 = ilt_s v6, v2
+      br_if_not v7
+      v3 = iadd v3, v6
+      v8:i32 = iconst.i32 1
+      v6 = iadd v6, v8
+      continue
+    }
+    v9:i32 = iconst.i32 1
+    v4 = iadd v4, v9
+    continue
+  }
+  return v3
+}
+",
+    );
+}
+
+#[test]
 fn round_trip_dispatch() {
     assert_round_trip(
-        "func @dispatch(v0:i32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  switch v0 {
+        "func @dispatch(v1:i32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  switch v1 {
     case 0 {
-      v1 = fconst.f32 1.0
+      v2 = fconst.f32 1.0
     }
     case 1 {
-      v1 = fconst.f32 2.0
+      v2 = fconst.f32 2.0
     }
     case 2 {
-      v1 = fconst.f32 4.0
+      v2 = fconst.f32 4.0
     }
     default {
-      v1 = fconst.f32 -1.0
+      v2 = fconst.f32 -1.0
     }
   }
-  return v1
+  return v2
 }
 ",
     );
@@ -140,14 +140,14 @@ fn round_trip_dispatch() {
 #[test]
 fn round_trip_early_return() {
     assert_round_trip(
-        "func @early_return(v0:f32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  v2:i32 = flt v0, v1
-  if v2 {
-    v3:f32 = fneg v0
-    return v3
+        "func @early_return(v1:f32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  v3:i32 = flt v1, v2
+  if v3 {
+    v4:f32 = fneg v1
+    return v4
   }
-  return v0
+  return v1
 }
 ",
     );
@@ -156,10 +156,10 @@ fn round_trip_early_return() {
 #[test]
 fn round_trip_entry_and_multi_return() {
     assert_round_trip(
-        "entry func @main(v0:f32, v1:f32) -> (f32, f32) {
-  v2:f32 = fadd v0, v1
-  v3:f32 = fsub v0, v1
-  return v2, v3
+        "entry func @main(v1:f32, v2:f32) -> (f32, f32) {
+  v3:f32 = fadd v1, v2
+  v4:f32 = fsub v1, v2
+  return v3, v4
 }
 ",
     );
@@ -170,9 +170,9 @@ fn round_trip_import_and_call() {
     assert_round_trip(
         "import @glsl::fsin(f32) -> f32
 
-func @use(v0:f32) -> f32 {
-  v1:f32 = call @glsl::fsin(v0)
-  return v1
+func @use(v1:f32) -> f32 {
+  v2:f32 = call @glsl::fsin(v1)
+  return v2
 }
 ",
     );
@@ -220,14 +220,14 @@ fn round_trip_noise_sample() {
     assert_round_trip(
         "import @lpfx::noise3(i32, f32, f32, f32)
 
-func @noise_sample(v0:f32, v1:f32, v2:f32) -> f32 {
+func @noise_sample(v1:f32, v2:f32, v3:f32) -> f32 {
   slot ss0, 12
-  v3:i32 = slot_addr ss0
-  call @lpfx::noise3(v3, v0, v1, v2)
-  v4:f32 = load v3, 0
-  v5:f32 = load v3, 4
-  v6:f32 = load v3, 8
-  return v4
+  v4:i32 = slot_addr ss0
+  call @lpfx::noise3(v4, v1, v2, v3)
+  v5:f32 = load v4, 0
+  v6:f32 = load v4, 4
+  v7:f32 = load v4, 8
+  return v5
 }
 ",
     );
@@ -236,11 +236,11 @@ func @noise_sample(v0:f32, v1:f32, v2:f32) -> f32 {
 #[test]
 fn round_trip_fill_vec3() {
     assert_round_trip(
-        "func @fill_vec3(v0:f32, v1:i32) {
-  v2:f32 = fmul v0, v0
-  store v1, 0, v2
-  store v1, 4, v2
-  store v1, 8, v2
+        "func @fill_vec3(v1:f32, v2:i32) {
+  v3:f32 = fmul v1, v1
+  store v2, 0, v3
+  store v2, 4, v3
+  store v2, 8, v3
 }
 ",
     );
@@ -249,18 +249,18 @@ fn round_trip_fill_vec3() {
 #[test]
 fn round_trip_arr_dyn() {
     assert_round_trip(
-        "func @arr_dyn(v0:i32) -> f32 {
+        "func @arr_dyn(v1:i32) -> f32 {
   slot ss0, 16
-  v1:i32 = slot_addr ss0
-  v2:f32 = fconst.f32 1.0
-  store v1, 0, v2
-  store v1, 4, v2
-  store v1, 8, v2
-  store v1, 12, v2
-  v3:i32 = imul_imm v0, 4
-  v4:i32 = iadd v1, v3
-  v5:f32 = load v4, 0
-  return v5
+  v2:i32 = slot_addr ss0
+  v3:f32 = fconst.f32 1.0
+  store v2, 0, v3
+  store v2, 4, v3
+  store v2, 8, v3
+  store v2, 12, v3
+  v4:i32 = imul_imm v1, 4
+  v5:i32 = iadd v2, v4
+  v6:f32 = load v5, 0
+  return v6
 }
 ",
     );
@@ -269,12 +269,12 @@ fn round_trip_arr_dyn() {
 #[test]
 fn round_trip_use_ctx() {
     assert_round_trip(
-        "func @use_ctx(v0:f32, v1:i32) -> f32 {
-  v2:f32 = load v1, 0
-  v3:f32 = load v1, 4
-  v4:f32 = fadd v2, v3
-  store v1, 0, v4
-  return v4
+        "func @use_ctx(v1:f32, v2:i32) -> f32 {
+  v3:f32 = load v2, 0
+  v4:f32 = load v2, 4
+  v5:f32 = fadd v3, v4
+  store v2, 0, v5
+  return v5
 }
 ",
     );
@@ -283,8 +283,8 @@ fn round_trip_use_ctx() {
 #[test]
 fn round_trip_copy_mat4() {
     assert_round_trip(
-        "func @copy_mat4(v0:i32, v1:i32) {
-  memcpy v0, v1, 64
+        "func @copy_mat4(v1:i32, v2:i32) {
+  memcpy v1, v2, 64
 }
 ",
     );
@@ -303,13 +303,13 @@ fn round_trip_all_ops() {
 fn round_trip_constants() {
     assert_round_trip(
         "func @constants() -> i32 {
-  v0:f32 = fconst.f32 -0.0
-  v1:f32 = fconst.f32 inf
-  v2:f32 = fconst.f32 -inf
-  v3:f32 = fconst.f32 nan
-  v4:i32 = iconst.i32 16
-  v5:i32 = iconst.i32 -7
-  return v4
+  v1:f32 = fconst.f32 -0.0
+  v2:f32 = fconst.f32 inf
+  v3:f32 = fconst.f32 -inf
+  v4:f32 = fconst.f32 nan
+  v5:i32 = iconst.i32 16
+  v6:i32 = iconst.i32 -7
+  return v5
 }
 ",
     );
@@ -318,19 +318,19 @@ fn round_trip_constants() {
 #[test]
 fn round_trip_loop_continuing() {
     assert_round_trip(
-        "func @for_sum(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
+        "func @for_sum(v1:i32) -> i32 {
   v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
   loop {
-    v3:i32 = ige_s v2, v0
-    if v3 {
+    v4:i32 = ige_s v3, v1
+    if v4 {
       break
     }
-    v1 = iadd v1, v2
+    v2 = iadd v2, v3
     continuing:
-    v2 = iadd_imm v2, 1
+    v3 = iadd_imm v3, 1
   }
-  return v1
+  return v2
 }
 ",
     );
@@ -339,17 +339,17 @@ fn round_trip_loop_continuing() {
 #[test]
 fn round_trip_loop_continuing_with_break_if() {
     assert_round_trip(
-        "func @for_sum2(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
+        "func @for_sum2(v1:i32) -> i32 {
   v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
   loop {
-    v1 = iadd v1, v2
+    v2 = iadd v2, v3
     continuing:
-    v2 = iadd_imm v2, 1
-    v3:i32 = ige_s v2, v0
-    br_if_not v3
+    v3 = iadd_imm v3, 1
+    v4:i32 = ige_s v3, v1
+    br_if_not v4
   }
-  return v1
+  return v2
 }
 ",
     );
@@ -358,8 +358,8 @@ fn round_trip_loop_continuing_with_break_if() {
 #[test]
 fn parse_accepts_hex_iconst() {
     let ir = "func @h() -> i32 {
-  v0:i32 = iconst.i32 0xff
-  return v0
+  v1:i32 = iconst.i32 0xff
+  return v1
 }
 ";
     parse_module(ir).expect("hex iconst should parse");

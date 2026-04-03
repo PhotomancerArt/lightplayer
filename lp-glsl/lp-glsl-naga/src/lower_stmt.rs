@@ -5,7 +5,7 @@ use alloc::string::String;
 
 use alloc::vec::Vec;
 
-use lpir::{IrType, Op, SlotId};
+use lpir::{IrType, Op, SlotId, VMCTX_VREG};
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
 use crate::lower_access;
@@ -492,6 +492,9 @@ fn lower_user_call(
         .copied()
         .ok_or_else(|| LowerError::Internal(format!("callee not in export map: {name:?}")))?;
     let mut arg_vs = Vec::new();
+    // Add VMContext as first arg (vreg 0) for shader-to-shader calls.
+    // All shader functions expect VMContext as their first parameter.
+    arg_vs.push(VMCTX_VREG);
     let mut inout_copybacks: Vec<(Handle<LocalVariable>, SlotId)> = Vec::new();
     for (i, &arg_h) in arguments.iter().enumerate() {
         let callee_arg = &f.arguments[i];

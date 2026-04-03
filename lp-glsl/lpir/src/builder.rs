@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::module::{ImportDecl, IrFunction, IrModule, SlotDecl};
+use crate::module::{ImportDecl, IrFunction, IrModule, SlotDecl, VMCTX_VREG};
 use crate::op::Op;
 use crate::types::{CalleeRef, IrType, SlotId, VReg, VRegRange};
 
@@ -47,11 +47,11 @@ impl FunctionBuilder {
             is_entry: false,
             return_types: return_types.to_vec(),
             param_count: 0,
-            vreg_types: Vec::new(),
+            vreg_types: alloc::vec![IrType::I32], // VMContext pointer (32-bit)
             slots: Vec::new(),
             body: Vec::new(),
             vreg_pool: Vec::new(),
-            next_vreg: 0,
+            next_vreg: 1,
             next_slot: 0,
             block_stack: Vec::new(),
         }
@@ -390,6 +390,7 @@ impl FunctionBuilder {
         IrFunction {
             name: core::mem::take(&mut self.name),
             is_entry: self.is_entry,
+            vmctx_vreg: VMCTX_VREG,
             param_count: self.param_count,
             return_types: self.return_types,
             vreg_types: self.vreg_types,

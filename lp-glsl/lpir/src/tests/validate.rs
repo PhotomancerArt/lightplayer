@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::builder::FunctionBuilder;
-use crate::module::{ImportDecl, IrFunction, IrModule};
+use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
 use crate::op::Op;
 use crate::parse::parse_module;
 use crate::types::{CalleeRef, IrType, VReg, VRegRange};
@@ -13,29 +13,29 @@ use crate::validate::{validate_function, validate_module};
 
 #[test]
 fn validate_parsed_control_flow_examples() {
-    let abs = "func @abs(v0:f32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  v2:i32 = flt v0, v1
-  if v2 {
-    v0 = fneg v0
-  }
-  return v0
-}
-";
-    let dispatch = "func @dispatch(v0:i32) -> f32 {
-  v1:f32 = fconst.f32 0.0
-  switch v0 {
-    case 0 {
-      v1 = fconst.f32 1.0
-    }
-    case 1 {
-      v1 = fconst.f32 2.0
-    }
-    default {
-      v1 = fconst.f32 -1.0
-    }
+    let abs = "func @abs(v1:f32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  v3:i32 = flt v1, v2
+  if v3 {
+    v1 = fneg v1
   }
   return v1
+}
+";
+    let dispatch = "func @dispatch(v1:i32) -> f32 {
+  v2:f32 = fconst.f32 0.0
+  switch v1 {
+    case 0 {
+      v2 = fconst.f32 1.0
+    }
+    case 1 {
+      v2 = fconst.f32 2.0
+    }
+    default {
+      v2 = fconst.f32 -1.0
+    }
+  }
+  return v2
 }
 ";
     for src in [abs, dispatch] {
@@ -46,9 +46,9 @@ fn validate_parsed_control_flow_examples() {
 
 #[test]
 fn validate_simple_add_passes() {
-    let ir = "func @add(v0:f32, v1:f32) -> f32 {
-  v2:f32 = fadd v0, v1
-  return v2
+    let ir = "func @add(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
+  return v3
 }
 ";
     let m = parse_module(ir).unwrap();
@@ -60,6 +60,7 @@ fn validate_err_break_outside_loop() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
         vreg_types: Vec::new(),
@@ -108,14 +109,15 @@ fn validate_err_undefined_vreg() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
-        vreg_types: vec![IrType::F32, IrType::F32],
+        vreg_types: vec![IrType::I32, IrType::F32, IrType::F32],
         slots: Vec::new(),
         body: vec![Op::Fadd {
-            dst: VReg(1),
-            lhs: VReg(0),
-            rhs: VReg(0),
+            dst: VReg(2),
+            lhs: VReg(1),
+            rhs: VReg(1),
         }],
         vreg_pool: Vec::new(),
     };
@@ -132,13 +134,14 @@ fn validate_err_copy_type_mismatch() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 2,
         return_types: Vec::new(),
-        vreg_types: vec![IrType::F32, IrType::I32],
+        vreg_types: vec![IrType::I32, IrType::F32, IrType::I32],
         slots: Vec::new(),
         body: vec![Op::Copy {
-            dst: VReg(1),
-            src: VReg(0),
+            dst: VReg(2),
+            src: VReg(1),
         }],
         vreg_pool: Vec::new(),
     };
@@ -179,6 +182,7 @@ fn validate_err_callee_oob() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
         vreg_types: Vec::new(),
@@ -203,6 +207,7 @@ fn validate_err_continue_outside_loop() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
         vreg_types: Vec::new(),
@@ -265,20 +270,21 @@ fn validate_err_return_value_type() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
-        vreg_types: vec![IrType::I32],
+        vreg_types: vec![IrType::I32, IrType::I32],
         slots: Vec::new(),
         body: vec![
             Op::IconstI32 {
-                dst: VReg(0),
+                dst: VReg(1),
                 value: 1,
             },
             Op::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
         ],
-        vreg_pool: vec![VReg(0)],
+        vreg_pool: vec![VReg(1)],
     };
     let m = IrModule {
         imports: Vec::new(),
@@ -293,6 +299,7 @@ fn validate_err_vreg_pool_oob() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
         vreg_types: Vec::new(),
@@ -312,20 +319,20 @@ fn validate_err_vreg_pool_oob() {
 
 #[test]
 fn validate_err_continue_in_continuing() {
-    let ir = "func @bad(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
+    let ir = "func @bad(v1:i32) -> i32 {
   v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
   loop {
-    v3:i32 = ige_s v2, v0
-    if v3 {
+    v4:i32 = ige_s v3, v1
+    if v4 {
       break
     }
-    v1 = iadd v1, v2
+    v2 = iadd v2, v3
     continuing:
-    v2 = iadd_imm v2, 1
+    v3 = iadd_imm v3, 1
     continue
   }
-  return v1
+  return v2
 }
 ";
     let m = parse_module(ir).unwrap();
@@ -339,26 +346,26 @@ fn validate_err_continue_in_continuing() {
 #[test]
 fn validate_ok_continue_in_nested_loop_in_continuing() {
     let ir = "func @ok() -> i32 {
-  v0:i32 = iconst.i32 0
   v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 0
   loop {
-    v2:i32 = ige_s v1, v0
-    if v2 {
+    v3:i32 = ige_s v2, v1
+    if v3 {
       break
     }
     continuing:
-    v1 = iadd_imm v1, 1
-    v3:i32 = iconst.i32 0
+    v2 = iadd_imm v2, 1
+    v4:i32 = iconst.i32 0
     loop {
-      v4:i32 = ieq_imm v3, 1
-      if v4 {
+      v5:i32 = ieq_imm v4, 1
+      if v5 {
         break
       }
-      v3 = iadd_imm v3, 1
+      v4 = iadd_imm v4, 1
       continue
     }
   }
-  return v0
+  return v1
 }
 ";
     let m = parse_module(ir).unwrap();
@@ -367,19 +374,19 @@ fn validate_ok_continue_in_nested_loop_in_continuing() {
 
 #[test]
 fn validate_ok_loop_continuing_passes() {
-    let ir = "func @f(v0:i32) -> i32 {
-  v1:i32 = iconst.i32 0
+    let ir = "func @f(v1:i32) -> i32 {
   v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
   loop {
-    v3:i32 = ige_s v2, v0
-    if v3 {
+    v4:i32 = ige_s v3, v1
+    if v4 {
       break
     }
-    v1 = iadd v1, v2
+    v2 = iadd v2, v3
     continuing:
-    v2 = iadd_imm v2, 1
+    v3 = iadd_imm v3, 1
   }
-  return v1
+  return v2
 }
 ";
     let m = parse_module(ir).unwrap();
@@ -391,12 +398,13 @@ fn validate_err_slot_addr_oob() {
     let f = IrFunction {
         name: String::from("bad"),
         is_entry: false,
+        vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
-        vreg_types: vec![IrType::I32],
+        vreg_types: vec![IrType::I32, IrType::I32],
         slots: Vec::new(),
         body: vec![Op::SlotAddr {
-            dst: VReg(0),
+            dst: VReg(1),
             slot: crate::types::SlotId(0),
         }],
         vreg_pool: Vec::new(),

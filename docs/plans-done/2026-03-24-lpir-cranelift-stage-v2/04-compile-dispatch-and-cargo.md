@@ -3,17 +3,17 @@
 ### 1. Wire filetests + wasm to shared crates (not `lp-glsl-frontend`)
 
 **Already done (prerequisite):** **`lp-glsl-diagnostics`**, **`lp-glsl-core`**,
-**`lp-glsl-values`**, **`lp-glsl-exec`** exist as copies; legacy **`lp-glsl-frontend`**
+**`lp-glsl-abi`**, **`lp-glsl-exec`** exist as copies; legacy **`lp-glsl-frontend`**
 / **`lp-glsl-cranelift`** were **not** refactored.
 
 **This phase:**
 
-- **`lp-glsl-filetests`:** depend on **`lp-glsl-exec`**, **`lp-glsl-values`**, and
+- **`lp-glsl-filetests`:** depend on **`lp-glsl-exec`**, **`lp-glsl-abi`**, and
   **`lp-glsl-diagnostics`** (and **`lp-glsl-core`** if any shared signature types are
   needed at compile boundaries). Replace imports that pointed at
-  **`lp_glsl_cranelift::exec::…`** with **`lp_glsl_exec`**, **`lp_glsl_values`**, etc.
+  **`lp_glsl_cranelift::exec::…`** with **`lp_glsl_exec`**, **`lp_glsl_abi`**, etc.
 - **`lp-glsl-wasm`:** **`impl GlslExecutable` for WasmExecutable** using
-  **`lp_glsl_exec::GlslExecutable`**, **`lp_glsl_values::GlslValue`**, and
+  **`lp_glsl_exec::GlslExecutable`**, **`lp_glsl_abi::GlslValue`**, and
   **`lp_glsl_diagnostics::GlslError`** (match error mapping to what filetests expect).
 - **Legacy `lp-glsl-cranelift`:** **leave as-is** for V2 (optional later: re-export
   or depend on new crates for non-filetests callers — **Stage VII**).
@@ -28,7 +28,7 @@ filetests. Impls live in **`lp-glsl-wasm`**, filetests adapters, etc.
 ### 2. Filetests `Cargo.toml`
 
 - Add **`lpir-cranelift`** with needed features for **`jit`** / **`rv32`**.
-- Add **`lp-glsl-exec`**, **`lp-glsl-values`**, **`lp-glsl-diagnostics`** (and
+- Add **`lp-glsl-exec`**, **`lp-glsl-abi`**, **`lp-glsl-diagnostics`** (and
   **`lp-glsl-core`** if needed).
 - **Remove `lp-glsl-cranelift`** once filetests no longer imports it (error tests
   included — switch to **`lpir_cranelift::jit`** or shared parse errors as

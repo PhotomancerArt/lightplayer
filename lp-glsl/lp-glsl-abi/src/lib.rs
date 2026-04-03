@@ -19,6 +19,7 @@ mod path;
 mod path_resolve;
 mod value;
 mod value_path;
+mod vmcontext;
 
 pub use data::GlslData;
 pub use data_error::GlslDataError;
@@ -31,3 +32,7 @@ pub use path::{PathParseError, PathSegment, parse_path};
 pub use path_resolve::PathError;
 pub use value::GlslValue;
 pub use value_path::GlslValuePathError;
+pub use vmcontext::{
+    VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_GLOBALS_DEFAULTS_OFFSET,
+    VMCTX_OFFSET_TRAP_HANDLER, VmContextHeader, minimal_vmcontext,
+};

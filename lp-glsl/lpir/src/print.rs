@@ -78,11 +78,13 @@ fn print_function(out: &mut String, func: &IrFunction, module: &IrModule) {
     }
     let _ = write!(out, "func @{}", func.name);
     let _ = write!(out, "(");
+    let vm = func.vmctx_vreg.0 as usize;
     for i in 0..func.param_count as usize {
         if i > 0 {
             let _ = write!(out, ", ");
         }
-        let _ = write!(out, "{}:{}", VReg(i as u32), func.vreg_types[i]);
+        let j = vm + 1 + i;
+        let _ = write!(out, "{}:{}", VReg(j as u32), func.vreg_types[j]);
     }
     let _ = write!(out, ")");
     if !func.return_types.is_empty() {
@@ -98,8 +100,9 @@ fn print_function(out: &mut String, func: &IrFunction, module: &IrModule) {
         module,
         defined: vec![false; func.vreg_types.len()],
     };
+    st.defined[vm] = true;
     for i in 0..func.param_count as usize {
-        st.defined[i] = true;
+        st.defined[vm + 1 + i] = true;
     }
     let mut stack: Vec<Block> = Vec::new();
     let mut pc = 0usize;

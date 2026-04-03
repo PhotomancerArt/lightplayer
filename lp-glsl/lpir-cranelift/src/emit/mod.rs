@@ -99,15 +99,23 @@ pub fn signature_for_ir_func(
 ) -> Signature {
     let mut sig = Signature::new(call_conv);
     let sr = signature_uses_struct_return(isa, func);
+    // NOTE: When enable_multi_ret_implicit_sret is enabled, the backend treats the first
+    // pointer arg as the implicit sret pointer. So we MUST put sret before vmctx.
     if sr {
         sig.params.push(AbiParam::special(
             pointer_type,
             ArgumentPurpose::StructReturn,
         ));
     }
+    // NOTE: Use I32 for vmctx (not pointer_type) to avoid it being treated as special by
+    // RISC-V backend with enable_multi_ret_implicit_sret. The vmctx is semantically a pointer
+    // but we pass it as I32 to prevent ABI confusion.
+    sig.params.push(AbiParam::new(types::I32));
+    let vm = func.vmctx_vreg.0 as usize;
     for i in 0..func.param_count as usize {
-        sig.params
-            .push(AbiParam::new(ir_type_for_mode(func.vreg_types[i], mode)));
+        let ty = func.vreg_types[vm + 1 + i];
+        let ct = ir_type_for_mode(ty, mode);
+        sig.params.push(AbiParam::new(ct));
     }
     if !sr {
         for t in &func.return_types {
@@ -180,8 +188,12 @@ pub fn translate_function(
     ctx: &EmitCtx,
 ) -> Result<(), CompileError> {
     let mut vars = Vec::with_capacity(func.vreg_types.len());
+    let vm_i = func.vmctx_vreg.0 as usize;
     for (i, ty) in func.vreg_types.iter().enumerate() {
-        let ct = if ctx.vreg_wide_addr.get(i).copied().unwrap_or(false) {
+        let ct = if i == vm_i {
+            // NOTE: vmctx is I32 in the signature (not pointer) to avoid RISC-V ABI issues
+            types::I32
+        } else if ctx.vreg_wide_addr.get(i).copied().unwrap_or(false) {
             ctx.pointer_type
         } else {
             ir_type_for_mode(*ty, ctx.float_mode)
@@ -191,14 +203,25 @@ pub fn translate_function(
 
     let entry = builder.current_block().expect("entry block");
     let params: Vec<Value> = builder.block_params(entry).to_vec();
-    let param_base = usize::from(ctx.uses_struct_return);
-    for (i, val) in params.into_iter().enumerate() {
-        if i < param_base {
-            continue;
-        }
-        let user_idx = i - param_base;
-        if (user_idx as u16) < func.param_count {
-            def_v(builder, &vars, VReg(user_idx as u32), val);
+    let mut pi = 0usize;
+    // NOTE: Signature order is: [sret (if present), vmctx, user1, user2, ...]
+    if ctx.uses_struct_return {
+        // Skip sret pointer (first param when struct return is used)
+        pi += 1;
+    }
+    if pi < params.len() {
+        def_v(builder, &vars, func.vmctx_vreg, params[pi]);
+        pi += 1;
+    }
+    for user_i in 0..func.param_count as usize {
+        if pi < params.len() {
+            def_v(
+                builder,
+                &vars,
+                func.user_param_vreg(user_i as u16),
+                params[pi],
+            );
+            pi += 1;
         }
     }
 
