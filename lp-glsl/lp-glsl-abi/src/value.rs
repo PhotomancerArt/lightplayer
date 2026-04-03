@@ -1,13 +1,19 @@
 //! GLSL value types for function arguments and return values
 
-use glsl::syntax::{Expr, JumpStatement, SimpleStatement, Statement};
+use alloc::boxed::Box;
+
+#[cfg(feature = "parse")]
+use alloc::{format, vec::Vec};
+#[cfg(feature = "parse")]
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 
-use alloc::{boxed::Box, format, vec::Vec};
+#[cfg(feature = "parse")]
+use glsl::syntax::{Expr, JumpStatement, SimpleStatement, Statement};
 
 /// Truncate f32 toward zero (no_std compatible)
 /// Casts to i32 which truncates toward zero, then to i64
 #[inline]
+#[cfg(feature = "parse")]
 fn trunc_f32(f: f32) -> i64 {
     (f as i32) as i64
 }
@@ -54,12 +60,18 @@ pub enum GlslValue {
     Mat4x4([[f32; 4]; 4]), // [[col0_row0, col0_row1, col0_row2, col0_row3], [col1_row0, ...], ...]
     /// Fixed-size array; elements use the same recursive shape (scalars, vectors, matrices, nested arrays).
     Array(Box<[GlslValue]>),
+    /// Struct instance; `fields` are in declaration order (names match [`StructMember::name`] when present).
+    Struct {
+        name: Option<alloc::string::String>,
+        fields: alloc::vec::Vec<(alloc::string::String, GlslValue)>,
+    },
 }
 
 impl GlslValue {
     /// Parse a literal value string into GlslValue using GLSL parser
     /// Supports literals: integers, floats, booleans, vectors, and matrices
     /// Uses type checking to ensure valid literal syntax
+    #[cfg(feature = "parse")]
     pub fn parse(literal_str: &str) -> Result<Self, GlslError> {
         // Wrap the literal in a minimal function to parse it
         // We'll try different return types to determine the literal type
@@ -287,6 +299,23 @@ impl GlslValue {
             (GlslValue::Array(a), GlslValue::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.eq(y))
             }
+            (
+                GlslValue::Struct {
+                    name: na,
+                    fields: fa,
+                },
+                GlslValue::Struct {
+                    name: nb,
+                    fields: fb,
+                },
+            ) => {
+                na == nb
+                    && fa.len() == fb.len()
+                    && fa
+                        .iter()
+                        .zip(fb.iter())
+                        .all(|((ka, va), (kb, vb))| ka == kb && va.eq(vb))
+            }
             _ => false, // Type mismatch
         }
     }
@@ -343,6 +372,23 @@ impl GlslValue {
                         .zip(b.iter())
                         .all(|(x, y)| x.approx_eq(y, tolerance))
             }
+            (
+                GlslValue::Struct {
+                    name: na,
+                    fields: fa,
+                },
+                GlslValue::Struct {
+                    name: nb,
+                    fields: fb,
+                },
+            ) => {
+                na == nb
+                    && fa.len() == fb.len()
+                    && fa
+                        .iter()
+                        .zip(fb.iter())
+                        .all(|((ka, va), (kb, vb))| ka == kb && va.approx_eq(vb, tolerance))
+            }
             _ => false, // Type mismatch
         }
     }
@@ -357,6 +403,7 @@ impl GlslValue {
 }
 
 /// Single scalar argument to `mat2(s)` / `mat3(s)` / `mat4(s)` (diagonal matrix).
+#[cfg(feature = "parse")]
 fn parse_diagonal_matrix_scalar_arg(args: &[Expr]) -> Option<f32> {
     if args.len() != 1 {
         return None;
@@ -382,6 +429,7 @@ fn parse_diagonal_matrix_scalar_arg(args: &[Expr]) -> Option<f32> {
 
 /// Extract the return expression from a parsed shader
 /// Assumes the shader has a single function with a single return statement
+#[cfg(feature = "parse")]
 fn extract_return_expression(shader: &glsl::syntax::TranslationUnit) -> Option<&Expr> {
     for decl in &shader.0 {
         if let glsl::syntax::ExternalDeclaration::FunctionDefinition(func) = decl {
@@ -402,6 +450,7 @@ fn extract_return_expression(shader: &glsl::syntax::TranslationUnit) -> Option<&
 
 /// Parse a vector constructor expression into a Vec of floats
 /// Returns a Vec that can be converted to the appropriate array size
+#[cfg(feature = "parse")]
 fn parse_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<f32>, GlslError> {
     let mut components = Vec::new();
 
@@ -470,6 +519,7 @@ fn parse_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<f32>, GlslE
 
 /// Parse a boolean vector constructor expression into a Vec of bools
 /// Returns a Vec that can be converted to the appropriate array size
+#[cfg(feature = "parse")]
 fn parse_bool_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<bool>, GlslError> {
     let mut components = Vec::new();
 
@@ -558,6 +608,7 @@ fn parse_bool_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<bool>,
 
 /// Parse a signed integer vector constructor expression into a Vec of i32s
 /// Returns a Vec that can be converted to the appropriate array size
+#[cfg(feature = "parse")]
 fn parse_int_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<i32>, GlslError> {
     let mut components = Vec::new();
 
@@ -719,6 +770,7 @@ fn parse_int_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<i32>, G
 
 /// Parse a unsigned integer vector constructor expression into a Vec of u32s
 /// Returns a Vec that can be converted to the appropriate array size
+#[cfg(feature = "parse")]
 fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, GlslError> {
     let mut components = Vec::new();
 
@@ -846,6 +898,7 @@ fn parse_uint_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<u32>, 
 /// 1. Column vectors: mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))
 /// 2. Flat scalars: mat2(1.0, 2.0, 3.0, 4.0) - fills in column-major order
 /// Returns a fixed-size array that will be converted to the appropriate matrix type
+#[cfg(feature = "parse")]
 fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], GlslError> {
     let mut matrix = [[0.0f32; 4]; 4];
 
@@ -975,6 +1028,7 @@ mod tests {
     use super::GlslValue;
 
     #[test]
+    #[cfg(feature = "parse")]
     fn test_parse_mat2_from_column_vectors() {
         // mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))
         // Column 0: [1.0, 2.0]
@@ -1003,6 +1057,7 @@ mod tests {
     // test value parser.
 
     #[test]
+    #[cfg(feature = "parse")]
     fn test_parse_mat3_from_column_vectors() {
         // mat3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))
         let result =
@@ -1029,6 +1084,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "parse")]
     fn test_parse_mat4_from_column_vectors() {
         // mat4 with identity-like pattern
         let result = GlslValue::parse("mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))").unwrap();

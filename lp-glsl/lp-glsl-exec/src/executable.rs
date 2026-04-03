@@ -2,9 +2,9 @@
 
 use alloc::{string::String, vec::Vec};
 
+use lp_glsl_abi::GlslValue;
 use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
-use lp_glsl_values::GlslValue;
 
 pub trait GlslExecutable {
     fn call_void(&mut self, name: &str, args: &[GlslValue]) -> Result<(), GlslError>;

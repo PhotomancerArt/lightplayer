@@ -1,11 +1,11 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
+use lp_glsl_abi::GlslValue;
 use lp_glsl_core::{FunctionSignature, ParamQualifier, Parameter, Type};
 use lp_glsl_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
 use lp_glsl_exec::GlslExecutable;
 use lp_glsl_naga::GlslType;
-use lp_glsl_values::GlslValue;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use std::collections::HashMap;
@@ -171,6 +171,7 @@ fn to_frontend_type(ty: &GlslType) -> Type {
         GlslType::Array { element, len } => {
             Type::Array(Box::new(to_frontend_type(element)), *len as usize)
         }
+        GlslType::Struct { .. } => Type::Struct(0),
     }
 }
 
@@ -289,6 +290,23 @@ fn glsl_value_to_wasm_flat(
             let mut out = Vec::new();
             for it in items.iter() {
                 out.extend(glsl_value_to_wasm_flat(element, it, fm)?);
+            }
+            out
+        }
+        (Struct { members, .. }, GlslValue::Struct { fields, .. }) => {
+            if members.len() != fields.len() {
+                return Err(GlslError::new(
+                    ErrorCode::E0400,
+                    format!(
+                        "struct field count {} does not match type field count {}",
+                        fields.len(),
+                        members.len()
+                    ),
+                ));
+            }
+            let mut out = Vec::new();
+            for (m, (_, fv)) in members.iter().zip(fields.iter()) {
+                out.extend(glsl_value_to_wasm_flat(&m.ty, fv, fm)?);
             }
             out
         }
@@ -498,6 +516,26 @@ fn wasm_vals_to_glsl_value(
                 elems.push(v);
             }
             Ok((GlslValue::Array(elems.into_boxed_slice()), off))
+        }
+        Struct { name, members } => {
+            let mut off = 0;
+            let mut fields = Vec::with_capacity(members.len());
+            for m in members {
+                let key = m
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("_{}", fields.len()));
+                let (v, n) = wasm_vals_to_glsl_value(&m.ty, &vals[off..], fm)?;
+                off += n;
+                fields.push((key, v));
+            }
+            Ok((
+                GlslValue::Struct {
+                    name: name.clone(),
+                    fields,
+                },
+                off,
+            ))
         }
     }
 }

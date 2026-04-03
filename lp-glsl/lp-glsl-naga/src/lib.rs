@@ -34,7 +34,9 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
-pub use lpir::{GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType};
+pub use lp_glsl_abi::{
+    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType,
+};
 
 pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_parsed};
 pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};

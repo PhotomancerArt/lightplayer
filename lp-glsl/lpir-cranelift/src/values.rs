@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpir::{GlslParamMeta, GlslParamQualifier, GlslType};
+use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, GlslType};
 
 /// Q32 host-side value (floats as `f64` before fixed-point encode).
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +32,8 @@ pub enum GlslQ32 {
     Mat4([f64; 16]),
     /// Fixed-size array; ABI matches flattened element scalars in order.
     Array(Vec<GlslQ32>),
+    /// Struct; members in declaration order (flattened ABI not used until JIT supports structs).
+    Struct(Vec<GlslQ32>),
 }
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).
@@ -78,6 +80,9 @@ pub(crate) fn glsl_component_count(ty: &GlslType) -> usize {
         GlslType::Mat4 => 16,
         GlslType::Array { element, len } => {
             glsl_component_count(element).saturating_mul(*len as usize)
+        }
+        GlslType::Struct { members, .. } => {
+            members.iter().map(|m| glsl_component_count(&m.ty)).sum()
         }
     }
 }
@@ -167,6 +172,10 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
             Ok(out)
         }
 
+        (GlslType::Struct { .. }, _) | (_, GlslQ32::Struct(_)) => Err(CallError::Unsupported(
+            String::from("struct parameters are not supported by Level-1 call() yet"),
+        )),
+
         (expected, got) => Err(CallError::TypeMismatch(format!(
             "argument type mismatch: expected {:?}, got {:?}",
             expected,
@@ -197,6 +206,7 @@ fn got_ty_name(v: &GlslQ32) -> &'static str {
         GlslQ32::Mat3(_) => "Mat3",
         GlslQ32::Mat4(_) => "Mat4",
         GlslQ32::Array(_) => "Array",
+        GlslQ32::Struct(_) => "Struct",
     }
 }
 
@@ -209,6 +219,11 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
         )));
     }
     Ok(match ty {
+        GlslType::Struct { .. } => {
+            return Err(CallError::Unsupported(String::from(
+                "struct returns are not supported by Level-1 call() yet",
+            )));
+        }
         GlslType::Void => {
             return Err(CallError::Unsupported(String::from(
                 "decode_q32_return called for void",

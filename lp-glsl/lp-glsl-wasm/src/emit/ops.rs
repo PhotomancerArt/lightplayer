@@ -54,10 +54,13 @@ pub(crate) fn emit_op(
     // In unreachable mode, only process structural ops needed for stack balance.
     let is_structural = matches!(
         op,
-        Op::End | Op::Else | Op::SwitchStart { .. } | Op::CaseStart { .. } | Op::DefaultStart { .. }
+        Op::End
+            | Op::Else
+            | Op::SwitchStart { .. }
+            | Op::CaseStart { .. }
+            | Op::DefaultStart { .. }
     );
-    
-    
+
     if fctx.unreachable_mode && !is_structural {
         return Ok(());
     }
@@ -311,8 +314,7 @@ pub(crate) fn emit_op(
                 ctrl.pop();
                 return Ok(());
             }
-            
-            
+
             match ctrl.pop() {
                 Some(CtrlEntry::If) | Some(CtrlEntry::Else) => {
                     sink.end();

@@ -1,0 +1,18 @@
+[package]
+name = "lp-glsl-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GLSL ABI - types, values, layout, and paths"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
+glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, optional = true }
+
+[features]
+default = ["std", "parse"]
+std = ["glsl?/std", "lp-glsl-diagnostics/std"]
+parse = ["dep:glsl"]  # Enables GlslValue::parse() - requires glsl parser

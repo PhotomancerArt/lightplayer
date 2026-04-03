@@ -36,6 +36,13 @@ pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec
             }
             out
         }
+        GlslType::Struct { members, .. } => {
+            let mut out = Vec::new();
+            for m in members {
+                out.extend(glsl_type_to_wasm_components(&m.ty, float_mode));
+            }
+            out
+        }
     }
 }
 

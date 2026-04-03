@@ -3,7 +3,7 @@
 use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
 use anyhow::{Result, bail};
-use lp_glsl_values::GlslValue;
+use lp_glsl_abi::GlslValue;
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -465,6 +465,17 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 None => format!("[{inner}]"),
             }
         }
+        GlslValue::Struct { name, fields } => {
+            let inner = fields
+                .iter()
+                .map(|(_, v)| format_glsl_value(v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            match name {
+                Some(n) => format!("{n}({inner})"),
+                None => format!("struct({inner})"),
+            }
+        }
     }
 }
 
@@ -490,6 +501,7 @@ fn glsl_array_type_prefix(elem: Option<&GlslValue>) -> Option<&'static str> {
         GlslValue::Mat3x3(_) => "mat3",
         GlslValue::Mat4x4(_) => "mat4",
         GlslValue::Array(_) => return None,
+        GlslValue::Struct { .. } => return None,
     })
 }
 

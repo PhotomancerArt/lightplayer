@@ -3753,6 +3753,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-glsl-abi"
+version = "40.0.0"
+dependencies = [
+ "glsl",
+ "lp-glsl-diagnostics",
+]
+
+[[package]]
 name = "lp-glsl-builtin-ids"
 version = "40.0.0"
 
@@ -3802,9 +3810,9 @@ version = "40.0.0"
 name = "lp-glsl-exec"
 version = "40.0.0"
 dependencies = [
+ "lp-glsl-abi",
  "lp-glsl-core",
  "lp-glsl-diagnostics",
- "lp-glsl-values",
 ]
 
 [[package]]
@@ -3814,11 +3822,11 @@ dependencies = [
  "anyhow",
  "glob",
  "glsl",
+ "lp-glsl-abi",
  "lp-glsl-core",
  "lp-glsl-diagnostics",
  "lp-glsl-exec",
  "lp-glsl-naga",
- "lp-glsl-values",
  "lp-glsl-wasm",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -3857,18 +3865,11 @@ name = "lp-glsl-naga"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lp-glsl-abi",
  "lp-glsl-builtin-ids",
  "lpir",
  "naga 29.0.0",
  "smallvec",
-]
-
-[[package]]
-name = "lp-glsl-values"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "lp-glsl-diagnostics",
 ]
 
 [[package]]
@@ -4015,6 +4016,7 @@ dependencies = [
  "cranelift-native 0.127.0",
  "cranelift-object",
  "libm",
+ "lp-glsl-abi",
  "lp-glsl-builtin-ids",
  "lp-glsl-builtins",
  "lp-glsl-naga",

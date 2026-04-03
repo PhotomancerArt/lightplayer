@@ -2,12 +2,13 @@
 
 use std::collections::BTreeMap;
 
+use lp_glsl_abi::GlslValue;
+use lp_glsl_abi::{GlslFunctionMeta, GlslModuleMeta};
 use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
-use lp_glsl_values::GlslValue;
 use lp_riscv_elf::ElfLoadInfo;
-use lpir::{FloatMode as LpirFloatMode, GlslFunctionMeta, GlslModuleMeta, IrModule};
+use lpir::{FloatMode as LpirFloatMode, IrModule};
 use lpir_cranelift::{
     CompileOptions, CompilerError, glsl_q32_call_emulated, link_object_with_builtins,
     object_bytes_from_ir,

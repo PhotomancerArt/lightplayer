@@ -50,7 +50,7 @@ Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
 - `lp-glsl-naga/` — GLSL parsing (Naga) and lowering to LPIR
 - `lpir/` — LightPlayer IR (types, ops, builder, parser, printer, interpreter, validator)
-- `lp-glsl-core/`, `lp-glsl-diagnostics/`, `lp-glsl-values/` — shared types and errors for
+- `lp-glsl-core/`, `lp-glsl-diagnostics/`, `lp-glsl-abi/` — shared types and errors for
   tests / exec helpers
 
 ### Codegen

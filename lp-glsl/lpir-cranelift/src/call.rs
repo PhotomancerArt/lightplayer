@@ -1,8 +1,8 @@
-//! Level-1 [`GlslQ32`] calls using [`lpir::GlslModuleMeta`].
+//! Level-1 [`GlslQ32`] calls using [`lp_glsl_abi::GlslModuleMeta`].
 
 use cranelift_codegen::ir::ArgumentPurpose;
+use lp_glsl_abi::GlslType;
 use lpir::FloatMode;
-use lpir::GlslType;
 
 use crate::jit_module::JitModule;
 use crate::values::{

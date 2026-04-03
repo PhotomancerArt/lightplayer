@@ -7,6 +7,28 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Memory layout rules for structured/uniform-like data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutRules {
+    /// `std430` — storage-buffer style packing (default for LightPlayer).
+    Std430,
+    /// Reserved; not implemented yet.
+    Std140,
+}
+
+impl LayoutRules {
+    pub fn is_implemented(self) -> bool {
+        matches!(self, LayoutRules::Std430)
+    }
+}
+
+/// One field in a [`GlslType::Struct`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StructMember {
+    pub name: Option<String>,
+    pub ty: GlslType,
+}
+
 /// GLSL parameter direction for Level-1 marshalling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GlslParamQualifier {
@@ -15,7 +37,7 @@ pub enum GlslParamQualifier {
     InOut,
 }
 
-/// Logical GLSL type (scalar, vector, or square matrix) for one parameter or return.
+/// Logical GLSL type (scalar, vector, square matrix, array, struct) for parameters, returns, and layouts.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GlslType {
     Void,
@@ -43,6 +65,34 @@ pub enum GlslType {
         element: Box<GlslType>,
         len: u32,
     },
+    /// Struct type (layout follows active [`LayoutRules`], default `std430`).
+    Struct {
+        name: Option<String>,
+        members: Vec<StructMember>,
+    },
+}
+
+impl GlslType {
+    /// Byte size under `rules`.
+    pub fn size(&self, rules: LayoutRules) -> usize {
+        crate::layout::type_size(self, rules)
+    }
+
+    /// Alignment under `rules`.
+    pub fn alignment(&self, rules: LayoutRules) -> usize {
+        crate::layout::type_alignment(self, rules)
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        matches!(
+            self,
+            GlslType::Float | GlslType::Int | GlslType::UInt | GlslType::Bool
+        )
+    }
+
+    pub fn is_aggregate(&self) -> bool {
+        matches!(self, GlslType::Array { .. } | GlslType::Struct { .. })
+    }
 }
 
 /// One GLSL parameter after lowering (pointee type for `out` / `inout` pointers).
@@ -53,7 +103,7 @@ pub struct GlslParamMeta {
     pub ty: GlslType,
 }
 
-/// Metadata for one user function, aligned with [`crate::IrModule::functions`] order.
+/// Metadata for one user function.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GlslFunctionMeta {
     pub name: String,
@@ -96,5 +146,11 @@ mod tests {
         assert_eq!(m.functions[0].name, "add");
         assert_eq!(m.functions[0].params.len(), 2);
         assert_eq!(m.functions[0].return_type, GlslType::Float);
+    }
+
+    #[test]
+    fn layout_rules_std430_implemented() {
+        assert!(LayoutRules::Std430.is_implemented());
+        assert!(!LayoutRules::Std140.is_implemented());
     }
 }

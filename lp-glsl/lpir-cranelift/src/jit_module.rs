@@ -9,8 +9,9 @@ use cranelift_codegen::isa::{CallConv, OwnedTargetIsa};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
+use lp_glsl_abi::GlslModuleMeta;
+use lpir::FloatMode;
 use lpir::module::IrModule;
-use lpir::{FloatMode, GlslModuleMeta};
 
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};

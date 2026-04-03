@@ -7,7 +7,6 @@
 extern crate alloc;
 
 pub mod builder;
-pub mod glsl_metadata;
 pub mod interp;
 pub mod module;
 pub mod op;
@@ -20,9 +19,6 @@ pub mod validate;
 mod tests;
 
 pub use builder::{FunctionBuilder, ModuleBuilder};
-pub use glsl_metadata::{
-    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType,
-};
 pub use interp::{ImportHandler, InterpError, Value, interpret, interpret_with_depth};
 pub use module::{ImportDecl, IrFunction, IrModule, SlotDecl};
 pub use op::Op;

@@ -8,7 +8,7 @@ use core::fmt;
 
 use naga::{AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
 
-use lpir::{GlslParamMeta, GlslParamQualifier, GlslType};
+use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, GlslType};
 
 #[derive(Debug)]
 pub enum CompileError {

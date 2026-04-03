@@ -36,6 +36,7 @@ riscv32-emu = [
 
 [dependencies]
 libm = "0.2"
+lp-glsl-abi = { path = "../lp-glsl-abi", default-features = false }
 lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
 lp-glsl-builtins = { path = "../lp-glsl-builtins", default-features = false }
 lp-glsl-naga = { path = "../lp-glsl-naga", optional = true }

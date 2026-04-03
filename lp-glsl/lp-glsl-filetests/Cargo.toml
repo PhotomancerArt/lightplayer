@@ -12,7 +12,7 @@ lp-glsl-core = { path = "../lp-glsl-core" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", features = ["std"] }
 lp-glsl-exec = { path = "../lp-glsl-exec" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }
-lp-glsl-values = { path = "../lp-glsl-values", features = ["std"] }
+lp-glsl-abi = { path = "../lp-glsl-abi", features = ["std"] }
 lp-glsl-wasm = { path = "../lp-glsl-wasm" }
 lpir = { path = "../lpir" }
 lpir-cranelift = { path = "../lpir-cranelift", features = ["riscv32-emu"] }

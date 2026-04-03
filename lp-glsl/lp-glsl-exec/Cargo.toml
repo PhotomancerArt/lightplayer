@@ -11,8 +11,8 @@ workspace = true
 [dependencies]
 lp-glsl-core = { path = "../lp-glsl-core" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
-lp-glsl-values = { path = "../lp-glsl-values", default-features = false }
+lp-glsl-abi = { path = "../lp-glsl-abi", default-features = false }
 
 [features]
 default = ["std"]
-std = ["lp-glsl-diagnostics/std", "lp-glsl-values/std"]
+std = ["lp-glsl-diagnostics/std", "lp-glsl-abi/std"]

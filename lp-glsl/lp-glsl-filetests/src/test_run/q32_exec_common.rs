@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 
+use lp_glsl_abi::GlslValue;
+use lp_glsl_abi::{GlslFunctionMeta, GlslParamQualifier, GlslType};
 use lp_glsl_core::{FunctionSignature, ParamQualifier, Parameter, Type};
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
-use lp_glsl_values::GlslValue;
-use lpir::{GlslFunctionMeta, GlslParamQualifier, GlslType};
 use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
 
 pub(crate) fn signatures_from_meta(
-    meta: &lpir::GlslModuleMeta,
+    meta: &lp_glsl_abi::GlslModuleMeta,
 ) -> BTreeMap<String, FunctionSignature> {
     let mut m = BTreeMap::new();
     for g in &meta.functions {
@@ -82,6 +82,7 @@ fn lpir_glsl_type_to_core(t: &GlslType) -> Type {
         GlslType::Array { element, len } => {
             Type::Array(Box::new(lpir_glsl_type_to_core(element)), *len as usize)
         }
+        GlslType::Struct { .. } => Type::Struct(0),
     }
 }
 
@@ -195,6 +196,16 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
             }
             GlslQ32::Array(q)
         }
+        (Struct { members, .. }, GlslValue::Struct { fields, .. }) => {
+            if members.len() != fields.len() {
+                return Err(err());
+            }
+            let mut q = Vec::with_capacity(fields.len());
+            for (m, (_, fv)) in members.iter().zip(fields.iter()) {
+                q.push(glsl_value_to_q32(&m.ty, fv)?);
+            }
+            GlslQ32::Struct(q)
+        }
         _ => return Err(err()),
     })
 }
@@ -250,6 +261,20 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &GlslType, q: &GlslQ32) -> Result<GlslV
                 v.push(glsl_q32_to_glsl_value(element, it)?);
             }
             GlslValue::Array(v.into_boxed_slice())
+        }
+        (Struct { name, members }, GlslQ32::Struct(items)) => {
+            if items.len() != members.len() {
+                return Err(bad());
+            }
+            let mut fields = Vec::with_capacity(members.len());
+            for (i, m) in members.iter().enumerate() {
+                let key = m.name.clone().unwrap_or_else(|| format!("_{i}"));
+                fields.push((key, glsl_q32_to_glsl_value(&m.ty, &items[i])?));
+            }
+            GlslValue::Struct {
+                name: name.clone(),
+                fields,
+            }
         }
         _ => return Err(bad()),
     })

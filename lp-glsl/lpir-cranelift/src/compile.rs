@@ -1,6 +1,7 @@
 //! GLSL → Naga → LPIR → JIT pipeline (GLSL front-end: enable crate feature `glsl`).
 
-use lpir::{GlslModuleMeta, IrModule};
+use lp_glsl_abi::GlslModuleMeta;
+use lpir::IrModule;
 
 use crate::compile_options::CompileOptions;
 use crate::error::CompilerError;

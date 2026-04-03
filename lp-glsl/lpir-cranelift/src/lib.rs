@@ -46,6 +46,10 @@ pub use emit::signature_for_ir_func;
 pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
+pub use lp_glsl_abi::{
+    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType, LayoutRules,
+    PathError, StructMember,
+};
 pub use lpir::FloatMode;
 #[cfg(feature = "riscv32-emu")]
 pub use object_link::link_object_with_builtins;

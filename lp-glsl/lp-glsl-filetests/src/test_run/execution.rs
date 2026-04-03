@@ -2,9 +2,9 @@
 
 use anyhow::Result;
 
+use lp_glsl_abi::GlslValue;
 use lp_glsl_core::Type;
 use lp_glsl_exec::GlslExecutable;
-use lp_glsl_values::GlslValue;
 
 /// Execute a function by name with arguments and return the result as a [`GlslValue`].
 pub fn execute_function(

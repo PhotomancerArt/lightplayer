@@ -8,10 +8,11 @@ use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
+use lp_glsl_abi::{GlslModuleMeta, GlslType};
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
+use lpir::FloatMode;
 use lpir::module::IrModule;
-use lpir::{FloatMode, GlslModuleMeta, GlslType};
 use target_lexicon::Triple;
 
 use crate::compile_options::CompileOptions;

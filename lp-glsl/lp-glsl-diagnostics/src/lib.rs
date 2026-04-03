@@ -2,7 +2,7 @@
 //!
 //! Shared diagnostics for the GLSL / LPIR test and exec stack.
 //!
-//! Stack: `lp-glsl-diagnostics` → `lp-glsl-core` → `lp-glsl-values` → `lp-glsl-exec`.
+//! Stack: `lp-glsl-diagnostics` → `lp-glsl-core` → `lp-glsl-abi` → `lp-glsl-exec`.
 
 #![no_std]
 

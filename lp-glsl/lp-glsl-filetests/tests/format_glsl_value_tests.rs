@@ -1,7 +1,7 @@
 //! Unit tests for format_glsl_value() matrix display formatting
 
+use lp_glsl_abi::GlslValue;
 use lp_glsl_filetests::util::format_glsl_value;
-use lp_glsl_values::GlslValue;
 
 #[test]
 fn test_format_mat2x2() {

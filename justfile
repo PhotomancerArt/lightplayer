@@ -5,7 +5,9 @@
 rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "lp-glsl-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32"
+
 # fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
+
 fw_esp32_profile := "release-esp32"
 lp_glsl_dir := "lp-glsl"
 
@@ -31,6 +33,7 @@ generate-builtins:
     cargo run --bin lp-glsl-builtins-gen-app -p lp-glsl-builtins-gen-app
 
 # Ensure wasm32-unknown-unknown target is installed (web-demo, builtins wasm)
+
 wasm32_target := "wasm32-unknown-unknown"
 
 install-wasm32-target:
@@ -176,10 +179,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-values --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-abi --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 build-glsl-release:
-    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-values --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-abi --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 # ============================================================================
 # Formatting
@@ -248,10 +251,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-values --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm -- --no-deps -D warnings
+    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-abi --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-values --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-abi --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -281,7 +284,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-values --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lp-glsl-abi --package lp-glsl-diagnostics --package lp-glsl-core --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh
@@ -296,9 +299,11 @@ test-glsl-filetests:
 check: fmt-check clippy
 
 # Run build before test so lp-riscv-emu guest_app_tests can find the prebuilt binary.
+
 # (test would otherwise race with build and may fail with "Binary not found")
 [parallel]
 ci: check build-then-test
+
 build-then-test: build test
 
 # lp-app specific CI
@@ -361,8 +366,8 @@ demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
 
 # Run firmware on ESP32-C6 device
-
 # Path to fw-esp32 ELF (release-esp32 profile)
+
 fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 
 # Requires: ESP32-C6 device connected via USB
@@ -431,15 +436,16 @@ decode-backtrace *addrs:
 # ============================================================================
 # Allocation tracing
 # ============================================================================
-
 # Run a project in the emulator with allocation tracing.
 # Outputs path to trace directory.
 # Default project: examples/mem-profile
+
 # Usage: just mem-profile [path/to/project] [--frames N] [--note "description"]
 mem-profile *args:
     cargo run -p lp-cli -- mem-profile {{ args }}
 
 # Summarize heap allocations from a mem-profile output directory.
+
 # Usage: just heap-summary traces/2026-03-08-185520-simple-test [--top N]
 heap-summary trace_dir *args:
     cargo run -p lp-cli -- heap-summary {{ trace_dir }} {{ args }}
