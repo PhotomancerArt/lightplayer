@@ -35,7 +35,7 @@ fn vreg_val_ty(func: &IrFunction, reg: lpir::VReg, mode: FloatMode) -> Result<Va
         .copied()
         .ok_or_else(|| alloc::format!("v{} out of range", reg.0))?;
     Ok(match (ty, mode) {
-        (IrType::I32, _) => ValType::I32,
+        (IrType::I32 | IrType::Pointer, _) => ValType::I32,
         (IrType::F32, FloatMode::Q32) => ValType::I32,
         (IrType::F32, FloatMode::F32) => ValType::F32,
     })

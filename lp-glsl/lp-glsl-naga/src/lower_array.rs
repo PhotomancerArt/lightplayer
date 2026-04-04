@@ -220,7 +220,7 @@ pub(crate) fn zero_fill_array(
 fn push_zero_for_ir_type(fb: &mut lpir::FunctionBuilder, dst: VReg, ty: IrType) {
     match ty {
         IrType::F32 => fb.push(Op::FconstF32 { dst, value: 0.0 }),
-        IrType::I32 => fb.push(Op::IconstI32 { dst, value: 0 }),
+        IrType::I32 | IrType::Pointer => fb.push(Op::IconstI32 { dst, value: 0 }),
     }
 }
 

@@ -76,7 +76,11 @@ pub(crate) fn emit_call(
                     }
                     for (idx, vreg) in result_regs.iter().enumerate() {
                         let offset = (idx * 4) as i32;
-                        let ty = ir_type_for_mode(callee_ir.return_types[idx], ctx.float_mode);
+                        let ty = ir_type_for_mode(
+                            callee_ir.return_types[idx],
+                            ctx.float_mode,
+                            ctx.pointer_type,
+                        );
                         let v = builder.ins().load(ty, MemFlags::trusted(), base, offset);
                         def_v(builder, vars, *vreg, v);
                     }
@@ -124,7 +128,11 @@ pub(crate) fn emit_call(
                     }
                     for (idx, vreg) in result_regs.iter().enumerate() {
                         let offset = (idx * 4) as i32;
-                        let ty = ir_type_for_mode(import_decl.return_types[idx], ctx.float_mode);
+                        let ty = ir_type_for_mode(
+                            import_decl.return_types[idx],
+                            ctx.float_mode,
+                            ctx.pointer_type,
+                        );
                         let v = builder.ins().load(ty, MemFlags::trusted(), base, offset);
                         def_v(builder, vars, *vreg, v);
                     }

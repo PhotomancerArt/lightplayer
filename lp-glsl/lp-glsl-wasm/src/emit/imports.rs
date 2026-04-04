@@ -72,7 +72,7 @@ fn ir_params_to_glsl_kinds(params: &[IrType]) -> Vec<GlslParamKind> {
         .iter()
         .map(|t| match t {
             IrType::F32 => GlslParamKind::Float,
-            IrType::I32 => GlslParamKind::UInt,
+            IrType::I32 | IrType::Pointer => GlslParamKind::UInt,
         })
         .collect()
 }

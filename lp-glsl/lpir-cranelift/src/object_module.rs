@@ -104,9 +104,9 @@ mod tests {
     #[test]
     fn object_bytes_elf_magic_integer_ir() {
         let ir = parse_module(
-            r"func @add(v0:i32, v1:i32) -> i32 {
-  v2:i32 = iadd v0, v1
-  return v2
+            r"func @add(v1:i32, v2:i32) -> i32 {
+  v3:i32 = iadd v1, v2
+  return v3
 }
 ",
         )

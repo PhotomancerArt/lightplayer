@@ -65,13 +65,11 @@ impl DirectCall {
                 got: args.len(),
             });
         }
-        let mut full = alloc::vec::Vec::with_capacity(1 + args.len());
-        full.push(vmctx as i32);
-        full.extend_from_slice(args);
         unsafe {
             crate::invoke::invoke_i32_args_returns(
                 self.func_ptr,
-                &full,
+                vmctx,
+                args,
                 self.ret_i32_count,
                 self.uses_struct_return,
             )
@@ -101,13 +99,11 @@ impl DirectCall {
                 self.ret_i32_count
             )));
         }
-        let mut full = alloc::vec::Vec::with_capacity(1 + args.len());
-        full.push(vmctx as i32);
-        full.extend_from_slice(args);
         unsafe {
             crate::invoke::invoke_i32_args_returns_buf(
                 self.func_ptr,
-                &full,
+                vmctx,
+                args,
                 self.ret_i32_count,
                 out,
                 self.uses_struct_return,

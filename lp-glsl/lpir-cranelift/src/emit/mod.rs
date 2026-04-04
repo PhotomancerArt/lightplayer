@@ -107,26 +107,30 @@ pub fn signature_for_ir_func(
             ArgumentPurpose::StructReturn,
         ));
     }
-    // NOTE: Use I32 for vmctx (not pointer_type) to avoid it being treated as special by
-    // RISC-V backend with enable_multi_ret_implicit_sret. The vmctx is semantically a pointer
-    // but we pass it as I32 to prevent ABI confusion.
-    sig.params.push(AbiParam::new(types::I32));
+    // vmctx uses the ISA pointer type (I32 on RV32, I64 on x86-64). StructReturn (when present)
+    // is a separate special parameter; vmctx is a normal pointer argument.
+    sig.params.push(AbiParam::new(pointer_type));
     let vm = func.vmctx_vreg.0 as usize;
     for i in 0..func.param_count as usize {
         let ty = func.vreg_types[vm + 1 + i];
-        let ct = ir_type_for_mode(ty, mode);
+        let ct = ir_type_for_mode(ty, mode, pointer_type);
         sig.params.push(AbiParam::new(ct));
     }
     if !sr {
         for t in &func.return_types {
-            sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode)));
+            sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode, pointer_type)));
         }
     }
     sig
 }
 
-pub(crate) fn ir_type_for_mode(t: IrType, mode: FloatMode) -> types::Type {
+pub(crate) fn ir_type_for_mode(
+    t: IrType,
+    mode: FloatMode,
+    pointer_type: types::Type,
+) -> types::Type {
     match (t, mode) {
+        (IrType::Pointer, _) => pointer_type,
         (IrType::I32, _) => types::I32,
         (IrType::F32, FloatMode::F32) => types::F32,
         (IrType::F32, FloatMode::Q32) => types::I32,
@@ -162,8 +166,13 @@ pub(crate) fn vreg_wide_addr_chain(func: &IrFunction) -> Vec<bool> {
     for op in &func.body {
         match op {
             Op::SlotAddr { dst, .. } => wide[dst.0 as usize] = true,
-            Op::Iadd { dst, lhs, rhs } => {
+            Op::Iadd { dst, lhs, rhs } | Op::Isub { dst, lhs, rhs } => {
                 if wide[lhs.0 as usize] || wide[rhs.0 as usize] {
+                    wide[dst.0 as usize] = true;
+                }
+            }
+            Op::IaddImm { dst, src, .. } | Op::IsubImm { dst, src, .. } => {
+                if wide[src.0 as usize] {
                     wide[dst.0 as usize] = true;
                 }
             }
@@ -188,15 +197,12 @@ pub fn translate_function(
     ctx: &EmitCtx,
 ) -> Result<(), CompileError> {
     let mut vars = Vec::with_capacity(func.vreg_types.len());
-    let vm_i = func.vmctx_vreg.0 as usize;
     for (i, ty) in func.vreg_types.iter().enumerate() {
-        let ct = if i == vm_i {
-            // NOTE: vmctx is I32 in the signature (not pointer) to avoid RISC-V ABI issues
-            types::I32
-        } else if ctx.vreg_wide_addr.get(i).copied().unwrap_or(false) {
+        let wide = ctx.vreg_wide_addr.get(i).copied().unwrap_or(false);
+        let ct = if wide || matches!(*ty, IrType::Pointer) {
             ctx.pointer_type
         } else {
-            ir_type_for_mode(*ty, ctx.float_mode)
+            ir_type_for_mode(*ty, ctx.float_mode, ctx.pointer_type)
         };
         vars.push(builder.declare_var(ct));
     }

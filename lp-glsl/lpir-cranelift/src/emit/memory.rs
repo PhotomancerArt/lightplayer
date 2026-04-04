@@ -25,7 +25,11 @@ pub(crate) fn emit_memory(
         }
         Op::Load { dst, base, offset } => {
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
-            let ty = ir_type_for_mode(func.vreg_types[dst.0 as usize], ctx.float_mode);
+            let ty = ir_type_for_mode(
+                func.vreg_types[dst.0 as usize],
+                ctx.float_mode,
+                ctx.pointer_type,
+            );
             let val = builder.ins().load(
                 ty,
                 MemFlags::new(),

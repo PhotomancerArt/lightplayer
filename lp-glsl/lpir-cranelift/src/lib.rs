@@ -832,9 +832,10 @@ func @apply_sin(v1:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
-        let vm = jit_test_vmctx() as usize as i32;
-        let words =
-            unsafe { crate::invoke::invoke_i32_args_returns(p, &[vm], 2, false).expect("invoke") };
+        let vm = jit_test_vmctx();
+        let words = unsafe {
+            crate::invoke::invoke_i32_args_returns(p, vm, &[], 2, false).expect("invoke")
+        };
         assert_eq!(words.len(), 2, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);
@@ -862,9 +863,10 @@ func @apply_sin(v1:f32) -> f32 {
         )
         .expect("jit");
         let p = m.finalized_ptr_by_index(0);
-        let vm = jit_test_vmctx() as usize as i32;
-        let words =
-            unsafe { crate::invoke::invoke_i32_args_returns(p, &[vm], 3, false).expect("invoke") };
+        let vm = jit_test_vmctx();
+        let words = unsafe {
+            crate::invoke::invoke_i32_args_returns(p, vm, &[], 3, false).expect("invoke")
+        };
         assert_eq!(words.len(), 3, "{words:?}");
         assert_q32_approx(words[0], 1.0, 1e-4);
         assert_q32_approx(words[1], 2.0, 1e-4);

@@ -1425,7 +1425,7 @@ fn interp_local_call() {
   return v2
 }
 func @main(v1:i32) -> i32 {
-  v2:i32 = call @helper(v0, v1)
+  v2:i32 = call @helper(v1)
   return v2
 }
 ";
@@ -1440,7 +1440,7 @@ fn interp_local_call_multi_return() {
   return v1, v2
 }
 func @main() -> f32 {
-  v1:f32, v2:f32 = call @pair(v0)
+  v1:f32, v2:f32 = call @pair()
   v3:f32 = fadd v1, v2
   return v3
 }
@@ -1504,7 +1504,7 @@ fn interp_factorial() {
   }
   v4:i32 = iconst.i32 1
   v5:i32 = isub v1, v4
-  v6:i32 = call @fact(v0, v5)
+  v6:i32 = call @fact(v5)
   v7:i32 = imul v1, v6
   return v7
 }
@@ -1515,7 +1515,7 @@ fn interp_factorial() {
 #[test]
 fn interp_stack_overflow() {
     let ir = "func @inf(v1:i32) -> i32 {
-  v2:i32 = call @inf(v0, v1)
+  v2:i32 = call @inf(v1)
   return v2
 }
 ";

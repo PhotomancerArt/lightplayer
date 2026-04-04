@@ -57,13 +57,27 @@ pub fn parse_module(input: &str) -> Result<IrModule, ParseError> {
         }
         if s.starts_with("entry ") {
             let next_local = mb.function_count();
-            let func = parse_func_decl(&mut s, true, &mut names, mb.import_count(), next_local)?;
+            let func = parse_func_decl(
+                &mut s,
+                true,
+                &mut names,
+                mb.import_count(),
+                next_local,
+                mb.imports(),
+            )?;
             mb.add_function(func);
             continue;
         }
         if s.starts_with("func ") {
             let next_local = mb.function_count();
-            let func = parse_func_decl(&mut s, false, &mut names, mb.import_count(), next_local)?;
+            let func = parse_func_decl(
+                &mut s,
+                false,
+                &mut names,
+                mb.import_count(),
+                next_local,
+                mb.imports(),
+            )?;
             mb.add_function(func);
             continue;
         }
@@ -150,6 +164,7 @@ fn parse_type_list_csv(s: &str) -> Result<Vec<IrType>, ParseError> {
         .map(|t| match t.trim() {
             "f32" => Ok(IrType::F32),
             "i32" => Ok(IrType::I32),
+            "ptr" => Ok(IrType::Pointer),
             _ => Err(err(1, 1, "type")),
         })
         .collect()
@@ -166,6 +181,7 @@ fn parse_return_types_after_arrow(s: &str) -> Result<Vec<IrType>, ParseError> {
         let t = match w {
             "f32" => IrType::F32,
             "i32" => IrType::I32,
+            "ptr" => IrType::Pointer,
             _ => return Err(err(1, 1, "return type")),
         };
         Ok(alloc::vec![t])
@@ -212,6 +228,7 @@ fn parse_func_decl(
     names: &mut Vec<(String, CalleeRef)>,
     import_count: u32,
     next_local_func_index: u32,
+    imports: &[ImportDecl],
 ) -> Result<IrFunction, ParseError> {
     let mut t = *s;
     if is_entry {
@@ -259,7 +276,31 @@ fn parse_func_decl(
         body,
         names.as_slice(),
         import_count,
+        imports,
     )
+}
+
+fn call_operands_with_vmctx(
+    callee: CalleeRef,
+    import_count: u32,
+    imports: &[ImportDecl],
+    user: Vec<VReg>,
+) -> Vec<VReg> {
+    let local = callee.0 >= import_count;
+    let need_vmctx = if local {
+        true
+    } else {
+        imports
+            .get(callee.0 as usize)
+            .is_some_and(|i| i.needs_vmctx)
+    };
+    if need_vmctx {
+        let mut v = alloc::vec![VMCTX_VREG];
+        v.extend(user);
+        v
+    } else {
+        user
+    }
 }
 
 fn parse_param_list_str(s: &str) -> Result<(Vec<(VReg, IrType)>, &str), ParseError> {
@@ -304,6 +345,7 @@ fn parse_one_param(s: &str) -> Result<(VReg, IrType), ParseError> {
     let ty = match ty.trim() {
         "f32" => IrType::F32,
         "i32" => IrType::I32,
+        "ptr" => IrType::Pointer,
         _ => return Err(err(1, 1, "param type")),
     };
     Ok((vreg, ty))
@@ -348,6 +390,7 @@ fn parse_function_body(
     body: &str,
     names: &[(String, CalleeRef)],
     import_count: u32,
+    imports: &[ImportDecl],
 ) -> Result<IrFunction, ParseError> {
     let mut fb = FunctionBuilder::new(fname, returns);
     if is_entry {
@@ -382,7 +425,7 @@ fn parse_function_body(
             continue;
         }
         let peek_next = next_nonempty_trimmed(&lines, i + 1);
-        parse_stmt_line(&mut fb, line, names, import_count, peek_next)?;
+        parse_stmt_line(&mut fb, line, names, import_count, imports, peek_next)?;
         i += 1;
     }
     Ok(fb.finish())
@@ -418,6 +461,7 @@ fn parse_stmt_line(
     line: &str,
     names: &[(String, CalleeRef)],
     import_count: u32,
+    imports: &[ImportDecl],
     peek_next_line: Option<&str>,
 ) -> Result<(), ParseError> {
     if line == "break" {
@@ -502,7 +546,7 @@ fn parse_stmt_line(
         return Ok(());
     }
     if line.contains(" = call ") {
-        parse_call_assign(fb, line, names, import_count)?;
+        parse_call_assign(fb, line, names, import_count, imports)?;
         return Ok(());
     }
     if line.contains(" = ") {
@@ -510,7 +554,7 @@ fn parse_stmt_line(
         return Ok(());
     }
     if line.starts_with("call ") {
-        parse_call_void(fb, line, names, import_count)?;
+        parse_call_void(fb, line, names, import_count, imports)?;
         return Ok(());
     }
     Err(err(1, 1, format!("unrecognized statement: {line}")))
@@ -587,6 +631,7 @@ fn parse_call_void(
     line: &str,
     names: &[(String, CalleeRef)],
     import_count: u32,
+    imports: &[ImportDecl],
 ) -> Result<(), ParseError> {
     let rest = line.strip_prefix("call ").unwrap().trim();
     let (callee_s, args_s) = rest
@@ -596,7 +641,8 @@ fn parse_call_void(
         .strip_suffix(')')
         .ok_or_else(|| err(1, 1, "call needs )"))?;
     let callee = resolve_callee(callee_s, names, import_count)?;
-    let args = parse_vreg_list(args_s)?;
+    let user = parse_vreg_list(args_s)?;
+    let args = call_operands_with_vmctx(callee, import_count, imports, user);
     let results: Vec<VReg> = Vec::new();
     fb.push_call(callee, &args, &results);
     Ok(())
@@ -607,6 +653,7 @@ fn parse_call_assign(
     line: &str,
     names: &[(String, CalleeRef)],
     import_count: u32,
+    imports: &[ImportDecl],
 ) -> Result<(), ParseError> {
     let (lhs, rhs) = line
         .split_once(" = call ")
@@ -624,7 +671,8 @@ fn parse_call_assign(
         .strip_suffix(')')
         .ok_or_else(|| err(1, 1, "call needs )"))?;
     let callee = resolve_callee(callee_s.trim(), names, import_count)?;
-    let args = parse_vreg_list(args_s)?;
+    let user = parse_vreg_list(args_s)?;
+    let args = call_operands_with_vmctx(callee, import_count, imports, user);
     fb.push_call(callee, &args, &results);
     Ok(())
 }
@@ -662,6 +710,7 @@ fn parse_single_vreg_def(s: &str) -> Result<(VReg, Option<IrType>), ParseError> 
         let ty = match t.trim() {
             "f32" => IrType::F32,
             "i32" => IrType::I32,
+            "ptr" => IrType::Pointer,
             _ => return Err(err(1, 1, "type")),
         };
         Ok((vr, Some(ty)))

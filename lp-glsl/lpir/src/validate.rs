@@ -117,9 +117,21 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
     let fname = func.name.as_str();
     pool_bounds(func, fname, errs);
 
+    let vm = func.vmctx_vreg.0 as usize;
+    if vm < func.vreg_types.len() && func.vreg_types[vm] != IrType::Pointer {
+        errs.push(err_in_func(
+            fname,
+            None,
+            alloc::format!(
+                "vmctx v{} must have type ptr, got {:?}",
+                func.vmctx_vreg.0,
+                func.vreg_types[vm]
+            ),
+        ));
+    }
+
     let n = func.vreg_types.len();
     let mut defined = vec![false; n];
-    let vm = func.vmctx_vreg.0 as usize;
     if vm < n {
         defined[vm] = true;
     }
@@ -345,7 +357,7 @@ fn validate_call(
             let imp = &module.imports[i];
             import_param_scratch.clear();
             if imp.needs_vmctx {
-                import_param_scratch.push(IrType::I32);
+                import_param_scratch.push(IrType::Pointer);
             }
             import_param_scratch.extend_from_slice(&imp.param_types);
             (import_param_scratch.as_slice(), imp.return_types.as_slice())

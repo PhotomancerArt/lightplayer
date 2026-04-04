@@ -700,7 +700,7 @@ fn eval_op(
                     let b = read_u32(slot_mem, addr)?;
                     set_reg(regs, *dst, Value::F32(f32::from_bits(b)))?;
                 }
-                IrType::I32 => {
+                IrType::I32 | IrType::Pointer => {
                     let b = read_u32(slot_mem, addr)?;
                     set_reg(regs, *dst, Value::I32(b as i32))?;
                 }

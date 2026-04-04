@@ -47,7 +47,7 @@ impl FunctionBuilder {
             is_entry: false,
             return_types: return_types.to_vec(),
             param_count: 0,
-            vreg_types: alloc::vec![IrType::I32], // VMContext pointer (32-bit)
+            vreg_types: alloc::vec![IrType::Pointer], // VMContext (pointer width at codegen)
             slots: Vec::new(),
             body: Vec::new(),
             vreg_pool: Vec::new(),
@@ -415,6 +415,10 @@ impl ModuleBuilder {
 
     pub fn import_count(&self) -> u32 {
         self.imports.len() as u32
+    }
+
+    pub fn imports(&self) -> &[ImportDecl] {
+        &self.imports
     }
 
     pub fn function_count(&self) -> u32 {

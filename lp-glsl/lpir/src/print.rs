@@ -6,9 +6,26 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 
-use crate::module::{ImportDecl, IrFunction, IrModule};
+use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
 use crate::op::Op;
-use crate::types::{IrType, VReg};
+use crate::types::{CalleeRef, IrType, VReg};
+
+fn callee_needs_vmctx_operand(module: &IrModule, callee: CalleeRef) -> bool {
+    let import_count = module.imports.len() as u32;
+    if callee.0 >= import_count {
+        true
+    } else {
+        module.imports[callee.0 as usize].needs_vmctx
+    }
+}
+
+fn visible_call_arg_regs<'a>(module: &IrModule, callee: CalleeRef, args: &'a [VReg]) -> &'a [VReg] {
+    if callee_needs_vmctx_operand(module, callee) && args.first().copied() == Some(VMCTX_VREG) {
+        &args[1..]
+    } else {
+        args
+    }
+}
 
 enum Block {
     If,
@@ -252,6 +269,7 @@ fn print_op_at(
             results,
         } => {
             let args_s = st.func.pool_slice(*args);
+            let visible = visible_call_arg_regs(st.module, *callee, args_s);
             let res_s = st.func.pool_slice(*results);
             let (mod_n, fn_n) = callee_name(st.module, *callee);
             let _ = write!(out, "{ind}");
@@ -269,7 +287,7 @@ fn print_op_at(
             } else {
                 let _ = write!(out, "call @{mod_n}::{fn_n}(");
             }
-            for (i, v) in args_s.iter().enumerate() {
+            for (i, v) in visible.iter().enumerate() {
                 if i > 0 {
                     let _ = write!(out, ", ");
                 }

@@ -11,11 +11,13 @@ pub enum FloatMode {
     F32,
 }
 
-/// LPIR scalar type (width-aware).
+/// LPIR type (width-aware where applicable).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum IrType {
     F32,
     I32,
+    /// Target pointer width at codegen (host JIT: real pointer; interpreter: i32-sized abstract).
+    Pointer,
 }
 
 impl fmt::Display for IrType {
@@ -23,6 +25,7 @@ impl fmt::Display for IrType {
         match self {
             IrType::F32 => write!(f, "f32"),
             IrType::I32 => write!(f, "i32"),
+            IrType::Pointer => write!(f, "ptr"),
         }
     }
 }

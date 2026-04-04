@@ -112,7 +112,7 @@ fn validate_err_undefined_vreg() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
-        vreg_types: vec![IrType::I32, IrType::F32, IrType::F32],
+        vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32],
         slots: Vec::new(),
         body: vec![Op::Fadd {
             dst: VReg(2),
@@ -137,7 +137,7 @@ fn validate_err_copy_type_mismatch() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 2,
         return_types: Vec::new(),
-        vreg_types: vec![IrType::I32, IrType::F32, IrType::I32],
+        vreg_types: vec![IrType::Pointer, IrType::F32, IrType::I32],
         slots: Vec::new(),
         body: vec![Op::Copy {
             dst: VReg(2),
@@ -274,7 +274,7 @@ fn validate_err_return_value_type() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: vec![IrType::F32],
-        vreg_types: vec![IrType::I32, IrType::I32],
+        vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
         body: vec![
             Op::IconstI32 {
@@ -402,7 +402,7 @@ fn validate_err_slot_addr_oob() {
         vmctx_vreg: VMCTX_VREG,
         param_count: 0,
         return_types: Vec::new(),
-        vreg_types: vec![IrType::I32, IrType::I32],
+        vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
         body: vec![Op::SlotAddr {
             dst: VReg(1),
