@@ -71,27 +71,37 @@ unsafe fn invoke_sysv_struct_return_buf(
                 f(vmctx, buf, user[0], user[1], user[2], user[3]);
             }
             5 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32) = transmute(code);
+                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
                 f(vmctx, buf, user[0], user[1], user[2], user[3], user[4]);
             }
             6 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5]);
+                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
+                f(
+                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5],
+                );
             }
             7 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6]);
+                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
+                f(
+                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                );
             }
             8 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7]);
+                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                    transmute(code);
+                f(
+                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                    user[7],
+                );
             }
             _ => unreachable!(),
         }
     }
     Ok(())
 }
-
 
 /// AArch64: VMContext and user args in `x0`…`x7`; StructReturn pointer in `x8`.
 #[cfg(all(target_arch = "aarch64", not(target_os = "windows")))]
@@ -261,7 +271,6 @@ unsafe fn aarch64_invoke_struct_return_buf(
     Ok(())
 }
 
-
 unsafe fn invoke_struct_return_dispatch(
     code: *const u8,
     vmctx: VmCtxWord,
@@ -312,9 +321,7 @@ pub(crate) unsafe fn invoke_i32_args_returns(
     uses_struct_return: bool,
 ) -> Result<Vec<i32>, CallError> {
     let mut out = alloc::vec![0i32; n_ret];
-    unsafe {
-        invoke_i32_args_returns_buf(code, vmctx, user, n_ret, &mut out, uses_struct_return)?
-    };
+    unsafe { invoke_i32_args_returns_buf(code, vmctx, user, n_ret, &mut out, uses_struct_return)? };
     Ok(out)
 }
 
@@ -376,24 +383,33 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
                     f(vm, user[0], user[1], user[2]);
                 }
                 4 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32) = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
                     f(vm, user[0], user[1], user[2], user[3]);
                 }
                 5 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32) = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
                     f(vm, user[0], user[1], user[2], user[3], user[4]);
                 }
                 6 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
                     f(vm, user[0], user[1], user[2], user[3], user[4], user[5]);
                 }
                 7 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) = unsafe { transmute(code) };
-                    f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6]);
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
+                    f(
+                        vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                    );
                 }
                 8 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) = unsafe { transmute(code) };
-                    f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7]);
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) =
+                        unsafe { transmute(code) };
+                    f(
+                        vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7],
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -414,28 +430,38 @@ pub(crate) unsafe fn invoke_i32_args_returns_buf(
                     out[0] = f(vm, user[0], user[1]);
                 }
                 3 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32) -> i32 = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
                     out[0] = f(vm, user[0], user[1], user[2]);
                 }
                 4 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
                     out[0] = f(vm, user[0], user[1], user[2], user[3]);
                 }
                 5 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
                     out[0] = f(vm, user[0], user[1], user[2], user[3], user[4]);
                 }
                 6 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
                     out[0] = f(vm, user[0], user[1], user[2], user[3], user[4], user[5]);
                 }
                 7 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
-                    out[0] = f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6]);
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
+                    out[0] = f(
+                        vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                    );
                 }
                 8 => {
-                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 = unsafe { transmute(code) };
-                    out[0] = f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7]);
+                    let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> i32 =
+                        unsafe { transmute(code) };
+                    out[0] = f(
+                        vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7],
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -506,22 +532,28 @@ fn invoke_cret2(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet2 {
                 f(vm, user[0], user[1], user[2], user[3], user[4])
             }
             6 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet2 = transmute(code);
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet2 =
+                    transmute(code);
                 f(vm, user[0], user[1], user[2], user[3], user[4], user[5])
             }
             7 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet2 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet2 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                )
             }
             8 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet2 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet2 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7],
+                )
             }
             _ => unreachable!(),
         }
     }
 }
-
 
 #[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
 fn invoke_cret3(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet3 {
@@ -552,22 +584,28 @@ fn invoke_cret3(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet3 {
                 f(vm, user[0], user[1], user[2], user[3], user[4])
             }
             6 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet3 = transmute(code);
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet3 =
+                    transmute(code);
                 f(vm, user[0], user[1], user[2], user[3], user[4], user[5])
             }
             7 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet3 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet3 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                )
             }
             8 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet3 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet3 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7],
+                )
             }
             _ => unreachable!(),
         }
     }
 }
-
 
 #[cfg(not(all(target_arch = "aarch64", not(target_os = "windows"))))]
 fn invoke_cret4(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet4 {
@@ -598,22 +636,28 @@ fn invoke_cret4(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet4 {
                 f(vm, user[0], user[1], user[2], user[3], user[4])
             }
             6 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet4 = transmute(code);
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32) -> CRet4 =
+                    transmute(code);
                 f(vm, user[0], user[1], user[2], user[3], user[4], user[5])
             }
             7 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet4 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32) -> CRet4 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                )
             }
             8 => {
-                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet4 = transmute(code);
-                f(vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7])
+                let f: extern "C" fn(VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) -> CRet4 =
+                    transmute(code);
+                f(
+                    vm, user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7],
+                )
             }
             _ => unreachable!(),
         }
     }
 }
-
 
 /// Cranelift places each `I32` return in its own GPR (`x0`…). Rust `extern "C"` `repr(C)` structs
 /// pack small aggregates differently on Apple AArch64, so read registers explicitly after `blr`.
@@ -626,7 +670,12 @@ fn invoke_cret4(code: *const u8, vm: VmCtxWord, user: &[i32]) -> CRet4 {
     unused_mut,
     reason = "vec-return variant kept alongside aarch64_invoke_multi_ret_buf; invoke delegates to buf"
 )]
-unsafe fn aarch64_invoke_multi_ret(code: *const u8, vm: VmCtxWord, user: &[i32], n_ret: usize) -> Vec<i32> {
+unsafe fn aarch64_invoke_multi_ret(
+    code: *const u8,
+    vm: VmCtxWord,
+    user: &[i32],
+    n_ret: usize,
+) -> Vec<i32> {
     use core::arch::asm;
 
     #[inline(always)]

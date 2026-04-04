@@ -528,7 +528,7 @@ fn lower_user_call(
                 let base_inner = &ctx.module.types[*base].inner;
                 let ir_tys = naga_type_to_ir_types(base_inner)?;
                 let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
-                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                let addr = ctx.fb.alloc_vreg(IrType::Pointer);
                 ctx.fb.push(Op::SlotAddr { dst: addr, slot });
                 for (j, &src) in local_vregs.iter().enumerate() {
                     ctx.fb.push(Op::Store {
@@ -582,7 +582,7 @@ fn lower_user_call(
     ctx.fb.push_call(callee_ref, &arg_vs, &result_vs);
     for (lv, slot) in &inout_copybacks {
         let local_vregs = ctx.resolve_local(*lv)?;
-        let addr = ctx.fb.alloc_vreg(IrType::I32);
+        let addr = ctx.fb.alloc_vreg(IrType::Pointer);
         ctx.fb.push(Op::SlotAddr {
             dst: addr,
             slot: *slot,

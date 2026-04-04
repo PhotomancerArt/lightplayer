@@ -89,7 +89,9 @@ impl<'a> LowerCtx<'a> {
                     base,
                     space: AddressSpace::Function,
                 } => {
-                    let addr = fb.add_param(IrType::I32);
+                    // Stack / `inout` / `out` array bases are addresses: use pointer-sized LPIR so host
+                    // JIT (64-bit) matches Cranelift's pointer ABI (RV32/WASM still map Pointer → i32).
+                    let addr = fb.add_param(IrType::Pointer);
                     arg_vregs.insert(i as u32, smallvec::smallvec![addr]);
                     pointer_args.insert(i as u32, *base);
                 }

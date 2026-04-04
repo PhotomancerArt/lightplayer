@@ -32,14 +32,16 @@ All functions (entry or not) are visible and callable by the host in JIT and tes
 
 A single `call` opcode is used for both local and imported callees.
 
-Examples:
+Examples (text form — **user** operands only; VM context `v0:ptr` is implicit for callees that use it):
 
 ```
 v5:f32 = call @my_helper(v1, v2)                    ; local, single return
 call @void_func(v1, v2)                              ; void
 v5:f32, v6:f32, v7:f32 = call @vec3_fn(v1)          ; multi-return
-v8:f32 = call @std.math::fsin(v0)                    ; module-qualified import
+v8:f32 = call @std.math::fsin(v1)                   ; import: first arg is the user value, not v0
 ```
+
+The internal `call` opcode’s argument list begins with `v0` when the callee’s convention requires VM context (all local shader functions; imports only when `needs_vmctx` is set). The text parser inserts that operand; the printer hides it so authors never duplicate `v0` in parentheses.
 
 Import calls use the full qualified name at the call site, matching the `import` declaration.
 

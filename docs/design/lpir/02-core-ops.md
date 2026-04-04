@@ -4,6 +4,10 @@ This document lists core LPIR operations: syntax, operands, result types, and se
 
 Notation: `vn:ty` on the left-hand side is a defining occurrence with type `ty`. Operand registers are written without types when the type is clear from the operation.
 
+## Address arithmetic (`ptr` + `i32`)
+
+For byte addressing, `iadd` / `isub` (and immediate forms where the non-immediate operand is `ptr`) combine a `ptr` base with an `i32` offset; the result VReg is `ptr`. Pure 32-bit integer `iadd` / `isub` still uses two `i32` operands and an `i32` result. See `03-memory.md` and `01-types-and-vregs.md`.
+
 ## Arithmetic (floating-point)
 
 | Op    | Syntax                         | Operands     | Result | Semantics                                      |
@@ -144,8 +148,8 @@ v2:i32 = iadd_imm v1, 1
 
 | Op     | Syntax                           | Operands              | Result | Semantics |
 |--------|----------------------------------|-----------------------|--------|-----------|
-| select | `v3:ty = select v0, v1, v2`      | `i32`, `ty`, `ty`     | `ty`   | If `v0` is nonzero (`i32` condition), result is `v1`; else `v2`. Both `v1` and `v2` are evaluated before `select` (flat IR). Types of `v1`, `v2`, and `v3` must match (`f32` or `i32`). |
-| copy   | `v1:ty = copy v0`                | `ty`                  | `ty`   | Result bit pattern equals `v0`; type must match |
+| select | `v3:ty = select v0, v1, v2`      | `i32`, `ty`, `ty`     | `ty`   | If `v0` is nonzero (`i32` condition), result is `v1`; else `v2`. Both `v1` and `v2` are evaluated before `select` (flat IR). Types of `v1`, `v2`, and `v3` must match (`f32`, `i32`, or `ptr`). |
+| copy   | `v1:ty = copy v0`                | `ty`                  | `ty`   | Result bit pattern equals `v0`; type must match (`f32`, `i32`, or `ptr`) |
 
 Example:
 

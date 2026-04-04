@@ -61,8 +61,8 @@ Lowering is **mode-unaware**: it does not encode f32 vs fixed-point (Q32) choice
 | Non-SSA                       | Virtual registers may be reassigned. Each target performs its own SSA construction or equivalent as needed.                                                                                                                                      |
 | Structured control flow       | `if`/`else`, loops, `break`, `continue`, `br_if_not`, `switch`, `return`. There is no explicit CFG or basic-block graph. This aligns with WebAssembly structured control; lowering structured control to a CFG for Cranelift is straightforward. |
 | Float-mode-agnostic           | Operations such as `fadd` and `fmul` express GLSL floating-point semantics. Whether those map to IEEE f32 or to Q32 fixed-point is an emitter parameter, not part of the IR text.                                                                |
-| Width-aware virtual registers | Each virtual register has a concrete scalar type (`f32`, `i32`). Boolean conditions use `i32` (zero vs nonzero).                                                                                                                                 |
-| Scalar types (v1)             | `f32` (IEEE 754) and `i32` (signedness defined per operation). No dedicated `bool` type, no pointer type in the IR, no `i64`, no vectors in v1. Pointers are modeled as `i32` (see design decision 3).                                           |
+| Width-aware virtual registers | Each virtual register has a concrete type: `f32`, `i32`, or `ptr` (pointer-sized address). Boolean conditions use `i32` (zero vs nonzero).                                                                                                                                 |
+| Scalar types (v1)             | `f32` (IEEE 754), `i32` (signedness defined per operation), and `ptr` (opaque addresses: 32-bit on RV32/WASM, native pointer width on host JIT). No dedicated `bool` type, no general `i64` data type, no vectors in v1. See design decision 3.                                           |
 
 ## Key design decisions
 
@@ -70,7 +70,7 @@ Lowering is **mode-unaware**: it does not encode f32 vs fixed-point (Q32) choice
 
 2. **Q32 in the emitter, not as an LPIR→LPIR rewrite** — Fixed-point behavior is applied when emitting target code. Backends differ: for example, WebAssembly may use inline `i64` arithmetic where appropriate; Cranelift may use saturating paths via builtin calls or an all-`i32` wrapping strategy. A shared IR-level Q32 pass would not match these per-backend choices. **Concrete Q32 numeric rules** (builtins, div0, `isnan`/`isinf`, comparisons) are defined in [`../q32.md`](../q32.md); that document is normative for implementations.
 
-3. **General pointer model via `i32`** — Address-sized or opaque pointer values are represented as `i32` at the IR boundary appropriate to the ABI (including out-parameters and similar conventions).
+3. **Pointer model via `ptr`** — Opaque addresses (stack slots, GLSL `out` / `inout` / pointer parameters, VM context) use the `ptr` type so emitters can map it to the target’s pointer width (32-bit on RV32 and WASM32, full width on 64-bit host JIT). Integer `i32` remains for numeric work and small offsets; `load` / `store` / `memcpy` take a `ptr` base (or a `ptr` produced by address arithmetic). WASM emission maps `ptr` to linear-memory `i32`; RV32 uses 32-bit pointers.
 
 4. **Module-qualified imports for external functions** — Math builtins, Q32 helpers, LPFX, Lygia, and similar capabilities are not a closed opcode enum. They appear as `import @module::name(...)` (exact surface syntax is defined in the text-format specification). Emitter configuration supplies implementations **per module name**, so the set of importable modules is open-ended.
 

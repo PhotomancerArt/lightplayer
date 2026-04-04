@@ -1,4 +1,4 @@
-use super::{EmitCtx, bool_to_i32, def_v, def_v_expr, use_v};
+use super::{EmitCtx, bool_to_i32, def_v, def_v_expr, memory, use_v};
 use crate::error::CompileError;
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{InstBuilder, StackSlotData, StackSlotKind, types};
@@ -6,6 +6,7 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::FloatMode;
 use lpir::module::IrFunction;
 use lpir::op::Op;
+use lpir::types::IrType;
 
 fn q32_lpir_refs<'a>(ctx: &'a EmitCtx<'_>) -> Result<&'a super::LpirBuiltinRefs, CompileError> {
     ctx.lpir_builtins
@@ -525,15 +526,49 @@ pub(crate) fn emit_scalar(
             if_true,
             if_false,
         } => {
+            let dst_ir = func.vreg_types[dst.0 as usize];
             let c = use_v(builder, vars, *cond);
-            let t = use_v(builder, vars, *if_true);
-            let f_v = use_v(builder, vars, *if_false);
+            let t_raw = use_v(builder, vars, *if_true);
+            let t = match (
+                dst_ir,
+                func.vreg_types[if_true.0 as usize],
+                ctx.pointer_type != types::I32,
+            ) {
+                (IrType::Pointer, IrType::I32, true) => {
+                    memory::widen_to_ptr(builder, t_raw, ctx.pointer_type)
+                }
+                (IrType::I32, IrType::Pointer, true) => builder.ins().ireduce(types::I32, t_raw),
+                _ => t_raw,
+            };
+            let f_raw = use_v(builder, vars, *if_false);
+            let f_v = match (
+                dst_ir,
+                func.vreg_types[if_false.0 as usize],
+                ctx.pointer_type != types::I32,
+            ) {
+                (IrType::Pointer, IrType::I32, true) => {
+                    memory::widen_to_ptr(builder, f_raw, ctx.pointer_type)
+                }
+                (IrType::I32, IrType::Pointer, true) => builder.ins().ireduce(types::I32, f_raw),
+                _ => f_raw,
+            };
             let pred = builder.ins().icmp_imm(IntCC::NotEqual, c, 0);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().select(pred, t, f_v));
         }
         Op::Copy { dst, src } => {
             let a = use_v(builder, vars, *src);
-            def_v(builder, vars, *dst, a);
+            let dst_ir = func.vreg_types[dst.0 as usize];
+            let src_ir = func.vreg_types[src.0 as usize];
+            let val = match (dst_ir, src_ir) {
+                (IrType::Pointer, IrType::I32) if ctx.pointer_type != types::I32 => {
+                    memory::widen_to_ptr(builder, a, ctx.pointer_type)
+                }
+                (IrType::I32, IrType::Pointer) if ctx.pointer_type != types::I32 => {
+                    builder.ins().ireduce(types::I32, a)
+                }
+                _ => a,
+            };
+            def_v(builder, vars, *dst, val);
         }
         _ => return Ok(false),
     }

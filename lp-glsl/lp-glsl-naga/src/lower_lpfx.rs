@@ -323,7 +323,7 @@ pub(crate) fn lower_lpfx_call(
                 }
                 let dst = dsts[0];
                 let slot = ctx.fb.alloc_slot(4);
-                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                let addr = ctx.fb.alloc_vreg(IrType::Pointer);
                 ctx.fb.push(Op::SlotAddr { dst: addr, slot });
                 arg_vs.push(addr);
                 outs.push((addr, dst, *ir));
@@ -339,7 +339,7 @@ pub(crate) fn lower_lpfx_call(
                     )));
                 }
                 let slot = ctx.fb.alloc_slot(n as u32 * 4);
-                let addr = ctx.fb.alloc_vreg(IrType::I32);
+                let addr = ctx.fb.alloc_vreg(IrType::Pointer);
                 ctx.fb.push(Op::SlotAddr { dst: addr, slot });
                 arg_vs.push(addr);
                 vec_outs.push((addr, dsts, *ir_ty, n));

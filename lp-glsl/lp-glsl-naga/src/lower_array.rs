@@ -157,7 +157,7 @@ pub(crate) fn array_slot_base(ctx: &mut LowerCtx<'_>, slot: lpir::SlotId) -> VRe
 }
 
 fn array_slot_base_fb(fb: &mut lpir::FunctionBuilder, slot: lpir::SlotId) -> VReg {
-    let base = fb.alloc_vreg(IrType::I32);
+    let base = fb.alloc_vreg(IrType::Pointer);
     fb.push(Op::SlotAddr { dst: base, slot });
     base
 }

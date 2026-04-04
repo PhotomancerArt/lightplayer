@@ -6,13 +6,15 @@ External functions are declared with module-qualified names:
 
 ```
 import @std.math::fsin(f32) -> f32
-import @lpfx::noise3(i32, i32, i32, i32) -> (i32, i32, i32)
+import @lpfx::noise3(ptr, i32, i32, i32) -> (i32, i32, i32)
 ```
 
-Call sites use the same qualified name:
+Import `param_types` and return types use the same `f32` / `i32` / `ptr` spellings as functions. Address or buffer arguments (LPFX out-pointers, result scratch) use `ptr`. WebAssembly emission maps `ptr` to linear-memory `i32`; RV32 uses 32-bit pointers.
+
+Call sites use the same qualified name (user operands only in text; VM context is implicit when required):
 
 ```
-v1:f32 = call @std.math::fsin(v0)
+v1:f32 = call @std.math::fsin(v1)
 ```
 
 The `::` separator is structural syntax, not a user-defined operator name. The module prefix selects which emitter **provider** supplies the implementation.
@@ -23,7 +25,7 @@ This design replaces a closed `MathFunc`-style enum. Which functions exist in a 
 
 ## Well-known module: `std.math`
 
-The `std.math` module exposes scalar math operations aligned with GLSL 4.50 core builtins. Signatures below use LPIR types `f32` and `i32`.
+The `std.math` module exposes scalar math operations aligned with GLSL 4.50 core builtins. Signatures below use LPIR types `f32` and `i32` (no `ptr` in typical `std.math` entries).
 
 ### Float math (unary)
 

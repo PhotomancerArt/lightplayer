@@ -11,9 +11,9 @@ The source language is **GLSL 4.50 core** (`#version 450 core`), parsed and type
 | `Literal { value: U32(v) }` | `iconst.i32` | Reinterpret bits as `i32`. |
 | `Literal { value: Bool(v) }` | `iconst.i32 1` or `iconst.i32 0` | |
 | `Constant { handle }` | `fconst.f32` or `iconst.i32` | Resolve from module constants. |
-| `FunctionArgument { index }` | Parameter VReg `v`*i* | Same order as the function’s `param_list`. |
+| `FunctionArgument { index }` | Parameter VReg | Same order as Naga arguments; maps to user params `v1`, `v2`, … in LPIR text (`v0:ptr` is implicit VM context). |
 | `LocalVariable { handle }` | One VReg per scalar local | Vectors and matrices are scalarized across multiple VRegs. |
-| `Load { pointer }` | Use of the VReg holding the value, or `load` | If the pointer is a scalarized local, the load is represented by the corresponding VReg; otherwise `load` from an `i32` address VReg. |
+| `Load { pointer }` | Use of the VReg holding the value, or `load` | If the pointer is a scalarized local, the load is represented by the corresponding VReg; otherwise `load` from a `ptr` base VReg. |
 | `Binary { op, left, right }` | Core binary op or `call` | See [Binary operators](#binary-operators). Float modulo uses `call @std.math::fmod`. |
 | `Unary { op, expr }` | Core unary op or `ieq` with `0` | See [Unary operators](#unary-operators). |
 | `Select { condition, accept, reject }` | `select` | Condition VReg is `i32` (`0` false, nonzero true). |
@@ -89,7 +89,7 @@ Exact rules follow `02-core-ops.md` for saturation and NaN.
 | `Break` | `break` |
 | `Continue` | `continue` |
 | `Return { value }` | `return` *v* or `return` |
-| `Store { pointer, value }` | VReg assignment for scalarized locals, or `store` to an `i32` address |
+| `Store { pointer, value }` | VReg assignment for scalarized locals, or `store` to a `ptr` base |
 | `Call { function, arguments, result }` | `call @name(args)` or `call @module::name(args)` with result VRegs |
 
 ## Vector and matrix scalarization

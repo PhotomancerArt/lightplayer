@@ -15,7 +15,7 @@ This chapter defines the lexical structure and a line-oriented, semi-formal gram
 - **Integer literals:** Optional leading `-` for decimal; decimal digit sequences; or `0x` / `0X` followed by hexadecimal digits. The grammar uses `integer_literal` for signed-style integers where the operation defines interpretation (for example immediate operands).
 - **Unsigned offset / size literals:** Non-negative integer literals used for `load` / `store` offsets, `memcpy` sizes, and slot sizes. The grammar uses `uint_literal`.
 - **Float literals:** Decimal floating-point with a fractional part (`1.5`, `-0.0`), or the keywords `inf`, `-inf`, `nan` as accepted by the concrete parser for `fconst.f32`.
-- **Keywords:** `func`, `entry`, `import`, `slot`, `if`, `else`, `loop`, `break`, `continue`, `return`, `br_if_not`, `switch`, `case`, `default`, `call`, `select`, `copy`, `load`, `store`, `slot_addr`, `memcpy`, `f32`, `i32`, and every opcode spelling used in the `op` productions below. An identifier that matches a keyword is a keyword, not a generic identifier.
+- **Keywords:** `func`, `entry`, `import`, `slot`, `if`, `else`, `loop`, `break`, `continue`, `return`, `br_if_not`, `switch`, `case`, `default`, `call`, `select`, `copy`, `load`, `store`, `slot_addr`, `memcpy`, `f32`, `i32`, `ptr`, and every opcode spelling used in the `op` productions below. An identifier that matches a keyword is a keyword, not a generic identifier.
 
 ## Immediate variants
 
@@ -48,7 +48,7 @@ param_list       = [ vreg_def { "," vreg_def } ]
 type_list        = [ type { "," type } ]
 
 return_type      = type | "(" type { "," type } ")"
-type             = "f32" | "i32"
+type             = "f32" | "i32" | "ptr"
 
 func_body        = { slot_line } { inner_line }
 slot_line        = "slot" slot_name "," uint_literal EOL
@@ -125,6 +125,7 @@ load_op          = "load" vreg "," uint_literal
 Notes on the grammar:
 
 - `float_literal` and the precise accepted spellings for infinities and NaNs are defined by the parser implementation; the lexical rules above list the intended surface forms.
+- **Calls and VM context:** The IR pool for `call` includes `v0` (VM context, type `ptr`) as the first operand when the callee’s ABI requires it. In the **text** form, that operand is **not** written: the parser prepends `v0` for local functions and for imports that need VM context, and the printer omits leading `v0` so `call @f(v1)` round-trips. Callee arity in the module still includes the synthetic parameter (see `01-types-and-vregs.md`, `05-calls.md`).
 - `assign_stmt` covers multi-result `call` when `rhs` is `call_expr` and `vreg_list` has more than one `vreg_def`; arity must match the callee’s declared return type list.
 - `op` appears only as the right-hand side of `assign_stmt` (including `v0 = op` reassignments where `vreg_def` omits `: type`).
 - `identifier` in `local_func_name` and in `import_name` uses the lexical identifier rule.
@@ -139,7 +140,7 @@ Notes on the grammar:
 
 ## Well-formedness (function)
 
-- Every VReg used on a line is defined earlier in the function (by parameter list, or by a prior defining assignment on some control-flow path). Parameters in `param_list` are defined at entry with the types given there.
+- Every VReg used on a line is defined earlier in the function (by parameter list, or by a prior defining assignment on some control-flow path). Parameters in `param_list` are defined at entry with the types given there. `v0:ptr` (VM context) is always defined at entry even though it does not appear in `param_list`.
 - Each VReg has a single concrete type for its entire lifetime; redefinitions use the same type as the parameter or first definition.
 - Each `op` and `call` obeys the operand and result typing rules in `02-core-ops.md`, `03-memory.md`, and `05-calls.md` (including `select` branch types matching the result type).
 - `br_if_not` appears only inside a `loop` body.

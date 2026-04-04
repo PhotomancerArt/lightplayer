@@ -118,7 +118,8 @@ pub fn signature_for_ir_func(
     }
     if !sr {
         for t in &func.return_types {
-            sig.returns.push(AbiParam::new(ir_type_for_mode(*t, mode, pointer_type)));
+            sig.returns
+                .push(AbiParam::new(ir_type_for_mode(*t, mode, pointer_type)));
         }
     }
     sig
@@ -163,6 +164,11 @@ pub(crate) fn bool_to_i32(builder: &mut FunctionBuilder, b: Value) -> Value {
 /// Marks vregs whose SSA type is [`EmitCtx::pointer_type`]: stack slot addresses and `base + offset` chains.
 pub(crate) fn vreg_wide_addr_chain(func: &IrFunction) -> Vec<bool> {
     let mut wide = vec![false; func.vreg_types.len()];
+    for (i, ty) in func.vreg_types.iter().enumerate() {
+        if matches!(ty, IrType::Pointer) {
+            wide[i] = true;
+        }
+    }
     for op in &func.body {
         match op {
             Op::SlotAddr { dst, .. } => wide[dst.0 as usize] = true,

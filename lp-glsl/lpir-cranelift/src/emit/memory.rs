@@ -89,6 +89,9 @@ fn operand_as_ptr(
     v: VReg,
 ) -> Value {
     let val = use_v(builder, vars, v);
+    if builder.func.dfg.value_type(val) == ctx.pointer_type {
+        return val;
+    }
     if ctx
         .vreg_wide_addr
         .get(v.0 as usize)
@@ -101,7 +104,11 @@ fn operand_as_ptr(
     }
 }
 
-fn widen_to_ptr(builder: &mut FunctionBuilder, val: Value, ptr_type: types::Type) -> Value {
+pub(super) fn widen_to_ptr(
+    builder: &mut FunctionBuilder,
+    val: Value,
+    ptr_type: types::Type,
+) -> Value {
     if ptr_type == types::I32 {
         val
     } else {
