@@ -2,8 +2,10 @@
 
 **Date:** 2026-03-29
 **Branch:** `feature/lpir-cranelift`
-**Prior reports:** [post-refactor audit](2026-03-26-lp-glsl-post-refactor-audit.md), [Stage VI-C validation](2026-03-26-lpir-cranelift-vi-c-ab.md)
-**Prior gap analysis:** [`docs/roadmaps/2026-03-25-lpir-features/todo.md`](../roadmaps/2026-03-25-lpir-features/todo.md)
+**Prior reports:
+** [post-refactor audit](2026-03-26-lp-glsl-post-refactor-audit.md), [Stage VI-C validation](2026-03-26-lpir-cranelift-vi-c-ab.md)
+**Prior gap analysis:** [
+`docs/roadmaps/2026-03-25-lpir-features/todo.md`](../roadmaps-old/2026-03-25-lpir-features/todo.md)
 
 ## Purpose
 
@@ -33,15 +35,15 @@ The LPIR refactor is **structurally complete and validated on hardware**:
 
 Single-threaded (`LP_FILETESTS_THREADS=1`) to rule out harness concurrency artifacts:
 
-| Metric | Count |
-|--------|-------|
-| Total files | 651 |
-| Files passing | 501 (77%) |
-| Files failing | 150 (23%) |
-| Total test cases | 2530 |
-| Pass | 380 |
-| Expected-failure (`@unimplemented`) | 944 |
-| Unexpected failure | 1206 |
+| Metric                              | Count     |
+|-------------------------------------|-----------|
+| Total files                         | 651       |
+| Files passing                       | 501 (77%) |
+| Files failing                       | 150 (23%) |
+| Total test cases                    | 2530      |
+| Pass                                | 380       |
+| Expected-failure (`@unimplemented`) | 944       |
+| Unexpected failure                  | 1206      |
 
 The 944 expected-failure cases are tests annotated `@unimplemented(backend=wasm)` or similar — they
 document known gaps intentionally and do not represent regressions. The 1206 unexpected failures are
@@ -74,7 +76,8 @@ reference matrix types.
 **Scope:** Metadata (`GlslType`), lowering (`naga_type_inner_to_glsl`), invoke/ABI for host JIT
 (matrix returns need >4-word decode), matrix element stores (`lower_stmt.rs` explicit rejection).
 
-**Unlocks:** `matrix/**`, `operators/incdec-matrix-*`, `builtins/matrix-*`, `function/return-matrix`,
+**Unlocks:** `matrix/**`, `operators/incdec-matrix-*`, `builtins/matrix-*`,
+`function/return-matrix`,
 some `const/` and `function/forward-declare` files (which fail because the file contains
 matrix-typed forward declarations that poison the whole compile).
 
@@ -162,15 +165,15 @@ codegen bugs.
 
 ## Summary: feature gap size by root cause
 
-| Root cause | Failing files | Test cases | Effort estimate |
-|-----------|---------------|------------|-----------------|
-| **Matrix type** (metadata + lowering + invoke) | ~55 | ~470 | Large (multi-stage) |
-| **Relational exprs** (`all`/`any`/`not` on bvec) | ~29 | ~240 | Small-medium |
-| **Vector comparison / harness** | ~15 | ~140 | Small + investigation |
-| **Array + struct types** | ~6 | ~50 | Large (deferred) |
-| **Const / diagnostics** | ~15 | ~40 | Medium (mixed causes) |
-| **Builtins edge / Q32** | ~6 | ~40 | Small (isnan/isinf) + inherent limits |
-| **Minor / isolated** | ~4 | ~20 | Small |
+| Root cause                                       | Failing files | Test cases | Effort estimate                       |
+|--------------------------------------------------|---------------|------------|---------------------------------------|
+| **Matrix type** (metadata + lowering + invoke)   | ~55           | ~470       | Large (multi-stage)                   |
+| **Relational exprs** (`all`/`any`/`not` on bvec) | ~29           | ~240       | Small-medium                          |
+| **Vector comparison / harness**                  | ~15           | ~140       | Small + investigation                 |
+| **Array + struct types**                         | ~6            | ~50        | Large (deferred)                      |
+| **Const / diagnostics**                          | ~15           | ~40        | Medium (mixed causes)                 |
+| **Builtins edge / Q32**                          | ~6            | ~40        | Small (isnan/isinf) + inherent limits |
+| **Minor / isolated**                             | ~4            | ~20        | Small                                 |
 
 Note: file counts sum to >150 because some files are blocked by multiple root causes; the primary
 blocker determines which bucket they land in.
@@ -198,8 +201,8 @@ are important for parity but less urgent for the typical product use case.
 1. **Relational expression lowering** — handle `Expression::Relational { All, Any, Not, IsNan,
    IsInf }` in `lower_expr.rs`. Decompose to component-wise `iand`/`ior`/`ieq`/`feq`-with-NaN
    checks on scalarized bvec VRegs.
-   - Unblocks: `vec/bvec*/*` (29 files), `builtins/common-isnan`, `builtins/common-isinf`.
-   - Effort: ~1 session.
+    - Unblocks: `vec/bvec*/*` (29 files), `builtins/common-isnan`, `builtins/common-isinf`.
+    - Effort: ~1 session.
 
 ### Phase 2: Matrix support (unblock ~55 files)
 
@@ -215,9 +218,9 @@ are important for parity but less urgent for the typical product use case.
 6. **Matrix builtins** — wire `transpose`, `inverse`, `determinant`, `outerProduct`,
    `matrixCompMult` through the lowering (most already exist in `lower_math.rs` but may need
    metadata/invoke support to be end-to-end testable).
-   - Unblocks: `matrix/**`, `operators/incdec-matrix-*`, `builtins/matrix-*`,
-     `function/return-matrix`, several `const/` and `function/` files.
-   - Effort: ~2-3 sessions.
+    - Unblocks: `matrix/**`, `operators/incdec-matrix-*`, `builtins/matrix-*`,
+      `function/return-matrix`, several `const/` and `function/` files.
+    - Effort: ~2-3 sessions.
 
 ### Phase 3: Diagnostics and const edge cases (~15 files)
 
@@ -226,7 +229,7 @@ are important for parity but less urgent for the typical product use case.
    validation in `lp-glsl-naga`.
 8. **Const evaluation** — the Naga frontend handles most const folding; the remaining `const/`
    failures need case-by-case investigation (some may be matrix-related, resolved by Phase 2).
-   - Effort: ~1 session.
+    - Effort: ~1 session.
 
 ### Phase 4: Arrays and structs (future, unblock ~6+ files)
 
@@ -235,7 +238,8 @@ are important for parity but less urgent for the typical product use case.
 10. **Struct type lowering** — member layout, `AccessIndex` on struct, nested structs.
 11. **ABI for aggregate params/returns** — `out`/`inout` arrays and structs, stack-allocated
     return areas.
-    - Unblocks: `array/**` (many currently `@unimplemented`), `struct/**`, `function/param-out-array`.
+    - Unblocks: `array/**` (many currently `@unimplemented`), `struct/**`,
+      `function/param-out-array`.
     - Effort: ~3-4 sessions (larger IR surface area).
 
 ### Phase 5: Polish
@@ -250,18 +254,18 @@ are important for parity but less urgent for the typical product use case.
 
 ## Other workspace health
 
-| Area | Status |
-|------|--------|
-| `lp-engine` tests | Pass (4/4) |
-| `lp-server` tests | Pass (4/4) |
-| `fw-tests` (emu) | Pass (scene_render, unwind) |
-| `lpir` unit tests | Pass (168) |
-| `lpir-cranelift` unit tests | Pass (32) |
-| `lp-glsl-naga` unit + integration | Pass (51) |
-| Legacy compiler references in Cargo.toml | **None** — fully removed |
-| Documentation (READMEs, CRATES.md, lpir spec) | Up to date per 2026-03-26 audit |
-| ESP32 binary size | 1,163,820 bytes (2026-03-26 measurement) |
-| `scripts/build-builtins.sh` | Functional; hash paths fixed |
+| Area                                          | Status                                   |
+|-----------------------------------------------|------------------------------------------|
+| `lp-engine` tests                             | Pass (4/4)                               |
+| `lp-server` tests                             | Pass (4/4)                               |
+| `fw-tests` (emu)                              | Pass (scene_render, unwind)              |
+| `lpir` unit tests                             | Pass (168)                               |
+| `lpir-cranelift` unit tests                   | Pass (32)                                |
+| `lp-glsl-naga` unit + integration             | Pass (51)                                |
+| Legacy compiler references in Cargo.toml      | **None** — fully removed                 |
+| Documentation (READMEs, CRATES.md, lpir spec) | Up to date per 2026-03-26 audit          |
+| ESP32 binary size                             | 1,163,820 bytes (2026-03-26 measurement) |
+| `scripts/build-builtins.sh`                   | Functional; hash paths fixed             |
 
 ## Conclusion
 

@@ -3,7 +3,8 @@
 ## Scope of work
 
 Implement Milestone I from
-[`docs/roadmaps/2026-03-29-lpir-parity/milestone-i-relational-expressions.md`](../../roadmaps/2026-03-29-lpir-parity/milestone-i-relational-expressions.md):
+[
+`docs/roadmaps/2026-03-29-lpir-parity/milestone-i-relational-expressions.md`](../../roadmaps-old/2026-03-29-lpir-parity/milestone-i-relational-expressions.md):
 
 - Correct **type shape** for `Expression::Relational` in `expr_scalar.rs`.
 - Align **`lower_relational`** with **[`docs/design/q32.md`](../../design/q32.md) §6** (`isnan` /
@@ -60,12 +61,12 @@ Matrix `m1 == m2`:
 
 ## Main components and how they interact
 
-| Component | Role |
-|-----------|------|
-| `expr_type_inner` | Supplies `TypeInner` for every Naga expression handle; must not return `Err` on `Relational` when GLSL is valid. |
-| `expr_scalar_kind` | Used where a single **scalar** kind is required; for `All`/`Any` result use **`Bool`** scalar, not the bvec’s “vector of bool” kind shortcut. |
-| `lower_relational` | Emits LPIR bool lanes (`I32`); Q32 `isnan`/`isinf` must not use IEEE tricks or div0 sentinel tests. |
-| Filetests | Prove **jit + wasm + rv32** pass for the [expected corpus](./expected-passing-tests.md); strip `@unimplemented(backend=…)` that blocked any backend once LPIR is correct. |
+| Component          | Role                                                                                                                                                                      |
+|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `expr_type_inner`  | Supplies `TypeInner` for every Naga expression handle; must not return `Err` on `Relational` when GLSL is valid.                                                          |
+| `expr_scalar_kind` | Used where a single **scalar** kind is required; for `All`/`Any` result use **`Bool`** scalar, not the bvec’s “vector of bool” kind shortcut.                             |
+| `lower_relational` | Emits LPIR bool lanes (`I32`); Q32 `isnan`/`isinf` must not use IEEE tricks or div0 sentinel tests.                                                                       |
+| Filetests          | Prove **jit + wasm + rv32** pass for the [expected corpus](./expected-passing-tests.md); strip `@unimplemented(backend=…)` that blocked any backend once LPIR is correct. |
 
 **Note:** `lp-glsl-naga` lowering is **float-mode agnostic** at the IR level; all current filetest
 targets are **q32** (`jit.q32`, `wasm.q32`, `rv32.q32`). Emitting constant-false `isnan`/`isinf`

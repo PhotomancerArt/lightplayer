@@ -1,6 +1,6 @@
 # Design: lpir-cranelift Stage VI-C (ESP32 + fw-emu validation)
 
-Roadmap: [stage-vi-c-esp32.md](../../roadmaps/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)  
+Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)  
 Notes: [00-notes.md](./00-notes.md)
 
 ## Scope
@@ -62,13 +62,13 @@ short manual section to the same report.
 
 ## Main components and interactions
 
-| Piece | Role in VI-C |
-|-------|----------------|
-| `fw-esp32/Cargo.toml` | Strip unused optional deps; keep `lp-server` / optional `lp-engine` wiring as today. |
-| `fw-emu` | Same dependency chain as firmware path; used for integration tests and alloc tracing. |
-| `fw-tests`, `lp-client` tests | Smoke: build ELF, run in emulator, scenes / unwind / alloc-trace as applicable. |
-| `lp-cli` `mem_profile` (if used) | Builds `fw-emu` with `alloc-trace` — primary tool for memory comparison narrative. |
-| `docs/reports/…-ab.md` | Single place for methodology, fw-emu numbers, ESP32 checklist, known issues. |
+| Piece                            | Role in VI-C                                                                          |
+|----------------------------------|---------------------------------------------------------------------------------------|
+| `fw-esp32/Cargo.toml`            | Strip unused optional deps; keep `lp-server` / optional `lp-engine` wiring as today.  |
+| `fw-emu`                         | Same dependency chain as firmware path; used for integration tests and alloc tracing. |
+| `fw-tests`, `lp-client` tests    | Smoke: build ELF, run in emulator, scenes / unwind / alloc-trace as applicable.       |
+| `lp-cli` `mem_profile` (if used) | Builds `fw-emu` with `alloc-trace` — primary tool for memory comparison narrative.    |
+| `docs/reports/…-ab.md`           | Single place for methodology, fw-emu numbers, ESP32 checklist, known issues.          |
 
 ## Decisions (from notes)
 

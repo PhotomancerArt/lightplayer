@@ -1,6 +1,6 @@
 # Plan notes: lpir-cranelift Stage VI-C (ESP32 hardware validation)
 
-Roadmap: [stage-vi-c-esp32.md](../../roadmaps/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)
+Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)
 
 ## Scope of work
 

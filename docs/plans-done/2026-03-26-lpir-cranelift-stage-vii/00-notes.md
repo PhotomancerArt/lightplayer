@@ -1,6 +1,6 @@
 # Plan notes: lpir-cranelift Stage VII — Delete Old Compiler
 
-Roadmap: [stage-vii-cleanup.md](../../roadmaps/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
+Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
 
 ## Scope of work
 

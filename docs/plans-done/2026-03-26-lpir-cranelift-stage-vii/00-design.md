@@ -1,6 +1,6 @@
 # Design: lpir-cranelift Stage VII — Delete Old Compiler
 
-Roadmap: [stage-vii-cleanup.md](../../roadmaps/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
+Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
 Notes: [00-notes.md](./00-notes.md)
 
 ## Scope
@@ -68,20 +68,20 @@ REMAINS (new chain — no changes):
 
 ## Main components
 
-| Component | Action |
-|-----------|--------|
-| `lp-glsl-cranelift` | Delete directory |
-| `lp-glsl-jit-util` | Delete directory |
-| `lp-glsl-frontend` | Delete directory (after migrating gen-app + filetests) |
-| `esp32-glsl-jit` | Delete directory |
-| `lp-glsl-q32-metrics-app` | Delete directory |
+| Component                  | Action                                                                                                                                                                                                                                |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lp-glsl-cranelift`        | Delete directory                                                                                                                                                                                                                      |
+| `lp-glsl-jit-util`         | Delete directory                                                                                                                                                                                                                      |
+| `lp-glsl-frontend`         | Delete directory (after migrating gen-app + filetests)                                                                                                                                                                                |
+| `esp32-glsl-jit`           | Delete directory                                                                                                                                                                                                                      |
+| `lp-glsl-q32-metrics-app`  | Delete directory                                                                                                                                                                                                                      |
 | `lp-glsl-builtins-gen-app` | Remove old-backend gen paths; inline `FunctionSignature`, `Type`, `ParamQualifier`, `Parameter`, `extract_function_signature` as local types; drop `lp-glsl-frontend` dep; stop generating `lpfx_fns.rs`, `registry.rs`, `mapping.rs` |
-| `lp-glsl-filetests` | Replace `CompilationPipeline::parse()` with `TranslationUnit::parse()`; drop `lp-glsl-frontend` dep |
-| Workspace `Cargo.toml` | Remove deleted crates from `members`, `default-members`, profile entries |
-| `justfile` | Remove deleted crate references from `rv32_packages`, build/test/clippy |
-| Scripts / Docker | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh` |
-| Docs | Update `README.md`, `lp-glsl/README.md`, `AGENTS.md`, cursor rules; leave historical docs |
-| Ignored tests | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken |
+| `lp-glsl-filetests`        | Replace `CompilationPipeline::parse()` with `TranslationUnit::parse()`; drop `lp-glsl-frontend` dep                                                                                                                                   |
+| Workspace `Cargo.toml`     | Remove deleted crates from `members`, `default-members`, profile entries                                                                                                                                                              |
+| `justfile`                 | Remove deleted crate references from `rv32_packages`, build/test/clippy                                                                                                                                                               |
+| Scripts / Docker           | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh`                                                                                                                                                                          |
+| Docs                       | Update `README.md`, `lp-glsl/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                             |
+| Ignored tests              | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                             |
 
 ## Decisions (from notes)
 
