@@ -1,5 +1,8 @@
 # LPVM - LightPlayer Virtual Machine
 
+**Roadmap (milestones, three-layer `lps` / `lpir` / `lpvm` naming):**
+[docs/roadmaps/2026-04-04-lpvm/overview.md](../../roadmaps/2026-04-04-lpvm/overview.md)
+
 This document contains notes about a major refactor to separate the existing `GlslExecutable`
 into `LpvmModule`, `LpvmInstance`, and `LpvmMemory` concepts.
 

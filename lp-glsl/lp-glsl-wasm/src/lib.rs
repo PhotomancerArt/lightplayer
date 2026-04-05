@@ -12,9 +12,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-pub use lp_glsl_naga::{CompileError, FloatMode, GlslType};
+pub use lp_glsl_naga::{CompileError, FloatMode, LpsType};
 pub use module::{
-    SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmModule, glsl_type_to_wasm_components,
+    glsl_type_to_wasm_components, WasmExport, WasmModule, SHADOW_STACK_GLOBAL_EXPORT,
 };
 pub use options::WasmOptions;
 

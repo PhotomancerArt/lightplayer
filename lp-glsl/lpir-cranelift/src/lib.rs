@@ -5,7 +5,6 @@
 
 #[macro_use]
 extern crate alloc;
-
 #[cfg(feature = "std")]
 extern crate std;
 
@@ -47,7 +46,7 @@ pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
 pub use lp_glsl_abi::{
-    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, GlslType, LayoutRules,
+    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LayoutRules, LpsType,
     PathError, StructMember,
 };
 pub use lpir::FloatMode;
@@ -92,8 +91,8 @@ mod tests {
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, MemoryStrategy,
-        jit_from_ir,
+        jit_from_ir, CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32,
+        MemoryStrategy,
     };
 
     fn jit_test_vmctx() -> *const u8 {

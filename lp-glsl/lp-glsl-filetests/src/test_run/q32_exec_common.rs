@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use lp_glsl_abi::GlslValue;
-use lp_glsl_abi::{GlslFunctionMeta, GlslParamQualifier, GlslType};
+use lp_glsl_abi::LpsValue;
+use lp_glsl_abi::{GlslFunctionMeta, LpsType};
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
-use lps_types::{FnParam, LpsFnSig, LpsType, ParamQualifier};
+use lps_types::{FnParam, LpsFnSig};
 
 pub(crate) fn signatures_from_meta(
     meta: &lp_glsl_abi::GlslModuleMeta,
@@ -18,85 +18,29 @@ pub(crate) fn signatures_from_meta(
     m
 }
 
-fn qualifier(q: GlslParamQualifier) -> ParamQualifier {
-    match q {
-        GlslParamQualifier::In => ParamQualifier::In,
-        GlslParamQualifier::Out => ParamQualifier::Out,
-        GlslParamQualifier::InOut => ParamQualifier::InOut,
-    }
-}
-
-fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<GlslType> {
-    use LpsType::*;
-    Some(match ty {
-        Void => GlslType::Void,
-        Float => GlslType::Float,
-        Int => GlslType::Int,
-        UInt => GlslType::UInt,
-        Bool => GlslType::Bool,
-        Vec2 => GlslType::Vec2,
-        Vec3 => GlslType::Vec3,
-        Vec4 => GlslType::Vec4,
-        IVec2 => GlslType::IVec2,
-        IVec3 => GlslType::IVec3,
-        IVec4 => GlslType::IVec4,
-        UVec2 => GlslType::UVec2,
-        UVec3 => GlslType::UVec3,
-        UVec4 => GlslType::UVec4,
-        BVec2 => GlslType::BVec2,
-        BVec3 => GlslType::BVec3,
-        BVec4 => GlslType::BVec4,
-        Mat2 => GlslType::Mat2,
-        Mat3 => GlslType::Mat3,
-        Mat4 => GlslType::Mat4,
-        Array(e, n) => GlslType::Array {
-            element: Box::new(core_type_to_lpir_glsl(e)?),
-            len: *n as u32,
-        },
-        Sampler2D | Struct(_) | Error => return None,
-    })
-}
-
-fn lpir_glsl_type_to_core(t: &GlslType) -> LpsType {
-    match t {
-        GlslType::Void => LpsType::Void,
-        GlslType::Float => LpsType::Float,
-        GlslType::Int => LpsType::Int,
-        GlslType::UInt => LpsType::UInt,
-        GlslType::Bool => LpsType::Bool,
-        GlslType::Vec2 => LpsType::Vec2,
-        GlslType::Vec3 => LpsType::Vec3,
-        GlslType::Vec4 => LpsType::Vec4,
-        GlslType::IVec2 => LpsType::IVec2,
-        GlslType::IVec3 => LpsType::IVec3,
-        GlslType::IVec4 => LpsType::IVec4,
-        GlslType::UVec2 => LpsType::UVec2,
-        GlslType::UVec3 => LpsType::UVec3,
-        GlslType::UVec4 => LpsType::UVec4,
-        GlslType::BVec2 => LpsType::BVec2,
-        GlslType::BVec3 => LpsType::BVec3,
-        GlslType::BVec4 => LpsType::BVec4,
-        GlslType::Mat2 => LpsType::Mat2,
-        GlslType::Mat3 => LpsType::Mat3,
-        GlslType::Mat4 => LpsType::Mat4,
-        GlslType::Array { element, len } => {
-            LpsType::Array(Box::new(lpir_glsl_type_to_core(element)), *len as usize)
-        }
-        GlslType::Struct { .. } => LpsType::Struct(0),
+/// Types supported as array elements when decoding Q32 array returns.
+fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<LpsType> {
+    match ty {
+        LpsType::Struct { .. } => None,
+        LpsType::Array { element, len } => Some(LpsType::Array {
+            element: Box::new(core_type_to_lpir_glsl(element)?),
+            len: *len,
+        }),
+        _ => Some(ty.clone()),
     }
 }
 
 fn fn_meta_to_signature(g: &GlslFunctionMeta) -> LpsFnSig {
     LpsFnSig {
         name: g.name.clone(),
-        return_type: lpir_glsl_type_to_core(&g.return_type),
+        return_type: g.return_type.clone(),
         parameters: g
             .params
             .iter()
             .map(|p| FnParam {
                 name: p.name.clone(),
-                ty: lpir_glsl_type_to_core(&p.ty),
-                qualifier: qualifier(p.qualifier),
+                ty: p.ty.clone(),
+                qualifier: p.qualifier,
             })
             .collect(),
     }
@@ -104,7 +48,7 @@ fn fn_meta_to_signature(g: &GlslFunctionMeta) -> LpsFnSig {
 
 pub(crate) fn args_to_q32(
     gfn: &GlslFunctionMeta,
-    args: &[GlslValue],
+    args: &[LpsValue],
 ) -> Result<Vec<GlslQ32>, GlslError> {
     if gfn.params.len() != args.len() {
         return Err(GlslError::new(
@@ -124,8 +68,8 @@ pub(crate) fn args_to_q32(
     Ok(out)
 }
 
-fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, GlslError> {
-    use GlslType::*;
+fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslError> {
+    use LpsType::*;
     let err = || {
         GlslError::new(
             ErrorCode::E0400,
@@ -133,31 +77,31 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
         )
     };
     Ok(match (param_ty, v) {
-        (Float, GlslValue::F32(x)) => GlslQ32::Float(*x as f64),
-        (Int, GlslValue::I32(x)) => GlslQ32::Int(*x),
-        (UInt, GlslValue::U32(x)) => GlslQ32::UInt(*x),
-        (Bool, GlslValue::Bool(b)) => GlslQ32::Bool(*b),
-        (Vec2, GlslValue::Vec2(a)) => GlslQ32::Vec2(a[0] as f64, a[1] as f64),
-        (Vec3, GlslValue::Vec3(a)) => GlslQ32::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
-        (Vec4, GlslValue::Vec4(a)) => {
+        (Float, LpsValue::F32(x)) => GlslQ32::Float(*x as f64),
+        (Int, LpsValue::I32(x)) => GlslQ32::Int(*x),
+        (UInt, LpsValue::U32(x)) => GlslQ32::UInt(*x),
+        (Bool, LpsValue::Bool(b)) => GlslQ32::Bool(*b),
+        (Vec2, LpsValue::Vec2(a)) => GlslQ32::Vec2(a[0] as f64, a[1] as f64),
+        (Vec3, LpsValue::Vec3(a)) => GlslQ32::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
+        (Vec4, LpsValue::Vec4(a)) => {
             GlslQ32::Vec4(a[0] as f64, a[1] as f64, a[2] as f64, a[3] as f64)
         }
-        (IVec2, GlslValue::IVec2(a)) => GlslQ32::IVec2(a[0], a[1]),
-        (IVec3, GlslValue::IVec3(a)) => GlslQ32::IVec3(a[0], a[1], a[2]),
-        (IVec4, GlslValue::IVec4(a)) => GlslQ32::IVec4(a[0], a[1], a[2], a[3]),
-        (UVec2, GlslValue::UVec2(a)) => GlslQ32::UVec2(a[0], a[1]),
-        (UVec3, GlslValue::UVec3(a)) => GlslQ32::UVec3(a[0], a[1], a[2]),
-        (UVec4, GlslValue::UVec4(a)) => GlslQ32::UVec4(a[0], a[1], a[2], a[3]),
-        (BVec2, GlslValue::BVec2(a)) => GlslQ32::BVec2(a[0], a[1]),
-        (BVec3, GlslValue::BVec3(a)) => GlslQ32::BVec3(a[0], a[1], a[2]),
-        (BVec4, GlslValue::BVec4(a)) => GlslQ32::BVec4(a[0], a[1], a[2], a[3]),
-        (Mat2, GlslValue::Mat2x2(m)) => GlslQ32::Mat2([
+        (IVec2, LpsValue::IVec2(a)) => GlslQ32::IVec2(a[0], a[1]),
+        (IVec3, LpsValue::IVec3(a)) => GlslQ32::IVec3(a[0], a[1], a[2]),
+        (IVec4, LpsValue::IVec4(a)) => GlslQ32::IVec4(a[0], a[1], a[2], a[3]),
+        (UVec2, LpsValue::UVec2(a)) => GlslQ32::UVec2(a[0], a[1]),
+        (UVec3, LpsValue::UVec3(a)) => GlslQ32::UVec3(a[0], a[1], a[2]),
+        (UVec4, LpsValue::UVec4(a)) => GlslQ32::UVec4(a[0], a[1], a[2], a[3]),
+        (BVec2, LpsValue::BVec2(a)) => GlslQ32::BVec2(a[0], a[1]),
+        (BVec3, LpsValue::BVec3(a)) => GlslQ32::BVec3(a[0], a[1], a[2]),
+        (BVec4, LpsValue::BVec4(a)) => GlslQ32::BVec4(a[0], a[1], a[2], a[3]),
+        (Mat2, LpsValue::Mat2x2(m)) => GlslQ32::Mat2([
             m[0][0] as f64,
             m[0][1] as f64,
             m[1][0] as f64,
             m[1][1] as f64,
         ]),
-        (Mat3, GlslValue::Mat3x3(m)) => GlslQ32::Mat3([
+        (Mat3, LpsValue::Mat3x3(m)) => GlslQ32::Mat3([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -168,7 +112,7 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
             m[2][1] as f64,
             m[2][2] as f64,
         ]),
-        (Mat4, GlslValue::Mat4x4(m)) => GlslQ32::Mat4([
+        (Mat4, LpsValue::Mat4x4(m)) => GlslQ32::Mat4([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -186,7 +130,7 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
             m[3][2] as f64,
             m[3][3] as f64,
         ]),
-        (Array { element, len }, GlslValue::Array(items)) => {
+        (Array { element, len }, LpsValue::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(err());
             }
@@ -196,7 +140,7 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
             }
             GlslQ32::Array(q)
         }
-        (Struct { members, .. }, GlslValue::Struct { fields, .. }) => {
+        (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(err());
             }
@@ -210,9 +154,9 @@ fn glsl_value_to_q32(param_ty: &GlslType, v: &GlslValue) -> Result<GlslQ32, Glsl
     })
 }
 
-/// Convert a [`GlslQ32`] value to [`GlslValue`] using the logical LPIR [`GlslType`].
-pub(crate) fn glsl_q32_to_glsl_value(ty: &GlslType, q: &GlslQ32) -> Result<GlslValue, GlslError> {
-    use GlslType::*;
+/// Convert a [`GlslQ32`] value to [`LpsValue`] using the logical LPIR [`LpsType`].
+pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &GlslQ32) -> Result<LpsValue, GlslError> {
+    use LpsType::*;
     let bad = || {
         GlslError::new(
             ErrorCode::E0400,
@@ -220,33 +164,33 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &GlslType, q: &GlslQ32) -> Result<GlslV
         )
     };
     Ok(match (ty, q) {
-        (Float, GlslQ32::Float(x)) => GlslValue::F32(*x as f32),
-        (Int, GlslQ32::Int(x)) => GlslValue::I32(*x),
-        (UInt, GlslQ32::UInt(x)) => GlslValue::U32(*x),
-        (Bool, GlslQ32::Bool(b)) => GlslValue::Bool(*b),
-        (Vec2, GlslQ32::Vec2(a, b)) => GlslValue::Vec2([*a as f32, *b as f32]),
-        (Vec3, GlslQ32::Vec3(a, b, c)) => GlslValue::Vec3([*a as f32, *b as f32, *c as f32]),
+        (Float, GlslQ32::Float(x)) => LpsValue::F32(*x as f32),
+        (Int, GlslQ32::Int(x)) => LpsValue::I32(*x),
+        (UInt, GlslQ32::UInt(x)) => LpsValue::U32(*x),
+        (Bool, GlslQ32::Bool(b)) => LpsValue::Bool(*b),
+        (Vec2, GlslQ32::Vec2(a, b)) => LpsValue::Vec2([*a as f32, *b as f32]),
+        (Vec3, GlslQ32::Vec3(a, b, c)) => LpsValue::Vec3([*a as f32, *b as f32, *c as f32]),
         (Vec4, GlslQ32::Vec4(a, b, c, d)) => {
-            GlslValue::Vec4([*a as f32, *b as f32, *c as f32, *d as f32])
+            LpsValue::Vec4([*a as f32, *b as f32, *c as f32, *d as f32])
         }
-        (IVec2, GlslQ32::IVec2(a, b)) => GlslValue::IVec2([*a, *b]),
-        (IVec3, GlslQ32::IVec3(a, b, c)) => GlslValue::IVec3([*a, *b, *c]),
-        (IVec4, GlslQ32::IVec4(a, b, c, d)) => GlslValue::IVec4([*a, *b, *c, *d]),
-        (UVec2, GlslQ32::UVec2(a, b)) => GlslValue::UVec2([*a, *b]),
-        (UVec3, GlslQ32::UVec3(a, b, c)) => GlslValue::UVec3([*a, *b, *c]),
-        (UVec4, GlslQ32::UVec4(a, b, c, d)) => GlslValue::UVec4([*a, *b, *c, *d]),
-        (BVec2, GlslQ32::BVec2(a, b)) => GlslValue::BVec2([*a, *b]),
-        (BVec3, GlslQ32::BVec3(a, b, c)) => GlslValue::BVec3([*a, *b, *c]),
-        (BVec4, GlslQ32::BVec4(a, b, c, d)) => GlslValue::BVec4([*a, *b, *c, *d]),
+        (IVec2, GlslQ32::IVec2(a, b)) => LpsValue::IVec2([*a, *b]),
+        (IVec3, GlslQ32::IVec3(a, b, c)) => LpsValue::IVec3([*a, *b, *c]),
+        (IVec4, GlslQ32::IVec4(a, b, c, d)) => LpsValue::IVec4([*a, *b, *c, *d]),
+        (UVec2, GlslQ32::UVec2(a, b)) => LpsValue::UVec2([*a, *b]),
+        (UVec3, GlslQ32::UVec3(a, b, c)) => LpsValue::UVec3([*a, *b, *c]),
+        (UVec4, GlslQ32::UVec4(a, b, c, d)) => LpsValue::UVec4([*a, *b, *c, *d]),
+        (BVec2, GlslQ32::BVec2(a, b)) => LpsValue::BVec2([*a, *b]),
+        (BVec3, GlslQ32::BVec3(a, b, c)) => LpsValue::BVec3([*a, *b, *c]),
+        (BVec4, GlslQ32::BVec4(a, b, c, d)) => LpsValue::BVec4([*a, *b, *c, *d]),
         (Mat2, GlslQ32::Mat2(a)) => {
-            GlslValue::Mat2x2([[a[0] as f32, a[1] as f32], [a[2] as f32, a[3] as f32]])
+            LpsValue::Mat2x2([[a[0] as f32, a[1] as f32], [a[2] as f32, a[3] as f32]])
         }
-        (Mat3, GlslQ32::Mat3(a)) => GlslValue::Mat3x3([
+        (Mat3, GlslQ32::Mat3(a)) => LpsValue::Mat3x3([
             [a[0] as f32, a[1] as f32, a[2] as f32],
             [a[3] as f32, a[4] as f32, a[5] as f32],
             [a[6] as f32, a[7] as f32, a[8] as f32],
         ]),
-        (Mat4, GlslQ32::Mat4(a)) => GlslValue::Mat4x4([
+        (Mat4, GlslQ32::Mat4(a)) => LpsValue::Mat4x4([
             [a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32],
             [a[4] as f32, a[5] as f32, a[6] as f32, a[7] as f32],
             [a[8] as f32, a[9] as f32, a[10] as f32, a[11] as f32],
@@ -260,7 +204,7 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &GlslType, q: &GlslQ32) -> Result<GlslV
             for it in items {
                 v.push(glsl_q32_to_glsl_value(element, it)?);
             }
-            GlslValue::Array(v.into_boxed_slice())
+            LpsValue::Array(v.into_boxed_slice())
         }
         (Struct { name, members }, GlslQ32::Struct(items)) => {
             if items.len() != members.len() {
@@ -271,7 +215,7 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &GlslType, q: &GlslQ32) -> Result<GlslV
                 let key = m.name.clone().unwrap_or_else(|| format!("_{i}"));
                 fields.push((key, glsl_q32_to_glsl_value(&m.ty, &items[i])?));
             }
-            GlslValue::Struct {
+            LpsValue::Struct {
                 name: name.clone(),
                 fields,
             }
@@ -289,7 +233,7 @@ pub(crate) trait Q32ShaderExecutable {
     fn call_q32_ret(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
     ) -> Result<GlslReturn<GlslQ32>, GlslError>;
 
     fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig>;
@@ -298,7 +242,7 @@ pub(crate) trait Q32ShaderExecutable {
 pub(crate) fn impl_call_void<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
 ) -> Result<(), GlslError> {
     let gfn = find_gfn(exec.signatures_map(), name)?;
     if gfn.return_type != LpsType::Void {
@@ -323,7 +267,7 @@ fn find_gfn<'a>(
 pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
 ) -> Result<f32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     if sig.return_type != LpsType::Float {
@@ -345,7 +289,7 @@ pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
 ) -> Result<i32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
@@ -371,7 +315,7 @@ pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
 ) -> Result<bool, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     if sig.return_type != LpsType::Bool {
@@ -393,7 +337,7 @@ pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     dim: usize,
 ) -> Result<Vec<f32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -427,7 +371,7 @@ pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     dim: usize,
 ) -> Result<Vec<i32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -459,7 +403,7 @@ pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     dim: usize,
 ) -> Result<Vec<u32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -491,7 +435,7 @@ pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     dim: usize,
 ) -> Result<Vec<bool>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -523,7 +467,7 @@ pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     rows: usize,
     cols: usize,
 ) -> Result<Vec<f32>, GlslError> {
@@ -560,13 +504,13 @@ pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_array_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[GlslValue],
+    args: &[LpsValue],
     elem_ty: &LpsType,
     len: usize,
-) -> Result<Vec<GlslValue>, GlslError> {
+) -> Result<Vec<LpsValue>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
-        LpsType::Array(e, n) if **e == *elem_ty && *n == len => {}
+        LpsType::Array { element, len: n } if **element == *elem_ty && *n as usize == len => {}
         _ => {
             return Err(GlslError::new(
                 ErrorCode::E0400,

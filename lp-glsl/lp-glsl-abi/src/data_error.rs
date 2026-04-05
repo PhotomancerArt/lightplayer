@@ -1,12 +1,12 @@
-//! Errors for [`crate::GlslData`] and related buffer/value conversion.
+//! Errors for [`crate::LpvmData`] and related buffer/value conversion.
 
 use alloc::string::String;
 
 use crate::path_resolve::PathError;
 
-/// Failure reading/writing [`crate::GlslData`] or converting to/from [`crate::GlslValue`].
+/// Failure reading/writing [`crate::LpvmData`] or converting to/from [`crate::LpsValue`].
 #[derive(Debug)]
-pub enum GlslDataError {
+pub enum DataError {
     Path(PathError),
     LayoutNotImplemented,
     BufferTooShort { need: usize, have: usize },
@@ -14,7 +14,7 @@ pub enum GlslDataError {
     BadPathForScalar { path: String, expected_ty: String },
 }
 
-impl GlslDataError {
+impl DataError {
     pub fn type_mismatch(expected: impl Into<String>, message: impl Into<String>) -> Self {
         Self::TypeMismatch {
             expected: expected.into(),
@@ -23,7 +23,7 @@ impl GlslDataError {
     }
 }
 
-impl core::fmt::Display for GlslDataError {
+impl core::fmt::Display for DataError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Path(e) => write!(f, "{e}"),
@@ -42,9 +42,9 @@ impl core::fmt::Display for GlslDataError {
     }
 }
 
-impl core::error::Error for GlslDataError {}
+impl core::error::Error for DataError {}
 
-impl From<PathError> for GlslDataError {
+impl From<PathError> for DataError {
     fn from(e: PathError) -> Self {
         Self::Path(e)
     }

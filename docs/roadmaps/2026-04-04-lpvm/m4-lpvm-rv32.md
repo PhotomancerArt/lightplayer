@@ -46,8 +46,9 @@ All existing consumers must continue to work after the refactor.
 
 ### How the RV32 backend works in filetests today
 
-`LpirRv32Executable` in filetests:
-1. GLSL → naga → `IrModule` + `GlslModuleMeta`
+`LpirRv32Executable` in **`lps-filetests`** (path may still be `lp-glsl-filetests`):
+1. GLSL → **`lps-naga`** → `IrModule` + module metadata (e.g. `LpvmModuleMeta` /
+   transitional `GlslModuleMeta`)
 2. `object_bytes_from_ir(&ir, &options)` — compile LPIR to RV32 object file
    via Cranelift (targeting riscv32)
 3. `link_object_with_builtins(&object_bytes)` — link with builtins → `ElfLoadInfo`
@@ -122,7 +123,7 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 cranelift-codegen = { ..., default-features = false }  # for object compilation
 cranelift-object = { ... }
 cranelift-module = { ... }
-lp-glsl-builtins = { ... }  # for linking
+lps-builtins = { ... }  # for linking (path may still be lp-glsl-builtins)
 ```
 
 Note: `lpvm-rv32` needs Cranelift for compiling LPIR to RV32 object code. This
@@ -161,7 +162,7 @@ This logic currently lives in `lpir-cranelift` behind the `riscv32-emu` feature
 
 - Do NOT break existing emulator consumers. Provide backward-compatible APIs.
 - Do NOT remove JIT-in-RAM support from the emulator.
-- Do NOT update `lp-glsl-filetests` to use `lpvm-rv32` yet. That's M5.
+- Do NOT update **`lps-filetests`** to use `lpvm-rv32` yet. That's M5.
 - Do NOT merge `lp-riscv-emu` into `lpvm-rv32`. The emulator is a
   general-purpose tool; `lpvm-rv32` wraps it.
 

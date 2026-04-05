@@ -1,13 +1,13 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
-use lp_glsl_abi::GlslValue;
+use lp_glsl_abi::LpsValue;
 use lp_glsl_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
 use lp_glsl_exec::GlslExecutable;
-use lp_glsl_naga::GlslType;
+use lp_glsl_naga::LpsType;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
-use lp_glsl_wasm::{glsl_wasm, GlslWasmError, WasmExport, WasmOptions, SHADOW_STACK_GLOBAL_EXPORT};
-use lps_types::{FnParam, LpsFnSig, LpsType, ParamQualifier};
+use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
+use lps_types::{FnParam, LpsFnSig, ParamQualifier};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Config, Engine, Instance, Store, Val};
@@ -93,7 +93,7 @@ impl WasmExecutable {
     fn call_wasm_multi(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
     ) -> Result<Vec<wasmtime::Val>, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
@@ -132,46 +132,17 @@ fn glsl_wasm_error_to_diagnostics(e: GlslWasmError) -> GlslDiagnostics {
 fn wasm_export_to_signature(export: &WasmExport) -> LpsFnSig {
     LpsFnSig {
         name: export.name.clone(),
-        return_type: to_frontend_type(&export.return_type),
+        return_type: export.return_type.clone(),
         parameters: export
             .param_types
             .iter()
             .enumerate()
             .map(|(i, ty)| FnParam {
                 name: format!("p{i}"),
-                ty: to_frontend_type(ty),
+                ty: ty.clone(),
                 qualifier: ParamQualifier::In,
             })
             .collect(),
-    }
-}
-
-fn to_frontend_type(ty: &GlslType) -> LpsType {
-    match ty {
-        GlslType::Void => LpsType::Void,
-        GlslType::Float => LpsType::Float,
-        GlslType::Int => LpsType::Int,
-        GlslType::UInt => LpsType::UInt,
-        GlslType::Bool => LpsType::Bool,
-        GlslType::Vec2 => LpsType::Vec2,
-        GlslType::Vec3 => LpsType::Vec3,
-        GlslType::Vec4 => LpsType::Vec4,
-        GlslType::IVec2 => LpsType::IVec2,
-        GlslType::IVec3 => LpsType::IVec3,
-        GlslType::IVec4 => LpsType::IVec4,
-        GlslType::UVec2 => LpsType::UVec2,
-        GlslType::UVec3 => LpsType::UVec3,
-        GlslType::UVec4 => LpsType::UVec4,
-        GlslType::BVec2 => LpsType::BVec2,
-        GlslType::BVec3 => LpsType::BVec3,
-        GlslType::BVec4 => LpsType::BVec4,
-        GlslType::Mat2 => LpsType::Mat2,
-        GlslType::Mat3 => LpsType::Mat3,
-        GlslType::Mat4 => LpsType::Mat4,
-        GlslType::Array { element, len } => {
-            LpsType::Array(Box::new(to_frontend_type(element)), *len as usize)
-        }
-        GlslType::Struct { .. } => LpsType::Struct(0),
     }
 }
 
@@ -193,72 +164,72 @@ fn wasm_val_to_f32(v: &Val, fm: lp_glsl_naga::FloatMode) -> Result<f32, GlslErro
     }
 }
 
-/// Flatten a logical [`GlslValue`] to WASM values for `ty` (matches [`glsl_type_to_wasm_components`] order).
+/// Flatten a logical [`LpsValue`] to WASM values for `ty` (matches [`glsl_type_to_wasm_components`] order).
 fn glsl_value_to_wasm_flat(
-    ty: &GlslType,
-    v: &GlslValue,
+    ty: &LpsType,
+    v: &LpsValue,
     fm: lp_glsl_naga::FloatMode,
 ) -> Result<Vec<Val>, GlslError> {
-    use GlslType::*;
+    use LpsType::*;
     Ok(match (ty, v) {
-        (Float, GlslValue::F32(f)) => vec![encode_f32_wasm(*f, fm)],
-        (Int, GlslValue::I32(i)) => vec![Val::I32(*i)],
-        (UInt, GlslValue::U32(u)) => vec![Val::I32(*u as i32)],
-        (Bool, GlslValue::Bool(b)) => vec![Val::I32(if *b { 1 } else { 0 })],
-        (Vec2, GlslValue::Vec2(a)) => vec![encode_f32_wasm(a[0], fm), encode_f32_wasm(a[1], fm)],
-        (Vec3, GlslValue::Vec3(a)) => vec![
+        (Float, LpsValue::F32(f)) => vec![encode_f32_wasm(*f, fm)],
+        (Int, LpsValue::I32(i)) => vec![Val::I32(*i)],
+        (UInt, LpsValue::U32(u)) => vec![Val::I32(*u as i32)],
+        (Bool, LpsValue::Bool(b)) => vec![Val::I32(if *b { 1 } else { 0 })],
+        (Vec2, LpsValue::Vec2(a)) => vec![encode_f32_wasm(a[0], fm), encode_f32_wasm(a[1], fm)],
+        (Vec3, LpsValue::Vec3(a)) => vec![
             encode_f32_wasm(a[0], fm),
             encode_f32_wasm(a[1], fm),
             encode_f32_wasm(a[2], fm),
         ],
-        (Vec4, GlslValue::Vec4(a)) => vec![
+        (Vec4, LpsValue::Vec4(a)) => vec![
             encode_f32_wasm(a[0], fm),
             encode_f32_wasm(a[1], fm),
             encode_f32_wasm(a[2], fm),
             encode_f32_wasm(a[3], fm),
         ],
-        (IVec2, GlslValue::IVec2(a)) => vec![Val::I32(a[0]), Val::I32(a[1])],
-        (IVec3, GlslValue::IVec3(a)) => vec![Val::I32(a[0]), Val::I32(a[1]), Val::I32(a[2])],
-        (IVec4, GlslValue::IVec4(a)) => vec![
+        (IVec2, LpsValue::IVec2(a)) => vec![Val::I32(a[0]), Val::I32(a[1])],
+        (IVec3, LpsValue::IVec3(a)) => vec![Val::I32(a[0]), Val::I32(a[1]), Val::I32(a[2])],
+        (IVec4, LpsValue::IVec4(a)) => vec![
             Val::I32(a[0]),
             Val::I32(a[1]),
             Val::I32(a[2]),
             Val::I32(a[3]),
         ],
-        (UVec2, GlslValue::UVec2(a)) => vec![Val::I32(a[0] as i32), Val::I32(a[1] as i32)],
-        (UVec3, GlslValue::UVec3(a)) => vec![
+        (UVec2, LpsValue::UVec2(a)) => vec![Val::I32(a[0] as i32), Val::I32(a[1] as i32)],
+        (UVec3, LpsValue::UVec3(a)) => vec![
             Val::I32(a[0] as i32),
             Val::I32(a[1] as i32),
             Val::I32(a[2] as i32),
         ],
-        (UVec4, GlslValue::UVec4(a)) => vec![
+        (UVec4, LpsValue::UVec4(a)) => vec![
             Val::I32(a[0] as i32),
             Val::I32(a[1] as i32),
             Val::I32(a[2] as i32),
             Val::I32(a[3] as i32),
         ],
-        (BVec2, GlslValue::BVec2(a)) => vec![
+        (BVec2, LpsValue::BVec2(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
         ],
-        (BVec3, GlslValue::BVec3(a)) => vec![
+        (BVec3, LpsValue::BVec3(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
             Val::I32(if a[2] { 1 } else { 0 }),
         ],
-        (BVec4, GlslValue::BVec4(a)) => vec![
+        (BVec4, LpsValue::BVec4(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
             Val::I32(if a[2] { 1 } else { 0 }),
             Val::I32(if a[3] { 1 } else { 0 }),
         ],
-        (Mat2, GlslValue::Mat2x2(m)) => vec![
+        (Mat2, LpsValue::Mat2x2(m)) => vec![
             encode_f32_wasm(m[0][0], fm),
             encode_f32_wasm(m[0][1], fm),
             encode_f32_wasm(m[1][0], fm),
             encode_f32_wasm(m[1][1], fm),
         ],
-        (Mat3, GlslValue::Mat3x3(m)) => {
+        (Mat3, LpsValue::Mat3x3(m)) => {
             let mut v = Vec::with_capacity(9);
             for col in m.iter() {
                 for x in col.iter() {
@@ -267,7 +238,7 @@ fn glsl_value_to_wasm_flat(
             }
             v
         }
-        (Mat4, GlslValue::Mat4x4(m)) => {
+        (Mat4, LpsValue::Mat4x4(m)) => {
             let mut v = Vec::with_capacity(16);
             for col in m.iter() {
                 for x in col.iter() {
@@ -276,7 +247,7 @@ fn glsl_value_to_wasm_flat(
             }
             v
         }
-        (Array { element, len }, GlslValue::Array(items)) => {
+        (Array { element, len }, LpsValue::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -293,7 +264,7 @@ fn glsl_value_to_wasm_flat(
             }
             out
         }
-        (Struct { members, .. }, GlslValue::Struct { fields, .. }) => {
+        (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(GlslError::new(
                     ErrorCode::E0400,
@@ -321,7 +292,7 @@ fn glsl_value_to_wasm_flat(
 
 fn build_wasm_args(
     export_info: &WasmExport,
-    args: &[GlslValue],
+    args: &[LpsValue],
     fm: lp_glsl_naga::FloatMode,
 ) -> Result<Vec<Val>, GlslError> {
     if args.len() != export_info.param_types.len() {
@@ -354,13 +325,13 @@ fn build_wasm_args(
     Ok(wasm_args)
 }
 
-/// Decode flattened WASM result values into a [`GlslValue`]; returns `(value, slots_consumed)`.
+/// Decode flattened WASM result values into a [`LpsValue`]; returns `(value, slots_consumed)`.
 fn wasm_vals_to_glsl_value(
-    ty: &GlslType,
+    ty: &LpsType,
     vals: &[Val],
     fm: lp_glsl_naga::FloatMode,
-) -> Result<(GlslValue, usize), GlslError> {
-    use GlslType::*;
+) -> Result<(LpsValue, usize), GlslError> {
+    use LpsType::*;
     match ty {
         Void => Err(GlslError::new(
             ErrorCode::E0400,
@@ -368,24 +339,24 @@ fn wasm_vals_to_glsl_value(
         )),
         Float => {
             let f = wasm_val_to_f32(&vals[0], fm)?;
-            Ok((GlslValue::F32(f), 1))
+            Ok((LpsValue::F32(f), 1))
         }
         Int => match vals.first() {
-            Some(Val::I32(i)) => Ok((GlslValue::I32(*i), 1)),
+            Some(Val::I32(i)) => Ok((LpsValue::I32(*i), 1)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 for int return",
             )),
         },
         UInt => match vals.first() {
-            Some(Val::I32(i)) => Ok((GlslValue::U32(*i as u32), 1)),
+            Some(Val::I32(i)) => Ok((LpsValue::U32(*i as u32), 1)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 for uint return",
             )),
         },
         Bool => match vals.first() {
-            Some(Val::I32(i)) => Ok((GlslValue::Bool(*i != 0), 1)),
+            Some(Val::I32(i)) => Ok((LpsValue::Bool(*i != 0), 1)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 for bool return",
@@ -394,30 +365,30 @@ fn wasm_vals_to_glsl_value(
         Vec2 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
-            Ok((GlslValue::Vec2([a, b]), 2))
+            Ok((LpsValue::Vec2([a, b]), 2))
         }
         Vec3 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
             let c = wasm_val_to_f32(&vals[2], fm)?;
-            Ok((GlslValue::Vec3([a, b, c]), 3))
+            Ok((LpsValue::Vec3([a, b, c]), 3))
         }
         Vec4 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
             let c = wasm_val_to_f32(&vals[2], fm)?;
             let d = wasm_val_to_f32(&vals[3], fm)?;
-            Ok((GlslValue::Vec4([a, b, c, d]), 4))
+            Ok((LpsValue::Vec4([a, b, c, d]), 4))
         }
         IVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::IVec2([*a, *b]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::IVec2([*a, *b]), 2)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 pair for ivec2",
             )),
         },
         IVec3 => match (&vals[0], &vals[1], &vals[2]) {
-            (Val::I32(a), Val::I32(b), Val::I32(c)) => Ok((GlslValue::IVec3([*a, *b, *c]), 3)),
+            (Val::I32(a), Val::I32(b), Val::I32(c)) => Ok((LpsValue::IVec3([*a, *b, *c]), 3)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 triple for ivec3",
@@ -425,7 +396,7 @@ fn wasm_vals_to_glsl_value(
         },
         IVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
-                Ok((GlslValue::IVec4([*a, *b, *c, *d]), 4))
+                Ok((LpsValue::IVec4([*a, *b, *c, *d]), 4))
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
@@ -433,7 +404,7 @@ fn wasm_vals_to_glsl_value(
             )),
         },
         UVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::UVec2([*a as u32, *b as u32]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::UVec2([*a as u32, *b as u32]), 2)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 pair for uvec2",
@@ -441,7 +412,7 @@ fn wasm_vals_to_glsl_value(
         },
         UVec3 => match (&vals[0], &vals[1], &vals[2]) {
             (Val::I32(a), Val::I32(b), Val::I32(c)) => {
-                Ok((GlslValue::UVec3([*a as u32, *b as u32, *c as u32]), 3))
+                Ok((LpsValue::UVec3([*a as u32, *b as u32, *c as u32]), 3))
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
@@ -450,7 +421,7 @@ fn wasm_vals_to_glsl_value(
         },
         UVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => Ok((
-                GlslValue::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
+                LpsValue::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
                 4,
             )),
             _ => Err(GlslError::new(
@@ -459,7 +430,7 @@ fn wasm_vals_to_glsl_value(
             )),
         },
         BVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((GlslValue::BVec2([*a != 0, *b != 0]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::BVec2([*a != 0, *b != 0]), 2)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: expected i32 pair for bvec2",
@@ -467,7 +438,7 @@ fn wasm_vals_to_glsl_value(
         },
         BVec3 => match (&vals[0], &vals[1], &vals[2]) {
             (Val::I32(a), Val::I32(b), Val::I32(c)) => {
-                Ok((GlslValue::BVec3([*a != 0, *b != 0, *c != 0]), 3))
+                Ok((LpsValue::BVec3([*a != 0, *b != 0, *c != 0]), 3))
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
@@ -476,7 +447,7 @@ fn wasm_vals_to_glsl_value(
         },
         BVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
-                Ok((GlslValue::BVec4([*a != 0, *b != 0, *c != 0, *d != 0]), 4))
+                Ok((LpsValue::BVec4([*a != 0, *b != 0, *c != 0, *d != 0]), 4))
             }
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
@@ -490,7 +461,7 @@ fn wasm_vals_to_glsl_value(
             col0[1] = wasm_val_to_f32(&vals[1], fm)?;
             col1[0] = wasm_val_to_f32(&vals[2], fm)?;
             col1[1] = wasm_val_to_f32(&vals[3], fm)?;
-            Ok((GlslValue::Mat2x2([col0, col1]), 4))
+            Ok((LpsValue::Mat2x2([col0, col1]), 4))
         }
         Mat3 => {
             let mut m = [[0f32; 3]; 3];
@@ -499,7 +470,7 @@ fn wasm_vals_to_glsl_value(
                     m[col][row] = wasm_val_to_f32(&vals[col * 3 + row], fm)?;
                 }
             }
-            Ok((GlslValue::Mat3x3(m), 9))
+            Ok((LpsValue::Mat3x3(m), 9))
         }
         Mat4 => {
             let mut m = [[0f32; 4]; 4];
@@ -508,7 +479,7 @@ fn wasm_vals_to_glsl_value(
                     m[col][row] = wasm_val_to_f32(&vals[col * 4 + row], fm)?;
                 }
             }
-            Ok((GlslValue::Mat4x4(m), 16))
+            Ok((LpsValue::Mat4x4(m), 16))
         }
         Array { element, len } => {
             let mut off = 0;
@@ -518,7 +489,7 @@ fn wasm_vals_to_glsl_value(
                 off += n;
                 elems.push(v);
             }
-            Ok((GlslValue::Array(elems.into_boxed_slice()), off))
+            Ok((LpsValue::Array(elems.into_boxed_slice()), off))
         }
         Struct { name, members } => {
             let mut off = 0;
@@ -533,7 +504,7 @@ fn wasm_vals_to_glsl_value(
                 fields.push((key, v));
             }
             Ok((
-                GlslValue::Struct {
+                LpsValue::Struct {
                     name: name.clone(),
                     fields,
                 },
@@ -544,7 +515,7 @@ fn wasm_vals_to_glsl_value(
 }
 
 impl GlslExecutable for WasmExecutable {
-    fn call_void(&mut self, name: &str, args: &[GlslValue]) -> Result<(), GlslError> {
+    fn call_void(&mut self, name: &str, args: &[LpsValue]) -> Result<(), GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
@@ -563,7 +534,7 @@ impl GlslExecutable for WasmExecutable {
         Ok(())
     }
 
-    fn call_i32(&mut self, name: &str, args: &[GlslValue]) -> Result<i32, GlslError> {
+    fn call_i32(&mut self, name: &str, args: &[LpsValue]) -> Result<i32, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
@@ -591,7 +562,7 @@ impl GlslExecutable for WasmExecutable {
         }
     }
 
-    fn call_f32(&mut self, name: &str, args: &[GlslValue]) -> Result<f32, GlslError> {
+    fn call_f32(&mut self, name: &str, args: &[LpsValue]) -> Result<f32, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
             GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
         })?;
@@ -628,7 +599,7 @@ impl GlslExecutable for WasmExecutable {
         }
     }
 
-    fn call_bool(&mut self, name: &str, args: &[GlslValue]) -> Result<bool, GlslError> {
+    fn call_bool(&mut self, name: &str, args: &[LpsValue]) -> Result<bool, GlslError> {
         let i = self.call_i32(name, args)?;
         Ok(i != 0)
     }
@@ -636,7 +607,7 @@ impl GlslExecutable for WasmExecutable {
     fn call_bvec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<bool>, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
@@ -644,7 +615,7 @@ impl GlslExecutable for WasmExecutable {
         })?;
         let ok = matches!(
             (&export_info.return_type, dim),
-            (GlslType::BVec2, 2) | (GlslType::BVec3, 3) | (GlslType::BVec4, 4)
+            (LpsType::BVec2, 2) | (LpsType::BVec3, 3) | (LpsType::BVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
@@ -671,7 +642,7 @@ impl GlslExecutable for WasmExecutable {
     fn call_ivec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<i32>, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
@@ -679,7 +650,7 @@ impl GlslExecutable for WasmExecutable {
         })?;
         let ok = matches!(
             (&export_info.return_type, dim),
-            (GlslType::IVec2, 2) | (GlslType::IVec3, 3) | (GlslType::IVec4, 4)
+            (LpsType::IVec2, 2) | (LpsType::IVec3, 3) | (LpsType::IVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
@@ -706,7 +677,7 @@ impl GlslExecutable for WasmExecutable {
     fn call_uvec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<u32>, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
@@ -714,7 +685,7 @@ impl GlslExecutable for WasmExecutable {
         })?;
         let ok = matches!(
             (&export_info.return_type, dim),
-            (GlslType::UVec2, 2) | (GlslType::UVec3, 3) | (GlslType::UVec4, 4)
+            (LpsType::UVec2, 2) | (LpsType::UVec3, 3) | (LpsType::UVec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
@@ -741,7 +712,7 @@ impl GlslExecutable for WasmExecutable {
     fn call_vec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<f32>, GlslError> {
         let export_info = self.exports.get(name).ok_or_else(|| {
@@ -749,7 +720,7 @@ impl GlslExecutable for WasmExecutable {
         })?;
         let ok = matches!(
             (&export_info.return_type, dim),
-            (GlslType::Vec2, 2) | (GlslType::Vec3, 3) | (GlslType::Vec4, 4)
+            (LpsType::Vec2, 2) | (LpsType::Vec3, 3) | (LpsType::Vec4, 4)
         );
         if !ok {
             return Err(GlslError::new(
@@ -782,7 +753,7 @@ impl GlslExecutable for WasmExecutable {
     fn call_mat(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         rows: usize,
         cols: usize,
     ) -> Result<Vec<f32>, GlslError> {
@@ -791,7 +762,7 @@ impl GlslExecutable for WasmExecutable {
         })?;
         let ok = matches!(
             (&export_info.return_type, rows, cols),
-            (GlslType::Mat2, 2, 2) | (GlslType::Mat3, 3, 3) | (GlslType::Mat4, 4, 4)
+            (LpsType::Mat2, 2, 2) | (LpsType::Mat3, 3, 3) | (LpsType::Mat4, 4, 4)
         );
         if !ok {
             return Err(GlslError::new(
@@ -824,10 +795,10 @@ impl GlslExecutable for WasmExecutable {
     fn call_array(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         elem_ty: &LpsType,
         len: usize,
-    ) -> Result<Vec<GlslValue>, GlslError> {
+    ) -> Result<Vec<LpsValue>, GlslError> {
         let return_type = self
             .exports
             .get(name)
@@ -835,8 +806,11 @@ impl GlslExecutable for WasmExecutable {
             .ok_or_else(|| {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
-        let expected = LpsType::Array(Box::new(elem_ty.clone()), len);
-        if to_frontend_type(&return_type) != expected {
+        let expected = LpsType::Array {
+            element: Box::new(elem_ty.clone()),
+            len: len as u32,
+        };
+        if return_type != expected {
             return Err(GlslError::new(
                 ErrorCode::E0400,
                 format!(
@@ -857,7 +831,7 @@ impl GlslExecutable for WasmExecutable {
             ));
         }
         match val {
-            GlslValue::Array(items) => Ok(Vec::from(items)),
+            LpsValue::Array(items) => Ok(Vec::from(items)),
             _ => Err(GlslError::new(
                 ErrorCode::E0400,
                 "WASM: internal: array return was not decoded as Array",

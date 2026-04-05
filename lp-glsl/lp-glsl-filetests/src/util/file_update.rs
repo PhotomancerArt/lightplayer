@@ -3,7 +3,7 @@
 use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
 use anyhow::{Result, bail};
-use lp_glsl_abi::GlslValue;
+use lp_glsl_abi::LpsValue;
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,7 +37,7 @@ impl FileUpdate {
     pub fn update_run_expectation(
         &self,
         line_number: usize,
-        new_value: &GlslValue,
+        new_value: &LpsValue,
         comparison: ComparisonOp,
     ) -> Result<()> {
         // This is required for correctness of this update.
@@ -371,11 +371,11 @@ fn format_float(f: f32) -> String {
 
 /// Format a GlslValue as a string for use in test files.
 /// Matrices are displayed in GLSL constructor format (e.g., mat2(vec2(...), vec2(...)))
-pub fn format_glsl_value(value: &GlslValue) -> String {
+pub fn format_glsl_value(value: &LpsValue) -> String {
     match value {
-        GlslValue::I32(i) => i.to_string(),
-        GlslValue::U32(u) => format!("{u}u"),
-        GlslValue::F32(f) => {
+        LpsValue::I32(i) => i.to_string(),
+        LpsValue::U32(u) => format!("{u}u"),
+        LpsValue::F32(f) => {
             // Format float with enough precision but avoid unnecessary decimals
             if f.fract() == 0.0 {
                 format!("{f:.1}")
@@ -383,31 +383,31 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format!("{f}")
             }
         }
-        GlslValue::Bool(b) => b.to_string(),
-        GlslValue::Vec2(v) => format!("vec2({}, {})", format_float(v[0]), format_float(v[1])),
-        GlslValue::Vec3(v) => format!(
+        LpsValue::Bool(b) => b.to_string(),
+        LpsValue::Vec2(v) => format!("vec2({}, {})", format_float(v[0]), format_float(v[1])),
+        LpsValue::Vec3(v) => format!(
             "vec3({}, {}, {})",
             format_float(v[0]),
             format_float(v[1]),
             format_float(v[2])
         ),
-        GlslValue::Vec4(v) => format!(
+        LpsValue::Vec4(v) => format!(
             "vec4({}, {}, {}, {})",
             format_float(v[0]),
             format_float(v[1]),
             format_float(v[2]),
             format_float(v[3])
         ),
-        GlslValue::IVec2(v) => format!("ivec2({}, {})", v[0], v[1]),
-        GlslValue::IVec3(v) => format!("ivec3({}, {}, {})", v[0], v[1], v[2]),
-        GlslValue::IVec4(v) => format!("ivec4({}, {}, {}, {})", v[0], v[1], v[2], v[3]),
-        GlslValue::UVec2(v) => format!("uvec2({}u, {}u)", v[0], v[1]),
-        GlslValue::UVec3(v) => format!("uvec3({}u, {}u, {}u)", v[0], v[1], v[2]),
-        GlslValue::UVec4(v) => format!("uvec4({}u, {}u, {}u, {}u)", v[0], v[1], v[2], v[3]),
-        GlslValue::BVec2(v) => format!("bvec2({}, {})", v[0], v[1]),
-        GlslValue::BVec3(v) => format!("bvec3({}, {}, {})", v[0], v[1], v[2]),
-        GlslValue::BVec4(v) => format!("bvec4({}, {}, {}, {})", v[0], v[1], v[2], v[3]),
-        GlslValue::Mat2x2(m) => {
+        LpsValue::IVec2(v) => format!("ivec2({}, {})", v[0], v[1]),
+        LpsValue::IVec3(v) => format!("ivec3({}, {}, {})", v[0], v[1], v[2]),
+        LpsValue::IVec4(v) => format!("ivec4({}, {}, {}, {})", v[0], v[1], v[2], v[3]),
+        LpsValue::UVec2(v) => format!("uvec2({}u, {}u)", v[0], v[1]),
+        LpsValue::UVec3(v) => format!("uvec3({}u, {}u, {}u)", v[0], v[1], v[2]),
+        LpsValue::UVec4(v) => format!("uvec4({}u, {}u, {}u, {}u)", v[0], v[1], v[2], v[3]),
+        LpsValue::BVec2(v) => format!("bvec2({}, {})", v[0], v[1]),
+        LpsValue::BVec3(v) => format!("bvec3({}, {}, {})", v[0], v[1], v[2]),
+        LpsValue::BVec4(v) => format!("bvec4({}, {}, {}, {})", v[0], v[1], v[2], v[3]),
+        LpsValue::Mat2x2(m) => {
             format!(
                 "mat2(vec2({}, {}), vec2({}, {}))",
                 format_float(m[0][0]),
@@ -416,7 +416,7 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format_float(m[1][1])
             )
         }
-        GlslValue::Mat3x3(m) => {
+        LpsValue::Mat3x3(m) => {
             format!(
                 "mat3(vec3({}, {}, {}), vec3({}, {}, {}), vec3({}, {}, {}))",
                 format_float(m[0][0]),
@@ -430,7 +430,7 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format_float(m[2][2])
             )
         }
-        GlslValue::Mat4x4(m) => {
+        LpsValue::Mat4x4(m) => {
             format!(
                 "mat4(vec4({}, {}, {}, {}), vec4({}, {}, {}, {}), vec4({}, {}, {}, {}), vec4({}, {}, {}, {}))",
                 format_float(m[0][0]),
@@ -451,7 +451,7 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 format_float(m[3][3])
             )
         }
-        GlslValue::Array(items) => {
+        LpsValue::Array(items) => {
             if items.is_empty() {
                 return "float[0]()".to_string();
             }
@@ -465,7 +465,7 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
                 None => format!("[{inner}]"),
             }
         }
-        GlslValue::Struct { name, fields } => {
+        LpsValue::Struct { name, fields } => {
             let inner = fields
                 .iter()
                 .map(|(_, v)| format_glsl_value(v))
@@ -479,29 +479,29 @@ pub fn format_glsl_value(value: &GlslValue) -> String {
     }
 }
 
-fn glsl_array_type_prefix(elem: Option<&GlslValue>) -> Option<&'static str> {
+fn glsl_array_type_prefix(elem: Option<&LpsValue>) -> Option<&'static str> {
     Some(match elem? {
-        GlslValue::F32(_) => "float",
-        GlslValue::I32(_) => "int",
-        GlslValue::U32(_) => "uint",
-        GlslValue::Bool(_) => "bool",
-        GlslValue::Vec2(_) => "vec2",
-        GlslValue::Vec3(_) => "vec3",
-        GlslValue::Vec4(_) => "vec4",
-        GlslValue::IVec2(_) => "ivec2",
-        GlslValue::IVec3(_) => "ivec3",
-        GlslValue::IVec4(_) => "ivec4",
-        GlslValue::UVec2(_) => "uvec2",
-        GlslValue::UVec3(_) => "uvec3",
-        GlslValue::UVec4(_) => "uvec4",
-        GlslValue::BVec2(_) => "bvec2",
-        GlslValue::BVec3(_) => "bvec3",
-        GlslValue::BVec4(_) => "bvec4",
-        GlslValue::Mat2x2(_) => "mat2",
-        GlslValue::Mat3x3(_) => "mat3",
-        GlslValue::Mat4x4(_) => "mat4",
-        GlslValue::Array(_) => return None,
-        GlslValue::Struct { .. } => return None,
+        LpsValue::F32(_) => "float",
+        LpsValue::I32(_) => "int",
+        LpsValue::U32(_) => "uint",
+        LpsValue::Bool(_) => "bool",
+        LpsValue::Vec2(_) => "vec2",
+        LpsValue::Vec3(_) => "vec3",
+        LpsValue::Vec4(_) => "vec4",
+        LpsValue::IVec2(_) => "ivec2",
+        LpsValue::IVec3(_) => "ivec3",
+        LpsValue::IVec4(_) => "ivec4",
+        LpsValue::UVec2(_) => "uvec2",
+        LpsValue::UVec3(_) => "uvec3",
+        LpsValue::UVec4(_) => "uvec4",
+        LpsValue::BVec2(_) => "bvec2",
+        LpsValue::BVec3(_) => "bvec3",
+        LpsValue::BVec4(_) => "bvec4",
+        LpsValue::Mat2x2(_) => "mat2",
+        LpsValue::Mat3x3(_) => "mat3",
+        LpsValue::Mat4x4(_) => "mat4",
+        LpsValue::Array(_) => return None,
+        LpsValue::Struct { .. } => return None,
     })
 }
 

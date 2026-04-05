@@ -2,109 +2,57 @@
 
 ## Goal
 
-Port `lp-glsl-filetests` from the `GlslExecutable` trait to the LPVM trait
-system. All three backends (JIT, RV32, WASM) should be exercised through the
-uniform LPVM API. This is the primary validation step.
+Port **`lps-filetests`** (rename of `lp-glsl-filetests`) from **`GlslExecutable`**
+to the LPVM trait system. All three backends (JIT, RV32, WASM) exercise the same
+LPVM-shaped API. Primary validation step.
+
+## Naming / paths
+
+Target crate: **`lps-filetests`**. During migration the directory or package may
+still be `lp-glsl-filetests`; use **`cargo test -p <actual-package-name>`**.
 
 ## Context for Agents
 
 ### How filetests work today
 
-`lp-glsl-filetests` is the main test infrastructure. It:
+1. Read `.glsl` tests + expected outputs.
+2. Select backend: `Backend::Jit` | `Rv32` | `Wasm`.
+3. Build **`Box<dyn GlslExecutable>`** (or equivalent).
+4. Call functions, compare to expectations.
 
-1. Reads `.glsl` test files with expected outputs in comments
-2. Compiles each test for one or more backends (`Backend::Jit`, `Backend::Rv32`,
-   `Backend::Wasm`)
-3. Creates a `Box<dyn GlslExecutable>` for the chosen backend
-4. Calls functions and compares results to expected values
+Typical wiring:
 
-`compile.rs` dispatches on `Backend`:
-- `Jit` → `LpirJitExecutable` (wraps `lpir_cranelift::JitModule`)
-- `Rv32` → `LpirRv32Executable` (object compile + link + emulate)
-- `Wasm` → `WasmExecutable` (emit WASM + wasmtime)
+- **Jit** → `LpirJitExecutable` + **`lpir_cranelift::JitModule`**
+- **Rv32** → object + link + emulate (`lpir-cranelift` `riscv32-emu` path today)
+- **Wasm** → emission + wasmtime (runner may live in filetests until **`lpvm-wasm`**
+  `runtime` is ready)
 
-### `GlslExecutable` trait methods
+### `GlslExecutable` surface
 
-- `call_void`, `call_i32`, `call_f32`, `call_bool`
-- `call_vec`, `call_ivec`, `call_uvec`, `call_bvec`, `call_mat`
-- `call_array`
-- `get_function_signature`, `list_functions`
-- Debug: `format_emulator_state`, `format_clif_ir`, `format_vcode`,
-  `format_disassembly` (std only, optional)
+Typed `call_*`, `call_array`, `get_function_signature`, `list_functions`, plus
+optional std debug hooks (`format_clif_ir`, etc.). Logical signatures use
+**`lps-types`** (`LpsFunctionSignature`, etc.) after M1 renames.
 
-### What changes
+### Target shape
 
-Replace `Box<dyn GlslExecutable>` with the LPVM trait system. The exact
-approach depends on the trait design from M1, but conceptually:
+1. Compile / load → **`LpvmModule`** (per backend crate).
+2. **`LpvmInstance`** + **`LpvmMemory`** as designed in M1–M4.
+3. Calls through LPVM API; keep **ergonomic test helpers** (wrapper module or
+   extension traits) so tests stay readable.
 
-1. Compile LPIR → `LpvmModule` (via the chosen backend)
-2. Create `LpvmInstance` from the module
-3. Call functions via `LpvmInstance`
-4. Compare results
+### Debug output
 
-Since the backends are now in separate crates (`lpvm-cranelift`, `lpvm-rv32`,
-`lpvm-wasm`), filetests depends on all three.
+Backend-specific formatting (CLIF, VCode, wasm WAT, emulator state) may **not**
+live on the core traits. Expose via concrete backend types or side APIs that
+filetests import explicitly.
 
-### Key consideration: filetests API ergonomics
+## Migration strategy
 
-The current `GlslExecutable` trait has convenience methods like `call_f32`,
-`call_vec`, etc. The LPVM traits may have a more generic `call(name, args) →
-LpvmValue` interface.
+1. **Parallel path**: keep `GlslExecutable` working while LPVM path is built.
+2. **Switch** when LPVM path passes all tests on all backends.
+3. **Remove** `GlslExecutable` and `lp-glsl-exec` dependency from filetests.
 
-Options for maintaining test ergonomics:
-1. Build a test helper layer in filetests that wraps `LpvmInstance::call` with
-   typed convenience methods.
-2. Add convenience methods to `LpvmInstance` itself.
-3. Use extension traits in `lpvm` for typed calls.
-
-The goal is: filetests should be easy to write and read. Don't sacrifice test
-clarity for API purity.
-
-### Key consideration: debug output
-
-`GlslExecutable` has optional debug methods (`format_clif_ir`, `format_vcode`,
-etc.) used in test output. These are backend-specific. The LPVM trait may not
-include them.
-
-Options:
-1. Backend crates expose debug formatting as separate methods (not through the
-   trait).
-2. The trait has an optional debug trait bound.
-3. Filetests downcast or use backend-specific types for debug output.
-
-### Backend-specific behaviors to preserve
-
-**JIT (`lpvm-cranelift`):**
-- Compilation errors are reported with source locations
-- Debug output: Cranelift IR, VCode, disassembly
-
-**RV32 (`lpvm-rv32`):**
-- Emulator state can be formatted for debugging
-- Instruction count / execution metrics available
-- MAX_INSTRUCTIONS limit for timeout
-
-**WASM (`lpvm-wasm`):**
-- WAT disassembly via wasmprinter
-- Fuel-based execution limits
-- Shadow stack reset between calls
-
-## Migration Strategy
-
-### Phase 1: Add LPVM path alongside GlslExecutable
-
-Keep the existing `GlslExecutable` code working. Add a parallel code path that
-uses LPVM traits. This allows incremental migration and A/B comparison.
-
-### Phase 2: Switch filetests to LPVM path
-
-Once the LPVM path passes all tests, switch over. Remove the `GlslExecutable`
-implementations.
-
-### Phase 3: Clean up
-
-Remove `GlslExecutable` dependency. Update imports. Simplify.
-
-## Filetest Dependencies After Migration
+## Dependencies after migration (illustrative)
 
 ```toml
 [dependencies]
@@ -112,31 +60,24 @@ lpvm = { path = "../../lpvm/lpvm" }
 lpvm-cranelift = { path = "../../lpvm/lpvm-cranelift" }
 lpvm-rv32 = { path = "../../lpvm/lpvm-rv32" }
 lpvm-wasm = { path = "../../lpvm/lpvm-wasm", features = ["runtime"] }
-lpir = { path = "../lpir" }
-lp-glsl-naga = { path = "../lp-glsl-naga" }
-# ... test infrastructure deps
+lpir = { path = "../lpir" }   # or top-level path after moves
+lps-types = { path = "../lps-types" }
+lps-naga = { path = "../lps-naga" }
 ```
 
-No longer needed:
-- `lp-glsl-exec`
-- `lp-glsl-abi` (use `lpvm` instead)
-- Direct `lpir-cranelift` dependency (use `lpvm-cranelift` instead)
-- Direct `lp-riscv-emu`, `lp-riscv-elf` dependencies (wrapped by `lpvm-rv32`)
-- Direct `wasmtime` dependency (wrapped by `lpvm-wasm` runtime)
+**Remove** (once fully migrated): `lp-glsl-exec`, direct `lp-glsl-abi`, direct
+`lpir-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
+if folded into `lpvm-wasm` runtime.
 
 ## What NOT To Do
 
-- Do NOT break existing filetests during migration. Keep the old path working
-  until the new one is validated.
-- Do NOT skip any backend. All three (JIT, RV32, WASM) must work.
-- Do NOT remove debug output capabilities. Find a way to preserve them.
-- Do NOT change test expectations. If tests fail, the bug is in the migration,
-  not the tests. (See project rule: NEVER change a test to make it pass.)
+- Do NOT drop a backend.
+- Do NOT weaken debug output without replacement.
+- Do NOT change test expectations to hide bugs (project rule).
 
 ## Done When
 
-- All existing filetests pass on all three backends through LPVM traits
-- `GlslExecutable` is no longer used by filetests
-- Debug output (IR, disassembly, emulator state) still available
-- `lp-glsl-exec` dependency removed from filetests
-- Test ergonomics are good — tests are readable and concise
+- All filetests pass on **Jit, RV32, WASM** via LPVM
+- `GlslExecutable` unused in filetests
+- **`lps-filetests`** (or current package name) depends on `lpvm` + three
+  backends, not on `lp-glsl-exec`

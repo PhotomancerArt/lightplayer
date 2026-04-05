@@ -2,102 +2,60 @@
 
 ## Goal
 
-Remove all old crates and code that were replaced by LPVM. Ensure everything
-builds and passes with no dead code.
+Remove obsolete crates and dead code after LPVM migration. Full build + tests
+green.
 
-## What To Delete
+## Repository state
 
-### Crates to remove
+Package names on disk may still mix `lp-glsl-*` and `lps-*`. Delete only after
+**no remaining dependents**. Grep `Cargo.toml` and `use` statements before
+removing workspace members.
 
-| Crate          | Replaced by   | Notes                                                    |
-|----------------|---------------|----------------------------------------------------------|
-| `lp-glsl-abi`  | `lpvm`        | All types moved to `lpvm`                                |
-| `lp-glsl-exec` | `lpvm` traits | `GlslExecutable` replaced by `LpvmModule`/`LpvmInstance` |
-| `lps-types`    | `lpir`        | Types absorbed into `lpir` in M1                         |
+## Crates to remove (typical)
 
-### Code to remove from other crates
+| Obsolete | Replaced by | Notes |
+|----------|-------------|-------|
+| `lp-glsl-abi` | `lpvm` | Runtime ABI + values |
+| `lp-glsl-exec` | `lpvm` traits | `GlslExecutable` → LPVM |
+| `lpir-cranelift` (bulk) | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
+| `lp-glsl-wasm` (or transitional WASM crate) | `lpvm-wasm` | Emission + runtime |
 
-| Location                               | What                            | Replaced by      |
-|----------------------------------------|---------------------------------|------------------|
-| `lpir-cranelift` (most of it)          | JIT compilation                 | `lpvm-cranelift` |
-| `lpir-cranelift` `riscv32-emu` feature | Object compile + link + emulate | `lpvm-rv32`      |
-| `lp-glsl-wasm`                         | WASM emission                   | `lpvm-wasm`      |
+**Keep `lps-types`** (and the whole **`lps-*` shader layer**). Do **not** delete
+the logical-type crate — it is not absorbed into `lpir`.
 
-`lpir-cranelift` may become empty after extraction. If so, delete it.
-`lp-glsl-wasm` is fully replaced by `lpvm-wasm`. Delete it.
+## Workspace
 
-### Re-export shims
+Remove deleted paths from `[workspace.members]` / `default-members`.
 
-If any shim crates were created during M1 for backward compatibility, remove
-them now that all consumers have migrated.
+## Verification commands
 
-## Workspace Cargo.toml
-
-Remove deleted crates from `[workspace.members]` and `default-members`.
-
-Verify the member list is correct — no references to deleted paths.
-
-## What To Verify
-
-### Full build
+Adjust **`-p` package names** if crates are not yet renamed on disk.
 
 ```bash
-# Default members
 cargo check
-
-# Embedded
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
-
-# Host
 cargo check -p lp-server
-```
-
-### All tests
-
-```bash
-# Filetests (all backends)
-cargo test -p lp-glsl-filetests
-
-# Firmware tests
+cargo test -p lps-filetests          # or current filetests package name
 cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
-
-# Server tests
-cargo test -p lp-server --no-run
-
-# LPIR tests
 cargo test -p lpir
+cargo test -p lp-server --no-run
 ```
 
-### No dead code
+## Web / demo
 
-```bash
-# Check for warnings
-cargo check 2>&1 | grep "warning"
-
-# Check for references to deleted crates
-# (search Cargo.toml files for old crate names)
-```
-
-### No orphaned files
-
-Check that no source files reference deleted crates in imports or comments.
+**`web-demo`** (or `lp-app/web-demo`): switch from old WASM emission crate to
+**`lpvm-wasm`** (or `lps-*` wrapper if one exists). Verify wasm32 build if
+applicable.
 
 ## What NOT To Do
 
-- Do NOT delete anything that still has dependents. Verify all references are
-  gone before deleting.
-- Do NOT rush this. Each deletion should be verified with a build.
-- Do NOT forget to update `web-demo` — it depends on `lp-glsl-wasm` and needs
-  to switch to `lpvm-wasm`.
+- Do NOT delete **`lps-types`** or **`lps-naga`** — they are the shader layer,
+  not leftovers from ABI/exec migration.
+- Do NOT delete a crate that still appears in any `Cargo.toml`.
 
 ## Done When
 
-- Old crates (`lp-glsl-abi`, `lp-glsl-exec`, `lps-types`) are deleted
-- `lpir-cranelift` is deleted or reduced to minimal shim
-- `lp-glsl-wasm` is deleted
-- No workspace member references deleted paths
-- Full build passes (default, embedded, host)
-- All tests pass
-- No dead code warnings related to the migration
-- `web-demo` updated to use `lpvm-wasm`
+- No references to removed ABI/exec/JIT-monolith crates
+- All checks/tests above pass
+- `web-demo` (if present) points at new WASM stack

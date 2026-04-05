@@ -1,12 +1,12 @@
 //! Level-1 [`GlslQ32`] calls using [`lp_glsl_abi::GlslModuleMeta`].
 
 use cranelift_codegen::ir::ArgumentPurpose;
-use lp_glsl_abi::GlslType;
+use lp_glsl_abi::LpsType;
 use lpir::FloatMode;
 
 use crate::jit_module::JitModule;
 use crate::values::{
-    CallError, CallResult, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg,
+    decode_q32_return, flatten_q32_arg, CallError, CallResult, GlslQ32, GlslReturn,
 };
 
 impl JitModule {
@@ -67,7 +67,7 @@ impl JitModule {
         let words = unsafe {
             crate::invoke::invoke_i32_args_returns(code, vmctx, user, n_ret, uses_struct_return)?
         };
-        if gfn.return_type == GlslType::Void {
+        if gfn.return_type == LpsType::Void {
             return Ok(GlslReturn {
                 value: None,
                 outs: alloc::vec::Vec::new(),

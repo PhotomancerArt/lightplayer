@@ -1,5 +1,55 @@
 # LPVM Roadmap
 
+## Repository state (during renames)
+
+Work on this roadmap may overlap with crate/path renames (`lp-glsl-*` → `lps-*`,
+new `lpvm/` tree). **These roadmap documents are the intended target naming.**
+If the tree on disk still uses old paths or a find/replace left odd wording
+elsewhere, trust this folder and fix drift when you touch files.
+
+## Three layers: `lps` / `lpir` / `lpvm`
+
+Long-term naming groups the shader system into three prefixes:
+
+| Layer | Prefix | Role | Knows about |
+|-------|--------|------|-------------|
+| **Shader** | `lps-*` | Frontends, logical types, shader-layer tests | vec3, mat4, GLSL (today), WGSL (future) |
+| **IR** | `lpir` | Scalarized intermediate representation | `IrType` (F32, I32, Pointer), ops, vregs |
+| **VM** | `lpvm-*` | Runtime, execution, backends | Module, Instance, Memory, values, VMContext |
+
+`lps` is not self-explanatory on first read; it is the **LightPlayer shader**
+layer, parallel to how `lpir` and `lpvm` abbreviate their domains.
+
+**Dependency direction (allowed edges):**
+
+```
+lps-naga ──► lpir          (lowers to LPIR)
+lps-naga ──► lps-types     (logical shader types)
+lpvm       ──► lpir        (IR module shape, codegen inputs)
+lpvm       ──► lps-types   (signatures, metadata consumers see)
+lpvm-*     ──► lpvm, lpir  (backends)
+lps-filetests ──► lps-*, lpir, lpvm-*   (integration tests)
+```
+
+**Important:** `lp-glsl-core`’s `Type` / `FunctionSignature` are **not** LPIR
+concepts. LPIR is scalarized; it does not carry logical vec3/mat4 as a first-class
+IR type. Those types live in **`lps-types`** (rename of `lp-glsl-core`), not in
+`lpir`.
+
+### Target crate map (shader layer)
+
+| Current / transitional | Target (`lps-*`) |
+|------------------------|------------------|
+| `lp-glsl-core` | `lps-types` |
+| `lp-glsl-naga` | `lps-naga` |
+| `lp-glsl-builtins` | `lps-builtins` |
+| `lp-glsl-builtin-ids` | `lps-builtin-ids` |
+| `lp-glsl-filetests` | `lps-filetests` |
+| `lp-glsl-diagnostics` | `lps-diagnostics` (or keep name if shared tooling) |
+
+ABI/runtime types from `lp-glsl-abi` and exec traits from `lp-glsl-exec` move
+into **`lpvm`**, not into `lps-types`.
+
 ## What is LPVM?
 
 LPVM is the runtime system for executing compiled LPIR modules. It introduces
@@ -17,10 +67,9 @@ development simulation target. The engine must be backend-agnostic: Cranelift
 JIT on ESP32/desktop, browser WebAssembly API in-browser. LPVM enables this by
 abstracting the runtime behind traits that are monomorphized per firmware target.
 
-**Naming cleanup**: the "glsl" prefix on runtime types (`GlslValue`, `GlslType`,
-`GlslExecutable`) conflates the language frontend with the backend runtime.
-LPVM draws a clean boundary: everything before LPIR is "glsl" (language),
-everything after is "lpvm" (runtime). Long-term, `lp-glsl/` goes away entirely.
+**Naming cleanup**: retire the `lp-glsl/` catch-all. Use **`lps-*`** for the
+shader/language layer, **`lpir`** for scalarized IR only, **`lpvm-*`** for the
+runtime. Long-term, the old `lp-glsl` directory name goes away.
 
 ## Architecture
 
@@ -28,93 +77,82 @@ everything after is "lpvm" (runtime). Long-term, `lp-glsl/` goes away entirely.
   GLSL source
        │
        ▼
-  lp-glsl-naga ──► lpir (IrModule, Type, FunctionSignature)
-                      │
-          ┌───────────┼───────────┐
-          ▼           ▼           ▼
-   lpvm-cranelift  lpvm-rv32  lpvm-wasm
-          │           │           │
-          └─────┬─────┘     ┌────┘
-                ▼            ▼
-          LpvmModule    LpvmModule
-          LpvmInstance  LpvmInstance
-          LpvmMemory    LpvmMemory
-                │            │
-                ▼            ▼
-            lp-engine<M: LpvmModule>
+  lps-naga ──► lpir (IrModule — scalarized)
+       │            │
+       │            ├──► lpvm-cranelift
+       │            ├──► lpvm-rv32
+       │            └──► lpvm-wasm
+       │
+       └── lps-types (LpsType, LpsFunctionSignature — logical types)
                 │
-       ┌────────┼────────┐
-       ▼        ▼        ▼
-   fw-esp32  fw-emu   fw-wasm (future)
+                └── referenced by lpvm (metadata / calling convention)
 ```
 
 ## Crate Structure
 
 ```
+lps/                          # shader layer (may start under lp-glsl/ during migration)
+├── lps-types/
+├── lps-naga/
+├── lps-builtins/
+├── lps-builtin-ids/
+├── lps-filetests/
+└── ...
+
+lp-glsl/lpir/                 # IR crate (path may move to top-level later)
+└── ...
+
 lpvm/
-├── lpvm/                # Core: traits, values, vmcontext, layout, metadata
-├── lpvm-cranelift/      # Cranelift JIT backend
-├── lpvm-rv32/           # RV32 emulator backend
-└── lpvm-wasm/           # WASM emission + runtime (wasmtime / browser)
+├── lpvm/                     # Core: traits, values, vmcontext, layout, runtime metadata
+├── lpvm-cranelift/
+├── lpvm-rv32/
+└── lpvm-wasm/
 ```
+
+### `lps-types`
+
+Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
+`LpsParamQualifier`. **Zero dependency on `lpir` and `lpvm`.** Shared by
+`lps-naga` (frontend) and `lpvm` (runtime metadata and call semantics).
 
 ### `lpvm` (core)
 
-Types, traits, and runtime-specific concepts. `no_std + alloc`. Depends on
-`lpir` for type definitions (`Type`, `FunctionSignature`). Replaces
-`lp-glsl-abi`, `lp-glsl-exec`, absorbs runtime-relevant parts of
-`lps-types`.
+Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
+**`lpir`** (IR module, lowering inputs) and **`lps-types`** (what callers think
+functions look like). Replaces **`lp-glsl-abi`** and **`lp-glsl-exec`** (trait
+concepts → `LpvmModule` / `LpvmInstance` / `LpvmMemory`).
 
-Contains: `LpvmModule`, `LpvmInstance`, `LpvmMemory` traits. `LpvmValue`,
-`LpvmData`, layout functions, `VmContext`, module metadata.
+Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,
+`LpvmModuleMeta`-style metadata (may reference `lps-types` for field types).
 
-### `lpvm-cranelift`
+### `lpvm-cranelift` / `lpvm-rv32` / `lpvm-wasm`
 
-Cranelift JIT backend. Implements `LpvmModule`/`LpvmInstance`/`LpvmMemory`.
-Depends on `lpvm`, `lpir`, `cranelift-*`. Works on both host (native ISA)
-and embedded (RISC-V) without `std`.
-
-### `lpvm-rv32`
-
-RV32 emulator backend. Wraps `lp-riscv-emu` with LPVM trait interface.
-Depends on `lpvm`, `lpir`, `lp-riscv-*`. Requires prior refactor of
-`lp-riscv-emu` to support Module/Memory/Instance separation.
-
-### `lpvm-wasm`
-
-WASM emission (LPIR → `.wasm` bytes) as core, `no_std + alloc`. A `runtime`
-feature adds `LpvmModule`/`LpvmInstance` implementations, with the backing
-runtime auto-selected by target: `wasmtime` on native, browser `WebAssembly`
-API on `wasm32`.
+Backends implementing the LPVM traits. See milestone docs.
 
 ## Design Decisions
 
-1. **One core crate** — traits use types; splitting them creates circular deps
-   or an awkward third crate. Matches wasmtime/wasmer prior art.
+1. **One `lpvm` core crate** — traits and runtime types stay together; avoids
+   circular deps.
 
-2. **Separate backend crates** — dependency trees are too different for feature
-   flags (cranelift-\*, lp-riscv-\*, wasmtime, wasm-encoder). Each consumer
-   pulls exactly what it needs.
+2. **Separate backend crates** — different dependency trees (cranelift-\*,
+   lp-riscv-\*, wasmtime).
 
-3. **IR types live in `lpir`** — `Type` and `FunctionSignature` are IR concepts,
-   not runtime concepts. The frontend depends on `lpir`, not `lpvm`. `lpvm`
-   depends on `lpir` for type definitions. `lps-types` is absorbed into
-   `lpir`.
+3. **`lps-types` is not `lpir`** — logical shader types are not scalarized IR.
+   `lpir` stays free of vec3/mat4 as IR types.
 
-4. **Engine is backend-agnostic** — `lp-engine` depends only on `lpvm` traits,
-   generic over `M: LpvmModule`. Monomorphized per firmware target for
-   zero-cost abstraction. Enables `fw-wasm`.
+4. **`lpvm` depends on `lps-types` and `lpir`** — runtime needs both “what the
+   IR looks like” and “what the user-facing signature is.”
 
-5. **`Lpvm` prefix on external types** — too many ecosystems (Naga, Cranelift,
-   WASM, LPIR) for bare names. `LpvmModule`, `LpvmValue`, etc. Internal types
-   can use shorter names.
+5. **Engine is backend-agnostic** — `lp-engine` depends only on `lpvm` traits,
+   generic over `M: LpvmModule`. Firmware picks `lpvm-cranelift` or `lpvm-wasm`.
 
-6. **`lp-riscv-emu` refactor required** — its current model combines code,
-   memory, and thread state. Must support the separation at its own level
-   before `lpvm-rv32` can wrap it.
+6. **`Lpvm` prefix on VM-layer external types** — disambiguates from Cranelift,
+   wasm, naga. **`Lps` prefix on shader-layer types** in `lps-types`.
 
-7. **`lpvm-interp` deferred** — interpreter stays in `lpir::interp` for
-   IR-level testing. Future work if needed behind LPVM traits.
+7. **`lp-riscv-emu` refactor required** — before `lpvm-rv32` can wrap it cleanly.
+
+8. **`lpvm-interp` deferred** — interpreter stays in `lpir::interp` until needed
+   behind LPVM traits.
 
 ## Constraints
 
@@ -148,8 +186,9 @@ API on `wasm32`.
 
 ### [M1: Renames, moves, and new types](m1-renames-moves-new-types.md)
 
-Create `lpvm` core crate, absorb `lps-types` into `lpir`, move types from
-`lp-glsl-abi`/`lp-glsl-exec`. Mechanical refactoring, no new backends.
+Introduce **`lps-types`** (logical types), **`lpvm`** core crate, wire
+dependencies (`lpvm` → `lpir` + `lps-types`). Mechanical refactoring; no new
+backends.
 
 ### [M2: `lpvm-wasm`](m2-lpvm-wasm.md)
 
@@ -168,7 +207,7 @@ LPVM wrapper. Hardest backend milestone.
 
 ### [M5: Migrate filetests](m5-migrate-filetests.md)
 
-Port filetests from `GlslExecutable` to LPVM traits. All three backends.
+Port **`lps-filetests`** from `GlslExecutable` to LPVM traits. All three backends.
 Primary validation step.
 
 ### [M6: Migrate engine](m6-migrate-engine.md)
@@ -178,4 +217,4 @@ validation with firmware builds and `fw-tests`.
 
 ### [M7: Cleanup](m7-cleanup.md)
 
-Delete old crates, remove dead code, verify everything builds and passes.
+Delete obsolete crates, remove dead code, verify everything builds and passes.

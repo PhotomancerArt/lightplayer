@@ -1,186 +1,161 @@
 # M1: Renames, Moves, and New Types
 
+## Repository state
+
+Renames may already be in progress (RustRover, find/replace). **This document
+describes the target layout.** If paths on disk still say `lp-glsl-*`, map them
+mentally to the `lps-*` names in [overview.md](overview.md).
+
 ## Goal
 
-Create the `lpvm` core crate and reorganize existing types into their correct
-homes. This is mostly mechanical refactoring — no new functionality, no new
-backends. The old and new crates coexist at the end of this milestone.
+Establish the **three-layer naming** and crate boundaries:
+
+1. **`lps-types`** — logical shader types (rename/evolution of `lp-glsl-core`).
+2. **`lpvm`** — VM/runtime types, traits, values, layout, VMContext.
+3. **`lpir`** — unchanged role: **scalarized IR only** (no absorption of
+   `Type` / `FunctionSignature` from the shader layer).
+
+No new backends in this milestone. Old crates may remain as shims until later
+milestones.
 
 ## Context for Agents
 
-This milestone involves moving types between crates. The human will handle bulk
-renames and moves using RustRover's refactoring tools. Agent work is cleanup:
-fixing imports, updating Cargo.toml dependencies, ensuring everything compiles.
+Mechanical moves and renames: human often uses RustRover; agent fixes imports,
+`Cargo.toml`, and compile errors.
 
-**Do not** delete old crates in this milestone. They may temporarily exist as
-thin re-export shims until consumers are migrated in later milestones.
+**Do not** delete `lps-types` or old ABI crates in this milestone unless the
+human explicitly finishes the shim strategy.
+
+## Layer model (critical)
+
+- **`lpir`** is **scalarized**. It uses `IrType` (F32, I32, Pointer), not logical
+  vec3/mat4 as an IR-level type system.
+- **`lps-types`** holds **`LpsType`**, **`LpsFunctionSignature`**, **`LpsParameter`**,
+  **`LpsParamQualifier`** — what the **frontend** produces and what **callers**
+  use for GLSL-style semantics. Same types apply to future WGSL, etc.
+- **`lpvm`** holds runtime values (`LpvmValue`), layout, VMContext, and **LPVM
+  traits**. It **depends on** `lps-types` for metadata/signatures and on `lpir`
+  for `IrModule` / codegen-facing IR.
+
+Wrong: moving `LpsType` into `lpir` “because both are types.” Right: keep logical
+types in **`lps-types`**.
 
 ## What Moves Where
 
-### Into `lpir` (absorbing `lps-types`)
+### `lps-types` (shader layer — rename from `lp-glsl-core`)
 
-`lps-types` is eliminated. Its types move into `lpir`:
+| Transitional crate | Target package | Public types (target names) |
+|--------------------|----------------|-----------------------------|
+| `lp-glsl-core` | `lps-types` | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
 
-| Old location                   | Old name            | New location                     | New name                     |
-|--------------------------------|---------------------|----------------------------------|------------------------------|
-| `lps-types::Type`              | `Type`              | `lpir::types::Type`              | Keep `Type` (internal to IR) |
-| `lps-types::StructId`          | `StructId`          | `lpir::types::StructId`          | Keep `StructId`              |
-| `lps-types::FunctionSignature` | `FunctionSignature` | `lpir::types::FunctionSignature` | Keep                         |
-| `lps-types::Parameter`         | `Parameter`         | `lpir::types::Parameter`         | Keep                         |
-| `lps-types::ParamQualifier`    | `ParamQualifier`    | `lpir::types::ParamQualifier`    | Keep                         |
+Use a consistent **`Lps*`** prefix for this crate’s public types so they never
+collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
 
-Note: `lpir` already has `lpir::types` with `IrType`, `VReg`, `SlotId`, etc.
-The `lps-types` types are higher-level (GLSL/shader types like vec3, mat4)
-vs `IrType` which is low-level (i32, f32, pointer). Both belong in `lpir` but
-at different abstraction levels. Consider a submodule like `lpir::shader_types`
-or similar if `lpir::types` gets crowded.
+**Dependents** (update imports in this milestone as renames land): `lps-naga`,
+`lps-filetests`, any crate that still depended on `lp-glsl-exec` for signatures
+(see below).
 
-**Dependents to update**: `lp-glsl-exec`, `lp-glsl-filetests` — both depend on
-`lps-types` directly and need their imports changed to `lpir`.
+### `lpvm` (new crate — absorbs `lp-glsl-abi` + replaces `lp-glsl-exec` traits)
 
-### Into `lpvm` (new crate, absorbing `lp-glsl-abi` and `lp-glsl-exec`)
+Create `lpvm/lpvm/` at repo root. `#![no_std]` with `extern crate alloc`.
 
-Create `lpvm/lpvm/` at the repo root. `#![no_std]` with `extern crate alloc`.
+**Dependencies:**
 
-**From `lp-glsl-abi`:**
+```toml
+[dependencies]
+lpir = { path = "...", default-features = false }
+lps-types = { path = "...", default-features = false }
+```
 
-| Old name                                                                         | New name                             | Notes                                                                                                                              |
-|----------------------------------------------------------------------------------|--------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|
-| `GlslValue`                                                                      | `LpvmValue`                          | Enum with scalar/vector/matrix/array/struct variants                                                                               |
-| `GlslType` (metadata)                                                            | `LpvmType`                           | Runtime type metadata enum (parallels `lpir::Type` but with layout info like `StructMember`)                                       |
-| `GlslData`                                                                       | `LpvmData`                           | Binary data buffer with typed access                                                                                               |
-| `GlslDataError`                                                                  | `LpvmDataError`                      |                                                                                                                                    |
-| `GlslModuleMeta`                                                                 | `LpvmModuleMeta`                     | Module-level metadata (function list, types)                                                                                       |
-| `GlslFunctionMeta`                                                               | `LpvmFunctionMeta`                   | Per-function metadata                                                                                                              |
-| `GlslParamMeta`                                                                  | `LpvmParamMeta`                      | Parameter metadata                                                                                                                 |
-| `GlslParamQualifier`                                                             | `LpvmParamQualifier`                 | Note: `lps-types` also has `ParamQualifier` — these are different types at different levels. This one is the ABI/metadata version. |
-| `LayoutRules`                                                                    | `LpvmLayoutRules`                    | Layout strategy enum                                                                                                               |
-| `StructMember`                                                                   | `LpvmStructMember`                   | Struct field descriptor                                                                                                            |
-| `VmContext` / `VmContextHeader`                                                  | `LpvmVmContext`                      | repr(C) VMContext header                                                                                                           |
-| `PathSegment`, `PathParseError`, `PathError`, `GlslValuePathError`               | `LpvmPathSegment`, etc.              | Path accessors for navigating values                                                                                               |
-| Layout functions: `type_size`, `type_alignment`, `array_stride`, `round_up`      | Same names, in `lpvm::layout` module |                                                                                                                                    |
-| `minimal_vmcontext`                                                              | Keep name, in `lpvm::vmcontext`      |                                                                                                                                    |
-| `parse_path`                                                                     | Keep name, in `lpvm::path`           |                                                                                                                                    |
-| VMContext constants: `DEFAULT_VMCTX_FUEL`, `VMCTX_OFFSET_*`, `VMCTX_HEADER_SIZE` | Keep names, in `lpvm::vmcontext`     |                                                                                                                                    |
+Paths: use whatever directory layout exists after renames (`lp-glsl/lpir`,
+`lps/lps-types`, etc.).
+
+**From `lp-glsl-abi` (rename map):**
+
+| Old name | New name | Notes |
+|----------|----------|-------|
+| `GlslValue` | `LpvmValue` | Runtime value enum |
+| `GlslType` (metadata / layout) | `LpvmType` or align with `lps-types` | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
+| `GlslData` | `LpvmData` | |
+| `GlslModuleMeta` | `LpvmModuleMeta` | Likely references `lps-types` for function signatures |
+| `GlslFunctionMeta` | `LpvmFunctionMeta` | |
+| `GlslParamMeta` | `LpvmParamMeta` | |
+| `GlslParamQualifier` (ABI) | `LpvmParamQualifier` | **Not** the same as `LpsParamQualifier` unless you intentionally unify |
+| `LayoutRules`, `StructMember` | `LpvmLayoutRules`, `LpvmStructMember` | |
+| `VmContext` | `LpvmVmContext` | |
+| Paths, layout fns, constants | `lpvm::path`, `lpvm::layout`, `lpvm::vmcontext` | |
 
 **From `lp-glsl-exec`:**
 
-The `GlslExecutable` trait is replaced by the new LPVM traits. These are
-**new designs**, not direct renames:
+Replace **`GlslExecutable`** with new traits (design in this milestone;
+implementations in M2–M4):
 
-| New trait      | Role                                                                                       |
-|----------------|--------------------------------------------------------------------------------------------|
-| `LpvmModule`   | Compiled code. Immutable after compilation. Can create instances.                          |
-| `LpvmInstance` | Running execution context. Owns or references memory + VMContext. Supports function calls. |
-| `LpvmMemory`   | Linear memory backing an instance.                                                         |
+| Trait | Role |
+|-------|------|
+| `LpvmModule` | Compiled artifact; can instantiate |
+| `LpvmInstance` | Execution + calls + VMContext |
+| `LpvmMemory` | Linear memory for an instance |
 
-The trait signatures will be designed during this milestone but implementations
-come in M2-M4 (backends).
+### Diagnostics / errors
 
-### `lpvm` dependency on `lpir`
+Prefer **`LpvmError`** inside `lpvm` rather than depending on a “glsl”-named
+diagnostics crate long-term. During migration, temporary bridges to
+`lps-diagnostics` / old `lp-glsl-diagnostics` are OK.
 
-`lpvm` depends on `lpir` for `Type` and `FunctionSignature` (which moved into
-`lpir` above). This is the right direction: the runtime knows about IR types,
-but the IR doesn't know about the runtime.
-
-### `lpvm` dependency on `lp-glsl-diagnostics`
-
-`lp-glsl-abi` currently depends on `lp-glsl-diagnostics` for `GlslError`. The
-`lpvm` crate needs an error type. Options:
-
-1. Depend on `lp-glsl-diagnostics` — keeps the dependency but "glsl" in a
-   runtime crate is ugly.
-2. Define `LpvmError` in `lpvm` — cleaner, but may need conversion from/to
-   `GlslError` during migration.
-
-Prefer option 2. `lpvm` should have its own error type. Conversions can bridge
-during the migration period.
-
-## Crate Setup Details
-
-### `lpvm/lpvm/Cargo.toml`
-
-```toml
-[package]
-name = "lpvm"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-lpir = { path = "../../lp-glsl/lpir", default-features = false }
-
-[features]
-default = ["std"]
-std = []
-parse = []  # GlslValue::parse equivalent, if needed
-```
-
-Note: `lpir` is still under `lp-glsl/` for now. It may move to top-level later.
-Use a relative path that works with the current directory structure.
-
-### Directory layout
+## Crate layout (`lpvm` core)
 
 ```
 lpvm/
 └── lpvm/
     ├── Cargo.toml
     └── src/
-        ├── lib.rs          # #![no_std], re-exports
-        ├── value.rs         # LpvmValue
-        ├── data.rs          # LpvmData, LpvmDataError
-        ├── metadata.rs      # LpvmType, LpvmModuleMeta, LpvmFunctionMeta, etc.
-        ├── layout.rs        # type_size, type_alignment, array_stride
-        ├── vmcontext.rs     # LpvmVmContext, constants
-        ├── path.rs          # LpvmPathSegment, parse_path
-        ├── path_resolve.rs  # PathError
-        ├── value_path.rs    # LpvmValuePathError, value path navigation
-        ├── error.rs         # LpvmError
-        ├── module.rs        # LpvmModule trait
-        ├── instance.rs      # LpvmInstance trait
-        └── memory.rs        # LpvmMemory trait
+        ├── lib.rs
+        ├── value.rs
+        ├── data.rs
+        ├── metadata.rs      # may use lps-types heavily
+        ├── layout.rs
+        ├── vmcontext.rs
+        ├── path.rs
+        ├── path_resolve.rs
+        ├── value_path.rs
+        ├── error.rs
+        ├── module.rs        # LpvmModule
+        ├── instance.rs      # LpvmInstance
+        └── memory.rs        # LpvmMemory
 ```
 
-## Workspace Cargo.toml
+## Workspace `Cargo.toml`
 
-Add `"lpvm/lpvm"` to `[workspace.members]` and `default-members`.
+Add `lpvm/lpvm` and `lps-types` (or transitional path) to members as they appear.
 
 ## What NOT To Do
 
-- Do NOT implement the traits in this milestone. Trait definitions only.
-- Do NOT delete `lp-glsl-abi`, `lp-glsl-exec`, or `lps-types` yet. They
-  may exist as re-export shims or be referenced by code not yet migrated.
-- Do NOT update `lp-engine` or `lp-glsl-filetests` to use `lpvm` yet. That's
-  M5-M6.
-- Do NOT change `lpir-cranelift`, `lp-glsl-wasm`, or `lp-riscv-emu` yet.
-  That's M2-M4.
+- Do NOT move **`LpsType` / `LpsFunctionSignature`** into **`lpir`**.
+- Do NOT implement LPVM backends in this milestone (only traits + types).
+- Do NOT migrate **`lps-filetests`** or **`lp-engine`** to call new backends yet
+  (M5–M6).
+- Do NOT change **`lpir-cranelift`** / **`lpvm-wasm`** predecessor / **`lp-riscv-emu`**
+  for backend behavior yet (M2–M4).
 
-## Existing Dependents of Affected Crates
+## Dependents to keep in mind
 
-### `lp-glsl-abi` dependents (will need updating in later milestones)
+**Will eventually use `lpvm` instead of `lp-glsl-abi`:**
 
-- `lp-engine`
-- `lp-glsl-builtins`
-- `lp-glsl-naga`
-- `lpir-cranelift`
-- `lp-glsl-filetests`
-- `lp-glsl-exec`
+- `lp-engine`, `lps-builtins`, `lps-naga`, `lpir-cranelift`, `lps-filetests`,
+  `lp-glsl-exec` (until removed)
 
-### `lps-types` dependents (update in this milestone)
+**Use `lps-types` for logical signatures:**
 
-- `lp-glsl-exec`
-- `lp-glsl-filetests`
-
-### `lp-glsl-exec` dependents (will need updating in M5)
-
-- `lp-glsl-filetests`
+- `lps-naga`, `lps-filetests`, `lp-glsl-exec` / future test harness,
+  anything that describes user-visible function types
 
 ## Done When
 
-- `lpvm` crate exists at `lpvm/lpvm/` and compiles (`no_std` + `alloc`)
-- `LpvmModule`, `LpvmInstance`, `LpvmMemory` traits are defined
-- `LpvmValue`, `LpvmData`, `LpvmType`, `LpvmVmContext`, layout functions exist
-- `lps-types` types are in `lpir`
-- Old crates still exist (possibly as shims)
-- Full workspace builds: `cargo check` passes for default members
-- Embedded check passes:
-  `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`
+- `lps-types` exists (or transitional name with documented alias) with **`Lps*`**
+  logical types; **no** dependency on `lpir` or `lpvm`
+- `lpvm` exists, **`no_std` + `alloc`**, depends on **`lpir` + `lps-types`**
+- `LpvmModule` / `LpvmInstance` / `LpvmMemory` defined (signatures may still be
+  refined in M2)
+- `LpvmValue`, `LpvmData`, VMContext, layout helpers present
+- Workspace and embedded checks pass (see overview / AGENTS.md for fw-esp32
+  command)

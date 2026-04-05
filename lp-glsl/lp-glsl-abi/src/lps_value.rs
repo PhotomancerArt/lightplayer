@@ -18,7 +18,7 @@ fn trunc_f32(f: f32) -> i64 {
     (f as i32) as i64
 }
 
-/// GLSL value types for function arguments
+/// Shader value as rust enum, heap-allocated
 ///
 /// ## Matrix Storage Format
 ///
@@ -38,7 +38,7 @@ fn trunc_f32(f: f32) -> i64 {
 /// To access column `col`, use `m[col][row]` for `row` in 0..rows.
 /// To access row `row`, use `m[col][row]` for `col` in 0..cols.
 #[derive(Debug, Clone)]
-pub enum GlslValue {
+pub enum LpsValue {
     I32(i32),
     U32(u32),
     F32(f32),
@@ -59,15 +59,15 @@ pub enum GlslValue {
     Mat3x3([[f32; 3]; 3]), // [[col0_row0, col0_row1, col0_row2], [col1_row0, ...], ...]
     Mat4x4([[f32; 4]; 4]), // [[col0_row0, col0_row1, col0_row2, col0_row3], [col1_row0, ...], ...]
     /// Fixed-size array; elements use the same recursive shape (scalars, vectors, matrices, nested arrays).
-    Array(Box<[GlslValue]>),
+    Array(Box<[LpsValue]>),
     /// Struct instance; `fields` are in declaration order (names match [`StructMember::name`] when present).
     Struct {
         name: Option<alloc::string::String>,
-        fields: alloc::vec::Vec<(alloc::string::String, GlslValue)>,
+        fields: alloc::vec::Vec<(alloc::string::String, LpsValue)>,
     },
 }
 
-impl GlslValue {
+impl LpsValue {
     /// Parse a literal value string into GlslValue using GLSL parser
     /// Supports literals: integers, floats, booleans, vectors, and matrices
     /// Uses type checking to ensure valid literal syntax
@@ -103,16 +103,16 @@ impl GlslValue {
                 if let Some(expr) = extract_return_expression(&shader) {
                     match expr {
                         Expr::IntConst(n, _) => {
-                            return Ok(GlslValue::I32(*n));
+                            return Ok(LpsValue::I32(*n));
                         }
                         Expr::UIntConst(n, _) => {
-                            return Ok(GlslValue::U32(*n));
+                            return Ok(LpsValue::U32(*n));
                         }
                         Expr::FloatConst(f, _) => {
-                            return Ok(GlslValue::F32(*f));
+                            return Ok(LpsValue::F32(*f));
                         }
                         Expr::BoolConst(b, _) => {
-                            return Ok(GlslValue::Bool(*b));
+                            return Ok(LpsValue::Bool(*b));
                         }
                         Expr::Unary(op, unary_expr, _) => {
                             // Handle unary minus for negative numbers
@@ -120,14 +120,14 @@ impl GlslValue {
                             if let UnaryOp::Minus = *op {
                                 match **unary_expr {
                                     Expr::IntConst(n, _) => {
-                                        return Ok(GlslValue::I32(-n));
+                                        return Ok(LpsValue::I32(-n));
                                     }
                                     Expr::UIntConst(n, _) => {
                                         // -1u gives 0xffffffffu (wrapping negation: !n + 1)
-                                        return Ok(GlslValue::U32((!n).wrapping_add(1)));
+                                        return Ok(LpsValue::U32((!n).wrapping_add(1)));
                                     }
                                     Expr::FloatConst(f, _) => {
-                                        return Ok(GlslValue::F32(-f));
+                                        return Ok(LpsValue::F32(-f));
                                     }
                                     _ => {
                                         // Not a negated literal, continue
@@ -146,70 +146,70 @@ impl GlslValue {
                                 match type_name {
                                     "vec2" => {
                                         if let Ok(v) = parse_vector_constructor(args, 2) {
-                                            return Ok(GlslValue::Vec2([v[0], v[1]]));
+                                            return Ok(LpsValue::Vec2([v[0], v[1]]));
                                         }
                                     }
                                     "vec3" => {
                                         if let Ok(v) = parse_vector_constructor(args, 3) {
-                                            return Ok(GlslValue::Vec3([v[0], v[1], v[2]]));
+                                            return Ok(LpsValue::Vec3([v[0], v[1], v[2]]));
                                         }
                                     }
                                     "vec4" => {
                                         if let Ok(v) = parse_vector_constructor(args, 4) {
-                                            return Ok(GlslValue::Vec4([v[0], v[1], v[2], v[3]]));
+                                            return Ok(LpsValue::Vec4([v[0], v[1], v[2], v[3]]));
                                         }
                                     }
                                     "ivec2" => {
                                         if let Ok(v) = parse_int_vector_constructor(args, 2) {
-                                            return Ok(GlslValue::IVec2([v[0], v[1]]));
+                                            return Ok(LpsValue::IVec2([v[0], v[1]]));
                                         }
                                     }
                                     "ivec3" => {
                                         if let Ok(v) = parse_int_vector_constructor(args, 3) {
-                                            return Ok(GlslValue::IVec3([v[0], v[1], v[2]]));
+                                            return Ok(LpsValue::IVec3([v[0], v[1], v[2]]));
                                         }
                                     }
                                     "ivec4" => {
                                         if let Ok(v) = parse_int_vector_constructor(args, 4) {
-                                            return Ok(GlslValue::IVec4([v[0], v[1], v[2], v[3]]));
+                                            return Ok(LpsValue::IVec4([v[0], v[1], v[2], v[3]]));
                                         }
                                     }
                                     "uvec2" => {
                                         if let Ok(v) = parse_uint_vector_constructor(args, 2) {
-                                            return Ok(GlslValue::UVec2([v[0], v[1]]));
+                                            return Ok(LpsValue::UVec2([v[0], v[1]]));
                                         }
                                     }
                                     "uvec3" => {
                                         if let Ok(v) = parse_uint_vector_constructor(args, 3) {
-                                            return Ok(GlslValue::UVec3([v[0], v[1], v[2]]));
+                                            return Ok(LpsValue::UVec3([v[0], v[1], v[2]]));
                                         }
                                     }
                                     "uvec4" => {
                                         if let Ok(v) = parse_uint_vector_constructor(args, 4) {
-                                            return Ok(GlslValue::UVec4([v[0], v[1], v[2], v[3]]));
+                                            return Ok(LpsValue::UVec4([v[0], v[1], v[2], v[3]]));
                                         }
                                     }
                                     "bvec2" => {
                                         if let Ok(v) = parse_bool_vector_constructor(args, 2) {
-                                            return Ok(GlslValue::BVec2([v[0], v[1]]));
+                                            return Ok(LpsValue::BVec2([v[0], v[1]]));
                                         }
                                     }
                                     "bvec3" => {
                                         if let Ok(v) = parse_bool_vector_constructor(args, 3) {
-                                            return Ok(GlslValue::BVec3([v[0], v[1], v[2]]));
+                                            return Ok(LpsValue::BVec3([v[0], v[1], v[2]]));
                                         }
                                     }
                                     "bvec4" => {
                                         if let Ok(v) = parse_bool_vector_constructor(args, 4) {
-                                            return Ok(GlslValue::BVec4([v[0], v[1], v[2], v[3]]));
+                                            return Ok(LpsValue::BVec4([v[0], v[1], v[2], v[3]]));
                                         }
                                     }
                                     "mat2" => {
                                         if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
-                                            return Ok(GlslValue::Mat2x2([[s, 0.0], [0.0, s]]));
+                                            return Ok(LpsValue::Mat2x2([[s, 0.0], [0.0, s]]));
                                         }
                                         if let Ok(m) = parse_matrix_constructor(args, 2) {
-                                            return Ok(GlslValue::Mat2x2([
+                                            return Ok(LpsValue::Mat2x2([
                                                 [m[0][0], m[0][1]],
                                                 [m[1][0], m[1][1]],
                                             ]));
@@ -217,14 +217,14 @@ impl GlslValue {
                                     }
                                     "mat3" => {
                                         if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
-                                            return Ok(GlslValue::Mat3x3([
+                                            return Ok(LpsValue::Mat3x3([
                                                 [s, 0.0, 0.0],
                                                 [0.0, s, 0.0],
                                                 [0.0, 0.0, s],
                                             ]));
                                         }
                                         if let Ok(m) = parse_matrix_constructor(args, 3) {
-                                            return Ok(GlslValue::Mat3x3([
+                                            return Ok(LpsValue::Mat3x3([
                                                 [m[0][0], m[0][1], m[0][2]],
                                                 [m[1][0], m[1][1], m[1][2]],
                                                 [m[2][0], m[2][1], m[2][2]],
@@ -233,7 +233,7 @@ impl GlslValue {
                                     }
                                     "mat4" => {
                                         if let Some(s) = parse_diagonal_matrix_scalar_arg(args) {
-                                            return Ok(GlslValue::Mat4x4([
+                                            return Ok(LpsValue::Mat4x4([
                                                 [s, 0.0, 0.0, 0.0],
                                                 [0.0, s, 0.0, 0.0],
                                                 [0.0, 0.0, s, 0.0],
@@ -241,7 +241,7 @@ impl GlslValue {
                                             ]));
                                         }
                                         if let Ok(m) = parse_matrix_constructor(args, 4) {
-                                            return Ok(GlslValue::Mat4x4([
+                                            return Ok(LpsValue::Mat4x4([
                                                 [m[0][0], m[0][1], m[0][2], m[0][3]],
                                                 [m[1][0], m[1][1], m[1][2], m[1][3]],
                                                 [m[2][0], m[2][1], m[2][2], m[2][3]],
@@ -277,34 +277,34 @@ impl GlslValue {
     /// For vectors/matrices: exact match for all components
     pub fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (GlslValue::I32(a), GlslValue::I32(b)) => a == b,
-            (GlslValue::U32(a), GlslValue::U32(b)) => a == b,
-            (GlslValue::F32(a), GlslValue::F32(b)) => a == b, // Exact equality
-            (GlslValue::Bool(a), GlslValue::Bool(b)) => a == b,
-            (GlslValue::Vec2(a), GlslValue::Vec2(b)) => a == b,
-            (GlslValue::Vec3(a), GlslValue::Vec3(b)) => a == b,
-            (GlslValue::Vec4(a), GlslValue::Vec4(b)) => a == b,
-            (GlslValue::IVec2(a), GlslValue::IVec2(b)) => a == b,
-            (GlslValue::IVec3(a), GlslValue::IVec3(b)) => a == b,
-            (GlslValue::IVec4(a), GlslValue::IVec4(b)) => a == b,
-            (GlslValue::UVec2(a), GlslValue::UVec2(b)) => a == b,
-            (GlslValue::UVec3(a), GlslValue::UVec3(b)) => a == b,
-            (GlslValue::UVec4(a), GlslValue::UVec4(b)) => a == b,
-            (GlslValue::BVec2(a), GlslValue::BVec2(b)) => a == b,
-            (GlslValue::BVec3(a), GlslValue::BVec3(b)) => a == b,
-            (GlslValue::BVec4(a), GlslValue::BVec4(b)) => a == b,
-            (GlslValue::Mat2x2(a), GlslValue::Mat2x2(b)) => a == b,
-            (GlslValue::Mat3x3(a), GlslValue::Mat3x3(b)) => a == b,
-            (GlslValue::Mat4x4(a), GlslValue::Mat4x4(b)) => a == b,
-            (GlslValue::Array(a), GlslValue::Array(b)) => {
+            (LpsValue::I32(a), LpsValue::I32(b)) => a == b,
+            (LpsValue::U32(a), LpsValue::U32(b)) => a == b,
+            (LpsValue::F32(a), LpsValue::F32(b)) => a == b, // Exact equality
+            (LpsValue::Bool(a), LpsValue::Bool(b)) => a == b,
+            (LpsValue::Vec2(a), LpsValue::Vec2(b)) => a == b,
+            (LpsValue::Vec3(a), LpsValue::Vec3(b)) => a == b,
+            (LpsValue::Vec4(a), LpsValue::Vec4(b)) => a == b,
+            (LpsValue::IVec2(a), LpsValue::IVec2(b)) => a == b,
+            (LpsValue::IVec3(a), LpsValue::IVec3(b)) => a == b,
+            (LpsValue::IVec4(a), LpsValue::IVec4(b)) => a == b,
+            (LpsValue::UVec2(a), LpsValue::UVec2(b)) => a == b,
+            (LpsValue::UVec3(a), LpsValue::UVec3(b)) => a == b,
+            (LpsValue::UVec4(a), LpsValue::UVec4(b)) => a == b,
+            (LpsValue::BVec2(a), LpsValue::BVec2(b)) => a == b,
+            (LpsValue::BVec3(a), LpsValue::BVec3(b)) => a == b,
+            (LpsValue::BVec4(a), LpsValue::BVec4(b)) => a == b,
+            (LpsValue::Mat2x2(a), LpsValue::Mat2x2(b)) => a == b,
+            (LpsValue::Mat3x3(a), LpsValue::Mat3x3(b)) => a == b,
+            (LpsValue::Mat4x4(a), LpsValue::Mat4x4(b)) => a == b,
+            (LpsValue::Array(a), LpsValue::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.eq(y))
             }
             (
-                GlslValue::Struct {
+                LpsValue::Struct {
                     name: na,
                     fields: fa,
                 },
-                GlslValue::Struct {
+                LpsValue::Struct {
                     name: nb,
                     fields: fb,
                 },
@@ -326,58 +326,58 @@ impl GlslValue {
     /// For vectors/matrices: checks each component within tolerance
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
         match (self, other) {
-            (GlslValue::I32(a), GlslValue::I32(b)) => a == b, // Exact for ints
-            (GlslValue::U32(a), GlslValue::U32(b)) => a == b, // Exact for uints
-            (GlslValue::F32(a), GlslValue::F32(b)) => (a - b).abs() <= tolerance,
-            (GlslValue::Bool(a), GlslValue::Bool(b)) => a == b, // Exact for bools
-            (GlslValue::Vec2(a), GlslValue::Vec2(b)) => a
+            (LpsValue::I32(a), LpsValue::I32(b)) => a == b, // Exact for ints
+            (LpsValue::U32(a), LpsValue::U32(b)) => a == b, // Exact for uints
+            (LpsValue::F32(a), LpsValue::F32(b)) => (a - b).abs() <= tolerance,
+            (LpsValue::Bool(a), LpsValue::Bool(b)) => a == b, // Exact for bools
+            (LpsValue::Vec2(a), LpsValue::Vec2(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::Vec3(a), GlslValue::Vec3(b)) => a
+            (LpsValue::Vec3(a), LpsValue::Vec3(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::Vec4(a), GlslValue::Vec4(b)) => a
+            (LpsValue::Vec4(a), LpsValue::Vec4(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::IVec2(a), GlslValue::IVec2(b)) => a == b, // Exact for ints
-            (GlslValue::IVec3(a), GlslValue::IVec3(b)) => a == b, // Exact for ints
-            (GlslValue::IVec4(a), GlslValue::IVec4(b)) => a == b, // Exact for ints
-            (GlslValue::UVec2(a), GlslValue::UVec2(b)) => a == b, // Exact for uints
-            (GlslValue::UVec3(a), GlslValue::UVec3(b)) => a == b, // Exact for uints
-            (GlslValue::UVec4(a), GlslValue::UVec4(b)) => a == b, // Exact for uints
-            (GlslValue::BVec2(a), GlslValue::BVec2(b)) => a == b, // Exact for bools
-            (GlslValue::BVec3(a), GlslValue::BVec3(b)) => a == b, // Exact for bools
-            (GlslValue::BVec4(a), GlslValue::BVec4(b)) => a == b, // Exact for bools
-            (GlslValue::Mat2x2(a), GlslValue::Mat2x2(b)) => a
+            (LpsValue::IVec2(a), LpsValue::IVec2(b)) => a == b, // Exact for ints
+            (LpsValue::IVec3(a), LpsValue::IVec3(b)) => a == b, // Exact for ints
+            (LpsValue::IVec4(a), LpsValue::IVec4(b)) => a == b, // Exact for ints
+            (LpsValue::UVec2(a), LpsValue::UVec2(b)) => a == b, // Exact for uints
+            (LpsValue::UVec3(a), LpsValue::UVec3(b)) => a == b, // Exact for uints
+            (LpsValue::UVec4(a), LpsValue::UVec4(b)) => a == b, // Exact for uints
+            (LpsValue::BVec2(a), LpsValue::BVec2(b)) => a == b, // Exact for bools
+            (LpsValue::BVec3(a), LpsValue::BVec3(b)) => a == b, // Exact for bools
+            (LpsValue::BVec4(a), LpsValue::BVec4(b)) => a == b, // Exact for bools
+            (LpsValue::Mat2x2(a), LpsValue::Mat2x2(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::Mat3x3(a), GlslValue::Mat3x3(b)) => a
+            (LpsValue::Mat3x3(a), LpsValue::Mat3x3(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::Mat4x4(a), GlslValue::Mat4x4(b)) => a
+            (LpsValue::Mat4x4(a), LpsValue::Mat4x4(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (GlslValue::Array(a), GlslValue::Array(b)) => {
+            (LpsValue::Array(a), LpsValue::Array(b)) => {
                 a.len() == b.len()
                     && a.iter()
                         .zip(b.iter())
                         .all(|(x, y)| x.approx_eq(y, tolerance))
             }
             (
-                GlslValue::Struct {
+                LpsValue::Struct {
                     name: na,
                     fields: fa,
                 },
-                GlslValue::Struct {
+                LpsValue::Struct {
                     name: nb,
                     fields: fb,
                 },
@@ -1025,7 +1025,7 @@ fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], 
 mod tests {
     use alloc::vec;
 
-    use super::GlslValue;
+    use super::LpsValue;
 
     #[test]
     #[cfg(feature = "parse")]
@@ -1035,9 +1035,9 @@ mod tests {
         // Column 1: [3.0, 4.0]
         // Storage (column-major): [1.0, 2.0, 3.0, 4.0]
         // Internal representation: [[1.0, 2.0], [3.0, 4.0]] (column-major)
-        let result = GlslValue::parse("mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))").unwrap();
+        let result = LpsValue::parse("mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))").unwrap();
         match result {
-            GlslValue::Mat2x2(m) => {
+            LpsValue::Mat2x2(m) => {
                 // m[col][row] format
                 // Column 0: [1.0, 2.0] (col0_row0, col0_row1)
                 // Column 1: [3.0, 4.0] (col1_row0, col1_row1)
@@ -1061,10 +1061,10 @@ mod tests {
     fn test_parse_mat3_from_column_vectors() {
         // mat3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))
         let result =
-            GlslValue::parse("mat3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))")
+            LpsValue::parse("mat3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))")
                 .unwrap();
         match result {
-            GlslValue::Mat3x3(m) => {
+            LpsValue::Mat3x3(m) => {
                 // m[col][row] format
                 // Column 0: [1.0, 2.0, 3.0]
                 assert_eq!(m[0][0], 1.0); // col0_row0
@@ -1087,9 +1087,9 @@ mod tests {
     #[cfg(feature = "parse")]
     fn test_parse_mat4_from_column_vectors() {
         // mat4 with identity-like pattern
-        let result = GlslValue::parse("mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))").unwrap();
+        let result = LpsValue::parse("mat4(vec4(1.0, 0.0, 0.0, 0.0), vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0), vec4(0.0, 0.0, 0.0, 1.0))").unwrap();
         match result {
-            GlslValue::Mat4x4(m) => {
+            LpsValue::Mat4x4(m) => {
                 // m[col][row] format
                 // Column 0: [1.0, 0.0, 0.0, 0.0]
                 assert_eq!(m[0][0], 1.0); // col0_row0
@@ -1127,7 +1127,7 @@ mod tests {
         let flat_array = vec![1.0, 2.0, 3.0, 4.0];
 
         // Simulate the conversion from test_utils.rs
-        let mat = GlslValue::Mat2x2([
+        let mat = LpsValue::Mat2x2([
             [flat_array[0], flat_array[1]], // [1.0, 2.0] - col 0
             [flat_array[2], flat_array[3]], // [3.0, 4.0] - col 1
         ]);
@@ -1135,7 +1135,7 @@ mod tests {
         // Verify the matrix represents the correct values
         // Column 0 should be [1.0, 2.0], Column 1 should be [3.0, 4.0]
         match mat {
-            GlslValue::Mat2x2(m) => {
+            LpsValue::Mat2x2(m) => {
                 // m[col][row] format
                 // Column 0: [m[0][0], m[0][1]] = [1.0, 2.0] ✓
                 assert_eq!(m[0][0], 1.0); // col0_row0
@@ -1159,7 +1159,7 @@ mod tests {
         let flat_array = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
         // Simulate the conversion from test_utils.rs
-        let mat = GlslValue::Mat3x3([
+        let mat = LpsValue::Mat3x3([
             [flat_array[0], flat_array[1], flat_array[2]], // col 0
             [flat_array[3], flat_array[4], flat_array[5]], // col 1
             [flat_array[6], flat_array[7], flat_array[8]], // col 2
@@ -1167,7 +1167,7 @@ mod tests {
 
         // Verify columns are correct
         match mat {
-            GlslValue::Mat3x3(m) => {
+            LpsValue::Mat3x3(m) => {
                 // Column 0: [1.0, 2.0, 3.0]
                 assert_eq!(m[0][0], 1.0);
                 assert_eq!(m[0][1], 2.0);
@@ -1200,7 +1200,7 @@ mod tests {
         ];
 
         // Simulate the conversion from test_utils.rs
-        let mat = GlslValue::Mat4x4([
+        let mat = LpsValue::Mat4x4([
             [flat_array[0], flat_array[1], flat_array[2], flat_array[3]], // col 0
             [flat_array[4], flat_array[5], flat_array[6], flat_array[7]], // col 1
             [flat_array[8], flat_array[9], flat_array[10], flat_array[11]], // col 2
@@ -1214,7 +1214,7 @@ mod tests {
 
         // Verify columns are correct
         match mat {
-            GlslValue::Mat4x4(m) => {
+            LpsValue::Mat4x4(m) => {
                 // Column 0: [1.0, 0.0, 0.0, 0.0]
                 assert_eq!(m[0][0], 1.0);
                 assert_eq!(m[0][1], 0.0);

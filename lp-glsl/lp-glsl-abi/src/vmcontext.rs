@@ -6,8 +6,8 @@
 
 use alloc::boxed::Box;
 
-use crate::GlslType;
-use crate::GlslValue;
+use crate::LpsValue;
+use lps_types::LpsType;
 
 /// Default instruction fuel for new [`VmContext`] values (tests and host JIT calls).
 pub const DEFAULT_VMCTX_FUEL: u64 = 1_000_000;
@@ -28,7 +28,7 @@ pub struct VmContext {
     pub fuel: u64,
     pub trap_handler: u32,
     /// Describes globals/uniforms layout; may be null until wired up.
-    pub metadata: *const GlslType,
+    pub metadata: *const LpsType,
 }
 
 // SAFETY: `metadata` is an opaque pointer in the ABI header; hosts that share a `VmContext` across
@@ -64,17 +64,17 @@ impl VmContext {
     }
 
     /// Placeholder: read global by index.
-    pub fn get_global(&self, _index: usize) -> GlslValue {
+    pub fn get_global(&self, _index: usize) -> LpsValue {
         unimplemented!("globals access in Milestone 2")
     }
 
     /// Placeholder: write global by index.
-    pub fn set_global(&mut self, _index: usize, _value: GlslValue) {
+    pub fn set_global(&mut self, _index: usize, _value: LpsValue) {
         unimplemented!("globals access in Milestone 2")
     }
 
     /// Placeholder: read uniform by index.
-    pub fn get_uniform(&self, _index: usize) -> GlslValue {
+    pub fn get_uniform(&self, _index: usize) -> LpsValue {
         unimplemented!("uniforms access in Milestone 2")
     }
 }

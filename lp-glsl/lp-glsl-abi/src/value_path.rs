@@ -1,14 +1,14 @@
-//! Path-based navigation on [`crate::GlslValue`] trees (struct, array, vector components).
+//! Path-based navigation on [`crate::LpsValue`] trees (struct, array, vector components).
 
 use alloc::borrow::Cow;
 use alloc::string::String;
 
-use crate::GlslValue;
+use crate::LpsValue;
 use crate::path::{PathParseError, PathSegment, parse_path};
 
-/// Failure resolving a path on a [`GlslValue`].
+/// Failure resolving a path on a [`LpsValue`].
 #[derive(Debug)]
-pub enum GlslValuePathError {
+pub enum LpsValuePathError {
     Parse(PathParseError),
     FieldNotFound { field: String },
     IndexOutOfBounds { index: usize, len: usize },
@@ -16,7 +16,7 @@ pub enum GlslValuePathError {
     NotAField { hint: &'static str },
 }
 
-impl core::fmt::Display for GlslValuePathError {
+impl core::fmt::Display for LpsValuePathError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Parse(e) => write!(f, "{e}"),
@@ -30,602 +30,602 @@ impl core::fmt::Display for GlslValuePathError {
     }
 }
 
-impl core::error::Error for GlslValuePathError {}
+impl core::error::Error for LpsValuePathError {}
 
-impl From<PathParseError> for GlslValuePathError {
+impl From<PathParseError> for LpsValuePathError {
     fn from(e: PathParseError) -> Self {
         Self::Parse(e)
     }
 }
 
-impl GlslValue {
+impl LpsValue {
     /// Resolve `path` to a value; vector/matrix swizzles yield owned scalars or small composites.
-    pub fn get_path<'a>(&'a self, path: &str) -> Result<Cow<'a, GlslValue>, GlslValuePathError> {
-        let segs = parse_path(path).map_err(GlslValuePathError::from)?;
+    pub fn get_path<'a>(&'a self, path: &str) -> Result<Cow<'a, LpsValue>, LpsValuePathError> {
+        let segs = parse_path(path).map_err(LpsValuePathError::from)?;
         walk_get(self, &segs)
     }
 
     /// Set the value at `path` when the path ends at a mutable slot (struct field, array element,
     /// or vector component).
-    pub fn set_path(&mut self, path: &str, value: GlslValue) -> Result<(), GlslValuePathError> {
-        let segs = parse_path(path).map_err(GlslValuePathError::from)?;
+    pub fn set_path(&mut self, path: &str, value: LpsValue) -> Result<(), LpsValuePathError> {
+        let segs = parse_path(path).map_err(LpsValuePathError::from)?;
         walk_set(self, &segs, value)
     }
 }
 
 fn walk_get<'a>(
-    v: &'a GlslValue,
+    v: &'a LpsValue,
     segs: &[PathSegment],
-) -> Result<Cow<'a, GlslValue>, GlslValuePathError> {
+) -> Result<Cow<'a, LpsValue>, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(Cow::Borrowed(v));
     }
     match (&segs[0], v) {
-        (PathSegment::Field(name), GlslValue::Struct { fields, .. }) => {
+        (PathSegment::Field(name), LpsValue::Struct { fields, .. }) => {
             let (_, sub) = fields.iter().find(|(n, _)| n == name).ok_or_else(|| {
-                GlslValuePathError::FieldNotFound {
+                LpsValuePathError::FieldNotFound {
                     field: name.clone(),
                 }
             })?;
             walk_get(sub, &segs[1..])
         }
-        (PathSegment::Index(idx), GlslValue::Array(items)) => {
+        (PathSegment::Index(idx), LpsValue::Array(items)) => {
             let len = items.len();
             let sub = items
                 .get(*idx)
-                .ok_or(GlslValuePathError::IndexOutOfBounds { index: *idx, len })?;
+                .ok_or(LpsValuePathError::IndexOutOfBounds { index: *idx, len })?;
             walk_get(sub, &segs[1..])
         }
-        (PathSegment::Field(name), GlslValue::Vec2(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec2(a)) => {
             let x = vec2_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::Vec3(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec3(a)) => {
             let x = vec3_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::Vec4(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec4(a)) => {
             let x = vec4_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::IVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec2(a)) => {
             let x = ivec2_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::IVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec3(a)) => {
             let x = ivec3_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::IVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec4(a)) => {
             let x = ivec4_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::UVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec2(a)) => {
             let x = uvec2_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::UVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec3(a)) => {
             let x = uvec3_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::UVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec4(a)) => {
             let x = uvec4_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::BVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec2(a)) => {
             let x = bvec2_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::BVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec3(a)) => {
             let x = bvec3_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), GlslValue::BVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec4(a)) => {
             let x = bvec4_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(_), _) => Err(GlslValuePathError::NotAField {
+        (PathSegment::Field(_), _) => Err(LpsValuePathError::NotAField {
             hint: "not a struct or vector",
         }),
-        (PathSegment::Index(_), _) => Err(GlslValuePathError::NotIndexable),
+        (PathSegment::Index(_), _) => Err(LpsValuePathError::NotIndexable),
     }
 }
 
-fn walk_vec_tail(x: GlslValue, segs: &[PathSegment]) -> Result<GlslValue, GlslValuePathError> {
+fn walk_vec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
-    Err(GlslValuePathError::NotAField {
+    Err(LpsValuePathError::NotAField {
         hint: "no nested fields on scalar",
     })
 }
 
-fn walk_ivec_tail(x: GlslValue, segs: &[PathSegment]) -> Result<GlslValue, GlslValuePathError> {
+fn walk_ivec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
-    Err(GlslValuePathError::NotAField {
+    Err(LpsValuePathError::NotAField {
         hint: "no nested fields on scalar",
     })
 }
 
-fn walk_uvec_tail(x: GlslValue, segs: &[PathSegment]) -> Result<GlslValue, GlslValuePathError> {
+fn walk_uvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
-    Err(GlslValuePathError::NotAField {
+    Err(LpsValuePathError::NotAField {
         hint: "no nested fields on scalar",
     })
 }
 
-fn walk_bvec_tail(x: GlslValue, segs: &[PathSegment]) -> Result<GlslValue, GlslValuePathError> {
+fn walk_bvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
-    Err(GlslValuePathError::NotAField {
+    Err(LpsValuePathError::NotAField {
         hint: "no nested fields on scalar",
     })
 }
 
 fn walk_set(
-    v: &mut GlslValue,
+    v: &mut LpsValue,
     segs: &[PathSegment],
-    value: GlslValue,
-) -> Result<(), GlslValuePathError> {
+    value: LpsValue,
+) -> Result<(), LpsValuePathError> {
     if segs.is_empty() {
         *v = value;
         return Ok(());
     }
     match (&segs[0], v) {
-        (PathSegment::Field(name), GlslValue::Struct { fields, .. }) => {
+        (PathSegment::Field(name), LpsValue::Struct { fields, .. }) => {
             let (_, sub) = fields.iter_mut().find(|(n, _)| n == name).ok_or_else(|| {
-                GlslValuePathError::FieldNotFound {
+                LpsValuePathError::FieldNotFound {
                     field: name.clone(),
                 }
             })?;
             walk_set(sub, &segs[1..], value)
         }
-        (PathSegment::Index(idx), GlslValue::Array(items)) => {
+        (PathSegment::Index(idx), LpsValue::Array(items)) => {
             let len = items.len();
             let sub = items
                 .get_mut(*idx)
-                .ok_or(GlslValuePathError::IndexOutOfBounds { index: *idx, len })?;
+                .ok_or(LpsValuePathError::IndexOutOfBounds { index: *idx, len })?;
             walk_set(sub, &segs[1..], value)
         }
-        (PathSegment::Field(name), GlslValue::Vec2(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec2(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::F32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::F32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "vec2 component requires f32",
                 });
             };
             *vec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::Vec3(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec3(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::F32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::F32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "vec3 component requires f32",
                 });
             };
             *vec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::Vec4(a)) => {
+        (PathSegment::Field(name), LpsValue::Vec4(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::F32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::F32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "vec4 component requires f32",
                 });
             };
             *vec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::IVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec2(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::I32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::I32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "ivec2 component requires i32",
                 });
             };
             *ivec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::IVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec3(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::I32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::I32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "ivec3 component requires i32",
                 });
             };
             *ivec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::IVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::IVec4(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::I32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::I32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "ivec4 component requires i32",
                 });
             };
             *ivec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::UVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec2(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::U32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::U32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "uvec2 component requires u32",
                 });
             };
             *uvec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::UVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec3(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::U32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::U32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "uvec3 component requires u32",
                 });
             };
             *uvec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::UVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::UVec4(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::U32(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::U32(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "uvec4 component requires u32",
                 });
             };
             *uvec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::BVec2(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec2(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::Bool(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::Bool(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "bvec2 component requires bool",
                 });
             };
             *bvec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::BVec3(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec3(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::Bool(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::Bool(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "bvec3 component requires bool",
                 });
             };
             *bvec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), GlslValue::BVec4(a)) => {
+        (PathSegment::Field(name), LpsValue::BVec4(a)) => {
             if !segs[1..].is_empty() {
-                return Err(GlslValuePathError::NotAField {
+                return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
                 });
             }
-            let GlslValue::Bool(x) = value else {
-                return Err(GlslValuePathError::NotAField {
+            let LpsValue::Bool(x) = value else {
+                return Err(LpsValuePathError::NotAField {
                     hint: "bvec4 component requires bool",
                 });
             };
             *bvec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(_), _) => Err(GlslValuePathError::NotAField {
+        (PathSegment::Field(_), _) => Err(LpsValuePathError::NotAField {
             hint: "not a struct, array, or vector",
         }),
-        (PathSegment::Index(_), _) => Err(GlslValuePathError::NotIndexable),
+        (PathSegment::Index(_), _) => Err(LpsValuePathError::NotIndexable),
     }
 }
 
-fn vec2_component(a: &[f32; 2], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::F32(*component2_f32(a, name)?))
+fn vec2_component(a: &[f32; 2], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::F32(*component2_f32(a, name)?))
 }
 
-fn vec3_component(a: &[f32; 3], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::F32(*component3_f32(a, name)?))
+fn vec3_component(a: &[f32; 3], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::F32(*component3_f32(a, name)?))
 }
 
-fn vec4_component(a: &[f32; 4], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::F32(*component4_f32(a, name)?))
+fn vec4_component(a: &[f32; 4], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::F32(*component4_f32(a, name)?))
 }
 
-fn ivec2_component(a: &[i32; 2], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::I32(*component2_i32(a, name)?))
+fn ivec2_component(a: &[i32; 2], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::I32(*component2_i32(a, name)?))
 }
 
-fn ivec3_component(a: &[i32; 3], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::I32(*component3_i32(a, name)?))
+fn ivec3_component(a: &[i32; 3], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::I32(*component3_i32(a, name)?))
 }
 
-fn ivec4_component(a: &[i32; 4], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::I32(*component4_i32(a, name)?))
+fn ivec4_component(a: &[i32; 4], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::I32(*component4_i32(a, name)?))
 }
 
-fn uvec2_component(a: &[u32; 2], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::U32(*component2_u32(a, name)?))
+fn uvec2_component(a: &[u32; 2], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::U32(*component2_u32(a, name)?))
 }
 
-fn uvec3_component(a: &[u32; 3], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::U32(*component3_u32(a, name)?))
+fn uvec3_component(a: &[u32; 3], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::U32(*component3_u32(a, name)?))
 }
 
-fn uvec4_component(a: &[u32; 4], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::U32(*component4_u32(a, name)?))
+fn uvec4_component(a: &[u32; 4], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::U32(*component4_u32(a, name)?))
 }
 
-fn bvec2_component(a: &[bool; 2], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::Bool(*component2_bool(a, name)?))
+fn bvec2_component(a: &[bool; 2], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::Bool(*component2_bool(a, name)?))
 }
 
-fn bvec3_component(a: &[bool; 3], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::Bool(*component3_bool(a, name)?))
+fn bvec3_component(a: &[bool; 3], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::Bool(*component3_bool(a, name)?))
 }
 
-fn bvec4_component(a: &[bool; 4], name: &str) -> Result<GlslValue, GlslValuePathError> {
-    Ok(GlslValue::Bool(*component4_bool(a, name)?))
+fn bvec4_component(a: &[bool; 4], name: &str) -> Result<LpsValue, LpsValuePathError> {
+    Ok(LpsValue::Bool(*component4_bool(a, name)?))
 }
 
 fn vec2_component_mut<'a>(
     a: &'a mut [f32; 2],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     component2_f32_mut(a, name)
 }
 
 fn vec3_component_mut<'a>(
     a: &'a mut [f32; 3],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     component3_f32_mut(a, name)
 }
 
 fn vec4_component_mut<'a>(
     a: &'a mut [f32; 4],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     component4_f32_mut(a, name)
 }
 
 fn ivec2_component_mut<'a>(
     a: &'a mut [i32; 2],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     component2_i32_mut(a, name)
 }
 
 fn ivec3_component_mut<'a>(
     a: &'a mut [i32; 3],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     component3_i32_mut(a, name)
 }
 
 fn ivec4_component_mut<'a>(
     a: &'a mut [i32; 4],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     component4_i32_mut(a, name)
 }
 
 fn uvec2_component_mut<'a>(
     a: &'a mut [u32; 2],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     component2_u32_mut(a, name)
 }
 
 fn uvec3_component_mut<'a>(
     a: &'a mut [u32; 3],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     component3_u32_mut(a, name)
 }
 
 fn uvec4_component_mut<'a>(
     a: &'a mut [u32; 4],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     component4_u32_mut(a, name)
 }
 
 fn bvec2_component_mut<'a>(
     a: &'a mut [bool; 2],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     component2_bool_mut(a, name)
 }
 
 fn bvec3_component_mut<'a>(
     a: &'a mut [bool; 3],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     component3_bool_mut(a, name)
 }
 
 fn bvec4_component_mut<'a>(
     a: &'a mut [bool; 4],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     component4_bool_mut(a, name)
 }
 
-fn component2_f32<'a>(a: &'a [f32; 2], name: &str) -> Result<&'a f32, GlslValuePathError> {
+fn component2_f32<'a>(a: &'a [f32; 2], name: &str) -> Result<&'a f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
 }
 
-fn component3_f32<'a>(a: &'a [f32; 3], name: &str) -> Result<&'a f32, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        "z" | "b" | "p" => Ok(&a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component4_f32<'a>(a: &'a [f32; 4], name: &str) -> Result<&'a f32, GlslValuePathError> {
+fn component3_f32<'a>(a: &'a [f32; 3], name: &str) -> Result<&'a f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
         "z" | "b" | "p" => Ok(&a[2]),
-        "w" | "a" | "q" => Ok(&a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
 }
 
-fn component2_i32<'a>(a: &'a [i32; 2], name: &str) -> Result<&'a i32, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component3_i32<'a>(a: &'a [i32; 3], name: &str) -> Result<&'a i32, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        "z" | "b" | "p" => Ok(&a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component4_i32<'a>(a: &'a [i32; 4], name: &str) -> Result<&'a i32, GlslValuePathError> {
+fn component4_f32<'a>(a: &'a [f32; 4], name: &str) -> Result<&'a f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
         "z" | "b" | "p" => Ok(&a[2]),
         "w" | "a" | "q" => Ok(&a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
 }
 
-fn component2_u32<'a>(a: &'a [u32; 2], name: &str) -> Result<&'a u32, GlslValuePathError> {
+fn component2_i32<'a>(a: &'a [i32; 2], name: &str) -> Result<&'a i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
 }
 
-fn component3_u32<'a>(a: &'a [u32; 3], name: &str) -> Result<&'a u32, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        "z" | "b" | "p" => Ok(&a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component4_u32<'a>(a: &'a [u32; 4], name: &str) -> Result<&'a u32, GlslValuePathError> {
+fn component3_i32<'a>(a: &'a [i32; 3], name: &str) -> Result<&'a i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
         "z" | "b" | "p" => Ok(&a[2]),
-        "w" | "a" | "q" => Ok(&a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
 }
 
-fn component2_bool<'a>(a: &'a [bool; 2], name: &str) -> Result<&'a bool, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component3_bool<'a>(a: &'a [bool; 3], name: &str) -> Result<&'a bool, GlslValuePathError> {
-    match name {
-        "x" | "r" | "s" => Ok(&a[0]),
-        "y" | "g" | "t" => Ok(&a[1]),
-        "z" | "b" | "p" => Ok(&a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
-            field: String::from(name),
-        }),
-    }
-}
-
-fn component4_bool<'a>(a: &'a [bool; 4], name: &str) -> Result<&'a bool, GlslValuePathError> {
+fn component4_i32<'a>(a: &'a [i32; 4], name: &str) -> Result<&'a i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&a[0]),
         "y" | "g" | "t" => Ok(&a[1]),
         "z" | "b" | "p" => Ok(&a[2]),
         "w" | "a" | "q" => Ok(&a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component2_u32<'a>(a: &'a [u32; 2], name: &str) -> Result<&'a u32, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component3_u32<'a>(a: &'a [u32; 3], name: &str) -> Result<&'a u32, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        "z" | "b" | "p" => Ok(&a[2]),
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component4_u32<'a>(a: &'a [u32; 4], name: &str) -> Result<&'a u32, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        "z" | "b" | "p" => Ok(&a[2]),
+        "w" | "a" | "q" => Ok(&a[3]),
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component2_bool<'a>(a: &'a [bool; 2], name: &str) -> Result<&'a bool, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component3_bool<'a>(a: &'a [bool; 3], name: &str) -> Result<&'a bool, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        "z" | "b" | "p" => Ok(&a[2]),
+        _ => Err(LpsValuePathError::FieldNotFound {
+            field: String::from(name),
+        }),
+    }
+}
+
+fn component4_bool<'a>(a: &'a [bool; 4], name: &str) -> Result<&'a bool, LpsValuePathError> {
+    match name {
+        "x" | "r" | "s" => Ok(&a[0]),
+        "y" | "g" | "t" => Ok(&a[1]),
+        "z" | "b" | "p" => Ok(&a[2]),
+        "w" | "a" | "q" => Ok(&a[3]),
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -634,11 +634,11 @@ fn component4_bool<'a>(a: &'a [bool; 4], name: &str) -> Result<&'a bool, GlslVal
 fn component2_f32_mut<'a>(
     a: &'a mut [f32; 2],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -647,12 +647,12 @@ fn component2_f32_mut<'a>(
 fn component3_f32_mut<'a>(
     a: &'a mut [f32; 3],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -661,13 +661,13 @@ fn component3_f32_mut<'a>(
 fn component4_f32_mut<'a>(
     a: &'a mut [f32; 4],
     name: &str,
-) -> Result<&'a mut f32, GlslValuePathError> {
+) -> Result<&'a mut f32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
         "w" | "a" | "q" => Ok(&mut a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -676,11 +676,11 @@ fn component4_f32_mut<'a>(
 fn component2_i32_mut<'a>(
     a: &'a mut [i32; 2],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -689,12 +689,12 @@ fn component2_i32_mut<'a>(
 fn component3_i32_mut<'a>(
     a: &'a mut [i32; 3],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -703,13 +703,13 @@ fn component3_i32_mut<'a>(
 fn component4_i32_mut<'a>(
     a: &'a mut [i32; 4],
     name: &str,
-) -> Result<&'a mut i32, GlslValuePathError> {
+) -> Result<&'a mut i32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
         "w" | "a" | "q" => Ok(&mut a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -718,11 +718,11 @@ fn component4_i32_mut<'a>(
 fn component2_u32_mut<'a>(
     a: &'a mut [u32; 2],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -731,12 +731,12 @@ fn component2_u32_mut<'a>(
 fn component3_u32_mut<'a>(
     a: &'a mut [u32; 3],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -745,13 +745,13 @@ fn component3_u32_mut<'a>(
 fn component4_u32_mut<'a>(
     a: &'a mut [u32; 4],
     name: &str,
-) -> Result<&'a mut u32, GlslValuePathError> {
+) -> Result<&'a mut u32, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
         "w" | "a" | "q" => Ok(&mut a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -760,11 +760,11 @@ fn component4_u32_mut<'a>(
 fn component2_bool_mut<'a>(
     a: &'a mut [bool; 2],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -773,12 +773,12 @@ fn component2_bool_mut<'a>(
 fn component3_bool_mut<'a>(
     a: &'a mut [bool; 3],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -787,13 +787,13 @@ fn component3_bool_mut<'a>(
 fn component4_bool_mut<'a>(
     a: &'a mut [bool; 4],
     name: &str,
-) -> Result<&'a mut bool, GlslValuePathError> {
+) -> Result<&'a mut bool, LpsValuePathError> {
     match name {
         "x" | "r" | "s" => Ok(&mut a[0]),
         "y" | "g" | "t" => Ok(&mut a[1]),
         "z" | "b" | "p" => Ok(&mut a[2]),
         "w" | "a" | "q" => Ok(&mut a[3]),
-        _ => Err(GlslValuePathError::FieldNotFound {
+        _ => Err(LpsValuePathError::FieldNotFound {
             field: String::from(name),
         }),
     }
@@ -807,25 +807,25 @@ mod tests {
 
     #[test]
     fn get_path_struct_field() {
-        let v = GlslValue::Struct {
+        let v = LpsValue::Struct {
             name: None,
             fields: vec![
-                (String::from("a"), GlslValue::F32(1.0)),
-                (String::from("b"), GlslValue::I32(2)),
+                (String::from("a"), LpsValue::F32(1.0)),
+                (String::from("b"), LpsValue::I32(2)),
             ],
         };
         match v.get_path("a").unwrap() {
-            Cow::Borrowed(GlslValue::F32(x)) => assert!((*x - 1.0).abs() < 1e-6),
-            Cow::Owned(GlslValue::F32(x)) => assert!((x - 1.0).abs() < 1e-6),
+            Cow::Borrowed(LpsValue::F32(x)) => assert!((*x - 1.0).abs() < 1e-6),
+            Cow::Owned(LpsValue::F32(x)) => assert!((x - 1.0).abs() < 1e-6),
             _ => panic!("expected f32"),
         }
     }
 
     #[test]
     fn set_path_vec_component() {
-        let mut v = GlslValue::Vec3([0.0, 0.0, 0.0]);
-        v.set_path("y", GlslValue::F32(3.0)).unwrap();
-        let GlslValue::Vec3(a) = &v else {
+        let mut v = LpsValue::Vec3([0.0, 0.0, 0.0]);
+        v.set_path("y", LpsValue::F32(3.0)).unwrap();
+        let LpsValue::Vec3(a) = &v else {
             panic!("vec3");
         };
         assert!((a[1] - 3.0).abs() < 1e-6);

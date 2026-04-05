@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, GlslType};
+use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, LpsType};
 
 /// Q32 host-side value (floats as `f64` before fixed-point encode).
 #[derive(Clone, Debug, PartialEq)]
@@ -68,20 +68,20 @@ impl fmt::Display for CallError {
 #[cfg(feature = "std")]
 impl std::error::Error for CallError {}
 
-pub(crate) fn glsl_component_count(ty: &GlslType) -> usize {
+pub(crate) fn glsl_component_count(ty: &LpsType) -> usize {
     match ty {
-        GlslType::Void => 0,
-        GlslType::Float | GlslType::Int | GlslType::UInt | GlslType::Bool => 1,
-        GlslType::Vec2 | GlslType::IVec2 | GlslType::UVec2 | GlslType::BVec2 => 2,
-        GlslType::Vec3 | GlslType::IVec3 | GlslType::UVec3 | GlslType::BVec3 => 3,
-        GlslType::Vec4 | GlslType::IVec4 | GlslType::UVec4 | GlslType::BVec4 => 4,
-        GlslType::Mat2 => 4,
-        GlslType::Mat3 => 9,
-        GlslType::Mat4 => 16,
-        GlslType::Array { element, len } => {
+        LpsType::Void => 0,
+        LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => 1,
+        LpsType::Vec2 | LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => 2,
+        LpsType::Vec3 | LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => 3,
+        LpsType::Vec4 | LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => 4,
+        LpsType::Mat2 => 4,
+        LpsType::Mat3 => 9,
+        LpsType::Mat4 => 16,
+        LpsType::Array { element, len } => {
             glsl_component_count(element).saturating_mul(*len as usize)
         }
-        GlslType::Struct { members, .. } => {
+        LpsType::Struct { members, .. } => {
             members.iter().map(|m| glsl_component_count(&m.ty)).sum()
         }
     }
@@ -94,65 +94,65 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
         )));
     }
     match (&param.ty, arg) {
-        (GlslType::Float, GlslQ32::Float(x)) => Ok(alloc::vec![crate::q32::q32_encode_f64(*x)]),
-        (GlslType::Int, GlslQ32::Int(x)) => Ok(alloc::vec![*x]),
-        (GlslType::UInt, GlslQ32::UInt(x)) => Ok(alloc::vec![*x as i32]),
-        (GlslType::Bool, GlslQ32::Bool(b)) => Ok(alloc::vec![if *b { 1 } else { 0 }]),
+        (LpsType::Float, GlslQ32::Float(x)) => Ok(alloc::vec![crate::q32::q32_encode_f64(*x)]),
+        (LpsType::Int, GlslQ32::Int(x)) => Ok(alloc::vec![*x]),
+        (LpsType::UInt, GlslQ32::UInt(x)) => Ok(alloc::vec![*x as i32]),
+        (LpsType::Bool, GlslQ32::Bool(b)) => Ok(alloc::vec![if *b { 1 } else { 0 }]),
 
-        (GlslType::Vec2, GlslQ32::Vec2(a, b)) => Ok(alloc::vec![
+        (LpsType::Vec2, GlslQ32::Vec2(a, b)) => Ok(alloc::vec![
             crate::q32::q32_encode_f64(*a),
             crate::q32::q32_encode_f64(*b),
         ]),
-        (GlslType::Vec3, GlslQ32::Vec3(a, b, c)) => Ok(alloc::vec![
+        (LpsType::Vec3, GlslQ32::Vec3(a, b, c)) => Ok(alloc::vec![
             crate::q32::q32_encode_f64(*a),
             crate::q32::q32_encode_f64(*b),
             crate::q32::q32_encode_f64(*c),
         ]),
-        (GlslType::Vec4, GlslQ32::Vec4(a, b, c, d)) => Ok(alloc::vec![
+        (LpsType::Vec4, GlslQ32::Vec4(a, b, c, d)) => Ok(alloc::vec![
             crate::q32::q32_encode_f64(*a),
             crate::q32::q32_encode_f64(*b),
             crate::q32::q32_encode_f64(*c),
             crate::q32::q32_encode_f64(*d),
         ]),
 
-        (GlslType::IVec2, GlslQ32::IVec2(a, b)) => Ok(alloc::vec![*a, *b]),
-        (GlslType::IVec3, GlslQ32::IVec3(a, b, c)) => Ok(alloc::vec![*a, *b, *c]),
-        (GlslType::IVec4, GlslQ32::IVec4(a, b, c, d)) => Ok(alloc::vec![*a, *b, *c, *d]),
+        (LpsType::IVec2, GlslQ32::IVec2(a, b)) => Ok(alloc::vec![*a, *b]),
+        (LpsType::IVec3, GlslQ32::IVec3(a, b, c)) => Ok(alloc::vec![*a, *b, *c]),
+        (LpsType::IVec4, GlslQ32::IVec4(a, b, c, d)) => Ok(alloc::vec![*a, *b, *c, *d]),
 
-        (GlslType::UVec2, GlslQ32::UVec2(a, b)) => Ok(alloc::vec![*a as i32, *b as i32]),
-        (GlslType::UVec3, GlslQ32::UVec3(a, b, c)) => {
+        (LpsType::UVec2, GlslQ32::UVec2(a, b)) => Ok(alloc::vec![*a as i32, *b as i32]),
+        (LpsType::UVec3, GlslQ32::UVec3(a, b, c)) => {
             Ok(alloc::vec![*a as i32, *b as i32, *c as i32])
         }
-        (GlslType::UVec4, GlslQ32::UVec4(a, b, c, d)) => {
+        (LpsType::UVec4, GlslQ32::UVec4(a, b, c, d)) => {
             Ok(alloc::vec![*a as i32, *b as i32, *c as i32, *d as i32,])
         }
 
-        (GlslType::BVec2, GlslQ32::BVec2(a, b)) => {
+        (LpsType::BVec2, GlslQ32::BVec2(a, b)) => {
             Ok(alloc::vec![if *a { 1 } else { 0 }, if *b { 1 } else { 0 },])
         }
-        (GlslType::BVec3, GlslQ32::BVec3(a, b, c)) => Ok(alloc::vec![
+        (LpsType::BVec3, GlslQ32::BVec3(a, b, c)) => Ok(alloc::vec![
             if *a { 1 } else { 0 },
             if *b { 1 } else { 0 },
             if *c { 1 } else { 0 },
         ]),
-        (GlslType::BVec4, GlslQ32::BVec4(a, b, c, d)) => Ok(alloc::vec![
+        (LpsType::BVec4, GlslQ32::BVec4(a, b, c, d)) => Ok(alloc::vec![
             if *a { 1 } else { 0 },
             if *b { 1 } else { 0 },
             if *c { 1 } else { 0 },
             if *d { 1 } else { 0 },
         ]),
 
-        (GlslType::Mat2, GlslQ32::Mat2(a)) => {
+        (LpsType::Mat2, GlslQ32::Mat2(a)) => {
             Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
         }
-        (GlslType::Mat3, GlslQ32::Mat3(a)) => {
+        (LpsType::Mat3, GlslQ32::Mat3(a)) => {
             Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
         }
-        (GlslType::Mat4, GlslQ32::Mat4(a)) => {
+        (LpsType::Mat4, GlslQ32::Mat4(a)) => {
             Ok(a.iter().map(|x| crate::q32::q32_encode_f64(*x)).collect())
         }
 
-        (GlslType::Array { element, len }, GlslQ32::Array(items)) => {
+        (LpsType::Array { element, len }, GlslQ32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(CallError::TypeMismatch(format!(
                     "array argument length mismatch: expected {}, got {}",
@@ -172,7 +172,7 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
             Ok(out)
         }
 
-        (GlslType::Struct { .. }, _) | (_, GlslQ32::Struct(_)) => Err(CallError::Unsupported(
+        (LpsType::Struct { .. }, _) | (_, GlslQ32::Struct(_)) => Err(CallError::Unsupported(
             String::from("struct parameters are not supported by Level-1 call() yet"),
         )),
 
@@ -210,7 +210,7 @@ fn got_ty_name(v: &GlslQ32) -> &'static str {
     }
 }
 
-pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32, CallError> {
+pub(crate) fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<GlslQ32, CallError> {
     let n = glsl_component_count(ty);
     if words.len() < n {
         return Err(CallError::Unsupported(format!(
@@ -219,58 +219,58 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
         )));
     }
     Ok(match ty {
-        GlslType::Struct { .. } => {
+        LpsType::Struct { .. } => {
             return Err(CallError::Unsupported(String::from(
                 "struct returns are not supported by Level-1 call() yet",
             )));
         }
-        GlslType::Void => {
+        LpsType::Void => {
             return Err(CallError::Unsupported(String::from(
                 "decode_q32_return called for void",
             )));
         }
-        GlslType::Float => GlslQ32::Float(crate::q32::q32_to_f64(words[0])),
-        GlslType::Int => GlslQ32::Int(words[0]),
-        GlslType::UInt => GlslQ32::UInt(words[0] as u32),
-        GlslType::Bool => GlslQ32::Bool(words[0] != 0),
-        GlslType::Vec2 => GlslQ32::Vec2(
+        LpsType::Float => GlslQ32::Float(crate::q32::q32_to_f64(words[0])),
+        LpsType::Int => GlslQ32::Int(words[0]),
+        LpsType::UInt => GlslQ32::UInt(words[0] as u32),
+        LpsType::Bool => GlslQ32::Bool(words[0] != 0),
+        LpsType::Vec2 => GlslQ32::Vec2(
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
         ),
-        GlslType::Vec3 => GlslQ32::Vec3(
+        LpsType::Vec3 => GlslQ32::Vec3(
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
             crate::q32::q32_to_f64(words[2]),
         ),
-        GlslType::Vec4 => GlslQ32::Vec4(
+        LpsType::Vec4 => GlslQ32::Vec4(
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
             crate::q32::q32_to_f64(words[2]),
             crate::q32::q32_to_f64(words[3]),
         ),
-        GlslType::IVec2 => GlslQ32::IVec2(words[0], words[1]),
-        GlslType::IVec3 => GlslQ32::IVec3(words[0], words[1], words[2]),
-        GlslType::IVec4 => GlslQ32::IVec4(words[0], words[1], words[2], words[3]),
-        GlslType::UVec2 => GlslQ32::UVec2(words[0] as u32, words[1] as u32),
-        GlslType::UVec3 => GlslQ32::UVec3(words[0] as u32, words[1] as u32, words[2] as u32),
-        GlslType::UVec4 => GlslQ32::UVec4(
+        LpsType::IVec2 => GlslQ32::IVec2(words[0], words[1]),
+        LpsType::IVec3 => GlslQ32::IVec3(words[0], words[1], words[2]),
+        LpsType::IVec4 => GlslQ32::IVec4(words[0], words[1], words[2], words[3]),
+        LpsType::UVec2 => GlslQ32::UVec2(words[0] as u32, words[1] as u32),
+        LpsType::UVec3 => GlslQ32::UVec3(words[0] as u32, words[1] as u32, words[2] as u32),
+        LpsType::UVec4 => GlslQ32::UVec4(
             words[0] as u32,
             words[1] as u32,
             words[2] as u32,
             words[3] as u32,
         ),
-        GlslType::BVec2 => GlslQ32::BVec2(words[0] != 0, words[1] != 0),
-        GlslType::BVec3 => GlslQ32::BVec3(words[0] != 0, words[1] != 0, words[2] != 0),
-        GlslType::BVec4 => {
+        LpsType::BVec2 => GlslQ32::BVec2(words[0] != 0, words[1] != 0),
+        LpsType::BVec3 => GlslQ32::BVec3(words[0] != 0, words[1] != 0, words[2] != 0),
+        LpsType::BVec4 => {
             GlslQ32::BVec4(words[0] != 0, words[1] != 0, words[2] != 0, words[3] != 0)
         }
-        GlslType::Mat2 => GlslQ32::Mat2([
+        LpsType::Mat2 => GlslQ32::Mat2([
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
             crate::q32::q32_to_f64(words[2]),
             crate::q32::q32_to_f64(words[3]),
         ]),
-        GlslType::Mat3 => GlslQ32::Mat3([
+        LpsType::Mat3 => GlslQ32::Mat3([
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
             crate::q32::q32_to_f64(words[2]),
@@ -281,7 +281,7 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
             crate::q32::q32_to_f64(words[7]),
             crate::q32::q32_to_f64(words[8]),
         ]),
-        GlslType::Mat4 => GlslQ32::Mat4([
+        LpsType::Mat4 => GlslQ32::Mat4([
             crate::q32::q32_to_f64(words[0]),
             crate::q32::q32_to_f64(words[1]),
             crate::q32::q32_to_f64(words[2]),
@@ -299,7 +299,7 @@ pub(crate) fn decode_q32_return(ty: &GlslType, words: &[i32]) -> Result<GlslQ32,
             crate::q32::q32_to_f64(words[14]),
             crate::q32::q32_to_f64(words[15]),
         ]),
-        GlslType::Array { element, len } => {
+        LpsType::Array { element, len } => {
             let per = glsl_component_count(element);
             let mut elems = Vec::with_capacity(*len as usize);
             for i in 0..(*len as usize) {

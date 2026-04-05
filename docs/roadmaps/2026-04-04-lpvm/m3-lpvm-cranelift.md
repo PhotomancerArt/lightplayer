@@ -27,7 +27,8 @@ validates the trait API against a backend we have full control over.
 
 **Compile entry points:**
 
-- `jit(source, options)` — GLSL → naga → LPIR → JitModule (needs `glsl` feature)
+- `jit(source, options)` — GLSL → **`lps-naga`** → LPIR → JitModule (needs
+  frontend feature; name may still be `glsl` in code during migration)
 - `jit_from_ir(ir, options)` — LPIR → JitModule (no metadata, limited call())
 - `jit_from_ir_owned(ir, meta, options)` — LPIR + metadata → JitModule (full)
 
@@ -91,7 +92,7 @@ cranelift-codegen = { ..., default-features = false }
 cranelift-frontend = { ..., default-features = false }
 cranelift-jit = { ..., default-features = false }
 cranelift-module = { ..., default-features = false }
-lp-glsl-builtins = { ..., default-features = false }
+lps-builtins = { ..., default-features = false }
 # ... same cranelift deps as lpir-cranelift, minus riscv32-emu deps
 
 [features]
@@ -189,6 +190,8 @@ What stays in `lpir-cranelift` temporarily:
   product — see AGENTS.md.
 - Do NOT delete `lpir-cranelift` yet. It coexists until consumers are migrated.
 - Do NOT update `lp-engine` to use this yet. That's M6.
+- Builtin crate path may still read `lp-glsl-builtins` on disk until rename
+  completes; use workspace reality.
 - Do NOT add `#[cfg(feature = "std")]` to any compile/execute path.
 
 ## Validation

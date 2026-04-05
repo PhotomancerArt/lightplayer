@@ -1,8 +1,8 @@
-//! Memory layout for [`crate::metadata::GlslType`] (std430 only for now).
+//! Memory layout for [`LpsType`] (std430 only for now).
 //!
 //! Rules match GLSL `std430` for transparent types. See `docs/design/glsl-layout.md`.
 
-use crate::metadata::{GlslType, LayoutRules, StructMember};
+use lps_types::{LayoutRules, LpsType, StructMember};
 
 /// Round `size` up to a multiple of `alignment` (must be > 0).
 pub fn round_up(size: usize, alignment: usize) -> usize {
@@ -11,7 +11,7 @@ pub fn round_up(size: usize, alignment: usize) -> usize {
 }
 
 /// Byte size of `ty` under `rules`.
-pub fn type_size(ty: &GlslType, rules: LayoutRules) -> usize {
+pub fn type_size(ty: &LpsType, rules: LayoutRules) -> usize {
     match rules {
         LayoutRules::Std430 => std430_size(ty),
         LayoutRules::Std140 => panic!("std140 layout is not implemented yet"),
@@ -19,7 +19,7 @@ pub fn type_size(ty: &GlslType, rules: LayoutRules) -> usize {
 }
 
 /// Alignment of `ty` under `rules`.
-pub fn type_alignment(ty: &GlslType, rules: LayoutRules) -> usize {
+pub fn type_alignment(ty: &LpsType, rules: LayoutRules) -> usize {
     match rules {
         LayoutRules::Std430 => std430_alignment(ty),
         LayoutRules::Std140 => panic!("std140 layout is not implemented yet"),
@@ -27,14 +27,14 @@ pub fn type_alignment(ty: &GlslType, rules: LayoutRules) -> usize {
 }
 
 /// Stride between array elements (size rounded up to element alignment).
-pub fn array_stride(element: &GlslType, rules: LayoutRules) -> usize {
+pub fn array_stride(element: &LpsType, rules: LayoutRules) -> usize {
     let s = type_size(element, rules);
     let a = type_alignment(element, rules);
     round_up(s, a)
 }
 
-fn std430_size(ty: &GlslType) -> usize {
-    use GlslType::*;
+fn std430_size(ty: &LpsType) -> usize {
+    use LpsType::*;
     match ty {
         Void => 0,
         Float | Int | UInt | Bool => 4,
@@ -49,8 +49,8 @@ fn std430_size(ty: &GlslType) -> usize {
     }
 }
 
-fn std430_alignment(ty: &GlslType) -> usize {
-    use GlslType::*;
+fn std430_alignment(ty: &LpsType) -> usize {
+    use LpsType::*;
     match ty {
         Void => 1,
         Float | Int | UInt | Bool => 4,

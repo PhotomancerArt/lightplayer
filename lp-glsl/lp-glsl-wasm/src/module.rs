@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lp_glsl_naga::{FloatMode, GlslType};
+use lp_glsl_naga::{FloatMode, LpsType};
 
 pub use wasm_encoder::ValType as WasmValType;
 
@@ -11,24 +11,24 @@ pub use wasm_encoder::ValType as WasmValType;
 pub const SHADOW_STACK_GLOBAL_EXPORT: &str = "__lp_shadow_sp";
 
 /// Map a GLSL type to the sequence of WASM locals/results used in the ABI.
-pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec<WasmValType> {
+pub fn glsl_type_to_wasm_components(ty: &LpsType, float_mode: FloatMode) -> Vec<WasmValType> {
     match ty {
-        GlslType::Void => Vec::new(),
-        GlslType::Bool | GlslType::Int | GlslType::UInt => alloc::vec![WasmValType::I32],
-        GlslType::Float => alloc::vec![scalar_float_vt(float_mode)],
-        GlslType::Vec2 | GlslType::IVec2 | GlslType::UVec2 | GlslType::BVec2 => {
+        LpsType::Void => Vec::new(),
+        LpsType::Bool | LpsType::Int | LpsType::UInt => alloc::vec![WasmValType::I32],
+        LpsType::Float => alloc::vec![scalar_float_vt(float_mode)],
+        LpsType::Vec2 | LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => {
             alloc::vec![component_vt(ty, float_mode); 2]
         }
-        GlslType::Vec3 | GlslType::IVec3 | GlslType::UVec3 | GlslType::BVec3 => {
+        LpsType::Vec3 | LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => {
             alloc::vec![component_vt(ty, float_mode); 3]
         }
-        GlslType::Vec4 | GlslType::IVec4 | GlslType::UVec4 | GlslType::BVec4 => {
+        LpsType::Vec4 | LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => {
             alloc::vec![component_vt(ty, float_mode); 4]
         }
-        GlslType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
-        GlslType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
-        GlslType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
-        GlslType::Array { element, len } => {
+        LpsType::Mat2 => alloc::vec![scalar_float_vt(float_mode); 4],
+        LpsType::Mat3 => alloc::vec![scalar_float_vt(float_mode); 9],
+        LpsType::Mat4 => alloc::vec![scalar_float_vt(float_mode); 16],
+        LpsType::Array { element, len } => {
             let inner = glsl_type_to_wasm_components(element, float_mode);
             let mut out = Vec::with_capacity(inner.len().saturating_mul(*len as usize));
             for _ in 0..*len {
@@ -36,7 +36,7 @@ pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec
             }
             out
         }
-        GlslType::Struct { members, .. } => {
+        LpsType::Struct { members, .. } => {
             let mut out = Vec::new();
             for m in members {
                 out.extend(glsl_type_to_wasm_components(&m.ty, float_mode));
@@ -53,9 +53,9 @@ fn scalar_float_vt(fm: FloatMode) -> WasmValType {
     }
 }
 
-fn component_vt(ty: &GlslType, fm: FloatMode) -> WasmValType {
+fn component_vt(ty: &LpsType, fm: FloatMode) -> WasmValType {
     match ty {
-        GlslType::Vec2 | GlslType::Vec3 | GlslType::Vec4 => scalar_float_vt(fm),
+        LpsType::Vec2 | LpsType::Vec3 | LpsType::Vec4 => scalar_float_vt(fm),
         _ => WasmValType::I32,
     }
 }
@@ -75,6 +75,6 @@ pub struct WasmExport {
     pub name: String,
     pub params: Vec<WasmValType>,
     pub results: Vec<WasmValType>,
-    pub return_type: GlslType,
-    pub param_types: Vec<GlslType>,
+    pub return_type: LpsType,
+    pub param_types: Vec<LpsType>,
 }

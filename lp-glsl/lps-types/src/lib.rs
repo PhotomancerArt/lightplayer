@@ -11,4 +11,4 @@ mod sig;
 mod types;
 
 pub use sig::{FnParam, LpsFnSig, ParamQualifier};
-pub use types::{LpsType, StructId};
+pub use types::{LayoutRules, LpsType, StructMember};

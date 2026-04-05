@@ -1,13 +1,14 @@
+use alloc::string::String;
 use alloc::{boxed::Box, vec::Vec};
 
-/// Shader type system (shared with exec / filetests).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Logical shader type (scalar, vector, square matrix, array, struct) for parameters, returns, and layouts.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LpsType {
     Void,
-    Bool,
+    Float,
     Int,
     UInt,
-    Float,
+    Bool,
     Vec2,
     Vec3,
     Vec4,
@@ -23,19 +24,41 @@ pub enum LpsType {
     Mat2,
     Mat3,
     Mat4,
-    Sampler2D,
-    Struct(StructId),
-    Array(Box<LpsType>, usize),
-    Error,
+    /// Fixed-size array `T[n]`; ABI is `n` flattened scalars (row-major).
+    Array {
+        element: Box<LpsType>,
+        len: u32,
+    },
+    /// Struct type (layout follows active [`LayoutRules`], default `std430`).
+    Struct {
+        name: Option<String>,
+        members: Vec<StructMember>,
+    },
 }
 
-pub type StructId = usize;
+/// One field in a [`LpsType::Struct`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StructMember {
+    pub name: Option<String>,
+    pub ty: LpsType,
+}
+
+/// Memory layout rules for structured/uniform-like data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutRules {
+    /// `std430` — storage-buffer style packing (default for LightPlayer).
+    Std430,
+    /// Reserved; not implemented yet.
+    Std140,
+}
+
+impl LayoutRules {
+    pub fn is_implemented(self) -> bool {
+        matches!(self, LayoutRules::Std430)
+    }
+}
 
 impl LpsType {
-    pub fn is_error(&self) -> bool {
-        matches!(self, LpsType::Error)
-    }
-
     pub fn is_numeric(&self) -> bool {
         match self {
             LpsType::Int | LpsType::UInt | LpsType::Float => true,
@@ -49,7 +72,7 @@ impl LpsType {
             | LpsType::UVec3
             | LpsType::UVec4 => true,
             LpsType::Mat2 | LpsType::Mat3 | LpsType::Mat4 => true,
-            LpsType::Array(element_ty, _) => element_ty.is_numeric(),
+            LpsType::Array { element, .. } => element.is_numeric(),
             _ => false,
         }
     }
@@ -148,12 +171,12 @@ impl LpsType {
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self, LpsType::Array(_, _))
+        matches!(self, LpsType::Array { .. })
     }
 
     pub fn array_element_type(&self) -> Option<LpsType> {
         match self {
-            LpsType::Array(element_ty, _) => Some(*element_ty.clone()),
+            LpsType::Array { element, .. } => Some(*element.clone()),
             _ => None,
         }
     }
@@ -161,9 +184,9 @@ impl LpsType {
     pub fn array_dimensions(&self) -> Vec<usize> {
         let mut dims = Vec::new();
         let mut current = self;
-        while let LpsType::Array(element_ty, size) = current {
-            dims.push(*size);
-            current = element_ty.as_ref();
+        while let LpsType::Array { element, len } = current {
+            dims.push(*len as usize);
+            current = element.as_ref();
         }
         dims
     }
@@ -174,5 +197,9 @@ impl LpsType {
         }
         let dims = self.array_dimensions();
         Some(dims.iter().product())
+    }
+
+    pub fn is_aggregate(&self) -> bool {
+        matches!(self, LpsType::Array { .. } | LpsType::Struct { .. })
     }
 }

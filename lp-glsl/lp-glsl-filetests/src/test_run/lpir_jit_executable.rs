@@ -3,18 +3,18 @@
 use std::collections::BTreeMap;
 
 use lp_glsl_abi::GlslFunctionMeta;
-use lp_glsl_abi::GlslValue;
+use lp_glsl_abi::LpsValue;
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
 use lpir::FloatMode as LpirFloatMode;
-use lpir_cranelift::{jit, CompileOptions, CompilerError, JitModule};
+use lpir_cranelift::{CompileOptions, CompilerError, JitModule, jit};
 use lpir_cranelift::{GlslQ32, GlslReturn};
 use lps_types::{LpsFnSig, LpsType};
 
 use super::q32_exec_common::{
-    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
-    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
+    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
+    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
+    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// Host JIT executable for `jit.q32` / `jit.f32` filetest targets.
@@ -55,7 +55,7 @@ impl Q32ShaderExecutable for LpirJitExecutable {
     fn call_q32_ret(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
     ) -> Result<GlslReturn<GlslQ32>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
@@ -73,26 +73,26 @@ impl Q32ShaderExecutable for LpirJitExecutable {
 }
 
 impl GlslExecutable for LpirJitExecutable {
-    fn call_void(&mut self, name: &str, args: &[GlslValue]) -> Result<(), GlslError> {
+    fn call_void(&mut self, name: &str, args: &[LpsValue]) -> Result<(), GlslError> {
         impl_call_void(self, name, args)
     }
 
-    fn call_i32(&mut self, name: &str, args: &[GlslValue]) -> Result<i32, GlslError> {
+    fn call_i32(&mut self, name: &str, args: &[LpsValue]) -> Result<i32, GlslError> {
         call_i32_from_q32(self, name, args)
     }
 
-    fn call_f32(&mut self, name: &str, args: &[GlslValue]) -> Result<f32, GlslError> {
+    fn call_f32(&mut self, name: &str, args: &[LpsValue]) -> Result<f32, GlslError> {
         call_f32_from_q32(self, name, args)
     }
 
-    fn call_bool(&mut self, name: &str, args: &[GlslValue]) -> Result<bool, GlslError> {
+    fn call_bool(&mut self, name: &str, args: &[LpsValue]) -> Result<bool, GlslError> {
         call_bool_from_q32(self, name, args)
     }
 
     fn call_bvec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<bool>, GlslError> {
         call_bvec_from_q32(self, name, args, dim)
@@ -101,7 +101,7 @@ impl GlslExecutable for LpirJitExecutable {
     fn call_ivec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<i32>, GlslError> {
         call_ivec_from_q32(self, name, args, dim)
@@ -110,7 +110,7 @@ impl GlslExecutable for LpirJitExecutable {
     fn call_uvec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<u32>, GlslError> {
         call_uvec_from_q32(self, name, args, dim)
@@ -119,7 +119,7 @@ impl GlslExecutable for LpirJitExecutable {
     fn call_vec(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         dim: usize,
     ) -> Result<Vec<f32>, GlslError> {
         call_vec_from_q32(self, name, args, dim)
@@ -128,7 +128,7 @@ impl GlslExecutable for LpirJitExecutable {
     fn call_mat(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         rows: usize,
         cols: usize,
     ) -> Result<Vec<f32>, GlslError> {
@@ -138,10 +138,10 @@ impl GlslExecutable for LpirJitExecutable {
     fn call_array(
         &mut self,
         name: &str,
-        args: &[GlslValue],
+        args: &[LpsValue],
         elem_ty: &LpsType,
         len: usize,
-    ) -> Result<Vec<GlslValue>, GlslError> {
+    ) -> Result<Vec<LpsValue>, GlslError> {
         call_array_from_q32(self, name, args, elem_ty, len)
     }
 

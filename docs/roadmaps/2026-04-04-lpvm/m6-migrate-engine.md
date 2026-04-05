@@ -27,7 +27,8 @@ The engine directly uses `lpir_cranelift` types. It does not use
 Instead of `JitModule` and `DirectCall`, it holds `M` (the module) and
 `M::Instance` (the instance, or a prepared call handle).
 
-The compile step becomes: GLSL → naga → LPIR → `M::compile(ir)` → module.
+The compile step becomes: GLSL → **`lps-naga`** → LPIR → backend compile →
+`LpvmModule` (exact constructor API depends on M3).
 The render step becomes: `instance.call(...)` or equivalent hot-path method.
 
 ### Generic engine architecture

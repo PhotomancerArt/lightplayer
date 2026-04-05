@@ -9,6 +9,7 @@ description = "GLSL ABI - types, values, layout, and paths"
 workspace = true
 
 [dependencies]
+lps-types = { path = "../lps-types" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
 glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, optional = true }
 

@@ -37,7 +37,7 @@ members = [
     "lp-glsl/lp-glsl-filetests-app",
     "lp-glsl/lp-glsl-wasm",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc", "lpvm/lpvm",
+    "spikes/naga-wasm-poc",
 ]
 resolver = "2"
 

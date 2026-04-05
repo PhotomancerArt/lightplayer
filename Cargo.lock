@@ -3759,6 +3759,7 @@ version = "40.0.0"
 dependencies = [
  "glsl",
  "lp-glsl-diagnostics",
+ "lps-types",
 ]
 
 [[package]]
@@ -4026,10 +4027,6 @@ dependencies = [
 
 [[package]]
 name = "lps-types"
-version = "40.0.0"
-
-[[package]]
-name = "lpvm"
 version = "40.0.0"
 
 [[package]]

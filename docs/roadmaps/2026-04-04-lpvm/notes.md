@@ -15,26 +15,24 @@ Inspired by WASM's Module/Instance/Memory separation, LPVM introduces:
 This separation enables: multiple instances from one module, clean VMContext
 ownership, future parallelism, and a uniform API across backends.
 
-Secondary goal: fix naming. The "glsl" prefix on runtime types (`GlslValue`,
-`GlslType`, `GlslData`, `GlslExecutable`) conflates the language frontend with
-the backend runtime. LPVM provides a clean namespace boundary: everything before
-LPIR is "glsl" (language-specific), everything after is "lpvm" (runtime).
+Secondary goal: fix naming. Retire the `lp-glsl/` catch-all in favor of three
+layers: **`lps-*`** (shader / logical types / frontends), **`lpir`** (scalarized
+IR only), **`lpvm-*`** (runtime). Runtime types (`GlslValue`, …) move to `lpvm`;
+logical signatures live in **`lps-types`**, not in `lpir` (LPIR does not carry
+vec3/mat4 as IR types).
 
 ## Current State
 
 ### Crates that would be affected
 
-- `lp-glsl-abi` — values, types, layout, metadata, VmContext. The "grab bag"
-  crate for ABI types. no_std.
-- `lp-glsl-exec` — `GlslExecutable` trait. Used by filetests, not by lp-engine.
-- `lps-types` — `Type`, `FunctionSignature`, semantic types. no_std.
-- `lpir-cranelift` — LPIR → Cranelift → machine code. Also contains RV32
-  emulator backend behind `riscv32-emu` feature.
-- `lpir` — IR definition + interpreter (`interp` module).
-- `lp-glsl-wasm` — LPIR → WASM bytecode emission.
-- `lp-riscv-emu` — RISC-V emulator (combines code, memory, thread state).
-- `lp-engine` — production runtime. Uses `JitModule`/`DirectCall` from
-  lpir-cranelift directly, not `GlslExecutable`.
+- `lp-glsl-abi` → **`lpvm`** — values, layout, runtime metadata, VmContext.
+- `lp-glsl-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
+- `lp-glsl-core` → **`lps-types`** — logical `LpsType`, `LpsFunctionSignature`, etc.
+- `lpir-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
+- `lpir` — scalarized IR + interpreter only.
+- `lp-glsl-wasm` → **`lpvm-wasm`**.
+- `lp-riscv-emu` — refactor for module/memory/instance; still general-purpose.
+- `lp-engine` — becomes generic over `LpvmModule`; today uses `JitModule`/`DirectCall`.
 
 ### Backends today
 
@@ -43,7 +41,7 @@ LPIR is "glsl" (language-specific), everything after is "lpvm" (runtime).
 | Cranelift JIT (host+embedded) | `lpir-cranelift`                         | cranelift-*             |
 | RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`) | lp-riscv-*              |
 | WASM emission                 | `lp-glsl-wasm`                           | wasm-encoder            |
-| WASM runner (desktop)         | `lp-glsl-filetests`                      | wasmtime                |
+| WASM runner (desktop)         | `lps-filetests` (transitional names vary) | wasmtime                |
 | WASM runner (browser)         | `web-demo`                               | browser WebAssembly API |
 | LPIR interpreter              | `lpir::interp`                           | (none beyond lpir)      |
 
@@ -87,11 +85,10 @@ make reasonable concessions.
 ### Q10: Directory structure
 
 **Answer**: `lpvm/` at the repo root, alongside `lp-riscv/`, `lp-core/`, etc.
-Long-term goal is to eliminate `lp-glsl/` entirely — it was the old catchall
-for the shader system and is not a good name. `lpir` would also eventually
-move out of `lp-glsl/` to its own top-level location (or under `lpvm/`).
-The remaining GLSL-specific crates (`lp-glsl-naga`, builtins) may get
-reorganized or renamed in a future pass.
+Long-term: eliminate **`lp-glsl/`** as a directory name. Shader layer becomes
+**`lps-*`** (`lps-types`, `lps-naga`, `lps-builtins`, `lps-filetests`, …).
+**`lpir`** may move to top-level. **`lpvm/`** holds VM crates. Repo may be
+mid-rename; [overview.md](overview.md) is canonical for target names.
 
 ## Open Questions
 
@@ -99,21 +96,19 @@ reorganized or renamed in a future pass.
 
 What goes in the `lpvm` core crate?
 
-Candidates: values (`GlslValue`), types (`GlslType`/`Type`), layout functions,
-VmContext, Module/Instance/Memory traits, metadata types, data types, path
-accessors.
+Candidates: values (`GlslValue` → `LpvmValue`), runtime metadata/layout (`GlslType`
+ABI side → `Lpvm*` types that may reference **`lps-types`**), layout functions,
+VmContext, Module/Instance/Memory traits, `LpvmData`, path accessors.
 
-**Context**: Currently these are spread across `lp-glsl-abi` (values, types,
-layout, vmcontext, metadata), `lps-types` (Type, FunctionSignature), and
-`lp-glsl-exec` (GlslExecutable trait). All are no_std.
+**Context**: Spread across `lp-glsl-abi`, **`lps-types`** (logical signatures),
+and `lp-glsl-exec` (trait).
 
-**Suggested answer**: All of the above go in one `lpvm` crate. The traits use
-the types, so separating them creates circular deps or an awkward third crate.
-This matches wasmtime/wasmer where the core crate is the unified API surface.
-
-**Answer**: Yes. One `lpvm` crate containing values, types, layout, vmcontext,
-metadata, traits. Replaces `lp-glsl-abi`, `lp-glsl-exec`, absorbs relevant
-parts of `lps-types`.
+**Answer**: One **`lpvm`** crate for **VM/runtime** surface: traits, `LpvmValue`,
+layout, VMContext, runtime-oriented metadata. **Logical** shader types
+(`LpsType`, `LpsFunctionSignature`, …) stay in **`lps-types`** — they are not
+LPIR (scalarized) and not VM-only; frontend and runtime both use them.
+**`lpvm`** depends on **`lps-types`** and **`lpir`**. Replaces `lp-glsl-abi` and
+`lp-glsl-exec`; does **not** absorb `lps-types`.
 
 ### Q2: Backend crate organization
 
@@ -164,26 +159,22 @@ keeps `lpir` self-contained for IR-level testing.
 IR-level testing. `lpvm-interp` is future work if we ever need the interpreter
 behind the LPVM trait interface.
 
-### Q5: Relationship between lps-types and lpvm
+### Q5: Relationship between `lps-types`, `lpir`, and `lpvm`
 
-`lps-types` defines `Type` and `FunctionSignature`. Are these
-GLSL-specific or universal runtime types?
+`lps-types` holds logical shader types (`LpsType`, `LpsFunctionSignature`, …).
+Are these GLSL-only? IR? Runtime-only?
 
-**Context**: The types are float, int, vec2-4, mat2-4, bool, arrays, structs.
-These aren't GLSL-specific — they're the universal set of shader types. They're
-used by the runtime (function metadata, call signatures) as much as by the
-compiler.
+**Context**: float, vec2–4, mat2–4, bool, arrays, structs — shared by GLSL
+today and other shading languages later. **`lpir` is scalarized** (no vec3 as an
+IR type). The frontend lowers to LPIR but still emits **metadata** using logical
+types.
 
-**Suggested answer**: Move these into `lpvm`. They're runtime types that happen
-to also be used by the GLSL frontend. `lp-glsl-naga` would depend on `lpvm`
-for type definitions rather than `lps-types`.
-
-**Answer**: These are IR types, not runtime types. They belong in `lpir`, which
-is the shared dependency between frontend and backend. `lps-types` gets
-absorbed into `lpir`. The frontend (`lp-glsl-naga`) depends on `lpir` to
-produce IR — it does not need `lpvm`. `lpvm` depends on `lpir` for type
-definitions and adds runtime-specific concepts (Value, VmContext, layout,
-traits).
+**Answer**: **`lps-types`** is the **shader-layer type vocabulary** — shared by
+**`lps-naga`** (and future frontends) and **`lpvm`** (signatures, calling
+convention, metadata). **`lpir`** does **not** absorb these types. **`lpvm`**
+adds runtime values (`LpvmValue`), VMContext, layout, and traits; it **depends on**
+**`lps-types`** where signatures matter. Naming: **`Lps*`** in `lps-types`,
+**`Lpvm*`** for VM-layer runtime types.
 
 ### Q6: What happens to lp-riscv-emu?
 
@@ -224,7 +215,8 @@ in-browser as a development simulation target. In-browser, shaders run via
 `lpvm-wasm` (browser WebAssembly API), not Cranelift. So the engine must be
 backend-agnostic. Generics (monomorphization) over `M: lpvm::Module` give
 zero-cost abstraction: each firmware crate selects its backend at the top
-level (`fw-esp32` → `lpvm-cranelift`, `fw-wasm` → `lpvm-wasm`).
+level (`fw-esp32` → `lpvm-cranelift`, `fw-wasm` → `lpvm-wasm`). Traits are
+`LpvmModule` / `LpvmInstance` / `LpvmMemory` (names per M1).
 
 ### Q8: Naming conventions
 

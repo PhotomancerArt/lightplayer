@@ -1,4 +1,4 @@
-//! [`NagaModule`], function metadata, Naga → [`GlslType`] mapping, and [`CompileError`] for type extraction.
+//! [`NagaModule`], function metadata, Naga → [`LpsType`] mapping, and [`CompileError`] for type extraction.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -8,7 +8,7 @@ use core::fmt;
 
 use naga::{AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
 
-use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, GlslType};
+use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, LpsType};
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -31,7 +31,7 @@ impl core::error::Error for CompileError {}
 pub struct FunctionInfo {
     pub name: String,
     pub params: Vec<GlslParamMeta>,
-    pub return_type: GlslType,
+    pub return_type: LpsType,
 }
 
 /// Parsed module plus one entry per named user function, in [`Module::functions`] iteration order.
@@ -105,7 +105,7 @@ fn function_info(
         .collect::<Result<Vec<_>, _>>()?;
     let return_type = match &function.result {
         Some(res) => naga_type_inner_to_glsl(module, &module.types[res.ty].inner)?,
-        None => GlslType::Void,
+        None => LpsType::Void,
     };
     Ok(FunctionInfo {
         name,
@@ -114,16 +114,16 @@ fn function_info(
     })
 }
 
-fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslType, CompileError> {
+fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<LpsType, CompileError> {
     match *inner {
         TypeInner::Pointer { base, .. } => {
             naga_type_inner_to_glsl(module, &module.types[base].inner)
         }
         TypeInner::Scalar(scalar) => match scalar.kind {
-            ScalarKind::Float if scalar.width == 4 => Ok(GlslType::Float),
-            ScalarKind::Sint if scalar.width == 4 => Ok(GlslType::Int),
-            ScalarKind::Uint if scalar.width == 4 => Ok(GlslType::UInt),
-            ScalarKind::Bool => Ok(GlslType::Bool),
+            ScalarKind::Float if scalar.width == 4 => Ok(LpsType::Float),
+            ScalarKind::Sint if scalar.width == 4 => Ok(LpsType::Int),
+            ScalarKind::Uint if scalar.width == 4 => Ok(LpsType::UInt),
+            ScalarKind::Bool => Ok(LpsType::Bool),
             _ => Err(CompileError::UnsupportedType(format!(
                 "scalar kind {:?} width {}",
                 scalar.kind, scalar.width
@@ -141,18 +141,18 @@ fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslTyp
                 )));
             }
             match (size, scalar.kind) {
-                (VectorSize::Bi, ScalarKind::Float) => Ok(GlslType::Vec2),
-                (VectorSize::Tri, ScalarKind::Float) => Ok(GlslType::Vec3),
-                (VectorSize::Quad, ScalarKind::Float) => Ok(GlslType::Vec4),
-                (VectorSize::Bi, ScalarKind::Sint) => Ok(GlslType::IVec2),
-                (VectorSize::Tri, ScalarKind::Sint) => Ok(GlslType::IVec3),
-                (VectorSize::Quad, ScalarKind::Sint) => Ok(GlslType::IVec4),
-                (VectorSize::Bi, ScalarKind::Uint) => Ok(GlslType::UVec2),
-                (VectorSize::Tri, ScalarKind::Uint) => Ok(GlslType::UVec3),
-                (VectorSize::Quad, ScalarKind::Uint) => Ok(GlslType::UVec4),
-                (VectorSize::Bi, ScalarKind::Bool) => Ok(GlslType::BVec2),
-                (VectorSize::Tri, ScalarKind::Bool) => Ok(GlslType::BVec3),
-                (VectorSize::Quad, ScalarKind::Bool) => Ok(GlslType::BVec4),
+                (VectorSize::Bi, ScalarKind::Float) => Ok(LpsType::Vec2),
+                (VectorSize::Tri, ScalarKind::Float) => Ok(LpsType::Vec3),
+                (VectorSize::Quad, ScalarKind::Float) => Ok(LpsType::Vec4),
+                (VectorSize::Bi, ScalarKind::Sint) => Ok(LpsType::IVec2),
+                (VectorSize::Tri, ScalarKind::Sint) => Ok(LpsType::IVec3),
+                (VectorSize::Quad, ScalarKind::Sint) => Ok(LpsType::IVec4),
+                (VectorSize::Bi, ScalarKind::Uint) => Ok(LpsType::UVec2),
+                (VectorSize::Tri, ScalarKind::Uint) => Ok(LpsType::UVec3),
+                (VectorSize::Quad, ScalarKind::Uint) => Ok(LpsType::UVec4),
+                (VectorSize::Bi, ScalarKind::Bool) => Ok(LpsType::BVec2),
+                (VectorSize::Tri, ScalarKind::Bool) => Ok(LpsType::BVec3),
+                (VectorSize::Quad, ScalarKind::Bool) => Ok(LpsType::BVec4),
                 _ => Err(CompileError::UnsupportedType(format!(
                     "vector {:?} {:?}",
                     size, scalar.kind
@@ -169,7 +169,7 @@ fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslTyp
                 }
             };
             let elem = naga_type_inner_to_glsl(module, &module.types[base].inner)?;
-            Ok(GlslType::Array {
+            Ok(LpsType::Array {
                 element: Box::new(elem),
                 len,
             })
@@ -186,9 +186,9 @@ fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<GlslTyp
                 )));
             }
             match (columns, rows) {
-                (VectorSize::Bi, VectorSize::Bi) => Ok(GlslType::Mat2),
-                (VectorSize::Tri, VectorSize::Tri) => Ok(GlslType::Mat3),
-                (VectorSize::Quad, VectorSize::Quad) => Ok(GlslType::Mat4),
+                (VectorSize::Bi, VectorSize::Bi) => Ok(LpsType::Mat2),
+                (VectorSize::Tri, VectorSize::Tri) => Ok(LpsType::Mat3),
+                (VectorSize::Quad, VectorSize::Quad) => Ok(LpsType::Mat4),
                 _ => Err(CompileError::UnsupportedType(format!(
                     "matrix {columns:?}x{rows:?}"
                 ))),
