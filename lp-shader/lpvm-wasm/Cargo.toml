@@ -1,0 +1,34 @@
+[package]
+name = "lpvm-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LPIR to WebAssembly emission and wasmtime runtime for LPVM (disable default features for emit-only)"
+
+[lints]
+workspace = true
+
+[features]
+default = ["runtime"]
+runtime = ["dep:wasmtime", "dep:lpvm"]
+
+[dependencies]
+lps-builtin-ids = { path = "../lps-builtin-ids" }
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
+wasm-encoder = "0.245"
+log = { workspace = true, default-features = false }
+lpvm = { path = "../lpvm", optional = true }
+wasmtime = { version = "42", optional = true }
+
+[dev-dependencies]
+lps-frontend = { path = "../lps-frontend" }
+wasmtime = "42"
+
+[[test]]
+name = "runtime_lpvm_call"
+required-features = ["runtime"]
+
+[[test]]
+name = "runtime_builtin_sin"
+required-features = ["runtime"]
