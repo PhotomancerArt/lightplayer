@@ -1,7 +1,7 @@
 // test run
 
 // =============================================================================
-// VMContext: __lp_get_fuel reads header fuel (must match lp_glsl_abi::DEFAULT_VMCTX_FUEL)
+// VMContext: __lp_get_fuel reads header fuel (must match lpvm::DEFAULT_VMCTX_FUEL)
 // =============================================================================
 
 // @unimplemented(rv32.q32): VMContext must be placed in emulator RAM, not host stack pointer

@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 
-use lp_glsl_abi::GlslFunctionMeta;
-use lp_glsl_abi::LpsValue;
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
 use lpir::FloatMode as LpirFloatMode;
 use lpir_cranelift::{CompileOptions, CompilerError, JitModule, jit};
 use lpir_cranelift::{GlslQ32, GlslReturn};
 use lps_types::{LpsFnSig, LpsType};
+use lpvm::GlslFunctionMeta;
+use lpvm::LpsValue;
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,

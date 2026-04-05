@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use lp_glsl_abi::LpsValue;
-use lp_glsl_abi::{GlslFunctionMeta, GlslModuleMeta};
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
 use lp_riscv_elf::ElfLoadInfo;
@@ -14,6 +12,8 @@ use lpir_cranelift::{
 };
 use lpir_cranelift::{GlslQ32, GlslReturn};
 use lps_types::{LpsFnSig, LpsType};
+use lpvm::LpsValue;
+use lpvm::{GlslFunctionMeta, GlslModuleMeta};
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,

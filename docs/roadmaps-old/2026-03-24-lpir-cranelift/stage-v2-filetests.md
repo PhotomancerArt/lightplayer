@@ -6,7 +6,7 @@ Wire **`lp-glsl-filetests`** to **`lpir-cranelift`** for **`jit.q32`** (host CPU
 and **`rv32.q32`** (emulator), using the RV32 object + link + emulator path built
 in **Stage V1**. **Remove** the legacy **`cranelift.q32`** target and **`lp-glsl-cranelift`**
 from the filetest runner. Shared boundary: **`lp-glsl-exec`** (**`GlslExecutable`**),
-**`lp-glsl-abi`** (**`GlslValue`**), **`lp-glsl-diagnostics`**, **`lps-types`**
+**`lpvm`** (**`GlslValue`**), **`lp-glsl-diagnostics`**, **`lps-types`**
 as needed — **legacy `lp-glsl-frontend` / `lp-glsl-cranelift` stay unchanged** until
 a later deprecation pass.
 
@@ -24,7 +24,7 @@ there)
 - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations
 - **`rv32.q32`:** LPIR → Stage V1 object + link + emulator
 - **`wasm.q32`:** unchanged backend; **`impl GlslExecutable`** uses **`lp-glsl-exec`**
-- **Wire** filetests + wasm to **`lp-glsl-exec`** / **`lp-glsl-abi`** (etc.);
+- **Wire** filetests + wasm to **`lp-glsl-exec`** / **`lpvm`** (etc.);
   **remove `lp-glsl-cranelift` dependency from `lp-glsl-filetests`**
 - **Remove** legacy **`cranelift.q32`** / **`Backend::Cranelift`**; migrate
   annotations (`backend=cranelift` → `jit` or `rv32`)

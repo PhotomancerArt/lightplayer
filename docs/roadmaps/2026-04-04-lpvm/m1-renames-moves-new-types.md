@@ -44,9 +44,9 @@ types in **`lps-types`**.
 
 ### `lps-types` (shader layer — rename from `lp-glsl-core`)
 
-| Transitional crate | Target package | Public types (target names) |
-|--------------------|----------------|-----------------------------|
-| `lp-glsl-core` | `lps-types` | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
+| Transitional crate | Target package | Public types (target names)                                                           |
+|--------------------|----------------|---------------------------------------------------------------------------------------|
+| `lp-glsl-core`     | `lps-types`    | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
 
 Use a consistent **`Lps*`** prefix for this crate’s public types so they never
 collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
@@ -55,7 +55,7 @@ collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
 `lps-filetests`, any crate that still depended on `lp-glsl-exec` for signatures
 (see below).
 
-### `lpvm` (new crate — absorbs `lp-glsl-abi` + replaces `lp-glsl-exec` traits)
+### `lpvm` (new crate — absorbs `lpvm` + replaces `lp-glsl-exec` traits)
 
 Create `lpvm/lpvm/` at repo root. `#![no_std]` with `extern crate alloc`.
 
@@ -70,31 +70,31 @@ lps-types = { path = "...", default-features = false }
 Paths: use whatever directory layout exists after renames (`lp-glsl/lpir`,
 `lps/lps-types`, etc.).
 
-**From `lp-glsl-abi` (rename map):**
+**From `lpvm` (rename map):**
 
-| Old name | New name | Notes |
-|----------|----------|-------|
-| `GlslValue` | `LpvmValue` | Runtime value enum |
-| `GlslType` (metadata / layout) | `LpvmType` or align with `lps-types` | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
-| `GlslData` | `LpvmData` | |
-| `GlslModuleMeta` | `LpvmModuleMeta` | Likely references `lps-types` for function signatures |
-| `GlslFunctionMeta` | `LpvmFunctionMeta` | |
-| `GlslParamMeta` | `LpvmParamMeta` | |
-| `GlslParamQualifier` (ABI) | `LpvmParamQualifier` | **Not** the same as `LpsParamQualifier` unless you intentionally unify |
-| `LayoutRules`, `StructMember` | `LpvmLayoutRules`, `LpvmStructMember` | |
-| `VmContext` | `LpvmVmContext` | |
-| Paths, layout fns, constants | `lpvm::path`, `lpvm::layout`, `lpvm::vmcontext` | |
+| Old name                       | New name                                        | Notes                                                                                                                                 |
+|--------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `GlslValue`                    | `LpvmValue`                                     | Runtime value enum                                                                                                                    |
+| `GlslType` (metadata / layout) | `LpvmType` or align with `lps-types`            | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
+| `GlslData`                     | `LpvmData`                                      |                                                                                                                                       |
+| `GlslModuleMeta`               | `LpvmModuleMeta`                                | Likely references `lps-types` for function signatures                                                                                 |
+| `GlslFunctionMeta`             | `LpvmFunctionMeta`                              |                                                                                                                                       |
+| `GlslParamMeta`                | `LpvmParamMeta`                                 |                                                                                                                                       |
+| `GlslParamQualifier` (ABI)     | `LpvmParamQualifier`                            | **Not** the same as `LpsParamQualifier` unless you intentionally unify                                                                |
+| `LayoutRules`, `StructMember`  | `LpvmLayoutRules`, `LpvmStructMember`           |                                                                                                                                       |
+| `VmContext`                    | `LpvmVmContext`                                 |                                                                                                                                       |
+| Paths, layout fns, constants   | `lpvm::path`, `lpvm::layout`, `lpvm::vmcontext` |                                                                                                                                       |
 
 **From `lp-glsl-exec`:**
 
 Replace **`GlslExecutable`** with new traits (design in this milestone;
 implementations in M2–M4):
 
-| Trait | Role |
-|-------|------|
-| `LpvmModule` | Compiled artifact; can instantiate |
-| `LpvmInstance` | Execution + calls + VMContext |
-| `LpvmMemory` | Linear memory for an instance |
+| Trait          | Role                               |
+|----------------|------------------------------------|
+| `LpvmModule`   | Compiled artifact; can instantiate |
+| `LpvmInstance` | Execution + calls + VMContext      |
+| `LpvmMemory`   | Linear memory for an instance      |
 
 ### Diagnostics / errors
 
@@ -139,7 +139,7 @@ Add `lpvm/lpvm` and `lps-types` (or transitional path) to members as they appear
 
 ## Dependents to keep in mind
 
-**Will eventually use `lpvm` instead of `lp-glsl-abi`:**
+**Will eventually use `lpvm` instead of `lpvm`:**
 
 - `lp-engine`, `lps-builtins`, `lps-naga`, `lpir-cranelift`, `lps-filetests`,
   `lp-glsl-exec` (until removed)

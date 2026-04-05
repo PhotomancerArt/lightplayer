@@ -5,7 +5,7 @@
 In `lpir-cranelift/src/call.rs:48-51`:
 
 ```rust
-let header = lp_glsl_abi::VmContextHeader::default();
+let header = lpvm::VmContextHeader::default();
 let vmctx = core::ptr::from_ref(&header).cast::<u8>();
 full.push(vmctx as usize as i32);  // 64-bit pointer TRUNCATED to 32-bit!
 ```

@@ -1,7 +1,10 @@
 # Plan: VMContext-enabled builtins PoC
 
 ## Overview
-Add optional VMContext parameter to builtins, creating a proof-of-concept builtin (`__lp_get_fuel`) that reads from the VMContext. This establishes infrastructure for texture sampling and other context-aware builtins.
+
+Add optional VMContext parameter to builtins, creating a proof-of-concept builtin (`__lp_get_fuel`)
+that reads from the VMContext. This establishes infrastructure for texture sampling and other
+context-aware builtins.
 
 ## Design
 
@@ -15,6 +18,7 @@ uint __lp_get_fuel(vmcontext ctx);
 ```
 
 The `vmcontext` type is:
+
 - Recognized by the codegen as a marker for `needs_vmctx`
 - Stripped from the user-visible signature
 - Passed implicitly as `&VmContext` to the implementation
@@ -22,18 +26,18 @@ The `vmcontext` type is:
 ### VmContext Structure
 
 ```rust
-// In lp-glsl-lp-glsl-abi/src/vmcontext.rs
+// In lp-glsl-lpvm/src/vmcontext.rs
 #[repr(C)]
 pub struct VmContext {
     /// Remaining instruction fuel (decremented by interpreter/JIT)
     pub fuel: u64,
-    
+
     /// Trap handler function pointer (if fuel reaches 0)
     pub trap_handler: u32,
-    
+
     /// Pointer to metadata describing globals/uniforms layout
     pub metadata: *const GlslType,
-    
+
     // Globals and uniforms follow contiguously in memory after this header
 }
 
@@ -42,13 +46,13 @@ impl VmContext {
     pub fn globals_base(&self) -> *mut u8 {
         (self as *const _ as *const u8).add(core::mem::size_of::<VmContext>()) as *mut u8
     }
-    
+
     /// Placeholder: Read a global value by index
     pub fn get_global(&self, index: usize) -> GlslValue {
         // TODO(Milestone 2): Implement using metadata
         unimplemented!()
     }
-    
+
     /// Placeholder: Write a global value by index  
     pub fn set_global(&mut self, index: usize, value: GlslValue) {
         // TODO(Milestone 2): Implement using metadata
@@ -106,7 +110,7 @@ impl VmContext {
 
 ```
 lp-glsl/
-├── lp-glsl-abi/
+├── lpvm/
 │   └── src/
 │       └── vmcontext.rs          # VmContext struct, methods, docs
 │
@@ -150,11 +154,13 @@ lp-glsl/
 ## Phase 1: Update VmContext with documentation and methods
 
 ### Scope
-Enhance `VmContext` struct with proper documentation, metadata pointer, and placeholder methods for global access.
+
+Enhance `VmContext` struct with proper documentation, metadata pointer, and placeholder methods for
+global access.
 
 ### Implementation Details
 
-**File: `lp-glsl-lp-glsl-abi/src/vmcontext.rs`**
+**File: `lp-glsl-lpvm/src/vmcontext.rs`**
 
 ```rust
 //! VmContext is the central runtime structure for shader execution.
@@ -212,9 +218,10 @@ impl VmContext {
 ```
 
 ### Validate
+
 ```bash
-cargo check -p lp-glsl-abi
-cargo test -p lp-glsl-abi
+cargo check -p lpvm
+cargo test -p lpvm
 ```
 
 ---
@@ -222,13 +229,16 @@ cargo test -p lp-glsl-abi
 ## Phase 2: Add needs_vmctx to builtin system
 
 ### Scope
-Add `needs_vmctx` flag to `BuiltinSignature` and `ImportDecl`, update codegen to detect `vmcontext` type.
+
+Add `needs_vmctx` flag to `BuiltinSignature` and `ImportDecl`, update codegen to detect `vmcontext`
+type.
 
 ### Implementation Details
 
 **File: `lp-glsl-builtin-ids/src/lib.rs`**
 
 Add to `BuiltinSignature`:
+
 ```rust
 pub struct BuiltinSignature {
     pub id: BuiltinId,
@@ -243,6 +253,7 @@ pub struct BuiltinSignature {
 **File: `lp-glsl-builtins-gen`** (codegen tool)
 
 Update parser to:
+
 1. Recognize `vmcontext` as a reserved type name
 2. Set `needs_vmctx = true` if any param has type `vmcontext`
 3. Exclude `vmcontext` param from `params` array (it's implicit)
@@ -250,6 +261,7 @@ Update parser to:
 **File: `lpir/src/module.rs`**
 
 Add to `ImportDecl`:
+
 ```rust
 pub struct ImportDecl {
     pub module_name: String,
@@ -261,6 +273,7 @@ pub struct ImportDecl {
 ```
 
 ### Validate
+
 ```bash
 cargo build -p lp-glsl-builtins-gen-app
 cargo run -p lp-glsl-builtins-gen-app  # Regenerate builtins
@@ -271,6 +284,7 @@ cargo run -p lp-glsl-builtins-gen-app  # Regenerate builtins
 ## Phase 3: Wire through lowering
 
 ### Scope
+
 Copy `needs_vmctx` from builtin IDs to ImportDecl, conditionally add VMContext to Call args.
 
 ### Implementation Details
@@ -278,6 +292,7 @@ Copy `needs_vmctx` from builtin IDs to ImportDecl, conditionally add VMContext t
 **File: `lp-glsl-lp-glsl-naga/src/lower_ctx.rs`**
 
 When building import map from builtin signatures, copy the flag:
+
 ```rust
 import_decl.needs_vmctx = builtin_sig.needs_vmctx;
 ```
@@ -285,6 +300,7 @@ import_decl.needs_vmctx = builtin_sig.needs_vmctx;
 **File: `lp-glsl-lp-glsl-naga/src/lower_stmt.rs`**
 
 In `lower_user_call()`, check before adding VMContext:
+
 ```rust
 let mut arg_vs = Vec::new();
 
@@ -307,6 +323,7 @@ if is_user_func || is_vmctx_builtin {
 ```
 
 ### Validate
+
 ```bash
 cargo check -p lp-glsl-naga
 cargo test -p lp-glsl-naga
@@ -317,6 +334,7 @@ cargo test -p lp-glsl-naga
 ## Phase 4: Wire through Cranelift codegen
 
 ### Scope
+
 Include VMContext in import signatures when `needs_vmctx` is true.
 
 ### Implementation Details
@@ -339,13 +357,17 @@ if needs_vmctx {
 }
 ```
 
-(Note: Need to handle how we know the callee when building signature - may need to pass callee info or check differently.)
+(Note: Need to handle how we know the callee when building signature - may need to pass callee info
+or check differently.)
 
-Actually, signature building happens per-function, not per-call. So the function definition itself needs to carry `needs_vmctx`. 
+Actually, signature building happens per-function, not per-call. So the function definition itself
+needs to carry `needs_vmctx`.
 
-Better approach: `IrFunction` already has `vmctx_vreg` - that's for user functions. For imports, we check `ImportDecl.needs_vmctx` when generating the import's signature in the module context.
+Better approach: `IrFunction` already has `vmctx_vreg` - that's for user functions. For imports, we
+check `ImportDecl.needs_vmctx` when generating the import's signature in the module context.
 
 ### Validate
+
 ```bash
 cargo check -p lpir-cranelift
 cargo test -p lpir-cranelift
@@ -356,6 +378,7 @@ cargo test -p lpir-cranelift
 ## Phase 5: Create PoC builtin
 
 ### Scope
+
 Create `__lp_get_fuel()` builtin that reads `fuel` from VMContext.
 
 ### Implementation Details
@@ -370,7 +393,7 @@ uint __lp_get_fuel(vmcontext ctx);
 **File: `lp-glsl-builtins-emu/src/lib.rs`**
 
 ```rust
-use lp_glsl_abi::vmcontext::VmContext;
+use lpvm::vmcontext::VmContext;
 
 /// Get remaining instruction fuel from VMContext
 /// 
@@ -386,6 +409,7 @@ pub unsafe extern "C" fn __lp_get_fuel(ctx: &VmContext) -> u32 {
 Stub or actual WASM implementation.
 
 ### Validate
+
 ```bash
 cargo build -p lp-glsl-builtins-emu-app
 ```
@@ -395,6 +419,7 @@ cargo build -p lp-glsl-builtins-emu-app
 ## Phase 6: Test file and validation
 
 ### Scope
+
 Create test file and verify PoC works.
 
 ### Implementation Details
@@ -413,6 +438,7 @@ uint test_fuel_read() {
 ```
 
 ### Validate
+
 ```bash
 # Build all builtins
 cargo build -p lp-glsl-builtins-emu-app
@@ -430,18 +456,21 @@ cargo run -p lp-glsl-filetests-app -- test
 ## Phase 7: Cleanup & validation
 
 ### Scope
+
 Final cleanup, documentation, commit.
 
 ### Tasks
+
 1. Review all TODO comments
 2. Check for unused imports/functions
 3. Verify all tests pass
 4. Update any relevant documentation
 
 ### Validate
+
 ```bash
-cargo test -p lp-glsl-abi -p lp-glsl-naga -p lpir-cranelift -p lp-glsl-filetests
-cargo clippy -p lp-glsl-abi -p lp-glsl-naga -p lpir-cranelift
+cargo test -p lpvm -p lp-glsl-naga -p lpir-cranelift -p lp-glsl-filetests
+cargo clippy -p lpvm -p lp-glsl-naga -p lpir-cranelift
 ```
 
 ---
@@ -451,11 +480,12 @@ cargo clippy -p lp-glsl-abi -p lp-glsl-naga -p lpir-cranelift
 ### Open questions for later milestones:
 
 - How does the metadata pointer get initialized? (By host before shader execution)
-- How do we handle the distinction between uniforms (read-only, set at init) vs globals (read-write, mutable)?
+- How do we handle the distinction between uniforms (read-only, set at init) vs globals (read-write,
+  mutable)?
 - Should VmContext methods for globals check permissions at runtime?
 
 ### Design decisions documented:
 
 - **Option B** (vmcontext type) selected for builtin signatures
-- **`lp-glsl-builtins-emu -> lp-glsl-abi`** dependency is acceptable
+- **`lp-glsl-builtins-emu -> lpvm`** dependency is acceptable
 - **Direct field access** for simple fields like `fuel`, methods for complex operations

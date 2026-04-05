@@ -37,7 +37,7 @@ pub enum GlslType {
 - Does NOT support structs
 - Used for function parameter/return metadata
 
-**`lp-glsl-abi/src/glsl_value.rs` - `GlslValue`**:
+**`lpvm/src/glsl_value.rs` - `GlslValue`**:
 
 ```rust
 pub enum GlslValue {

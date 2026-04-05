@@ -3,6 +3,7 @@
 ## Scope of Phase
 
 Update all test harnesses to allocate and pass VMContext when calling shaders. This includes:
+
 - `lp-glsl-filetests` (Q32 and WASM runners)
 - `lp-glsl-exec` (executable helpers)
 - Any integration tests
@@ -20,7 +21,7 @@ Update all test harnesses to allocate and pass VMContext when calling shaders. T
 Add VMContext allocation:
 
 ```rust
-use lp_glsl_abi::minimal_vmcontext;
+use lpvm::minimal_vmcontext;
 
 pub fn exec_q32_shader(
     module: &JitModule,
@@ -68,7 +69,7 @@ impl Q32ExecContext {
 For WASM, VMContext is allocated in WASM memory:
 
 ```rust
-use lp_glsl_abi::{VmContextHeader, VMCTX_HEADER_SIZE};
+use lpvm::{VmContextHeader, VMCTX_HEADER_SIZE};
 
 pub fn run_wasm_shader(
     module: &wasmtime::Module,

@@ -103,7 +103,7 @@ Full layout and commands: [`lp-glsl/README.md`](lp-glsl/README.md).
 - **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
 - **`lps-types`** Shared type and function-signature shapes for tests / exec helpers
 - **`lp-glsl-diagnostics`** Error codes, spans, `GlslError`
-- **`lp-glsl-abi`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
+- **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
 - **`lp-glsl-exec`** `GlslExecutable` trait and filetest backend glue
 - **`lp-glsl-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
 - **`lp-glsl-builtin-ids`** Generated enum of builtin function IDs
@@ -144,7 +144,7 @@ LightPlayer would not be possible without the amazing work of these projects:
   **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
   targets
 - **[glsl-parser](https://git.sr.ht/~hadronized/glsl)** - GLSL parser (
-  [forked](https://github.com/light-player/glsl-parser) for spans; used by `lp-glsl-abi` and
+  [forked](https://github.com/light-player/glsl-parser) for spans; used by `lpvm` and
   filetest helpers, not the main naga frontend)
 - **[Lygia](https://github.com/patriciogonzalezvivo/lygia)** - Shader library (source for lpfx
   built-in functions)

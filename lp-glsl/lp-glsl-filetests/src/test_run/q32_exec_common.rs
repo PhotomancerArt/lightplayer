@@ -2,15 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use lp_glsl_abi::LpsValue;
-use lp_glsl_abi::{GlslFunctionMeta, LpsType};
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
 use lps_types::{FnParam, LpsFnSig};
+use lpvm::LpsValue;
+use lpvm::{GlslFunctionMeta, LpsType};
 
-pub(crate) fn signatures_from_meta(
-    meta: &lp_glsl_abi::GlslModuleMeta,
-) -> BTreeMap<String, LpsFnSig> {
+pub(crate) fn signatures_from_meta(meta: &lpvm::GlslModuleMeta) -> BTreeMap<String, LpsFnSig> {
     let mut m = BTreeMap::new();
     for g in &meta.functions {
         m.insert(g.name.clone(), fn_meta_to_signature(g));

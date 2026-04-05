@@ -2,10 +2,12 @@
 
 ## Scope of Work
 
-Establish the VMContext type definition, header struct, and signature changes. Thread an empty VMContext (no uniforms or globals yet) through the entire system (Cranelift and WASM).
+Establish the VMContext type definition, header struct, and signature changes. Thread an empty
+VMContext (no uniforms or globals yet) through the entire system (Cranelift and WASM).
 
 **Key deliverables:**
-- `VmContextHeader` struct in `lp-glsl-abi` with well-known fields at fixed offsets
+
+- `VmContextHeader` struct in `lpvm` with well-known fields at fixed offsets
 - `IrFunction.vmctx_vreg: VReg` — explicit VMContext in LPIR
 - All function signatures include VMContext as first param
 - `DirectCall`, `invoke`, WASM emission updated for VMContext
@@ -16,7 +18,7 @@ Establish the VMContext type definition, header struct, and signature changes. T
 
 ```
 lp-glsl/
-├── lp-glsl-abi/
+├── lpvm/
 │   └── src/
 │       ├── lib.rs                    # Re-export VmContextHeader
 │       └── vmcontext.rs              # NEW: VmContextHeader struct, offsets
@@ -60,7 +62,8 @@ pub struct VmContextHeader {
 // Total: 16 bytes, naturally aligned
 ```
 
-The header lives at a fixed offset (0) in every VMContext. The host accesses these fields via the struct. Shader-specific data (uniforms, globals) follows the header at dynamic offsets.
+The header lives at a fixed offset (0) in every VMContext. The host accesses these fields via the
+struct. Shader-specific data (uniforms, globals) follows the header at dynamic offsets.
 
 ### Function Signatures
 
@@ -73,13 +76,16 @@ fn shader(vmctx: *mut VMContext, arg0: i32, arg1: i32) -> i32
 ```
 
 **LPIR representation:**
+
 - `IrFunction.vmctx_vreg: VReg` — always 0
 - User params start at vreg 1
 
 **Cranelift:**
+
 - `signature.params[0]` = `AbiParam::new(pointer_type)`
 
 **WASM:**
+
 - `local.get 0` = vmctx pointer (i32)
 - User params start at `local.get 1`
 
@@ -134,7 +140,7 @@ impl VmContext {
 
 ## Main Components and Interactions
 
-### 1. VmContextHeader (`lp-glsl-abi`)
+### 1. VmContextHeader (`lpvm`)
 
 ```rust
 // vmcontext.rs
@@ -247,10 +253,12 @@ pub fn exec_q32_shader(
 ## Milestone I Focus
 
 This milestone intentionally does NOT include:
+
 - Uniform collection or access
 - Global collection or access
 - `_init()` function
 - Global defaults/reset logic
 - Fuel metering implementation
 
-It only establishes the **plumbing**—getting VMContext through the system so later milestones can build on it.
+It only establishes the **plumbing**—getting VMContext through the system so later milestones can
+build on it.

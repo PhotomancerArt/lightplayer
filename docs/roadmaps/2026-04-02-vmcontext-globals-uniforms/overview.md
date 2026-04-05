@@ -2,12 +2,15 @@
 
 ## Motivation / Rationale
 
-LightPlayer needs GLSL shaders to access `uniform` and `global` variables. Currently, the shader execution environment is stateless—functions operate only on their explicit parameters. To support:
+LightPlayer needs GLSL shaders to access `uniform` and `global` variables. Currently, the shader
+execution environment is stateless—functions operate only on their explicit parameters. To support:
 
 - **Uniforms**: Read-only data set by the host (time, resolution, user parameters)
-- **Globals**: Mutable state within an invocation, shared across function calls (counters, RNG seeds). Reset to initial values before each invocation.
+- **Globals**: Mutable state within an invocation, shared across function calls (counters, RNG
+  seeds). Reset to initial values before each invocation.
 
-We need a runtime context that provides access to this data. The context must work on both RISC-V32 (embedded) and WebAssembly (browser/emu) targets.
+We need a runtime context that provides access to this data. The context must work on both
+RISC-V32 (embedded) and WebAssembly (browser/emu) targets.
 
 ## Architecture / Design
 
@@ -16,10 +19,10 @@ We need a runtime context that provides access to this data. The context must wo
 VMContext is a dynamically-created `GlslType` built at compile time. It contains:
 
 1. **Well-known header** (fixed offsets):
-   - `fuel: u64` — optional gas metering
-   - `trap_handler: u32` — optional callback pointer
-   - `globals_defaults_offset: u32` — offset to globals_defaults section (for memcpy reset)
-   - (room for expansion)
+    - `fuel: u64` — optional gas metering
+    - `trap_handler: u32` — optional callback pointer
+    - `globals_defaults_offset: u32` — offset to globals_defaults section (for memcpy reset)
+    - (room for expansion)
 
 2. **Shader-specific uniforms**: Collected from `uniform` declarations, accessed by name
 
@@ -41,7 +44,8 @@ VMContext (single flat allocation)
 └── [S] defaults_global_position: vec3 // source for reset
 ```
 
-The host accesses well-known fields via a Rust struct (`VmContextHeader`) through unsafe cast. Shader code accesses all fields via `vmctx + offset`.
+The host accesses well-known fields via a Rust struct (`VmContextHeader`) through unsafe cast.
+Shader code accesses all fields via `vmctx + offset`.
 
 ### VMContext as First Parameter
 
@@ -51,11 +55,13 @@ Every shader function receives VMContext as an explicit first parameter:
 - **WASM**: `i32` added to all function signatures
 - **LPIR**: First vreg implicitly holds VMContext; backends treat as native pointer
 
-LPIR stays agnostic—no new opcodes. Lowering produces regular `Op::Load`/`Op::Store` with addresses computed as `vmctx + offset`.
+LPIR stays agnostic—no new opcodes. Lowering produces regular `Op::Load`/`Op::Store` with addresses
+computed as `vmctx + offset`.
 
 ### Uniform Access: Name-Based
 
-Uniforms are **not** accessed via binding IDs. Instead, the host looks up offsets by name using `GlslType` metadata:
+Uniforms are **not** accessed via binding IDs. Instead, the host looks up offsets by name using
+`GlslType` metadata:
 
 ```rust
 // Host side
@@ -63,7 +69,8 @@ let offset = vmcontext_type.path_offset(&["uniform_time"])?;
 let ptr = vmctx_ptr.add(offset);
 ```
 
-This produces cleaner GLSL (no `layout(binding = N)` required) at the cost of name lookup (offset can be cached after first access). A known design choice/limitation.
+This produces cleaner GLSL (no `layout(binding = N)` required) at the cost of name lookup (offset
+can be cached after first access). A known design choice/limitation.
 
 ### Global Initialization and Reset
 
@@ -73,13 +80,16 @@ To avoid re-running shader code on every invocation:
 2. Run `_init(vmctx)` once per shader to initialize both globals and globals_defaults
 3. On each invocation, `memcpy(vmctx.globals_defaults → vmctx.globals)` for fast reset
 
-The `globals_defaults_offset` is stored in the VMContext header (at a fixed well-known offset). The host reads this offset, computes `globals_size` from metadata, and performs `memcpy(vmctx + defaults_offset → vmctx + globals_offset, globals_size)` for fast reset. This assumes globals are initialized only from uniform/constant data—safe for shader patterns.
+The `globals_defaults_offset` is stored in the VMContext header (at a fixed well-known offset). The
+host reads this offset, computes `globals_size` from metadata, and performs
+`memcpy(vmctx + defaults_offset → vmctx + globals_offset, globals_size)` for fast reset. This
+assumes globals are initialized only from uniform/constant data—safe for shader patterns.
 
 ## File Tree
 
 ```
 lp-glsl/
-├── lp-glsl-abi/
+├── lpvm/
 │   └── src/
 │       └── vmcontext.rs        # VmContextHeader, constants, builder
 ├── lp-glsl-naga/
@@ -112,6 +122,7 @@ docs/design/
 Store VMContext pointer in a reserved register (RISC-V) or WASM global.
 
 **Rejected**: Requires:
+
 - Cranelift reserved register configuration (not well-tested on RISC-V)
 - Custom assembly per architecture for setup/teardown
 - LPIR language extensions (new opcodes)
@@ -123,28 +134,38 @@ The explicit parameter approach is simpler, more portable, and has negligible co
 
 VMContext contains pointers to separate allocations for uniforms and globals.
 
-**Rejected**: Two allocations means two cache lines accessed. Single flat struct keeps everything contiguous—better cache locality.
+**Rejected**: Two allocations means two cache lines accessed. Single flat struct keeps everything
+contiguous—better cache locality.
 
 ### 3. Binding-Based Uniform Access
 
 Use `layout(binding = N)` to identify uniforms.
 
-**Rejected**: Requires explicit bindings in GLSL source. Name-based access is cleaner and matches the existing `GlslType` metadata we already collect.
+**Rejected**: Requires explicit bindings in GLSL source. Name-based access is cleaner and matches
+the existing `GlslType` metadata we already collect.
 
 ### 4. Separate Defaults Buffer
 
 Store global defaults in a separate allocation outside VMContext.
 
-**Rejected**: Extra allocation and pointer. Keeping defaults in the same flat struct (globals section followed by defaults section) allows a single memcpy with pre-computed offsets.
+**Rejected**: Extra allocation and pointer. Keeping defaults in the same flat struct (globals
+section followed by defaults section) allows a single memcpy with pre-computed offsets.
 
 ## Risks
 
-1. **Performance of name lookup**: Offset lookup by name is slower than binding-based access. Mitigated by caching offsets after first access.
+1. **Performance of name lookup**: Offset lookup by name is slower than binding-based access.
+   Mitigated by caching offsets after first access.
 
-2. **Global initialization complexity**: The `_init()` + memcpy approach assumes globals are initialized from uniform/constant data only. If users need more complex patterns (e.g., global initialized from a previous global), we may need to extend.
+2. **Global initialization complexity**: The `_init()` + memcpy approach assumes globals are
+   initialized from uniform/constant data only. If users need more complex patterns (e.g., global
+   initialized from a previous global), we may need to extend.
 
-3. **Embedded memory pressure**: VMContext is one more allocation. Size is `header + uniforms + globals + defaults`. Should be acceptable given typical shader sizes.
+3. **Embedded memory pressure**: VMContext is one more allocation. Size is
+   `header + uniforms + globals + defaults`. Should be acceptable given typical shader sizes.
 
-4. **Pointer width assumptions**: Currently assumes 32-bit targets. 64-bit support would need pointer width plumbing through frontend.
+4. **Pointer width assumptions**: Currently assumes 32-bit targets. 64-bit support would need
+   pointer width plumbing through frontend.
 
-5. **LPIR changes breaking existing tests**: Adding implicit first param to all functions requires updating filetests, DirectCall, invoke paths. Mitigated by milestone structure (I focuses on threading, II on uniforms).
+5. **LPIR changes breaking existing tests**: Adding implicit first param to all functions requires
+   updating filetests, DirectCall, invoke paths. Mitigated by milestone structure (I focuses on
+   threading, II on uniforms).

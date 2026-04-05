@@ -1,7 +1,7 @@
 ## Scope of phase
 
 **Prerequisite:** Phase **04** wired filetests to **`lp-glsl-exec`** /
-**`lp-glsl-abi`** (and **`lp-glsl-diagnostics`** for **`GlslError`**). Trait
+**`lpvm`** (and **`lp-glsl-diagnostics`** for **`GlslError`**). Trait
 definition lives in **`lp-glsl-exec`**, not **`lp-glsl-frontend`**.
 
 Add **`lpir_jit_executable.rs`** implementing **`GlslExecutable`** for

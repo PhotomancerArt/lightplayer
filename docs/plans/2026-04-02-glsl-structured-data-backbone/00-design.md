@@ -15,7 +15,7 @@ Create foundational types and APIs for structured data in LightPlayer:
 
 ```
 lp-glsl/
-├── lp-glsl-abi/
+├── lpvm/
 │   └── src/
 │       ├── lib.rs                    # UPDATE: re-export GlslData, GlslDataError
 │       ├── glsl_value.rs             # EXISTING: GlslValue enum (minor updates)

@@ -3,7 +3,7 @@
 use crate::parse::parse_annotation;
 use crate::parse::test_type::ComparisonOp;
 use anyhow::{Result, bail};
-use lp_glsl_abi::LpsValue;
+use lpvm::LpsValue;
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};

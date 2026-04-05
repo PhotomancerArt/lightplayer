@@ -15,14 +15,14 @@ for V2; they keep their own copies until a later deprecation/removal pass.
 ```
 lp-glsl/lp-glsl-diagnostics/   # DONE: ErrorCode, GlslError, GlSourceLoc, …
 lp-glsl/lps-types/          # DONE: Type, StructId, FunctionSignature (no registry)
-lp-glsl/lp-glsl-abi/        # DONE: GlslValue (+ glsl parse dep)
+lp-glsl/lpvm/        # DONE: GlslValue (+ glsl parse dep)
 lp-glsl/lp-glsl-exec/          # DONE: GlslExecutable trait (no DirectCallInfo; legacy JIT keeps that)
 
 lp-glsl/lp-glsl-frontend/      # V2: no hoist — leave as-is until deprecation
 lp-glsl/lp-glsl-cranelift/     # V2: no edits for filetests — Stage VII: delete crate
 
 lp-glsl/lp-glsl-wasm/
-└── src/                       # UPDATE: impl GlslExecutable from lp-glsl-exec; GlslValue from lp-glsl-abi
+└── src/                       # UPDATE: impl GlslExecutable from lp-glsl-exec; GlslValue from lpvm
 
 lp-glsl/lp-glsl-filetests/
 ├── Cargo.toml                 # UPDATE: lpir-cranelift + lp-glsl-exec (+ values/diagnostics); REMOVE lp-glsl-cranelift
@@ -50,13 +50,13 @@ lp-glsl/lp-glsl-filetests/
               └───────────────┴───────────────┘
                             │
                     GlslExecutable (lp-glsl-exec)
-                    GlslValue (lp-glsl-abi)
+                    GlslValue (lpvm)
                             │
                     run_detail / execution
 ```
 
 - **No legacy Cranelift** in the runner.
-- **Trait / value home:** **`lp-glsl-exec`** + **`lp-glsl-abi`** (+ **`lp-glsl-diagnostics`** for *
+- **Trait / value home:** **`lp-glsl-exec`** + **`lpvm`** (+ **`lp-glsl-diagnostics`** for *
   *`GlslError`**). Small dependency order: diagnostics → core → values → exec. Filetests and *
   *`lp-glsl-wasm`** depend on these; they do **not** need **`lp-glsl-cranelift`** for the trait
   boundary.
@@ -74,17 +74,17 @@ lp-glsl/lp-glsl-filetests/
 
 ## Main components
 
-| Component                                                            | Role                                                                                    |
-|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| `lp-glsl-diagnostics` / `lps-types` / `lp-glsl-abi` / `lp-glsl-exec` | Shared types (**done**); legacy crates still duplicate until removed later.             |
-| `lp-glsl-wasm`                                                       | `impl GlslExecutable for WasmExecutable` using **`lp_glsl_exec`** / **`lp_glsl_abi`**.  |
-| `lpir_jit_executable.rs` / `lpir_rv32_executable.rs`                 | `impl GlslExecutable` for lpir paths in filetests (or small sibling crate if we split). |
-| `compile.rs`                                                         | `match backend { Wasm => …, Jit => …, Rv32 => … }` only.                                |
-| CI / docs                                                            | Run full target list; locals default to `jit.q32`.                                      |
+| Component                                                     | Role                                                                                    |
+|---------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| `lp-glsl-diagnostics` / `lps-types` / `lpvm` / `lp-glsl-exec` | Shared types (**done**); legacy crates still duplicate until removed later.             |
+| `lp-glsl-wasm`                                                | `impl GlslExecutable for WasmExecutable` using **`lp_glsl_exec`** / **`lpvm`**.         |
+| `lpir_jit_executable.rs` / `lpir_rv32_executable.rs`          | `impl GlslExecutable` for lpir paths in filetests (or small sibling crate if we split). |
+| `compile.rs`                                                  | `match backend { Wasm => …, Jit => …, Rv32 => … }` only.                                |
+| CI / docs                                                     | Run full target list; locals default to `jit.q32`.                                      |
 
 ## Phases (see `01-` … `06-` in this directory)
 
-**Prerequisite (done):** **`lp-glsl-diagnostics`**, **`lps-types`**, **`lp-glsl-abi`**, *
+**Prerequisite (done):** **`lp-glsl-diagnostics`**, **`lps-types`**, **`lpvm`**, *
 *`lp-glsl-exec`** are in the workspace; legacy code was **not** refactored—only copies for the new
 stack.
 
@@ -94,7 +94,7 @@ adapters implement the stable trait from **`lp-glsl-exec`**.
 
 1. **01** — Target matrix; remove Cranelift; `DEFAULT_TARGETS = [jit.q32]`;
    `ALL_TARGETS`; annotations `jit` / `rv32` / `wasm`
-2. **04** — Wire filetests + wasm to **`lp-glsl-exec`** / **`lp-glsl-abi`** (and diagnostics as
+2. **04** — Wire filetests + wasm to **`lp-glsl-exec`** / **`lpvm`** (and diagnostics as
    needed); drop **`lp-glsl-cranelift`** from filetests; compile dispatch without Cranelift (**do
    not** edit **`lp-glsl-frontend`** / **`lp-glsl-cranelift`** for this unless unavoidable)
 3. **02** — `LpirJitExecutable`

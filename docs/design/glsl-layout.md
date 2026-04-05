@@ -1,7 +1,7 @@
 # GLSL memory layout (LightPlayer)
 
 LightPlayer uses **`std430`-style packing** for structured CPU-side buffers (
-`lpir::LayoutRules::Std430`, [`GlslData`](../../lp-glsl/lp-glsl-abi/src/glsl_data.rs)). This matches
+`lpir::LayoutRules::Std430`, [`GlslData`](../../lp-glsl/lpvm/src/glsl_data.rs)). This matches
 common GPU storage-buffer rules for transparent types.
 
 ## Implemented rules (`Std430`)
@@ -32,4 +32,4 @@ Scalars in memory are **little-endian** (`GlslData` read/write).
 
 - Layout math: `lp-glsl/lpir/src/layout.rs`
 - Path offsets / leaf types: `lp-glsl/lpir/src/glsl_path.rs`, `path.rs`
-- Runtime buffer: `lp-glsl/lp-glsl-abi/src/glsl_data.rs`
+- Runtime buffer: `lp-glsl/lpvm/src/glsl_data.rs`

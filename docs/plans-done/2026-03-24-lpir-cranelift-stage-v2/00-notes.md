@@ -12,7 +12,7 @@
   no `glsl_emu_riscv32` / old AST compiler in the filetest runner.
 - **Drop `lp-glsl-cranelift` from `lp-glsl-filetests` dependencies** by depending
   on **new small crates** (copies; legacy crates unchanged): **`lp-glsl-diagnostics`**,
-  **`lps-types`**, **`lp-glsl-abi`**, **`lp-glsl-exec`**. Implement the trait
+  **`lps-types`**, **`lpvm`**, **`lp-glsl-exec`**. Implement the trait
   in **`lp-glsl-wasm`** and the lpir adapters against **`lp-glsl-exec`**. Old
   **`lp-glsl-cranelift`** keeps its own copies for non-filetests callers until
   Stage VII deletes that crate.
@@ -43,7 +43,7 @@
 
 ### Execution
 
-- **New stack (in repo):** **`lp-glsl-exec`** (`GlslExecutable`), **`lp-glsl-abi`**
+- **New stack (in repo):** **`lp-glsl-exec`** (`GlslExecutable`), **`lpvm`**
   (`GlslValue`), **`lp-glsl-diagnostics`** (`GlslError`), **`lps-types`**
   (signatures for the trait). **Legacy:** **`lp-glsl-cranelift`** still holds the
   old trait/value definitions until rewired or removed.
@@ -69,7 +69,7 @@
 **Context:** Filetests must not depend on **`lp-glsl-cranelift`** after legacy
 removal.
 
-**Answer:** **Dedicated crates:** **`lp-glsl-exec`** (trait), **`lp-glsl-abi`**
+**Answer:** **Dedicated crates:** **`lp-glsl-exec`** (trait), **`lpvm`**
 (value types), plus **`lp-glsl-diagnostics`** / **`lps-types`** as needed.
 Adapters stay in **`lp-glsl-filetests`** (`lpir_jit_executable`,
 `lpir_rv32_executable`); **`lp-glsl-wasm`** implements the trait without the old

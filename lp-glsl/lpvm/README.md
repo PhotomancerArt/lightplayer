@@ -1,14 +1,17 @@
-# lp-glsl-abi
+# lpvm
 
-GLSL **Application Binary Interface** (ABI) - types, values, memory layout, and path-based access for the LightPlayer shader system.
+GLSL **Application Binary Interface** (ABI) - types, values, memory layout, and path-based access
+for the LightPlayer shader system.
 
-This crate provides the foundation for working with GLSL types at the ABI level. It is **self-contained** and does not depend on the LPIR (LightPlayer IR) crate, enabling it to be used independently for value manipulation, serialization, and host-side shader data management.
+This crate provides the foundation for working with GLSL types at the ABI level. It is *
+*self-contained** and does not depend on the LPIR (LightPlayer IR) crate, enabling it to be used
+independently for value manipulation, serialization, and host-side shader data management.
 
 ## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         lp-glsl-abi                               │
+│                         lpvm                               │
 ├─────────────────────────────────────────────────────────────────┤
 │  metadata.rs    │  GlslType, StructMember, LayoutRules             │
 │                 │  GlslFunctionMeta, GlslModuleMeta                 │
@@ -85,15 +88,15 @@ let pos = data.get("position").unwrap();
 
 The crate implements **std430** layout rules for storage-buffer-style packing:
 
-| Type | Size | Alignment |
-|------|------|-----------|
-| float, int, uint, bool | 4 | 4 |
-| vec2 | 8 | 8 |
-| vec3 | 12 | 4 (not padded to 16!) |
-| vec4 | 16 | 16 |
-| mat2 | 16 | 8 |
-| mat3 | 36 | 4 |
-| mat4 | 64 | 16 |
+| Type                   | Size | Alignment             |
+|------------------------|------|-----------------------|
+| float, int, uint, bool | 4    | 4                     |
+| vec2                   | 8    | 8                     |
+| vec3                   | 12   | 4 (not padded to 16!) |
+| vec4                   | 16   | 16                    |
+| mat2                   | 16   | 8                     |
+| mat3                   | 36   | 4                     |
+| mat4                   | 64   | 16                    |
 
 ## Path Syntax
 
@@ -110,13 +113,14 @@ Access nested values using GLSL-style paths:
 - **`std`** (default) - Enable std-dependent functionality
 - **`parse`** (default) - Enable `GlslValue::parse()` using the GLSL parser (requires `glsl` crate)
 
-The crate is `no_std` compatible without the `std` feature. The `parse` feature can be disabled for embedded builds to avoid the `nom` parser dependency.
+The crate is `no_std` compatible without the `std` feature. The `parse` feature can be disabled for
+embedded builds to avoid the `nom` parser dependency.
 
 ## Relationship to Other Crates
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   lp-glsl-abi   │────→│ lpir-cranelift  │←────│   lp-glsl-naga  │
+│   lpvm   │────→│ lpir-cranelift  │←────│   lp-glsl-naga  │
 │   (this crate)  │     │   (JIT codegen) │     │  (GLSL parser)  │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
          │                       │
@@ -128,7 +132,7 @@ The crate is `no_std` compatible without the `std` feature. The `parse` feature 
 ```
 
 - **`lpir`** - Pure intermediate representation (no GLSL dependencies)
-- **`lpir-cranelift`** - Combines `lp-glsl-abi` (types) with `lpir` (IR) for JIT compilation
+- **`lpir-cranelift`** - Combines `lpvm` (types) with `lpir` (IR) for JIT compilation
 - **`lp-glsl-naga`** - GLSL frontend that produces LPIR + metadata
 
 See [`../CRATES.md`](../CRATES.md) for the full crate map.

@@ -25,7 +25,7 @@ unwinding = { version = "0.2", optional = true, default-features = false, featur
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
 lpir-cranelift = { path = "../../lp-glsl/lpir-cranelift", default-features = false, features = ["glsl"] }
-lp-glsl-abi = { path = "../../lp-glsl/lp-glsl-abi", default-features = false }
+lpvm = { path = "../../lp-glsl/lpvm", default-features = false }
 lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }
 log = { workspace = true, default-features = false }
 

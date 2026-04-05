@@ -6,7 +6,7 @@ Add Struct variant to GlslValue, implement path access methods.
 
 ## Implementation Details
 
-### 1. Add Struct variant to GlslValue (lp-glsl-abi/src/glsl_value.rs)
+### 1. Add Struct variant to GlslValue (lpvm/src/glsl_value.rs)
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
@@ -572,8 +572,8 @@ fn glsl_type_roundtrip() {
 ## Validation
 
 ```bash
-cargo check -p lp-glsl-abi
-cargo test -p lp-glsl-abi -- glsl_value
+cargo check -p lpvm
+cargo test -p lpvm -- glsl_value
 ```
 
 ## Notes

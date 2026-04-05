@@ -102,7 +102,7 @@ Update or remove stale comments. Key files from earlier analysis:
 - `lp-glsl-builtins/src/host/mod.rs`, `macros.rs` — JIT delegate comments
 - `lp-glsl-builtins/build.rs` — old build.rs reference
 - `lp-glsl-diagnostics/src/lib.rs` — "retain copies" comment
-- `lp-glsl-abi/src/lib.rs` — "copied from lp-glsl-cranelift"
+- `lpvm/src/lib.rs` — "copied from lp-glsl-cranelift"
 
 ## Validate
 

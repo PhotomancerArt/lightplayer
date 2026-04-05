@@ -3736,11 +3736,11 @@ dependencies = [
  "libm",
  "log",
  "lp-engine-client",
- "lp-glsl-abi",
  "lp-glsl-builtins",
  "lp-model",
  "lp-shared",
  "lpir-cranelift",
+ "lpvm",
  "serde",
  "unwinding",
 ]
@@ -3754,15 +3754,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-glsl-abi"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "lp-glsl-diagnostics",
- "lps-types",
-]
-
-[[package]]
 name = "lp-glsl-builtin-ids"
 version = "40.0.0"
 
@@ -3771,8 +3762,8 @@ name = "lp-glsl-builtins"
 version = "40.0.0"
 dependencies = [
  "log",
- "lp-glsl-abi",
  "lpfx-impl-macro",
+ "lpvm",
 ]
 
 [[package]]
@@ -3809,9 +3800,9 @@ version = "40.0.0"
 name = "lp-glsl-exec"
 version = "40.0.0"
 dependencies = [
- "lp-glsl-abi",
  "lp-glsl-diagnostics",
  "lps-types",
+ "lpvm",
 ]
 
 [[package]]
@@ -3821,7 +3812,6 @@ dependencies = [
  "anyhow",
  "glob",
  "glsl",
- "lp-glsl-abi",
  "lp-glsl-diagnostics",
  "lp-glsl-exec",
  "lp-glsl-naga",
@@ -3832,6 +3822,7 @@ dependencies = [
  "lpir",
  "lpir-cranelift",
  "lps-types",
+ "lpvm",
  "num_cpus",
  "regex",
  "walkdir",
@@ -3864,9 +3855,9 @@ name = "lp-glsl-naga"
 version = "40.0.0"
 dependencies = [
  "libm",
- "lp-glsl-abi",
  "lp-glsl-builtin-ids",
  "lpir",
+ "lpvm",
  "naga 29.0.0",
  "smallvec",
 ]
@@ -4015,19 +4006,28 @@ dependencies = [
  "cranelift-native 0.127.0",
  "cranelift-object",
  "libm",
- "lp-glsl-abi",
  "lp-glsl-builtin-ids",
  "lp-glsl-builtins",
  "lp-glsl-naga",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lpvm",
  "target-lexicon",
 ]
 
 [[package]]
 name = "lps-types"
 version = "40.0.0"
+
+[[package]]
+name = "lpvm"
+version = "40.0.0"
+dependencies = [
+ "glsl",
+ "lp-glsl-diagnostics",
+ "lps-types",
+]
 
 [[package]]
 name = "mach2"

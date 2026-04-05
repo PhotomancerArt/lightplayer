@@ -2,7 +2,7 @@
 
 use crate::parse::test_type::ComparisonOp;
 use anyhow::Result;
-use lp_glsl_abi::LpsValue;
+use lpvm::LpsValue;
 
 /// Bases for `type[size](...)` array constructors (longer names first).
 const TYPED_ARRAY_BASES: &[&str] = &[
@@ -317,7 +317,7 @@ pub fn compare_results(
 mod tests {
     use super::*;
     use crate::parse::test_type::ComparisonOp;
-    use lp_glsl_abi::LpsValue;
+    use lpvm::LpsValue;
 
     #[test]
     fn test_parse_glsl_value_int() {

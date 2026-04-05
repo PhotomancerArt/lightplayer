@@ -1,13 +1,13 @@
 //! WASM execution via wasmtime, implementing GlslExecutable.
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
-use lp_glsl_abi::LpsValue;
 use lp_glsl_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
 use lp_glsl_exec::GlslExecutable;
 use lp_glsl_naga::LpsType;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use lps_types::{FnParam, LpsFnSig, ParamQualifier};
+use lpvm::LpsValue;
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Config, Engine, Instance, Store, Val};

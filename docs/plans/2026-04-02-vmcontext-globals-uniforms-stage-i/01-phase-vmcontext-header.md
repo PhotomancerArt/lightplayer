@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Create the `VmContextHeader` struct and offset constants in `lp-glsl-abi`. This is the foundation that all other components will reference.
+Create the `VmContextHeader` struct and offset constants in `lpvm`. This is the foundation
+that all other components will reference.
 
 ## Code Organization Reminders
 
@@ -12,7 +13,7 @@ Create the `VmContextHeader` struct and offset constants in `lp-glsl-abi`. This 
 
 ## Implementation Details
 
-### 1. Create `lp-glsl-abi/src/vmcontext.rs`
+### 1. Create `lpvm/src/vmcontext.rs`
 
 ```rust
 //! VMContext header definition and utilities.
@@ -63,7 +64,7 @@ pub fn minimal_vmcontext() -> alloc::boxed::Box<[u8]> {
 }
 ```
 
-### 2. Update `lp-glsl-abi/src/lib.rs`
+### 2. Update `lpvm/src/lib.rs`
 
 Add re-exports:
 
@@ -106,6 +107,6 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-abi
-cargo check -p lp-glsl-abi --target riscv32imac-unknown-none-elf
+cargo test -p lpvm
+cargo check -p lpvm --target riscv32imac-unknown-none-elf
 ```

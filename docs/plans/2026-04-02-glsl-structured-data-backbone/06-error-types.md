@@ -11,13 +11,13 @@ Finalize error types, add integration tests, ensure all components work together
 Verify in:
 
 - `lpir/src/path.rs` - `PathParseError` and `PathError`
-- `lp-glsl-abi/src/glsl_data_error.rs` - `GlslDataError`
-- `lp-glsl-abi/src/glsl_value.rs` - `GlslValueError`
+- `lpvm/src/glsl_data_error.rs` - `GlslDataError`
+- `lpvm/src/glsl_value.rs` - `GlslValueError`
 
 ### 2. Add From impls for error conversion
 
 ```rust
-// In lp-glsl-abi/src/glsl_data_error.rs
+// In lpvm/src/glsl_data_error.rs
 impl From<PathError> for GlslDataError {
     fn from(e: PathError) -> Self {
         Self::Path(e)
@@ -34,10 +34,10 @@ impl From<GlslValueError> for GlslDataError {
 
 ### 3. Create integration tests file
 
-Create `lp-glsl-abi/tests/roundtrip_tests.rs`:
+Create `lpvm/tests/roundtrip_tests.rs`:
 
 ```rust
-use lp_glsl_abi::{GlslData, GlslValue};
+use lpvm::{GlslData, GlslValue};
 use lpir::{GlslType, LayoutRules, StructMember};
 
 #[test]
@@ -213,7 +213,7 @@ fn nested_depth_n() {
 
 ### 5. Verify re-exports in lib.rs files
 
-`lp-glsl-abi/src/lib.rs`:
+`lpvm/src/lib.rs`:
 
 ```rust
 pub mod glsl_data;
@@ -241,15 +241,15 @@ pub use layout::{type_size, type_alignment, round_up};
 ```bash
 # Check all packages compile
 cargo check -p lpir
-cargo check -p lp-glsl-abi
+cargo check -p lpvm
 
 # Run all tests
 cargo test -p lpir
-cargo test -p lp-glsl-abi
+cargo test -p lpvm
 
 # Check no warnings
 cargo clippy -p lpir -- -D warnings
-cargo clippy -p lp-glsl-abi -- -D warnings
+cargo clippy -p lpvm -- -D warnings
 
 # Check formatting
 cargo fmt -- --check

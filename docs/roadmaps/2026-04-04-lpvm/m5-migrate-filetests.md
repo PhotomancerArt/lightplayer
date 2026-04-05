@@ -65,7 +65,7 @@ lps-types = { path = "../lps-types" }
 lps-naga = { path = "../lps-naga" }
 ```
 
-**Remove** (once fully migrated): `lp-glsl-exec`, direct `lp-glsl-abi`, direct
+**Remove** (once fully migrated): `lp-glsl-exec`, direct `lpvm`, direct
 `lpir-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
 if folded into `lpvm-wasm` runtime.
 

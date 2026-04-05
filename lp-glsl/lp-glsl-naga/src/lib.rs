@@ -31,11 +31,9 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
-pub use lp_glsl_abi::{
-    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LpsType,
-};
+pub use lpvm::{GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LpsType};
 
-pub use naga_types::{naga_module_from_parsed, CompileError, FunctionInfo, NagaModule};
+pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_parsed};
 pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};
 
 #[cfg(test)]
@@ -233,7 +231,7 @@ float test_main() {
 
     #[test]
     fn interp_sin_std_math() {
-        use lpir::{interpret, Value};
+        use lpir::{Value, interpret};
         let src = "float f(float x) { return sin(x); }";
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");
@@ -244,7 +242,7 @@ float test_main() {
 
     #[test]
     fn interp_nested_user_call() {
-        use lpir::{interpret, Value};
+        use lpir::{Value, interpret};
         let src = "float g(float x) { return x + 1.0; } float f(float x) { return g(x); }";
         let naga = compile(src).unwrap();
         let (ir, _) = super::lower(&naga).expect("lower");

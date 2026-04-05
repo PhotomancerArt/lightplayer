@@ -1,12 +1,12 @@
-//! Level-1 [`GlslQ32`] calls using [`lp_glsl_abi::GlslModuleMeta`].
+//! Level-1 [`GlslQ32`] calls using [`lpvm::GlslModuleMeta`].
 
 use cranelift_codegen::ir::ArgumentPurpose;
-use lp_glsl_abi::LpsType;
 use lpir::FloatMode;
+use lpvm::LpsType;
 
 use crate::jit_module::JitModule;
 use crate::values::{
-    decode_q32_return, flatten_q32_arg, CallError, CallResult, GlslQ32, GlslReturn,
+    CallError, CallResult, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg,
 };
 
 impl JitModule {
@@ -45,7 +45,7 @@ impl JitModule {
                 param_count
             )));
         }
-        let header = lp_glsl_abi::VmContextHeader::default();
+        let header = lpvm::VmContextHeader::default();
         let vmctx = core::ptr::from_ref(&header).cast::<u8>();
         let user = flat.as_slice();
         let sig = self

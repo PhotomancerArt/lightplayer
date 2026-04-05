@@ -12,7 +12,7 @@ lps-types = { path = "../lps-types" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", features = ["std"] }
 lp-glsl-exec = { path = "../lp-glsl-exec" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }
-lp-glsl-abi = { path = "../lp-glsl-abi", features = ["std"] }
+lpvm = { path = "../lpvm", features = ["std"] }
 lp-glsl-wasm = { path = "../lp-glsl-wasm" }
 lpir = { path = "../lpir" }
 lpir-cranelift = { path = "../lpir-cranelift", features = ["riscv32-emu"] }

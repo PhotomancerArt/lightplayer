@@ -2,7 +2,8 @@
 
 ## Goal
 
-Collect uniform and global metadata from GLSL, build the full dynamic VMContext type, and enable readonly access to uniforms and globals.
+Collect uniform and global metadata from GLSL, build the full dynamic VMContext type, and enable
+readonly access to uniforms and globals.
 
 ## Suggested Plan Name
 
@@ -11,6 +12,7 @@ Collect uniform and global metadata from GLSL, build the full dynamic VMContext 
 ## Scope
 
 **In scope:**
+
 - Collect uniform declarations from naga AST
 - Collect global variable declarations from naga AST
 - Build complete VMContext GlslType with uniforms and globals sections
@@ -20,6 +22,7 @@ Collect uniform and global metadata from GLSL, build the full dynamic VMContext 
 - Readonly global support (globals that are never written)
 
 **Out of scope:**
+
 - Global writes (mutable globals)
 - `_init()` function with real initialization
 - Defaults buffer
@@ -34,7 +37,7 @@ Collect uniform and global metadata from GLSL, build the full dynamic VMContext 
 ## Deliverables
 
 - `lp-glsl-naga` collects uniform/global metadata
-- `VmContextBuilder` in `lp-glsl-abi` constructs full type
+- `VmContextBuilder` in `lpvm` constructs full type
 - Path-based offset resolution with caching
 - Filetests demonstrating uniform reads
 - Filetests demonstrating global reads

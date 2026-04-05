@@ -13,12 +13,12 @@ removing workspace members.
 
 ## Crates to remove (typical)
 
-| Obsolete | Replaced by | Notes |
-|----------|-------------|-------|
-| `lp-glsl-abi` | `lpvm` | Runtime ABI + values |
-| `lp-glsl-exec` | `lpvm` traits | `GlslExecutable` → LPVM |
-| `lpir-cranelift` (bulk) | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
-| `lp-glsl-wasm` (or transitional WASM crate) | `lpvm-wasm` | Emission + runtime |
+| Obsolete                                    | Replaced by                   | Notes                        |
+|---------------------------------------------|-------------------------------|------------------------------|
+| `lpvm`                                      | `lpvm`                        | Runtime ABI + values         |
+| `lp-glsl-exec`                              | `lpvm` traits                 | `GlslExecutable` → LPVM      |
+| `lpir-cranelift` (bulk)                     | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
+| `lp-glsl-wasm` (or transitional WASM crate) | `lpvm-wasm`                   | Emission + runtime           |
 
 **Keep `lps-types`** (and the whole **`lps-*` shader layer**). Do **not** delete
 the logical-type crate — it is not absorbed into `lpir`.

@@ -2,7 +2,8 @@
 
 ## Goal
 
-Validate the full implementation across all targets, clean up temporary scaffolding, and ensure embedded builds remain functional.
+Validate the full implementation across all targets, clean up temporary scaffolding, and ensure
+embedded builds remain functional.
 
 ## Suggested Plan Name
 
@@ -11,6 +12,7 @@ Validate the full implementation across all targets, clean up temporary scaffold
 ## Scope
 
 **In scope:**
+
 - Comprehensive filetests for uniforms and globals
 - WASM browser integration test
 - RISC-V32 embedded build validation (`fw-esp32`, `fw-emu`)
@@ -19,6 +21,7 @@ Validate the full implementation across all targets, clean up temporary scaffold
 - Remove any temporary scaffolding from earlier milestones
 
 **Out of scope:**
+
 - New features (fuel, trap handlers)
 - Optimization work beyond basic validation
 
@@ -33,7 +36,7 @@ Validate the full implementation across all targets, clean up temporary scaffold
 - Passing filetests for all uniform/global patterns
 - Passing `fw-esp32` and `fw-emu` builds
 - Passing WASM tests
-- Updated `lp-glsl-abi` README with VMContext usage
+- Updated `lpvm` README with VMContext usage
 - Updated `docs/design/uniforms-globals.md` with final implementation notes
 
 ## Dependencies
@@ -48,7 +51,7 @@ Validate the full implementation across all targets, clean up temporary scaffold
 
 ```bash
 # Core tests
-cargo test -p lp-glsl-abi -p lpir-cranelift -p lp-glsl-naga
+cargo test -p lpvm -p lpir-cranelift -p lp-glsl-naga
 
 # Filetests
 cargo test -p lp-glsl-filetests

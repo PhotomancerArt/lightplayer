@@ -11,8 +11,8 @@ workspace = true
 [dependencies]
 lps-types = { path = "../lps-types" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
-lp-glsl-abi = { path = "../lp-glsl-abi", default-features = false }
+lpvm = { path = "../lpvm", default-features = false }
 
 [features]
 default = ["std"]
-std = ["lp-glsl-diagnostics/std", "lp-glsl-abi/std"]
+std = ["lp-glsl-diagnostics/std", "lpvm/std"]

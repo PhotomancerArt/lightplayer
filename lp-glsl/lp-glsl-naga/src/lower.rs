@@ -5,8 +5,8 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 
-use lp_glsl_abi::{GlslFunctionMeta, GlslModuleMeta};
 use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, ModuleBuilder};
+use lpvm::{GlslFunctionMeta, GlslModuleMeta};
 use naga::{Function, Handle, Module};
 
 use crate::NagaModule;

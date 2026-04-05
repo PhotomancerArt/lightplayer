@@ -11,11 +11,11 @@ elsewhere, trust this folder and fix drift when you touch files.
 
 Long-term naming groups the shader system into three prefixes:
 
-| Layer | Prefix | Role | Knows about |
-|-------|--------|------|-------------|
-| **Shader** | `lps-*` | Frontends, logical types, shader-layer tests | vec3, mat4, GLSL (today), WGSL (future) |
-| **IR** | `lpir` | Scalarized intermediate representation | `IrType` (F32, I32, Pointer), ops, vregs |
-| **VM** | `lpvm-*` | Runtime, execution, backends | Module, Instance, Memory, values, VMContext |
+| Layer      | Prefix   | Role                                         | Knows about                                 |
+|------------|----------|----------------------------------------------|---------------------------------------------|
+| **Shader** | `lps-*`  | Frontends, logical types, shader-layer tests | vec3, mat4, GLSL (today), WGSL (future)     |
+| **IR**     | `lpir`   | Scalarized intermediate representation       | `IrType` (F32, I32, Pointer), ops, vregs    |
+| **VM**     | `lpvm-*` | Runtime, execution, backends                 | Module, Instance, Memory, values, VMContext |
 
 `lps` is not self-explanatory on first read; it is the **LightPlayer shader**
 layer, parallel to how `lpir` and `lpvm` abbreviate their domains.
@@ -38,16 +38,16 @@ IR type. Those types live in **`lps-types`** (rename of `lp-glsl-core`), not in
 
 ### Target crate map (shader layer)
 
-| Current / transitional | Target (`lps-*`) |
-|------------------------|------------------|
-| `lp-glsl-core` | `lps-types` |
-| `lp-glsl-naga` | `lps-naga` |
-| `lp-glsl-builtins` | `lps-builtins` |
-| `lp-glsl-builtin-ids` | `lps-builtin-ids` |
-| `lp-glsl-filetests` | `lps-filetests` |
-| `lp-glsl-diagnostics` | `lps-diagnostics` (or keep name if shared tooling) |
+| Current / transitional | Target (`lps-*`)                                   |
+|------------------------|----------------------------------------------------|
+| `lp-glsl-core`         | `lps-types`                                        |
+| `lp-glsl-naga`         | `lps-naga`                                         |
+| `lp-glsl-builtins`     | `lps-builtins`                                     |
+| `lp-glsl-builtin-ids`  | `lps-builtin-ids`                                  |
+| `lp-glsl-filetests`    | `lps-filetests`                                    |
+| `lp-glsl-diagnostics`  | `lps-diagnostics` (or keep name if shared tooling) |
 
-ABI/runtime types from `lp-glsl-abi` and exec traits from `lp-glsl-exec` move
+ABI/runtime types from `lpvm` and exec traits from `lp-glsl-exec` move
 into **`lpvm`**, not into `lps-types`.
 
 ## What is LPVM?
@@ -119,7 +119,7 @@ Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 
 Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
 **`lpir`** (IR module, lowering inputs) and **`lps-types`** (what callers think
-functions look like). Replaces **`lp-glsl-abi`** and **`lp-glsl-exec`** (trait
+functions look like). Replaces **`lpvm`** and **`lp-glsl-exec`** (trait
 concepts → `LpvmModule` / `LpvmInstance` / `LpvmMemory`).
 
 Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,

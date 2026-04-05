@@ -26,7 +26,7 @@ All packages live under `lp-glsl/` unless noted. Workspace membership follows th
 | `lps-types`                 | Shared type / function-signature shapes (`#![no_std]` + alloc)              | No                         |
 | `lp-glsl-diagnostics`       | `GlslError`, spans, codes                                                   | No                         |
 | `lp-glsl-exec`              | `GlslExecutable` + glue for filetests backends                              | No                         |
-| `lp-glsl-abi`               | Runtime values / literals; uses `glsl` parser fork                          | No                         |
+| `lpvm`                      | Runtime values / literals; uses `glsl` parser fork                          | No                         |
 | `lp-glsl-naga`              | GLSL → LPIR via **naga** `glsl-in`                                          | No                         |
 | `lpir`                      | LPIR IR (`IrModule`, types, ops)                                            | No                         |
 | `lpir-cranelift`            | LPIR → Cranelift → JIT / object; optional `lp-glsl-naga` via `glsl` feature | No                         |
@@ -56,7 +56,7 @@ flowchart TB
   subgraph support["Shared helpers"]
     diag["lp-glsl-diagnostics"]
     core["lps-types"]
-    values["lp-glsl-abi"]
+    values["lpvm"]
     values --> diag
     values -.-> glsl_parser["glsl fork"]
   end
@@ -104,7 +104,7 @@ flowchart TB
 **Observations:**
 
 - **On-device compile path** (`lp-engine`): `lpir-cranelift` with `glsl` → `lp-glsl-naga` → `lpir`;
-  builtins from `lp-glsl-builtins`. No `lp-glsl-exec`, `lp-glsl-abi`, or `glsl` parser crate on that
+  builtins from `lp-glsl-builtins`. No `lp-glsl-exec`, `lpvm`, or `glsl` parser crate on that
   path — appropriate for splitting “compiler” vs “test harness helpers.”
 - **`lps-types`**: Used by `lp-glsl-exec` and `lp-glsl-filetests` only. The crate-level doc
   comment in `lps-types/src/lib.rs` says it is used by `lp-glsl-naga`; **that is not true** in
@@ -116,7 +116,7 @@ flowchart TB
 
 ### `lp-glsl/README.md`
 
-- Accurately lists the new crates (`lps-types`, `lp-glsl-diagnostics`, `lp-glsl-abi`,
+- Accurately lists the new crates (`lps-types`, `lp-glsl-diagnostics`, `lpvm`,
   `lp-glsl-exec`, `lp-glsl-wasm`) and the Naga → LPIR → Cranelift story.
 - Commands are generally valid from repo root (`./scripts/glsl-filetests.sh`,
   `cargo check -p fw-esp32 …`).
@@ -130,7 +130,7 @@ bullet list:
 
 - `lps-types`
 - `lp-glsl-diagnostics`
-- `lp-glsl-abi`
+- `lpvm`
 - `lp-glsl-exec`
 - `lp-glsl-wasm`
 
@@ -175,7 +175,7 @@ trust in docs).
 
 ## Root `README.md` acknowledgments
 
-- **`glsl-parser` fork** remains relevant: `lp-glsl-abi` and `lp-glsl-filetests` depend on the
+- **`glsl-parser` fork** remains relevant: `lpvm` and `lp-glsl-filetests` depend on the
   `glsl` crate (fork with spans).
 - **Naga** is the primary GLSL front end for **`lp-glsl-naga`**; the acknowledgments section does
   not mention Naga — optional doc improvement.

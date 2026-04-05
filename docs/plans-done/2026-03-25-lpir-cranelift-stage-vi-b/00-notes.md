@@ -35,7 +35,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 - Rework **`ShaderRuntime`** (`runtime.rs`): compile via **`lpir_cranelift::jit`** (or
   orchestrated **`lp_glsl_naga` + `jit_from_ir_owned`** if we split for memory),
   store **`JitModule`** (or thin wrapper), implement **`lp_glsl_exec::GlslExecutable`**
-  for the slow path (**`call_vec`** with **`lp_glsl_abi::GlslValue`**).
+  for the slow path (**`call_vec`** with **`lpvm::GlslValue`**).
 - Replace **`get_direct_call_info`** (not on **`lp_glsl_exec::GlslExecutable`**) with
   **`JitModule::direct_call("main")`** → **`DirectCall`**, or equivalent.
 - Map **`ShaderConfig::glsl_opts`** → **`CompileOptions`** (**`Q32Options`**,

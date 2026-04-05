@@ -20,7 +20,7 @@
 - Keep **`ALL_TARGETS`** and **`DEFAULT_TARGETS`** adjacent with a short comment
   on **CI vs local** policy.
 - **`Backend`** / **`Target`** code should not assume **`lp-glsl-cranelift`**;
-  execution types come from **`lp-glsl-exec`** / **`lp-glsl-abi`** after phase
+  execution types come from **`lp-glsl-exec`** / **`lpvm`** after phase
   **04** (see **`04-compile-dispatch-and-cargo.md`**).
 
 ## Implementation details

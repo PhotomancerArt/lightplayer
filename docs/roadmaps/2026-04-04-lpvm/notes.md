@@ -25,7 +25,7 @@ vec3/mat4 as IR types).
 
 ### Crates that would be affected
 
-- `lp-glsl-abi` → **`lpvm`** — values, layout, runtime metadata, VmContext.
+- `lpvm` → **`lpvm`** — values, layout, runtime metadata, VmContext.
 - `lp-glsl-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
 - `lp-glsl-core` → **`lps-types`** — logical `LpsType`, `LpsFunctionSignature`, etc.
 - `lpir-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
@@ -36,14 +36,14 @@ vec3/mat4 as IR types).
 
 ### Backends today
 
-| Backend                       | Location                                 | Heavy deps              |
-|-------------------------------|------------------------------------------|-------------------------|
-| Cranelift JIT (host+embedded) | `lpir-cranelift`                         | cranelift-*             |
-| RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`) | lp-riscv-*              |
-| WASM emission                 | `lp-glsl-wasm`                           | wasm-encoder            |
+| Backend                       | Location                                  | Heavy deps              |
+|-------------------------------|-------------------------------------------|-------------------------|
+| Cranelift JIT (host+embedded) | `lpir-cranelift`                          | cranelift-*             |
+| RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`)  | lp-riscv-*              |
+| WASM emission                 | `lp-glsl-wasm`                            | wasm-encoder            |
 | WASM runner (desktop)         | `lps-filetests` (transitional names vary) | wasmtime                |
-| WASM runner (browser)         | `web-demo`                               | browser WebAssembly API |
-| LPIR interpreter              | `lpir::interp`                           | (none beyond lpir)      |
+| WASM runner (browser)         | `web-demo`                                | browser WebAssembly API |
+| LPIR interpreter              | `lpir::interp`                            | (none beyond lpir)      |
 
 ## Motivation
 
@@ -100,14 +100,14 @@ Candidates: values (`GlslValue` → `LpvmValue`), runtime metadata/layout (`Glsl
 ABI side → `Lpvm*` types that may reference **`lps-types`**), layout functions,
 VmContext, Module/Instance/Memory traits, `LpvmData`, path accessors.
 
-**Context**: Spread across `lp-glsl-abi`, **`lps-types`** (logical signatures),
+**Context**: Spread across `lpvm`, **`lps-types`** (logical signatures),
 and `lp-glsl-exec` (trait).
 
 **Answer**: One **`lpvm`** crate for **VM/runtime** surface: traits, `LpvmValue`,
 layout, VMContext, runtime-oriented metadata. **Logical** shader types
 (`LpsType`, `LpsFunctionSignature`, …) stay in **`lps-types`** — they are not
 LPIR (scalarized) and not VM-only; frontend and runtime both use them.
-**`lpvm`** depends on **`lps-types`** and **`lpir`**. Replaces `lp-glsl-abi` and
+**`lpvm`** depends on **`lps-types`** and **`lpir`**. Replaces `lpvm` and
 `lp-glsl-exec`; does **not** absorb `lps-types`.
 
 ### Q2: Backend crate organization

@@ -45,11 +45,11 @@ pub use emit::signature_for_ir_func;
 pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
-pub use lp_glsl_abi::{
+pub use lpir::FloatMode;
+pub use lpvm::{
     GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LayoutRules, LpsType,
     PathError, StructMember,
 };
-pub use lpir::FloatMode;
 #[cfg(feature = "riscv32-emu")]
 pub use object_link::link_object_with_builtins;
 pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
@@ -91,14 +91,13 @@ mod tests {
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        jit_from_ir, CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32,
-        MemoryStrategy,
+        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, MemoryStrategy,
+        jit_from_ir,
     };
 
     fn jit_test_vmctx() -> *const u8 {
         // Use properly aligned storage for VmContext (needs 8-byte alignment for u64 fuel field).
-        static VMCTX: core::mem::MaybeUninit<lp_glsl_abi::VmContext> =
-            core::mem::MaybeUninit::zeroed();
+        static VMCTX: core::mem::MaybeUninit<lpvm::VmContext> = core::mem::MaybeUninit::zeroed();
         VMCTX.as_ptr() as *const u8
     }
 

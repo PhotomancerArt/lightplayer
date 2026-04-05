@@ -132,7 +132,7 @@ let align = ty.alignment(LayoutRules::Std430);
 let offset = ty.offset_for_path("lights[3].color", LayoutRules::Std430, 0)?;
 ```
 
-### GlslData (lp-glsl-abi)
+### GlslData (lpvm)
 
 ```rust
 // Create and modify
@@ -148,7 +148,7 @@ let data = GlslData::from_value(ty, &value)?;
 let value = data.to_value()?;
 ```
 
-### GlslValue (lp-glsl-abi)
+### GlslValue (lpvm)
 
 ```rust
 // Tree manipulation
@@ -184,7 +184,7 @@ Add module-level docs:
 ### 3. Check for TODOs and temporary code
 
 ```bash
-grep -r "TODO\|FIXME\|XXX\|hack\|temporary" lpir/src/ lp-glsl-abi/src/ \
+grep -r "TODO\|FIXME\|XXX\|hack\|temporary" lpir/src/ lpvm/src/ \
   --include="*.rs" | grep -v target
 ```
 
@@ -200,19 +200,19 @@ cargo +nightly fmt -- --check
 
 # 2. Build check
 cargo check -p lpir --target riscv32imac-unknown-none-elf
-cargo check -p lp-glsl-abi --target riscv32imac-unknown-none-elf
+cargo check -p lpvm --target riscv32imac-unknown-none-elf
 
 # 3. Tests
 cargo test -p lpir
-cargo test -p lp-glsl-abi
+cargo test -p lpvm
 
 # 4. Clippy (strict)
 cargo clippy -p lpir -- -D warnings -A clippy::new_without_default
-cargo clippy -p lp-glsl-abi -- -D warnings
+cargo clippy -p lpvm -- -D warnings
 
 # 5. Doc tests
 cargo doc -p lpir --no-deps
-cargo doc -p lp-glsl-abi --no-deps
+cargo doc -p lpvm --no-deps
 ```
 
 ### 5. Review public API surface
@@ -221,7 +221,7 @@ Check that only intended items are public:
 
 ```bash
 cargo rustdoc -p lpir -- --document-private-items 2>&1 | grep "pub " | head -30
-cargo rustdoc -p lp-glsl-abi -- --document-private-items 2>&1 | grep "pub " | head -30
+cargo rustdoc -p lpvm -- --document-private-items 2>&1 | grep "pub " | head -30
 ```
 
 Ensure no internal helpers leaked.
@@ -247,8 +247,8 @@ Create `docs/plans/2026-04-02-glsl-structured-data-backbone/summary.md`:
 
 - `lpir/src/layout.rs` - layout computation
 - `lpir/src/path.rs` - path parsing
-- `lp-glsl-abi/src/glsl_data.rs` - GlslData implementation
-- `lp-glsl-abi/src/glsl_data_error.rs` - error types
+- `lpvm/src/glsl_data.rs` - GlslData implementation
+- `lpvm/src/glsl_data_error.rs` - error types
 
 ### Key Features
 
@@ -295,7 +295,7 @@ This is prep work. The JIT compiler and executable integration will use:
 
 ```bash
 # Final check everything works
-cargo test -p lpir -p lp-glsl-abi --no-fail-fast
+cargo test -p lpir -p lpvm --no-fail-fast
 ```
 
 ## Commit

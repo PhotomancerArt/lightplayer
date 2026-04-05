@@ -20,8 +20,8 @@ use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
-use lp_glsl_abi::VmContextHeader;
 use lpir_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
+use lpvm::VmContextHeader;
 
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;

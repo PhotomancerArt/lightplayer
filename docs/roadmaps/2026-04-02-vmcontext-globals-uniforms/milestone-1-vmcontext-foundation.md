@@ -2,7 +2,9 @@
 
 ## Goal
 
-Establish the VMContext type definition, header struct, and signature changes. Thread an empty VMContext through the entire system (Cranelift and WASM) with no uniforms or globals yet—just the plumbing.
+Establish the VMContext type definition, header struct, and signature changes. Thread an empty
+VMContext through the entire system (Cranelift and WASM) with no uniforms or globals yet—just the
+plumbing.
 
 ## Suggested Plan Name
 
@@ -11,7 +13,8 @@ Establish the VMContext type definition, header struct, and signature changes. T
 ## Scope
 
 **In scope:**
-- `VmContextHeader` struct definition in `lp-glsl-abi`
+
+- `VmContextHeader` struct definition in `lpvm`
 - Dynamic `GlslType` builder for shader-specific VMContext
 - Update Cranelift signature generation to add VMContext as first param
 - Update WASM emission to add i32 VMContext param
@@ -20,6 +23,7 @@ Establish the VMContext type definition, header struct, and signature changes. T
 - Test: verify VMContext pointer arrives correctly in shader functions
 
 **Out of scope:**
+
 - Actual uniform or global collection
 - Load/store from VMContext
 - Defaults buffer
@@ -34,7 +38,7 @@ Establish the VMContext type definition, header struct, and signature changes. T
 
 ## Deliverables
 
-- `lp-glsl-abi/src/vmcontext.rs` with header and builder
+- `lpvm/src/vmcontext.rs` with header and builder
 - `docs/design/uniforms-globals.md` (design doc for entire feature)
 - Updated `lpir-cranelift` signatures
 - Updated `lp-glsl-wasm` signatures

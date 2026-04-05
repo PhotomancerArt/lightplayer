@@ -8,11 +8,11 @@ use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
-use lp_glsl_abi::{GlslModuleMeta, LpsType, VmContextHeader};
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
-use lpir::module::IrModule;
 use lpir::FloatMode;
+use lpir::module::IrModule;
+use lpvm::{GlslModuleMeta, LpsType, VmContextHeader};
 use target_lexicon::Triple;
 
 use crate::compile_options::CompileOptions;
@@ -20,7 +20,7 @@ use crate::emit;
 use crate::error::CompilerError;
 use crate::object_link::link_object_with_builtins;
 use crate::object_module::object_bytes_from_ir;
-use crate::values::{decode_q32_return, flatten_q32_arg, CallError, GlslQ32, GlslReturn};
+use crate::values::{CallError, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg};
 
 fn riscv32_reference_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, CompilerError> {
     let mut flag_builder = settings::builder();
@@ -257,10 +257,10 @@ pub(crate) fn run_loaded_function_i32_with_sig(
 mod tests {
     use lpir::parse_module;
 
+    use crate::FloatMode;
     use crate::compile_options::CompileOptions;
     use crate::object_link::builtins_executable_bytes;
     use crate::q32::q32_encode_f64;
-    use crate::FloatMode;
 
     use super::run_lpir_function_i32;
 

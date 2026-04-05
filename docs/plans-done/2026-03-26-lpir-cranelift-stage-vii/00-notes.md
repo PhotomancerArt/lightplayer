@@ -32,7 +32,7 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 |----------------------------|----------------------------------------------------------|
 | `lp-glsl-builtins-emu-app` | `lpir-cranelift` build.rs embeds its ELF for riscv32-emu |
 | `lp-glsl-exec`             | Filetest runner trait (`GlslExecutable`)                 |
-| `lp-glsl-abi`              | Used by exec + filetests                                 |
+| `lpvm`                     | Used by exec + filetests                                 |
 | `lp-glsl-diagnostics`      | Used by values, exec, filetests                          |
 | `lp-glsl-frontend`         | Filetests + gen-app (see Q1)                             |
 

@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Final cleanup, validation, and commit. Ensure all tests pass, no warnings, and the implementation is complete.
+Final cleanup, validation, and commit. Ensure all tests pass, no warnings, and the implementation is
+complete.
 
 ## Cleanup Checklist
 
@@ -20,7 +21,7 @@ Run the following validation commands:
 
 ```bash
 # Core crate tests
-cargo test -p lp-glsl-abi -p lpir -p lpir-cranelift -p lp-glsl-naga
+cargo test -p lpvm -p lpir -p lpir-cranelift -p lp-glsl-naga
 
 # WASM emission tests
 cargo test -p lp-glsl-wasm
@@ -39,7 +40,7 @@ cargo +nightly fmt -- --check
 ### Documentation
 
 - [ ] Verify `docs/design/uniforms-globals.md` exists and is complete
-- [ ] Update crate READMEs if needed (lp-glsl-abi, lpir-cranelift)
+- [ ] Update crate READMEs if needed (lpvm, lpir-cranelift)
 - [ ] Check that new public APIs have doc comments
 
 ## Commit Message
@@ -69,6 +70,7 @@ EOF
 ## Post-Commit
 
 After committing:
+
 1. Create a summary file at `docs/plans/2026-04-02-vmcontext-globals-uniforms-stage-i/summary.md`
 2. Move plan to `docs/plans-done/2026-04-02-vmcontext-globals-uniforms-stage-i/`
 
@@ -89,8 +91,8 @@ After committing:
 
 ## Files Changed
 
-- lp-glsl-abi/src/vmcontext.rs (NEW)
-- lp-glsl-abi/src/lib.rs
+- lpvm/src/vmcontext.rs (NEW)
+- lpvm/src/lib.rs
 - lpir/src/module.rs
 - lpir-cranelift/src/emit/mod.rs
 - lpir-cranelift/src/lib.rs
@@ -104,7 +106,8 @@ After committing:
 ## Validation
 
 All tests pass:
-- cargo test -p lp-glsl-abi -p lpir -p lpir-cranelift -p lp-glsl-naga
+
+- cargo test -p lpvm -p lpir -p lpir-cranelift -p lp-glsl-naga
 - cargo test -p lp-glsl-wasm
 - cargo test -p lp-glsl-filetests
 - cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

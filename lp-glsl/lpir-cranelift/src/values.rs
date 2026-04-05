@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lp_glsl_abi::{GlslParamMeta, GlslParamQualifier, LpsType};
+use lpvm::{GlslParamMeta, GlslParamQualifier, LpsType};
 
 /// Q32 host-side value (floats as `f64` before fixed-point encode).
 #[derive(Clone, Debug, PartialEq)]

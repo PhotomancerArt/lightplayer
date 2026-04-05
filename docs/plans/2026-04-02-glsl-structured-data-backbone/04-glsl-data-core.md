@@ -6,7 +6,7 @@ Implement GlslData struct with memory backing, path-based access, and conversion
 
 ## Implementation Details
 
-### 1. Create error type (lp-glsl-abi/src/glsl_data_error.rs)
+### 1. Create error type (lpvm/src/glsl_data_error.rs)
 
 ```rust
 use alloc::string::String;
@@ -46,7 +46,7 @@ impl core::fmt::Display for GlslDataError {
 impl std::error::Error for GlslDataError {}
 ```
 
-### 2. Create GlslData (lp-glsl-abi/src/glsl_data.rs)
+### 2. Create GlslData (lpvm/src/glsl_data.rs)
 
 ```rust
 use alloc::string::{String, ToString};
@@ -357,7 +357,7 @@ fn round_up(size: usize, alignment: usize) -> usize {
 ### 3. Update lib.rs exports
 
 ```rust
-// lp-glsl-abi/src/lib.rs
+// lpvm/src/lib.rs
 pub mod glsl_data;
 pub mod glsl_data_error;
 
@@ -465,8 +465,8 @@ fn type_mismatch_error() {
 ## Validation
 
 ```bash
-cargo check -p lp-glsl-abi
-cargo test -p lp-glsl-abi -- --test-threads=1
+cargo check -p lpvm
+cargo test -p lpvm -- --test-threads=1
 ```
 
 ## Notes

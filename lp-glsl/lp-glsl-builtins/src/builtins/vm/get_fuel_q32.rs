@@ -3,7 +3,7 @@
 //! The VMContext pointer is passed as a zero/sign-extended `i32` word (same as LPIR [`VMCTX_VREG`]),
 //! not as a native pointer type, so Cranelift import signatures match shader calls on every ISA.
 
-use lp_glsl_abi::VmContext;
+use lpvm::VmContext;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_vm_get_fuel_q32(vmctx_word: i32) -> u32 {
