@@ -5,7 +5,8 @@
 Implement **roadmap Milestone III**:
 
 1. **Bvec → numeric vector casts** (`vec2(bvec2(...))`, etc.) - fix `As`/`Compose` lowering
-2. **Q32 `round()` builtin** - promote from "not yet implemented" to implemented with half-away-from-zero semantics
+2. **Q32 `round()` builtin** - promote from "not yet implemented" to implemented with
+   half-away-from-zero semantics
 3. **Test triage** - annotate genuine Naga limitations, rewrite non-standard syntax
 
 **Out of scope:** array lowering (Milestone IV), matrix sret (V), multi-backend sweep (VI), structs.
@@ -13,7 +14,7 @@ Implement **roadmap Milestone III**:
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/src/
 │   └── lower_expr.rs          # UPDATE: As/Compose for bvec casts; round builtin
 ├── lp-glsl-builtins/src/builtins/glsl/
@@ -81,14 +82,14 @@ Test fails?
 ## Main components and interactions
 
 - **`lower_expr.rs`**: Central location for expression lowering fixes
-  - `As` handling for bvec -> numeric vector
-  - `Compose` handling for bvec -> numeric vector
-  - Ensure `round` builtin is properly dispatched
+    - `As` handling for bvec -> numeric vector
+    - `Compose` handling for bvec -> numeric vector
+    - Ensure `round` builtin is properly dispatched
 
 - **`q32.md`**: Single source of truth for Q32 semantics
-  - Update builtins table to reflect round as implemented
+    - Update builtins table to reflect round as implemented
 
 - **`lp-glsl-filetests`**: Validation corpus
-  - Remove annotations from now-working tests
-  - Add annotations for genuine limitations
-  - Rewrite non-standard syntax tests
+    - Remove annotations from now-working tests
+    - Add annotations for genuine limitations
+    - Rewrite non-standard syntax tests

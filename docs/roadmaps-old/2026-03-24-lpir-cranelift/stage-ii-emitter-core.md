@@ -15,34 +15,36 @@ native f32.
 ## Scope
 
 **In scope:**
-- New crate `lp-glsl/lpir-cranelift/` with Cargo.toml, `no_std` + `alloc`
+
+- New crate `lp-shader/lpir-cranelift/` with Cargo.toml, `no_std` + `alloc`
   support, cranelift dependencies (cranelift-codegen, cranelift-frontend,
   cranelift-module, cranelift-jit)
 - `emit.rs` — the core translation:
-  - Block stack for structured CF → Cranelift blocks
-  - `IfStart`/`Else`/`End` → then/else/merge blocks with branches
-  - `LoopStart`/`End` → header/exit blocks
-  - `Break`/`Continue` → jumps to exit/header
-  - `BrIfNot` → conditional branch
-  - `Return` → Cranelift return instruction
-  - VReg → Cranelift `Variable`, `def_var`/`use_var`
-  - Scalar arithmetic ops → Cranelift equivalents (`fadd`, `isub`, etc.)
-  - Comparison ops → Cranelift `icmp`/`fcmp`
-  - Constants → `iconst`/`f32const`
-  - `Select` → Cranelift `select`
-  - `Copy` → `def_var` alias
-  - Cast ops → Cranelift conversion instructions
+    - Block stack for structured CF → Cranelift blocks
+    - `IfStart`/`Else`/`End` → then/else/merge blocks with branches
+    - `LoopStart`/`End` → header/exit blocks
+    - `Break`/`Continue` → jumps to exit/header
+    - `BrIfNot` → conditional branch
+    - `Return` → Cranelift return instruction
+    - VReg → Cranelift `Variable`, `def_var`/`use_var`
+    - Scalar arithmetic ops → Cranelift equivalents (`fadd`, `isub`, etc.)
+    - Comparison ops → Cranelift `icmp`/`fcmp`
+    - Constants → `iconst`/`f32const`
+    - `Select` → Cranelift `select`
+    - `Copy` → `def_var` alias
+    - Cast ops → Cranelift conversion instructions
 - `module.rs` — minimal JitModule wrapper:
-  - Create Cranelift JITModule
-  - Declare + define functions
-  - Finalize
-  - Basic function calling (for tests)
+    - Create Cranelift JITModule
+    - Declare + define functions
+    - Finalize
+    - Basic function calling (for tests)
 - `lib.rs` — `jit_from_ir(ir: &IrModule, ...) -> Result<JitModule>`
 - `error.rs` — CompileError
 - Tests: hand-built IrModule with arithmetic, control flow, multi-return
   → JIT compile → call → verify results
 
 **Out of scope:**
+
 - Q32 mode (Stage III)
 - Builtin calls / imports (Stage III)
 - Memory ops: slot, load, store, memcpy (Stage III)
@@ -85,7 +87,7 @@ native f32.
 
 ## Deliverables
 
-- `lp-glsl/lpir-cranelift/` crate
+- `lp-shader/lpir-cranelift/` crate
 - Core emitter handling all scalar LPIR ops and structured CF
 - Basic JitModule with function calling
 - Tests proving arithmetic, conditionals, loops, multi-return work

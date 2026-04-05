@@ -90,7 +90,7 @@ Remove `<sourceFolder>` entries for deleted crate paths:
 Grep for remaining references to deleted crates in Rust source comments:
 
 ```bash
-rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-q32-metrics|lp-glsl-frontend' --type rust lp-glsl/ lp-core/ lp-fw/
+rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-q32-metrics|lp-glsl-frontend' --type rust lp-shader/ lp-core/ lp-fw/
 ```
 
 Update or remove stale comments. Key files from earlier analysis:

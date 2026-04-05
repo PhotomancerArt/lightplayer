@@ -34,7 +34,7 @@ Migrate the `esp32-glsl-jit` application from defmt/RTT logging to plain serial 
 ## File Structure
 
 ```
-lp-glsl/esp32-glsl-jit/
+lp-shader/esp32-glsl-jit/
 ├── .cargo/
 │   └── config.toml              # NEW: Cargo config for espflash runner and link args
 ├── Cargo.toml                    # UPDATE: Remove defmt deps, add esp-rtos, esp-println, esp-backtrace

@@ -12,14 +12,14 @@ docs/
 └── design/
     └── q32.md                              # NEW: single source of truth for Q32 semantics
 
-lp-glsl/lp-glsl-builtins/src/
+lp-shader/lp-glsl-builtins/src/
 ├── glsl/q32/types/
 │   └── q32.rs                              # UPDATE: saturating operators, fixed div-by-zero,
 │                                           #         fixed constant comments
 ├── builtins/lpir/
 │   └── fdiv_q32.rs                         # UPDATE: 0/0 → 0 (currently returns MAX_FIXED)
 
-lp-glsl/lp-glsl-filetests/filetests/
+lp-shader/lp-glsl-filetests/filetests/
 ├── builtins/
 │   ├── common-isinf.glsl                   # UPDATE: Q32-specific expectations / @unsupported
 │   └── common-isnan.glsl                   # UPDATE: same
@@ -64,11 +64,17 @@ must conform.
 
 1. **Overview** — What Q32 is, why it exists, relationship to LPIR.
 2. **Encoding** — Q16.16 format, range `[-32768.0, 32767.999984741]`, raw `i32` payload.
-3. **Conversions** — `from_f32`, `from_i32`, `to_f32`, `to_i32`, `to_u8_clamped`, `to_u16_clamped`, `from_fixed`.
+3. **Conversions** — `from_f32`, `from_i32`, `to_f32`, `to_i32`, `to_u8_clamped`, `to_u16_clamped`,
+   `from_fixed`.
 4. **Arithmetic** — Saturating add/sub/mul/div/neg/abs. Div-by-zero rules. Rem-by-zero → 0.
-5. **Named constants** — `PI`, `TAU`, `E`, `PHI`, `ONE`, `HALF`, `ZERO` with intended float values and exact fixed-point representations.
-6. **GLSL builtins on Q32** — Table of every GLSL builtin with Q32 behavior (normal case + edge case).
-7. **Relational builtins** — `isnan` always false, `isinf` always false, comparisons are integer comparisons on raw payload.
+5. **Named constants** — `PI`, `TAU`, `E`, `PHI`, `ONE`, `HALF`, `ZERO` with intended float values
+   and exact fixed-point representations.
+6. **GLSL builtins on Q32** — Table of every GLSL builtin with Q32 behavior (normal case + edge
+   case).
+7. **Relational builtins** — `isnan` always false, `isinf` always false, comparisons are integer
+   comparisons on raw payload.
 8. **`@unsupported` policy** — IEEE-only edge tests use `@unsupported(float_mode=q32, …)`.
-9. **Backend conformance** — All backends must produce results matching this doc. WASM details deferred.
-10. **Reference implementation** — Points to `Q32` struct as canonical; JIT builtins as executable boundary.
+9. **Backend conformance** — All backends must produce results matching this doc. WASM details
+   deferred.
+10. **Reference implementation** — Points to `Q32` struct as canonical; JIT builtins as executable
+    boundary.

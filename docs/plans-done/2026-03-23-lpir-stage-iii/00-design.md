@@ -11,7 +11,7 @@ Roadmap: `docs/roadmaps/2026-03-21-lpir/stage-iii.md`.
 ## File structure
 
 ```
-lp-glsl/lpir/src/
+lp-shader/lpir/src/
 ├── tests.rs                           # UPDATE: keep round-trip, sizing, smoke tests;
 │                                      #   remove validator negatives (moved)
 ├── tests/

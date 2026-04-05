@@ -109,7 +109,7 @@ impl VmContext {
 ## File Structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpvm/
 │   └── src/
 │       └── vmcontext.rs          # VmContext struct, methods, docs
@@ -186,29 +186,29 @@ pub struct VmContext {
 impl VmContext {
     /// Size of header (before globals/uniforms region)
     pub const HEADER_SIZE: usize = core::mem::size_of::<VmContext>();
-    
+
     /// Get base pointer to globals storage (read-only for uniforms)
     pub fn globals_base(&self) -> *const u8 {
         (self as *const _ as *const u8).wrapping_add(Self::HEADER_SIZE)
     }
-    
+
     /// Get mutable pointer to globals storage
     pub fn globals_base_mut(&mut self) -> *mut u8 {
         (self as *mut _ as *mut u8).wrapping_add(Self::HEADER_SIZE)
     }
-    
+
     /// Placeholder: Read global by index
     /// TODO(Milestone 2): Wire up with metadata
     pub fn get_global(&self, _index: usize) -> GlslValue {
         unimplemented!("globals access in Milestone 2")
     }
-    
+
     /// Placeholder: Write global by index
     /// TODO(Milestone 2): Wire up with metadata  
     pub fn set_global(&mut self, _index: usize, _value: GlslValue) {
         unimplemented!("globals access in Milestone 2")
     }
-    
+
     /// Placeholder: Read uniform by index
     /// TODO(Milestone 2): Wire up with metadata
     pub fn get_uniform(&self, _index: usize) -> GlslValue {
@@ -307,16 +307,16 @@ let mut arg_vs = Vec::new();
 // Only add VMContext for:
 // 1. User functions (callee >= import_count) - always
 // 2. Builtin imports that need it
-let is_user_func = callee_ref.0 >= import_count;
+let is_user_func = callee_ref.0 > = import_count;
 let is_vmctx_builtin = if callee_ref.0 < import_count {
-    let import_idx = callee_ref.0 as usize;
-    ctx.ir.imports[import_idx].needs_vmctx
+let import_idx = callee_ref.0 as usize;
+ctx.ir.imports[import_idx].needs_vmctx
 } else {
-    false
+false
 };
 
-if is_user_func || is_vmctx_builtin {
-    arg_vs.push(VMCTX_VREG);
+if is_user_func | | is_vmctx_builtin {
+arg_vs.push(VMCTX_VREG);
 }
 
 // ... rest of arg processing
@@ -346,14 +346,14 @@ In `signature_for_ir_func()`, check if callee is an import with `needs_vmctx`:
 ```rust
 // For imports, check if they need VMContext
 let needs_vmctx = if let Some(import_idx) = callee_as_import(func, callee) {
-    ctx.ir.imports[import_idx].needs_vmctx
+ctx.ir.imports[import_idx].needs_vmctx
 } else {
-    // User functions always need VMContext
-    true
+// User functions always need VMContext
+true
 };
 
 if needs_vmctx {
-    sig.params.push(AbiParam::new(types::I32)); // VMContext
+sig.params.push(AbiParam::new(types::I32)); // VMContext
 }
 ```
 
@@ -396,7 +396,7 @@ uint __lp_get_fuel(vmcontext ctx);
 use lpvm::vmcontext::VmContext;
 
 /// Get remaining instruction fuel from VMContext
-/// 
+///
 /// # Safety
 /// ctx must be a valid pointer to VmContext
 pub unsafe extern "C" fn __lp_get_fuel(ctx: &VmContext) -> u32 {

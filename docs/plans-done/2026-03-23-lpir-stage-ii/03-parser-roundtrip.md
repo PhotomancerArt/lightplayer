@@ -19,7 +19,7 @@ produce good error messages with line/column information via `nom_locate`.
 
 ### 1. Add dependencies
 
-Update `lp-glsl/lpir/Cargo.toml`:
+Update `lp-shader/lpir/Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -62,25 +62,32 @@ The parser is recursive-descent via nom combinators. Key parsing functions
 (each returns `IResult<Span, T>`):
 
 **Top level:**
-- `module` — `many0(module_item)`, where `module_item` is `import_decl | func_decl | entry_func_decl`
+
+- `module` — `many0(module_item)`, where `module_item` is
+  `import_decl | func_decl | entry_func_decl`
 - `import_decl` — `"import" import_name "(" type_list ")" ["->" return_type]`
 - `func_decl` — `"func" local_func_name "(" param_list ")" ["->" return_type] "{" func_body "}"`
 - `entry_func_decl` — `"entry" func_decl` (sets `is_entry = true`)
 
 **Function body:**
+
 - `func_body` — `many0(slot_line) many0(inner_line)`
 - `slot_line` — `"slot" slot_name "," uint_literal`
-- `inner_line` — one of: `assign_stmt`, `void_stmt`, `if_stmt`, `loop_stmt`, `switch_stmt`, `return_stmt`, `"break"`, `"continue"`, `br_if_not_stmt`
+- `inner_line` — one of: `assign_stmt`, `void_stmt`, `if_stmt`, `loop_stmt`, `switch_stmt`,
+  `return_stmt`, `"break"`, `"continue"`, `br_if_not_stmt`
 
 **Statements:**
+
 - `assign_stmt` — `vreg_list "=" rhs` (where rhs is `op | call_expr`)
 - `void_stmt` — `store_stmt | memcpy_stmt | void_call_stmt`
 - Control flow: `if_stmt`, `loop_stmt`, `switch_stmt` — recursive, parse nested bodies
 
 **Ops:**
+
 - `op` — dispatch on keyword: `"fadd"` → binary float, `"iconst.i32"` → const, etc.
 
 **Tokens:**
+
 - `vreg` — `"v" digits` → `VReg(n)`
 - `vreg_def` — `vreg [":" type]` → VReg + optional type
 - `slot_name` — `"ss" digits` → `SlotId(n)`
@@ -102,6 +109,7 @@ encounters ops, it calls builder methods. Control flow keywords (`if`, `else`,
 maps to the appropriate `end_*` call.
 
 The parser needs a resolution step for callee names:
+
 - Maintain a name → `CalleeRef` map, populated from imports and function
   declarations.
 - Since functions may be called before they're defined (forward references),

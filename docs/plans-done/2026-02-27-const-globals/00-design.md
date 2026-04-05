@@ -2,12 +2,13 @@
 
 ## Scope
 
-Create a spec-mirroring, feature-based filetest suite for GLSL const and constant expressions. No implementation of const support in this plan.
+Create a spec-mirroring, feature-based filetest suite for GLSL const and constant expressions. No
+implementation of const support in this plan.
 
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-filetests/filetests/
+lp-shader/lp-glsl-filetests/filetests/
 ├── const/                         # NEW: const category
 │   ├── qualifier/
 │   │   ├── must-init.glsl
@@ -65,4 +66,5 @@ Each subdirectory = one feature = one future implementation plan boundary.
 
 ## Validation
 
-`just filetest const/` or equivalent — all tests run; run tests use `[expect-fail]` until const support is implemented; error tests pass when the compiler rejects invalid const.
+`just filetest const/` or equivalent — all tests run; run tests use `[expect-fail]` until const
+support is implemented; error tests pass when the compiler rejects invalid const.

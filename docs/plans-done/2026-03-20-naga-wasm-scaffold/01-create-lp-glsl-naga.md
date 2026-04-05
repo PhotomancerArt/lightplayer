@@ -2,7 +2,7 @@
 
 ## Scope
 
-Create `lp-glsl/lp-glsl-naga/`, a `no_std`-compatible crate that wraps
+Create `lp-shader/lp-glsl-naga/`, a `no_std`-compatible crate that wraps
 `naga::front::glsl::Frontend` and returns a `NagaModule` (the `naga::Module`
 plus per-function metadata as `FunctionInfo`).
 
@@ -36,7 +36,7 @@ workspace = true
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 ```
 
-Add `"lp-glsl/lp-glsl-naga"` to both `members` and `default-members` in the
+Add `"lp-shader/lp-glsl-naga"` to both `members` and `default-members` in the
 workspace `Cargo.toml`.
 
 ### 2. src/lib.rs
@@ -115,19 +115,22 @@ pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
 ### 3. Helper functions (bottom of lib.rs)
 
 `parse_glsl(source) → Result<naga::Module, CompileError>`:
+
 - Create `naga::front::glsl::Frontend::default()`
 - Use `naga::front::glsl::Options::from(naga::ShaderStage::Vertex)`
 - Call `frontend.parse(&options, source)`, map errors to `CompileError::Parse`
 
 `extract_functions(module) → Result<Vec<FunctionInfo>, CompileError>`:
+
 - Iterate `module.functions.iter()`
 - For each function with a name, extract:
-  - `name` from `function.name.clone().unwrap_or_default()`
-  - `params` from `function.arguments` — resolve `module.types[arg.ty].inner`
-    via `naga_type_to_glsl()`
-  - `return_type` from `function.result` (or `GlslType::Void` if `None`)
+    - `name` from `function.name.clone().unwrap_or_default()`
+    - `params` from `function.arguments` — resolve `module.types[arg.ty].inner`
+      via `naga_type_to_glsl()`
+    - `return_type` from `function.result` (or `GlslType::Void` if `None`)
 
 `naga_type_to_glsl(inner: &naga::TypeInner) → Result<GlslType, CompileError>`:
+
 - `TypeInner::Scalar { kind: Float, width: 4 }` → `GlslType::Float`
 - `TypeInner::Scalar { kind: Sint, width: 4 }` → `GlslType::Int`
 - `TypeInner::Scalar { kind: Uint, width: 4 }` → `GlslType::UInt`

@@ -23,6 +23,7 @@ functions in a batch. We need a standalone helper that transforms ONE function.
 
 This is a standalone function (not a method on GlModule) that transforms one
 function. It needs:
+
 - The float-typed `Function` (input, consumed or borrowed)
 - The `Transform` implementation
 - The Q32 module (for `declare_func_in_func` during transform)
@@ -72,6 +73,7 @@ to borrow them, but that's out of scope.
 ### 2. Verify against existing transform
 
 Add a test that:
+
 1. Creates a float module with a simple function
 2. Creates a Q32 module with the Q32 signature declared
 3. Calls `transform_single_function`
@@ -131,11 +133,11 @@ helper).
 ## Validate
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_transform_single
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_transform_single
 ```
 
 Ensure all existing tests still pass:
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 ```

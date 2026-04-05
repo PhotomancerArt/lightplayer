@@ -9,7 +9,7 @@ generating inline code.
 
 ### 3.1 Update convert_fadd
 
-In `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
+In `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
 
 - Replace inline saturation code (~20 instructions) with builtin call
 - Follow the pattern from `convert_fmul`:

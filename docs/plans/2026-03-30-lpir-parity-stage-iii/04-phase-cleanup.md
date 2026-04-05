@@ -11,8 +11,8 @@ Final cleanup, remove any temporary code, ensure all tests pass, and prepare for
 ```bash
 # Search for TODOs, FIXMEs, debug prints
 cd /Users/yona/dev/photomancer/lp2025
-grep -r "TODO\|FIXME\|println!\|dbg!" lp-glsl/lp-glsl-naga/src/ --include="*.rs" | grep -v "test"
-grep -r "TODO\|FIXME\|println!\|dbg!" lp-glsl/lpir-cranelift/src/ --include="*.rs" | grep -v "test"
+grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/lp-glsl-naga/src/ --include="*.rs" | grep -v "test"
+grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/lpir-cranelift/src/ --include="*.rs" | grep -v "test"
 ```
 
 Remove any temporary debug code added during development.
@@ -69,9 +69,9 @@ Create `docs/plans/2026-03-30-lpir-parity-stage-iii/summary.md`:
 
 ## Files changed
 
-- `lp-glsl/lp-glsl-naga/src/lower_expr.rs`
+- `lp-shader/lp-glsl-naga/src/lower_expr.rs`
 - `docs/design/q32.md`
-- `lp-glsl/lp-glsl-filetests/filetests/const/builtin/extended.glsl`
+- `lp-shader/lp-glsl-filetests/filetests/const/builtin/extended.glsl`
 - (other test files as needed)
 
 ## Validation results

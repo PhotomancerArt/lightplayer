@@ -12,17 +12,17 @@ the typed call interface are Stage IV.
 ## File structure
 
 ```
-lp-glsl/lpir/src/
+lp-shader/lpir/src/
 └── types.rs                        # UPDATE: add FloatMode { Q32, F32 }
 
-lp-glsl/lp-glsl-naga/src/
+lp-shader/lp-glsl-naga/src/
 └── lib.rs                          # UPDATE: remove FloatMode, re-export lpir::FloatMode
 
-lp-glsl/lp-glsl-wasm/src/
+lp-shader/lp-glsl-wasm/src/
 ├── emit/imports.rs                 # UPDATE: use lpir::FloatMode
 └── options.rs                      # UPDATE: use lpir::FloatMode
 
-lp-glsl/lpir-cranelift/
+lp-shader/lpir-cranelift/
 ├── Cargo.toml                      # UPDATE: add lp-glsl-builtin-ids, lp-glsl-builtins deps
 └── src/
     ├── lib.rs                      # UPDATE: re-exports, FloatMode in public API
@@ -158,6 +158,7 @@ EmitCtx {
 ### `emit/scalar.rs` — Q32-aware dispatch
 
 Each float op checks `ctx.float_mode`:
+
 - `F32` → existing native CLIF instruction
 - `Q32` → either call builtin FuncRef (for the 6 with builtins) or call
   inline `q32::emit_q32_*` helper
@@ -174,6 +175,7 @@ Extends the existing Call handler. If `callee.0 < import_count`, index into
 ### `jit_module.rs` — updated setup
 
 `jit_from_ir` gains a `FloatMode` parameter. When Q32:
+
 1. Set `symbol_lookup_fn` on `JITBuilder` before `JITModule::new`
 2. Call `declare_builtins` after module creation
 3. For each function, resolve import `FuncRef`s via

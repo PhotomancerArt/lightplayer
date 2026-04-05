@@ -1,7 +1,7 @@
 # GLSL memory layout (LightPlayer)
 
 LightPlayer uses **`std430`-style packing** for structured CPU-side buffers (
-`lpir::LayoutRules::Std430`, [`GlslData`](../../lp-glsl/lpvm/src/glsl_data.rs)). This matches
+`lpir::LayoutRules::Std430`, [`GlslData`](../../lp-shader/lpvm/src/glsl_data.rs)). This matches
 common GPU storage-buffer rules for transparent types.
 
 ## Implemented rules (`Std430`)
@@ -25,11 +25,11 @@ Scalars in memory are **little-endian** (`GlslData` read/write).
 
 ## Not implemented
 
-- **`std140`** — reserved; [`LayoutRules::Std140`](../../lp-glsl/lpir/src/glsl_metadata.rs) panics
-  in [`layout::type_size`](../../lp-glsl/lpir/src/layout.rs) / `type_alignment`.
+- **`std140`** — reserved; [`LayoutRules::Std140`](../../lp-shader/lpir/src/glsl_metadata.rs) panics
+  in [`layout::type_size`](../../lp-shader/lpir/src/layout.rs) / `type_alignment`.
 
 ## Related code
 
-- Layout math: `lp-glsl/lpir/src/layout.rs`
-- Path offsets / leaf types: `lp-glsl/lpir/src/glsl_path.rs`, `path.rs`
-- Runtime buffer: `lp-glsl/lpvm/src/glsl_data.rs`
+- Layout math: `lp-shader/lpir/src/layout.rs`
+- Path offsets / leaf types: `lp-shader/lpir/src/glsl_path.rs`, `path.rs`
+- Runtime buffer: `lp-shader/lpvm/src/glsl_data.rs`

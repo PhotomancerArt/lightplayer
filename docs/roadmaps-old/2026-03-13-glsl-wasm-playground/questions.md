@@ -56,6 +56,7 @@ FloatStrategy later. Same compiler config, same options, different backend.
 **Context**: Shaders call builtins like `__lp_q32_sin`, `lpfx_snoise`, etc.
 In the JIT path, these are linked via `symbol_lookup_fn`. In WASM, the
 options are:
+
 - **WASM imports**: Shader module imports builtins; host provides them from
   a separate builtins WASM instance at instantiation time.
 - **Static linking**: Bundle builtins into the shader WASM module at
@@ -83,6 +84,7 @@ Same pattern for filetests (via wasmtime) and browser execution.
 app. It needs to be useful for validating the WASM compilation path.
 
 **Suggestion**: Minimal two-pane layout:
+
 - Left: GLSL source editor (CodeMirror or plain textarea for V0)
 - Right: canvas showing rendered output (simulated LED strip or 2D texture)
 - Below: compiler output (errors, timing, WASM module size)
@@ -120,6 +122,7 @@ Improving the debug UI is later work.
 
 **Context**: The compiler frontend (parse + semantic analysis) needs to run
 somewhere. Options:
+
 - **In the browser**: Compile lp-glsl-frontend + lp-glsl-wasm to WASM.
   The compiler itself runs in the browser. Zero server dependency.
 - **On a server**: Send GLSL source to a backend, get WASM bytes back.
@@ -161,6 +164,7 @@ directly.
 
 **Context**: The playground needs to compile Rust to WASM and bundle it
 with HTML/JS. Options:
+
 - **wasm-pack**: Rust → WASM with wasm-bindgen glue, outputs npm package.
 - **Trunk**: Leptos's recommended bundler, heavier setup.
 - **Manual**: cargo build --target wasm32-unknown-unknown + wasm-bindgen CLI.
@@ -181,6 +185,7 @@ recipes to build and serve: `just playground-build`, `just playground-serve`.
 results. The Cranelift backend has extensive filetests.
 
 **Suggestion**: Two layers:
+
 1. **Cross-validation tests** (Rust, runs in CI): Compile the same GLSL
    source with both Cranelift (Q32) and WASM backends. Execute both. Compare
    output values. These run as normal `cargo test` in the workspace.
@@ -191,6 +196,7 @@ The cross-validation tests are the important ones. They can reuse the
 existing filetest GLSL sources.
 
 **Answer**: Two layers:
+
 1. **Filetests via wasmtime** (Rust, cargo test): Modularize the existing
    filetest architecture to support multiple runtimes. All tests are
    applicable for all targets — the "target riscv32.q32" directive is
@@ -210,6 +216,7 @@ existing filetest GLSL sources.
 ### Q10: Crate naming and placement?
 
 **Context**: The compiler split produces three crates:
+
 - lp-glsl-frontend (shared parser + semantic)
 - lp-glsl-compiler (Cranelift backend, refactored)
 - lp-glsl-wasm (WASM backend, new)
@@ -217,19 +224,21 @@ existing filetest GLSL sources.
 The playground itself is a separate build artifact.
 
 **Suggestion**:
-- `lp-glsl/lp-glsl-frontend/` — new crate
-- `lp-glsl/lp-glsl-compiler/` — existing, refactored
-- `lp-glsl/lp-glsl-wasm/` — new crate
+
+- `lp-shader/lp-glsl-frontend/` — new crate
+- `lp-shader/lp-glsl-compiler/` — existing, refactored
+- `lp-shader/lp-glsl-wasm/` — new crate
 - `lp-app/playground/` — the web playground (wasm-pack project)
 
 All in the existing workspace, with lp-glsl-wasm and playground excluded
 from default-members (WASM targets).
 
 **Answer**:
-- `lp-glsl/lp-glsl-frontend/` — new: parser, semantic, types, errors
-- `lp-glsl/lp-glsl-cranelift/` — renamed from lp-glsl-compiler: Cranelift
+
+- `lp-shader/lp-glsl-frontend/` — new: parser, semantic, types, errors
+- `lp-shader/lp-glsl-cranelift/` — renamed from lp-glsl-compiler: Cranelift
   backend (depends on frontend)
-- `lp-glsl/lp-glsl-wasm/` — new: WASM codegen backend (depends on frontend)
+- `lp-shader/lp-glsl-wasm/` — new: WASM codegen backend (depends on frontend)
 - `lp-app/playground/` — web playground (wasm-pack project)
 
 Symmetric naming: lp-glsl-cranelift and lp-glsl-wasm are parallel backends.

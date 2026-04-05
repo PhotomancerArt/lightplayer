@@ -1,0 +1,53 @@
+[package]
+name = "lpir-cranelift"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LPIR → Cranelift codegen and JIT (RISC-V); optional GLSL via lp-glsl-naga"
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+# Host: `std` (libstd + native ISA). GLSL front end is separate (`glsl`); embedded JIT uses `glsl` without `std`.
+default = ["std", "glsl"]
+std = [
+    "cranelift-codegen/std",
+    "cranelift-codegen/host-arch",
+    "cranelift-frontend/std",
+    "cranelift-module/std",
+    "cranelift-jit/std",
+    "dep:cranelift-native",
+    "lp-glsl-builtins/std",
+]
+# GLSL string entry (`jit`) via `lp-glsl-naga`; independent of `std` for on-device builds.
+glsl = ["dep:lp-glsl-naga"]
+cranelift-optimizer = ["cranelift-codegen/optimizer"]
+cranelift-verifier = ["cranelift-codegen/verifier"]
+riscv32-emu = [
+    "std",
+    "glsl",
+    "dep:cranelift-object",
+    "dep:lp-riscv-elf",
+    "dep:lp-riscv-emu",
+    "cranelift-codegen/riscv32",
+]
+
+[dependencies]
+libm = "0.2"
+lpvm = { path = "../lpvm", default-features = false }
+lps-shared = { path = "../lps-shared" }
+lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lp-glsl-builtins = { path = "../lp-glsl-builtins", default-features = false }
+lp-glsl-naga = { path = "../lp-glsl-naga", optional = true }
+lpir = { path = "../lpir" }
+cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }
+cranelift-frontend = { workspace = true, default-features = false, features = ["core"] }
+cranelift-module = { workspace = true, default-features = false, features = ["core"] }
+cranelift-jit = { workspace = true, default-features = false, features = ["core"] }
+cranelift-native = { workspace = true, optional = true }
+cranelift-object = { workspace = true, optional = true }
+target-lexicon = { workspace = true }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }
+lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }

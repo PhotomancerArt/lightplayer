@@ -4,16 +4,16 @@
 
 Create two crates and update one:
 
-1. **NEW** `lp-glsl/lp-glsl-naga/` — Naga-based GLSL frontend
-2. **REWRITE** `lp-glsl/lp-glsl-wasm/` — WASM backend consuming naga::Module
-3. **UPDATE** `lp-glsl/lp-glsl-filetests/` — wasm_runner uses new types
+1. **NEW** `lp-shader/lp-glsl-naga/` — Naga-based GLSL frontend
+2. **REWRITE** `lp-shader/lp-glsl-wasm/` — WASM backend consuming naga::Module
+3. **UPDATE** `lp-shader/lp-glsl-filetests/` — wasm_runner uses new types
 
 Scalar filetests (`scalar/float/op-add.glsl` etc.) pass on `wasm.q32` target.
 
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/                    # NEW
 │   ├── Cargo.toml                   # naga (glsl-in), no_std
 │   └── src/

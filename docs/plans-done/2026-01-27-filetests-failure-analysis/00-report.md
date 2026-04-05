@@ -102,8 +102,8 @@ Signature: Signature { params: [AbiParam { value_type: types::I32, purpose: Stru
 **Code Location**:
 
 - Function signature generation:
-  `lp-glsl/lp-glsl-compiler/src/frontend/codegen/signature.rs:132-140`
-- Test execution: `lp-glsl/lp-glsl-compiler/src/exec/execute_fn.rs` or test harness
+  `lp-shader/lp-glsl-compiler/src/frontend/codegen/signature.rs:132-140`
+- Test execution: `lp-shader/lp-glsl-compiler/src/exec/execute_fn.rs` or test harness
 
 **Recommendation**:
 

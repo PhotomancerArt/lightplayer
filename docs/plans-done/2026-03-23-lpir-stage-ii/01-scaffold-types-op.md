@@ -37,7 +37,7 @@ std = []
 
 ### 2. Workspace registration
 
-Add `"lp-glsl/lpir"` to `[workspace].members` in the root `Cargo.toml`.
+Add `"lp-shader/lpir"` to `[workspace].members` in the root `Cargo.toml`.
 Also add it to `[workspace].default-members` if appropriate.
 
 ### 3. src/lib.rs

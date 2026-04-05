@@ -7,14 +7,14 @@ outer scope variables, and outer variables remain unchanged when shadowed.
 
 ## Changes
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/semantic/scope.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/semantic/scope.rs`
 
 - **`lookup_variable()` function**: Ensure proper shadowing behavior
     - Inner scope variables should shadow outer scope variables
     - When looking up a variable, find the innermost declaration
     - Verify scope stack is searched correctly (innermost first)
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/loop_for.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/loop_for.rs`
 
 - **For loop variable scoping**:
     - Ensure init-expression variables are scoped correctly
@@ -23,7 +23,7 @@ outer scope variables, and outer variables remain unchanged when shadowed.
     - Pop scope after loop body
     - Verify init-expression variable is only in scope until end of loop body
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/if_stmt.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/if_stmt.rs`
 
 - **If block variable scoping**:
     - Ensure inner block variables shadow outer variables
@@ -31,7 +31,7 @@ outer scope variables, and outer variables remain unchanged when shadowed.
     - Pop scope after if block body
     - Verify variables declared in if block don't leak to outer scope
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/context.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/codegen/context.rs`
 
 - **Scope management**: Verify scope stack is managed correctly
     - Check `push_scope()` and `pop_scope()` usage

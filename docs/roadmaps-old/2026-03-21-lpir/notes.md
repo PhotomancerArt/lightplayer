@@ -77,6 +77,7 @@ path, not changes to the IR or lowering.
 ### Q32 in the emitter rationale
 
 Q32 strategies are fundamentally backend-specific:
+
 - WASM: inline i64 sequences (native i64 support)
 - Cranelift saturating: builtin calls (`__lp_q32_add` etc.) because riscv32imac
   lacks i64 div and i64 mul requires libcalls
@@ -114,10 +115,11 @@ relooper.
 ## Crate structure
 
 **Answer**: Two crates:
-- `lp-glsl/lpir` — core library. IR types, builder API, text printer, text
+
+- `lp-shader/lpir` — core library. IR types, builder API, text printer, text
   parser. `no_std` compatible (printer/parser behind `alloc` feature).
   Zero external dependencies.
-- `lp-glsl/lpir-cli` — optional CLI. Reads LPIR text, validates, prints stats,
+- `lp-shader/lpir-cli` — optional CLI. Reads LPIR text, validates, prints stats,
   maybe runs through a backend. Depends on `lpir` + `std`. Can be deferred.
 
 `lp-glsl-naga` depends on `lpir` for the lowering (Naga → LPIR).

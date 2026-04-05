@@ -45,7 +45,7 @@ fw-core = { path = "../../crates/fw-core", default-features = false }
 lp-server = { path = "../../crates/lp-server", default-features = false }
 lp-shared = { path = "../../crates/lp-shared", default-features = false }
 lp-model = { path = "../../crates/lp-model", default-features = false }
-lp-riscv-tools = { path = "../../../lp-glsl/lp-riscv-tools", default-features = false }
+lp-riscv-tools = { path = "../../../lp-shader/lp-riscv-tools", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 ```

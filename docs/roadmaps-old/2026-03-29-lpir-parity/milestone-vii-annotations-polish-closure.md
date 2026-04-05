@@ -47,7 +47,7 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
 ### Documentation
 
 - Update `docs/reports/2026-03-29-lpir-feature-parity-audit.md` with final numbers.
-- Update `lp-glsl/lp-glsl-filetests/README.md` if annotation semantics or tooling changed.
+- Update `lp-shader/lp-glsl-filetests/README.md` if annotation semantics or tooling changed.
 - Write final parity report using the Milestone VI comparison tooling.
 
 ### Closure

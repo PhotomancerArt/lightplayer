@@ -9,7 +9,7 @@ like `psrdnoise` to use out parameters.
 
 ### Files to Modify
 
-1. **`lp-glsl/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_sig.rs`**
+1. **`lp-shader/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_sig.rs`**
     - Update `build_call_signature()` to check parameter qualifiers
     - Update `convert_to_cranelift_types()` to handle qualifiers
 

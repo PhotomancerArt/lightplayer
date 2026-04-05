@@ -87,8 +87,8 @@ After regeneration, no `.gen.glsl` file should contain `// target` or
 `[expect-fail]`:
 
 ```bash
-grep -r '// target' lp-glsl/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
-grep -r '\[expect-fail\]' lp-glsl/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
+grep -r '// target' lp-shader/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
+grep -r '\[expect-fail\]' lp-shader/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
 ```
 
 ## Validate

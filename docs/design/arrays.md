@@ -2,7 +2,8 @@
 
 ## Overview
 
-This document describes how GLSL arrays are represented, stored, and accessed in LPIR (LightPlayer IR). Arrays are a fundamental GLSL feature that enables collections of values with dynamic indexing.
+This document describes how GLSL arrays are represented, stored, and accessed in LPIR (LightPlayer
+IR). Arrays are a fundamental GLSL feature that enables collections of values with dynamic indexing.
 
 ## Goals
 
@@ -26,13 +27,16 @@ This document describes how GLSL arrays are represented, stored, and accessed in
 ### Why Arrays Need Special Handling
 
 Unlike vectors and matrices (which have fixed, small sizes and can be scalarized to VRegs), arrays:
+
 1. Can be arbitrarily large (e.g., `float data[1000]`)
 2. Require dynamic indexing at runtime (`arr[i]` where `i` is unknown at compile time)
 3. Need address computation: `base + index × element_size`
 
 ### Safety Requirements on Embedded
 
-On ESP32-C6, shaders run in the same address space as the firmware. An out-of-bounds array access could corrupt the runtime. This requires:
+On ESP32-C6, shaders run in the same address space as the firmware. An out-of-bounds array access
+could corrupt the runtime. This requires:
+
 1. Runtime bounds checking on dynamic indexing
 2. Defined behavior on OOB (not just "undefined behavior")
 
@@ -40,9 +44,11 @@ On ESP32-C6, shaders run in the same address space as the firmware. An out-of-bo
 
 ### Array Layout: Stack Slots
 
-All arrays are stored in LPIR stack slots, allocated via `FunctionBuilder::alloc_slot(size_in_bytes)`.
+All arrays are stored in LPIR stack slots, allocated via
+`FunctionBuilder::alloc_slot(size_in_bytes)`.
 
 **Layout:**
+
 ```
 Slot memory (row-major for multi-dimensional):
 ┌─────────────────────────────────────────────────────────────┐
@@ -53,14 +59,17 @@ Slot memory (row-major for multi-dimensional):
 ```
 
 **Element size calculation:**
+
 - Scalar (int/float/bool): 4 bytes
 - Vector (vecN/ivecN/bvecN): 4 × N bytes
 - Matrix (matNxM): 4 × N × M bytes
 
 **Multi-dimensional array layout:**
+
 ```glsl
 int arr[3][4];  // Row-major: 12 elements contiguous
 ```
+
 Flat index: `i × 4 + j` for `arr[i][j]`
 
 ### Array Metadata
@@ -78,13 +87,15 @@ struct ArrayInfo {
 ```
 
 Storage in `LowerCtx`:
+
 ```rust
 pub(crate) array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>
 ```
 
 ### Type Mapping
 
-Arrays are handled separately from the `naga_type_to_ir_types()` pipeline. When lowering a local variable declaration:
+Arrays are handled separately from the `naga_type_to_ir_types()` pipeline. When lowering a local
+variable declaration:
 
 1. Check if type is array via `TypeInner::Array`
 2. Calculate total size: `element_count × element_size`
@@ -122,12 +133,14 @@ For `Expression::Access { base, index }` on array:
 
 **Fat pointer representation for parameters:**
 Arrays passed as function parameters use a "fat pointer" - two I32 values:
+
 1. **Pointer** - base address (I32)
 2. **Length** - element count (I32)
 
 This matches Rust slice representation (`&[T]` = ptr + len).
 
 **Bounds check lowering:**
+
 ```
 // Before dynamic array access:
 v_in_bounds = IltU(index_v, length_v)      // index < length
@@ -145,12 +158,12 @@ v_clamped = Select(v_in_bounds, index_v, Iconst(0))  // or length-1
 
 **Parameter passing:**
 
-| Param Type | Representation | Registers |
-|------------|----------------|-----------|
-| `in` scalar/vector/matrix | By value (flattened) | N VRegs |
-| `in` array | Fat pointer | 2 VRegs (ptr, length) |
-| `out`/`inout` non-array | Pointer | 1 VReg (ptr) |
-| `out`/`inout` array | Fat pointer | 2 VRegs (ptr, length) |
+| Param Type                | Representation       | Registers             |
+|---------------------------|----------------------|-----------------------|
+| `in` scalar/vector/matrix | By value (flattened) | N VRegs               |
+| `in` array                | Fat pointer          | 2 VRegs (ptr, length) |
+| `out`/`inout` non-array   | Pointer              | 1 VReg (ptr)          |
+| `out`/`inout` array       | Fat pointer          | 2 VRegs (ptr, length) |
 
 **Callee handling:**
 
@@ -187,12 +200,13 @@ for (i, arg) in func.arguments.iter().enumerate() {
 GLSL: `int arr[3] = {1, 2, 3}`
 
 Lowering:
+
 1. Allocate slot for array
 2. For each initializer element:
-   - Compute offset: `index × element_size`
-   - Emit store of initializer value
+    - Compute offset: `index × element_size`
+    - Emit store of initializer value
 3. If partial initialization (fewer elements than array size):
-   - Zero-fill remaining elements (memcpy from zeroed temp or loop)
+    - Zero-fill remaining elements (memcpy from zeroed temp or loop)
 
 ### Multi-Dimensional Arrays
 
@@ -203,12 +217,14 @@ Storage: Single flat slot with 12 elements (row-major).
 **Indexing:** `arr[i][j]`
 
 Lowering computes flat index:
+
 ```
 flat_index = i × 4 + j           // inner dimension is 4
 byte_offset = flat_index × 4    // element_size for int
 ```
 
 For N-dimensional arrays:
+
 ```
 // arr[d0][d1][d2]...[dn-1]
 // flat_index = i0×(d1×d2×...×dn) + i1×(d2×...×dn) + ... + in-1
@@ -219,7 +235,7 @@ For N-dimensional arrays:
 ### File Structure
 
 ```
-lp-glsl/lp-glsl-naga/src/
+lp-shader/lp-glsl-naga/src/
 ├── lower_ctx.rs          # Add array_map, fat pointer handling
 ├── lower_expr.rs         # Add Access/AccessIndex for arrays
 ├── lower_stmt.rs         # Add array Store handling
@@ -227,7 +243,7 @@ lp-glsl/lp-glsl-naga/src/
 ├── naga_util.rs          # Add array type utilities
 └── mod.rs                # Export new modules
 
-lp-glsl/lpir/src/
+lp-shader/lpir/src/
 ├── op.rs                 # Existing: SlotAddr, Load, Store, Memcpy
 ├── builder.rs            # Existing: alloc_slot()
 └── types.rs              # Existing: SlotId
@@ -284,6 +300,7 @@ Naga GLSL parsing
 **Decision:** Use stack slots for all arrays, not just large ones.
 
 **Rationale:**
+
 - Dynamic indexing requires address computation; VRegs can't be dynamically indexed efficiently
 - Uniform approach is simpler to implement and reason about
 - Optimizer can promote to VRegs later if profiling shows benefit
@@ -294,6 +311,7 @@ Naga GLSL parsing
 **Decision:** Pass `(ptr, element_count)` as fat pointer for array parameters.
 
 **Rationale:**
+
 - Prior art: Rust slices, Go slices, C++ std::span all use element count
 - Enables bounds checking without type knowledge
 - Future `.length()` method can use this information
@@ -304,6 +322,7 @@ Naga GLSL parsing
 **Decision:** Clamp index to valid range on OOB access for v1.
 
 **Rationale:**
+
 - Safety requirement: prevents memory corruption on embedded
 - v1 trade-off: silent wrong result vs crash - we choose "keeps running"
 - Future: Trap + stack unwinding for error recovery
@@ -311,9 +330,11 @@ Naga GLSL parsing
 
 ### 4. Separate `array_map` (Not Enum in `local_map`)
 
-**Decision:** Add `array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>` instead of extending `local_map` values to an enum.
+**Decision:** Add `array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>` instead of extending
+`local_map` values to an enum.
 
 **Rationale:**
+
 - Keeps non-array path simple (no enum matching overhead)
 - Array handling is fundamentally different (pointer-based vs value-based)
 - Clear separation of concerns
@@ -323,6 +344,7 @@ Naga GLSL parsing
 **Decision:** Store multi-dimensional arrays as a single flat slot (row-major), not nested slots.
 
 **Rationale:**
+
 - Matches C/GLSL semantics (row-major)
 - Simpler allocation (one `alloc_slot` call)
 - Index computation at lowering time is straightforward
@@ -330,23 +352,27 @@ Naga GLSL parsing
 
 ## Open Questions
 
-1. **Whole-array operations:** Should we support `arr1 = arr2` (copy) and `arr1 == arr2` (comparison)? GLSL doesn't allow array assignment/comparison, but future versions might.
+1. **Whole-array operations:** Should we support `arr1 = arr2` (copy) and `arr1 == arr2` (
+   comparison)? GLSL doesn't allow array assignment/comparison, but future versions might.
 
-2. **Unsized array parameters:** GLSL allows `int arr[]` as function parameter (size inferred at call site). Do we need this for v1 or can it wait?
+2. **Unsized array parameters:** GLSL allows `int arr[]` as function parameter (size inferred at
+   call site). Do we need this for v1 or can it wait?
 
 3. **`.length()` method:** Should we add this in v2? It would use the fat pointer length field.
 
-4. **Zero-initialization cost:** Large arrays zero-initialized on declaration could be expensive. Should we have a "lazy zero" mode or require explicit initialization?
+4. **Zero-initialization cost:** Large arrays zero-initialized on declaration could be expensive.
+   Should we have a "lazy zero" mode or require explicit initialization?
 
 ## Related Documents
 
 - `docs/roadmaps/2026-03-29-lpir-parity/milestone-iv-array-lowering.md` - Implementation milestone
 - `docs/plans/2026-03-30-arrays-notes.md` - Working notes and analysis
-- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` - Old compiler array declaration
-- `lp-glsl/lp-glsl-compiler/src/frontend/semantic/types.rs` - Old compiler type system
+- `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` - Old compiler array
+  declaration
+- `lp-shader/lp-glsl-compiler/src/frontend/semantic/types.rs` - Old compiler type system
 
 ## Changelog
 
-| Date | Change |
-|------|--------|
+| Date       | Change                                                               |
+|------------|----------------------------------------------------------------------|
 | 2026-03-30 | Initial design document - stack slots, fat pointers, bounds clamping |

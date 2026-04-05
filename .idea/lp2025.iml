@@ -2,10 +2,6 @@
 <module type="EMPTY_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/embive-program/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/test-structreturn/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/crates/runtime-embive/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/apps/embassy_hello_world_hashbrown/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-cli/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-cli/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-core/src" isTestSource="false" />
@@ -32,40 +28,44 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-riscv/lp-riscv-tools/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-emu-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-gen-app/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-compiler/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests-gen-app/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-filetests/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpfx-impl-macro/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lp-client/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-emu/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-tests/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtin-ids/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-wasm/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-app/web-demo/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-builtins-wasm/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-naga/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-naga/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-diagnostics/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-exec/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpsc-shared/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpvm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lpvm/lpvm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/apps/embassy_hello_world_hashbrown/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/apps/embive-program/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/apps/test-structreturn/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/crates/runtime-embive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtin-ids/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtins-emu-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtins-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtins-gen-app/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtins-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-builtins/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-compiler/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-compiler/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-compiler/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-diagnostics/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-exec/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-filetests-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-filetests-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-filetests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-filetests/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-naga/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-naga/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-wasm/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lp-glsl-wasm/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpfx-impl-macro/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpir-cranelift/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-shared/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

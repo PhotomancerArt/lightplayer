@@ -94,14 +94,14 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 - **`lp-model`** Data models and API definitions for projects, nodes, and server communication
 - **`lp-shared`** Shared utilities for filesystem, logging, time, and transport
 
-## GLSL Compiler (`lp-glsl/`)
+## GLSL Compiler (`lp-shader/`)
 
-Full layout and commands: [`lp-glsl/README.md`](lp-glsl/README.md).
+Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 
 - **`lp-glsl-naga`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
 - **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
-- **`lpsc-shared`** Shared type and function-signature shapes for tests / exec helpers
+- **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
 - **`lp-glsl-diagnostics`** Error codes, spans, `GlslError`
 - **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
 - **`lp-glsl-exec`** `GlslExecutable` trait and filetest backend glue

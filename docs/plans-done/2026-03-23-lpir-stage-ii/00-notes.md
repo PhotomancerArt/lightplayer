@@ -13,7 +13,7 @@ Spec: `docs/lpir/` (chapters 00–09).
 
 ## Current state
 
-- **No `lpir` crate exists.** The `lp-glsl/` directory has `lp-glsl-naga`,
+- **No `lpir` crate exists.** The `lp-shader/` directory has `lp-glsl-naga`,
   `lp-glsl-wasm`, `lp-glsl-cranelift`, and others, but no `lpir/` subdirectory.
 - The LPIR spec is complete (10 chapters in `docs/lpir/`).
 - Existing crates use `#![no_std]` + `extern crate alloc`; the `lpir` crate
@@ -24,19 +24,20 @@ Spec: `docs/lpir/` (chapters 00–09).
 
 ### 1. Crate naming and path
 
-The roadmap spec overview says `lp-glsl/lpir/`. Other crates under `lp-glsl/`
+The roadmap spec overview says `lp-shader/lpir/`. Other crates under `lp-shader/`
 follow a `lp-glsl-<name>` convention (e.g. `lp-glsl-naga`, `lp-glsl-wasm`).
 
 Should the crate be:
-- `lp-glsl/lpir/` with package name `lpir` (as in roadmap)
-- `lp-glsl/lp-glsl-lpir/` with package name `lp-glsl-lpir` (matching convention)
 
-**Suggested**: `lp-glsl/lpir/` with package name `lpir`. The `lpir` crate is the
+- `lp-shader/lpir/` with package name `lpir` (as in roadmap)
+- `lp-shader/lp-glsl-lpir/` with package name `lp-glsl-lpir` (matching convention)
+
+**Suggested**: `lp-shader/lpir/` with package name `lpir`. The `lpir` crate is the
 IR core and will be depended on by `lp-glsl-naga` (for lowering), `lp-glsl-wasm`
 (for emission), and `lp-glsl-cranelift`. A shorter name reflects that it is a
 foundational module, not just another `lp-glsl-*` plugin.
 
-**Answer**: `lp-glsl/lpir/` with package name `lpir`.
+**Answer**: `lp-shader/lpir/` with package name `lpir`.
 
 ---
 
@@ -104,6 +105,7 @@ and import declarations? Or should we start with just `IrFunction` (standalone)
 and add `IrModule` later when we have Naga lowering (Stage IV)?
 
 **Suggested**: Include `IrModule` from the start. It's needed for:
+
 - Import declarations (referenced by `call @std.math::fsin(...)` etc.)
 - Multiple function definitions
 - Entry function marking
@@ -129,6 +131,7 @@ The spec says virtual registers have dense indices (`v0..v{N-1}`) with a fixed
 type per register. Options:
 
 **Option A — newtype + parallel type array in IrFunction**:
+
 ```rust
 struct VReg(u32);
 // In IrFunction:
@@ -149,6 +152,7 @@ Not practical for 2 types; wastes space.
 ### 5. Builder API design for control flow
 
 For scalar ops, the builder pattern is clear:
+
 ```rust
 let v2 = builder.alloc_vreg(IrType::F32);
 builder.push(Op::Fadd { dst: v2, lhs: v0, rhs: v1 });
@@ -157,6 +161,7 @@ builder.push(Op::Fadd { dst: v2, lhs: v0, rhs: v1 });
 For control flow, options:
 
 **Option A — direct construction**: Build `Vec<Op>` for bodies and pass them:
+
 ```rust
 let then_body = vec![Op::Fadd { dst: v2, lhs: v0, rhs: v1 }];
 let else_body = vec![];
@@ -164,6 +169,7 @@ builder.push(Op::If { cond, then_body, else_body });
 ```
 
 **Option B — nested builder with closures**:
+
 ```rust
 builder.push_if(cond, |b| {
     b.push(Op::Fadd { dst: v2, lhs: v0, rhs: v1 });
@@ -184,6 +190,7 @@ under (3 × `u32`). But `Call` has variable-arity arguments and results.
 **Option A — side pool (Cranelift-style ValueList)**:
 `IrFunction` holds a shared `vreg_pool: Vec<VReg>`. Each `Call` stores a
 `(start: u32, count: u16)` range into the pool for args and results:
+
 ```rust
 Op::Call {
     callee: CalleeRef,
@@ -191,9 +198,11 @@ Op::Call {
     results: VRegRange,  // { start: u32, count: u16 }
 }
 ```
+
 Total: ~16-20 bytes. Pool grows monotonically; no per-call allocation.
 
 **Option B — inline small array**:
+
 ```rust
 Op::Call {
     callee: CalleeRef,
@@ -203,6 +212,7 @@ Op::Call {
     result_count: u8,
 }
 ```
+
 Total: ~42 bytes. Blows up the enum size for every Op variant. Bad.
 
 **Suggested**: Option A (side pool). One extra `Vec<VReg>` per function, all
@@ -224,6 +234,7 @@ pool for args, results, and return values.
 ### 6. Multi-return in `return` statement
 
 The text format grammar currently says:
+
 ```
 return_stmt = "return" [ vreg ]
 ```
@@ -233,6 +244,7 @@ and the well-formedness rules state: "a parenthesized return type in the
 declaration corresponds to multiple parallel returned scalars."
 
 This means `return` needs to support multiple VRegs:
+
 ```
 return v0, v1, v2
 ```
@@ -260,6 +272,7 @@ results." Stage III says "extend the interpreter… with comprehensive coverage.
 How much should the Stage II interpreter cover?
 
 **Suggested**: Stage II interpreter covers:
+
 - All arithmetic, comparison, logic, constant, immediate, cast, select, copy ops
 - Control flow: if/else, loop, break, continue, br_if_not, switch, return
 - Memory: slot, slot_addr, load, store, memcpy
@@ -283,6 +296,7 @@ The roadmap says "Validation: basic well-formedness checks." What should be
 checked vs deferred to Stage III?
 
 **Suggested Stage II checks**:
+
 - VReg defined before use
 - VReg type consistency (same type on redefinition)
 - `break`/`continue`/`br_if_not` only inside `loop`

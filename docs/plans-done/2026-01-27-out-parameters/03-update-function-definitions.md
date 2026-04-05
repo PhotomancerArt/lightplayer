@@ -9,15 +9,15 @@ Parameters should be stored as pointers and accessed via load/store operations.
 
 ### Files to Modify
 
-1. **`lp-glsl/lp-glsl-compiler/src/frontend/glsl_compiler.rs`**
+1. **`lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs`**
     - Update parameter declaration section
     - Handle out/inout parameters as pointers
     - Update parameter access to load/store from pointers
 
-2. **`lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`**
+2. **`lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`**
     - Handle reading from out/inout parameter variables (load from pointer)
 
-3. **`lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`**
+3. **`lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`**
     - Handle writing to out/inout parameter variables (store to pointer)
 
 ### Changes

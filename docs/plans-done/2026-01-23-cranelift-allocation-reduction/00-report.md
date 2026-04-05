@@ -95,7 +95,7 @@ options.algorithm = match b.flags().regalloc_algorithm() {
 - Cannot be freed until after compilation completes
 
 **Location:**
-`/Users/yona/dev/photomancer/lp2025/lp-glsl/lp-glsl-compiler/src/backend/codegen/jit.rs:139-177`
+`/Users/yona/dev/photomancer/lp2025/lp-shader/lp-glsl-compiler/src/backend/codegen/jit.rs:139-177`
 
 ### 3. VCode Size
 
@@ -159,7 +159,7 @@ available memory.
 
 **Implementation Locations:**
 
-1. **For ESP32 JIT compilation** (`lp-glsl/esp32-glsl-jit/src/main.rs:230-234`):
+1. **For ESP32 JIT compilation** (`lp-shader/esp32-glsl-jit/src/main.rs:230-234`):
    ```rust
    let mut flag_builder = settings::builder();
    flag_builder.set("opt_level", "none").unwrap();
@@ -170,7 +170,7 @@ available memory.
    ```
 
 2. **For default RISC-V32 flags** (
-   `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs:116-141`):
+   `lp-shader/lp-glsl-compiler/src/backend/target/target.rs:116-141`):
    ```rust
    fn default_riscv32_flags() -> Result<Flags, GlslError> {
        let mut flag_builder = settings::builder();
@@ -183,7 +183,7 @@ available memory.
    ```
 
 3. **For default host flags** (
-   `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs:145-169`):
+   `lp-shader/lp-glsl-compiler/src/backend/target/target.rs:145-169`):
    ```rust
    fn default_host_flags() -> Result<Flags, GlslError> {
        let mut flag_builder = settings::builder();
@@ -279,7 +279,7 @@ available memory.
 
 **Implementation:**
 
-- Modify `/Users/yona/dev/photomancer/lp2025/lp-glsl/esp32-glsl-jit/src/main.rs:56`
+- Modify `/Users/yona/dev/photomancer/lp2025/lp-shader/esp32-glsl-jit/src/main.rs:56`
 - Change `esp_alloc::heap_allocator!(size: 300_000);` to larger value
 
 **Expected Impact:**
@@ -368,11 +368,11 @@ available memory.
     - Need to find where compiler settings are configured in lp-glsl-compiler
 
 2. **Heap Size Configuration:**
-    - `/Users/yona/dev/photomancer/lp2025/lp-glsl/esp32-glsl-jit/src/main.rs:56`
+    - `/Users/yona/dev/photomancer/lp2025/lp-shader/esp32-glsl-jit/src/main.rs:56`
 
 3. **CLIF IR Freeing:**
    -
-   `/Users/yona/dev/photomancer/lp2025/lp-glsl/lp-glsl-compiler/src/backend/codegen/jit.rs:139-177`
+   `/Users/yona/dev/photomancer/lp2025/lp-shader/lp-glsl-compiler/src/backend/codegen/jit.rs:139-177`
 
 4. **Compilation Function:**
    -

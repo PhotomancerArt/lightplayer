@@ -2,7 +2,9 @@
 
 ## Scope of Work
 
-Migrate the entire codebase from custom `debug!` macros to the standard `log` crate with `env_logger` for std environments. This plan focuses on infrastructure setup - crate-by-crate migration will be handled separately using IDE find-replace tools.
+Migrate the entire codebase from custom `debug!` macros to the standard `log` crate with
+`env_logger` for std environments. This plan focuses on infrastructure setup - crate-by-crate
+migration will be handled separately using IDE find-replace tools.
 
 ## File Structure
 
@@ -40,18 +42,18 @@ lp-fw/fw-esp32/src/
 ├── main.rs                   # UPDATE: Initialize logger
 └── log.rs                    # NEW: Logger initialization for ESP32
 
-lp-glsl/lp-glsl-builtins/src/host/
+lp-shader/lp-glsl-builtins/src/host/
 ├── mod.rs                    # UPDATE: Remove host_println, update host_debug → host_log
 ├── macros.rs                 # UPDATE: Replace host_debug!/host_println! with log macros
 ├── logger.rs                 # NEW: Logger implementation (routes to emulator/JIT)
 ├── test.rs                   # UPDATE: Update test implementations
 └── no_std_format.rs          # UPDATE: Update for log levels
 
-lp-glsl/lp-glsl-compiler/src/backend/host/
+lp-shader/lp-glsl-compiler/src/backend/host/
 ├── impls.rs                  # UPDATE: Replace __host_debug/__host_println with __host_log
 └── registry.rs               # UPDATE: Update HostId enum (remove Println, update Debug → Log)
 
-lp-glsl/esp32-glsl-jit/src/
+lp-shader/esp32-glsl-jit/src/
 └── jit_fns.rs                # UPDATE: Replace lp_jit_host_debug/lp_jit_host_println with lp_jit_host_log
 ```
 
@@ -121,6 +123,7 @@ lp-glsl/esp32-glsl-jit/src/
 **Purpose**: Automatic test logger initialization for all tests
 
 **Implementation**:
+
 - Add `test-log` crate dependency to workspace
 - Tests use `#[test_log::test]` instead of `#[test]`
 - For tokio tests: `#[tokio::test] #[test_log::test]` (stacked attributes)
@@ -129,6 +132,7 @@ lp-glsl/esp32-glsl-jit/src/
 - No manual initialization needed in any test
 
 **Usage**:
+
 ```rust
 use test_log::test;
 
@@ -146,6 +150,7 @@ async fn my_async_test() {
 ```
 
 **Dependencies**:
+
 - Add `test-log = "0.2"` to workspace `Cargo.toml` (or individual crate `Cargo.toml` files)
 - `test-log` uses `env_logger` under the hood, so `env_logger` must be available
 
@@ -154,12 +159,14 @@ async fn my_async_test() {
 **Purpose**: Logger implementation for `no_std` emulator guest code
 
 **Implementation**:
+
 - Implements `log::Log` trait
 - Routes all log calls to `SYSCALL_LOG` syscall
 - Formats messages with module path, level, and message
 - No allocation - uses static buffers for formatting
 
 **Initialization**:
+
 - Called from `fw-emu/src/main.rs` before any logging
 - Must be initialized once at startup
 
@@ -168,12 +175,14 @@ async fn my_async_test() {
 **Purpose**: Handle `SYSCALL_LOG` syscalls from guest and route to `env_logger`
 
 **Implementation**:
+
 - Receives syscall with: level, module_path, message
 - Creates `log::Record` with guest's module path and level
 - Calls `log::log!()` which respects `RUST_LOG` filtering
 - Uses `env_logger` for formatting and output
 
 **Integration**:
+
 - Called from `execution.rs` when handling `SYSCALL_LOG` syscall
 - Host must initialize `env_logger` before running guest code
 
@@ -182,12 +191,14 @@ async fn my_async_test() {
 **Purpose**: Logger implementation for ESP32 `no_std` environment
 
 **Implementation**:
+
 - Implements `log::Log` trait
 - Routes to `esp_println::println!` with formatted output
 - Filters at `info` level by default (hardcoded)
 - Formats: `[LEVEL] module::path: message`
 
 **Initialization**:
+
 - Called from `fw-esp32/src/main.rs` at startup
 - Can be initialized with custom level if needed (future)
 
@@ -196,6 +207,7 @@ async fn my_async_test() {
 **Purpose**: Logger implementation for GLSL builtins (works in both emulator and JIT)
 
 **Implementation**:
+
 - Implements `log::Log` trait
 - Routes to `__host_log` function (extern "C")
 - In emulator: `__host_log` uses `SYSCALL_LOG`
@@ -203,12 +215,14 @@ async fn my_async_test() {
 - In tests: `__host_log` uses `log` crate directly
 
 **Initialization**:
+
 - Called from GLSL compiler or emulator guest code
 - Must be initialized before GLSL code runs
 
 ### 6. Syscall Refactoring
 
 **SYSCALL_LOG** (replaces `SYSCALL_DEBUG`):
+
 - `args[0]`: level (u8: 0=error, 1=warn, 2=info, 3=debug)
 - `args[1]`: module_path pointer (as i32)
 - `args[2]`: module_path length (as i32)
@@ -216,6 +230,7 @@ async fn my_async_test() {
 - `args[4]`: message length (as i32)
 
 **__host_log** (replaces `__host_debug`):
+
 - Same signature as `SYSCALL_LOG`
 - In emulator: delegates to `SYSCALL_LOG`
 - In JIT: creates `log::Record` and calls `log::log!()`
@@ -289,6 +304,7 @@ async fn my_async_test() {
 ### Phase 2: Crate Migration (User Handled)
 
 User will migrate crates one by one using IDE find-replace:
+
 - Replace `crate::debug!(...)` with `log::debug!(...)`
 - Replace `host_debug!(...)` with `log::debug!(...)`
 - Replace `host_println!(...)` with `log::info!(...)`

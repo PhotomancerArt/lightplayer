@@ -32,7 +32,7 @@ story so **VI-B** can swap the engine dependency without also inventing
 
 ## Current codebase state
 
-### `lpir-cranelift` (`lp-glsl/lpir-cranelift/`)
+### `lpir-cranelift` (`lp-shader/lpir-cranelift/`)
 
 - **`lib.rs`:** Uses `extern crate alloc` but **no** `#![no_std]` — still pulls
   `std` transitively via dependencies.

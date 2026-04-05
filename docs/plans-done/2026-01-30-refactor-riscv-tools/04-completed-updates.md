@@ -33,7 +33,7 @@ All import paths have been updated in the moved source files and consumer code.
 
 ## Consumer Code Updated
 
-### `lp-glsl/lp-glsl-compiler/`
+### `lp-shader/lp-glsl-compiler/`
 
 - `src/exec/emu.rs` - Updated to use `lp_riscv_emu::{EmulatorError, trap_code_to_string}`,
   `lp_riscv_inst::format_instruction`

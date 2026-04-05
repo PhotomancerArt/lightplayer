@@ -9,7 +9,7 @@ of directly calling builtins. This allows the q32 transform to handle the conver
 
 ### 2.1 Update `emit_lp_lib_fn_call()` Logic
 
-In `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`:
+In `lp-shader/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`:
 
 - Check `needs_q32_mapping()` to determine if function needs TestCase conversion
 - If `true` (simplex functions):
@@ -25,7 +25,9 @@ In `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`:
 Create helper method similar to `get_math_libcall()`:
 
 -
+
 `get_lp_lib_testcase_call(&mut self, lp_fn: LpLibFn, arg_count: usize) -> Result<FuncRef, GlslError>`
+
 - Use `lp_fn.symbol_name()` to get TestCase name
 - Create signature with `F32` params/returns (before transform)
 - Return `FuncRef` for the TestCase call

@@ -19,8 +19,8 @@
 ✅ Updated consumer `Cargo.toml` files:
 
 - `lp-fw/fw-emu/Cargo.toml` - Changed to `lp-riscv-emu`
-- `lp-glsl/lp-glsl-compiler/Cargo.toml` - Updated to use new crates
-- `lp-glsl/lp-glsl-filetests/Cargo.toml` - Updated to use new crates
+- `lp-shader/lp-glsl-compiler/Cargo.toml` - Updated to use new crates
+- `lp-shader/lp-glsl-filetests/Cargo.toml` - Updated to use new crates
 
 ## What You Need to Do
 

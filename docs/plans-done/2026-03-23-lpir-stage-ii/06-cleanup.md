@@ -9,7 +9,7 @@
 Grep the crate for any temporary code, TODOs, debug prints, etc.:
 
 ```
-rg 'TODO|FIXME|HACK|dbg!|println!|eprintln!' lp-glsl/lpir/src/
+rg 'TODO|FIXME|HACK|dbg!|println!|eprintln!' lp-shader/lpir/src/
 ```
 
 Remove or resolve all findings.
@@ -81,7 +81,7 @@ Commit the completed work:
 ```
 feat(lpir): implement lpir crate — core types, builder, printer, parser, interpreter, validator
 
-- Add lp-glsl/lpir/ crate (no_std + alloc)
+- Add lp-shader/lpir/ crate (no_std + alloc)
 - Flat Op encoding with control flow markers and skip offsets
 - VRegPool for variable-arity Call/Return operands
 - Stack-based FunctionBuilder with offset patching

@@ -9,7 +9,7 @@ copying values back after the call.
 
 ### Files to Modify
 
-1. **`lp-glsl/lp-glsl-compiler/src/frontend/codegen/expr/function.rs`**
+1. **`lp-shader/lp-glsl-compiler/src/frontend/codegen/expr/function.rs`**
     - Update `prepare_call_arguments()` to handle out/inout
     - Add `copy_back_out_parameters()` function
     - Update `emit_user_function_call()` to call copy-back

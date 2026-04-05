@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-When `fast_math` is true, `convert_fadd` and `convert_fsub` emit inline `iadd`/`isub` instead of calling the saturating builtins. When false, keep existing builtin call behavior.
+When `fast_math` is true, `convert_fadd` and `convert_fsub` emit inline `iadd`/`isub` instead of
+calling the saturating builtins. When false, keep existing builtin call behavior.
 
 ## Code Organization Reminders
 
@@ -16,9 +17,10 @@ When `fast_math` is true, `convert_fadd` and `convert_fsub` emit inline `iadd`/`
 
 ### 1. convert_fadd - fast math path
 
-**File**: `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`
+**File**: `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`
 
 When `fast_math` is true:
+
 - Extract operands: `let (arg1_old, arg2_old) = extract_binary_operands(...)?`
 - Map operands: `map_operand` as currently done
 - Emit: `let result = builder.ins().iadd(arg1, arg2);`
@@ -60,7 +62,8 @@ Same pattern: when `fast_math`, use `builder.ins().isub(arg1, arg2)` instead of 
 
 ### 3. Update call sites in instructions.rs
 
-Ensure `convert_fadd` and `convert_fsub` are called with the `fast_math` parameter from the instruction router.
+Ensure `convert_fadd` and `convert_fsub` are called with the `fast_math` parameter from the
+instruction router.
 
 ## Validate
 
@@ -70,4 +73,6 @@ cargo test -p lp-glsl-compiler
 scripts/glsl-filetests.sh
 ```
 
-Run filetests to ensure existing shaders still produce correct results (with fast_math=false by default). Consider adding a filetest that uses fast_math and checks for iadd/isub in the output if such a test framework exists.
+Run filetests to ensure existing shaders still produce correct results (with fast_math=false by
+default). Consider adding a filetest that uses fast_math and checks for iadd/isub in the output if
+such a test framework exists.

@@ -2,7 +2,8 @@
 
 ## Scope
 
-Implement array initializer list support: `int arr[3] = {10, 20, 30}`, including full initialization, partial initialization with zero-fill, and unsized arrays with inferred size.
+Implement array initializer list support: `int arr[3] = {10, 20, 30}`, including full
+initialization, partial initialization with zero-fill, and unsized arrays with inferred size.
 
 Target: All 5 tests from `3-initialization.glsl` should pass.
 
@@ -10,7 +11,8 @@ Target: All 5 tests from `3-initialization.glsl` should pass.
 
 ### 1. Detect Initializer in Local Variable Declaration
 
-In `lp-glsl/lp-glsl-naga/src/lower_ctx.rs`, the local variable init handling already exists for non-arrays:
+In `lp-shader/lp-glsl-naga/src/lower_ctx.rs`, the local variable init handling already exists for
+non-arrays:
 
 ```rust
 for (lv_handle, var) in func.local_variables.iter() {
@@ -35,7 +37,7 @@ for (lv_handle, var) in func.local_variables.iter() {
 
 ### 2. Add Array Initializer Lowering
 
-Add to `lp-glsl/lp-glsl-naga/src/lower_array.rs`:
+Add to `lp-shader/lp-glsl-naga/src/lower_array.rs`:
 
 ```rust
 /// Lower array initializer: {a, b, c} or unsized array inference
@@ -139,7 +141,9 @@ fn store_element_at_offset(
 
 ### 3. Handle Unsized Arrays
 
-For `int arr[] = {1, 2, 3}`, Naga infers the size from the initializer. The array type in Naga will have the correct size after parsing. Our existing slot allocation code should work as-is because it reads the size from the type.
+For `int arr[] = {1, 2, 3}`, Naga infers the size from the initializer. The array type in Naga will
+have the correct size after parsing. Our existing slot allocation code should work as-is because it
+reads the size from the type.
 
 However, we need to verify this works correctly. In `lower_ctx.rs`:
 
@@ -162,6 +166,7 @@ if let TypeInner::Array { base, size } = ty_inner {
 ## Tests to Verify
 
 From `array/phase/3-initialization.glsl`:
+
 ```glsl
 int test_full_initialization() {
     int arr[3] = {10, 20, 30};

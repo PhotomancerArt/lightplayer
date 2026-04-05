@@ -10,7 +10,7 @@ float-mode-unaware.
 ## File structure
 
 ```
-lp-glsl/lp-glsl-naga/
+lp-shader/lp-glsl-naga/
 ├── Cargo.toml                    # UPDATE: add lpir, lp-glsl-builtin-ids deps
 └── src/
     ├── lib.rs                    # UPDATE: pub mod lower + submodules
@@ -22,11 +22,11 @@ lp-glsl/lp-glsl-naga/
     ├── lower_lpfx.rs             # NEW: LPFX detection, import creation, out-param ABI
     └── std_math_handler.rs       # NEW: StdMathHandler (ImportHandler for tests)
 
-lp-glsl/lp-glsl-naga/tests/
+lp-shader/lp-glsl-naga/tests/
     ├── lower_interp.rs           # NEW: GLSL → LPIR → interpret → verify results
     └── lower_print.rs            # NEW: GLSL → LPIR → print → verify text output
 
-lp-glsl/lpir/src/
+lp-shader/lpir/src/
     └── op.rs                     # UPDATE: add Fabs, Fsqrt, Fmin, Fmax, Ffloor,
                                   #         Fceil, Ftrunc, Fnearest
 ```
@@ -91,6 +91,7 @@ lpfx), then lowers each user function. Returns `IrModule` or `LowerError`.
 ### `lower_ctx.rs` — per-function context
 
 `LowerCtx` holds:
+
 - `FunctionBuilder` — for emitting ops and allocating VRegs
 - Expression cache: `Vec<Option<VReg>>` indexed by `Handle<Expression>`
 - Parameter alias map: `Handle<LocalVariable>` → `VReg` (detected upfront)
@@ -130,6 +131,7 @@ Three tiers:
 `Fabs`, `Fsqrt`, `Fmin`, `Fmax`, `Ffloor`, `Fceil`, `Ftrunc`, `Fnearest`
 
 **Tier 2 — Inline decomposition** (arithmetic sequences):
+
 - `mix(x, y, t)` → `fsub(y, x)` → `fmul(_, t)` → `fadd(x, _)`
 - `smoothstep(e0, e1, x)` → range, clamp via fmin/fmax, polynomial
 - `step(edge, x)` → `fge(x, edge)` → `select(_, 1.0, 0.0)`
@@ -157,16 +159,16 @@ Rust's `f32` methods (sin, cos, round, etc.). Used by interpreter tests.
 
 ### New LPIR ops (in `lpir/src/op.rs`)
 
-| Op | Fields | Semantics |
-|----|--------|-----------|
-| `Fabs` | `{ dst, src }` | `dst = |src|` |
-| `Fsqrt` | `{ dst, src }` | `dst = sqrt(src)` |
-| `Fmin` | `{ dst, lhs, rhs }` | `dst = min(lhs, rhs)` |
-| `Fmax` | `{ dst, lhs, rhs }` | `dst = max(lhs, rhs)` |
-| `Ffloor` | `{ dst, src }` | `dst = floor(src)` |
-| `Fceil` | `{ dst, src }` | `dst = ceil(src)` |
-| `Ftrunc` | `{ dst, src }` | `dst = trunc(src)` (toward zero) |
-| `Fnearest` | `{ dst, src }` | `dst = roundEven(src)` |
+| Op         | Fields              | Semantics                        |
+|------------|---------------------|----------------------------------|
+| `Fabs`     | `{ dst, src }`      | `dst =                           |src|` |
+| `Fsqrt`    | `{ dst, src }`      | `dst = sqrt(src)`                |
+| `Fmin`     | `{ dst, lhs, rhs }` | `dst = min(lhs, rhs)`            |
+| `Fmax`     | `{ dst, lhs, rhs }` | `dst = max(lhs, rhs)`            |
+| `Ffloor`   | `{ dst, src }`      | `dst = floor(src)`               |
+| `Fceil`    | `{ dst, src }`      | `dst = ceil(src)`                |
+| `Ftrunc`   | `{ dst, src }`      | `dst = trunc(src)` (toward zero) |
+| `Fnearest` | `{ dst, src }`      | `dst = roundEven(src)`           |
 
 These are float-mode-agnostic. Emitters implement per-mode: float mode maps
 to native instructions (WASM `f32.abs`, `f32.sqrt`, etc.); Q32 mode maps to

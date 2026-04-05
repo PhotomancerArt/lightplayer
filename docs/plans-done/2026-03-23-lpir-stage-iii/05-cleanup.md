@@ -11,7 +11,7 @@ Final review, cleanup, and commit.
 Grep the crate for any temporary code, TODOs, debug prints, etc.:
 
 ```
-rg 'TODO|FIXME|HACK|dbg!|println!|eprintln!' lp-glsl/lpir/src/
+rg 'TODO|FIXME|HACK|dbg!|println!|eprintln!' lp-shader/lpir/src/
 ```
 
 Remove or resolve all findings.

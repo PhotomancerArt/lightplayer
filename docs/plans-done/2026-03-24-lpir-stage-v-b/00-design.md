@@ -8,7 +8,7 @@ Fix ~40 failing GLSL filetests: 5 correctness bugs (P0), test maintenance
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-wasm/src/emit/
 │   └── control.rs                # FIX: continue depth calculation
 ├── lp-glsl-naga/src/
@@ -59,6 +59,7 @@ WASM loop structure:
 `As` expressions with Bool target are rejected as "non-32-bit byte convert".
 
 **Fix:** In `expr_scalar.rs`, add a case for `ScalarKind::Bool` target:
+
 - `bool(float)` in Q32 → `Ine(src, const_0)` (Q32 zero is 0i32)
 - `bool(int)` / `bool(uint)` → `Ine(src, const_0)`
 - `bool(bool)` → identity `Copy`
@@ -80,6 +81,7 @@ expression tree for this test case.
 Functions defined after their call site produce "undefined function" errors.
 
 **Fix:** Two-pass lowering in `lower.rs`:
+
 1. First pass: iterate `naga_module.functions`, register each function's
    `CalleeRef` in `func_map`. (This already happens — lines 26-29.)
 2. The actual bug may be in the Naga frontend (function parsing order) rather
@@ -98,6 +100,7 @@ frontend or in how `NagaModule::functions` is populated.
 
 **`lower_ctx.rs`** — In `LowerCtx::new`, when a function argument has type
 `Pointer { base, space: Function }`:
+
 - Resolve the base type to IR types.
 - Allocate an LPIR **slot** (not a vreg) for the parameter.
 - Add a single `IrType::I32` param (the address) to the function signature.
@@ -105,13 +108,16 @@ frontend or in how `NagaModule::functions` is populated.
 
 **`lower_expr.rs`** — When `Expression::Load { pointer }` hits a
 `FunctionArgument` that's a pointer param:
+
 - Emit `Op::Load` from the address vreg.
 
 **`lower_stmt.rs`** — `Statement::Store` to a pointer-typed FunctionArgument:
+
 - Emit `Op::Store` to the address vreg.
 
 **`lower_stmt.rs`** — At call sites (`lower_user_call`), for `inout`/`out`
 arguments:
+
 - Allocate a slot in the caller.
 - For `inout`: store the current value into the slot.
 - Pass `SlotAddr` as the argument.

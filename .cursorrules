@@ -10,7 +10,7 @@
 
 # Embedded JIT: `std` means "host-only conveniences" (libstd, cranelift-native, anyhow). It does NOT mean "has a compiler."
 
-# Embedded JIT: Every change to lp-core/, lp-glsl/, lp-fw/ must be validated against: cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
+# Embedded JIT: Every change to lp-core/, lp-shader/, lp-fw/ must be validated against: cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 
 # Warnings: Fix warnings before committing. Don't just ignore them. If you can't fix them easily, ask for help.
 

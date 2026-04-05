@@ -12,7 +12,7 @@ Migrate all ~634 test files and update the gen-app.
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-filetests/
+lp-shader/lp-glsl-filetests/
 └── src/
     ├── lib.rs                          # UPDATE: multi-target dispatch
     ├── parse/
@@ -46,16 +46,16 @@ lp-glsl/lp-glsl-filetests/
         ├── file_update.rs              # UPDATE: new annotation format
         └── ...                         # unchanged
 
-lp-glsl/lp-glsl-filetests-app/
+lp-shader/lp-glsl-filetests-app/
 └── src/
     └── main.rs                         # UPDATE: --target flag
 
-lp-glsl/lp-glsl-filetests-gen-app/
+lp-shader/lp-glsl-filetests-gen-app/
 └── src/
     ├── util.rs                         # UPDATE: remove target from header
     └── vec/*.rs                        # UPDATE: remove target line from generators
 
-lp-glsl/lp-glsl-filetests/filetests/
+lp-shader/lp-glsl-filetests/filetests/
 ├── scalar/**/*.glsl                    # UPDATE: remove // target, convert [expect-fail]
 ├── vec/**/*.gen.glsl                   # REGENERATE: via gen-app
 ├── builtins/**/*.glsl                  # UPDATE: remove // target, convert [expect-fail]
@@ -135,6 +135,7 @@ struct Target {
 ```
 
 Predefined constants:
+
 - `CRANELIFT_Q32`: cranelift, q32, riscv32, emulator
 - `WASM_Q32`: wasm, q32, wasm32, emulator
 
@@ -276,11 +277,13 @@ Multiple annotations stack (each is an independent filter).
 ### Migration
 
 All ~634 hand-written test files:
+
 1. Remove `// target riscv32.q32`
 2. Convert `[expect-fail]` suffix → `@unimplemented()` on preceding line
 3. Files with features unsupported on wasm get file-level
    `@unimplemented(backend=wasm)`
 
 Generated `.gen.glsl` files:
+
 1. Update gen-app templates (remove target line)
 2. Regenerate all files

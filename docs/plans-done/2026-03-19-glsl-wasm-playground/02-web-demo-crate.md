@@ -2,7 +2,8 @@
 
 ## Scope
 
-Create `lp-app/web-demo/`, a wasm-pack project that exposes `compile_glsl(source) → Vec<u8>` to JavaScript via wasm-bindgen. Verify `wasm-pack build` produces working output.
+Create `lp-app/web-demo/`, a wasm-pack project that exposes `compile_glsl(source) → Vec<u8>` to
+JavaScript via wasm-bindgen. Verify `wasm-pack build` produces working output.
 
 ## Code organization reminders
 
@@ -40,14 +41,16 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-lp-glsl-frontend = { path = "../../lp-glsl/lp-glsl-frontend" }
-lp-glsl-wasm = { path = "../../lp-glsl/lp-glsl-wasm" }
+lp-glsl-frontend = { path = "../../lp-shader/lp-glsl-frontend" }
+lp-glsl-wasm = { path = "../../lp-shader/lp-glsl-wasm" }
 wasm-bindgen = "0.2"
 ```
 
 Notes:
+
 - `cdylib` is required by wasm-pack.
-- No `#![no_std]` — this crate uses wasm-bindgen which requires std (the allocator + panic handler come from wasm-bindgen's runtime).
+- No `#![no_std]` — this crate uses wasm-bindgen which requires std (the allocator + panic handler
+  come from wasm-bindgen's runtime).
 - Depends only on `lp-glsl-frontend` and `lp-glsl-wasm`. No Cranelift.
 
 ### 3. Create src/lib.rs
@@ -69,7 +72,8 @@ pub fn compile_glsl(source: &str) -> Result<Vec<u8>, String> {
 }
 ```
 
-This is the entire Rust surface area exposed to JS. The compiler (parser + semantic analysis + WASM codegen) runs when JS calls `compile_glsl`.
+This is the entire Rust surface area exposed to JS. The compiler (parser + semantic analysis + WASM
+codegen) runs when JS calls `compile_glsl`.
 
 ### 4. Add to workspace
 
@@ -86,12 +90,15 @@ Do NOT add to `default-members`.
 
 ### 5. Handle lp-glsl-wasm no_std vs web-demo std
 
-`lp-glsl-frontend` and `lp-glsl-wasm` are `#![no_std]` with `extern crate alloc`. When compiled as a dependency of `web-demo` (which uses std via wasm-bindgen), the allocator is provided by wasm-bindgen's runtime. This should just work — `alloc` types (`Vec`, `String`, `Box`) resolve to the global allocator provided by the cdylib's std.
+`lp-glsl-frontend` and `lp-glsl-wasm` are `#![no_std]` with `extern crate alloc`. When compiled as a
+dependency of `web-demo` (which uses std via wasm-bindgen), the allocator is provided by
+wasm-bindgen's runtime. This should just work — `alloc` types (`Vec`, `String`, `Box`) resolve to
+the global allocator provided by the cdylib's std.
 
 If `lp-glsl-frontend` or `lp-glsl-wasm` have conditional `std` features, enable them:
 
 ```toml
-lp-glsl-frontend = { path = "../../lp-glsl/lp-glsl-frontend", features = ["std"] }
+lp-glsl-frontend = { path = "../../lp-shader/lp-glsl-frontend", features = ["std"] }
 ```
 
 But only if needed — try without first.
@@ -103,6 +110,7 @@ wasm-pack build lp-app/web-demo/ --target web
 ```
 
 This produces `lp-app/web-demo/pkg/` with:
+
 - `web_demo_bg.wasm` — the compiled WASM module
 - `web_demo.js` — JS glue (ES module)
 - `web_demo.d.ts` — TypeScript types

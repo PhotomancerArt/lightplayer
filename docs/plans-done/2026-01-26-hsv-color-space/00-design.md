@@ -9,7 +9,7 @@ color manipulation code to Rust.
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-builtins/src/builtins/lpfx/
+lp-shader/lp-glsl-builtins/src/builtins/lpfx/
 ├── color/
 │   └── space/
 │       ├── mod.rs                    # NEW: Module declaration for color/space

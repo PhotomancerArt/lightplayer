@@ -63,6 +63,7 @@ render (per pixel):
 ### RV32 emulator code in `lpir-cranelift`
 
 Behind `riscv32-emu` feature, `lpir-cranelift` also contains:
+
 - `object_bytes_from_ir` — compile to RV32 object file
 - `link_object_with_builtins` — link with builtins → ELF
 - `glsl_q32_call_emulated` — run in emulator
@@ -87,7 +88,7 @@ edition = "2024"
 
 [dependencies]
 lpvm = { path = "../lpvm", default-features = false }
-lpir = { path = "../../lp-glsl/lpir", default-features = false }
+lpir = { path = "../../lp-shader/lpir", default-features = false }
 cranelift-codegen = { ..., default-features = false }
 cranelift-frontend = { ..., default-features = false }
 cranelift-jit = { ..., default-features = false }
@@ -126,11 +127,11 @@ lpvm-cranelift/
 
 ### Trait implementation mapping
 
-| LPVM trait | Cranelift implementation | Notes |
-|---|---|---|
-| `LpvmModule` | Wraps finalized Cranelift JIT code | Immutable after compilation. Contains code pointers, metadata, function signatures. |
-| `LpvmInstance` | VMContext + memory + call interface | Owns or borrows LpvmMemory. Provides function calls with VMContext. |
-| `LpvmMemory` | Backing memory for VMContext + globals/uniforms | For JIT, this is the buffer that VMContext points into. |
+| LPVM trait     | Cranelift implementation                        | Notes                                                                               |
+|----------------|-------------------------------------------------|-------------------------------------------------------------------------------------|
+| `LpvmModule`   | Wraps finalized Cranelift JIT code              | Immutable after compilation. Contains code pointers, metadata, function signatures. |
+| `LpvmInstance` | VMContext + memory + call interface             | Owns or borrows LpvmMemory. Provides function calls with VMContext.                 |
+| `LpvmMemory`   | Backing memory for VMContext + globals/uniforms | For JIT, this is the buffer that VMContext points into.                             |
 
 ### The DirectCall question
 
@@ -142,6 +143,7 @@ args) adds overhead: name lookup, value marshaling. This is fine for filetests
 but not for the render loop.
 
 Options:
+
 1. `LpvmInstance` has both `call(name, args)` (ergonomic) and a way to get a
    "prepared call" handle that avoids per-call overhead.
 2. `lpvm-cranelift` exposes `DirectCall` as an additional type beyond the trait
@@ -154,16 +156,19 @@ surface the issue.
 ### What to extract from `lpir-cranelift`
 
 Most of the compilation logic moves to `lpvm-cranelift`:
+
 - LPIR → Cranelift IR lowering
 - JIT module building (ISA config, JITBuilder, finalize)
 - Function call mechanics (invoke, arg marshaling)
 - CompileOptions, error types
 
 What stays in `lpir-cranelift` (or moves to `lpvm-rv32`):
+
 - `riscv32-emu` feature code: object compilation, ELF linking, emulated calls
 - These are RV32 emulator concerns, not JIT concerns
 
 What stays in `lpir-cranelift` temporarily:
+
 - Anything that other crates still depend on, until they're migrated
 
 ## Unit Tests

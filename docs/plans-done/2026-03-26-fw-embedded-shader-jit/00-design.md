@@ -2,14 +2,19 @@
 
 ## Scope of work
 
-- **Product:** GLSL sources from on-flash (or emulated) FS → **compile on device** → **JIT’d code** → run (ESP32-C6 / RISC-V reference, `fw-emu` in CI).
-- **Acceptance:** `fw-tests` `scene_render_emu` + `alloc_trace_emu` pass; **`fw-esp32`** **`cargo check`** on **`riscv32imac-unknown-none-elf`** with default **`server`** (compiler in image).
-- **Cargo philosophy:** GLSL+JIT are **baseline** for server/engine; **`std`** gates **host-only** pieces (`libstd`, `cranelift-native`, …), not “has a compiler.” Opt-out flags only for stripped / special builds.
+- **Product:** GLSL sources from on-flash (or emulated) FS → **compile on device** → **JIT’d code
+  ** → run (ESP32-C6 / RISC-V reference, `fw-emu` in CI).
+- **Acceptance:** `fw-tests` `scene_render_emu` + `alloc_trace_emu` pass; **`fw-esp32`** *
+  *`cargo check`** on **`riscv32imac-unknown-none-elf`** with default **`server`** (compiler in
+  image).
+- **Cargo philosophy:** GLSL+JIT are **baseline** for server/engine; **`std`** gates **host-only**
+  pieces (`libstd`, `cranelift-native`, …), not “has a compiler.” Opt-out flags only for stripped /
+  special builds.
 
 ## File structure (relevant)
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/                 # UPDATE: already no_std; remains front end
 ├── lpir-cranelift/
 │   ├── Cargo.toml                # UPDATE: split `std` vs `glsl`; `lp-glsl-naga` not std-only
@@ -68,12 +73,22 @@ lp-fw/fw-tests/
 
 ## Main components and interactions
 
-1. **`lpir-cranelift`:** Owns **GLSL → IR → machine code**. **`glsl`** (or default dep) pulls **`lp-glsl-naga`**; **`jit()`** runs under **`glsl` + alloc**, without **`std`**. **`std`** adds **host** codegen discovery (`cranelift-native`) and any **`std`-only helpers**.
-2. **`lp-engine`:** **`ShaderRuntime`** calls **`lpir_cranelift::jit`** (or thin wrapper). **No** “enable compiler” feature for normal builds; **optional** **`minimal`** / **`no-shader-compile`** only if we need a smaller `lp-engine` for tests/tools.
-3. **`lp-server` / firmware:** Depend on **`lp-engine`** with **`default-features = false`** but **dependency feature list must still include `lpir-cranelift`’s `glsl`** (and optimizer/verifier flags as today). No extra “turn compiler on” knob at **`fw-emu`** unless we’re fixing a missing passthrough.
-4. **Platform:** ESP32-C6 build uses **`riscv32imac-unknown-none-elf`** (see `justfile`). **`fw-emu`** uses same family for CI parity. If **I-cache flush** or **executable region** rules appear on real silicon, handle in **`jit_memory` / Cranelift JIT finalize** path (phase notes).
+1. **`lpir-cranelift`:** Owns **GLSL → IR → machine code**. **`glsl`** (or default dep) pulls *
+   *`lp-glsl-naga`**; **`jit()`** runs under **`glsl` + alloc**, without **`std`**. **`std`** adds *
+   *host** codegen discovery (`cranelift-native`) and any **`std`-only helpers**.
+2. **`lp-engine`:** **`ShaderRuntime`** calls **`lpir_cranelift::jit`** (or thin wrapper). **No**
+   “enable compiler” feature for normal builds; **optional** **`minimal`** / **`no-shader-compile`**
+   only if we need a smaller `lp-engine` for tests/tools.
+3. **`lp-server` / firmware:** Depend on **`lp-engine`** with **`default-features = false`** but *
+   *dependency feature list must still include `lpir-cranelift`’s `glsl`** (and optimizer/verifier
+   flags as today). No extra “turn compiler on” knob at **`fw-emu`** unless we’re fixing a missing
+   passthrough.
+4. **Platform:** ESP32-C6 build uses **`riscv32imac-unknown-none-elf`** (see `justfile`). **`fw-emu`
+   ** uses same family for CI parity. If **I-cache flush** or **executable region** rules appear on
+   real silicon, handle in **`jit_memory` / Cranelift JIT finalize** path (phase notes).
 
 ## Dependencies
 
 - **`pp-rs` / `lp-glsl-naga` no_std** (prior plan) — prerequisite.
-- Roadmap **Stage VI-A** (`stage-vi-a-embedded-readiness.md`) — overlapping goals for **`lpir-cranelift`** embedded profile; this plan closes the loop through **engine + fw-tests**.
+- Roadmap **Stage VI-A** (`stage-vi-a-embedded-readiness.md`) — overlapping goals for *
+  *`lpir-cranelift`** embedded profile; this plan closes the loop through **engine + fw-tests**.

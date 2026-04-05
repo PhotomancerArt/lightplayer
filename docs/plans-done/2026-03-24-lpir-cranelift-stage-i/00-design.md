@@ -10,7 +10,7 @@ consumers. All WASM-path and LPIR-path tests pass after rename.
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-builtin-ids/src/
 │   ├── lib.rs                          # UPDATE: regenerated BuiltinId enum
 │   │                                   #   new variant names (LpGlslSinQ32, etc.)
@@ -159,10 +159,10 @@ lp-glsl/
 
 2. **`lp-glsl-builtins-gen-app`** — walks builtins source, generates
    `BuiltinId` enum and consumer files. Updated to:
-   - Derive module/fn_name/mode from new naming convention
-   - Generate `module()`, `fn_name()`, `mode()` methods
-   - Stop emitting into `lp-glsl-cranelift`
-   - Update `glsl_builtin_mapping` generation for new variant names
+    - Derive module/fn_name/mode from new naming convention
+    - Generate `module()`, `fn_name()`, `mode()` methods
+    - Stop emitting into `lp-glsl-cranelift`
+    - Update `glsl_builtin_mapping` generation for new variant names
 
 3. **`lp-glsl-builtin-ids`** — regenerated. New variant names, new methods,
    new `Module` and `Mode` enums.

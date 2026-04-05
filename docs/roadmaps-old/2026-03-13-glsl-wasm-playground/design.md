@@ -12,7 +12,7 @@ Target: render `basic/rainbow.shader` in a browser with no server.
 ## Crate Structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-frontend/              # NEW: shared parser + semantic analysis
 │   ├── Cargo.toml                 #   deps: glsl, hashbrown, serde, log, lp-model
 │   └── src/
@@ -125,6 +125,7 @@ crates are pulled in.
 ### Filetest architecture
 
 The existing filetest infrastructure is extended with a pluggable runtime:
+
 - Cranelift runtime: existing native execution
 - WASM runtime: wasmtime execution (test-only dependency)
 - Per-target `[expect-fail]` annotations for tests that the WASM backend

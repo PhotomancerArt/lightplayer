@@ -20,7 +20,7 @@ much memory. Fastalloc uses simpler data structures and should require less memo
 
 ### Step 1: Add Fastalloc Setting to ESP32 JIT Flags
 
-**File:** `lp-glsl/esp32-glsl-jit/src/main.rs`
+**File:** `lp-shader/esp32-glsl-jit/src/main.rs`
 
 **Location:** Around line 230-234 where ISA flags are created
 
@@ -48,7 +48,7 @@ affect the failing compilation.
 
 ### Step 2: Add Fastalloc Setting to Default RISC-V32 Flags
 
-**File:** `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-shader/lp-glsl-compiler/src/backend/target/target.rs`
 
 **Location:** `default_riscv32_flags()` function (around line 116-141)
 
@@ -94,7 +94,7 @@ behavior.
 
 ### Step 3: Add Fastalloc Setting to Default Host Flags (Optional)
 
-**File:** `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-shader/lp-glsl-compiler/src/backend/target/target.rs`
 
 **Location:** `default_host_flags()` function (around line 145-169)
 
@@ -120,7 +120,7 @@ better code quality on host systems.
 
 ```bash
 # Build and flash ESP32 firmware
-cd lp-glsl/esp32-glsl-jit
+cd lp-shader/esp32-glsl-jit
 cargo build --release --target riscv32imac-unknown-none-elf
 # Flash and run on ESP32 hardware
 ```
@@ -172,8 +172,8 @@ If Fastalloc causes unacceptable code quality or other issues:
 
 ## Related Files
 
-- `lp-glsl/esp32-glsl-jit/src/main.rs` - ESP32 JIT compilation entry point
-- `lp-glsl/lp-glsl-compiler/src/backend/target/target.rs` - Default flag configuration
+- `lp-shader/esp32-glsl-jit/src/main.rs` - ESP32 JIT compilation entry point
+- `lp-shader/lp-glsl-compiler/src/backend/target/target.rs` - Default flag configuration
 -
 
 `/Users/yona/dev/photomancer/feature/lp-cranelift-lp2025/cranelift/codegen/src/machinst/compile.rs` -

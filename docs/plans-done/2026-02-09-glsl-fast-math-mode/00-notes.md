@@ -16,7 +16,7 @@ instead of saturating builtin calls. This trades overflow safety for performance
 ### Q32 arithmetic conversion
 
 - **Add/Sub**: `convert_fadd` and `convert_fsub` in
-  `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs` always emit a call
+  `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs` always emit a call
   to `__lp_q32_add` or `__lp_q32_sub` builtins
 - **Mul/Div**: Same pattern with `__lp_q32_mul` and `__lp_q32_div` - these use i64 internally and
   must stay as builtins
@@ -31,7 +31,7 @@ instead of saturating builtin calls. This trades overflow safety for performance
 
 ### Q32 transform configuration
 
-- `Q32Transform` in `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/transform.rs` takes only
+- `Q32Transform` in `lp-shader/lp-glsl-compiler/src/backend/transform/q32/transform.rs` takes only
   `FixedPointFormat` (Fixed16x16 or Q32x32)
 - No compile-time options exist for math mode
 - Transform is used from `lp-glsl-compiler/src/frontend/mod.rs` when compiling for q32

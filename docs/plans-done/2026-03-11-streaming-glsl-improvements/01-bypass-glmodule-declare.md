@@ -49,6 +49,6 @@ not owned, so no need to clone the signature either.
 ## Validate
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_streaming
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 ```

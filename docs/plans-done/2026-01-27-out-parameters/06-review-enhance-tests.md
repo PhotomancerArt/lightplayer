@@ -9,10 +9,10 @@ support.
 
 ### Files to Review
 
-1. **`lp-glsl/lp-glsl-filetests/filetests/function/param-out.glsl`**
-2. **`lp-glsl/lp-glsl-filetests/filetests/function/param-inout.glsl`**
-3. **`lp-glsl/lp-glsl-filetests/filetests/function/param-mixed.glsl`**
-4. **`lp-glsl/lp-glsl-filetests/filetests/function/edge-lvalue-out.glsl`**
+1. **`lp-shader/lp-glsl-filetests/filetests/function/param-out.glsl`**
+2. **`lp-shader/lp-glsl-filetests/filetests/function/param-inout.glsl`**
+3. **`lp-shader/lp-glsl-filetests/filetests/function/param-mixed.glsl`**
+4. **`lp-shader/lp-glsl-filetests/filetests/function/edge-lvalue-out.glsl`**
 
 ### Test Cases to Add
 

@@ -9,7 +9,7 @@ all existing wasm.q32 filetests pass (or are annotated as out-of-scope).
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/
 │   └── src/
 │       ├── lib.rs               # UPDATE: LPFX prototype injection in compile()

@@ -18,6 +18,7 @@ docs (`plans-done/`, old roadmaps, reports) untouched.
 ### 1. `README.md` (root)
 
 Remove from the crate table:
+
 - `lp-glsl-cranelift` entry
 - `lp-glsl-jit-util` entry
 - `lp-glsl-frontend` entry (if listed)
@@ -27,7 +28,7 @@ Remove from the crate table:
 Update any prose that mentions "two compiler backends" or similar to reflect
 that `lpir-cranelift` is now the single compiler path.
 
-### 2. `lp-glsl/README.md`
+### 2. `lp-shader/README.md`
 
 Remove directory listing entries for deleted crates. Update the architecture
 description to reflect the naga → LPIR → lpir-cranelift chain as the only
@@ -62,7 +63,7 @@ stage references old crates as if they exist, update.
 No code changes — visual review of updated docs. Optionally:
 
 ```bash
-rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-frontend' README.md AGENTS.md .cursorrules .cursor/rules/ lp-glsl/README.md
+rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-frontend' README.md AGENTS.md .cursorrules .cursor/rules/ lp-shader/README.md
 ```
 
 Should return zero matches (or only historical context like "was deleted in

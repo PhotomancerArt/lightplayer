@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update `lp-glsl/lp-glsl-builtins/src/builtins/lpir/fdiv_q32.rs` so that
+Update `lp-shader/lp-glsl-builtins/src/builtins/lpir/fdiv_q32.rs` so that
 `0 / 0` returns `0` instead of `MAX_FIXED`.
 
 ## Code Organization Reminders

@@ -12,12 +12,12 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 
 ### Crates to delete outright (old compiler chain)
 
-| Crate                     | Path                               | Dependents                                  |
-|---------------------------|------------------------------------|---------------------------------------------|
-| `lp-glsl-cranelift`       | `lp-glsl/lp-glsl-cranelift/`       | `esp32-glsl-jit`, `lp-glsl-q32-metrics-app` |
-| `lp-glsl-jit-util`        | `lp-glsl/lp-glsl-jit-util/`        | `lp-glsl-cranelift`, `esp32-glsl-jit`       |
-| `esp32-glsl-jit`          | `lp-glsl/esp32-glsl-jit/`          | (none)                                      |
-| `lp-glsl-q32-metrics-app` | `lp-glsl/lp-glsl-q32-metrics-app/` | (none)                                      |
+| Crate                     | Path                                 | Dependents                                  |
+|---------------------------|--------------------------------------|---------------------------------------------|
+| `lp-glsl-cranelift`       | `lp-shader/lp-glsl-cranelift/`       | `esp32-glsl-jit`, `lp-glsl-q32-metrics-app` |
+| `lp-glsl-jit-util`        | `lp-shader/lp-glsl-jit-util/`        | `lp-glsl-cranelift`, `esp32-glsl-jit`       |
+| `esp32-glsl-jit`          | `lp-shader/esp32-glsl-jit/`          | (none)                                      |
+| `lp-glsl-q32-metrics-app` | `lp-shader/lp-glsl-q32-metrics-app/` | (none)                                      |
 
 ### Crates needing partial cleanup
 
@@ -43,7 +43,7 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
   clippy/test package lists (lines 6, 131, 139, 184–187, 206, 212, 260, 263, 293)
 - **`.idea/lp2025.iml`:** source folder entries for deleted crates
 - **`scripts/lp-build.sh`**, **`Dockerfile.rv32-jit`**: reference `esp32-glsl-jit`
-- **`README.md`** (root), **`lp-glsl/README.md`**, **`AGENTS.md`**: describe old crate
+- **`README.md`** (root), **`lp-shader/README.md`**, **`AGENTS.md`**: describe old crate
 - **`fw-esp32/Cargo.toml`:** orphan optional deps already deleted in VI-C (confirm)
 - **`Cargo.lock`:** auto-updates on next resolve
 - **`docs/`**: ~69 files reference `lp-glsl-cranelift` (plans-done, roadmaps,
@@ -155,11 +155,11 @@ failing (WASM ABI issue, not VII scope).
 historical plans, completed roadmap stages, and reports.
 
 **Suggested answer:** Leave historical docs as-is (they document what happened).
-Only update **living** docs: `README.md` (root), `lp-glsl/README.md`,
+Only update **living** docs: `README.md` (root), `lp-shader/README.md`,
 `AGENTS.md`, and any active roadmap files.
 
 **Answer:** Leave old plans/reports untouched. Update current documentation:
-`README.md` (root), `lp-glsl/README.md`, `AGENTS.md`, cursor rules.
+`README.md` (root), `lp-shader/README.md`, `AGENTS.md`, cursor rules.
 
 ## Notes
 

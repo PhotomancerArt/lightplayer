@@ -18,7 +18,7 @@ compiles.
 
 ### 1. `lp-glsl-filetests` — replace `CompilationPipeline::parse`
 
-In `lp-glsl/lp-glsl-filetests/src/test_run/test_glsl.rs`:
+In `lp-shader/lp-glsl-filetests/src/test_run/test_glsl.rs`:
 
 - Replace `use lp_glsl_frontend::CompilationPipeline;` with
   `use glsl::parser::Parse;` and `use glsl::syntax::TranslationUnit;`.
@@ -31,14 +31,14 @@ Example diff:
 
 ```rust
 // Before:
-let parse_result = CompilationPipeline::parse(&full_function_code);
+let parse_result = CompilationPipeline::parse( & full_function_code);
 Ok(parse_result) => {
-    match glsl_for_fn_graph(&parse_result.shader, ...) {
+match glsl_for_fn_graph( & parse_result.shader, ...) {
 
 // After:
-let parse_result = TranslationUnit::parse(&full_function_code);
+let parse_result = TranslationUnit::parse( & full_function_code);
 Ok(tu) => {
-    match glsl_for_fn_graph(&tu, ...) {
+match glsl_for_fn_graph( & tu, ...) {
 ```
 
 Same for the test functions that use `CompilationPipeline::parse`.
@@ -143,13 +143,13 @@ Delete the corresponding `generate_*` function bodies at the bottom of
 ### 4. Delete `lp-glsl-frontend`
 
 ```bash
-rm -rf lp-glsl/lp-glsl-frontend
+rm -rf lp-shader/lp-glsl-frontend
 ```
 
 Remove from root `Cargo.toml`:
 
-- `[workspace] members`: `"lp-glsl/lp-glsl-frontend"`
-- `[workspace] default-members`: `"lp-glsl/lp-glsl-frontend"`
+- `[workspace] members`: `"lp-shader/lp-glsl-frontend"`
+- `[workspace] default-members`: `"lp-shader/lp-glsl-frontend"`
 
 ### 5. Also check: `glsl` crate dependency
 

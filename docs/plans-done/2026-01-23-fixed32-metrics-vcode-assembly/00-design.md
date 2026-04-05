@@ -10,7 +10,7 @@ metrics to statistics.
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-q32-metrics-app/
+lp-shader/lp-glsl-q32-metrics-app/
 ├── src/
 │   ├── main.rs                    # UPDATE: Change to use ObjectModule
 │   ├── cli.rs                     # No changes

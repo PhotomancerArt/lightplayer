@@ -5,6 +5,7 @@
 Create the `glsl_jit_streaming` entry point and the two-module setup. This phase
 gets the skeleton compiling but does NOT implement the per-function loop yet —
 that's Phase 4. This phase focuses on:
+
 - The new public API function
 - Creating both float and Q32 modules with all declarations
 - Building the func_id_map / old_func_id_map for transforms
@@ -45,15 +46,15 @@ The function should:
    Q32-type declarations and is used for compilation.
 
 7. **Declare all functions in both modules**:
-   - Collect all function names + signatures from `typed_ast.user_functions`
-     and `typed_ast.main_function`
-   - Sort alphabetically for deterministic FuncId assignment
-   - For each function:
-     - Build float signature via `SignatureBuilder::build_with_triple`
-     - Build Q32 signature via `q32_transform.transform_signature(&float_sig)`
-     - Declare in float module with float sig
-     - Declare in Q32 module with Q32 sig
-     - Main gets `Linkage::Export`, user functions get `Linkage::Local`
+    - Collect all function names + signatures from `typed_ast.user_functions`
+      and `typed_ast.main_function`
+    - Sort alphabetically for deterministic FuncId assignment
+    - For each function:
+        - Build float signature via `SignatureBuilder::build_with_triple`
+        - Build Q32 signature via `q32_transform.transform_signature(&float_sig)`
+        - Declare in float module with float sig
+        - Declare in Q32 module with Q32 sig
+        - Main gets `Linkage::Export`, user functions get `Linkage::Local`
 
 8. **Build func_id_map and old_func_id_map** — same logic as
    `apply_transform_impl` in `gl_module.rs`. Map function names to their FuncIds
@@ -68,13 +69,13 @@ The function should:
     - Generate all CLIF IR (batch, like current `compile_to_gl_module_jit`)
     - Apply Q32 transform (batch)
     - Call `build_jit_executable_memory_optimized`
-    
+
     This lets us validate the setup (parsing, module creation, declarations)
     without the streaming loop yet.
 
 ### 2. Export from crate
 
-File: `lp-glsl/lp-glsl-compiler/src/lib.rs`
+File: `lp-shader/lp-glsl-compiler/src/lib.rs`
 
 Add `pub use frontend::glsl_jit_streaming;` alongside the existing
 `pub use frontend::glsl_jit;`.
@@ -83,7 +84,7 @@ Add `pub use frontend::glsl_jit_streaming;` alongside the existing
 
 Add a basic test that calls `glsl_jit_streaming` with a simple shader and
 verifies it produces a working executable. This can go in
-`lp-glsl/lp-glsl-compiler/src/frontend/mod.rs` or as an integration test.
+`lp-shader/lp-glsl-compiler/src/frontend/mod.rs` or as an integration test.
 
 ```rust
 #[test]
@@ -126,11 +127,11 @@ fn test_glsl_jit_streaming_multi_function() {
 ## Validate
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_glsl_jit_streaming
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_glsl_jit_streaming
 ```
 
 Ensure all existing tests still pass:
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 ```

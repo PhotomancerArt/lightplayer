@@ -90,6 +90,7 @@ where needed.
 ## Dependencies
 
 **lp-glsl-frontend**:
+
 - `glsl` (parser)
 - `hashbrown`
 - `serde` (no_std, alloc)
@@ -98,6 +99,7 @@ where needed.
 - NO cranelift crates
 
 **lp-glsl-cranelift** (renamed):
+
 - `lp-glsl-frontend` (new dependency)
 - `cranelift-codegen`, `cranelift-frontend`, `cranelift-jit`,
   `cranelift-module`, `cranelift-object` (existing)
@@ -108,10 +110,11 @@ where needed.
 
 ### Cargo.toml (workspace root)
 
-Members: replace `lp-glsl/lp-glsl-compiler` with:
+Members: replace `lp-shader/lp-glsl-compiler` with:
+
 ```
-"lp-glsl/lp-glsl-frontend",
-"lp-glsl/lp-glsl-cranelift",
+"lp-shader/lp-glsl-frontend",
+"lp-shader/lp-glsl-cranelift",
 ```
 
 Default-members: same replacement.
@@ -119,11 +122,12 @@ Default-members: same replacement.
 ### Downstream crates that depend on lp-glsl-compiler
 
 These need their dependency renamed to `lp-glsl-cranelift`:
+
 - `lp-core/lp-engine` (uses glsl_jit, glsl_jit_streaming, GlslExecutable)
-- `lp-glsl/lp-glsl-filetests` (uses compilation APIs)
-- `lp-glsl/lp-glsl-filetests-app` (binary)
-- `lp-glsl/lp-glsl-filetests-gen-app` (binary)
-- `lp-glsl/lp-glsl-q32-metrics-app` (binary)
+- `lp-shader/lp-glsl-filetests` (uses compilation APIs)
+- `lp-shader/lp-glsl-filetests-app` (binary)
+- `lp-shader/lp-glsl-filetests-gen-app` (binary)
+- `lp-shader/lp-glsl-q32-metrics-app` (binary)
 - Any other crate that imports from `lp_glsl_compiler`
 
 Some of these may also want to depend on `lp-glsl-frontend` directly for
@@ -151,7 +155,7 @@ crate's public API.
 
 ### Phase 2: Create lp-glsl-frontend crate
 
-1. Create `lp-glsl/lp-glsl-frontend/Cargo.toml` with the dependencies
+1. Create `lp-shader/lp-glsl-frontend/Cargo.toml` with the dependencies
    listed above.
 
 2. Move the files listed in "What moves" above. This is `git mv` for
@@ -163,8 +167,8 @@ crate's public API.
 
 ### Phase 3: Rename lp-glsl-compiler to lp-glsl-cranelift
 
-1. Rename the directory: `lp-glsl/lp-glsl-compiler/` →
-   `lp-glsl/lp-glsl-cranelift/`.
+1. Rename the directory: `lp-shader/lp-glsl-compiler/` →
+   `lp-shader/lp-glsl-cranelift/`.
 
 2. Update `Cargo.toml` (package name, lib name).
 
@@ -183,9 +187,9 @@ crate's public API.
 1. Update workspace `Cargo.toml` (members, default-members).
 
 2. Update every crate that depended on `lp-glsl-compiler`:
-   - Change dependency name to `lp-glsl-cranelift`
-   - Add `lp-glsl-frontend` dependency where needed for shared types
-   - Update `use` statements
+    - Change dependency name to `lp-glsl-cranelift`
+    - Add `lp-glsl-frontend` dependency where needed for shared types
+    - Update `use` statements
 
 3. Verify: `cargo build` (full workspace) and `cargo test` pass.
 

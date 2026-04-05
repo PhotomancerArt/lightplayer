@@ -1,6 +1,7 @@
 # LPIR Feature Parity — Notes
 
-**Design:** [00-design.md](./00-design.md) · **Phases:** [01](./01-phase-relational-bvec.md) … [09](./09-phase-cleanup-validation.md)
+**Design:** [00-design.md](./00-design.md) · **Phases:
+** [01](./01-phase-relational-bvec.md) … [09](./09-phase-cleanup-validation.md)
 
 ## Scope of work
 
@@ -50,14 +51,14 @@ and WASM. WASM-specific `@unimplemented` annotations for pre-existing gaps are a
 
 ### Key code touchpoints
 
-- `lp-glsl/lp-glsl-naga/src/lower_expr.rs` — expression lowering (relational, matrix, array)
-- `lp-glsl/lp-glsl-naga/src/lower_stmt.rs` — statement lowering (matrix stores, aggregates)
-- `lp-glsl/lp-glsl-naga/src/lower_ctx.rs` — `naga_type_to_ir_types` (type mapping)
-- `lp-glsl/lp-glsl-naga/src/lower_math.rs` — math builtin decomposition
-- `lp-glsl/lp-glsl-naga/src/lib.rs` — `naga_type_inner_to_glsl`, `extract_functions`
-- `lp-glsl/lpir/src/glsl_metadata.rs` — `GlslType` enum
-- `lp-glsl/lpir-cranelift/src/invoke.rs` — host JIT calling, return decode
-- `lp-glsl/lp-glsl-filetests/` — test harness and `.glsl` corpus
+- `lp-shader/lp-glsl-naga/src/lower_expr.rs` — expression lowering (relational, matrix, array)
+- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` — statement lowering (matrix stores, aggregates)
+- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` — `naga_type_to_ir_types` (type mapping)
+- `lp-shader/lp-glsl-naga/src/lower_math.rs` — math builtin decomposition
+- `lp-shader/lp-glsl-naga/src/lib.rs` — `naga_type_inner_to_glsl`, `extract_functions`
+- `lp-shader/lpir/src/glsl_metadata.rs` — `GlslType` enum
+- `lp-shader/lpir-cranelift/src/invoke.rs` — host JIT calling, return decode
+- `lp-shader/lp-glsl-filetests/` — test harness and `.glsl` corpus
 
 ## Questions
 
@@ -139,7 +140,8 @@ The discrepancy affects ~5-10 files at most.
 out to be a quick fix (e.g. stale global state between test files), fix it. If it requires major
 harness refactoring, file it as a separate follow-up.
 
-**Answer:** Yes — investigate in the final polish phase; fix if straightforward, otherwise spin off a follow-up.
+**Answer:** Yes — investigate in the final polish phase; fix if straightforward, otherwise spin off
+a follow-up.
 
 ## Notes
 

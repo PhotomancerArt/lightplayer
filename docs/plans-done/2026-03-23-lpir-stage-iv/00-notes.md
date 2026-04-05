@@ -8,6 +8,7 @@ control flow, user function calls, math builtin decomposition, and LPFX call
 structure. The lowering is completely float-mode-unaware.
 
 **In scope:**
+
 - Expression lowering: literals, arguments, locals (load/store), binary ops,
   unary ops, comparisons, casts, select, zero values, constants
 - Statement lowering: emit (no-op), block, if/else, loop, break, continue,
@@ -24,15 +25,17 @@ structure. The lowering is completely float-mode-unaware.
 - Tests: GLSL → Naga → LPIR → print text, verify output
 
 **Out of scope:**
+
 - Vector expressions (future follow-on)
 - Vector builtins (future follow-on)
 - WASM emission from LPIR (Stage V)
 
 ## Current state
 
-### `lp-glsl-naga` crate (`lp-glsl/lp-glsl-naga/`)
+### `lp-glsl-naga` crate (`lp-shader/lp-glsl-naga/`)
 
 Thin wrapper around `naga::front::glsl`. Provides:
+
 - `compile(source) → NagaModule` (parse GLSL, collect function metadata)
 - `NagaModule { module: naga::Module, functions: Vec<(Handle<Function>, FunctionInfo)> }`
 - `FunctionInfo { name, params: Vec<(String, GlslType)>, return_type: GlslType }`
@@ -42,6 +45,7 @@ Thin wrapper around `naga::front::glsl`. Provides:
 ### `lp-glsl-wasm` crate (existing Naga → WASM emitter)
 
 The reference for what Naga IR patterns the lowering must handle. Key files:
+
 - `emit.rs` (~1970 lines): walks Naga statements and expressions, emits WASM
   instructions directly. Handles scalars + vectors, mode-aware (float/Q32).
 - `locals.rs` (~310 lines): WASM local allocation, parameter aliasing detection,
@@ -50,6 +54,7 @@ The reference for what Naga IR patterns the lowering must handle. Key files:
   memory, call emission.
 
 The WASM emitter covers these expression types (scalar path):
+
 - `Literal`, `Constant`, `FunctionArgument`, `CallResult`, `Load(LocalVariable)`
 - `Binary` (all Naga binary ops including LogicalAnd/Or, bitwise, shifts)
 - `Unary` (Negate, LogicalNot, BitwiseNot)
@@ -57,6 +62,7 @@ The WASM emitter covers these expression types (scalar path):
 - `Math` (Mix, SmoothStep, Step, Round, Abs, Min, Max)
 
 Statement types:
+
 - `Emit` (no-op for pure expressions, emit+drop for side-effectful)
 - `Block`, `If`, `Loop` (with do-while trailing guard splitting), `Break`,
   `Continue`, `Return`, `Store`, `Call`
@@ -64,6 +70,7 @@ Statement types:
 ### `lpir` crate
 
 Complete as of Stage III. Key API surface for the lowering:
+
 - `FunctionBuilder` / `ModuleBuilder` for construction
 - `Op` enum with all arithmetic, comparison, control flow, memory, call ops
 - `IrType`: `F32` | `I32` only (booleans and uints use `I32`)
@@ -116,17 +123,20 @@ The `std.math` import module provides `fround`, `fmod`, `fabs`, `fmin`, `fmax`,
 `fmix`, `fsmoothstep`, `fstep`, etc. Two strategies:
 
 **Option A — Maximize inline decomposition:**
+
 - Decompose into core LPIR ops: abs, min, max, step, mix, smoothstep
   (all expressible via fadd/fsub/fmul/fdiv + comparisons + select + constants)
 - Emit as `@std.math::...` imports: round, mod (need floor/trunc which aren't
   core LPIR ops)
 
 **Option B — All math builtins as imports:**
+
 - Every `MathFunction` maps to `call @std.math::fname(...)`. Simpler lowering,
   but the interpreter needs a comprehensive StdMathHandler and emitters need to
   handle more import calls.
 
 **Option C — Hybrid (suggested):**
+
 - Decompose: mix, smoothstep, step (these are straightforward arithmetic
   sequences in mode-agnostic LPIR)
 - Import: abs, round, min, max, mod (clean single-call semantics; emitters
@@ -162,6 +172,7 @@ continuing; break_if; br 0; } }`). WASM has relative branch depths, so
 `Continue` can target the inner block boundary.
 
 **Proposed LPIR approach — first-iteration flag:**
+
 ```
 v_first:i32 = iconst.i32 1
 loop {
@@ -198,6 +209,7 @@ up intervening If frames).
 
 The roadmap includes LPFX: "detect LPFX builtins, generate memory ops for
 out-params." In LPIR, this means:
+
 1. Detect `lpfx_*` calls in Naga IR
 2. Create `@lpfx::builtin_name(...)` import declarations in the IrModule
 3. For out-parameters: allocate slots via `FunctionBuilder::alloc_slot`,
@@ -223,6 +235,7 @@ LPIR has only `F32` and `I32`. Naga distinguishes `Float`, `Sint`, `Uint`,
 `Bool` scalar kinds.
 
 **Suggested mapping:**
+
 - `Float` → `IrType::F32`
 - `Sint` → `IrType::I32`
 - `Uint` → `IrType::I32` (signedness per-operation: `IdivU`, `IltU`, etc.)
@@ -238,6 +251,7 @@ This matches the WASM emitter's approach (both `int` and `uint` map to `i32`;
 ### Q6: Testing strategy
 
 The roadmap specifies two test types:
+
 1. GLSL → Naga → LPIR → interpret → verify results
 2. GLSL → Naga → LPIR → print text → verify output
 
@@ -245,6 +259,7 @@ For (1), the interpreter needs an `ImportHandler` to handle `@std.math::...`
 calls (if we use imports for some math builtins per Q2).
 
 **Suggested:**
+
 - Build a `StdMathHandler` implementing `ImportHandler` that handles `std.math`
   module calls using Rust's `f32` operations (sin, cos, round, etc.)
 - Test helpers: `lower_and_run(glsl, func, args) → Vec<Value>` and

@@ -19,12 +19,12 @@ Final validation, cleanup of temporary code, fix all warnings, format, commit.
 Search the git diff and codebase for any remaining old-convention references:
 
 ```
-rg '__lp_q32_' lp-glsl/     # should only appear in stale lp-glsl-cranelift
-rg '__lpfx_' lp-glsl/       # same — only stale old cranelift
-rg 'std\.math' lp-glsl/     # should be zero outside old cranelift
-rg 'StdMathHandler' lp-glsl/  # should be zero (renamed)
-rg 'LpQ32' lp-glsl/         # old variant names, should be zero outside old cranelift
-rg 'Lpfx[A-Z]' lp-glsl/     # old lpfx variant names (LpfxFbm not LpLpfxFbm)
+rg '__lp_q32_' lp-shader/     # should only appear in stale lp-glsl-cranelift
+rg '__lpfx_' lp-shader/       # same — only stale old cranelift
+rg 'std\.math' lp-shader/     # should be zero outside old cranelift
+rg 'StdMathHandler' lp-shader/  # should be zero (renamed)
+rg 'LpQ32' lp-shader/         # old variant names, should be zero outside old cranelift
+rg 'Lpfx[A-Z]' lp-shader/     # old lpfx variant names (LpfxFbm not LpLpfxFbm)
 ```
 
 Any hits outside `lp-glsl-cranelift/` need fixing.
@@ -32,7 +32,7 @@ Any hits outside `lp-glsl-cranelift/` need fixing.
 ### Check for TODOs
 
 ```
-rg 'TODO' lp-glsl/ --glob '!lp-glsl-cranelift/**'
+rg 'TODO' lp-shader/ --glob '!lp-glsl-cranelift/**'
 ```
 
 Remove any temporary TODOs added during this plan.

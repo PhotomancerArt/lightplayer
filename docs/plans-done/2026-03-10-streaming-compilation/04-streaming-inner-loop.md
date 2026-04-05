@@ -6,6 +6,7 @@ Replace the temporary batch implementation in `glsl_jit_streaming` (from Phase 2
 with the actual per-function streaming loop. This is the core of the plan.
 
 For each function (in smallest-first order):
+
 1. Generate CLIF IR from AST (using float module)
 2. Q32 transform (using per-function helper from Phase 3)
 3. `define_function` on Q32 module (compile to machine code)
@@ -160,6 +161,7 @@ one each iteration (the `FunctionBuilderContext` inside is lightweight).
 `GlslCompiler`. For the streaming path, it needs to be callable from
 `frontend/mod.rs`. It's already `fn compile_function_to_clif` (not `pub`).
 Either:
+
 - Make it `pub(crate)` so `frontend/mod.rs` can call it
 - Or call through `GlslCompiler` by adding a thin public wrapper
 
@@ -261,6 +263,6 @@ now use only the streaming loop.
 ## Validate
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_streaming
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 ```

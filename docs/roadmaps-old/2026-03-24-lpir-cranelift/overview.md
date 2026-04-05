@@ -94,7 +94,7 @@ the design from the start.
 ### Crate structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpir/                      # LPIR core (existing, unchanged)
 ├── lp-glsl-naga/              # Naga → LPIR lowering (existing)
 │                              #   UPDATE: extract GlslMetadata during lowering

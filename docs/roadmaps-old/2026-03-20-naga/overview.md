@@ -24,7 +24,7 @@ support.
 ## Architecture / design
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/                # NEW: Naga-based frontend
 │   └── src/
 │       ├── lib.rs               # compile() entry point, wraps naga::front::glsl

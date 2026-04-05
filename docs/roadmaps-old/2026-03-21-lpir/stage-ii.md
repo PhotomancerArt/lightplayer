@@ -13,7 +13,8 @@ with unit tests using hand-built IR.
 ## Scope
 
 **In scope:**
-- `lp-glsl/lpir/` crate setup (Cargo.toml, no_std + alloc, no external deps)
+
+- `lp-shader/lpir/` crate setup (Cargo.toml, no_std + alloc, no external deps)
 - `Op` enum, `IrFunction`, `IrModule`, `IrType` (F32/I32), `VReg` type alias
 - `VRegAllocator` — monotonic counter for fresh VRegs
 - Builder API for constructing `IrFunction` (push ops, allocate VRegs)
@@ -27,6 +28,7 @@ with unit tests using hand-built IR.
   mismatches)
 
 **Out of scope:**
+
 - Q32 expansion (lives in backend emitters, not in `lpir`)
 - Naga lowering (Stage IV)
 - WASM emission (Stage V)
@@ -50,7 +52,7 @@ with unit tests using hand-built IR.
 
 ## Deliverables
 
-- `lp-glsl/lpir/` crate with lib.rs, builder.rs, print.rs, parse.rs, interp.rs
+- `lp-shader/lpir/` crate with lib.rs, builder.rs, print.rs, parse.rs, interp.rs
 - Unit tests covering all Op variants, control flow, round-trip printing,
   interpreter execution
 

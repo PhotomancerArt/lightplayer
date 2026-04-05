@@ -15,7 +15,7 @@ starting the next function. Goal: reduce peak heap usage on ESP32 by ~25-30 KB.
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-compiler/src/
+lp-shader/lp-glsl-compiler/src/
 ├── frontend/
 │   ├── mod.rs                          # UPDATE: Add glsl_jit_streaming() entry point
 │   ├── glsl_compiler.rs                # UPDATE: Extract per-function CLIF gen method
@@ -86,6 +86,7 @@ lp-glsl/lp-glsl-compiler/src/
 ### 1. `glsl_jit_streaming()` (frontend/mod.rs)
 
 New top-level entry point. Orchestrates the entire streaming pipeline:
+
 - Parses and analyzes GLSL → `TypedShader`
 - Creates float module + Q32 module (both with all functions declared upfront)
 - Builds func_id_map / old_func_id_map for the transform
@@ -105,6 +106,7 @@ rather than a batch loop that collects all results into a Vec.
 
 New helper that transforms a single function using the existing `Transform` trait.
 Takes:
+
 - A float-typed `Function` (from CLIF gen)
 - The Q32 transform
 - A `TransformContext` referencing the Q32 module
@@ -116,6 +118,7 @@ instead it goes straight to `define_function`.
 ### 4. `build_jit_executable_streaming()` (backend/codegen/jit.rs)
 
 Inner loop that, for each function:
+
 1. Generates CLIF IR (via the float module)
 2. Transforms (Q32)
 3. Calls `define_function` on the Q32 module

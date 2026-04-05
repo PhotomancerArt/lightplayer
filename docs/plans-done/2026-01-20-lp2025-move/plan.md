@@ -11,7 +11,7 @@ reference the cranelift fork via git.
 The new repo has:
 
 - `lp-app/` - LightPlayer application workspace
-- `lp-glsl/` - LightPlayer GLSL compiler workspace
+- `lp-shader/` - LightPlayer GLSL compiler workspace
 - `scripts/` - Build and test scripts (lp-build.sh, glsl-filetests.sh, build-builtins.sh)
 - Root `Cargo.toml` - Unified workspace including all crates from both lp-app and lp-glsl
 
@@ -28,13 +28,13 @@ The new repo has:
 2. ✅ **Extract Git History**
     - Used `git filter-repo` to extract history for both directories
     - Extracted `lp-app/` history, preserving paths as `lp-app/...`
-    - Extracted `lp-glsl/` history, preserving paths as `lp-glsl/...`
+    - Extracted `lp-shader/` history, preserving paths as `lp-shader/...`
     - Merged both histories into the new repo
     - Preserved commit messages and author information
 
 3. ✅ **Copy Directories and Scripts**
     - Copied `lp-app/` directory to new repo root
-    - Copied `lp-glsl/` directory to new repo root
+    - Copied `lp-shader/` directory to new repo root
     - Copied LP-specific scripts:
         - `scripts/lp-build.sh`
         - `scripts/glsl-filetests.sh`
@@ -50,15 +50,15 @@ The new repo has:
     - Updated cranelift dependencies in root `Cargo.toml` to use git:
         - Repository: `https://github.com/Yona-Appletree/lp-cranelift.git`
         - Branch: `feature/lp2025`
-    - Updated `lp-app/Cargo.toml` and `lp-glsl/Cargo.toml` to reference workspace dependencies
+    - Updated `lp-app/Cargo.toml` and `lp-shader/Cargo.toml` to reference workspace dependencies
     - Commented out workspace sections in lp-app and lp-glsl Cargo.toml files (workspace now defined
       at root)
 
 6. ✅ **Update Cross-References**
     - Updated `lp-app/crates/lp-engine/Cargo.toml` line 20: Changed path from
-      `../../../lp-glsl/lp-glsl-compiler` to `../../../lp-glsl/lp-glsl-compiler` (
+      `../../../lp-shader/lp-glsl-compiler` to `../../../lp-shader/lp-glsl-compiler` (
       correct relative path)
-    - Updated `lp-glsl/Cargo.toml` to reference `lp-app/apps/lp-cli` (was `lp-core-cli`)
+    - Updated `lp-shader/Cargo.toml` to reference `lp-app/apps/lp-cli` (was `lp-core-cli`)
 
 7. ✅ **Update Scripts**
     - Updated `scripts/lp-build.sh`: Removed cranelift-specific test (32-bit filetests), updated
@@ -71,7 +71,7 @@ The new repo has:
 
 8. ✅ **Verify Build and Tests**
     - ✅ Fixed path issue: `lp-app/crates/lp-engine/Cargo.toml` - changed from
-      `../../lp-glsl/lp-glsl-compiler` to `../../../lp-glsl/lp-glsl-compiler`
+      `../../lp-shader/lp-glsl-compiler` to `../../../lp-shader/lp-glsl-compiler`
     - ✅ Fixed `cranelift-interpreter` dependency: Added to root workspace dependencies and updated
       `lp-glsl-compiler` to use workspace reference
     - ✅ Added missing `runtime-embive` crate to workspace members (later removed due to embedded
@@ -98,12 +98,13 @@ The new repo has:
 1. **Workspace Configuration:**
     - Root `Cargo.toml` (created) - unified workspace with all crates
     - `lp-app/Cargo.toml` - workspace sections commented out, dependencies reference root workspace
-    - `lp-glsl/Cargo.toml` - workspace sections commented out, dependencies reference root workspace
+    - `lp-shader/Cargo.toml` - workspace sections commented out, dependencies reference root
+      workspace
 
 2. **Dependency Updates:**
     - Root `Cargo.toml` - defines cranelift git dependencies in workspace.dependencies
     - `lp-app/Cargo.toml` - references workspace cranelift dependencies
-    - `lp-glsl/Cargo.toml` - references workspace cranelift dependencies
+    - `lp-shader/Cargo.toml` - references workspace cranelift dependencies
     - `lp-app/crates/lp-engine/Cargo.toml` - lp-glsl-compiler path (line 20)
 
 3. **Script Updates:**
@@ -114,12 +115,12 @@ The new repo has:
 4. **Documentation:**
     - Root `README.md` (created)
     - `lp-app/README.md` (needs update - remove mention of being in cranelift repo)
-    - `lp-glsl/README.md` (needs update - update script paths and remove cranelift references)
+    - `lp-shader/README.md` (needs update - update script paths and remove cranelift references)
 
 ## Known Issues
 
 1. ✅ **Path Issue**: Fixed - `lp-app/crates/lp-engine/Cargo.toml` line 20 now correctly references
-   `lp-glsl-compiler` with path `../../../lp-glsl/lp-glsl-compiler`.
+   `lp-glsl-compiler` with path `../../../lp-shader/lp-glsl-compiler`.
 
 2. ✅ **Workspace Structure**: Cargo doesn't support nested workspaces, so we consolidated everything
    into the root workspace. The lp-app and lp-glsl Cargo.toml files have their workspace sections
@@ -133,7 +134,7 @@ The new repo has:
 The git history was successfully extracted using `git filter-repo`:
 
 - lp-app history: Preserved with paths as `lp-app/...`
-- lp-glsl history: Preserved with paths as `lp-glsl/...`
+- lp-glsl history: Preserved with paths as `lp-shader/...`
 - Both histories merged into the new repository
 
 ## Next Steps
@@ -149,7 +150,7 @@ The git history was successfully extracted using `git filter-repo`:
 8. ✅ Setup git remote - DONE
 9. ✅ **Create GitHub repository** `https://github.com/Yona-Appletree/lp2025.git` - DONE
 10. ✅ Push to GitHub: `git push -u origin main` - DONE
-11. ⏳ Update documentation files (lp-app/README.md, lp-glsl/README.md) - Optional
+11. ⏳ Update documentation files (lp-app/README.md, lp-shader/README.md) - Optional
 
 ## Commands Used
 

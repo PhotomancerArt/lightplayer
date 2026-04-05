@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Implement the syscall wrappers for serial, time, and output providers in fw-emu using the actual syscall functions from `lp-riscv-emu-guest`.
+Implement the syscall wrappers for serial, time, and output providers in fw-emu using the actual
+syscall functions from `lp-riscv-emu-guest`.
 
 ## Code Organization Reminders
 
@@ -22,10 +23,11 @@ Add `lp-riscv-emu-guest` dependency:
 lp-riscv-emu-guest = { path = "../../../lp-riscv/lp-riscv-emu-guest" }
 ```
 
-Update `lp-emu-guest` to use package alias if needed, or remove it if `lp-riscv-emu-guest` has everything:
+Update `lp-emu-guest` to use package alias if needed, or remove it if `lp-riscv-emu-guest` has
+everything:
 
 ```toml
-lp-emu-guest = { path = "../../../lp-glsl/crates/lp-emu-guest", package = "lp-riscv-emu-guest" }
+lp-emu-guest = { path = "../../../lp-shader/crates/lp-emu-guest", package = "lp-riscv-emu-guest" }
 ```
 
 ### 2. Update serial syscall wrapper (`lp-app/apps/fw-emu/src/serial/syscall.rs`)

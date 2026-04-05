@@ -10,6 +10,7 @@ dispatches to both `cranelift.q32` and `wasm.q32` targets with an
 annotation system tracking expected failures.
 
 Current filetest results:
+
 ```
                   pass    fail   unimpl   broken
  cranelift.q32    1499       0      970        0
@@ -37,6 +38,7 @@ that appear in the most test files.
 ## Current codegen limitations
 
 The WASM codegen handles:
+
 - Literals (int, uint, float Q32, bool)
 - Variables (local.get)
 - Binary ops: `+`, `-` (i32 only), comparisons (`==`, `!=`, `<`, etc.)
@@ -46,6 +48,7 @@ The WASM codegen handles:
 - Function parameters
 
 Missing (needed for rainbow.shader):
+
 - **Assignment expressions** (`x = expr`)
 - **Type-aware binary ops** (int mul vs Q32 float mul)
 - **Q32 multiply and divide** (inline i64 intermediate)
@@ -94,6 +97,7 @@ handling.
 ### Multi-local vector representation
 
 Vectors use multiple WASM locals (one per component):
+
 - `vec2 v` → 2 locals: `v_0`, `v_1`
 - `vec3 v` → 3 locals: `v_0`, `v_1`, `v_2`
 - `vec4 v` → 4 locals: `v_0`, `v_1`, `v_2`, `v_3`
@@ -120,6 +124,7 @@ Q32 multiply: `(i64(a) * i64(b)) >> 16`, truncated to i32.
 Q32 divide: `(i64(a) << 16) / i64(b)`, truncated to i32.
 
 These are emitted inline as WASM instructions:
+
 ```wasm
 ;; Q32 mul: (a * b) >> 16
 local.get $a
@@ -228,10 +233,10 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
    allocate multiple WASM locals for vec2/3/4.
 2. Extend type mapping: vectors → multiple WASM values.
 3. Implement vector constructors:
-   - `vec2(x, y)`, `vec3(x, y, z)`, `vec4(x, y, z, w)` — push
-     each component.
-   - `vec3(scalar)` — replicate scalar to all components.
-   - `vec3(vec2, scalar)`, `vec4(vec3, scalar)`, etc. — mixed.
+    - `vec2(x, y)`, `vec3(x, y, z)`, `vec4(x, y, z, w)` — push
+      each component.
+    - `vec3(scalar)` — replicate scalar to all components.
+    - `vec3(vec2, scalar)`, `vec4(vec3, scalar)`, etc. — mixed.
 4. Implement component access (`.x`, `.y`, `.z`, `.w`) via
    `local.get(base + offset)`.
 5. Implement swizzle (`.xy`, `.rgb`, `.xyzw`, etc.) — emit multiple
@@ -303,26 +308,26 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-   - `lp-glsl/lp-glsl-wasm/README.md`: document supported features,
-     builtin import mechanism, vector representation.
-   - `lp-glsl/lp-glsl-filetests/README.md`: update with current
-     wasm.q32 pass counts and annotation patterns.
-   - `lp-glsl/README.md`: update crate table if needed.
+    - `lp-shader/lp-glsl-wasm/README.md`: document supported features,
+      builtin import mechanism, vector representation.
+    - `lp-shader/lp-glsl-filetests/README.md`: update with current
+      wasm.q32 pass counts and annotation patterns.
+    - `lp-shader/README.md`: update crate table if needed.
 
 ## Feature → filetest mapping (approximate)
 
-| Feature                    | Test directories unlocked          | Est. tests |
-|----------------------------|------------------------------------|------------|
-| Assignment, int mul/div    | scalar/int/*, scalar/uint/*        | ~28        |
-| Q32 float mul/div          | scalar/float/*                     | ~13        |
-| Type constructors/coercion | scalar/*/from-*.glsl               | ~12        |
-| Logical ops, ternary       | scalar/bool/*, control/ternary/*   | ~29        |
-| If/else                    | control/if/*, control/if_else/*    | ~10        |
-| For/while/do-while         | control/for/*, control/while/*, etc| ~40        |
-| User function calls        | function/*                         | ~40        |
-| Vectors                    | vec/*, uvec*/*                     | ~200+      |
-| Builtins                   | builtins/*                         | ~63        |
-| Matrices                   | matrix/*                           | ~68        |
+| Feature                    | Test directories unlocked           | Est. tests |
+|----------------------------|-------------------------------------|------------|
+| Assignment, int mul/div    | scalar/int/*, scalar/uint/*         | ~28        |
+| Q32 float mul/div          | scalar/float/*                      | ~13        |
+| Type constructors/coercion | scalar/*/from-*.glsl                | ~12        |
+| Logical ops, ternary       | scalar/bool/*, control/ternary/*    | ~29        |
+| If/else                    | control/if/*, control/if_else/*     | ~10        |
+| For/while/do-while         | control/for/*, control/while/*, etc | ~40        |
+| User function calls        | function/*                          | ~40        |
+| Vectors                    | vec/*, uvec*/*                      | ~200+      |
+| Builtins                   | builtins/*                          | ~63        |
+| Matrices                   | matrix/*                            | ~68        |
 
 Note: matrices are NOT required for rainbow.shader and are out of scope
 for this plan. They can remain `@unimplemented(backend=wasm)`.

@@ -26,7 +26,8 @@ pre-mark every current failure as an expected gap:
 2. Use `--mark-unimplemented` (or `LP_MARK_UNIMPLEMENTED=1`). You will be prompted to type `yes`
    unless you pass `--assume-yes`.
 3. The runner adds `// @unimplemented(backend=jit)` **before the first `// run:`** when the whole
-   module fails to compile in **summary** mode (the usual multi-file run), or **`// @unimplemented(backend=jit)`**
+   module fails to compile in **summary** mode (the usual multi-file run), or *
+   *`// @unimplemented(backend=jit)`**
    immediately before each failing `// run:`** when the file compiled but individual directives
    failed (or in single-file **detail** mode, where there is no whole-file compile step).
 4. Re-run the suite; exit code should be **0** with failures counted as expected `@unimplemented`.
@@ -41,7 +42,7 @@ Requires: `cargo run -p lp-glsl-filetests-app -- test --target jit.q32 --mark-un
 No new crates. Work is within existing crates:
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/src/
 │   ├── lower_expr.rs              # Relational, bvec casts, dynamic index
 │   ├── lower_stmt.rs              # Matrix/bvec element stores
@@ -77,13 +78,13 @@ lp-glsl/
 
 ## Milestones
 
-| # | Focus | Files unblocked | Primary crate |
-|---|-------|----------------|---------------|
-| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green | `lp-glsl-filetests` |
-| I | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21 | `lp-glsl-naga` |
-| II | Pointer stores/loads (matrix element, bvec dynamic index) | ~15 | `lp-glsl-naga` |
-| III | Bvec lowering gaps (casts, `mix`, misc) | ~6 | `lp-glsl-naga` |
-| IV | Array type lowering | ~5+ | `lp-glsl-naga`, `lpir` |
-| V | Matrix invoke / sret (large returns) | unlocks mat3/mat4 tests | `lpir-cranelift` |
-| VI | Multi-backend parity (WASM/RV32 sweep + comparison tooling) | cross-target | `lp-glsl-filetests` |
-| VII | Annotations, polish, closure | remaining edge cases | all |
+| #      | Focus                                                                    | Files unblocked         | Primary crate          |
+|--------|--------------------------------------------------------------------------|-------------------------|------------------------|
+| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lp-glsl-filetests`    |
+| I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lp-glsl-naga`         |
+| II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lp-glsl-naga`         |
+| III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lp-glsl-naga`         |
+| IV     | Array type lowering                                                      | ~5+                     | `lp-glsl-naga`, `lpir` |
+| V      | Matrix invoke / sret (large returns)                                     | unlocks mat3/mat4 tests | `lpir-cranelift`       |
+| VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lp-glsl-filetests`    |
+| VII    | Annotations, polish, closure                                             | remaining edge cases    | all                    |

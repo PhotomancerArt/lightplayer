@@ -13,7 +13,7 @@ the majority of filetests.
 ## File structure
 
 ```
-lp-glsl/lp-glsl-naga/
+lp-shader/lp-glsl-naga/
 ├── Cargo.toml                    # UPDATE: add smallvec dependency
 └── src/
     ├── lower_ctx.rs              # UPDATE: SmallVec expr cache, multi-VReg
@@ -90,6 +90,7 @@ The expression cache changes from `Vec<Option<VReg>>` to
 ### `lower_ctx.rs` — multi-VReg infrastructure
 
 Changes:
+
 - `expr_cache: Vec<Option<SmallVec<[VReg; 4]>>>`
 - `local_map: BTreeMap<Handle<LocalVariable>, SmallVec<[VReg; 4]>>`
 - `param_aliases: BTreeMap<Handle<LocalVariable>, SmallVec<[VReg; 4]>>`
@@ -143,6 +144,7 @@ broadcasts the float to each lane. Use `expr_type_inner` to detect width
 mismatch.
 
 Vector-specific math functions dispatch to `lower_matrix.rs`:
+
 - `Dot` → inline dot product (multiply + add chain)
 - `Cross` → inline cross product formula
 - `Length` → dot(v,v) → sqrt

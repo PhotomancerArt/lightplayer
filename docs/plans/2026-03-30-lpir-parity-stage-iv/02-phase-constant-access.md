@@ -2,15 +2,18 @@
 
 ## Scope
 
-Implement `AccessIndex` lowering for arrays to enable constant-index element access: `arr[0]`, `arr[2]`, etc.
+Implement `AccessIndex` lowering for arrays to enable constant-index element access: `arr[0]`,
+`arr[2]`, etc.
 
-Target: `test_read()`, `test_write()`, `test_multiple_writes()`, `test_multiple_reads()`, `phase1()` from `1-foundation.glsl` should pass.
+Target: `test_read()`, `test_write()`, `test_multiple_writes()`, `test_multiple_reads()`, `phase1()`
+from `1-foundation.glsl` should pass.
 
 ## Implementation Details
 
 ### 1. Detect Array AccessIndex in expr_type_inner
 
-In `lp-glsl/lp-glsl-naga/src/naga_util.rs`, `expr_type_inner()` already handles `AccessIndex` on arrays at lines 232-234:
+In `lp-shader/lp-glsl-naga/src/naga_util.rs`, `expr_type_inner()` already handles `AccessIndex` on
+arrays at lines 232-234:
 
 ```rust
 TypeInner::Array { base: elt, .. } => Ok(module.types[*elt].inner.clone()),
@@ -20,7 +23,7 @@ This should already work - verify it's returning the correct element type.
 
 ### 2. Add Array AccessIndex Lowering
 
-In `lp-glsl/lp-glsl-naga/src/lower_expr.rs`, extend the `AccessIndex` match arm:
+In `lp-shader/lp-glsl-naga/src/lower_expr.rs`, extend the `AccessIndex` match arm:
 
 ```rust
 Expression::AccessIndex { base, index } => {
@@ -86,7 +89,8 @@ Expression::AccessIndex { base, index } => {
 
 ### 3. Add Store Support for Array Elements
 
-In `lp-glsl/lp-glsl-naga/src/lower_stmt.rs`, handle `Store` where the pointer is an array element access:
+In `lp-shader/lp-glsl-naga/src/lower_stmt.rs`, handle `Store` where the pointer is an array element
+access:
 
 ```rust
 Statement::Store { pointer, value } => {
@@ -139,6 +143,7 @@ Statement::Store { pointer, value } => {
 ## Tests to Verify
 
 From `array/phase/1-foundation.glsl`:
+
 ```glsl
 int test_write() {
     int arr[5];

@@ -17,7 +17,7 @@ Re-check ignored tests, full validation sweep, grep for leftovers, write
 
 ### 1. Re-check ignored test
 
-In `lp-glsl/lp-glsl-filetests/tests/lpfx_builtins_memory.rs`:
+In `lp-shader/lp-glsl-filetests/tests/lpfx_builtins_memory.rs`:
 
 - Remove `#[ignore = "..."]` from
   `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it`.
@@ -39,7 +39,7 @@ cargo test -p lp-glsl-filetests --test lpfx_builtins_memory
 
 ```bash
 rg 'lp.glsl.cranelift|lp.glsl.jit.util|esp32.glsl.jit|lp.glsl.q32.metrics|lp.glsl.frontend' \
-    --type rust --type toml lp-glsl/ lp-core/ lp-fw/ Cargo.toml justfile
+    --type rust --type toml lp-shader/ lp-core/ lp-fw/ Cargo.toml justfile
 ```
 
 Should return **zero** matches in code/config files (comments about history in

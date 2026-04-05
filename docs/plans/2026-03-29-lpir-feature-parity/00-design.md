@@ -23,7 +23,7 @@ to a follow-up plan.
 ## File structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lp-glsl-naga/src/
 │   ├── lower_expr.rs              # UPDATE: Relational
 │   ├── lower_stmt.rs              # UPDATE: matrix element stores
@@ -66,10 +66,10 @@ each lower that to their ABI; **invoke.rs** is only the Rust-side caller for hos
 
 ## Main components
 
-| Component | Role |
-|-----------|------|
-| `lp-glsl-naga` | Maps Naga expressions/statements to LPIR; must accept matrix signatures and relational ops on bvec. |
-| `lpir::glsl_metadata` | Describes exported function types for callers; must include matrix shapes for invoke/decode. |
-| `lpir-cranelift` | Emits CLIF; host tests need invoke glue that matches Cranelift’s multi-return / sret ABI. |
-| `lp-glsl-wasm` | Emits WASM; must remain consistent with LPIR multi-return for the same shaders. |
-| `lp-glsl-filetests` | Corpus + runner; annotations (`@unimplemented`, `@broken`, `@unsupported`). |
+| Component             | Role                                                                                                |
+|-----------------------|-----------------------------------------------------------------------------------------------------|
+| `lp-glsl-naga`        | Maps Naga expressions/statements to LPIR; must accept matrix signatures and relational ops on bvec. |
+| `lpir::glsl_metadata` | Describes exported function types for callers; must include matrix shapes for invoke/decode.        |
+| `lpir-cranelift`      | Emits CLIF; host tests need invoke glue that matches Cranelift’s multi-return / sret ABI.           |
+| `lp-glsl-wasm`        | Emits WASM; must remain consistent with LPIR multi-return for the same shaders.                     |
+| `lp-glsl-filetests`   | Corpus + runner; annotations (`@unimplemented`, `@broken`, `@unsupported`).                         |

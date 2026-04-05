@@ -1,6 +1,6 @@
 ---
 description: no_std policy for the shader compilation pipeline
-globs: lp-core/**/*.rs,lp-core/**/Cargo.toml,lp-glsl/**/*.rs,lp-glsl/**/Cargo.toml,lp-fw/**/*.rs,lp-fw/**/Cargo.toml
+globs: lp-core/**/*.rs,lp-core/**/Cargo.toml,lp-shader/**/*.rs,lp-shader/**/Cargo.toml,lp-fw/**/*.rs,lp-fw/**/Cargo.toml
 alwaysApply: false
 ---
 

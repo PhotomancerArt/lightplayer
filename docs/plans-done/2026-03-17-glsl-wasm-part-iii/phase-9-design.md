@@ -16,6 +16,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 9
 ## 1. Build and test
 
 **Commands:**
+
 ```bash
 cargo build
 cargo test
@@ -48,13 +49,15 @@ cargo test -p lp-glsl-filetests
 
 **Command:** `just build-fw-esp32`
 
-**Purpose:** Ensures lp-glsl changes don't break the ESP32 firmware build. If the workspace has this target, it must succeed.
+**Purpose:** Ensures lp-glsl changes don't break the ESP32 firmware build. If the workspace has this
+target, it must succeed.
 
 ---
 
 ## 5. README updates
 
 **lp-glsl-wasm/README.md:**
+
 - Document supported features (scalars, vectors, control flow, builtins, LPFX)
 - Builtin import mechanism (module "builtins", function names)
 - Vector representation (multi-local)
@@ -62,11 +65,13 @@ cargo test -p lp-glsl-filetests
 - Limitations (no matrices, no arrays, no structs)
 
 **lp-glsl-filetests/README.md:**
+
 - Current wasm.q32 pass count
 - Annotation patterns (@unimplemented(backend=wasm))
 - How to run with --target wasm.q32
 
-**lp-glsl/README.md:**
+**lp-shader/README.md:**
+
 - Crate table: update lp-glsl-wasm description
 - Any new crates or changes
 
@@ -75,6 +80,7 @@ cargo test -p lp-glsl-filetests
 ## 6. Validation script
 
 **From plan:** Full validation command block:
+
 ```bash
 cargo build
 cargo test
@@ -92,9 +98,9 @@ just build-fw-esp32
 
 ## File change summary
 
-| File | Changes |
-|------|---------|
-| Various | Fix warnings, formatting |
-| lp-glsl/lp-glsl-wasm/README.md | Document features, mechanism |
-| lp-glsl/lp-glsl-filetests/README.md | Pass counts, annotation patterns |
-| lp-glsl/README.md | Crate table if needed |
+| File                                  | Changes                          |
+|---------------------------------------|----------------------------------|
+| Various                               | Fix warnings, formatting         |
+| lp-shader/lp-glsl-wasm/README.md      | Document features, mechanism     |
+| lp-shader/lp-glsl-filetests/README.md | Pass counts, annotation patterns |
+| lp-shader/README.md                   | Crate table if needed            |

@@ -21,20 +21,20 @@ Search the diff and codebase for:
 
 ```bash
 # Old format remnants in test files
-grep -r '// target' lp-glsl/lp-glsl-filetests/filetests/ --include='*.glsl'
-grep -r '\[expect-fail\]' lp-glsl/lp-glsl-filetests/filetests/ --include='*.glsl'
+grep -r '// target' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl'
+grep -r '\[expect-fail\]' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl'
 
 # Old type references in code
-grep -r 'FiletestTarget' lp-glsl/lp-glsl-filetests/src/
-grep -r 'expect_fail' lp-glsl/lp-glsl-filetests/src/
-grep -r 'DecimalFormat' lp-glsl/lp-glsl-filetests/src/
+grep -r 'FiletestTarget' lp-shader/lp-glsl-filetests/src/
+grep -r 'expect_fail' lp-shader/lp-glsl-filetests/src/
+grep -r 'DecimalFormat' lp-shader/lp-glsl-filetests/src/
 
 # TODOs introduced during this work
-grep -r 'TODO' lp-glsl/lp-glsl-filetests/src/ --include='*.rs'
+grep -r 'TODO' lp-shader/lp-glsl-filetests/src/ --include='*.rs'
 
 # Debug prints
-grep -r 'println!' lp-glsl/lp-glsl-filetests/src/ --include='*.rs' | grep -v 'eprintln\|format_'
-grep -r 'dbg!' lp-glsl/lp-glsl-filetests/src/ --include='*.rs'
+grep -r 'println!' lp-shader/lp-glsl-filetests/src/ --include='*.rs' | grep -v 'eprintln\|format_'
+grep -r 'dbg!' lp-shader/lp-glsl-filetests/src/ --include='*.rs'
 ```
 
 Remove any temporary code, unused imports, dead code.

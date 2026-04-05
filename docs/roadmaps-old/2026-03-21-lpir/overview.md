@@ -63,7 +63,7 @@ WASM emitter   CLIF emitter (future)
 ### Crate structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpir/                    # NEW: LPIR core library
 │   └── src/
 │       ├── lib.rs           #   Op enum, IrFunction, IrType, VReg
@@ -162,6 +162,7 @@ func @loop_sum(v0:i32) -> i32 {
 ```
 
 Syntax summary:
+
 - `vN:type` — VReg definition (type on first definition, bare `vN` after)
 - `@name` — function/global name
 - `f*` — float ops (`fadd`, `fmul`, `fconst.f32`, `flt`, `fneg`, etc.)
@@ -183,6 +184,7 @@ dead VReg elimination, liveness-based local reuse) remain possible.
 and emits abstract float ops (`fadd`, `fmul`). Each backend's emitter handles
 Q32 expansion internally based on `FloatMode`. This is the right design
 because Q32 strategies are fundamentally backend-specific:
+
 - WASM: inline i64 sequences (extend, add, saturate, wrap) — native i64
 - Cranelift saturating: builtin calls (`__lp_q32_add`) — riscv32 lacks i64 div
 - Cranelift wrapping: all-i32 using `imul`+`smulhi`+shifts — no i64 at all
@@ -319,14 +321,14 @@ use case.
 
 ## Scope estimate
 
-| Component | Est. lines | Location |
-|---|---|---|
-| IR types + builder | ~200 | lpir/src/ |
-| Text printer | ~150 | lpir/src/print.rs |
-| Text parser | ~300 | lpir/src/parse.rs |
-| Interpreter | ~250 | lpir/src/interp.rs |
-| Naga → LPIR lowering (scalar) | ~800 | lp-glsl-naga/src/lower.rs |
-| LPIR → WASM emission (incl Q32) | ~500 | lp-glsl-wasm/src/emit.rs |
-| Tests | ~400 | across crates |
-| **Total new** | **~2600** | |
-| **Total deleted** | **~3100** | emit.rs + emit_vec.rs + locals.rs |
+| Component                       | Est. lines | Location                          |
+|---------------------------------|------------|-----------------------------------|
+| IR types + builder              | ~200       | lpir/src/                         |
+| Text printer                    | ~150       | lpir/src/print.rs                 |
+| Text parser                     | ~300       | lpir/src/parse.rs                 |
+| Interpreter                     | ~250       | lpir/src/interp.rs                |
+| Naga → LPIR lowering (scalar)   | ~800       | lp-glsl-naga/src/lower.rs         |
+| LPIR → WASM emission (incl Q32) | ~500       | lp-glsl-wasm/src/emit.rs          |
+| Tests                           | ~400       | across crates                     |
+| **Total new**                   | **~2600**  |                                   |
+| **Total deleted**               | **~3100**  | emit.rs + emit_vec.rs + locals.rs |

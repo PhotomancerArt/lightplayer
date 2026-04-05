@@ -14,7 +14,7 @@ Create foundational types and APIs for structured data in LightPlayer:
 ## File Structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpvm/
 │   └── src/
 │       ├── lib.rs                    # UPDATE: re-export GlslData, GlslDataError
@@ -76,7 +76,7 @@ pub enum LayoutRules {
     /// - arrays: element stride = element size (no rounding)
     /// - structs: alignment = max member alignment
     Std430,
-    
+
     /// Reserved for future GPU transpilation
     /// Not implemented - will panic if used
     Std140,
@@ -85,10 +85,10 @@ pub enum LayoutRules {
 impl LayoutRules {
     /// Size of scalar type under these rules.
     pub fn scalar_size(&self, ty: ScalarType) -> usize;
-    
+
     /// Alignment of scalar type under these rules.
     pub fn scalar_alignment(&self, ty: ScalarType) -> usize;
-    
+
     /// Round up size to alignment.
     pub fn round_up(&self, size: usize, alignment: usize) -> usize;
 }
@@ -122,14 +122,14 @@ pub struct StructMember {
 impl GlslType {
     /// Compute total size under given layout rules.
     pub fn size(&self, rules: LayoutRules) -> usize;
-    
+
     /// Compute alignment under given layout rules.
     pub fn alignment(&self, rules: LayoutRules) -> usize;
-    
+
     /// Compute byte offset for a path.
-    pub fn offset_for_path(&self, path: &str, rules: LayoutRules, base_offset: usize) 
-        -> Result<usize, PathError>;
-    
+    pub fn offset_for_path(&self, path: &str, rules: LayoutRules, base_offset: usize)
+                           -> Result<usize, PathError>;
+
     /// Get the type at a path.
     pub fn type_at_path(&self, path: &str) -> Result<&GlslType, PathError>;
 }
@@ -149,26 +149,26 @@ impl GlslData {
     pub fn new(ty: GlslType) -> Self {
         Self::with_rules(ty, LayoutRules::Std430)
     }
-    
+
     /// Create with specific layout rules.
     pub fn with_rules(ty: GlslType, rules: LayoutRules) -> Self;
-    
+
     /// Create from a GlslValue tree.
     pub fn from_value(ty: GlslType, value: &GlslValue) -> Result<Self, GlslDataError>;
-    
+
     /// Convert entire data block to GlslValue tree.
     pub fn to_value(&self) -> Result<GlslValue, GlslDataError>;
-    
+
     // Path-based access
     pub fn get(&self, path: &str) -> Result<GlslValue, GlslDataError>;
     pub fn set(&mut self, path: &str, value: GlslValue) -> Result<(), GlslDataError>;
-    
+
     // Direct scalar access
     pub fn get_f32(&self, path: &str) -> Result<f32, GlslDataError>;
     pub fn set_f32(&mut self, path: &str, val: f32) -> Result<(), GlslDataError>;
     pub fn get_i32(&self, path: &str) -> Result<i32, GlslDataError>;
     pub fn set_i32(&mut self, path: &str, val: i32) -> Result<(), GlslDataError>;
-    
+
     // Raw access
     pub fn as_ptr(&self) -> *const u8;
     pub fn as_mut_ptr(&mut self) -> *mut u8;
@@ -182,18 +182,18 @@ impl GlslData {
 impl GlslValue {
     // NEW: Struct variant
     Struct {
-        name: Option<String>,
-        fields: Vec<(String, GlslValue)>,
-    }
-    
-    /// Get value at path.
-    pub fn get_path(&self, path: &str) -> Result<&GlslValue, GlslValueError>;
-    
-    /// Get mutable reference at path.
-    pub fn get_path_mut(&mut self, path: &str) -> Result<&mut GlslValue, GlslValueError>;
-    
-    /// Set value at path.
-    pub fn set_path(&mut self, path: &str, value: GlslValue) -> Result<(), GlslValueError>;
+    name: Option<String>,
+    fields: Vec<(String, GlslValue) >,
+}
+
+/// Get value at path.
+pub fn get_path(&self, path: &str) -> Result<&GlslValue, GlslValueError>;
+
+/// Get mutable reference at path.
+pub fn get_path_mut(&mut self, path: &str) -> Result<&mut GlslValue, GlslValueError>;
+
+/// Set value at path.
+pub fn set_path(&mut self, path: &str, value: GlslValue) -> Result<(), GlslValueError>;
 }
 ```
 

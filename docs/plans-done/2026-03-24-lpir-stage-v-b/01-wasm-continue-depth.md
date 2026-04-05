@@ -16,7 +16,7 @@ correct when there's no nesting inside the loop body.
 
 ## Implementation
 
-### `lp-glsl/lp-glsl-wasm/src/emit/control.rs`
+### `lp-shader/lp-glsl-wasm/src/emit/control.rs`
 
 Change `innermost_loop_continue_depth` to accept `wasm_open: WasmOpenDepth`
 and compute the correct branch depth:
@@ -46,7 +46,7 @@ pub(crate) fn innermost_loop_continue_depth(
 }
 ```
 
-### `lp-glsl/lp-glsl-wasm/src/emit/ops.rs`
+### `lp-shader/lp-glsl-wasm/src/emit/ops.rs`
 
 Update the `Op::Continue` call site to pass `wasm_open`:
 

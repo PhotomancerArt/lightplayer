@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIGHTPLAYER_DIR="$WORKSPACE_ROOT/lp-glsl"
+LIGHTPLAYER_DIR="$WORKSPACE_ROOT/lp-shader"
 TARGET="riscv32imac-unknown-none-elf"
 OUTPUT_DIR="$WORKSPACE_ROOT/target/$TARGET/release"
 BINARY="$OUTPUT_DIR/lp-glsl-builtins-emu-app"

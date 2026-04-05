@@ -41,7 +41,7 @@ should be tidied before building on top:
 ### lp-glsl-wasm crate
 
 ```
-lp-glsl/lp-glsl-wasm/
+lp-shader/lp-glsl-wasm/
 ├── Cargo.toml
 └── src/
     ├── lib.rs              # Public API: glsl_wasm(source, options) → WasmModule
@@ -283,7 +283,7 @@ int test_add_params(int a, int b) {
 
 ### Phase 2: Create lp-glsl-wasm crate scaffolding
 
-1. Create `lp-glsl/lp-glsl-wasm/Cargo.toml` with dependencies.
+1. Create `lp-shader/lp-glsl-wasm/Cargo.toml` with dependencies.
 2. Create the directory structure and stub files.
 3. Implement `WasmOptions`, `WasmModule`, type mapping (`types.rs`).
 4. Implement the public API entry point (`glsl_wasm()`) that parses,
@@ -348,10 +348,10 @@ int test_add_params(int a, int b) {
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-    - `lp-glsl/README.md`: add lp-glsl-wasm to the crate table.
-    - `lp-glsl/lp-glsl-wasm/README.md`: create with purpose, usage,
+    - `lp-shader/README.md`: add lp-glsl-wasm to the crate table.
+    - `lp-shader/lp-glsl-wasm/README.md`: create with purpose, usage,
       and relationship to lp-glsl-frontend and lp-glsl-cranelift.
-    - `lp-glsl/lp-glsl-filetests/README.md`: document the new
+    - `lp-shader/lp-glsl-filetests/README.md`: document the new
       `wasm32.q32` target and wasmtime runner.
 
 ## Validate

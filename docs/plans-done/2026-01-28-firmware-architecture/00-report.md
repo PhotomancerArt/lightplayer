@@ -8,7 +8,7 @@ creating a `fw-core` library and a `fw-emu` application that runs in the RISC-V3
 
 ## Current State
 
-### ESP32 Prototype (`lp-glsl/esp32-glsl-jit`)
+### ESP32 Prototype (`lp-shader/esp32-glsl-jit`)
 
 The current prototype demonstrates:
 
@@ -51,7 +51,7 @@ The `ServerTransport` trait exists and defines:
 Currently only websocket implementation exists (`lp-cli/src/server/transport_ws.rs`). Need serial
 implementation for firmware.
 
-### RISC-V Emulator (`lp-glsl/lp-riscv-tools`)
+### RISC-V Emulator (`lp-shader/lp-riscv-tools`)
 
 The emulator (`Riscv32Emulator`) can:
 

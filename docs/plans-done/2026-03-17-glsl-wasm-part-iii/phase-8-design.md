@@ -14,27 +14,34 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 8
 
 ## 1. rainbow.shader location and structure
 
-**Find:** `rainbow.shader` (or rainbow.glsl) in the repo. Likely in examples/, lp-glsl/examples/, or filetests.
+**Find:** `rainbow.shader` (or rainbow.glsl) in the repo. Likely in examples/, lp-shader/examples/,
+or filetests.
 
-**Structure:** Main function, user functions, builtins used (clamp, mix, smoothstep, etc.), LPFX (psrdnoise?), vectors, control flow. Phases 1–7 implement these.
+**Structure:** Main function, user functions, builtins used (clamp, mix, smoothstep, etc.), LPFX (
+psrdnoise?), vectors, control flow. Phases 1–7 implement these.
 
 ---
 
 ## 2. Compilation
 
-**Action:** Run `glsl_wasm(rainbow_source, options)`. Fix any errors. Likely remaining: edge cases, missing builtin overload, type coercion, etc.
+**Action:** Run `glsl_wasm(rainbow_source, options)`. Fix any errors. Likely remaining: edge cases,
+missing builtin overload, type coercion, etc.
 
-**Systematic:** Add a test that compiles rainbow.shader. It should succeed after Phase 7. If it fails, fix the reported error.
+**Systematic:** Add a test that compiles rainbow.shader. It should succeed after Phase 7. If it
+fails, fix the reported error.
 
 ---
 
 ## 3. Execution and comparison
 
-**Cranelift path:** lp-glsl has execute_main or similar that runs a function with given inputs (fragCoord, outputSize, time) and returns pixel value.
+**Cranelift path:** lp-glsl has execute_main or similar that runs a function with given inputs (
+fragCoord, outputSize, time) and returns pixel value.
 
-**WASM path:** WasmExecutable.run("main", args) or equivalent. Args: vec of i32 (or whatever main expects). Compare output to Cranelift for same inputs.
+**WASM path:** WasmExecutable.run("main", args) or equivalent. Args: vec of i32 (or whatever main
+expects). Compare output to Cranelift for same inputs.
 
-**Sample inputs:** e.g. (0,0), (100,100) for fragCoord; (256,256) for outputSize; 0.0, 1.0, 2.5 for time. A few combinations.
+**Sample inputs:** e.g. (0,0), (100,100) for fragCoord; (256,256) for outputSize; 0.0, 1.0, 2.5 for
+time. A few combinations.
 
 ---
 
@@ -43,6 +50,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 8
 **Placement:** lp-glsl-wasm/tests/ or lp-glsl-filetests.
 
 **Steps:**
+
 1. Load rainbow.shader source
 2. Compile with glsl_wasm
 3. Instantiate with WasmExecutable (or wasmtime)
@@ -54,7 +62,9 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 8
 
 ## 5. Remove @unimplemented annotations
 
-**Process:** Run filetests with --target wasm.q32. For each test that now passes, remove `@unimplemented(backend=wasm)` if present. The runner logic: if test passes and has the annotation, we remove it. Manual or scripted.
+**Process:** Run filetests with --target wasm.q32. For each test that now passes, remove
+`@unimplemented(backend=wasm)` if present. The runner logic: if test passes and has the annotation,
+we remove it. Manual or scripted.
 
 **Careful:** Only remove when test actually passes. Don't remove prematurely.
 
@@ -70,12 +80,12 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 8
 
 ## File change summary
 
-| File | Changes |
-|------|---------|
-| rainbow.shader (if needed) | Fix any source issues |
-| lp-glsl-wasm | Bug fixes for rainbow compilation |
-| lp-glsl-wasm/tests/rainbow_integration.rs | New integration test |
-| filetests/*.glsl | Remove @unimplemented(backend=wasm) from passing tests |
+| File                                      | Changes                                                |
+|-------------------------------------------|--------------------------------------------------------|
+| rainbow.shader (if needed)                | Fix any source issues                                  |
+| lp-glsl-wasm                              | Bug fixes for rainbow compilation                      |
+| lp-glsl-wasm/tests/rainbow_integration.rs | New integration test                                   |
+| filetests/*.glsl                          | Remove @unimplemented(backend=wasm) from passing tests |
 
 ---
 

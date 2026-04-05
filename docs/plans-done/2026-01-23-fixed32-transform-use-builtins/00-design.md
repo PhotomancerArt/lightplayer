@@ -9,20 +9,20 @@ operation to a single function call, following the same pattern already establis
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-builtins/src/builtins/q32/
+lp-shader/lp-glsl-builtins/src/builtins/q32/
 ├── add.rs                    # NEW: __lp_q32_add builtin implementation
 ├── sub.rs                    # NEW: __lp_q32_sub builtin implementation
 ├── div.rs                    # EXISTS: Verify edge case handling
 ├── mul.rs                    # EXISTS: Reference implementation pattern
 └── mod.rs                    # AUTO-GENERATED: Will include add/sub exports
 
-lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/
+lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/
 └── arithmetic.rs             # UPDATE: convert_fadd, convert_fsub, convert_fdiv to use builtins
 
-lp-glsl/lp-glsl-compiler/src/backend/builtins/
+lp-shader/lp-glsl-compiler/src/backend/builtins/
 └── registry.rs               # AUTO-GENERATED: Will include Q32Add, Q32Sub
 
-lp-glsl/lp-glsl-builtins-emu-app/src/
+lp-shader/lp-glsl-builtins-emu-app/src/
 └── builtin_refs.rs           # AUTO-GENERATED: Will include add/sub references
 ```
 

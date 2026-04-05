@@ -9,7 +9,7 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 find_workspace_root() {
   local dir="$1"
   while [ "$dir" != "/" ]; do
-    if [ -f "$dir/Cargo.toml" ] && [ -d "$dir/lp-glsl" ]; then
+    if [ -f "$dir/Cargo.toml" ] && [ -d "$dir/lp-shader" ]; then
       echo "$dir"
       return 0
     fi
@@ -19,7 +19,7 @@ find_workspace_root() {
 }
 
 # If workspace root detection from script location fails, try current directory
-if [ ! -f "$WORKSPACE_ROOT/Cargo.toml" ] || [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
+if [ ! -f "$WORKSPACE_ROOT/Cargo.toml" ] || [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
   WORKSPACE_ROOT="$(find_workspace_root "$(pwd)")" || {
     echo "Error: Could not find workspace root. Please run from the workspace root directory." >&2
     exit 1
@@ -33,8 +33,8 @@ cd "$WORKSPACE_ROOT" || {
 }
 
 # Check if lp-glsl directory exists
-if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
@@ -180,11 +180,11 @@ fi
 
 # Show list of tests if requested
 if [ "$SHOW_LIST" = true ]; then
-  FILETESTS_DIR="$WORKSPACE_ROOT/lp-glsl/lp-glsl-filetests/filetests"
+  FILETESTS_DIR="$WORKSPACE_ROOT/lp-shader/lp-glsl-filetests/filetests"
 
   # Ensure lp-glsl directory exists
-  if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-    echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+  if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+    echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
     exit 1
   fi
 
@@ -236,8 +236,8 @@ if [ "$SHOW_LIST" = true ]; then
 fi
 
 # Ensure lp-glsl directory exists before running tests
-if [ ! -d "$WORKSPACE_ROOT/lp-glsl" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-glsl" >&2
+if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
+  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
@@ -249,7 +249,7 @@ echo "Building lp-glsl-builtins-emu-app..."
 }
 
 # Change to lp-glsl directory where lp-glsl-filetests-app workspace is located
-cd "$WORKSPACE_ROOT/lp-glsl" || {
+cd "$WORKSPACE_ROOT/lp-shader" || {
   echo "Error: Failed to change to lp-glsl directory" >&2
   exit 1
 }

@@ -15,7 +15,7 @@ scripts/glsl-filetests.sh
 Then the compiler unit tests:
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 ```
 
 And the full workspace if needed:
@@ -29,7 +29,7 @@ cargo test --workspace
 The codegen runs on ESP32 (no_std). Verify it compiles without std:
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
 ```
 
 ## Grep for remaining hardcoded float ops
@@ -39,10 +39,11 @@ instruction calls that should have been routed through the strategy:
 
 ```bash
 rg '\.ins\(\)\.(f32const|fadd|fsub|fmul|fdiv|fneg|fabs|fcmp|fmin|fmax|sqrt|floor|ceil|fcvt_from_sint|fcvt_to_sint|fcvt_from_uint|fcvt_to_uint)' \
-  lp-glsl/lp-glsl-compiler/src/frontend/codegen/
+  lp-shader/lp-glsl-compiler/src/frontend/codegen/
 ```
 
 Any remaining hits should be:
+
 - In test code (acceptable)
 - In non-float contexts (false positives — e.g. if there's an integer sqrt,
   though unlikely)
@@ -62,16 +63,16 @@ cargo +nightly fmt
 
 Verify the total number of changes matches expectations:
 
-| Phase | Sites |
-|-------|-------|
-| 3. Scalar arithmetic | ~10 |
-| 4. Constants | ~21 |
-| 5. Comparisons | ~16 |
-| 6. Math/rounding | ~35 |
-| 7. Composed operations | ~125 |
-| 8. Type references | ~11 |
-| 9. Conversions | ~5 |
-| **Total** | **~223** |
+| Phase                  | Sites    |
+|------------------------|----------|
+| 3. Scalar arithmetic   | ~10      |
+| 4. Constants           | ~21      |
+| 5. Comparisons         | ~16      |
+| 6. Math/rounding       | ~35      |
+| 7. Composed operations | ~125     |
+| 8. Type references     | ~11      |
+| 9. Conversions         | ~5       |
+| **Total**              | **~223** |
 
 The exact count will vary — the matrix files are hard to count precisely
 without doing the work. The important thing is that the grep in the

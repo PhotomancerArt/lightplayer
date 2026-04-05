@@ -56,7 +56,7 @@ cleaner. The old `glsl_jit` path remains available if we need to revert.
 Add a test that compiles the actual `examples/basic` rainbow shader through
 the streaming path. This exercises the full pipeline with a real-world shader:
 
-File: `lp-glsl/lp-glsl-compiler/tests/test_streaming_integration.rs` (new file)
+File: `lp-shader/lp-glsl-compiler/tests/test_streaming_integration.rs` (new file)
 
 ```rust
 use lp_glsl_compiler::{GlslOptions, glsl_jit, glsl_jit_streaming};
@@ -119,7 +119,7 @@ fn test_streaming_matches_batch_multi_function() {
 The streaming path must compile under `no_std` (ESP32 target). Verify:
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
 ```
 
 If there are `std`-only imports (e.g., `std::collections`), replace with
@@ -129,13 +129,13 @@ If there are `std`-only imports (e.g., `std::collections`), replace with
 
 ```bash
 # Integration tests
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
 
 # Full test suite
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 
 # no_std check
-cd lp-glsl/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
 
 # Engine tests (uses the updated callsite)
 cd lp-core/lp-engine && cargo test --features std

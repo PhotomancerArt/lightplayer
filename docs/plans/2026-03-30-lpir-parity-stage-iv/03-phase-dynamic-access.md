@@ -2,7 +2,8 @@
 
 ## Scope
 
-Implement `Expression::Access` lowering for arrays with runtime index values, including bounds clamping for safety.
+Implement `Expression::Access` lowering for arrays with runtime index values, including bounds
+clamping for safety.
 
 Target: All 10 tests from `2-bounds-checking.glsl` should pass.
 
@@ -10,7 +11,7 @@ Target: All 10 tests from `2-bounds-checking.glsl` should pass.
 
 ### 1. Add Bounds Clamping Helper
 
-Create `lp-glsl/lp-glsl-naga/src/lower_array.rs`:
+Create `lp-shader/lp-glsl-naga/src/lower_array.rs`:
 
 ```rust
 //! Array-specific lowering helpers
@@ -99,7 +100,7 @@ pub(crate) fn clamp_index(
 
 ### 2. Add Dynamic Array Access Lowering
 
-In `lp-glsl/lp-glsl-naga/src/lower_expr.rs`, add to the `Expression::Access` handling:
+In `lp-shader/lp-glsl-naga/src/lower_expr.rs`, add to the `Expression::Access` handling:
 
 ```rust
 Expression::Access { base, index } => {
@@ -187,7 +188,7 @@ fn lower_array_access(
 
 ### 3. Add Dynamic Array Store Support
 
-In `lp-glsl/lp-glsl-naga/src/lower_stmt.rs`, handle `Access` in Store:
+In `lp-shader/lp-glsl-naga/src/lower_stmt.rs`, handle `Access` in Store:
 
 ```rust
 Statement::Store { pointer, value } => {
@@ -268,6 +269,7 @@ fn store_array_dynamic(
 ## Tests to Verify
 
 From `array/phase/2-bounds-checking.glsl`:
+
 ```glsl
 // Valid bounds tests
 int test_bounds_index_zero() { int arr[3]; arr[0] = 42; return arr[0]; }

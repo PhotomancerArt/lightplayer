@@ -17,7 +17,7 @@ VMContext (no uniforms or globals yet) through the entire system (Cranelift and 
 ## File Structure
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpvm/
 │   └── src/
 │       ├── lib.rs                    # Re-export VmContextHeader
@@ -150,7 +150,9 @@ pub const VMCTX_OFFSET_GLOBALS_DEFAULTS_OFFSET: usize = 12;
 pub const VMCTX_HEADER_SIZE: usize = 16;
 
 #[repr(C)]
-pub struct VmContextHeader { ... }
+pub struct VmContextHeader {
+    ...
+}
 ```
 
 ### 2. LPIR Module Update (`lpir`)
@@ -178,10 +180,10 @@ pub fn signature_for_ir_func(
     isa: &dyn TargetIsa,
 ) -> Signature {
     let mut sig = Signature::new(call_conv);
-    
+
     // VMContext always first
     sig.params.push(AbiParam::new(pointer_type));
-    
+
     // User params follow
     for i in 0..func.param_count {
         sig.params.push(AbiParam::new(ir_type_for_mode(
@@ -241,7 +243,7 @@ pub fn exec_q32_shader(
 ) -> Result<Vec<i32>, String> {
     let vmctx = VmContext::minimal();  // NEW: Allocate minimal VMContext
     let ptr = vmctx.as_ptr();
-    
+
     let dc = module.direct_call(func_name)?;
     dc.call_i32(ptr, args)  // NEW: Pass vmctx
 }

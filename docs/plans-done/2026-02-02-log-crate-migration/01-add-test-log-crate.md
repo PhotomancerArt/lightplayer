@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Add `test-log` crate to the workspace for automatic test logger initialization. This enables all tests to use `#[test_log::test]` attribute for automatic `env_logger` initialization.
+Add `test-log` crate to the workspace for automatic test logger initialization. This enables all
+tests to use `#[test_log::test]` attribute for automatic `env_logger` initialization.
 
 ## Code Organization Reminders
 
@@ -27,18 +28,20 @@ test-log = "0.2"
 env_logger = "0.11"
 ```
 
-Note: `test-log` uses `env_logger` internally, but we also need `env_logger` directly for std applications.
+Note: `test-log` uses `env_logger` internally, but we also need `env_logger` directly for std
+applications.
 
 ### 2. Add test-log to Crate Cargo.toml Files
 
 Add `test-log` as a dev-dependency to crates that have tests:
 
 **Crates that need test-log**:
+
 - `lp-core/lp-shared/Cargo.toml` (if it has tests)
 - `lp-core/lp-client/Cargo.toml`
 - `lp-core/lp-server/Cargo.toml`
 - `lp-fw/fw-tests/Cargo.toml`
-- `lp-glsl/lp-glsl-filetests/Cargo.toml`
+- `lp-shader/lp-glsl-filetests/Cargo.toml`
 - Any other crate with tests
 
 **Example** (for `lp-core/lp-shared/Cargo.toml`):
@@ -51,7 +54,8 @@ env_logger = { workspace = true }
 
 ### 3. Update Test Examples
 
-Add a comment or example showing how to use `test-log` in tests. This can be in a README or as a comment in a test file.
+Add a comment or example showing how to use `test-log` in tests. This can be in a README or as a
+comment in a test file.
 
 **Example usage**:
 
@@ -73,7 +77,8 @@ async fn my_async_test() {
 
 ## Tests
 
-No tests needed for this phase - we're just adding a dependency. The actual usage will be validated in later phases when we update tests.
+No tests needed for this phase - we're just adding a dependency. The actual usage will be validated
+in later phases when we update tests.
 
 ## Validate
 
@@ -84,6 +89,7 @@ cargo check --workspace
 ```
 
 Ensure:
+
 - All crates compile successfully
 - `test-log` dependency is available
 - No dependency conflicts

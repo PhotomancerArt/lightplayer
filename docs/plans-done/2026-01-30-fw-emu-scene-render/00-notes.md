@@ -9,7 +9,8 @@ Get fw-emu working end-to-end by implementing a test that:
 3. Runs the firmware in the emulator
 4. Renders a few frames and verifies the output
 
-The test should duplicate the functionality of `scene_render.rs` but using the emulator firmware instead of direct runtime execution.
+The test should duplicate the functionality of `scene_render.rs` but using the emulator firmware
+instead of direct runtime execution.
 
 ## Current State
 
@@ -25,7 +26,8 @@ The test should duplicate the functionality of `scene_render.rs` but using the e
 
 **Dependencies:**
 
-- Uses `lp-emu-guest` (path to `lp-glsl/crates/lp-emu-guest`) but that crate doesn't export syscall functions
+- Uses `lp-emu-guest` (path to `lp-shader/crates/lp-emu-guest`) but that crate doesn't export
+  syscall functions
 - Needs `lp-riscv-emu-guest` (in `lp-riscv/`) which has the actual syscall wrappers
 
 ### Emulator Syscalls Available
@@ -52,10 +54,10 @@ The test:
 
 1. Creates an in-memory filesystem (`LpFsMemory`)
 2. Uses `ProjectBuilder` to create a simple scene:
-   - Texture node
-   - Shader node (basic shader)
-   - Output node
-   - Fixture node
+    - Texture node
+    - Shader node (basic shader)
+    - Output node
+    - Fixture node
 3. Creates `ProjectRuntime` with `MemoryOutputProvider`
 4. Loads and initializes nodes
 5. Ticks runtime 3 times (4ms each)
@@ -85,22 +87,27 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 
 ### Q1: Crate Dependency for Syscalls
 
-**Question**: Should fw-emu use `lp-riscv-emu-guest` (from `lp-riscv/`) for syscalls, or should we consolidate/update `lp-emu-guest` (from `lp-glsl/crates/`)?
+**Question**: Should fw-emu use `lp-riscv-emu-guest` (from `lp-riscv/`) for syscalls, or should we
+consolidate/update `lp-emu-guest` (from `lp-shader/crates/`)?
 
 **Context**:
 
-- `lp-app/apps/fw-emu/Cargo.toml` currently references `lp-emu-guest` from `lp-glsl/crates/lp-emu-guest`
+- `lp-app/apps/fw-emu/Cargo.toml` currently references `lp-emu-guest` from
+  `lp-shader/crates/lp-emu-guest`
 - That crate doesn't export syscall functions (only allocator, entry, panic, print)
 - `lp-riscv-emu-guest` in `lp-riscv/` has all the syscall wrappers we need
 - There seem to be two different crates with similar purposes
 
-**Answer**: Use `lp-riscv-emu-guest` from `lp-riscv/` - it was built specifically for this purpose. Replace `lp-emu-guest` dependency with `lp-riscv-emu-guest` since it has everything needed (allocator, entry, panic, print, and syscall wrappers).
+**Answer**: Use `lp-riscv-emu-guest` from `lp-riscv/` - it was built specifically for this purpose.
+Replace `lp-emu-guest` dependency with `lp-riscv-emu-guest` since it has everything needed (
+allocator, entry, panic, print, and syscall wrappers).
 
 ---
 
 ### Q2: Output Provider Implementation
 
-**Question**: How should we implement `SyscallOutputProvider`? Should we add output syscalls to the emulator, or use an in-memory provider for now?
+**Question**: How should we implement `SyscallOutputProvider`? Should we add output syscalls to the
+emulator, or use an in-memory provider for now?
 
 **Context**:
 
@@ -109,20 +116,23 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 - We could use an in-memory provider that the test can inspect
 - Or we could add output syscalls to the emulator
 
-**Answer**: For now, we don't care about outputs. Use a stub implementation that prints/logs when output changes (using print function). We don't need to verify actual output data in this test - just that the firmware runs and processes frames.
+**Answer**: For now, we don't care about outputs. Use a stub implementation that prints/logs when
+output changes (using print function). We don't need to verify actual output data in this test -
+just that the firmware runs and processes frames.
 
 ---
 
 ### Q3: Project Loading Strategy
 
-**Question**: How should the test load the project into the firmware? Via filesystem or via serial messages?
+**Question**: How should the test load the project into the firmware? Via filesystem or via serial
+messages?
 
 **Context**:
 
 - The firmware uses `LpFsMemory` for filesystem
 - Projects could be loaded by:
-  1. Pre-populating the filesystem before creating the emulator
-  2. Sending project load messages via serial after firmware starts
+    1. Pre-populating the filesystem before creating the emulator
+    2. Sending project load messages via serial after firmware starts
 - The reference test uses `ProjectBuilder` to create files in the filesystem
 - The firmware's `LpServer` expects projects in `"projects/"` directory
 
@@ -133,13 +143,16 @@ From `lp-riscv-emu/tests/guest_app_tests.rs`:
 3. Use `lp-client` to send `LoadProject` message to load the project
 4. Use `lp-client` to sync/get changes for frames
 
-This exercises the full message protocol using the proper client API. However, we need to do some refactoring first - `lp-client` uses async `ClientTransport` but we need to bridge to the emulator's synchronous serial I/O.
+This exercises the full message protocol using the proper client API. However, we need to do some
+refactoring first - `lp-client` uses async `ClientTransport` but we need to bridge to the emulator's
+synchronous serial I/O.
 
 ---
 
 ### Q4: Test Execution Model and Client Transport
 
-**Question**: How should the test run the firmware and bridge async `lp-client` with synchronous emulator?
+**Question**: How should the test run the firmware and bridge async `lp-client` with synchronous
+emulator?
 
 **Context**:
 
@@ -148,12 +161,13 @@ This exercises the full message protocol using the proper client API. However, w
 - We need to bridge async client calls with synchronous emulator execution
 - The firmware should yield after each tick to allow host to process serial I/O
 - The test needs to:
-  - Use `lp-client` to send messages (project load, sync, etc.)
-  - Run firmware until yield
-  - Process serial output
-  - Repeat for multiple frames
+    - Use `lp-client` to send messages (project load, sync, etc.)
+    - Run firmware until yield
+    - Process serial output
+    - Repeat for multiple frames
 
-**Answer**: Create a serial `ClientTransport` implementation that bridges async client calls to the emulator's serial I/O. The transport will:
+**Answer**: Create a serial `ClientTransport` implementation that bridges async client calls to the
+emulator's serial I/O. The transport will:
 
 - Buffer messages to send to firmware (add to emulator's serial input buffer)
 - Read serial output from emulator (drain emulator's serial output buffer)
@@ -166,7 +180,8 @@ This transport will be created as part of this plan.
 
 ### Q5: Time Management in Test
 
-**Question**: How should we manage time in the test? Should we advance time between frames or let the firmware request it?
+**Question**: How should we manage time in the test? Should we advance time between frames or let
+the firmware request it?
 
 **Context**:
 
@@ -175,7 +190,8 @@ This transport will be created as part of this plan.
 - The test needs to advance time by 4ms between frames (like reference test)
 - Time is managed by the emulator, not the test
 
-**Answer**: Update the emulator to support a time mode that allows overriding time advancement. This way we can control time deterministically for testing. The emulator should support:
+**Answer**: Update the emulator to support a time mode that allows overriding time advancement. This
+way we can control time deterministically for testing. The emulator should support:
 
 - Real-time mode (current behavior - uses wall-clock time)
 - Simulated time mode (allows explicit time advancement for testing)
@@ -202,4 +218,5 @@ This will be implemented as part of this plan.
 - Build using `cargo build` with `RUSTFLAGS="-C target-feature=-c"`
 - Cache the path in a static `Mutex<Option<PathBuf>>`
 
-We might want to abstract out the binary building code so it can be reused in multiple places. This could be a helper function or a small utility crate.
+We might want to abstract out the binary building code so it can be reused in multiple places. This
+could be a helper function or a small utility crate.

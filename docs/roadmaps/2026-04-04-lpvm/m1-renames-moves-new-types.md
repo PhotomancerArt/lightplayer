@@ -10,7 +10,7 @@ mentally to the `lps-*` names in [overview.md](overview.md).
 
 Establish the **three-layer naming** and crate boundaries:
 
-1. **`lpsc-shared`** — logical shader types (rename/evolution of `lp-glsl-core`).
+1. **`lps-shared`** — logical shader types (rename/evolution of `lp-glsl-core`).
 2. **`lpvm`** — VM/runtime types, traits, values, layout, VMContext.
 3. **`lpir`** — unchanged role: **scalarized IR only** (no absorption of
    `Type` / `FunctionSignature` from the shader layer).
@@ -23,30 +23,30 @@ milestones.
 Mechanical moves and renames: human often uses RustRover; agent fixes imports,
 `Cargo.toml`, and compile errors.
 
-**Do not** delete `lpsc-shared` or old ABI crates in this milestone unless the
+**Do not** delete `lps-shared` or old ABI crates in this milestone unless the
 human explicitly finishes the shim strategy.
 
 ## Layer model (critical)
 
 - **`lpir`** is **scalarized**. It uses `IrType` (F32, I32, Pointer), not logical
   vec3/mat4 as an IR-level type system.
-- **`lpsc-shared`** holds **`LpsType`**, **`LpsFunctionSignature`**, **`LpsParameter`**,
+- **`lps-shared`** holds **`LpsType`**, **`LpsFunctionSignature`**, **`LpsParameter`**,
   **`LpsParamQualifier`** — what the **frontend** produces and what **callers**
   use for GLSL-style semantics. Same types apply to future WGSL, etc.
 - **`lpvm`** holds runtime values (`LpvmValue`), layout, VMContext, and **LPVM
-  traits**. It **depends on** `lpsc-shared` for metadata/signatures and on `lpir`
+  traits**. It **depends on** `lps-shared` for metadata/signatures and on `lpir`
   for `IrModule` / codegen-facing IR.
 
 Wrong: moving `LpsType` into `lpir` “because both are types.” Right: keep logical
-types in **`lpsc-shared`**.
+types in **`lps-shared`**.
 
 ## What Moves Where
 
-### `lpsc-shared` (shader layer — rename from `lp-glsl-core`)
+### `lps-shared` (shader layer — rename from `lp-glsl-core`)
 
 | Transitional crate | Target package | Public types (target names)                                                           |
 |--------------------|----------------|---------------------------------------------------------------------------------------|
-| `lp-glsl-core`     | `lpsc-shared`  | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
+| `lp-glsl-core`     | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
 
 Use a consistent **`Lps*`** prefix for this crate’s public types so they never
 collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
@@ -64,20 +64,20 @@ Create `lpvm/lpvm/` at repo root. `#![no_std]` with `extern crate alloc`.
 ```toml
 [dependencies]
 lpir = { path = "...", default-features = false }
-lpsc-shared = { path = "...", default-features = false }
+lps-shared = { path = "...", default-features = false }
 ```
 
-Paths: use whatever directory layout exists after renames (`lp-glsl/lpir`,
-`lps/lpsc-shared`, etc.).
+Paths: use whatever directory layout exists after renames (`lp-shader/lpir`,
+`lps/lps-shared`, etc.).
 
 **From `lpvm` (rename map):**
 
 | Old name                       | New name                                        | Notes                                                                                                                                 |
 |--------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | `GlslValue`                    | `LpvmValue`                                     | Runtime value enum                                                                                                                    |
-| `GlslType` (metadata / layout) | `LpvmType` or align with `lpsc-shared`          | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
+| `GlslType` (metadata / layout) | `LpvmType` or align with `lps-shared`           | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
 | `GlslData`                     | `LpvmData`                                      |                                                                                                                                       |
-| `GlslModuleMeta`               | `LpvmModuleMeta`                                | Likely references `lpsc-shared` for function signatures                                                                               |
+| `GlslModuleMeta`               | `LpvmModuleMeta`                                | Likely references `lps-shared` for function signatures                                                                                |
 | `GlslFunctionMeta`             | `LpvmFunctionMeta`                              |                                                                                                                                       |
 | `GlslParamMeta`                | `LpvmParamMeta`                                 |                                                                                                                                       |
 | `GlslParamQualifier` (ABI)     | `LpvmParamQualifier`                            | **Not** the same as `LpsParamQualifier` unless you intentionally unify                                                                |
@@ -112,7 +112,7 @@ lpvm/
         ├── lib.rs
         ├── value.rs
         ├── data.rs
-        ├── metadata.rs      # may use lpsc-shared heavily
+        ├── metadata.rs      # may use lps-shared heavily
         ├── layout.rs
         ├── vmcontext.rs
         ├── path.rs
@@ -126,7 +126,7 @@ lpvm/
 
 ## Workspace `Cargo.toml`
 
-Add `lpvm/lpvm` and `lpsc-shared` (or transitional path) to members as they appear.
+Add `lpvm/lpvm` and `lps-shared` (or transitional path) to members as they appear.
 
 ## What NOT To Do
 
@@ -144,16 +144,16 @@ Add `lpvm/lpvm` and `lpsc-shared` (or transitional path) to members as they appe
 - `lp-engine`, `lps-builtins`, `lps-naga`, `lpir-cranelift`, `lps-filetests`,
   `lp-glsl-exec` (until removed)
 
-**Use `lpsc-shared` for logical signatures:**
+**Use `lps-shared` for logical signatures:**
 
 - `lps-naga`, `lps-filetests`, `lp-glsl-exec` / future test harness,
   anything that describes user-visible function types
 
 ## Done When
 
-- `lpsc-shared` exists (or transitional name with documented alias) with **`Lps*`**
+- `lps-shared` exists (or transitional name with documented alias) with **`Lps*`**
   logical types; **no** dependency on `lpir` or `lpvm`
-- `lpvm` exists, **`no_std` + `alloc`**, depends on **`lpir` + `lpsc-shared`**
+- `lpvm` exists, **`no_std` + `alloc`**, depends on **`lpir` + `lps-shared`**
 - `LpvmModule` / `LpvmInstance` / `LpvmMemory` defined (signatures may still be
   refined in M2)
 - `LpvmValue`, `LpvmData`, VMContext, layout helpers present

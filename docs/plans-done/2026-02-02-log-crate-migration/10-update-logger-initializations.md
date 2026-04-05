@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Ensure all entry points (fw-emu, fw-esp32, std applications) properly initialize their loggers. Update any existing initialization code to use the new logger infrastructure.
+Ensure all entry points (fw-emu, fw-esp32, std applications) properly initialize their loggers.
+Update any existing initialization code to use the new logger infrastructure.
 
 ## Code Organization Reminders
 
@@ -71,7 +72,7 @@ fn main() {
 }
 ```
 
-**Example for filetest runner** (`lp-glsl/lp-glsl-filetests/src/lib.rs` or main):
+**Example for filetest runner** (`lp-shader/lp-glsl-filetests/src/lib.rs` or main):
 
 ```rust
 pub fn run_tests() {
@@ -100,7 +101,7 @@ pub fn run_emulator(...) {
 
 ### 5. Update GLSL Builtins Initialization
 
-**File**: `lp-glsl/lp-glsl-compiler/src/exec/executable.rs` or wherever GLSL code runs
+**File**: `lp-shader/lp-glsl-compiler/src/exec/executable.rs` or wherever GLSL code runs
 
 Initialize builtins logger before running GLSL code:
 
@@ -114,12 +115,14 @@ init_logger();
 ### 6. Remove Old Initialization Code
 
 Search for and remove:
+
 - `esp_println::logger::init_logger_from_env()` calls (replace with our logger)
 - Any other old logger initialization code
 
 ## Tests
 
 Verify that logging works in each environment:
+
 - Run fw-emu and verify logs appear
 - Run fw-esp32 and verify logs appear (if possible)
 - Run CLI with `RUST_LOG=debug` and verify logs appear
@@ -136,6 +139,7 @@ cargo build --package fw-esp32
 ```
 
 Ensure:
+
 - All code compiles
 - All entry points initialize loggers
 - No old initialization code remains

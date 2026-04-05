@@ -8,7 +8,7 @@ where the inner calls return bvec2.
 
 ## Changes
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/builtins/relational.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/codegen/builtins/relational.rs`
 
 - **`builtin_equal()` function**: Investigate and fix bvec2 argument handling
     - Check how bvec2 arguments are passed and compared

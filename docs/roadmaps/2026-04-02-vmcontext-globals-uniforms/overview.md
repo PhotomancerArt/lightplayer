@@ -65,7 +65,7 @@ Uniforms are **not** accessed via binding IDs. Instead, the host looks up offset
 
 ```rust
 // Host side
-let offset = vmcontext_type.path_offset(&["uniform_time"])?;
+let offset = vmcontext_type.path_offset( & ["uniform_time"]) ?;
 let ptr = vmctx_ptr.add(offset);
 ```
 
@@ -88,7 +88,7 @@ assumes globals are initialized only from uniform/constant data—safe for shade
 ## File Tree
 
 ```
-lp-glsl/
+lp-shader/
 ├── lpvm/
 │   └── src/
 │       └── vmcontext.rs        # VmContextHeader, constants, builder

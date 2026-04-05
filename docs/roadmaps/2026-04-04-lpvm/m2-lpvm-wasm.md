@@ -33,7 +33,7 @@ with native vs `wasm32` target selection (see roadmap overview).
 - Top-level: GLSL → … → WASM bytes (may chain **`lps-naga`**).
 - **`WasmModule`**: bytes + exports + shadow stack global info.
 - **`WasmExport`**: WASM val types + **logical** param types (for harnesses) —
-  those logical types should come from **`lpsc-shared`**, not from a “glsl” name.
+  those logical types should come from **`lps-shared`**, not from a “glsl” name.
 
 ### How wasmtime runner works (today: often in `lps-filetests`)
 
@@ -54,7 +54,7 @@ until renamed):
 
 ### `Cargo.toml` (sketch)
 
-Depend on **`lpvm`**, **`lpir`**, **`lpsc-shared`** (if export metadata needs
+Depend on **`lpvm`**, **`lpir`**, **`lps-shared`** (if export metadata needs
 logical types), **`lps-builtin-ids`** (or transitional path), `wasm-encoder`,
 optional `wasmtime` / `wasm-bindgen` / `web-sys` per target + `runtime` feature.
 

@@ -9,6 +9,7 @@ Clean up any temporary code, fix warnings, ensure all tests pass, and complete t
 ### Remove Temporary Code
 
 Search for and remove:
+
 - `TODO` comments related to quick fixes
 - `println!` or `eprintln!` debug statements
 - `#[allow(dead_code)]` that was added temporarily
@@ -22,6 +23,7 @@ cargo clippy -p lp-glsl-naga -- -D warnings
 ```
 
 Common issues to fix:
+
 - Unused imports
 - Unused variables
 - Dead code
@@ -104,13 +106,13 @@ Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of arr
 
 ## Files Modified
 
-- `lp-glsl/lp-glsl-naga/src/lower_ctx.rs` - Array metadata tracking
-- `lp-glsl/lp-glsl-naga/src/lower_expr.rs` - Array read access
-- `lp-glsl/lp-glsl-naga/src/lower_stmt.rs` - Array store
-- `lp-glsl/lp-glsl-naga/src/naga_util.rs` - Array type utilities  
-- `lp-glsl/lp-glsl-naga/src/lower_array.rs` - NEW: Array helpers
-- `lp-glsl/lp-glsl-naga/src/lib.rs` - Export new module
-- `lp-glsl/lp-glsl-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
+- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` - Array metadata tracking
+- `lp-shader/lp-glsl-naga/src/lower_expr.rs` - Array read access
+- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` - Array store
+- `lp-shader/lp-glsl-naga/src/naga_util.rs` - Array type utilities  
+- `lp-shader/lp-glsl-naga/src/lower_array.rs` - NEW: Array helpers
+- `lp-shader/lp-glsl-naga/src/lib.rs` - Export new module
+- `lp-shader/lp-glsl-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
 
 ## Test Results
 

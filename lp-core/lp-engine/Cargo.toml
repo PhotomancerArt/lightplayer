@@ -24,9 +24,9 @@ std = [
 unwinding = { version = "0.2", optional = true, default-features = false, features = ["panic"] }
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
-lpir-cranelift = { path = "../../lp-glsl/lpir-cranelift", default-features = false, features = ["glsl"] }
-lpvm = { path = "../../lp-glsl/lpvm", default-features = false }
-lp-glsl-builtins = { path = "../../lp-glsl/lp-glsl-builtins", default-features = false }
+lpir-cranelift = { path = "../../lp-shader/lpir-cranelift", default-features = false, features = ["glsl"] }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false }
+lp-glsl-builtins = { path = "../../lp-shader/lp-glsl-builtins", default-features = false }
 log = { workspace = true, default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }

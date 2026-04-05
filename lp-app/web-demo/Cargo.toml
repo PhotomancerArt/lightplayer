@@ -15,5 +15,5 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-lp-glsl-wasm = { path = "../../lp-glsl/lp-glsl-wasm" }
+lp-glsl-wasm = { path = "../../lp-shader/lp-glsl-wasm" }
 wasm-bindgen = "0.2"

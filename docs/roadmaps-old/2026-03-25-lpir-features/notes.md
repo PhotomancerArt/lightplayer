@@ -42,9 +42,9 @@ Out of scope until decided otherwise (see questions):
   CLIF emitter.
 - **`lp-glsl-frontend`** + **`glsl-parser`**: feed the legacy Cranelift crate.
 - **Still depending on `lp-glsl-cranelift`** (workspace `Cargo.toml` edges):
-    - `lp-glsl/esp32-glsl-jit`
+    - `lp-shader/esp32-glsl-jit`
     - `lp-fw/fw-esp32` (optional feature)
-    - `lp-glsl/lp-glsl-q32-metrics-app`
+    - `lp-shader/lp-glsl-q32-metrics-app`
 
 ### Feature gaps (backlog detail)
 

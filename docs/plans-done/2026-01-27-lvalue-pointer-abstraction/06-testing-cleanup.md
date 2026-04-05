@@ -47,8 +47,8 @@ perform final cleanup. This phase ensures the refactoring is complete and correc
 
 ### Files to Review/Modify
 
-- Test files in `lp-glsl/lp-glsl-compiler/tests/`
-- Filetests in `lp-glsl/lp-glsl-filetests/filetests/function/`
+- Test files in `lp-shader/lp-glsl-compiler/tests/`
+- Filetests in `lp-shader/lp-glsl-filetests/filetests/function/`
 - Specifically review:
     - `param-out.glsl`
     - `param-inout.glsl`

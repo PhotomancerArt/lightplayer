@@ -12,7 +12,7 @@ Roadmap: `docs/roadmaps/2026-03-21-lpir/stage-ii.md`.
 ## File structure
 
 ```
-lp-glsl/lpir/
+lp-shader/lpir/
 ├── Cargo.toml                      # NEW: no_std + alloc; deps: nom, nom_locate
 └── src/
     ├── lib.rs                      # NEW: public API, re-exports
@@ -25,7 +25,7 @@ lp-glsl/lpir/
     ├── validate.rs                 # NEW: well-formedness checks
     └── interp.rs                   # NEW: interpreter
 
-Cargo.toml                          # UPDATE: add "lp-glsl/lpir" to members
+Cargo.toml                          # UPDATE: add "lp-shader/lpir" to members
 ```
 
 ## Architecture
@@ -257,7 +257,9 @@ pub enum Op {
 ## Builder API
 
 ```rust
-pub struct FunctionBuilder { ... }
+pub struct FunctionBuilder {
+    ...
+}
 
 impl FunctionBuilder {
     pub fn new(name: &str, return_types: &[IrType]) -> Self;
@@ -287,7 +289,9 @@ impl FunctionBuilder {
     pub fn finish(self) -> IrFunction;
 }
 
-pub struct ModuleBuilder { ... }
+pub struct ModuleBuilder {
+    ...
+}
 
 impl ModuleBuilder {
     pub fn new() -> Self;

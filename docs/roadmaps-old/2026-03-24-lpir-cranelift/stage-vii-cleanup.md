@@ -13,8 +13,9 @@ everything still builds and passes.
 ## Scope
 
 **In scope:**
-- Delete `lp-glsl/lp-glsl-cranelift/` (the old AST→CLIF compiler)
-- Delete `lp-glsl/lp-glsl-frontend/` (the old GLSL frontend/parser) if
+
+- Delete `lp-shader/lp-glsl-cranelift/` (the old AST→CLIF compiler)
+- Delete `lp-shader/lp-glsl-frontend/` (the old GLSL frontend/parser) if
   nothing else depends on it
 - Delete the `glsl` crate dependency chain if unused (the old hand-written
   GLSL parser)
@@ -30,6 +31,7 @@ everything still builds and passes.
 - Update any documentation that references the old crate or API
 
 **Out of scope:**
+
 - New features
 - Optimizations
 - LPIR vector support
@@ -86,6 +88,6 @@ nothing breaks.
 These were ignored while LPIR / builtins / WASM linking is in flux. Before
 closing Stage VII, remove `#[ignore]`, run the tests, and fix any failures.
 
-| Location | What |
-|----------|------|
-| `lp-glsl/lp-glsl-filetests/tests/lpfx_builtins_memory.rs` — `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it` | Links shader WASM with `lp_glsl_builtins_wasm.wasm`. Failed with `incompatible import type for builtins::__lpfx_saturate_vec3_q32`: Naga/LPIR lowers `vec3 lpfx_saturate(vec3)` as a WASM import with three i32 params and three i32 results, while the Rust builtin is `(result_ptr: i32, x, y, z) -> ()`. **Re-check:** align LPIR import + `lp-glsl-wasm` emission with the result-pointer ABI (or document an adapter), then un-ignore and verify scratch-memory behavior. |
+| Location                                                                                                               | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lp-shader/lp-glsl-filetests/tests/lpfx_builtins_memory.rs` — `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it` | Links shader WASM with `lp_glsl_builtins_wasm.wasm`. Failed with `incompatible import type for builtins::__lpfx_saturate_vec3_q32`: Naga/LPIR lowers `vec3 lpfx_saturate(vec3)` as a WASM import with three i32 params and three i32 results, while the Rust builtin is `(result_ptr: i32, x, y, z) -> ()`. **Re-check:** align LPIR import + `lp-glsl-wasm` emission with the result-pointer ABI (or document an adapter), then un-ignore and verify scratch-memory behavior. |

@@ -1,0 +1,17 @@
+[package]
+name = "lpvm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GLSL ABI - types, values, layout, and paths"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Host crates may enable `std` for consistency; `lpvm` stays `no_std` either way.
+std = []
+
+[dependencies]
+lps-shared = { path = "../lps-shared" }

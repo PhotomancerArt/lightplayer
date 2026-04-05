@@ -19,23 +19,25 @@ consumers: `lp-glsl-cranelift`, `lp-glsl-jit-util`, `esp32-glsl-jit`,
 ### 1. Delete directories
 
 ```bash
-rm -rf lp-glsl/lp-glsl-cranelift
-rm -rf lp-glsl/lp-glsl-jit-util
-rm -rf lp-glsl/esp32-glsl-jit
-rm -rf lp-glsl/lp-glsl-q32-metrics-app
+rm -rf lp-shader/lp-glsl-cranelift
+rm -rf lp-shader/lp-glsl-jit-util
+rm -rf lp-shader/esp32-glsl-jit
+rm -rf lp-shader/lp-glsl-q32-metrics-app
 ```
 
 ### 2. Root `Cargo.toml`
 
 Remove from `[workspace] members`:
-- `"lp-glsl/lp-glsl-cranelift"`
-- `"lp-glsl/lp-glsl-jit-util"`
-- `"lp-glsl/esp32-glsl-jit"`
-- `"lp-glsl/lp-glsl-q32-metrics-app"`
+
+- `"lp-shader/lp-glsl-cranelift"`
+- `"lp-shader/lp-glsl-jit-util"`
+- `"lp-shader/esp32-glsl-jit"`
+- `"lp-shader/lp-glsl-q32-metrics-app"`
 
 Remove from `[workspace] default-members`:
-- `"lp-glsl/lp-glsl-cranelift"`
-- `"lp-glsl/lp-glsl-jit-util"`
+
+- `"lp-shader/lp-glsl-cranelift"`
+- `"lp-shader/lp-glsl-jit-util"`
 
 Remove any `[profile.*.package.esp32-glsl-jit]` sections.
 

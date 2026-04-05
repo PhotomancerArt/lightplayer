@@ -18,8 +18,8 @@ the old code path for `Variable` and `Component` variants with name lookup tempo
 
 ### Files to Modify
 
-- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
-- `lp-glsl/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
+- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
+- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
 
 ### Changes
 

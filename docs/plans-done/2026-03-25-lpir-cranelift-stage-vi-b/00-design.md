@@ -11,7 +11,7 @@ directly (no trait object), and render via `DirectCall::call_i32_buf`
 ## File structure
 
 ```
-lp-glsl/lpir-cranelift/src/
+lp-shader/lpir-cranelift/src/
 ├── direct_call.rs                # UPDATE: add call_i32_buf (non-allocating)
 ├── invoke.rs                     # UPDATE: add invoke_i32_buf variant
 ├── jit_module.rs                 # UPDATE: unsafe impl Send + Sync for JitModule
@@ -86,12 +86,12 @@ unsafe impl Sync for JitModule {}
 
 **Fields replaced:**
 
-| Old | New |
-|---|---|
-| `executable: Option<Box<dyn GlslExecutable + Send + Sync>>` | `module: Option<JitModule>` |
-| `direct_func_ptr: Option<FunctionPtr>` | `direct_call: Option<DirectCall>` |
-| `direct_call_conv: Option<CallConv>` | _(folded into DirectCall)_ |
-| `direct_pointer_type: Option<Type>` | _(folded into DirectCall)_ |
+| Old                                                         | New                               |
+|-------------------------------------------------------------|-----------------------------------|
+| `executable: Option<Box<dyn GlslExecutable + Send + Sync>>` | `module: Option<JitModule>`       |
+| `direct_func_ptr: Option<FunctionPtr>`                      | `direct_call: Option<DirectCall>` |
+| `direct_call_conv: Option<CallConv>`                        | _(folded into DirectCall)_        |
+| `direct_pointer_type: Option<Type>`                         | _(folded into DirectCall)_        |
 
 **`compile_shader`:**
 
@@ -148,7 +148,7 @@ cranelift-codegen = { ... }
 lp-glsl-jit-util = { ... }
 
 # Add:
-lpir-cranelift = { path = "../../lp-glsl/lpir-cranelift", default-features = false }
+lpir-cranelift = { path = "../../lp-shader/lpir-cranelift", default-features = false }
 ```
 
 Features:

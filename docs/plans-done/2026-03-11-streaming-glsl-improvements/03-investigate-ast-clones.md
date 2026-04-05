@@ -46,6 +46,7 @@ path, they're alive during `define_function`.
 ## Fix
 
 Depends on investigation findings. Likely one of:
+
 - Move `GlslCompiler::new()` inside the loop
 - Clear `source_loc_manager` / `source_map` if they're accumulating
 - Drop the `FunctionBuilderContext` between iterations
@@ -57,7 +58,7 @@ Depends on investigation findings. Likely one of:
 ## Validate
 
 ```bash
-cd lp-glsl/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
 ```
 
 Re-run on ESP32 emulator with heap tracing to verify the `T::clone_one` entries

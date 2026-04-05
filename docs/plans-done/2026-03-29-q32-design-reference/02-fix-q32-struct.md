@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update `lp-glsl/lp-glsl-builtins/src/glsl/q32/types/q32.rs` to match
+Update `lp-shader/lp-glsl-builtins/src/glsl/q32/types/q32.rs` to match
 `docs/design/q32.md`.
 
 ## Code Organization Reminders

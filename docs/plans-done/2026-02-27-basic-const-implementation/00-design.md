@@ -3,6 +3,7 @@
 ## Scope
 
 Implement basic `const` support so that:
+
 - Global const declarations (e.g. `const float PI = 3.14159;`) compile and can be used in functions
 - Local const is properly validated (read-only, must-init)
 - Simple constant expressions (literals, +, -, *, /, constructors) are supported from Phase 1
@@ -11,7 +12,7 @@ Implement basic `const` support so that:
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-compiler/src/
+lp-shader/lp-glsl-compiler/src/
 ├── frontend/
 │   ├── semantic/
 │   │   ├── mod.rs
@@ -76,8 +77,14 @@ const_eval module:
 
 ## Main Components
 
-- **const_eval**: Evaluates constant expressions given a const environment. Supports literals, binary ops, unary minus, constructors, and const variable references.
-- **GlobalConstPass**: New semantic pass that runs before or alongside function extraction. Collects global const declarations, evaluates initializers, populates `TypedShader.global_constants`.
-- **TypedShader.global_constants**: Canonical map of global const name → evaluated value. Injected into per-function scope for validation and codegen.
-- **StorageClass::Const**: Tags variables as const. Enables must-init check, write rejection in LValue resolution.
-- **Codegen variable resolution**: When resolving a variable reference, if it's a const (from global_constants or local with Const storage), emit the value directly instead of loading from a slot.
+- **const_eval**: Evaluates constant expressions given a const environment. Supports literals,
+  binary ops, unary minus, constructors, and const variable references.
+- **GlobalConstPass**: New semantic pass that runs before or alongside function extraction. Collects
+  global const declarations, evaluates initializers, populates `TypedShader.global_constants`.
+- **TypedShader.global_constants**: Canonical map of global const name → evaluated value. Injected
+  into per-function scope for validation and codegen.
+- **StorageClass::Const**: Tags variables as const. Enables must-init check, write rejection in
+  LValue resolution.
+- **Codegen variable resolution**: When resolving a variable reference, if it's a const (from
+  global_constants or local with Const storage), emit the value directly instead of loading from a
+  slot.

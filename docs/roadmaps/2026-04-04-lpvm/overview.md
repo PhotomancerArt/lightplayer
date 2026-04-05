@@ -24,23 +24,23 @@ layer, parallel to how `lpir` and `lpvm` abbreviate their domains.
 
 ```
 lps-naga ──► lpir          (lowers to LPIR)
-lps-naga ──► lpsc-shared     (logical shader types)
+lps-naga ──► lps-shared     (logical shader types)
 lpvm       ──► lpir        (IR module shape, codegen inputs)
-lpvm       ──► lpsc-shared   (signatures, metadata consumers see)
+lpvm       ──► lps-shared   (signatures, metadata consumers see)
 lpvm-*     ──► lpvm, lpir  (backends)
 lps-filetests ──► lps-*, lpir, lpvm-*   (integration tests)
 ```
 
 **Important:** `lp-glsl-core`’s `Type` / `FunctionSignature` are **not** LPIR
 concepts. LPIR is scalarized; it does not carry logical vec3/mat4 as a first-class
-IR type. Those types live in **`lpsc-shared`** (rename of `lp-glsl-core`), not in
+IR type. Those types live in **`lps-shared`** (rename of `lp-glsl-core`), not in
 `lpir`.
 
 ### Target crate map (shader layer)
 
 | Current / transitional | Target (`lps-*`)                                   |
 |------------------------|----------------------------------------------------|
-| `lp-glsl-core`         | `lpsc-shared`                                      |
+| `lp-glsl-core`         | `lps-shared`                                       |
 | `lp-glsl-naga`         | `lps-naga`                                         |
 | `lp-glsl-builtins`     | `lps-builtins`                                     |
 | `lp-glsl-builtin-ids`  | `lps-builtin-ids`                                  |
@@ -48,7 +48,7 @@ IR type. Those types live in **`lpsc-shared`** (rename of `lp-glsl-core`), not i
 | `lp-glsl-diagnostics`  | `lps-diagnostics` (or keep name if shared tooling) |
 
 ABI/runtime types from `lpvm` and exec traits from `lp-glsl-exec` move
-into **`lpvm`**, not into `lpsc-shared`.
+into **`lpvm`**, not into `lps-shared`.
 
 ## What is LPVM?
 
@@ -67,7 +67,7 @@ development simulation target. The engine must be backend-agnostic: Cranelift
 JIT on ESP32/desktop, browser WebAssembly API in-browser. LPVM enables this by
 abstracting the runtime behind traits that are monomorphized per firmware target.
 
-**Naming cleanup**: retire the `lp-glsl/` catch-all. Use **`lps-*`** for the
+**Naming cleanup**: retire the `lp-shader/` catch-all. Use **`lps-*`** for the
 shader/language layer, **`lpir`** for scalarized IR only, **`lpvm-*`** for the
 runtime. Long-term, the old `lp-glsl` directory name goes away.
 
@@ -83,7 +83,7 @@ runtime. Long-term, the old `lp-glsl` directory name goes away.
        │            ├──► lpvm-rv32
        │            └──► lpvm-wasm
        │
-       └── lpsc-shared (LpsType, LpsFunctionSignature — logical types)
+       └── lps-shared (LpsType, LpsFunctionSignature — logical types)
                 │
                 └── referenced by lpvm (metadata / calling convention)
 ```
@@ -91,15 +91,15 @@ runtime. Long-term, the old `lp-glsl` directory name goes away.
 ## Crate Structure
 
 ```
-lps/                          # shader layer (may start under lp-glsl/ during migration)
-├── lpsc-shared/
+lps/                          # shader layer (may start under lp-shader/ during migration)
+├── lps-shared/
 ├── lps-naga/
 ├── lps-builtins/
 ├── lps-builtin-ids/
 ├── lps-filetests/
 └── ...
 
-lp-glsl/lpir/                 # IR crate (path may move to top-level later)
+lp-shader/lpir/                 # IR crate (path may move to top-level later)
 └── ...
 
 lpvm/
@@ -109,7 +109,7 @@ lpvm/
 └── lpvm-wasm/
 ```
 
-### `lpsc-shared`
+### `lps-shared`
 
 Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 `LpsParamQualifier`. **Zero dependency on `lpir` and `lpvm`.** Shared by
@@ -118,12 +118,12 @@ Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 ### `lpvm` (core)
 
 Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
-**`lpir`** (IR module, lowering inputs) and **`lpsc-shared`** (what callers think
+**`lpir`** (IR module, lowering inputs) and **`lps-shared`** (what callers think
 functions look like). Replaces **`lpvm`** and **`lp-glsl-exec`** (trait
 concepts → `LpvmModule` / `LpvmInstance` / `LpvmMemory`).
 
 Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,
-`LpvmModuleMeta`-style metadata (may reference `lpsc-shared` for field types).
+`LpvmModuleMeta`-style metadata (may reference `lps-shared` for field types).
 
 ### `lpvm-cranelift` / `lpvm-rv32` / `lpvm-wasm`
 
@@ -137,17 +137,17 @@ Backends implementing the LPVM traits. See milestone docs.
 2. **Separate backend crates** — different dependency trees (cranelift-\*,
    lp-riscv-\*, wasmtime).
 
-3. **`lpsc-shared` is not `lpir`** — logical shader types are not scalarized IR.
+3. **`lps-shared` is not `lpir`** — logical shader types are not scalarized IR.
    `lpir` stays free of vec3/mat4 as IR types.
 
-4. **`lpvm` depends on `lpsc-shared` and `lpir`** — runtime needs both “what the
+4. **`lpvm` depends on `lps-shared` and `lpir`** — runtime needs both “what the
    IR looks like” and “what the user-facing signature is.”
 
 5. **Engine is backend-agnostic** — `lp-engine` depends only on `lpvm` traits,
    generic over `M: LpvmModule`. Firmware picks `lpvm-cranelift` or `lpvm-wasm`.
 
 6. **`Lpvm` prefix on VM-layer external types** — disambiguates from Cranelift,
-   wasm, naga. **`Lps` prefix on shader-layer types** in `lpsc-shared`.
+   wasm, naga. **`Lps` prefix on shader-layer types** in `lps-shared`.
 
 7. **`lp-riscv-emu` refactor required** — before `lpvm-rv32` can wrap it cleanly.
 
@@ -186,8 +186,8 @@ Backends implementing the LPVM traits. See milestone docs.
 
 ### [M1: Renames, moves, and new types](m1-renames-moves-new-types.md)
 
-Introduce **`lpsc-shared`** (logical types), **`lpvm`** core crate, wire
-dependencies (`lpvm` → `lpir` + `lpsc-shared`). Mechanical refactoring; no new
+Introduce **`lps-shared`** (logical types), **`lpvm`** core crate, wire
+dependencies (`lpvm` → `lpir` + `lps-shared`). Mechanical refactoring; no new
 backends.
 
 ### [M2: `lpvm-wasm`](m2-lpvm-wasm.md)

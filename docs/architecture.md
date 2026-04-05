@@ -101,10 +101,10 @@ Shared firmware abstractions:
 - **Transport** - Serial-based transport implementation for client-server communication
 - **Logging** - Platform-specific logging infrastructure (emulator syscalls, ESP32 `esp_println`)
 
-## GLSL Compiler (`lp-glsl/`)
+## GLSL Compiler (`lp-shader/`)
 
 The GLSL compiler transforms GLSL shaders into executable code for embedded and desktop targets.
-See [`lp-glsl/README.md`](../lp-glsl/README.md) for the full crate index and commands, and
+See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and commands, and
 [`docs/lpir/`](lpir/) for the IR specification.
 
 ### Pipeline

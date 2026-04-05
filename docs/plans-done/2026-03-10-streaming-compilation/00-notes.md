@@ -7,6 +7,7 @@ Refactor the GLSL → machine code pipeline to compile functions one at a time
 before starting the next function. Goal: reduce peak heap usage on ESP32.
 
 Currently, the pipeline works in three batch phases:
+
 1. **CLIF IR generation** — all functions' CLIF IR built and stored in `GlModule.fns`
 2. **Q32 transform** — creates a *second* `GlModule<JITModule>`, transforms all
    functions, drops old module
@@ -14,6 +15,7 @@ Currently, the pipeline works in three batch phases:
    one-by-one, freeing CLIF IR after each
 
 The proposed pipeline:
+
 1. Parse + analyze → `TypedShader` (AST for all functions)
 2. Declare all functions in both modules (float + Q32 signatures) upfront
 3. For each function (smallest first):
@@ -28,16 +30,16 @@ The proposed pipeline:
 
 ### Pipeline code locations
 
-| File | Role |
-|------|------|
-| `lp-glsl/lp-glsl-compiler/src/frontend/mod.rs` | `glsl_jit`, `compile_glsl_to_gl_module_jit` — top-level API |
-| `lp-glsl/lp-glsl-compiler/src/frontend/glsl_compiler.rs` | `GlslCompiler::compile_to_gl_module_jit` — CLIF IR generation loop |
-| `lp-glsl/lp-glsl-compiler/src/backend/module/gl_module.rs` | `GlModule`, `apply_transform`, `add_function`, `declare_function` |
-| `lp-glsl/lp-glsl-compiler/src/backend/codegen/jit.rs` | `build_jit_executable`, `build_jit_executable_memory_optimized` |
-| `lp-glsl/lp-glsl-compiler/src/backend/transform/pipeline.rs` | `Transform` trait, `TransformContext` |
-| `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/` | Q32 transform implementation |
-| `lp-glsl/lp-glsl-compiler/src/frontend/codegen/context.rs` | `CodegenContext` — needs `&mut GlModule<M>` for `declare_func_in_func` |
-| `lp-glsl/lp-glsl-compiler/src/exec/jit.rs` | `GlslJitModule` — final output |
+| File                                                           | Role                                                                   |
+|----------------------------------------------------------------|------------------------------------------------------------------------|
+| `lp-shader/lp-glsl-compiler/src/frontend/mod.rs`               | `glsl_jit`, `compile_glsl_to_gl_module_jit` — top-level API            |
+| `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs`     | `GlslCompiler::compile_to_gl_module_jit` — CLIF IR generation loop     |
+| `lp-shader/lp-glsl-compiler/src/backend/module/gl_module.rs`   | `GlModule`, `apply_transform`, `add_function`, `declare_function`      |
+| `lp-shader/lp-glsl-compiler/src/backend/codegen/jit.rs`        | `build_jit_executable`, `build_jit_executable_memory_optimized`        |
+| `lp-shader/lp-glsl-compiler/src/backend/transform/pipeline.rs` | `Transform` trait, `TransformContext`                                  |
+| `lp-shader/lp-glsl-compiler/src/backend/transform/q32/`        | Q32 transform implementation                                           |
+| `lp-shader/lp-glsl-compiler/src/frontend/codegen/context.rs`   | `CodegenContext` — needs `&mut GlModule<M>` for `declare_func_in_func` |
+| `lp-shader/lp-glsl-compiler/src/exec/jit.rs`                   | `GlslJitModule` — final output                                         |
 
 ### Key data structures
 
@@ -52,6 +54,7 @@ The proposed pipeline:
 ### Current memory at peak (228 KB of 320 KB heap)
 
 Peak occurs during `fastalloc::run` (regalloc) inside `define_function`. At peak:
+
 - CLIF IR for remaining uncompiled functions: ~25-30 KB
 - Codegen working set (one function): ~70 KB
 - Module declarations/metadata: ~17 KB
@@ -78,6 +81,7 @@ The Q32 transform MUST NOT be done in-place. The current two-module approach
 in-place transformation. This constraint must be preserved.
 
 The transform uses `TransformContext` which needs:
+
 - `&mut GlModule<M>` (the new/target module)
 - `func_id_map: HashMap<String, FuncId>` (name → new FuncId)
 - `old_func_id_map: HashMap<FuncId, String>` (old FuncId → name)
@@ -97,6 +101,7 @@ module needs Q32 signatures for `define_function`.
 second JITModule with Q32 sigs.
 
 **Options**:
+
 - (A) Keep two `GlModule<JITModule>`s — a "float module" for CLIF generation and
   a "Q32 module" for compilation. The float module never compiles, just holds
   declarations. After all functions are processed, drop the float module.
@@ -124,6 +129,7 @@ Future work: consider eliminating the float module entirely by refactoring
 
 The plan calls for compiling smallest functions first to free memory for larger
 ones. But "smallest" could mean:
+
 - Fewest AST statements (known at parse time)
 - Fewest CLIF IR instructions (known only after CLIF generation)
 - Estimated from parameter/return type complexity
@@ -145,6 +151,7 @@ are used during `define_function` (machine code compilation). They're dead weigh
 at peak.
 
 **Options**:
+
 - (A) Drop them early in the streaming pipeline (before compilation loop)
 - (B) Don't store them in GlModule at all in the streaming path — extract what's
   needed for `GlslJitModule` upfront and never put the rest in GlModule
@@ -166,6 +173,7 @@ are used by tests (with `memory_optimized: false/true`). The streaming approach
 is a third path or a replacement for `memory_optimized`.
 
 **Options**:
+
 - (A) Add a new `build_jit_executable_streaming` alongside existing functions
 - (B) Replace `build_jit_executable_memory_optimized` with the streaming approach
 - (C) Replace both with streaming

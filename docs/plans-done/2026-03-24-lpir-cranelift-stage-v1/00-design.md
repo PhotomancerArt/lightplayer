@@ -15,7 +15,7 @@ run in `lp-riscv-emu`, validate in-crate. No `lp-glsl-filetests` wiring (V2).
 ## File structure
 
 ```
-lp-glsl/lpir-cranelift/
+lp-shader/lpir-cranelift/
 ├── build.rs                         # NEW (feature riscv32-emu): embed builtins ELF path
 ├── Cargo.toml                       # UPDATE: optional riscv32 / object / riscv deps
 └── src/
@@ -58,13 +58,13 @@ lp-glsl/lpir-cranelift/
 
 ## Main components
 
-| Component | Role |
-|-----------|------|
+| Component          | Role                                                                                                                                                               |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `object_module.rs` | Build `OwnedTargetIsa` for `riscv32` (match old `default_riscv32_flags` + triple), `ObjectBuilder` → `ObjectModule`, run shared define loop, `finish` → `Vec<u8>`. |
-| `jit_module.rs` | Refactor: call shared `define_lpir_in_module`; keep JIT-only finalize + `JitModule` fields. |
-| `object_link.rs` | Port logic from `builtins_linker.rs`: merge ELF, return `ElfLoadInfo` or error. |
-| `emu_run.rs` | Configure `Riscv32Emulator`, map symbol → PC, run until halt/timeout; helpers for simple scalar/Q32 returns. |
-| `build.rs` | When feature enabled, compile-time path to builtins ELF (same contract as old crate). |
+| `jit_module.rs`    | Refactor: call shared `define_lpir_in_module`; keep JIT-only finalize + `JitModule` fields.                                                                        |
+| `object_link.rs`   | Port logic from `builtins_linker.rs`: merge ELF, return `ElfLoadInfo` or error.                                                                                    |
+| `emu_run.rs`       | Configure `Riscv32Emulator`, map symbol → PC, run until halt/timeout; helpers for simple scalar/Q32 returns.                                                       |
+| `build.rs`         | When feature enabled, compile-time path to builtins ELF (same contract as old crate).                                                                              |
 
 ## Interactions
 

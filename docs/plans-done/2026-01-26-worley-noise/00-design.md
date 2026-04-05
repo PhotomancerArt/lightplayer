@@ -9,7 +9,7 @@ point in a grid.
 ## File Structure
 
 ```
-lp-glsl/lp-glsl-builtins/src/builtins/lpfx/
+lp-shader/lp-glsl-builtins/src/builtins/lpfx/
 ├── hash.rs                    # EXISTING: Hash functions
 ├── simplex/                    # EXISTING: Simplex noise functions
 │   └── ...

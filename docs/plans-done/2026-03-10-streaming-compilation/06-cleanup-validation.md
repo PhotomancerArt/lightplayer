@@ -16,7 +16,7 @@
 2. **Check for unused imports and dead code**: Fix all warnings.
 
    ```bash
-   cd lp-glsl/lp-glsl-compiler && cargo check --features std 2>&1 | grep warning
+   cd lp-shader/lp-glsl-compiler && cargo check --features std 2>&1 | grep warning
    cd lp-core/lp-engine && cargo check --features std 2>&1 | grep warning
    ```
 
@@ -35,13 +35,13 @@ Run the full test suite:
 
 ```bash
 # Compiler tests
-cd lp-glsl/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lp-glsl-compiler && cargo test --features std
 
 # Engine tests
 cd lp-core/lp-engine && cargo test --features std
 
 # no_std compilation check
-cd lp-glsl/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
 
 # Workspace-wide check
 cargo check --workspace

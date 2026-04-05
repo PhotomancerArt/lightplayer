@@ -35,6 +35,7 @@ ownership of both code and RAM, builds `Memory::with_default_addresses(code, ram
 ### Current emulator consumers
 
 The emulator is used beyond LPVM:
+
 - `fw-tests` — firmware integration tests
 - `lp-riscv-elf` — ELF loading tests
 - `lp-riscv-emu-guest-test-app` — guest test binary
@@ -47,6 +48,7 @@ All existing consumers must continue to work after the refactor.
 ### How the RV32 backend works in filetests today
 
 `LpirRv32Executable` in **`lps-filetests`** (path may still be `lp-glsl-filetests`):
+
 1. GLSL → **`lps-naga`** → `IrModule` + module metadata (e.g. `LpvmModuleMeta` /
    transitional `GlslModuleMeta`)
 2. `object_bytes_from_ir(&ir, &options)` — compile LPIR to RV32 object file
@@ -80,12 +82,14 @@ Separate the emulator into three conceptual layers:
 
 **Code access pattern**: `fetch_instruction` currently reads from either code
 or RAM (to support JIT-in-RAM). This must continue to work. Options:
+
 - Code image is mapped at a fixed address in the instance's memory view
   (read-only region) — same as today, but the backing storage is shared.
 - The execution loop checks code image first, then RAM, using address ranges.
 
 **Constructor changes**: Instead of `new(code, ram)` which takes ownership of
 everything, provide something like:
+
 - `new(code_image: &CodeImage, ram_size: usize)` — borrows code, allocates RAM
 - Or `new(code_image: Arc<CodeImage>, ram: Vec<u8>)` — shared code, owned RAM
 
@@ -117,7 +121,7 @@ it creates a code image + RAM and wires them together.
 ```toml
 [dependencies]
 lpvm = { path = "../lpvm", default-features = false }
-lpir = { path = "../../lp-glsl/lpir", default-features = false }
+lpir = { path = "../../lp-shader/lpir", default-features = false }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 cranelift-codegen = { ..., default-features = false }  # for object compilation
@@ -132,11 +136,11 @@ use of Cranelift than `lpvm-cranelift`.
 
 ### Trait implementation mapping
 
-| LPVM trait | RV32 implementation | Notes |
-|---|---|---|
-| `LpvmModule` | Compiled RV32 object (ELF) + linked code image | LPIR → Cranelift → RV32 object → ELF link → code image |
-| `LpvmInstance` | Emulator execution state + RAM | Wraps the refactored `Riscv32Emulator` |
-| `LpvmMemory` | Emulator RAM | The mutable portion of the emulator's memory |
+| LPVM trait     | RV32 implementation                            | Notes                                                  |
+|----------------|------------------------------------------------|--------------------------------------------------------|
+| `LpvmModule`   | Compiled RV32 object (ELF) + linked code image | LPIR → Cranelift → RV32 object → ELF link → code image |
+| `LpvmInstance` | Emulator execution state + RAM                 | Wraps the refactored `Riscv32Emulator`                 |
+| `LpvmMemory`   | Emulator RAM                                   | The mutable portion of the emulator's memory           |
 
 ### Compilation flow
 

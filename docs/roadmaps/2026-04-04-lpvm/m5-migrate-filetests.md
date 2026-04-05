@@ -31,7 +31,7 @@ Typical wiring:
 
 Typed `call_*`, `call_array`, `get_function_signature`, `list_functions`, plus
 optional std debug hooks (`format_clif_ir`, etc.). Logical signatures use
-**`lpsc-shared`** (`LpsFunctionSignature`, etc.) after M1 renames.
+**`lps-shared`** (`LpsFunctionSignature`, etc.) after M1 renames.
 
 ### Target shape
 
@@ -61,7 +61,7 @@ lpvm-cranelift = { path = "../../lpvm/lpvm-cranelift" }
 lpvm-rv32 = { path = "../../lpvm/lpvm-rv32" }
 lpvm-wasm = { path = "../../lpvm/lpvm-wasm", features = ["runtime"] }
 lpir = { path = "../lpir" }   # or top-level path after moves
-lpsc-shared = { path = "../lpsc-shared" }
+lps-shared = { path = "../lps-shared" }
 lps-naga = { path = "../lps-naga" }
 ```
 

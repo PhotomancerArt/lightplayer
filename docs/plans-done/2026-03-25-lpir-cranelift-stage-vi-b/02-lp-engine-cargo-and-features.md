@@ -26,7 +26,7 @@ deps, and forward features through `lp-server`.
 **Add:**
 
 ```toml
-lpir-cranelift = { path = "../../lp-glsl/lpir-cranelift", default-features = false }
+lpir-cranelift = { path = "../../lp-shader/lpir-cranelift", default-features = false }
 ```
 
 **Features** (mirror `lpir-cranelift`):

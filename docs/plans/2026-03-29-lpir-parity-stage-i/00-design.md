@@ -21,12 +21,12 @@ Implement Milestone I from
 ## File structure
 
 ```
-lp-glsl/lp-glsl-naga/src/
+lp-shader/lp-glsl-naga/src/
 ├── expr_scalar.rs              # UPDATE: expr_type_inner + expr_scalar_kind for Relational
 ├── lower_expr.rs               # UPDATE: lower_relational, isnan/isinf → lane false (Q32)
 └── ...
 
-lp-glsl/lp-glsl-filetests/filetests/
+lp-shader/lp-glsl-filetests/filetests/
 ├── builtins/common-isnan.glsl  # UPDATE: no infinite literals
 ├── builtins/common-isinf.glsl # UPDATE: no infinite literals
 ├── vec/bvec{2,3,4}/…            # UPDATE: strip @unimplemented where fixed (relational-only)

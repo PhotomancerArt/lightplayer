@@ -7,14 +7,14 @@ instead of clamping them to 0.
 
 ## Changes
 
-### `lp-glsl/lp-glsl-compiler/src/frontend/codegen/expr/coercion.rs`
+### `lp-shader/lp-glsl-compiler/src/frontend/codegen/expr/coercion.rs`
 
 - **`float_to_uint()` conversion** (around line 98-101):
     - Current: Uses `fcvt_to_uint` which may clamp negatives
     - Fix: Wrap negative values using modulo 2^32
     - Implementation: Convert to i32 first, then cast to u32 (wraps automatically)
 
-### `lp-glsl/lp-glsl-compiler/src/backend/transform/q32/converters/conversions.rs`
+### `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/conversions.rs`
 
 - **`convert_fcvt_to_uint()` function** (around line 189-236):
     - Current: Clamps negative values to 0 (line 222: `select(is_negative, zero, shifted)`)

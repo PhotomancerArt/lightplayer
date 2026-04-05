@@ -16,7 +16,7 @@ as raw integers.
 
 ## Implementation
 
-### `lp-glsl/lp-glsl-naga/src/expr_scalar.rs`
+### `lp-shader/lp-glsl-naga/src/expr_scalar.rs`
 
 The current `As` handling (in `lower_expr.rs` or `expr_scalar.rs`) rejects
 casts where the target type byte width != 4. Bool is 1 byte in Naga.
@@ -51,9 +51,9 @@ is a ternary (Select). After fixing the Bool case, check:
 
 1. Does `test_ternary_float_to_int_conversion` now pass?
 2. If not, trace the Naga expression tree:
-   - The ternary result should be `Expression::Select { ... }` with float type.
-   - The `int result = ...` assignment wraps it in `As(float → Sint)`.
-   - Verify the `As(float → Sint)` path emits `Op::FtoiSatS` in Q32 mode.
+    - The ternary result should be `Expression::Select { ... }` with float type.
+    - The `int result = ...` assignment wraps it in `As(float → Sint)`.
+    - Verify the `As(float → Sint)` path emits `Op::FtoiSatS` in Q32 mode.
 
 ### Tests
 

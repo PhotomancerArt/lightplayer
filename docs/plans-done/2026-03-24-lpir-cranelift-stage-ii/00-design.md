@@ -11,7 +11,7 @@ hand-built LPIR.
 ## File structure
 
 ```
-lp-glsl/lpir-cranelift/
+lp-shader/lpir-cranelift/
 └── src/
     ├── lib.rs                  # UPDATE: re-exports, expanded tests
     ├── jit_module.rs           # UPDATE: EmitCtx setup, FuncRef wiring, remove guards
@@ -90,12 +90,14 @@ result. Integer comparisons follow the same pattern as float comparisons using
 ### `emit/control.rs` — structured control flow
 
 **If/Else/End:**
+
 - `IfStart { cond }` → create else_block + merge_block, `brif cond` to
   current (fall-through then) vs else_block, push `CtrlFrame::If`
 - `Else` → jump to merge, switch to else_block
 - `End` on If → jump to merge, switch to merge_block
 
 **Loop:**
+
 - `LoopStart` → create header_block + exit_block, jump to header, switch to
   header, push `CtrlFrame::Loop`
 - `Break` → jump to exit_block (walk stack for innermost loop)
@@ -104,6 +106,7 @@ result. Integer comparisons follow the same pattern as float comparisons using
 - `End` on Loop → jump to header (back-edge), switch to exit_block
 
 **Switch:**
+
 - `SwitchStart { selector }` → create merge_block + first next_case block,
   push `CtrlFrame::Switch`
 - `CaseStart { value }` → in next_case block: icmp selector == value, create
@@ -139,6 +142,6 @@ via `builder.create_sized_stack_slot()` and passed in `EmitCtx`.
   Stage III)
 - Remove entry block `seal_block` (translate_function handles sealing)
 - Before each `translate_function` call:
-  - Create `FuncRef` for each local function via `declare_func_in_func`
-  - Create `StackSlot` for each `SlotDecl` via `create_sized_stack_slot`
-  - Bundle into `EmitCtx`
+    - Create `FuncRef` for each local function via `declare_func_in_func`
+    - Create `StackSlot` for each `SlotDecl` via `create_sized_stack_slot`
+    - Bundle into `EmitCtx`

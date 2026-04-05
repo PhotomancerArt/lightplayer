@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Create logger implementation for GLSL builtins that works in both emulator and JIT contexts. Routes to `__host_log` function which delegates to syscalls (emulator) or log crate (JIT).
+Create logger implementation for GLSL builtins that works in both emulator and JIT contexts. Routes
+to `__host_log` function which delegates to syscalls (emulator) or log crate (JIT).
 
 ## Code Organization Reminders
 
@@ -16,7 +17,7 @@ Create logger implementation for GLSL builtins that works in both emulator and J
 
 ### 1. Create Builtins Logger Module
 
-**File**: `lp-glsl/lp-glsl-builtins/src/host/logger.rs` (NEW)
+**File**: `lp-shader/lp-glsl-builtins/src/host/logger.rs` (NEW)
 
 ```rust
 //! Logger implementation for GLSL builtins.
@@ -96,7 +97,7 @@ pub fn init() {
 
 ### 2. Export Logger
 
-**File**: `lp-glsl/lp-glsl-builtins/src/host/mod.rs`
+**File**: `lp-shader/lp-glsl-builtins/src/host/mod.rs`
 
 Add:
 
@@ -108,7 +109,7 @@ pub use logger::{init as init_logger};
 
 ### 3. Update Cargo.toml
 
-**File**: `lp-glsl/lp-glsl-builtins/Cargo.toml`
+**File**: `lp-shader/lp-glsl-builtins/Cargo.toml`
 
 Ensure log dependency:
 
@@ -130,6 +131,7 @@ cargo check --package lp-glsl-builtins
 ```
 
 Ensure:
+
 - Logger compiles
 - `__host_log` function is declared correctly
 - No compilation errors

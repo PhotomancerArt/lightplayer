@@ -7,7 +7,7 @@
 - **`DEFAULT_TARGETS`:** `jit.q32` only for fast default runs (`scripts/glsl-filetests.sh` with no
   `--target`, and `run_filetest` / ignored integration test).
 - **Execution stack:** filetests compile and run through `lp-glsl-exec` and related crates (
-  `lpsc-shared`, `lpvm`, `lp-glsl-diagnostics`); legacy `lp-glsl-cranelift` is not a
+  `lps-shared`, `lpvm`, `lp-glsl-diagnostics`); legacy `lp-glsl-cranelift` is not a
   filetests dependency.
 - **Adapters:** `LpirJitExecutable`, `LpirRv32Executable`, wasm path wired per plan.
 - **Parallel JIT / object codegen:** process-wide serialization in `lpir-cranelift` (`process_sync`)

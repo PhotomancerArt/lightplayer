@@ -15,10 +15,10 @@ Inspired by WASM's Module/Instance/Memory separation, LPVM introduces:
 This separation enables: multiple instances from one module, clean VMContext
 ownership, future parallelism, and a uniform API across backends.
 
-Secondary goal: fix naming. Retire the `lp-glsl/` catch-all in favor of three
+Secondary goal: fix naming. Retire the `lp-shader/` catch-all in favor of three
 layers: **`lps-*`** (shader / logical types / frontends), **`lpir`** (scalarized
 IR only), **`lpvm-*`** (runtime). Runtime types (`GlslValue`, …) move to `lpvm`;
-logical signatures live in **`lpsc-shared`**, not in `lpir` (LPIR does not carry
+logical signatures live in **`lps-shared`**, not in `lpir` (LPIR does not carry
 vec3/mat4 as IR types).
 
 ## Current State
@@ -27,7 +27,7 @@ vec3/mat4 as IR types).
 
 - `lpvm` → **`lpvm`** — values, layout, runtime metadata, VmContext.
 - `lp-glsl-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
-- `lp-glsl-core` → **`lpsc-shared`** — logical `LpsType`, `LpsFunctionSignature`, etc.
+- `lp-glsl-core` → **`lps-shared`** — logical `LpsType`, `LpsFunctionSignature`, etc.
 - `lpir-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
 - `lpir` — scalarized IR + interpreter only.
 - `lp-glsl-wasm` → **`lpvm-wasm`**.
@@ -85,8 +85,8 @@ make reasonable concessions.
 ### Q10: Directory structure
 
 **Answer**: `lpvm/` at the repo root, alongside `lp-riscv/`, `lp-core/`, etc.
-Long-term: eliminate **`lp-glsl/`** as a directory name. Shader layer becomes
-**`lps-*`** (`lpsc-shared`, `lps-naga`, `lps-builtins`, `lps-filetests`, …).
+Long-term: eliminate **`lp-shader/`** as a directory name. Shader layer becomes
+**`lps-*`** (`lps-shared`, `lps-naga`, `lps-builtins`, `lps-filetests`, …).
 **`lpir`** may move to top-level. **`lpvm/`** holds VM crates. Repo may be
 mid-rename; [overview.md](overview.md) is canonical for target names.
 
@@ -97,18 +97,18 @@ mid-rename; [overview.md](overview.md) is canonical for target names.
 What goes in the `lpvm` core crate?
 
 Candidates: values (`GlslValue` → `LpvmValue`), runtime metadata/layout (`GlslType`
-ABI side → `Lpvm*` types that may reference **`lpsc-shared`**), layout functions,
+ABI side → `Lpvm*` types that may reference **`lps-shared`**), layout functions,
 VmContext, Module/Instance/Memory traits, `LpvmData`, path accessors.
 
-**Context**: Spread across `lpvm`, **`lpsc-shared`** (logical signatures),
+**Context**: Spread across `lpvm`, **`lps-shared`** (logical signatures),
 and `lp-glsl-exec` (trait).
 
 **Answer**: One **`lpvm`** crate for **VM/runtime** surface: traits, `LpvmValue`,
 layout, VMContext, runtime-oriented metadata. **Logical** shader types
-(`LpsType`, `LpsFunctionSignature`, …) stay in **`lpsc-shared`** — they are not
+(`LpsType`, `LpsFunctionSignature`, …) stay in **`lps-shared`** — they are not
 LPIR (scalarized) and not VM-only; frontend and runtime both use them.
-**`lpvm`** depends on **`lpsc-shared`** and **`lpir`**. Replaces `lpvm` and
-`lp-glsl-exec`; does **not** absorb `lpsc-shared`.
+**`lpvm`** depends on **`lps-shared`** and **`lpir`**. Replaces `lpvm` and
+`lp-glsl-exec`; does **not** absorb `lps-shared`.
 
 ### Q2: Backend crate organization
 
@@ -159,9 +159,9 @@ keeps `lpir` self-contained for IR-level testing.
 IR-level testing. `lpvm-interp` is future work if we ever need the interpreter
 behind the LPVM trait interface.
 
-### Q5: Relationship between `lpsc-shared`, `lpir`, and `lpvm`
+### Q5: Relationship between `lps-shared`, `lpir`, and `lpvm`
 
-`lpsc-shared` holds logical shader types (`LpsType`, `LpsFunctionSignature`, …).
+`lps-shared` holds logical shader types (`LpsType`, `LpsFunctionSignature`, …).
 Are these GLSL-only? IR? Runtime-only?
 
 **Context**: float, vec2–4, mat2–4, bool, arrays, structs — shared by GLSL
@@ -169,11 +169,11 @@ today and other shading languages later. **`lpir` is scalarized** (no vec3 as an
 IR type). The frontend lowers to LPIR but still emits **metadata** using logical
 types.
 
-**Answer**: **`lpsc-shared`** is the **shader-layer type vocabulary** — shared by
+**Answer**: **`lps-shared`** is the **shader-layer type vocabulary** — shared by
 **`lps-naga`** (and future frontends) and **`lpvm`** (signatures, calling
 convention, metadata). **`lpir`** does **not** absorb these types. **`lpvm`**
 adds runtime values (`LpvmValue`), VMContext, layout, and traits; it **depends on**
-**`lpsc-shared`** where signatures matter. Naming: **`Lps*`** in `lpsc-shared`,
+**`lps-shared`** where signatures matter. Naming: **`Lps*`** in `lps-shared`,
 **`Lpvm*`** for VM-layer runtime types.
 
 ### Q6: What happens to lp-riscv-emu?

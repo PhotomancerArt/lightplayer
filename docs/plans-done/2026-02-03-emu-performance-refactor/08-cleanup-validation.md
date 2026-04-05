@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Final cleanup, remove any temporary code, fix warnings, ensure everything compiles and tests pass, and validate the implementation.
+Final cleanup, remove any temporary code, fix warnings, ensure everything compiles and tests pass,
+and validate the implementation.
 
 ## Code Organization Reminders
 
@@ -15,6 +16,7 @@ Final cleanup, remove any temporary code, fix warnings, ensure everything compil
 ### 1. Remove temporary code
 
 Grep for:
+
 - `TODO` comments
 - `FIXME` comments
 - `XXX` comments
@@ -27,12 +29,14 @@ Remove or address all temporary code.
 ### 2. Fix warnings
 
 Run:
+
 ```bash
 cd lp-riscv/lp-riscv-emu
 cargo check 2>&1 | grep warning
 ```
 
 Fix all warnings:
+
 - Unused variables
 - Unused imports
 - Dead code
@@ -48,11 +52,13 @@ cargo +nightly fmt
 
 ### 4. Verify performance improvements
 
-If possible, run benchmarks or compare before/after performance. The expected improvement is 20-30% from reduced function call overhead.
+If possible, run benchmarks or compare before/after performance. The expected improvement is 20-30%
+from reduced function call overhead.
 
 ### 5. Review implementation
 
 Check that:
+
 - `run()` and `run_fuel()` are properly documented
 - `run_inner()` implements tight loop with inline fuel checking
 - `step_inner()` is marked `#[inline(always)]`
@@ -63,6 +69,7 @@ Check that:
 ### 6. Update documentation
 
 Ensure:
+
 - Module-level docs explain the new fuel-based API
 - `run()` and `run_fuel()` have clear doc comments
 - Examples in docs are updated if needed
@@ -79,7 +86,7 @@ cargo test
 cd ../../lp-core/lp-client
 cargo test
 
-cd ../../lp-glsl/lp-glsl-compiler
+cd ../../lp-shader/lp-glsl-compiler
 cargo test
 ```
 
@@ -106,12 +113,13 @@ cd ../../lp-core/lp-client
 cargo check
 cargo test
 
-cd ../../lp-glsl/lp-glsl-compiler
+cd ../../lp-shader/lp-glsl-compiler
 cargo check
 cargo test
 ```
 
 Ensure:
+
 - All code compiles without warnings
 - All tests pass
 - Code is properly formatted

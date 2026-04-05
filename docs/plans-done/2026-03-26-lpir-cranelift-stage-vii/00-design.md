@@ -13,7 +13,7 @@ removed from the tree.
 
 ```
 DELETED (crate directories):
-lp-glsl/
+lp-shader/
 ├── lp-glsl-cranelift/              # Old AST→CLIF compiler
 ├── lp-glsl-jit-util/               # Old JIT calling convention utility
 ├── lp-glsl-frontend/               # Old GLSL parser / semantic analysis
@@ -22,7 +22,7 @@ lp-glsl/
 Dockerfile.rv32-jit                 # Docker build for esp32-glsl-jit
 
 UPDATED:
-lp-glsl/
+lp-shader/
 ├── lp-glsl-builtins-gen-app/
 │   ├── Cargo.toml                  # DROP: lp-glsl-frontend dep
 │   └── src/
@@ -40,7 +40,7 @@ justfile                            # REMOVE: rv32_packages, build/test/clippy r
 scripts/lp-build.sh                 # CLEAN UP or DELETE
 .idea/lp2025.iml                    # REMOVE: source folder entries
 README.md                           # UPDATE: crate table
-lp-glsl/README.md                   # UPDATE: crate list
+lp-shader/README.md                   # UPDATE: crate list
 AGENTS.md                           # UPDATE: remove old crate references
 .cursor/rules/no-std-compile-path.mdc  # UPDATE: remove confusion warning
 ```
@@ -80,7 +80,7 @@ REMAINS (new chain — no changes):
 | Workspace `Cargo.toml`     | Remove deleted crates from `members`, `default-members`, profile entries                                                                                                                                                              |
 | `justfile`                 | Remove deleted crate references from `rv32_packages`, build/test/clippy                                                                                                                                                               |
 | Scripts / Docker           | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh`                                                                                                                                                                          |
-| Docs                       | Update `README.md`, `lp-glsl/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                             |
+| Docs                       | Update `README.md`, `lp-shader/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                           |
 | Ignored tests              | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                             |
 
 ## Decisions (from notes)

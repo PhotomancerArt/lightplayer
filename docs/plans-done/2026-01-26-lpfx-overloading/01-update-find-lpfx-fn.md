@@ -8,7 +8,7 @@ parameter types using exact type matching.
 
 ## Implementation
 
-### File: `lp-glsl/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
+### File: `lp-shader/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
 
 **Update `find_lpfx_fn` signature:**
 

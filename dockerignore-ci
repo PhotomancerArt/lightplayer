@@ -3,7 +3,7 @@
 # Exclude Cargo target dirs only - do NOT use **/target (excludes lp-glsl-compiler/src/backend/target/)
 lp2025/target
 lp-regalloc2/target
-lp2025/lp-glsl/target
+lp2025/lp-shader/target
 # Exclude rust-toolchain.toml to avoid rustup triggering under QEMU (rename fails on overlay fs)
 lp2025/rust-toolchain.toml
 .git
