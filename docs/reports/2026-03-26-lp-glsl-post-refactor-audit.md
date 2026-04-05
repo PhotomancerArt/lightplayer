@@ -23,7 +23,7 @@ All packages live under `lp-glsl/` unless noted. Workspace membership follows th
 | `lp-glsl-builtins-gen-app`  | Scans `lp-glsl-builtins`, emits IDs, `generated_builtin_abi.rs`, refs, etc. | Yes (stale paths)          |
 | `lp-glsl-builtins-emu-app`  | RISC-V guest binary: links all builtins for emu / filetests                 | Yes (stale names)          |
 | `lp-glsl-builtins-wasm`     | `cdylib` WASM builtins (`import-memory`)                                    | Yes (accurate)             |
-| `lp-glsl-core`              | Shared type / function-signature shapes (`#![no_std]` + alloc)              | No                         |
+| `lps-types`                 | Shared type / function-signature shapes (`#![no_std]` + alloc)              | No                         |
 | `lp-glsl-diagnostics`       | `GlslError`, spans, codes                                                   | No                         |
 | `lp-glsl-exec`              | `GlslExecutable` + glue for filetests backends                              | No                         |
 | `lp-glsl-abi`               | Runtime values / literals; uses `glsl` parser fork                          | No                         |
@@ -55,7 +55,7 @@ flowchart TB
 
   subgraph support["Shared helpers"]
     diag["lp-glsl-diagnostics"]
-    core["lp-glsl-core"]
+    core["lps-types"]
     values["lp-glsl-abi"]
     values --> diag
     values -.-> glsl_parser["glsl fork"]
@@ -106,9 +106,9 @@ flowchart TB
 - **On-device compile path** (`lp-engine`): `lpir-cranelift` with `glsl` → `lp-glsl-naga` → `lpir`;
   builtins from `lp-glsl-builtins`. No `lp-glsl-exec`, `lp-glsl-abi`, or `glsl` parser crate on that
   path — appropriate for splitting “compiler” vs “test harness helpers.”
-- **`lp-glsl-core`**: Used by `lp-glsl-exec` and `lp-glsl-filetests` only. The crate-level doc
-  comment in `lp-glsl-core/src/lib.rs` says it is used by `lp-glsl-naga`; **that is not true** in
-  the current `Cargo.toml` graph (naga crate has no `lp-glsl-core` dependency).
+- **`lps-types`**: Used by `lp-glsl-exec` and `lp-glsl-filetests` only. The crate-level doc
+  comment in `lps-types/src/lib.rs` says it is used by `lp-glsl-naga`; **that is not true** in
+  the current `Cargo.toml` graph (naga crate has no `lps-types` dependency).
 - **`lpir-cranelift` `package.description`** still says “Experimental … (Stage II)”; the stack is
   now production for firmware — consider updating the string to avoid implying a spike.
 
@@ -116,7 +116,7 @@ flowchart TB
 
 ### `lp-glsl/README.md`
 
-- Accurately lists the new crates (`lp-glsl-core`, `lp-glsl-diagnostics`, `lp-glsl-abi`,
+- Accurately lists the new crates (`lps-types`, `lp-glsl-diagnostics`, `lp-glsl-abi`,
   `lp-glsl-exec`, `lp-glsl-wasm`) and the Naga → LPIR → Cranelift story.
 - Commands are generally valid from repo root (`./scripts/glsl-filetests.sh`,
   `cargo check -p fw-esp32 …`).
@@ -128,7 +128,7 @@ flowchart TB
 Compared to the actual workspace crates, the following **are implemented but not listed** in that
 bullet list:
 
-- `lp-glsl-core`
+- `lps-types`
 - `lp-glsl-diagnostics`
 - `lp-glsl-abi`
 - `lp-glsl-exec`
@@ -187,7 +187,7 @@ trust in docs).
    `lp-glsl-wasm`).~~ Done.
 2. ~~**Extend** root `README.md` GLSL section with five missing crates.~~ Done (bullets + link to
    `lp-glsl/README.md`).
-3. ~~**Fix** `lp-glsl-core` crate docs (`lp-glsl-naga` claim).~~ Done.
+3. ~~**Fix** `lps-types` crate docs (`lp-glsl-naga` claim).~~ Done.
 4. ~~**Refresh** `lpir-cranelift` `description` in `Cargo.toml`.~~ Done.
 5. ~~**Repair** `scripts/build-builtins.sh` hash paths.~~ Done.
 6. ~~**Add** `lp-glsl/CRATES.md` + per-crate READMEs.~~ Done.

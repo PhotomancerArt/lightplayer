@@ -48,6 +48,7 @@ Drop `lp-glsl-frontend` from `lp-glsl-filetests/Cargo.toml`.
 ### 2. `lp-glsl-builtins-gen-app` — inline types
 
 The gen-app uses these from `lp-glsl-frontend`:
+
 - `semantic::types::Type` — enum (~20 variants)
 - `semantic::functions::FunctionSignature` — struct (name, return_type, parameters)
 - `semantic::functions::Parameter` — struct (name, ty, qualifier)
@@ -59,7 +60,7 @@ with inlined versions of these types. Only include the variants/fields actually
 used by the gen-app. The types are simple data structs with no complex logic.
 
 ```rust
-// src/lpfx/types.rs
+// src/lpfx/type
 
 /// GLSL type (subset needed for builtin signature parsing)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,6 +117,7 @@ to `FunctionSignature`. The mapping is straightforward: extract name, map
 version in `types.rs` or `glsl_parse.rs`.
 
 **Update imports** in:
+
 - `src/main.rs` — `use lp_glsl_frontend::semantic::types::Type` →
   `use crate::lpfx::types::Type`
 - `src/lpfx/glsl_parse.rs` — replace `lp_glsl_frontend` imports with local
@@ -145,6 +147,7 @@ rm -rf lp-glsl/lp-glsl-frontend
 ```
 
 Remove from root `Cargo.toml`:
+
 - `[workspace] members`: `"lp-glsl/lp-glsl-frontend"`
 - `[workspace] default-members`: `"lp-glsl/lp-glsl-frontend"`
 
@@ -152,6 +155,7 @@ Remove from root `Cargo.toml`:
 
 `lp-glsl-frontend` depended on the `glsl` crate (Rust GLSL parser, git dep).
 Other crates still use `glsl` directly:
+
 - `lp-glsl-filetests` (via `Cargo.toml`)
 - `lp-glsl-builtins-gen-app` (via `Cargo.toml`)
 

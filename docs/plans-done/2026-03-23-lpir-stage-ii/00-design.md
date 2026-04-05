@@ -102,7 +102,7 @@ external deps" rule; justified by parser quality-of-life.
 ## Core types
 
 ```rust
-// types.rs
+// type
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum IrType { F32, I32 }
 
@@ -113,7 +113,10 @@ pub struct VReg(pub u32);
 pub struct SlotId(pub u32);
 
 #[derive(Clone, Copy, Debug)]
-pub struct VRegRange { pub start: u32, pub count: u16 }
+pub struct VRegRange {
+    pub start: u32,
+    pub count: u16
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CalleeRef(pub u32);
@@ -321,6 +324,7 @@ pub fn interpret(
 ```
 
 Interpreter state per frame:
+
 - `regs: Vec<Value>` indexed by VReg
 - `slot_mem: Vec<u8>` (flattened; slot offsets from cumulative sizes)
 - `pc: usize` (index into body)

@@ -14,7 +14,7 @@ for V2; they keep their own copies until a later deprecation/removal pass.
 
 ```
 lp-glsl/lp-glsl-diagnostics/   # DONE: ErrorCode, GlslError, GlSourceLoc, …
-lp-glsl/lp-glsl-core/          # DONE: Type, StructId, FunctionSignature (no registry)
+lp-glsl/lps-types/          # DONE: Type, StructId, FunctionSignature (no registry)
 lp-glsl/lp-glsl-abi/        # DONE: GlslValue (+ glsl parse dep)
 lp-glsl/lp-glsl-exec/          # DONE: GlslExecutable trait (no DirectCallInfo; legacy JIT keeps that)
 
@@ -74,17 +74,17 @@ lp-glsl/lp-glsl-filetests/
 
 ## Main components
 
-| Component                                                               | Role                                                                                    |
-|-------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| `lp-glsl-diagnostics` / `lp-glsl-core` / `lp-glsl-abi` / `lp-glsl-exec` | Shared types (**done**); legacy crates still duplicate until removed later.             |
-| `lp-glsl-wasm`                                                          | `impl GlslExecutable for WasmExecutable` using **`lp_glsl_exec`** / **`lp_glsl_abi`**.  |
-| `lpir_jit_executable.rs` / `lpir_rv32_executable.rs`                    | `impl GlslExecutable` for lpir paths in filetests (or small sibling crate if we split). |
-| `compile.rs`                                                            | `match backend { Wasm => …, Jit => …, Rv32 => … }` only.                                |
-| CI / docs                                                               | Run full target list; locals default to `jit.q32`.                                      |
+| Component                                                            | Role                                                                                    |
+|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| `lp-glsl-diagnostics` / `lps-types` / `lp-glsl-abi` / `lp-glsl-exec` | Shared types (**done**); legacy crates still duplicate until removed later.             |
+| `lp-glsl-wasm`                                                       | `impl GlslExecutable for WasmExecutable` using **`lp_glsl_exec`** / **`lp_glsl_abi`**.  |
+| `lpir_jit_executable.rs` / `lpir_rv32_executable.rs`                 | `impl GlslExecutable` for lpir paths in filetests (or small sibling crate if we split). |
+| `compile.rs`                                                         | `match backend { Wasm => …, Jit => …, Rv32 => … }` only.                                |
+| CI / docs                                                            | Run full target list; locals default to `jit.q32`.                                      |
 
 ## Phases (see `01-` … `06-` in this directory)
 
-**Prerequisite (done):** **`lp-glsl-diagnostics`**, **`lp-glsl-core`**, **`lp-glsl-abi`**, *
+**Prerequisite (done):** **`lp-glsl-diagnostics`**, **`lps-types`**, **`lp-glsl-abi`**, *
 *`lp-glsl-exec`** are in the workspace; legacy code was **not** refactored—only copies for the new
 stack.
 

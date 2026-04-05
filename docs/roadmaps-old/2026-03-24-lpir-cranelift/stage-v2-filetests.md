@@ -6,7 +6,7 @@ Wire **`lp-glsl-filetests`** to **`lpir-cranelift`** for **`jit.q32`** (host CPU
 and **`rv32.q32`** (emulator), using the RV32 object + link + emulator path built
 in **Stage V1**. **Remove** the legacy **`cranelift.q32`** target and **`lp-glsl-cranelift`**
 from the filetest runner. Shared boundary: **`lp-glsl-exec`** (**`GlslExecutable`**),
-**`lp-glsl-abi`** (**`GlslValue`**), **`lp-glsl-diagnostics`**, **`lp-glsl-core`**
+**`lp-glsl-abi`** (**`GlslValue`**), **`lp-glsl-diagnostics`**, **`lps-types`**
 as needed — **legacy `lp-glsl-frontend` / `lp-glsl-cranelift` stay unchanged** until
 a later deprecation pass.
 
