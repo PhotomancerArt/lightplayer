@@ -4,23 +4,23 @@ use std::collections::BTreeMap;
 
 use lp_glsl_abi::GlslFunctionMeta;
 use lp_glsl_abi::GlslValue;
-use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
 use lpir::FloatMode as LpirFloatMode;
-use lpir_cranelift::{CompileOptions, CompilerError, JitModule, jit};
+use lpir_cranelift::{jit, CompileOptions, CompilerError, JitModule};
 use lpir_cranelift::{GlslQ32, GlslReturn};
+use lps_types::{LpsFnSig, LpsType};
 
 use super::q32_exec_common::{
-    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
-    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
-    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
+    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
+    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
+    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
 };
 
 /// Host JIT executable for `jit.q32` / `jit.f32` filetest targets.
 pub struct LpirJitExecutable {
     module: JitModule,
-    signatures: BTreeMap<String, FunctionSignature>,
+    signatures: BTreeMap<String, LpsFnSig>,
 }
 
 impl LpirJitExecutable {
@@ -67,7 +67,7 @@ impl Q32ShaderExecutable for LpirJitExecutable {
         self.module.call(name, &qargs).map_err(map_call_err)
     }
 
-    fn signatures_map(&self) -> &BTreeMap<String, FunctionSignature> {
+    fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig> {
         &self.signatures
     }
 }
@@ -139,13 +139,13 @@ impl GlslExecutable for LpirJitExecutable {
         &mut self,
         name: &str,
         args: &[GlslValue],
-        elem_ty: &Type,
+        elem_ty: &LpsType,
         len: usize,
     ) -> Result<Vec<GlslValue>, GlslError> {
         call_array_from_q32(self, name, args, elem_ty, len)
     }
 
-    fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {
+    fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig> {
         self.signatures.get(name)
     }
 

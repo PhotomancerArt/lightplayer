@@ -3801,10 +3801,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-glsl-core"
-version = "40.0.0"
-
-[[package]]
 name = "lp-glsl-diagnostics"
 version = "40.0.0"
 
@@ -3813,8 +3809,8 @@ name = "lp-glsl-exec"
 version = "40.0.0"
 dependencies = [
  "lp-glsl-abi",
- "lp-glsl-core",
  "lp-glsl-diagnostics",
+ "lps-types",
 ]
 
 [[package]]
@@ -3825,7 +3821,6 @@ dependencies = [
  "glob",
  "glsl",
  "lp-glsl-abi",
- "lp-glsl-core",
  "lp-glsl-diagnostics",
  "lp-glsl-exec",
  "lp-glsl-naga",
@@ -3835,6 +3830,7 @@ dependencies = [
  "lp-riscv-inst",
  "lpir",
  "lpir-cranelift",
+ "lps-types",
  "num_cpus",
  "regex",
  "walkdir",
@@ -4027,6 +4023,14 @@ dependencies = [
  "lpir",
  "target-lexicon",
 ]
+
+[[package]]
+name = "lps-types"
+version = "40.0.0"
+
+[[package]]
+name = "lpvm"
+version = "40.0.0"
 
 [[package]]
 name = "mach2"

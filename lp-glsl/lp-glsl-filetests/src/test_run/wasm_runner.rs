@@ -2,12 +2,12 @@
 
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
 use lp_glsl_abi::GlslValue;
-use lp_glsl_core::{FunctionSignature, ParamQualifier, Parameter, Type};
 use lp_glsl_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
 use lp_glsl_exec::GlslExecutable;
 use lp_glsl_naga::GlslType;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
-use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
+use lp_glsl_wasm::{glsl_wasm, GlslWasmError, WasmExport, WasmOptions, SHADOW_STACK_GLOBAL_EXPORT};
+use lps_types::{FnParam, LpsFnSig, LpsType, ParamQualifier};
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::{Config, Engine, Instance, Store, Val};
@@ -22,7 +22,7 @@ pub struct WasmExecutable {
     store: Store<()>,
     instance: Instance,
     exports: HashMap<String, WasmExport>,
-    signatures: HashMap<String, FunctionSignature>,
+    signatures: HashMap<String, LpsFnSig>,
     float_mode: lp_glsl_naga::FloatMode,
     wasm_bytes: Vec<u8>,
     shadow_stack_base: Option<i32>,
@@ -52,7 +52,7 @@ impl WasmExecutable {
             .iter()
             .map(|e| (e.name.clone(), e.clone()))
             .collect();
-        let signatures: HashMap<String, FunctionSignature> = module
+        let signatures: HashMap<String, LpsFnSig> = module
             .exports
             .iter()
             .map(|e| (e.name.clone(), wasm_export_to_signature(e)))
@@ -129,15 +129,15 @@ fn glsl_wasm_error_to_diagnostics(e: GlslWasmError) -> GlslDiagnostics {
     GlslDiagnostics::from(GlslError::new(ErrorCode::E0400, e.to_string()))
 }
 
-fn wasm_export_to_signature(export: &WasmExport) -> FunctionSignature {
-    FunctionSignature {
+fn wasm_export_to_signature(export: &WasmExport) -> LpsFnSig {
+    LpsFnSig {
         name: export.name.clone(),
         return_type: to_frontend_type(&export.return_type),
         parameters: export
             .param_types
             .iter()
             .enumerate()
-            .map(|(i, ty)| Parameter {
+            .map(|(i, ty)| FnParam {
                 name: format!("p{i}"),
                 ty: to_frontend_type(ty),
                 qualifier: ParamQualifier::In,
@@ -146,32 +146,32 @@ fn wasm_export_to_signature(export: &WasmExport) -> FunctionSignature {
     }
 }
 
-fn to_frontend_type(ty: &GlslType) -> Type {
+fn to_frontend_type(ty: &GlslType) -> LpsType {
     match ty {
-        GlslType::Void => Type::Void,
-        GlslType::Float => Type::Float,
-        GlslType::Int => Type::Int,
-        GlslType::UInt => Type::UInt,
-        GlslType::Bool => Type::Bool,
-        GlslType::Vec2 => Type::Vec2,
-        GlslType::Vec3 => Type::Vec3,
-        GlslType::Vec4 => Type::Vec4,
-        GlslType::IVec2 => Type::IVec2,
-        GlslType::IVec3 => Type::IVec3,
-        GlslType::IVec4 => Type::IVec4,
-        GlslType::UVec2 => Type::UVec2,
-        GlslType::UVec3 => Type::UVec3,
-        GlslType::UVec4 => Type::UVec4,
-        GlslType::BVec2 => Type::BVec2,
-        GlslType::BVec3 => Type::BVec3,
-        GlslType::BVec4 => Type::BVec4,
-        GlslType::Mat2 => Type::Mat2,
-        GlslType::Mat3 => Type::Mat3,
-        GlslType::Mat4 => Type::Mat4,
+        GlslType::Void => LpsType::Void,
+        GlslType::Float => LpsType::Float,
+        GlslType::Int => LpsType::Int,
+        GlslType::UInt => LpsType::UInt,
+        GlslType::Bool => LpsType::Bool,
+        GlslType::Vec2 => LpsType::Vec2,
+        GlslType::Vec3 => LpsType::Vec3,
+        GlslType::Vec4 => LpsType::Vec4,
+        GlslType::IVec2 => LpsType::IVec2,
+        GlslType::IVec3 => LpsType::IVec3,
+        GlslType::IVec4 => LpsType::IVec4,
+        GlslType::UVec2 => LpsType::UVec2,
+        GlslType::UVec3 => LpsType::UVec3,
+        GlslType::UVec4 => LpsType::UVec4,
+        GlslType::BVec2 => LpsType::BVec2,
+        GlslType::BVec3 => LpsType::BVec3,
+        GlslType::BVec4 => LpsType::BVec4,
+        GlslType::Mat2 => LpsType::Mat2,
+        GlslType::Mat3 => LpsType::Mat3,
+        GlslType::Mat4 => LpsType::Mat4,
         GlslType::Array { element, len } => {
-            Type::Array(Box::new(to_frontend_type(element)), *len as usize)
+            LpsType::Array(Box::new(to_frontend_type(element)), *len as usize)
         }
-        GlslType::Struct { .. } => Type::Struct(0),
+        GlslType::Struct { .. } => LpsType::Struct(0),
     }
 }
 
@@ -825,7 +825,7 @@ impl GlslExecutable for WasmExecutable {
         &mut self,
         name: &str,
         args: &[GlslValue],
-        elem_ty: &Type,
+        elem_ty: &LpsType,
         len: usize,
     ) -> Result<Vec<GlslValue>, GlslError> {
         let return_type = self
@@ -835,7 +835,7 @@ impl GlslExecutable for WasmExecutable {
             .ok_or_else(|| {
                 GlslError::new(ErrorCode::E0101, format!("function '{name}' not found"))
             })?;
-        let expected = Type::Array(Box::new(elem_ty.clone()), len);
+        let expected = LpsType::Array(Box::new(elem_ty.clone()), len);
         if to_frontend_type(&return_type) != expected {
             return Err(GlslError::new(
                 ErrorCode::E0400,
@@ -865,7 +865,7 @@ impl GlslExecutable for WasmExecutable {
         }
     }
 
-    fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {
+    fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig> {
         self.signatures.get(name)
     }
 

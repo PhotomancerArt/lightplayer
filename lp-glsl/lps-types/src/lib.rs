@@ -7,8 +7,8 @@
 
 extern crate alloc;
 
-mod functions;
+mod sig;
 mod types;
 
-pub use functions::{FunctionSignature, ParamQualifier, Parameter};
-pub use types::{StructId, Type};
+pub use sig::{FnParam, LpsFnSig, ParamQualifier};
+pub use types::{LpsType, StructId};

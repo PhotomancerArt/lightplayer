@@ -8,7 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-lp-glsl-core = { path = "../lp-glsl-core" }
+lps-types = { path = "../lps-types" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", features = ["std"] }
 lp-glsl-exec = { path = "../lp-glsl-exec" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }

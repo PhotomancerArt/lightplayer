@@ -9,7 +9,7 @@ description = "GlslExecutable trait for pluggable GLSL backends (new stack)"
 workspace = true
 
 [dependencies]
-lp-glsl-core = { path = "../lp-glsl-core" }
+lps-types = { path = "../lps-types" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
 lp-glsl-abi = { path = "../lp-glsl-abi", default-features = false }
 

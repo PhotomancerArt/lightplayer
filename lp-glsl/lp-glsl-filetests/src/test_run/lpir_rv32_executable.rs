@@ -4,21 +4,21 @@ use std::collections::BTreeMap;
 
 use lp_glsl_abi::GlslValue;
 use lp_glsl_abi::{GlslFunctionMeta, GlslModuleMeta};
-use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
 use lp_glsl_exec::GlslExecutable;
 use lp_riscv_elf::ElfLoadInfo;
 use lpir::{FloatMode as LpirFloatMode, IrModule};
 use lpir_cranelift::{
-    CompileOptions, CompilerError, glsl_q32_call_emulated, link_object_with_builtins,
-    object_bytes_from_ir,
+    glsl_q32_call_emulated, link_object_with_builtins, object_bytes_from_ir, CompileOptions,
+    CompilerError,
 };
 use lpir_cranelift::{GlslQ32, GlslReturn};
+use lps_types::{LpsFnSig, LpsType};
 
 use super::q32_exec_common::{
-    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
-    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
-    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
+    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
+    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
+    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
 };
 
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
@@ -27,7 +27,7 @@ pub struct LpirRv32Executable {
     meta: GlslModuleMeta,
     options: CompileOptions,
     load: ElfLoadInfo,
-    signatures: BTreeMap<String, FunctionSignature>,
+    signatures: BTreeMap<String, LpsFnSig>,
 }
 
 impl LpirRv32Executable {
@@ -88,7 +88,7 @@ impl Q32ShaderExecutable for LpirRv32Executable {
         .map_err(map_call_err)
     }
 
-    fn signatures_map(&self) -> &BTreeMap<String, FunctionSignature> {
+    fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig> {
         &self.signatures
     }
 }
@@ -160,13 +160,13 @@ impl GlslExecutable for LpirRv32Executable {
         &mut self,
         name: &str,
         args: &[GlslValue],
-        elem_ty: &Type,
+        elem_ty: &LpsType,
         len: usize,
     ) -> Result<Vec<GlslValue>, GlslError> {
         call_array_from_q32(self, name, args, elem_ty, len)
     }
 
-    fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature> {
+    fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig> {
         self.signatures.get(name)
     }
 

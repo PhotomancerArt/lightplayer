@@ -101,7 +101,7 @@ Full layout and commands: [`lp-glsl/README.md`](lp-glsl/README.md).
 - **`lp-glsl-naga`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
 - **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
-- **`lp-glsl-core`** Shared type and function-signature shapes for tests / exec helpers
+- **`lps-types`** Shared type and function-signature shapes for tests / exec helpers
 - **`lp-glsl-diagnostics`** Error codes, spans, `GlslError`
 - **`lp-glsl-abi`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
 - **`lp-glsl-exec`** `GlslExecutable` trait and filetest backend glue

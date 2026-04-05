@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use lp_glsl_abi::GlslValue;
 use lp_glsl_abi::{GlslFunctionMeta, GlslParamQualifier, GlslType};
-use lp_glsl_core::{FunctionSignature, ParamQualifier, Parameter, Type};
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
+use lps_types::{FnParam, LpsFnSig, LpsType, ParamQualifier};
 
 pub(crate) fn signatures_from_meta(
     meta: &lp_glsl_abi::GlslModuleMeta,
-) -> BTreeMap<String, FunctionSignature> {
+) -> BTreeMap<String, LpsFnSig> {
     let mut m = BTreeMap::new();
     for g in &meta.functions {
         m.insert(g.name.clone(), fn_meta_to_signature(g));
@@ -26,8 +26,8 @@ fn qualifier(q: GlslParamQualifier) -> ParamQualifier {
     }
 }
 
-fn core_type_to_lpir_glsl(ty: &Type) -> Option<GlslType> {
-    use Type::*;
+fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<GlslType> {
+    use LpsType::*;
     Some(match ty {
         Void => GlslType::Void,
         Float => GlslType::Float,
@@ -57,43 +57,43 @@ fn core_type_to_lpir_glsl(ty: &Type) -> Option<GlslType> {
     })
 }
 
-fn lpir_glsl_type_to_core(t: &GlslType) -> Type {
+fn lpir_glsl_type_to_core(t: &GlslType) -> LpsType {
     match t {
-        GlslType::Void => Type::Void,
-        GlslType::Float => Type::Float,
-        GlslType::Int => Type::Int,
-        GlslType::UInt => Type::UInt,
-        GlslType::Bool => Type::Bool,
-        GlslType::Vec2 => Type::Vec2,
-        GlslType::Vec3 => Type::Vec3,
-        GlslType::Vec4 => Type::Vec4,
-        GlslType::IVec2 => Type::IVec2,
-        GlslType::IVec3 => Type::IVec3,
-        GlslType::IVec4 => Type::IVec4,
-        GlslType::UVec2 => Type::UVec2,
-        GlslType::UVec3 => Type::UVec3,
-        GlslType::UVec4 => Type::UVec4,
-        GlslType::BVec2 => Type::BVec2,
-        GlslType::BVec3 => Type::BVec3,
-        GlslType::BVec4 => Type::BVec4,
-        GlslType::Mat2 => Type::Mat2,
-        GlslType::Mat3 => Type::Mat3,
-        GlslType::Mat4 => Type::Mat4,
+        GlslType::Void => LpsType::Void,
+        GlslType::Float => LpsType::Float,
+        GlslType::Int => LpsType::Int,
+        GlslType::UInt => LpsType::UInt,
+        GlslType::Bool => LpsType::Bool,
+        GlslType::Vec2 => LpsType::Vec2,
+        GlslType::Vec3 => LpsType::Vec3,
+        GlslType::Vec4 => LpsType::Vec4,
+        GlslType::IVec2 => LpsType::IVec2,
+        GlslType::IVec3 => LpsType::IVec3,
+        GlslType::IVec4 => LpsType::IVec4,
+        GlslType::UVec2 => LpsType::UVec2,
+        GlslType::UVec3 => LpsType::UVec3,
+        GlslType::UVec4 => LpsType::UVec4,
+        GlslType::BVec2 => LpsType::BVec2,
+        GlslType::BVec3 => LpsType::BVec3,
+        GlslType::BVec4 => LpsType::BVec4,
+        GlslType::Mat2 => LpsType::Mat2,
+        GlslType::Mat3 => LpsType::Mat3,
+        GlslType::Mat4 => LpsType::Mat4,
         GlslType::Array { element, len } => {
-            Type::Array(Box::new(lpir_glsl_type_to_core(element)), *len as usize)
+            LpsType::Array(Box::new(lpir_glsl_type_to_core(element)), *len as usize)
         }
-        GlslType::Struct { .. } => Type::Struct(0),
+        GlslType::Struct { .. } => LpsType::Struct(0),
     }
 }
 
-fn fn_meta_to_signature(g: &GlslFunctionMeta) -> FunctionSignature {
-    FunctionSignature {
+fn fn_meta_to_signature(g: &GlslFunctionMeta) -> LpsFnSig {
+    LpsFnSig {
         name: g.name.clone(),
         return_type: lpir_glsl_type_to_core(&g.return_type),
         parameters: g
             .params
             .iter()
-            .map(|p| Parameter {
+            .map(|p| FnParam {
                 name: p.name.clone(),
                 ty: lpir_glsl_type_to_core(&p.ty),
                 qualifier: qualifier(p.qualifier),
@@ -292,7 +292,7 @@ pub(crate) trait Q32ShaderExecutable {
         args: &[GlslValue],
     ) -> Result<GlslReturn<GlslQ32>, GlslError>;
 
-    fn signatures_map(&self) -> &BTreeMap<String, FunctionSignature>;
+    fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig>;
 }
 
 pub(crate) fn impl_call_void<E: Q32ShaderExecutable>(
@@ -301,7 +301,7 @@ pub(crate) fn impl_call_void<E: Q32ShaderExecutable>(
     args: &[GlslValue],
 ) -> Result<(), GlslError> {
     let gfn = find_gfn(exec.signatures_map(), name)?;
-    if gfn.return_type != Type::Void {
+    if gfn.return_type != LpsType::Void {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!("call_void: '{name}' does not return void"),
@@ -312,9 +312,9 @@ pub(crate) fn impl_call_void<E: Q32ShaderExecutable>(
 }
 
 fn find_gfn<'a>(
-    sigs: &'a BTreeMap<String, FunctionSignature>,
+    sigs: &'a BTreeMap<String, LpsFnSig>,
     name: &str,
-) -> Result<&'a FunctionSignature, GlslError> {
+) -> Result<&'a LpsFnSig, GlslError> {
     sigs.get(name)
         .ok_or_else(|| GlslError::new(ErrorCode::E0101, format!("function '{name}' not found")))
 }
@@ -326,7 +326,7 @@ pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
     args: &[GlslValue],
 ) -> Result<f32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
-    if sig.return_type != Type::Float {
+    if sig.return_type != LpsType::Float {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!("call_f32: '{name}' does not return float"),
@@ -349,7 +349,7 @@ pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
 ) -> Result<i32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
-        Type::Int | Type::UInt => {}
+        LpsType::Int | LpsType::UInt => {}
         _ => {
             return Err(GlslError::new(
                 ErrorCode::E0400,
@@ -374,7 +374,7 @@ pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
     args: &[GlslValue],
 ) -> Result<bool, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
-    if sig.return_type != Type::Bool {
+    if sig.return_type != LpsType::Bool {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!("call_bool: '{name}' does not return bool"),
@@ -399,7 +399,7 @@ pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
     let sig = find_gfn(exec.signatures_map(), name)?;
     let ok = matches!(
         (&sig.return_type, dim),
-        (Type::Vec2, 2) | (Type::Vec3, 3) | (Type::Vec4, 4)
+        (LpsType::Vec2, 2) | (LpsType::Vec3, 3) | (LpsType::Vec4, 4)
     );
     if !ok {
         return Err(GlslError::new(
@@ -433,7 +433,7 @@ pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
     let sig = find_gfn(exec.signatures_map(), name)?;
     let ok = matches!(
         (&sig.return_type, dim),
-        (Type::IVec2, 2) | (Type::IVec3, 3) | (Type::IVec4, 4)
+        (LpsType::IVec2, 2) | (LpsType::IVec3, 3) | (LpsType::IVec4, 4)
     );
     if !ok {
         return Err(GlslError::new(
@@ -465,7 +465,7 @@ pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
     let sig = find_gfn(exec.signatures_map(), name)?;
     let ok = matches!(
         (&sig.return_type, dim),
-        (Type::UVec2, 2) | (Type::UVec3, 3) | (Type::UVec4, 4)
+        (LpsType::UVec2, 2) | (LpsType::UVec3, 3) | (LpsType::UVec4, 4)
     );
     if !ok {
         return Err(GlslError::new(
@@ -497,7 +497,7 @@ pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
     let sig = find_gfn(exec.signatures_map(), name)?;
     let ok = matches!(
         (&sig.return_type, dim),
-        (Type::BVec2, 2) | (Type::BVec3, 3) | (Type::BVec4, 4)
+        (LpsType::BVec2, 2) | (LpsType::BVec3, 3) | (LpsType::BVec4, 4)
     );
     if !ok {
         return Err(GlslError::new(
@@ -530,7 +530,7 @@ pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
     let sig = find_gfn(exec.signatures_map(), name)?;
     let ok = matches!(
         (&sig.return_type, rows, cols),
-        (Type::Mat2, 2, 2) | (Type::Mat3, 3, 3) | (Type::Mat4, 4, 4)
+        (LpsType::Mat2, 2, 2) | (LpsType::Mat3, 3, 3) | (LpsType::Mat4, 4, 4)
     );
     if !ok {
         return Err(GlslError::new(
@@ -561,12 +561,12 @@ pub(crate) fn call_array_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
     args: &[GlslValue],
-    elem_ty: &Type,
+    elem_ty: &LpsType,
     len: usize,
 ) -> Result<Vec<GlslValue>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
-        Type::Array(e, n) if **e == *elem_ty && *n == len => {}
+        LpsType::Array(e, n) if **e == *elem_ty && *n == len => {}
         _ => {
             return Err(GlslError::new(
                 ErrorCode::E0400,

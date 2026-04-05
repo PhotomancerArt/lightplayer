@@ -2,19 +2,20 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::Type;
+use crate::LpsType;
 
+/// Signature for LightPlayer Shader functions
 #[derive(Debug, Clone)]
-pub struct FunctionSignature {
+pub struct LpsFnSig {
     pub name: String,
-    pub return_type: Type,
-    pub parameters: Vec<Parameter>,
+    pub return_type: LpsType,
+    pub parameters: Vec<FnParam>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Parameter {
+pub struct FnParam {
     pub name: String,
-    pub ty: Type,
+    pub ty: LpsType,
     pub qualifier: ParamQualifier,
 }
 

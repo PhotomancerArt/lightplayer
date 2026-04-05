@@ -17,7 +17,7 @@ members = [
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lpfx-impl-macro",
     "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-core",
+    "lp-glsl/lps-types",
     "lp-glsl/lp-glsl-diagnostics",
     "lp-glsl/lp-glsl-exec",
     "lp-glsl/lp-glsl-abi",
@@ -37,7 +37,7 @@ members = [
     "lp-glsl/lp-glsl-filetests-app",
     "lp-glsl/lp-glsl-wasm",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc",
+    "spikes/naga-wasm-poc", "lpvm/lpvm",
 ]
 resolver = "2"
 
@@ -59,7 +59,7 @@ default-members = [
     "lp-glsl/lp-glsl-builtin-ids",
     "lp-glsl/lp-glsl-builtins",
     "lp-glsl/lp-glsl-filetests-gen-app",
-    "lp-glsl/lp-glsl-core",
+    "lp-glsl/lps-types",
     "lp-glsl/lp-glsl-diagnostics",
     "lp-glsl/lp-glsl-exec",
     "lp-glsl/lp-glsl-abi",

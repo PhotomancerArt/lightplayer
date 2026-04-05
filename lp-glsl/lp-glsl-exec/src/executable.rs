@@ -3,8 +3,8 @@
 use alloc::{string::String, vec::Vec};
 
 use lp_glsl_abi::GlslValue;
-use lp_glsl_core::{FunctionSignature, Type};
 use lp_glsl_diagnostics::GlslError;
+use lps_types::{LpsFnSig, LpsType};
 
 pub trait GlslExecutable {
     fn call_void(&mut self, name: &str, args: &[GlslValue]) -> Result<(), GlslError>;
@@ -56,11 +56,11 @@ pub trait GlslExecutable {
         &mut self,
         name: &str,
         args: &[GlslValue],
-        elem_ty: &Type,
+        elem_ty: &LpsType,
         len: usize,
     ) -> Result<Vec<GlslValue>, GlslError>;
 
-    fn get_function_signature(&self, name: &str) -> Option<&FunctionSignature>;
+    fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig>;
 
     fn list_functions(&self) -> Vec<String>;
 

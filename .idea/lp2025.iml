@@ -60,11 +60,12 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/spikes/naga-wasm-poc/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-diagnostics/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-exec/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-abi/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lps-types/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lpvm/lpvm/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
