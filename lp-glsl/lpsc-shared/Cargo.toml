@@ -1,5 +1,5 @@
 [package]
-name = "lps-types"
+name = "lpsc-shared"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

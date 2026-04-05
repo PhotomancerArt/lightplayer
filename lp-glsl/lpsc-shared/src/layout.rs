@@ -2,7 +2,7 @@
 //!
 //! Rules match GLSL `std430` for transparent types. See `docs/design/glsl-layout.md`.
 
-use lps_types::{LayoutRules, LpsType, StructMember};
+use crate::{LayoutRules, LpsType, StructMember};
 
 /// Round `size` up to a multiple of `alignment` (must be > 0).
 pub fn round_up(size: usize, alignment: usize) -> usize {

@@ -3,9 +3,9 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// One step in a path.
+/// One step in a value path (`obj.things[2].prop`)
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PathSegment {
+pub enum LpsPathSeg {
     Field(String),
     Index(usize),
 }
@@ -37,7 +37,7 @@ impl core::fmt::Display for PathParseError {
 }
 
 /// Parse a path into segments. Allows a leading `[n]` for top-level arrays.
-pub fn parse_path(path: &str) -> Result<Vec<PathSegment>, PathParseError> {
+pub fn parse_path(path: &str) -> Result<Vec<LpsPathSeg>, PathParseError> {
     let path = path.trim();
     if path.is_empty() {
         return Err(PathParseError::EmptyPath);
@@ -54,11 +54,11 @@ pub fn parse_path(path: &str) -> Result<Vec<PathSegment>, PathParseError> {
                 Some(']') => {}
                 _ => return Err(PathParseError::MissingBracket),
             }
-            segments.push(PathSegment::Index(idx));
+            segments.push(LpsPathSeg::Index(idx));
         }
         _ => {
             let ident = parse_identifier(&mut chars)?;
-            segments.push(PathSegment::Field(ident));
+            segments.push(LpsPathSeg::Field(ident));
         }
     }
 
@@ -67,7 +67,7 @@ pub fn parse_path(path: &str) -> Result<Vec<PathSegment>, PathParseError> {
             Some('.') => {
                 chars.next();
                 let field = parse_identifier(&mut chars)?;
-                segments.push(PathSegment::Field(field));
+                segments.push(LpsPathSeg::Field(field));
             }
             Some('[') => {
                 chars.next();
@@ -76,7 +76,7 @@ pub fn parse_path(path: &str) -> Result<Vec<PathSegment>, PathParseError> {
                     Some(']') => {}
                     _ => return Err(PathParseError::MissingBracket),
                 }
-                segments.push(PathSegment::Index(idx));
+                segments.push(LpsPathSeg::Index(idx));
             }
             Some(c) => return Err(PathParseError::UnexpectedChar(*c)),
             None => break,
@@ -138,7 +138,7 @@ mod tests {
     fn parse_simple_field() {
         assert_eq!(
             parse_path("position").unwrap(),
-            vec![PathSegment::Field(String::from("position"))]
+            vec![LpsPathSeg::Field(String::from("position"))]
         );
     }
 
@@ -147,9 +147,9 @@ mod tests {
         assert_eq!(
             parse_path("light.position.x").unwrap(),
             vec![
-                PathSegment::Field(String::from("light")),
-                PathSegment::Field(String::from("position")),
-                PathSegment::Field(String::from("x")),
+                LpsPathSeg::Field(String::from("light")),
+                LpsPathSeg::Field(String::from("position")),
+                LpsPathSeg::Field(String::from("x")),
             ]
         );
     }
@@ -159,15 +159,15 @@ mod tests {
         assert_eq!(
             parse_path("lights[3].color").unwrap(),
             vec![
-                PathSegment::Field(String::from("lights")),
-                PathSegment::Index(3),
-                PathSegment::Field(String::from("color")),
+                LpsPathSeg::Field(String::from("lights")),
+                LpsPathSeg::Index(3),
+                LpsPathSeg::Field(String::from("color")),
             ]
         );
     }
 
     #[test]
     fn parse_leading_index() {
-        assert_eq!(parse_path("[2]").unwrap(), vec![PathSegment::Index(2)]);
+        assert_eq!(parse_path("[2]").unwrap(), vec![LpsPathSeg::Index(2)]);
     }
 }

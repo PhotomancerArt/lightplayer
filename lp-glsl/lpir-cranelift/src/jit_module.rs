@@ -11,7 +11,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
 use lpir::FloatMode;
 use lpir::module::IrModule;
-use lpvm::GlslModuleMeta;
+use lpsc_shared::LpsModuleSig;
 
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
@@ -24,7 +24,7 @@ use crate::jit_memory::AllocJitMemoryProvider;
 /// Finalized JIT shader module with GLSL metadata for typed calls.
 pub struct JitModule {
     pub(crate) inner: JITModule,
-    pub(crate) glsl_meta: GlslModuleMeta,
+    pub(crate) glsl_meta: LpsModuleSig,
     pub(crate) func_names: Vec<String>,
     pub(crate) func_ids: Vec<FuncId>,
     pub(crate) name_to_index: BTreeMap<String, usize>,
@@ -71,7 +71,7 @@ impl JitModule {
         self.float_mode
     }
 
-    pub fn glsl_meta(&self) -> &GlslModuleMeta {
+    pub fn glsl_meta(&self) -> &LpsModuleSig {
         &self.glsl_meta
     }
 
@@ -111,7 +111,7 @@ fn build_isa(flags: settings::Flags) -> Result<OwnedTargetIsa, CompilerError> {
 
 pub(crate) fn build_jit_module(
     ir: &IrModule,
-    glsl_meta: GlslModuleMeta,
+    glsl_meta: LpsModuleSig,
     options: CompileOptions,
 ) -> Result<JitModule, CompilerError> {
     let _codegen_guard = process_sync::codegen_guard();

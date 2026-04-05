@@ -8,7 +8,7 @@ use core::fmt;
 
 use naga::{AddressSpace, ArraySize, Function, Handle, Module, ScalarKind, TypeInner, VectorSize};
 
-use lpvm::{GlslParamMeta, GlslParamQualifier, LpsType};
+use lpsc_shared::{FnParam, LpsType, ParamQualifier};
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -30,7 +30,7 @@ impl core::error::Error for CompileError {}
 #[derive(Clone, Debug)]
 pub struct FunctionInfo {
     pub name: String,
-    pub params: Vec<GlslParamMeta>,
+    pub params: Vec<FnParam>,
     pub return_type: LpsType,
 }
 
@@ -89,17 +89,14 @@ fn function_info(
                     space: AddressSpace::Function,
                 } => (
                     naga_type_inner_to_glsl(module, &module.types[base].inner)?,
-                    GlslParamQualifier::InOut,
+                    ParamQualifier::InOut,
                 ),
-                _ => (
-                    naga_type_inner_to_glsl(module, inner)?,
-                    GlslParamQualifier::In,
-                ),
+                _ => (naga_type_inner_to_glsl(module, inner)?, ParamQualifier::In),
             };
-            Ok(GlslParamMeta {
+            Ok(FnParam {
                 name: pname,
-                qualifier,
                 ty,
+                qualifier,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

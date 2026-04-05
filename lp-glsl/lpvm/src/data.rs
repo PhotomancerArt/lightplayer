@@ -4,12 +4,11 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::data_error::DataError;
-use crate::layout::{array_stride, round_up, type_alignment, type_size};
-use lps_types::{LayoutRules, LpsType, StructMember};
-
 use crate::LpsValue;
-use crate::path_resolve::LpsTypePathExt;
+use crate::data_error::DataError;
+use lpsc_shared::layout::{array_stride, round_up, type_alignment, type_size};
+use lpsc_shared::path_resolve::LpsTypePathExt;
+use lpsc_shared::{LayoutRules, LpsType, StructMember};
 
 /// Shader data as represented in LPVM memory
 pub struct LpvmData {
@@ -524,7 +523,7 @@ mod tests {
     use super::*;
     use alloc::boxed::Box;
     use alloc::vec;
-    use lps_types::StructMember;
+    use lpsc_shared::StructMember;
 
     #[test]
     fn round_trip_struct_vec3_float() {

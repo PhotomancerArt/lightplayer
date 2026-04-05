@@ -20,7 +20,7 @@ removing workspace members.
 | `lpir-cranelift` (bulk)                     | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
 | `lp-glsl-wasm` (or transitional WASM crate) | `lpvm-wasm`                   | Emission + runtime           |
 
-**Keep `lps-types`** (and the whole **`lps-*` shader layer**). Do **not** delete
+**Keep `lpsc-shared`** (and the whole **`lps-*` shader layer**). Do **not** delete
 the logical-type crate — it is not absorbed into `lpir`.
 
 ## Workspace
@@ -50,7 +50,7 @@ applicable.
 
 ## What NOT To Do
 
-- Do NOT delete **`lps-types`** or **`lps-naga`** — they are the shader layer,
+- Do NOT delete **`lpsc-shared`** or **`lps-naga`** — they are the shader layer,
   not leftovers from ABI/exec migration.
 - Do NOT delete a crate that still appears in any `Cargo.toml`.
 

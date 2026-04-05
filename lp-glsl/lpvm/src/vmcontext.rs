@@ -7,7 +7,7 @@
 use alloc::boxed::Box;
 
 use crate::LpsValue;
-use lps_types::LpsType;
+use lpsc_shared::LpsType;
 
 /// Default instruction fuel for new [`VmContext`] values (tests and host JIT calls).
 pub const DEFAULT_VMCTX_FUEL: u64 = 1_000_000;

@@ -8,7 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-lps-types = { path = "../lps-types" }
+lpsc-shared = { path = "../lpsc-shared" }
 lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", features = ["std"] }
 lp-glsl-exec = { path = "../lp-glsl-exec" }
 lp-glsl-naga = { path = "../lp-glsl-naga" }

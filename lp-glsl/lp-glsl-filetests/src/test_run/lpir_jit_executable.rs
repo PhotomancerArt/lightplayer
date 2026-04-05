@@ -7,8 +7,7 @@ use lp_glsl_exec::GlslExecutable;
 use lpir::FloatMode as LpirFloatMode;
 use lpir_cranelift::{CompileOptions, CompilerError, JitModule, jit};
 use lpir_cranelift::{GlslQ32, GlslReturn};
-use lps_types::{LpsFnSig, LpsType};
-use lpvm::GlslFunctionMeta;
+use lpsc_shared::{LpsFnSig, LpsType};
 use lpvm::LpsValue;
 
 use super::q32_exec_common::{
@@ -42,7 +41,7 @@ impl LpirJitExecutable {
         Ok(Self { module, signatures })
     }
 
-    fn gfn_meta(&self, name: &str) -> Option<&GlslFunctionMeta> {
+    fn gfn_meta(&self, name: &str) -> Option<&LpsFnSig> {
         self.module
             .glsl_meta()
             .functions

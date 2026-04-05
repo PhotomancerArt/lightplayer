@@ -6,7 +6,7 @@ use lp_glsl_exec::GlslExecutable;
 use lp_glsl_naga::LpsType;
 use lp_glsl_wasm::glsl_type_to_wasm_components;
 use lp_glsl_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
-use lps_types::{FnParam, LpsFnSig, ParamQualifier};
+use lpsc_shared::{FnParam, LpsFnSig, ParamQualifier};
 use lpvm::LpsValue;
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;

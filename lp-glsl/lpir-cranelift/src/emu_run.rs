@@ -12,7 +12,8 @@ use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{LogLevel, Riscv32Emulator};
 use lpir::FloatMode;
 use lpir::module::IrModule;
-use lpvm::{GlslModuleMeta, LpsType, VmContextHeader};
+use lpsc_shared::{LpsModuleSig, LpsType};
+use lpvm::VmContextHeader;
 use target_lexicon::Triple;
 
 use crate::compile_options::CompileOptions;
@@ -45,7 +46,7 @@ fn riscv32_reference_isa() -> Result<cranelift_codegen::isa::OwnedTargetIsa, Com
 pub fn glsl_q32_call_emulated(
     load: &ElfLoadInfo,
     ir: &IrModule,
-    glsl_meta: &GlslModuleMeta,
+    glsl_meta: &LpsModuleSig,
     options: &CompileOptions,
     name: &str,
     args: &[GlslQ32],
@@ -60,9 +61,9 @@ pub fn glsl_q32_call_emulated(
         .iter()
         .find(|f| f.name == name)
         .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-    if gfn.params.len() != args.len() {
+    if gfn.parameters.len() != args.len() {
         return Err(CallError::Arity {
-            expected: gfn.params.len(),
+            expected: gfn.parameters.len(),
             got: args.len(),
         });
     }
@@ -74,7 +75,7 @@ pub fn glsl_q32_call_emulated(
     let ir_func = &ir.functions[idx];
     let param_count = ir_func.param_count as usize;
     let mut flat: Vec<i32> = Vec::new();
-    for (p, a) in gfn.params.iter().zip(args.iter()) {
+    for (p, a) in gfn.parameters.iter().zip(args.iter()) {
         flat.extend(flatten_q32_arg(p, a)?);
     }
     if flat.len() != param_count {

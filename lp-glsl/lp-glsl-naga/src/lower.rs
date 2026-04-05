@@ -6,7 +6,7 @@ use alloc::format;
 use alloc::string::String;
 
 use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, ModuleBuilder};
-use lpvm::{GlslFunctionMeta, GlslModuleMeta};
+use lpsc_shared::{LpsFnSig, LpsModuleSig};
 use naga::{Function, Handle, Module};
 
 use crate::NagaModule;
@@ -19,7 +19,7 @@ use crate::lower_lpfx;
 /// Registers `@glsl::*`, `@lpir::*`, and `@lpfx::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
-pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, GlslModuleMeta), LowerError> {
+pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
     let lpfx_map = lower_lpfx::register_lpfx_imports(&mut mb, naga_module)?;
@@ -30,7 +30,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, GlslModuleMeta), Low
         func_map.insert(*handle, CalleeRef(import_count.saturating_add(i as u32)));
     }
 
-    let mut glsl_meta = GlslModuleMeta::default();
+    let mut glsl_meta = LpsModuleSig::default();
     for (handle, info) in &naga_module.functions {
         let func = &naga_module.module.functions[*handle];
         let ir = lower_function(
@@ -45,9 +45,9 @@ pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, GlslModuleMeta), Low
             name: info.name.clone(),
             inner: Box::new(e),
         })?;
-        glsl_meta.functions.push(GlslFunctionMeta {
+        glsl_meta.functions.push(LpsFnSig {
             name: info.name.clone(),
-            params: info.params.clone(),
+            parameters: info.params.clone(),
             return_type: info.return_type.clone(),
         });
         mb.add_function(ir);

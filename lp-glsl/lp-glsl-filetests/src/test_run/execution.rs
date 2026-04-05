@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use lp_glsl_exec::GlslExecutable;
-use lps_types::LpsType;
+use lpsc_shared::LpsType;
 use lpvm::LpsValue;
 
 /// Execute a function by name with arguments and return the result as a [`LpsValue`].

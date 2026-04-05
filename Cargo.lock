@@ -3801,7 +3801,7 @@ name = "lp-glsl-exec"
 version = "40.0.0"
 dependencies = [
  "lp-glsl-diagnostics",
- "lps-types",
+ "lpsc-shared",
  "lpvm",
 ]
 
@@ -3821,7 +3821,7 @@ dependencies = [
  "lp-riscv-inst",
  "lpir",
  "lpir-cranelift",
- "lps-types",
+ "lpsc-shared",
  "lpvm",
  "num_cpus",
  "regex",
@@ -3857,7 +3857,7 @@ dependencies = [
  "libm",
  "lp-glsl-builtin-ids",
  "lpir",
- "lpvm",
+ "lpsc-shared",
  "naga 29.0.0",
  "smallvec",
 ]
@@ -4012,21 +4012,20 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lpsc-shared",
  "lpvm",
  "target-lexicon",
 ]
 
 [[package]]
-name = "lps-types"
+name = "lpsc-shared"
 version = "40.0.0"
 
 [[package]]
 name = "lpvm"
 version = "40.0.0"
 dependencies = [
- "glsl",
- "lp-glsl-diagnostics",
- "lps-types",
+ "lpsc-shared",
 ]
 
 [[package]]

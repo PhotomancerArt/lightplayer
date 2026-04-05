@@ -63,7 +63,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-diagnostics/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lp-glsl-exec/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpir-cranelift/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lps-types/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpsc-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-glsl/lpvm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lpvm/lpvm/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

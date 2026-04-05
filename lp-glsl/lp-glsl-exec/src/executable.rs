@@ -3,7 +3,7 @@
 use alloc::{string::String, vec::Vec};
 
 use lp_glsl_diagnostics::GlslError;
-use lps_types::{LpsFnSig, LpsType};
+use lpsc_shared::{LpsFnSig, LpsType};
 use lpvm::LpsValue;
 
 pub trait GlslExecutable {

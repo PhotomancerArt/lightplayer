@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use crate::path_resolve::PathError;
+use lpsc_shared::path_resolve::PathError;
 
 /// Failure reading/writing [`crate::LpvmData`] or converting to/from [`crate::LpsValue`].
 #[derive(Debug)]

@@ -1,6 +1,7 @@
 //! Parse assertions, compare values.
 
 use crate::parse::test_type::ComparisonOp;
+use crate::util::parse_lps_value_literal;
 use anyhow::Result;
 use lpvm::LpsValue;
 
@@ -172,9 +173,8 @@ pub fn parse_glsl_value(s: &str) -> Result<LpsValue> {
         return Ok(v);
     }
 
-    // Try parsing as vector or matrix constructor using GlslValue::parse
-    // This uses the GLSL parser to handle constructors like vec2(1.0, 2.0)
-    if let Ok(value) = LpsValue::parse(s) {
+    // Vector/matrix constructors: use filetests GLSL literal parser.
+    if let Ok(value) = parse_lps_value_literal(s) {
         return Ok(value);
     }
 

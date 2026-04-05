@@ -179,10 +179,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-types --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lpsc-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 build-glsl-release:
-    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-types --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lpsc-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 # ============================================================================
 # Formatting
@@ -251,10 +251,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-types --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm -- --no-deps -D warnings
+    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lpsc-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-types --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lpsc-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -284,7 +284,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-types --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lpsc-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh

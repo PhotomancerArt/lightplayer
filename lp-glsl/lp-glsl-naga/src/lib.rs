@@ -31,7 +31,12 @@ pub mod std_math_handler;
 pub use lower::lower;
 pub use lower_error::LowerError;
 
-pub use lpvm::{GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LpsType};
+pub use lpsc_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+
+/// Back-compat alias; prefer [`ParamQualifier`].
+pub type GlslParamQualifier = ParamQualifier;
+/// Back-compat alias for a single formal parameter; prefer [`FnParam`].
+pub type LpsSig = FnParam;
 
 pub use naga_types::{CompileError, FunctionInfo, NagaModule, naga_module_from_parsed};
 pub use parse::{compile, prepared_glsl_for_compile, user_snippet_first_physical_line};
@@ -57,7 +62,7 @@ mod tests {
         assert_eq!(result.functions[0].1.params.len(), 2);
         assert_eq!(
             result.functions[0].1.params[0].qualifier,
-            GlslParamQualifier::In
+            ParamQualifier::In
         );
     }
 

@@ -8,12 +8,10 @@ description = "GLSL ABI - types, values, layout, and paths"
 [lints]
 workspace = true
 
-[dependencies]
-lps-types = { path = "../lps-types" }
-lp-glsl-diagnostics = { path = "../lp-glsl-diagnostics", default-features = false }
-glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, optional = true }
-
 [features]
-default = ["std", "parse"]
-std = ["glsl?/std", "lp-glsl-diagnostics/std"]
-parse = ["dep:glsl"]  # Enables GlslValue::parse() - requires glsl parser
+default = []
+# Host crates may enable `std` for consistency; `lpvm` stays `no_std` either way.
+std = []
+
+[dependencies]
+lpsc-shared = { path = "../lpsc-shared" }

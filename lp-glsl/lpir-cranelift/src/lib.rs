@@ -46,10 +46,15 @@ pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
 pub use lpir::FloatMode;
-pub use lpvm::{
-    GlslFunctionMeta, GlslModuleMeta, GlslParamMeta, GlslParamQualifier, LayoutRules, LpsType,
-    PathError, StructMember,
+pub use lpsc_shared::path_resolve::PathError;
+pub use lpsc_shared::{
+    FnParam, LayoutRules, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, StructMember,
 };
+
+/// Back-compat alias; prefer [`ParamQualifier`].
+pub type GlslParamQualifier = ParamQualifier;
+/// Back-compat alias for a single formal parameter; prefer [`FnParam`].
+pub type LpsSig = FnParam;
 #[cfg(feature = "riscv32-emu")]
 pub use object_link::link_object_with_builtins;
 pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};

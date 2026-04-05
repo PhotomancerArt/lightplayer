@@ -1,8 +1,8 @@
-//! Level-1 [`GlslQ32`] calls using [`lpvm::GlslModuleMeta`].
+//! Level-1 [`GlslQ32`] calls using [`lpsc_shared::LpsModuleSig`].
 
 use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
-use lpvm::LpsType;
+use lpsc_shared::LpsType;
 
 use crate::jit_module::JitModule;
 use crate::values::{
@@ -23,9 +23,9 @@ impl JitModule {
             .iter()
             .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        if gfn.params.len() != args.len() {
+        if gfn.parameters.len() != args.len() {
             return Err(CallError::Arity {
-                expected: gfn.params.len(),
+                expected: gfn.parameters.len(),
                 got: args.len(),
             });
         }
@@ -35,7 +35,7 @@ impl JitModule {
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
         let param_count = self.ir_param_counts[*idx] as usize;
         let mut flat: alloc::vec::Vec<i32> = alloc::vec::Vec::new();
-        for (p, a) in gfn.params.iter().zip(args.iter()) {
+        for (p, a) in gfn.parameters.iter().zip(args.iter()) {
             flat.extend(flatten_q32_arg(p, a)?);
         }
         if flat.len() != param_count {

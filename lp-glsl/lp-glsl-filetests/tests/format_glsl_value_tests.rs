@@ -1,6 +1,6 @@
 //! Unit tests for format_glsl_value() matrix display formatting
 
-use lp_glsl_filetests::util::format_glsl_value;
+use lp_glsl_filetests::util::{format_glsl_value, parse_lps_value_literal};
 use lpvm::LpsValue;
 
 #[test]
@@ -18,7 +18,7 @@ fn test_format_mat2x2() {
     assert_eq!(formatted, "mat2(vec2(1.0, 2.0), vec2(3.0, 4.0))");
 
     // Verify it's valid GLSL that can be parsed
-    let parsed = LpsValue::parse(&formatted).unwrap();
+    let parsed = parse_lps_value_literal(&formatted).unwrap();
     match (mat, parsed) {
         (LpsValue::Mat2x2(m1), LpsValue::Mat2x2(m2)) => {
             assert_eq!(m1, m2);
@@ -49,7 +49,7 @@ fn test_format_mat3x3() {
     );
 
     // Verify it's valid GLSL that can be parsed
-    let parsed = LpsValue::parse(&formatted).unwrap();
+    let parsed = parse_lps_value_literal(&formatted).unwrap();
     match (mat, parsed) {
         (LpsValue::Mat3x3(m1), LpsValue::Mat3x3(m2)) => {
             assert_eq!(m1, m2);
@@ -82,7 +82,7 @@ fn test_format_mat4x4() {
     );
 
     // Verify it's valid GLSL that can be parsed
-    let parsed = LpsValue::parse(&formatted).unwrap();
+    let parsed = parse_lps_value_literal(&formatted).unwrap();
     match (mat, parsed) {
         (LpsValue::Mat4x4(m1), LpsValue::Mat4x4(m2)) => {
             assert_eq!(m1, m2);

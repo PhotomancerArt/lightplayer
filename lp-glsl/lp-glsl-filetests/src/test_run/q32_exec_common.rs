@@ -4,14 +4,13 @@ use std::collections::BTreeMap;
 
 use lp_glsl_diagnostics::{ErrorCode, GlslError};
 use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
-use lps_types::{FnParam, LpsFnSig};
+use lpsc_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
-use lpvm::{GlslFunctionMeta, LpsType};
 
-pub(crate) fn signatures_from_meta(meta: &lpvm::GlslModuleMeta) -> BTreeMap<String, LpsFnSig> {
+pub(crate) fn signatures_from_meta(meta: &LpsModuleSig) -> BTreeMap<String, LpsFnSig> {
     let mut m = BTreeMap::new();
     for g in &meta.functions {
-        m.insert(g.name.clone(), fn_meta_to_signature(g));
+        m.insert(g.name.clone(), g.clone());
     }
     m
 }
@@ -28,39 +27,20 @@ fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<LpsType> {
     }
 }
 
-fn fn_meta_to_signature(g: &GlslFunctionMeta) -> LpsFnSig {
-    LpsFnSig {
-        name: g.name.clone(),
-        return_type: g.return_type.clone(),
-        parameters: g
-            .params
-            .iter()
-            .map(|p| FnParam {
-                name: p.name.clone(),
-                ty: p.ty.clone(),
-                qualifier: p.qualifier,
-            })
-            .collect(),
-    }
-}
-
-pub(crate) fn args_to_q32(
-    gfn: &GlslFunctionMeta,
-    args: &[LpsValue],
-) -> Result<Vec<GlslQ32>, GlslError> {
-    if gfn.params.len() != args.len() {
+pub(crate) fn args_to_q32(gfn: &LpsFnSig, args: &[LpsValue]) -> Result<Vec<GlslQ32>, GlslError> {
+    if gfn.parameters.len() != args.len() {
         return Err(GlslError::new(
             ErrorCode::E0400,
             format!(
                 "wrong argument count for '{}': expected {}, got {}",
                 gfn.name,
-                gfn.params.len(),
+                gfn.parameters.len(),
                 args.len()
             ),
         ));
     }
     let mut out = Vec::with_capacity(args.len());
-    for (p, v) in gfn.params.iter().zip(args.iter()) {
+    for (p, v) in gfn.parameters.iter().zip(args.iter()) {
         out.push(glsl_value_to_q32(&p.ty, v)?);
     }
     Ok(out)

@@ -2,14 +2,14 @@
 
 ### 1. Wire filetests + wasm to shared crates (not `lp-glsl-frontend`)
 
-**Already done (prerequisite):** **`lp-glsl-diagnostics`**, **`lps-types`**,
+**Already done (prerequisite):** **`lp-glsl-diagnostics`**, **`lpsc-shared`**,
 **`lpvm`**, **`lp-glsl-exec`** exist as copies; legacy **`lp-glsl-frontend`**
 / **`lp-glsl-cranelift`** were **not** refactored.
 
 **This phase:**
 
 - **`lp-glsl-filetests`:** depend on **`lp-glsl-exec`**, **`lpvm`**, and
-  **`lp-glsl-diagnostics`** (and **`lps-types`** if any shared signature types are
+  **`lp-glsl-diagnostics`** (and **`lpsc-shared`** if any shared signature types are
   needed at compile boundaries). Replace imports that pointed at
   **`lp_glsl_cranelift::exec::…`** with **`lp_glsl_exec`**, **`lpvm`**, etc.
 - **`lp-glsl-wasm`:** **`impl GlslExecutable` for WasmExecutable** using
@@ -29,7 +29,7 @@ filetests. Impls live in **`lp-glsl-wasm`**, filetests adapters, etc.
 
 - Add **`lpir-cranelift`** with needed features for **`jit`** / **`rv32`**.
 - Add **`lp-glsl-exec`**, **`lpvm`**, **`lp-glsl-diagnostics`** (and
-  **`lps-types`** if needed).
+  **`lpsc-shared`** if needed).
 - **Remove `lp-glsl-cranelift`** once filetests no longer imports it (error tests
   included — switch to **`lpir_cranelift::jit`** or shared parse errors as
   appropriate).

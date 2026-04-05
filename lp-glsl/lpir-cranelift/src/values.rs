@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpvm::{GlslParamMeta, GlslParamQualifier, LpsType};
+use lpsc_shared::{FnParam, LpsType, ParamQualifier};
 
 /// Q32 host-side value (floats as `f64` before fixed-point encode).
 #[derive(Clone, Debug, PartialEq)]
@@ -87,8 +87,8 @@ pub(crate) fn glsl_component_count(ty: &LpsType) -> usize {
     }
 }
 
-pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Vec<i32>, CallError> {
-    if param.qualifier != GlslParamQualifier::In {
+pub(crate) fn flatten_q32_arg(param: &FnParam, arg: &GlslQ32) -> Result<Vec<i32>, CallError> {
+    if param.qualifier != ParamQualifier::In {
         return Err(CallError::Unsupported(String::from(
             "out/inout parameters are not supported by Level-1 call() yet",
         )));
@@ -160,10 +160,10 @@ pub(crate) fn flatten_q32_arg(param: &GlslParamMeta, arg: &GlslQ32) -> Result<Ve
                     items.len()
                 )));
             }
-            let sub = GlslParamMeta {
+            let sub = FnParam {
                 name: String::new(),
-                qualifier: param.qualifier,
                 ty: element.as_ref().clone(),
+                qualifier: param.qualifier,
             };
             let mut out = Vec::new();
             for it in items {

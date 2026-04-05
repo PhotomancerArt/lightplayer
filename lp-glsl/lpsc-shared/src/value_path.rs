@@ -1,10 +1,10 @@
-//! Path-based navigation on [`crate::LpsValue`] trees (struct, array, vector components).
+//! Path-based navigation on [`crate::lps_value::LpsValue`] trees (struct, array, vector components).
 
 use alloc::borrow::Cow;
 use alloc::string::String;
 
-use crate::LpsValue;
-use crate::path::{PathParseError, PathSegment, parse_path};
+use crate::lps_value::LpsValue;
+use crate::path::{parse_path, LpsPathSeg, PathParseError};
 
 /// Failure resolving a path on a [`LpsValue`].
 #[derive(Debug)]
@@ -38,16 +38,23 @@ impl From<PathParseError> for LpsValuePathError {
     }
 }
 
-impl LpsValue {
+/// Path-based get/set on [`LpsValue`] trees ([`LpsValue`] lives in `lpsc-shared`).
+pub trait LpsValuePathExt {
     /// Resolve `path` to a value; vector/matrix swizzles yield owned scalars or small composites.
-    pub fn get_path<'a>(&'a self, path: &str) -> Result<Cow<'a, LpsValue>, LpsValuePathError> {
+    fn get_path<'a>(&'a self, path: &str) -> Result<Cow<'a, LpsValue>, LpsValuePathError>;
+
+    /// Set the value at `path` when the path ends at a mutable slot (struct field, array element,
+    /// or vector component).
+    fn set_path(&mut self, path: &str, value: LpsValue) -> Result<(), LpsValuePathError>;
+}
+
+impl LpsValuePathExt for LpsValue {
+    fn get_path<'a>(&'a self, path: &str) -> Result<Cow<'a, LpsValue>, LpsValuePathError> {
         let segs = parse_path(path).map_err(LpsValuePathError::from)?;
         walk_get(self, &segs)
     }
 
-    /// Set the value at `path` when the path ends at a mutable slot (struct field, array element,
-    /// or vector component).
-    pub fn set_path(&mut self, path: &str, value: LpsValue) -> Result<(), LpsValuePathError> {
+    fn set_path(&mut self, path: &str, value: LpsValue) -> Result<(), LpsValuePathError> {
         let segs = parse_path(path).map_err(LpsValuePathError::from)?;
         walk_set(self, &segs, value)
     }
@@ -55,13 +62,13 @@ impl LpsValue {
 
 fn walk_get<'a>(
     v: &'a LpsValue,
-    segs: &[PathSegment],
+    segs: &[LpsPathSeg],
 ) -> Result<Cow<'a, LpsValue>, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(Cow::Borrowed(v));
     }
     match (&segs[0], v) {
-        (PathSegment::Field(name), LpsValue::Struct { fields, .. }) => {
+        (LpsPathSeg::Field(name), LpsValue::Struct { fields, .. }) => {
             let (_, sub) = fields.iter().find(|(n, _)| n == name).ok_or_else(|| {
                 LpsValuePathError::FieldNotFound {
                     field: name.clone(),
@@ -69,69 +76,69 @@ fn walk_get<'a>(
             })?;
             walk_get(sub, &segs[1..])
         }
-        (PathSegment::Index(idx), LpsValue::Array(items)) => {
+        (LpsPathSeg::Index(idx), LpsValue::Array(items)) => {
             let len = items.len();
             let sub = items
                 .get(*idx)
                 .ok_or(LpsValuePathError::IndexOutOfBounds { index: *idx, len })?;
             walk_get(sub, &segs[1..])
         }
-        (PathSegment::Field(name), LpsValue::Vec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec2(a)) => {
             let x = vec2_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::Vec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec3(a)) => {
             let x = vec3_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::Vec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec4(a)) => {
             let x = vec4_component(a, name)?;
             Ok(Cow::Owned(walk_vec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::IVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec2(a)) => {
             let x = ivec2_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::IVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec3(a)) => {
             let x = ivec3_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::IVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec4(a)) => {
             let x = ivec4_component(a, name)?;
             Ok(Cow::Owned(walk_ivec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::UVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec2(a)) => {
             let x = uvec2_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::UVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec3(a)) => {
             let x = uvec3_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::UVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec4(a)) => {
             let x = uvec4_component(a, name)?;
             Ok(Cow::Owned(walk_uvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::BVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec2(a)) => {
             let x = bvec2_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::BVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec3(a)) => {
             let x = bvec3_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(name), LpsValue::BVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec4(a)) => {
             let x = bvec4_component(a, name)?;
             Ok(Cow::Owned(walk_bvec_tail(x, &segs[1..])?))
         }
-        (PathSegment::Field(_), _) => Err(LpsValuePathError::NotAField {
+        (LpsPathSeg::Field(_), _) => Err(LpsValuePathError::NotAField {
             hint: "not a struct or vector",
         }),
-        (PathSegment::Index(_), _) => Err(LpsValuePathError::NotIndexable),
+        (LpsPathSeg::Index(_), _) => Err(LpsValuePathError::NotIndexable),
     }
 }
 
-fn walk_vec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
+fn walk_vec_tail(x: LpsValue, segs: &[LpsPathSeg]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
@@ -140,7 +147,7 @@ fn walk_vec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValue
     })
 }
 
-fn walk_ivec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
+fn walk_ivec_tail(x: LpsValue, segs: &[LpsPathSeg]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
@@ -149,7 +156,7 @@ fn walk_ivec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValu
     })
 }
 
-fn walk_uvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
+fn walk_uvec_tail(x: LpsValue, segs: &[LpsPathSeg]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
@@ -158,7 +165,7 @@ fn walk_uvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValu
     })
 }
 
-fn walk_bvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValuePathError> {
+fn walk_bvec_tail(x: LpsValue, segs: &[LpsPathSeg]) -> Result<LpsValue, LpsValuePathError> {
     if segs.is_empty() {
         return Ok(x);
     }
@@ -169,7 +176,7 @@ fn walk_bvec_tail(x: LpsValue, segs: &[PathSegment]) -> Result<LpsValue, LpsValu
 
 fn walk_set(
     v: &mut LpsValue,
-    segs: &[PathSegment],
+    segs: &[LpsPathSeg],
     value: LpsValue,
 ) -> Result<(), LpsValuePathError> {
     if segs.is_empty() {
@@ -177,7 +184,7 @@ fn walk_set(
         return Ok(());
     }
     match (&segs[0], v) {
-        (PathSegment::Field(name), LpsValue::Struct { fields, .. }) => {
+        (LpsPathSeg::Field(name), LpsValue::Struct { fields, .. }) => {
             let (_, sub) = fields.iter_mut().find(|(n, _)| n == name).ok_or_else(|| {
                 LpsValuePathError::FieldNotFound {
                     field: name.clone(),
@@ -185,14 +192,14 @@ fn walk_set(
             })?;
             walk_set(sub, &segs[1..], value)
         }
-        (PathSegment::Index(idx), LpsValue::Array(items)) => {
+        (LpsPathSeg::Index(idx), LpsValue::Array(items)) => {
             let len = items.len();
             let sub = items
                 .get_mut(*idx)
                 .ok_or(LpsValuePathError::IndexOutOfBounds { index: *idx, len })?;
             walk_set(sub, &segs[1..], value)
         }
-        (PathSegment::Field(name), LpsValue::Vec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec2(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -206,7 +213,7 @@ fn walk_set(
             *vec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::Vec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec3(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -220,7 +227,7 @@ fn walk_set(
             *vec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::Vec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::Vec4(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -234,7 +241,7 @@ fn walk_set(
             *vec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::IVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec2(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -248,7 +255,7 @@ fn walk_set(
             *ivec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::IVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec3(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -262,7 +269,7 @@ fn walk_set(
             *ivec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::IVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::IVec4(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -276,7 +283,7 @@ fn walk_set(
             *ivec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::UVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec2(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -290,7 +297,7 @@ fn walk_set(
             *uvec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::UVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec3(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -304,7 +311,7 @@ fn walk_set(
             *uvec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::UVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::UVec4(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -318,7 +325,7 @@ fn walk_set(
             *uvec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::BVec2(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec2(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -332,7 +339,7 @@ fn walk_set(
             *bvec2_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::BVec3(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec3(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -346,7 +353,7 @@ fn walk_set(
             *bvec3_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(name), LpsValue::BVec4(a)) => {
+        (LpsPathSeg::Field(name), LpsValue::BVec4(a)) => {
             if !segs[1..].is_empty() {
                 return Err(LpsValuePathError::NotAField {
                     hint: "no nested fields on scalar",
@@ -360,10 +367,10 @@ fn walk_set(
             *bvec4_component_mut(a, name)? = x;
             Ok(())
         }
-        (PathSegment::Field(_), _) => Err(LpsValuePathError::NotAField {
+        (LpsPathSeg::Field(_), _) => Err(LpsValuePathError::NotAField {
             hint: "not a struct, array, or vector",
         }),
-        (PathSegment::Index(_), _) => Err(LpsValuePathError::NotIndexable),
+        (LpsPathSeg::Index(_), _) => Err(LpsValuePathError::NotIndexable),
     }
 }
 

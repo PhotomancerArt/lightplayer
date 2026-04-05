@@ -4,14 +4,13 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lps_types::{LayoutRules, LpsType, StructMember};
-
 use crate::layout::{array_stride, round_up, type_alignment, type_size};
-use crate::path::{PathParseError, PathSegment, parse_path};
+use crate::path::{parse_path, LpsPathSeg, PathParseError};
+use crate::{LayoutRules, LpsType, StructMember};
 
 /// Path-based offset and type projection for [`LpsType`].
 ///
-/// Implemented as a trait because [`LpsType`] is defined in `lps-types`.
+/// Implemented as a trait because [`LpsType`] is defined in `lpsc-shared`.
 pub trait LpsTypePathExt {
     /// Byte offset for `path` under `rules`, added to `base_offset`.
     fn offset_for_path(
@@ -90,12 +89,12 @@ impl core::fmt::Display for PathError {
     }
 }
 
-fn type_walk(ty: &LpsType, segs: &[PathSegment]) -> Result<LpsType, PathError> {
+fn type_walk(ty: &LpsType, segs: &[LpsPathSeg]) -> Result<LpsType, PathError> {
     if segs.is_empty() {
         return Ok(ty.clone());
     }
     match (&segs[0], ty) {
-        (PathSegment::Field(name), LpsType::Struct { members, .. }) => {
+        (LpsPathSeg::Field(name), LpsType::Struct { members, .. }) => {
             let sub = members
                 .iter()
                 .find(|m| m.name.as_deref() == Some(name.as_str()))
@@ -107,7 +106,7 @@ fn type_walk(ty: &LpsType, segs: &[PathSegment]) -> Result<LpsType, PathError> {
             type_walk(sub, &segs[1..])
         }
         (
-            PathSegment::Field(name),
+            LpsPathSeg::Field(name),
             vec_ty @ (LpsType::Vec2
             | LpsType::Vec3
             | LpsType::Vec4
@@ -124,7 +123,7 @@ fn type_walk(ty: &LpsType, segs: &[PathSegment]) -> Result<LpsType, PathError> {
             let scalar_ty = vector_scalar_type(vec_ty, name)?;
             type_walk(&scalar_ty, &segs[1..])
         }
-        (PathSegment::Index(idx), LpsType::Array { element, len }) => {
+        (LpsPathSeg::Index(idx), LpsType::Array { element, len }) => {
             if *idx >= *len as usize {
                 return Err(PathError::IndexOutOfBounds {
                     index: *idx,
@@ -133,26 +132,26 @@ fn type_walk(ty: &LpsType, segs: &[PathSegment]) -> Result<LpsType, PathError> {
             }
             type_walk(element, &segs[1..])
         }
-        (PathSegment::Field(_name), LpsType::Void) => Err(PathError::NotAField {
+        (LpsPathSeg::Field(_name), LpsType::Void) => Err(PathError::NotAField {
             ty: String::from("void"),
         }),
         (
-            PathSegment::Field(_name),
+            LpsPathSeg::Field(_name),
             scalar @ (LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool),
         ) => Err(PathError::NotAField {
             ty: format!("{:?}", scalar),
         }),
-        (PathSegment::Field(name), _) => Err(PathError::FieldNotFound {
+        (LpsPathSeg::Field(name), _) => Err(PathError::FieldNotFound {
             field: name.clone(),
             available: field_names(ty),
         }),
-        (PathSegment::Index(_), _) => Err(PathError::NotIndexable { ty: type_name(ty) }),
+        (LpsPathSeg::Index(_), _) => Err(PathError::NotIndexable { ty: type_name(ty) }),
     }
 }
 
 fn offset_walk(
     ty: &LpsType,
-    segs: &[PathSegment],
+    segs: &[LpsPathSeg],
     rules: LayoutRules,
     base: usize,
 ) -> Result<usize, PathError> {
@@ -160,12 +159,12 @@ fn offset_walk(
         return Ok(base);
     }
     match (&segs[0], ty) {
-        (PathSegment::Field(name), LpsType::Struct { members, .. }) => {
+        (LpsPathSeg::Field(name), LpsType::Struct { members, .. }) => {
             let (off, sub) = struct_field_offset(members, name, rules, base)?;
             offset_walk(sub, &segs[1..], rules, off)
         }
         (
-            PathSegment::Field(name),
+            LpsPathSeg::Field(name),
             vec_ty @ (LpsType::Vec2
             | LpsType::Vec3
             | LpsType::Vec4
@@ -192,7 +191,7 @@ fn offset_walk(
             }
             Ok(base + comp_off)
         }
-        (PathSegment::Index(idx), LpsType::Array { element, len }) => {
+        (LpsPathSeg::Index(idx), LpsType::Array { element, len }) => {
             if *idx >= *len as usize {
                 return Err(PathError::IndexOutOfBounds {
                     index: *idx,
@@ -202,8 +201,8 @@ fn offset_walk(
             let stride = array_stride(element, rules);
             offset_walk(element, &segs[1..], rules, base + idx * stride)
         }
-        (PathSegment::Index(_), _) => Err(PathError::NotIndexable { ty: type_name(ty) }),
-        (PathSegment::Field(name), _) => Err(PathError::FieldNotFound {
+        (LpsPathSeg::Index(_), _) => Err(PathError::NotIndexable { ty: type_name(ty) }),
+        (LpsPathSeg::Field(name), _) => Err(PathError::FieldNotFound {
             field: name.clone(),
             available: field_names(ty),
         }),
@@ -247,7 +246,7 @@ fn vector_scalar_type(ty: &LpsType, name: &str) -> Result<LpsType, PathError> {
 }
 
 fn vector_component_meta(ty: &LpsType, name: &str) -> Result<(usize, LpsType), PathError> {
-    use LpsType::*;
+    use crate::LpsType::*;
     let idx = match ty {
         Vec2 | IVec2 | UVec2 | BVec2 => match name {
             "x" | "r" | "s" => 0usize,

@@ -11,9 +11,8 @@ use lpir_cranelift::{
     object_bytes_from_ir,
 };
 use lpir_cranelift::{GlslQ32, GlslReturn};
-use lps_types::{LpsFnSig, LpsType};
+use lpsc_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
-use lpvm::{GlslFunctionMeta, GlslModuleMeta};
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
@@ -24,7 +23,7 @@ use super::q32_exec_common::{
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
 pub struct LpirRv32Executable {
     ir: IrModule,
-    meta: GlslModuleMeta,
+    meta: LpsModuleSig,
     options: CompileOptions,
     load: ElfLoadInfo,
     signatures: BTreeMap<String, LpsFnSig>,
@@ -59,7 +58,7 @@ impl LpirRv32Executable {
         })
     }
 
-    fn gfn_meta(&self, name: &str) -> Option<&GlslFunctionMeta> {
+    fn gfn_meta(&self, name: &str) -> Option<&LpsFnSig> {
         self.meta.functions.iter().find(|f| f.name == name)
     }
 }
