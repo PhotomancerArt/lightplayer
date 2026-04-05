@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Point the **workspace** at **`light-player/pp-rs`** so every **`pp-rs`** edge (through **naga**) uses the fork.
+Point the **workspace** at **`light-player/pp-rs`** so every **`pp-rs`** edge (through **naga**)
+uses the fork.
 
 ## Code Organization Reminders
 
@@ -19,22 +20,26 @@ Point the **workspace** at **`light-player/pp-rs`** so every **`pp-rs`** edge (t
    pp-rs = { git = "https://github.com/light-player/pp-rs", branch = "main" }
    ```
 
-2. **Local dev:** in **`# Local dev patches`**, uncomment **`#[patch.crates-io]`** + **`pp-rs = { path = "../pp-rs" }`** after cloning **`https://github.com/light-player/pp-rs`** as **`../pp-rs`** (sibling of **`lp2025`**), and comment out the **`git`** patch line above so Cargo resolves one source only.
+2. **Local dev:** in **`# Local dev patches`**, uncomment **`#[patch.crates-io]`** + *
+   *`pp-rs = { path = "../pp-rs" }`** after cloning **`https://github.com/light-player/pp-rs`** as *
+   *`../pp-rs`** (sibling of **`lp2025`**), and comment out the **`git`** patch line above so Cargo
+   resolves one source only.
 
 3. Run **`cargo update -p pp-rs`** (or full refresh) so **`Cargo.lock`** records the **git** source.
 
-4. **Do not** add **`pp-rs`** to **`[workspace.dependencies]`** unless you need a shared version pin; **patch** alone is enough.
+4. **Do not** add **`pp-rs`** to **`[workspace.dependencies]`** unless you need a shared version
+   pin; **patch** alone is enough.
 
 ## Validate
 
 ```bash
 cd lp2025
-cargo check -p lp-glsl-naga
-cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf
-cargo check -p lp-glsl-wasm --target wasm32-unknown-unknown
-cargo test -p lp-glsl-filetests --no-run   # or a lighter subset if full run is heavy
+cargo check -p lps-naga
+cargo check -p lps-naga --target riscv32imac-unknown-none-elf
+cargo check -p lps-wasm --target wasm32-unknown-unknown
+cargo test -p lps-filetests --no-run   # or a lighter subset if full run is heavy
 ```
 
 ## Tests to write
 
-- None beyond existing **`lp-glsl-naga`** / filetests if run.
+- None beyond existing **`lps-naga`** / filetests if run.

@@ -41,11 +41,11 @@ simpler to implement in WASM (just use f32 instructions directly).
 behavior, and Q32 is what runs on the device. WASM i32 operations map
 directly to Q32 arithmetic (they're the same thing — i32 add, i32 mul with
 shift, etc.). The builtins (sin, sqrt, noise) are already implemented as
-Q32 i32 operations in lp-glsl-builtins.
+Q32 i32 operations in lps-builtins.
 
 **Answer**: Q32 first, but the WASM codegen must use the same pluggable
 NumericMode architecture as the Cranelift backend. The decimal system
-(Q32 vs float) is a core design axis of lp-glsl. The WASM backend gets
+(Q32 vs float) is a core design axis of lps. The WASM backend gets
 NumericMode support from the start — implement Q32Strategy now, add
 FloatStrategy later. Same compiler config, same options, different backend.
 
@@ -65,12 +65,12 @@ options are:
   called via WASM imports.
 
 **Suggestion**: WASM imports from a precompiled builtins module.
-lp-glsl-builtins compiles to its own `.wasm` binary once at build time.
+lps-builtins compiles to its own `.wasm` binary once at build time.
 When instantiating a shader, pass the builtins module's exports as the
 import object. This mirrors the JIT path's architecture and keeps shader
 modules small.
 
-**Answer**: WASM imports from a precompiled builtins module. lp-glsl-builtins
+**Answer**: WASM imports from a precompiled builtins module. lps-builtins
 compiles to a `.wasm` binary once at build time. Shader modules declare
 builtins as imports. At instantiation, the builtins module's exports are
 provided as the import object. Type-safe linking at instantiation time.
@@ -123,17 +123,17 @@ Improving the debug UI is later work.
 **Context**: The compiler frontend (parse + semantic analysis) needs to run
 somewhere. Options:
 
-- **In the browser**: Compile lp-glsl-frontend + lp-glsl-wasm to WASM.
+- **In the browser**: Compile lps-frontend + lps-wasm to WASM.
   The compiler itself runs in the browser. Zero server dependency.
 - **On a server**: Send GLSL source to a backend, get WASM bytes back.
   Simpler browser code but requires a server.
 
 **Suggestion**: In the browser. The whole point of this exercise is proving
-the all-in-browser compilation path. lp-glsl-frontend is no_std and should
-compile to WASM. lp-glsl-wasm (the new crate) is designed for WASM from
+the all-in-browser compilation path. lps-frontend is no_std and should
+compile to WASM. lps-wasm (the new crate) is designed for WASM from
 the start.
 
-**Answer**: In the browser. The compiler (lp-glsl-frontend + lp-glsl-wasm)
+**Answer**: In the browser. The compiler (lps-frontend + lps-wasm)
 compiles to WASM and runs client-side. Zero server dependency.
 
 ---
@@ -149,7 +149,7 @@ some buttons. Using Leptos here would add complexity and coupling before
 the framework decision is validated. Keep it simple: a static HTML file
 that loads the compiler WASM module via wasm-bindgen.
 
-Later, the Leptos app can reuse the lp-glsl-frontend and lp-glsl-wasm
+Later, the Leptos app can reuse the lps-frontend and lps-wasm
 crates directly (they're Rust).
 
 **Answer**: Plain HTML + vanilla JS + Rust/WASM. No framework. Ideally a
@@ -217,31 +217,31 @@ existing filetest GLSL sources.
 
 **Context**: The compiler split produces three crates:
 
-- lp-glsl-frontend (shared parser + semantic)
-- lp-glsl-compiler (Cranelift backend, refactored)
-- lp-glsl-wasm (WASM backend, new)
+- lps-frontend (shared parser + semantic)
+- lps-compiler (Cranelift backend, refactored)
+- lps-wasm (WASM backend, new)
 
 The playground itself is a separate build artifact.
 
 **Suggestion**:
 
-- `lp-shader/lp-glsl-frontend/` — new crate
-- `lp-shader/lp-glsl-compiler/` — existing, refactored
-- `lp-shader/lp-glsl-wasm/` — new crate
+- `lp-shader/lps-frontend/` — new crate
+- `lp-shader/lps-compiler/` — existing, refactored
+- `lp-shader/lps-wasm/` — new crate
 - `lp-app/playground/` — the web playground (wasm-pack project)
 
-All in the existing workspace, with lp-glsl-wasm and playground excluded
+All in the existing workspace, with lps-wasm and playground excluded
 from default-members (WASM targets).
 
 **Answer**:
 
-- `lp-shader/lp-glsl-frontend/` — new: parser, semantic, types, errors
-- `lp-shader/lp-glsl-cranelift/` — renamed from lp-glsl-compiler: Cranelift
+- `lp-shader/lps-frontend/` — new: parser, semantic, types, errors
+- `lp-shader/lps-cranelift/` — renamed from lps-compiler: Cranelift
   backend (depends on frontend)
-- `lp-shader/lp-glsl-wasm/` — new: WASM codegen backend (depends on frontend)
+- `lp-shader/lps-wasm/` — new: WASM codegen backend (depends on frontend)
 - `lp-app/playground/` — web playground (wasm-pack project)
 
-Symmetric naming: lp-glsl-cranelift and lp-glsl-wasm are parallel backends.
-lp-glsl-wasm and playground excluded from default-members.
-Filetest infrastructure extended in existing lp-glsl-filetests with
+Symmetric naming: lps-cranelift and lps-wasm are parallel backends.
+lps-wasm and playground excluded from default-members.
+Filetest infrastructure extended in existing lps-filetests with
 wasmtime-based runner.

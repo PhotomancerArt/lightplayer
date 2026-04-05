@@ -2,7 +2,7 @@
 
 ## What shipped
 
-- **`lpir-cranelift`:** Split **`glsl`** (front end / `lp-glsl-naga`) from **`std`** (host:
+- **`lpir-cranelift`:** Split **`glsl`** (front end / `lps-naga`) from **`std`** (host:
   `cranelift-native`, etc.). **`jit()`** and **`CompilerError::Lower`** use **`glsl`**. Default
   features **`std` + `glsl`**. RISC-V32 lowers multi-return functions with **StructReturn** when *
   *`return_types.len() > 2`**; invoke path uses a hidden buffer pointer on **`riscv32`** only.
@@ -14,7 +14,7 @@
 
 ## Key files
 
-- `lp-shader/lpir-cranelift/Cargo.toml`, `src/compile.rs`, `src/lib.rs`, `src/error.rs`,
+- `lp-shader/legacy/lpir-cranelift/Cargo.toml`, `src/compile.rs`, `src/lib.rs`, `src/error.rs`,
   `src/emit/mod.rs`, `src/emit/call.rs`, `src/module_lower.rs`, `src/jit_module.rs`,
   `src/direct_call.rs`, `src/invoke.rs`, `src/call.rs`, `src/emu_run.rs`
 - `lp-core/lp-engine/Cargo.toml`, `src/nodes/shader/runtime.rs`

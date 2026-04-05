@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL interpolation qualifiers in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/interpolation/` following the flat naming convention with prefixes. These tests will comprehensively cover interpolation qualifiers (smooth, flat, noperspective) and auxiliary storage qualifiers (centroid, sample) for input/output variables. These tests are expected to fail initially, serving as a specification for implementing interpolation qualifier support in the compiler.
+Create a complete test suite for GLSL interpolation qualifiers in `lightplayer/crates/lps-filetests/filetests/qualifiers/interpolation/` following the flat naming convention with prefixes. These tests will comprehensively cover interpolation qualifiers (smooth, flat, noperspective) and auxiliary storage qualifiers (centroid, sample) for input/output variables. These tests are expected to fail initially, serving as a specification for implementing interpolation qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -273,8 +273,8 @@ float test_smooth_interpolation() {
    - Error detection (multiple qualifiers, patch conflict)
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-in.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-out.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-in.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-out.glsl`
    - GLSL spec: `variables.adoc` - Interpolation Qualifiers (lines 5491-5625)
 
 ## Files to Create

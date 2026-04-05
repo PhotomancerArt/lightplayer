@@ -6,7 +6,7 @@ Implement runtime bounds checking for array reads and writes using `trapnz` to p
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/2-bounds-checking.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/2-bounds-checking.glsl`
 
 - Valid array access works
 - Out-of-bounds access traps at runtime (commented out in test since it would trap)
@@ -15,7 +15,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/2-bounds
 
 ### 1. Bounds Check Helper Function
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
 
 - Create or extend `emit_bounds_check()` function
 - Check: `index < 0 || index >= array_size`
@@ -34,7 +34,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/2-bounds
 
 ### 2. Add Bounds Checks to Array Reads
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - In `read_lvalue()` for `ArrayElement`:
   - Generate bounds check before `load`
@@ -42,7 +42,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/2-bounds
 
 ### 3. Add Bounds Checks to Array Writes
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - In `write_lvalue()` for `ArrayElement`:
   - Generate bounds check before `store`
@@ -66,6 +66,6 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/2-bounds
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 

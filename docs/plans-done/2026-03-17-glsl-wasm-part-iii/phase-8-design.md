@@ -34,7 +34,7 @@ fails, fix the reported error.
 
 ## 3. Execution and comparison
 
-**Cranelift path:** lp-glsl has execute_main or similar that runs a function with given inputs (
+**Cranelift path:** lps has execute_main or similar that runs a function with given inputs (
 fragCoord, outputSize, time) and returns pixel value.
 
 **WASM path:** WasmExecutable.run("main", args) or equivalent. Args: vec of i32 (or whatever main
@@ -47,7 +47,7 @@ time. A few combinations.
 
 ## 4. Integration test
 
-**Placement:** lp-glsl-wasm/tests/ or lp-glsl-filetests.
+**Placement:** lps-wasm/tests/ or lps-filetests.
 
 **Steps:**
 
@@ -83,8 +83,8 @@ we remove it. Manual or scripted.
 | File                                      | Changes                                                |
 |-------------------------------------------|--------------------------------------------------------|
 | rainbow.shader (if needed)                | Fix any source issues                                  |
-| lp-glsl-wasm                              | Bug fixes for rainbow compilation                      |
-| lp-glsl-wasm/tests/rainbow_integration.rs | New integration test                                   |
+| lps-wasm                              | Bug fixes for rainbow compilation                      |
+| lps-wasm/tests/rainbow_integration.rs | New integration test                                   |
 | filetests/*.glsl                          | Remove @unimplemented(backend=wasm) from passing tests |
 
 ---

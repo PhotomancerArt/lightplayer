@@ -18,7 +18,7 @@ functions first.
 
 ### 1. Add `ast_node_count` to `TypedFunction`
 
-File: `lp-shader/lp-glsl-compiler/src/frontend/semantic/mod.rs`
+File: `lp-shader/lps-compiler/src/frontend/semantic/mod.rs`
 
 Add an `impl TypedFunction` block with a method that recursively counts AST
 nodes. The glsl crate's `Statement` has two variants:
@@ -114,11 +114,11 @@ if available, or just test with hand-built nodes.
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- semantic::tests
+cd lp-shader/lps-compiler && cargo test --features std -- semantic::tests
 ```
 
 Ensure all existing tests still pass:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 ```

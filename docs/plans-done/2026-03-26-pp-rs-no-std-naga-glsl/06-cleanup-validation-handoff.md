@@ -2,25 +2,29 @@
 
 ## Scope of phase
 
-Remove stray TODOs, run full formatting/lint for touched crates, add **`summary.md`**, move plan to **`docs/plans-done/`**, conventional commit.
+Remove stray TODOs, run full formatting/lint for touched crates, add **`summary.md`**, move plan to
+**`docs/plans-done/`**, conventional commit.
 
 ## Cleanup & validation
 
-- Grep **`pp-rs`** and **`lp2025`** diff for **`TODO`**, **`dbg!`**, **`println!`**, temporary **`path`** patches left enabled by mistake.
+- Grep **`pp-rs`** and **`lp2025`** diff for **`TODO`**, **`dbg!`**, **`println!`**, temporary *
+  *`path`** patches left enabled by mistake.
 - Run **`cargo +nightly fmt`** on **`pp-rs`** and any **`lp2025`** files touched.
-- Run **`cargo clippy`** on **`lp-glsl-naga`** (and **`lp-glsl-wasm`** if touched) with **`-D warnings`** per workspace rules.
+- Run **`cargo clippy`** on **`lps-naga`** (and **`lps-wasm`** if touched) with *
+  *`-D warnings`** per workspace rules.
 
 ```bash
 cd lp2025
-cargo check -p lp-glsl-naga
-cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf
-cargo check -p lp-glsl-wasm --target wasm32-unknown-unknown
-cargo test -p lp-glsl-naga
+cargo check -p lps-naga
+cargo check -p lps-naga --target riscv32imac-unknown-none-elf
+cargo check -p lps-wasm --target wasm32-unknown-unknown
+cargo test -p lps-naga
 ```
 
 ## Plan cleanup
 
-- Write **`summary.md`** in this directory: fork URL, patch line, validation commands, follow-up (**embedded `lp-engine` GLSL JIT**).
+- Write **`summary.md`** in this directory: fork URL, patch line, validation commands, follow-up (*
+  *embedded `lp-engine` GLSL JIT**).
 - **`mv docs/plans/2026-03-26-pp-rs-no-std-naga-glsl docs/plans-done/`**
 
 ## Commit

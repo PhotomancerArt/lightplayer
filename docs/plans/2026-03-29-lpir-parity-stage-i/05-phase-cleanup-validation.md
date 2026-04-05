@@ -3,8 +3,8 @@
 ## Cleanup & validation
 
 - Grep diff for `TODO`, `dbg!`, `println!`, commented-out relational code; remove stray debug.
-- `cargo +nightly fmt` on touched crates (`lp-glsl-naga`, filetests if edited).
-- `cargo clippy -p lp-glsl-naga -D warnings` (fix or allow with narrow justification only if
+- `cargo +nightly fmt` on touched crates (`lps-naga`, filetests if edited).
+- `cargo clippy -p lps-naga -D warnings` (fix or allow with narrow justification only if
   required).
 
 ```bash

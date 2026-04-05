@@ -17,7 +17,7 @@ This is a bulk mechanical transformation.
 
 ### Transformation Rules
 
-For every `.glsl` file in `lp-shader/lp-glsl-filetests/filetests/` (excluding
+For every `.glsl` file in `lp-shader/lps-filetests/filetests/` (excluding
 `.gen.glsl` files, which are handled in phase 7):
 
 1. **Remove `// target riscv32.q32`** line (and any `// target wasm32.q32`)
@@ -91,8 +91,8 @@ scripts/glsl-filetests.sh --target wasm.q32
 No test file should have `// target` or `[expect-fail]` remaining:
 
 ```bash
-grep -r '// target' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl' | grep -v '.gen.glsl'
-grep -r '\[expect-fail\]' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl' | grep -v '.gen.glsl'
+grep -r '// target' lp-shader/lps-filetests/filetests/ --include='*.glsl' | grep -v '.gen.glsl'
+grep -r '\[expect-fail\]' lp-shader/lps-filetests/filetests/ --include='*.glsl' | grep -v '.gen.glsl'
 ```
 
 Both greps should return empty.
@@ -100,7 +100,7 @@ Both greps should return empty.
 ## Validate
 
 ```
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 scripts/glsl-filetests.sh
 ```
 

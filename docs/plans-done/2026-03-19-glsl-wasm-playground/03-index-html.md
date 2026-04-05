@@ -2,7 +2,8 @@
 
 ## Scope
 
-Build the single-page web demo: textarea with GLSL source, canvas rendering shader output, error panel. Auto-compile on change. End-to-end: rainbow.shader renders in a browser.
+Build the single-page web demo: textarea with GLSL source, canvas rendering shader output, error
+panel. Auto-compile on change. End-to-end: rainbow.shader renders in a browser.
 
 ## Code organization reminders
 
@@ -46,10 +47,12 @@ Create `lp-app/web-demo/www/index.html`. This is the only file that needs to be 
 
 ### 3. CSS
 
-Two-column layout. Textarea on the left, canvas on the right, errors below. Keep it minimal but readable.
+Two-column layout. Textarea on the left, canvas on the right, errors below. Keep it minimal but
+readable.
 
 - Textarea: monospace font, dark background, full height of left pane.
-- Canvas: `image-rendering: pixelated` so the 64×64 grid scales up without blur. Scale to ~512×512 via CSS `width`/`height`.
+- Canvas: `image-rendering: pixelated` so the 64×64 grid scales up without blur. Scale to ~512×512
+  via CSS `width`/`height`.
 - Error panel: monospace, red text for errors, below both panes.
 - Status: small text showing compile time, fps, etc.
 
@@ -116,7 +119,8 @@ function compileShader(source) {
 }
 ```
 
-Note: Using synchronous `WebAssembly.Module` + `WebAssembly.Instance` is fine for small shader modules. Avoids async complexity in the compile-on-change path.
+Note: Using synchronous `WebAssembly.Module` + `WebAssembly.Instance` is fine for small shader
+modules. Avoids async complexity in the compile-on-change path.
 
 ### 6. JavaScript module — auto-compile on change
 
@@ -189,38 +193,45 @@ function render(timestamp) {
 
 ### 8. Multi-value return handling
 
-WebAssembly multi-value returns are supported in all modern browsers (Chrome 85+, Firefox 78+, Safari 14.1+). When a WASM function returns multiple values, the JS API returns them as an array.
+WebAssembly multi-value returns are supported in all modern browsers (Chrome 85+, Firefox 78+,
+Safari 14.1+). When a WASM function returns multiple values, the JS API returns them as an array.
 
-If multi-value doesn't work as expected (e.g., only the first value is returned), the fallback is to have the shader write its output to linear memory instead. But this is unlikely to be needed.
+If multi-value doesn't work as expected (e.g., only the first value is returned), the fallback is to
+have the shader write its output to linear memory instead. But this is unlikely to be needed.
 
-**Test this early**: After getting the basic page working, verify that `mainFn(...)` returns an array of 4 values. If it returns a single value, we need to adjust the approach.
+**Test this early**: After getting the basic page working, verify that `mainFn(...)` returns an
+array of 4 values. If it returns a single value, we need to adjust the approach.
 
 ### 9. Embed rainbow.shader source
 
 Pre-load the textarea with the rainbow.shader source. Either:
+
 - (a) Inline it in the HTML as the textarea's default content
 - (b) Fetch it as a separate file
 
-Use (a) — inline in the HTML. Simpler, no extra fetch. Copy the content of `examples/basic/src/rainbow.shader/main.glsl` into the textarea element.
+Use (a) — inline in the HTML. Simpler, no extra fetch. Copy the content of
+`examples/basic/src/rainbow.shader/main.glsl` into the textarea element.
 
 ### 10. Error handling edge cases
 
 - **Builtins fetch fails**: Show "Failed to load builtins.wasm" in error panel.
 - **Compiler WASM fails to load**: Show "Failed to load compiler" in error panel.
 - **Shader instantiation fails** (e.g., import mismatch): Show the error, keep last shader.
-- **Shader execution throws** (e.g., unreachable): Catch in the render loop, show error, stop rendering until next successful compile.
+- **Shader execution throws** (e.g., unreachable): Catch in the render loop, show error, stop
+  rendering until next successful compile.
 
 ### 11. Copy artifacts to www/
 
 Before serving, the build pipeline needs to copy:
+
 1. `lp-app/web-demo/pkg/` → accessible from `www/pkg/` (or symlink)
-2. `target/wasm32-unknown-unknown/release/lp_glsl_builtins_wasm.wasm` → `www/builtins.wasm`
+2. `target/wasm32-unknown-unknown/release/lps_builtins_wasm.wasm` → `www/builtins.wasm`
 
 For now, do this manually or with a script. Phase 4 will automate it.
 
 ## Validate
 
-1. Build builtins: `cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release`
+1. Build builtins: `cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release`
 2. Build compiler: `wasm-pack build lp-app/web-demo/ --target web`
 3. Copy artifacts to www/
 4. Serve: `miniserve --index index.html lp-app/web-demo/www/`

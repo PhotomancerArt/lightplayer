@@ -29,8 +29,8 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
 ### Code quality
 
 - `cargo +nightly fmt` on all touched crates.
-- `cargo clippy -D warnings` on `lp-glsl-naga`, `lpir`, `lpir-cranelift`, `lp-glsl-filetests`,
-  `lp-glsl-wasm`.
+- `cargo clippy -D warnings` on `lps-naga`, `lpir`, `lpir-cranelift`, `lps-filetests`,
+  `lps-wasm`.
 - Grep uncommitted diff for `TODO`, `dbg!`, `println!`, `HACK`, temporary code. Remove or
   convert to tracked issues.
 - Fix all new warnings.
@@ -40,14 +40,14 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
 - `./scripts/glsl-filetests.sh` → exit 0 (jit.q32).
 - `./scripts/glsl-filetests.sh --target wasm.q32` → exit 0.
 - `./scripts/glsl-filetests.sh --target rv32.q32` → exit 0.
-- `cargo test -p lp-glsl-naga -p lpir -p lpir-cranelift -p lp-glsl-filetests -p lp-glsl-wasm`.
+- `cargo test -p lps-naga -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm`.
 - `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`.
 - `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`.
 
 ### Documentation
 
 - Update `docs/reports/2026-03-29-lpir-feature-parity-audit.md` with final numbers.
-- Update `lp-shader/lp-glsl-filetests/README.md` if annotation semantics or tooling changed.
+- Update `lp-shader/lps-filetests/README.md` if annotation semantics or tooling changed.
 - Write final parity report using the Milestone VI comparison tooling.
 
 ### Closure

@@ -3,8 +3,8 @@
 ## Scope of work
 
 Fix the ~40 failing GLSL filetests that surfaced after Stage IV-B / Stage V
-work. These span the Naga→LPIR lowering (`lp-glsl-naga`), the WASM emitter
-(`lp-glsl-wasm`), LPFX import resolution, and test maintenance.
+work. These span the Naga→LPIR lowering (`lps-naga`), the WASM emitter
+(`lps-wasm`), LPFX import resolution, and test maintenance.
 
 ## Current state
 

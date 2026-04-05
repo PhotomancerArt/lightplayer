@@ -124,7 +124,7 @@ Or just `CompileOptions::default()` where Q32 + Default strategy is wanted.
 
 Search for `CompileOptions {` across:
 - `lpir-cranelift/src/lib.rs` (tests)
-- `lp-glsl-filetests/` (compile dispatch)
+- `lps-filetests/` (compile dispatch)
 - Any other callers
 
 Note: `Q32Options` is plumbed and stored but the emitter does **not** yet

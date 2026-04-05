@@ -40,6 +40,7 @@ impl ImportTable {
 ```
 
 Scan logic:
+
 - Walk every function's `expressions` arena for `Expression::Math { fun, .. }`
 - For each `fun`, determine if it requires an import (see below)
 - Assign sequential indices
@@ -47,6 +48,7 @@ Scan logic:
 ### 2. Which MathFunctions are inline vs import?
 
 **Float mode — WASM native instructions:**
+
 - `Abs` → `f32.abs`
 - `Ceil` → `f32.ceil`
 - `Floor` → `f32.floor`
@@ -58,6 +60,7 @@ Scan logic:
 - `Fma` → emit as `a*b + c` (no native fma in WASM)
 
 **Float mode — import required:**
+
 - All trig: `Sin`, `Cos`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2`
 - Hyperbolic: `Sinh`, `Cosh`, `Tanh`, `Asinh`, `Acosh`, `Atanh`
 - `Exp`, `Exp2`, `Log`, `Log2`, `Pow`
@@ -73,13 +76,14 @@ Scan logic:
 - `Cross` → inline
 - `Reflect`, `Refract`, `FaceForward` → inline
 
-**Q32 mode — everything imports** (the `lp-glsl-builtins-wasm` crate provides
+**Q32 mode — everything imports** (the `lps-builtins-wasm` crate provides
 Q32 implementations):
+
 - All math functions → import `__lp_<name>`
 
 ### 3. Import naming convention
 
-The `lp-glsl-builtins-wasm` crate exports functions with `__lp_` prefix.
+The `lps-builtins-wasm` crate exports functions with `__lp_` prefix.
 Map `MathFunction` variant to import name:
 
 ```rust
@@ -96,7 +100,7 @@ fn math_function_import_name(fun: MathFunction) -> &'static str {
 }
 ```
 
-Check against actual exports from `lp-glsl-builtins-wasm` (the `__lp_*`
+Check against actual exports from `lps-builtins-wasm` (the `__lp_*`
 strings already exist — 58 of them per the build output).
 
 ### 4. Create emit_math.rs
@@ -198,6 +202,7 @@ fn emit_math_vector(..., dim: u32, ...) -> Result<(), String> {
 ```
 
 Some functions are special:
+
 - `Dot(a, b)` → sum of a[i]*b[i] for i in 0..dim → **returns scalar**
 - `Length(v)` → sqrt(dot(v,v)) → **returns scalar**
 - `Normalize(v)` → v / length(v) → **returns vector**
@@ -257,7 +262,7 @@ RelationalFunction::All | RelationalFunction::Any => {
 scripts/glsl-filetests.sh --target wasm.q32 "builtins/"
 scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
 scripts/glsl-filetests.sh --target wasm.q32 "vec/"
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 All `builtins/` tests should pass. Some edge cases (NaN/Inf handling differences

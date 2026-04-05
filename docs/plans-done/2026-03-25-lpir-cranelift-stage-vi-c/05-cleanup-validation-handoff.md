@@ -20,7 +20,7 @@ append results to the A/B report.
 
 ```bash
 git diff main --name-only   # or your base branch
-git diff | rg 'TODO|FIXME|dbg!|println!|lp-glsl-cranelift' || true
+git diff | rg 'TODO|FIXME|dbg!|println!|lps-cranelift' || true
 ```
 
 Ensure `fw-esp32` no longer lists removed crates.
@@ -71,7 +71,7 @@ Separate implementation commit if manifest edits land in the same PR:
 ```
 chore(fw-esp32): drop orphan old-compiler optional dependencies
 
-- Remove unused lp-glsl-cranelift / cranelift-* / target-lexicon edges; compiler path is lp-server → lp-engine → lpir-cranelift
+- Remove unused lps-cranelift / cranelift-* / target-lexicon edges; compiler path is lp-server → lp-engine → lpir-cranelift
 ```
 
 ## Validate

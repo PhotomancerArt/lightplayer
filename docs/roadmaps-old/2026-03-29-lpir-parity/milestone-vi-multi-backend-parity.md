@@ -15,7 +15,7 @@ to make cross-target comparison easy and repeatable.
 
 ### Comparison tooling
 
-- **Multi-target report mode** for `lp-glsl-filetests-app`: a `--report` (or similar) flag that
+- **Multi-target report mode** for `lps-filetests-app`: a `--report` (or similar) flag that
   runs all targets and produces a structured report with:
   - Per-file, per-target status (pass / fail / unimplemented / broken / unsupported).
   - **Cross-target discrepancies**: files that pass on one target but fail on another.
@@ -28,8 +28,8 @@ to make cross-target comparison easy and repeatable.
 
 - Run the full corpus on `wasm.q32` and `rv32.q32`.
 - Triage failures:
-  - **Shared LPIR bug** → fix in `lp-glsl-naga` / `lpir`.
-  - **Backend emit bug** → fix in `lp-glsl-wasm` or `lpir-cranelift`.
+  - **Shared LPIR bug** → fix in `lps-naga` / `lpir`.
+  - **Backend emit bug** → fix in `lps-wasm` or `lpir-cranelift`.
   - **Intentional platform limit** → annotate `@unsupported(backend=…, reason="…")`.
   - **Unimplemented on that backend** → annotate `@unimplemented(backend=…)`.
 - Do **not** remove existing `@unimplemented(backend=wasm)` wholesale without verifying the test
@@ -50,7 +50,7 @@ to make cross-target comparison easy and repeatable.
 
 ## Deliverables
 
-- Multi-target report command in `lp-glsl-filetests-app`.
+- Multi-target report command in `lps-filetests-app`.
 - Generated parity report in `docs/reports/`.
 - WASM / RV32 failures triaged: fixed, annotated, or documented.
 - All three targets at 0 unexpected failures.

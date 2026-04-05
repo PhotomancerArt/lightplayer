@@ -39,7 +39,7 @@ Add tests to each implementation file in `#[cfg(test)]` modules:
 ### Test Dependencies
 
 - Add `noise` crate as dev dependency if not already present
-- Use existing test helpers from `lp-glsl-builtins/src/util/test_helpers.rs`
+- Use existing test helpers from `lps-builtins/src/util/test_helpers.rs`
 
 ## Success Criteria
 

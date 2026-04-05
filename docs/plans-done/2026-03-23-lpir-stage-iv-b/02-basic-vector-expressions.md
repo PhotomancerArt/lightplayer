@@ -226,9 +226,9 @@ Expression::CallResult(_) => {
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
-cargo clippy -p lp-glsl-naga
+cargo test -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
+cargo clippy -p lps-naga
 ```
 
 Existing scalar tests pass. Simple vector construction filetests

@@ -48,7 +48,7 @@ Internal implementation functions can still use `__lp_q32_*` naming.
 
 **Question**: Should `lp_*` functions be:
 
-- Option A: A new category checked separately (like "lp_glsl_builtins")
+- Option A: A new category checked separately (like "lps_builtins")
 - Option B: Registered as user functions but with special handling
 - Option C: Added to the GLSL builtin system but with `lp_` prefix
 

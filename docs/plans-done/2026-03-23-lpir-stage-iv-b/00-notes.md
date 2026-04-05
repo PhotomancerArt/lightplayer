@@ -2,7 +2,7 @@
 
 ## Scope
 
-Extend the Naga → LPIR lowering (`lp-glsl-naga`) to scalarize vector
+Extend the Naga → LPIR lowering (`lps-naga`) to scalarize vector
 and matrix operations. After this stage, GLSL programs using vec2/vec3/
 vec4, mat2/mat3/mat4, swizzles, component access, and vector math all
 lower to flat scalar LPIR ops. This is required for the web demo and the

@@ -21,7 +21,7 @@ Final review, remove temporary code, fix warnings, verify all tests pass.
 - Remove any `#[allow(unused)]` that is no longer needed.
 - Verify all doc comments are accurate.
 - Verify `q32.rs` inline ops match the old crate's behavior. Cross-reference
-  with `lp-glsl-cranelift/src/frontend/codegen/numeric.rs` Q32Strategy methods.
+  with `lps-cranelift/src/frontend/codegen/numeric.rs` Q32Strategy methods.
 - Verify `builtins.rs` `get_function_pointer` covers all BuiltinId variants
   that can be resolved (no panics at runtime for missing arms).
 
@@ -46,8 +46,8 @@ Fix all warnings.
 ```
 cargo test -p lpir-cranelift
 cargo test -p lpir
-cargo test -p lp-glsl-naga
-cargo test -p lp-glsl-wasm
+cargo test -p lps-naga
+cargo test -p lps-wasm
 ```
 
 All tests pass.
@@ -66,7 +66,7 @@ feat(lpir-cranelift): Q32 emission, builtins, and import resolution
 
 - Moved FloatMode to lpir crate, renamed Float → F32
 - Import resolution: ImportDecl → BuiltinId → Cranelift FuncRef
-- Builtin declaration and JIT symbol lookup (lp-glsl-builtins)
+- Builtin declaration and JIT symbol lookup (lps-builtins)
 - Q32 type mapping: IrType::F32 → Cranelift I32
 - Q32 constant encoding (Q16.16)
 - Q32 inline ops: fneg, fabs, fmin, fmax, ffloor, fceil, ftrunc
@@ -86,6 +86,6 @@ cargo clippy -p lpir-cranelift -- -D warnings
 cargo clippy -p lpir -- -D warnings
 cargo test -p lpir-cranelift
 cargo test -p lpir
-cargo test -p lp-glsl-naga
-cargo test -p lp-glsl-wasm
+cargo test -p lps-naga
+cargo test -p lps-wasm
 ```

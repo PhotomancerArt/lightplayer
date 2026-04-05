@@ -47,7 +47,7 @@ All existing consumers must continue to work after the refactor.
 
 ### How the RV32 backend works in filetests today
 
-`LpirRv32Executable` in **`lps-filetests`** (path may still be `lp-glsl-filetests`):
+`LpirRv32Executable` in **`lps-filetests`** (path may still be `lps-filetests`):
 
 1. GLSL → **`lps-naga`** → `IrModule` + module metadata (e.g. `LpvmModuleMeta` /
    transitional `GlslModuleMeta`)
@@ -127,7 +127,7 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 cranelift-codegen = { ..., default-features = false }  # for object compilation
 cranelift-object = { ... }
 cranelift-module = { ... }
-lps-builtins = { ... }  # for linking (path may still be lp-glsl-builtins)
+lps-builtins = { ... }  # for linking (path may still be lps-builtins)
 ```
 
 Note: `lpvm-rv32` needs Cranelift for compiling LPIR to RV32 object code. This

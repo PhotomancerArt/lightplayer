@@ -6,7 +6,7 @@
 ## Scope of work
 
 Bring the Naga → LPIR → Cranelift pipeline to **GLSL feature parity** with the filetest corpus.
-The legacy compiler (`lp-glsl-cranelift`, `lp-glsl-frontend`) has already been removed from the
+The legacy compiler (`lps-cranelift`, `lps-frontend`) has already been removed from the
 dependency graph. This plan addresses the remaining **language coverage gaps** surfaced by the
 filetest suite.
 
@@ -51,14 +51,14 @@ and WASM. WASM-specific `@unimplemented` annotations for pre-existing gaps are a
 
 ### Key code touchpoints
 
-- `lp-shader/lp-glsl-naga/src/lower_expr.rs` — expression lowering (relational, matrix, array)
-- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` — statement lowering (matrix stores, aggregates)
-- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` — `naga_type_to_ir_types` (type mapping)
-- `lp-shader/lp-glsl-naga/src/lower_math.rs` — math builtin decomposition
-- `lp-shader/lp-glsl-naga/src/lib.rs` — `naga_type_inner_to_glsl`, `extract_functions`
+- `lp-shader/lps-naga/src/lower_expr.rs` — expression lowering (relational, matrix, array)
+- `lp-shader/lps-naga/src/lower_stmt.rs` — statement lowering (matrix stores, aggregates)
+- `lp-shader/lps-naga/src/lower_ctx.rs` — `naga_type_to_ir_types` (type mapping)
+- `lp-shader/lps-naga/src/lower_math.rs` — math builtin decomposition
+- `lp-shader/lps-naga/src/lib.rs` — `naga_type_inner_to_glsl`, `extract_functions`
 - `lp-shader/lpir/src/glsl_metadata.rs` — `GlslType` enum
-- `lp-shader/lpir-cranelift/src/invoke.rs` — host JIT calling, return decode
-- `lp-shader/lp-glsl-filetests/` — test harness and `.glsl` corpus
+- `lp-shader/legacy/lpir-cranelift/src/invoke.rs` — host JIT calling, return decode
+- `lp-shader/lps-filetests/` — test harness and `.glsl` corpus
 
 ## Questions
 
@@ -104,14 +104,14 @@ then Cranelift invoke glue (sret for >4-word returns) as a separate phase.
 
 **Context:** 4 `type_errors/` files fail because the LPIR path produces different error codes than
 expected (e.g. `E0400 unsupported expression` instead of `E0112 post-increment requires numeric
-operand`). Fixing this requires adding pre-lowering validation in `lp-glsl-naga` to catch these
+operand`). Fixing this requires adding pre-lowering validation in `lps-naga` to catch these
 cases before they reach the general lowering error path.
 
 **Suggested answer:** Fix the diagnostics — they're small targeted checks (e.g. "reject `++` on
 bool before attempting to lower the binary Add") and improve the user-facing error quality. Don't
 just annotate the tests as `@broken`.
 
-**Answer:** Fix diagnostics (pre-lowering validation in `lp-glsl-naga`).
+**Answer:** Fix diagnostics (pre-lowering validation in `lps-naga`).
 
 ---
 

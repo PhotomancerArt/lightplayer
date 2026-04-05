@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update `lp-shader/lp-glsl-builtins/src/glsl/q32/types/q32.rs` to match
+Update `lp-shader/lps-builtins/src/glsl/q32/types/q32.rs` to match
 `docs/design/q32.md`.
 
 ## Code Organization Reminders
@@ -121,7 +121,7 @@ pub const fn mul_int(self, i: i32) -> Q32 {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-builtins -- q32
+cargo test -p lps-builtins -- q32
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```
 

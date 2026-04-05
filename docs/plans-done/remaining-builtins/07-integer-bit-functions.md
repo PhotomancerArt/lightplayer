@@ -45,8 +45,8 @@ complexity.
 
 ## Files to Create/Modify
 
-- For inline: `lightplayer/crates/lp-glsl-compiler/src/backend/transform/q32/converters/math.rs`
-- For builtins: `lightplayer/crates/lp-glsl-builtins/src/q32/` (new files as needed)
+- For inline: `lightplayer/crates/lps-compiler/src/backend/transform/q32/converters/math.rs`
+- For builtins: `lightplayer/crates/lps-builtins/src/q32/` (new files as needed)
 - Run builtin generator if any builtins are added
 
 ## Success Criteria

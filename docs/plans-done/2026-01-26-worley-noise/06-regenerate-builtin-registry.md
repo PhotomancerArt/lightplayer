@@ -9,7 +9,7 @@ system. The generator scans `lpfx/worley/` directory and adds functions to the `
 
 ### Steps
 
-1. Run the builtin generator: `cargo run --bin lp-glsl-builtin-gen-app` (or appropriate command)
+1. Run the builtin generator: `cargo run --bin lps-builtin-gen-app` (or appropriate command)
 2. Verify that new functions are registered in `BuiltinId` enum
 3. Verify that function signatures are correctly parsed
 4. Ensure all functions are accessible via the builtin system

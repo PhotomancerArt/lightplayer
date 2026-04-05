@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Prove **`pp-rs`** + **`lp-glsl-naga`** compile for **bare-metal RISC-V** and that **WASM** / host paths are unchanged.
+Prove **`pp-rs`** + **`lps-naga`** compile for **bare-metal RISC-V** and that **WASM** / host
+paths are unchanged.
 
 ## Code Organization Reminders
 
@@ -14,24 +15,28 @@ Prove **`pp-rs`** + **`lp-glsl-naga`** compile for **bare-metal RISC-V** and tha
 
 ## Implementation Details
 
-1. From **`lp2025`** root, with **`[patch.crates-io]`** temporarily pointing **`pp-rs`** to **`path = "../pp-rs"`** (or after Phase 4, git):
+1. From **`lp2025`** root, with **`[patch.crates-io]`** temporarily pointing **`pp-rs`** to *
+   *`path = "../pp-rs"`** (or after Phase 4, git):
    ```bash
    rustup target add riscv32imac-unknown-none-elf
-   cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf
+   cargo check -p lps-naga --target riscv32imac-unknown-none-elf
    ```
 2. WASM sanity (unchanged **`std`** on target):
    ```bash
-   cargo check -p lp-glsl-wasm --target wasm32-unknown-unknown
+   cargo check -p lps-wasm --target wasm32-unknown-unknown
    ```
 3. Host:
    ```bash
-   cargo test -p lp-glsl-naga
+   cargo test -p lps-naga
    ```
 
 ## Validate
 
-All three commands above succeed with **no new warnings** in **`pp-rs`** / **`lp-glsl-naga`** that violate **lp2025** lint policy (fix or allow with justification).
+All three commands above succeed with **no new warnings** in **`pp-rs`** / **`lps-naga`** that
+violate **lp2025** lint policy (fix or allow with justification).
 
 ## Tests to write
 
-- Optional **GitHub Actions** (on **`light-player/pp-rs`**): matrix **`ubuntu-latest`** with **`cargo check`** + **`riscv32imac-unknown-none-elf`** + **`wasm32-unknown-unknown`** for a minimal crate that depends only on **`pp-rs`**, or document that **`lp2025`** CI is the integration gate.
+- Optional **GitHub Actions** (on **`light-player/pp-rs`**): matrix **`ubuntu-latest`** with *
+  *`cargo check`** + **`riscv32imac-unknown-none-elf`** + **`wasm32-unknown-unknown`** for a minimal
+  crate that depends only on **`pp-rs`**, or document that **`lp2025`** CI is the integration gate.

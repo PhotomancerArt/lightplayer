@@ -44,7 +44,7 @@ function call.
     - Unignore the `test_q32_fdiv` test - it should work now with the builtin
     - Filetests provide comprehensive coverage
 
-4. **Code Size Verification**: ✅ **ANSWERED** - Run lp-glsl-q32-metrics-app script after changes to
+4. **Code Size Verification**: ✅ **ANSWERED** - Run lps-q32-metrics-app script after changes to
    compare with before.
     - Before state already captured in `docs/reports/q32/2026-01-24T01.26.02-pre-ops-builtins`
     - Run script again after implementation to compare and verify code size reduction

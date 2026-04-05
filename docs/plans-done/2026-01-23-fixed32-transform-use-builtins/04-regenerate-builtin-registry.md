@@ -11,7 +11,7 @@ the new add and sub builtins.
 
 Execute `scripts/build-builtins.sh`:
 
-- This will scan `lp-glsl-builtins/src/builtins/q32/` for new builtins
+- This will scan `lps-builtins/src/builtins/q32/` for new builtins
 - Auto-generate `mod.rs` with exports for add and sub
 - Auto-generate `registry.rs` with `Q32Add` and `Q32Sub` enum variants
 - Auto-generate `builtin_refs.rs` with function references

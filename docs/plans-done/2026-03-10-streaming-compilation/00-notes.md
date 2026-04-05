@@ -32,14 +32,14 @@ The proposed pipeline:
 
 | File                                                           | Role                                                                   |
 |----------------------------------------------------------------|------------------------------------------------------------------------|
-| `lp-shader/lp-glsl-compiler/src/frontend/mod.rs`               | `glsl_jit`, `compile_glsl_to_gl_module_jit` — top-level API            |
-| `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs`     | `GlslCompiler::compile_to_gl_module_jit` — CLIF IR generation loop     |
-| `lp-shader/lp-glsl-compiler/src/backend/module/gl_module.rs`   | `GlModule`, `apply_transform`, `add_function`, `declare_function`      |
-| `lp-shader/lp-glsl-compiler/src/backend/codegen/jit.rs`        | `build_jit_executable`, `build_jit_executable_memory_optimized`        |
-| `lp-shader/lp-glsl-compiler/src/backend/transform/pipeline.rs` | `Transform` trait, `TransformContext`                                  |
-| `lp-shader/lp-glsl-compiler/src/backend/transform/q32/`        | Q32 transform implementation                                           |
-| `lp-shader/lp-glsl-compiler/src/frontend/codegen/context.rs`   | `CodegenContext` — needs `&mut GlModule<M>` for `declare_func_in_func` |
-| `lp-shader/lp-glsl-compiler/src/exec/jit.rs`                   | `GlslJitModule` — final output                                         |
+| `lp-shader/lps-compiler/src/frontend/mod.rs`               | `glsl_jit`, `compile_glsl_to_gl_module_jit` — top-level API            |
+| `lp-shader/lps-compiler/src/frontend/glsl_compiler.rs`     | `GlslCompiler::compile_to_gl_module_jit` — CLIF IR generation loop     |
+| `lp-shader/lps-compiler/src/backend/module/gl_module.rs`   | `GlModule`, `apply_transform`, `add_function`, `declare_function`      |
+| `lp-shader/lps-compiler/src/backend/codegen/jit.rs`        | `build_jit_executable`, `build_jit_executable_memory_optimized`        |
+| `lp-shader/lps-compiler/src/backend/transform/pipeline.rs` | `Transform` trait, `TransformContext`                                  |
+| `lp-shader/lps-compiler/src/backend/transform/q32/`        | Q32 transform implementation                                           |
+| `lp-shader/lps-compiler/src/frontend/codegen/context.rs`   | `CodegenContext` — needs `&mut GlModule<M>` for `declare_func_in_func` |
+| `lp-shader/lps-compiler/src/exec/jit.rs`                   | `GlslJitModule` — final output                                         |
 
 ### Key data structures
 

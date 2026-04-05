@@ -12,7 +12,7 @@ Stage II implementation is mechanical.
 
 ## Current state
 
-The existing WASM emitter (`lp-glsl-wasm/src/emit.rs`, ~1986 lines) handles
+The existing WASM emitter (`lps-wasm/src/emit.rs`, ~1986 lines) handles
 the following directly from Naga IR:
 
 **Expressions**: Literal (F32/I32/U32/Bool), Constant, FunctionArgument,

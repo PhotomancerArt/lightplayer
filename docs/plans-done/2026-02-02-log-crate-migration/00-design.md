@@ -42,14 +42,14 @@ lp-fw/fw-esp32/src/
 ├── main.rs                   # UPDATE: Initialize logger
 └── log.rs                    # NEW: Logger initialization for ESP32
 
-lp-shader/lp-glsl-builtins/src/host/
+lp-shader/lps-builtins/src/host/
 ├── mod.rs                    # UPDATE: Remove host_println, update host_debug → host_log
 ├── macros.rs                 # UPDATE: Replace host_debug!/host_println! with log macros
 ├── logger.rs                 # NEW: Logger implementation (routes to emulator/JIT)
 ├── test.rs                   # UPDATE: Update test implementations
 └── no_std_format.rs          # UPDATE: Update for log levels
 
-lp-shader/lp-glsl-compiler/src/backend/host/
+lp-shader/lps-compiler/src/backend/host/
 ├── impls.rs                  # UPDATE: Replace __host_debug/__host_println with __host_log
 └── registry.rs               # UPDATE: Update HostId enum (remove Println, update Debug → Log)
 
@@ -202,7 +202,7 @@ async fn my_async_test() {
 - Called from `fw-esp32/src/main.rs` at startup
 - Can be initialized with custom level if needed (future)
 
-### 5. Builtins Host Logger (`lp-glsl-builtins/src/host/logger.rs`)
+### 5. Builtins Host Logger (`lps-builtins/src/host/logger.rs`)
 
 **Purpose**: Logger implementation for GLSL builtins (works in both emulator and JIT)
 

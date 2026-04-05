@@ -2,25 +2,26 @@
 
 ## How WASM Mode Differs from Emulator
 
-| Aspect | Emulator (RV32) | WASM |
-|--------|-----------------|------|
-| **Memory** | Separate `code` and `ram` vectors | Single `wasmtime::Memory` (linear memory) |
-| **Builtins** | RISC-V code linked into guest image | WASM functions from `lp_glsl_builtins_wasm.wasm` |
-| **VMContext** | Guest allocates, guest pointer | Host allocates, offset into linear memory |
-| **Builtin→Memory** | Guest dereferences directly | Builtin accesses `env.memory` import |
-| **Host→Memory** | Direct slice into `ram: Vec<u8>` | `memory.data(&store)` / `memory.data_mut(&store)` |
-| **Allocator** | Guest `linked_list_allocator` | Host-managed (no guest allocator needed) |
+| Aspect             | Emulator (RV32)                     | WASM                                              |
+|--------------------|-------------------------------------|---------------------------------------------------|
+| **Memory**         | Separate `code` and `ram` vectors   | Single `wasmtime::Memory` (linear memory)         |
+| **Builtins**       | RISC-V code linked into guest image | WASM functions from `lps_builtins_wasm.wasm`      |
+| **VMContext**      | Guest allocates, guest pointer      | Host allocates, offset into linear memory         |
+| **Builtin→Memory** | Guest dereferences directly         | Builtin accesses `env.memory` import              |
+| **Host→Memory**    | Direct slice into `ram: Vec<u8>`    | `memory.data(&store)` / `memory.data_mut(&store)` |
+| **Allocator**      | Guest `linked_list_allocator`       | Host-managed (no guest allocator needed)          |
 
 ## Current Bug (VMContext)
 
-In `lp-glsl-filetests/src/test_run/wasm_runner.rs:340`:
+In `lps-filetests/src/test_run/wasm_runner.rs:340`:
 
 ```rust
 // WRONG: Dummy zero passed, builtins crash when dereferencing
 wasm_args.push(Val::I32(0)); // Dummy VMContext pointer
 ```
 
-The builtin `__lp_vm_get_fuel_q32` expects a valid pointer into linear memory but receives `0`, causing a WASM trap when it tries to load from address 0.
+The builtin `__lp_vm_get_fuel_q32` expects a valid pointer into linear memory but receives `0`,
+causing a WASM trap when it tries to load from address 0.
 
 ## The Fix
 
@@ -50,7 +51,9 @@ WASM Linear Memory (env.memory)
 
 ### Key Insight
 
-WASM builtins already import `env.memory` and access it directly. The host doesn't need to call into the guest to allocate—the host can:
+WASM builtins already import `env.memory` and access it directly. The host doesn't need to call into
+the guest to allocate—the host can:
+
 1. Reserve space in linear memory at instantiation time
 2. Write data directly via `memory.data_mut()`
 3. Pass offsets to shaders
@@ -165,7 +168,7 @@ In `build_wasm_args()` (replacing the dummy `0`):
 fn build_wasm_args(
     export_info: &WasmExport,
     args: &[GlslValue],
-    fm: lp_glsl_naga::FloatMode,
+    fm: lps_naga::FloatMode,
     vmctx_offset: i32,  // NEW: actual offset from memory_layout
 ) -> Result<Vec<Val>, GlslError> {
     // ... validation ...
@@ -184,10 +187,10 @@ fn build_wasm_args(
 
 #### 4. Builtins Access VMContext
 
-The builtin in `lp_glsl_builtins_wasm` receives the offset and accesses memory:
+The builtin in `lps_builtins_wasm` receives the offset and accesses memory:
 
 ```rust
-// In lp_glsl_builtins_wasm (WASM target)
+// In lps_builtins_wasm (WASM target)
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_vm_get_fuel_q32(vmctx_offset: i32) -> u32 {
     // Access env.memory through raw pointer (WASM linear memory is 0x0-based)
@@ -196,7 +199,8 @@ pub extern "C" fn __lp_vm_get_fuel_q32(vmctx_offset: i32) -> u32 {
 }
 ```
 
-The key difference: in WASM, `vmctx_offset` is a valid offset into the module's own linear memory, not a cross-process pointer.
+The key difference: in WASM, `vmctx_offset` is a valid offset into the module's own linear memory,
+not a cross-process pointer.
 
 ## Texture Memory Strategy
 
@@ -228,6 +232,7 @@ impl WasmExecutable {
 ### Option B: Guest Heap (Complex, Rarely Needed)
 
 If textures need to be freed/reallocated dynamically:
+
 - Guest could expose allocator functions (like the emulator plan)
 - Host calls into guest to allocate, receives offset
 - But this is likely overkill—textures usually live for a frame/scene
@@ -235,6 +240,7 @@ If textures need to be freed/reallocated dynamically:
 ### Recommendation
 
 **Option A** (bump allocation for textures) because:
+
 - Textures are usually loaded once per scene
 - WASM memory can be reset between test runs
 - Simpler than guest allocator calls
@@ -242,29 +248,33 @@ If textures need to be freed/reallocated dynamically:
 
 ## Comparison to Emulator Approach
 
-| Task | Emulator | WASM |
-|------|----------|------|
+| Task                   | Emulator                             | WASM                                           |
+|------------------------|--------------------------------------|------------------------------------------------|
 | **Allocate VMContext** | Call `__lp_guest_alloc` via emulator | Reserve in `wasm_link::reserve_memory_regions` |
-| **Write VMContext** | Slice into `ram: Vec<u8>` | `memory.data_mut(&store)[offset..]` |
-| **Pass to shader** | Guest address (`0x8000_xxxx`) | Offset into linear memory (`0x0000_xxxx`) |
-| **Builtin access** | Direct pointer deref | Direct pointer deref (same memory!) |
-| **Grow memory** | Not needed (fixed RAM) | `memory.grow(&mut store, pages)` |
+| **Write VMContext**    | Slice into `ram: Vec<u8>`            | `memory.data_mut(&store)[offset..]`            |
+| **Pass to shader**     | Guest address (`0x8000_xxxx`)        | Offset into linear memory (`0x0000_xxxx`)      |
+| **Builtin access**     | Direct pointer deref                 | Direct pointer deref (same memory!)            |
+| **Grow memory**        | Not needed (fixed RAM)               | `memory.grow(&mut store, pages)`               |
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `lp-glsl-filetests/src/test_run/wasm_link.rs` | Add `WasmMemoryLayout`, `reserve_memory_regions()` |
-| `lp-glsl-filetests/src/test_run/wasm_runner.rs` | Store `memory` and `memory_layout` in `WasmExecutable` |
-| `lp-glsl-filetests/src/test_run/wasm_runner.rs` | Pass real `vmctx_offset` instead of `0` in `build_wasm_args()` |
-| `lp-glsl-builtins-wasm/src/lib.rs` (or vm mod) | Ensure VMContext builtin uses correct offset access |
+| File                                        | Change                                                         |
+|---------------------------------------------|----------------------------------------------------------------|
+| `lps-filetests/src/test_run/wasm_link.rs`   | Add `WasmMemoryLayout`, `reserve_memory_regions()`             |
+| `lps-filetests/src/test_run/wasm_runner.rs` | Store `memory` and `memory_layout` in `WasmExecutable`         |
+| `lps-filetests/src/test_run/wasm_runner.rs` | Pass real `vmctx_offset` instead of `0` in `build_wasm_args()` |
+| `lps-builtins-wasm/src/lib.rs` (or vm mod)  | Ensure VMContext builtin uses correct offset access            |
 
 ## Open Questions
 
-1. **Memory size**: Default WASM memory is often 1-2 pages (64KB-128KB). Need to ensure enough space for VMContext + textures.
+1. **Memory size**: Default WASM memory is often 1-2 pages (64KB-128KB). Need to ensure enough space
+   for VMContext + textures.
 
-2. **Memory alignment**: WASM linear memory starts at offset 0. Data segments from the module may occupy low addresses. Need to reserve space after data segments end.
+2. **Memory alignment**: WASM linear memory starts at offset 0. Data segments from the module may
+   occupy low addresses. Need to reserve space after data segments end.
 
-3. **Multiple instantiations**: Each `WasmExecutable` has its own `Store` and `Memory`. VMContext offsets are per-instance, not global.
+3. **Multiple instantiations**: Each `WasmExecutable` has its own `Store` and `Memory`. VMContext
+   offsets are per-instance, not global.
 
-4. **Fuel/budget tracking**: WASM has built-in fuel metering (already used). VMContext fuel field may be redundant or could be synced periodically.
+4. **Fuel/budget tracking**: WASM has built-in fuel metering (already used). VMContext fuel field
+   may be redundant or could be synced periodically.

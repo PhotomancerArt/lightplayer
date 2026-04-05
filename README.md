@@ -98,22 +98,22 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 
 Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 
-- **`lp-glsl-naga`** GLSL → LPIR (via naga)
+- **`lps-naga`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
 - **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
 - **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
-- **`lp-glsl-diagnostics`** Error codes, spans, `GlslError`
+- **`lps-diagnostics`** Error codes, spans, `GlslError`
 - **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
-- **`lp-glsl-exec`** `GlslExecutable` trait and filetest backend glue
-- **`lp-glsl-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
-- **`lp-glsl-builtin-ids`** Generated enum of builtin function IDs
-- **`lp-glsl-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
+- **`lps-exec`** `GlslExecutable` trait and filetest backend glue
+- **`lps-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
+- **`lps-builtin-ids`** Generated enum of builtin function IDs
+- **`lps-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
   lygia-inspired library of native glsl functions
-- **`lp-glsl-builtins-emu-app`** RISC-V guest for running tests linked against builtins
-- **`lp-glsl-builtins-gen-app`** Code generator for builtin function boilerplate
-- **`lp-glsl-filetests`** Collection of tests for GLSL spec compliance and correctness
-- **`lp-glsl-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
-- **`lp-glsl-filetests-app`** Filetest runner binary
+- **`lps-builtins-emu-app`** RISC-V guest for running tests linked against builtins
+- **`lps-builtins-gen-app`** Code generator for builtin function boilerplate
+- **`lps-filetests`** Collection of tests for GLSL spec compliance and correctness
+- **`lps-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
+- **`lps-filetests-app`** Filetest runner binary
 - **`lpfx-impl-macro`** Macros for builtin function implementations
 
 ## RISC-V Tooling (`lp-riscv/`)
@@ -139,7 +139,7 @@ LightPlayer would not be possible without the amazing work of these projects:
   backend ([forked](https://github.com/Yona-Appletree/lp-cranelift) to support 32-bit RISC-V and
   `no_std`)
 - **[Naga](https://github.com/gfx-rs/wgpu/tree/main/naga)** - Shader IR and **`glsl-in`** GLSL
-  frontend (used by `lp-glsl-naga`)
+  frontend (used by `lps-naga`)
 - **[pp-rs](https://github.com/light-player/pp-rs)** - GLSL preprocessor fork, patched in
   **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
   targets

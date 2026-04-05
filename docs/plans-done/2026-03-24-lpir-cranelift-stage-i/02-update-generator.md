@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update `lp-glsl-builtins-gen-app` to understand the new naming convention,
+Update `lps-builtins-gen-app` to understand the new naming convention,
 generate `Module` and `Mode` enums, add self-describing methods to `BuiltinId`,
 remove old cranelift outputs, and regenerate all files.
 
@@ -24,7 +24,7 @@ In `main.rs`, remove:
 - The `registry_path` and `mapping_rs_path` variables
 - Remove these paths from the `format_generated_files` call
 
-This is ~300 lines of deletion. The `lp-glsl-cranelift` crate will no longer
+This is ~300 lines of deletion. The `lps-cranelift` crate will no longer
 compile after this (accepted).
 
 ### 2b. Add module/mode parsing to BuiltinInfo
@@ -179,16 +179,16 @@ appropriate mapping.
 ### 2g. Run generator
 
 ```
-cargo run -p lp-glsl-builtins-gen-app
+cargo run -p lps-builtins-gen-app
 ```
 
 This regenerates:
-- `lp-glsl-builtin-ids/src/lib.rs`
-- `lp-glsl-builtin-ids/src/glsl_builtin_mapping.rs`
-- `lp-glsl-builtins-emu-app/src/builtin_refs.rs`
-- `lp-glsl-builtins-wasm/src/builtin_refs.rs`
-- `lp-glsl-builtins/src/builtins/q32/mod.rs`
-- `lp-glsl-wasm/src/codegen/builtin_wasm_import_types.rs`
+- `lps-builtin-ids/src/lib.rs`
+- `lps-builtin-ids/src/glsl_builtin_mapping.rs`
+- `lps-builtins-emu-app/src/builtin_refs.rs`
+- `lps-builtins-wasm/src/builtin_refs.rs`
+- `lps-builtins/src/builtins/q32/mod.rs`
+- `lps-wasm/src/codegen/builtin_wasm_import_types.rs`
 
 (No longer generates `registry.rs` or `mapping.rs` for old cranelift.)
 
@@ -203,12 +203,12 @@ Spot-check the generated `lib.rs`:
 ## Validate
 
 ```
-cargo check -p lp-glsl-builtin-ids
-cargo test -p lp-glsl-builtin-ids
-cargo check -p lp-glsl-builtins
-cargo test -p lp-glsl-builtins
-cargo check -p lp-glsl-builtins-gen-app
-cargo test -p lp-glsl-builtins-gen-app
+cargo check -p lps-builtin-ids
+cargo test -p lps-builtin-ids
+cargo check -p lps-builtins
+cargo test -p lps-builtins
+cargo check -p lps-builtins-gen-app
+cargo test -p lps-builtins-gen-app
 ```
 
 The WASM emitter and Naga crates may still fail (they reference `"std.math"`

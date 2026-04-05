@@ -45,7 +45,7 @@ std = [
     "cranelift-module/std",
     "cranelift-jit/std",
     "cranelift-native",
-    "lp-glsl-builtins/std",
+    "lps-builtins/std",
 ]
 cranelift-optimizer = ["cranelift-codegen/optimizer"]
 cranelift-verifier = ["cranelift-codegen/verifier"]

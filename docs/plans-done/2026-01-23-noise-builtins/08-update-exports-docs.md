@@ -7,7 +7,7 @@ exported and documented.
 
 ## Implementation
 
-### File: `lp-glsl-builtins/src/builtins/q32/mod.rs`
+### File: `lps-builtins/src/builtins/q32/mod.rs`
 
 The builtin generator should have already updated this file, but verify:
 

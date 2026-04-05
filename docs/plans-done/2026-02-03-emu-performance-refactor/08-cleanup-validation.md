@@ -86,7 +86,7 @@ cargo test
 cd ../../lp-core/lp-client
 cargo test
 
-cd ../../lp-shader/lp-glsl-compiler
+cd ../../lp-shader/lps-compiler
 cargo test
 ```
 
@@ -113,7 +113,7 @@ cd ../../lp-core/lp-client
 cargo check
 cargo test
 
-cd ../../lp-shader/lp-glsl-compiler
+cd ../../lp-shader/lps-compiler
 cargo check
 cargo test
 ```

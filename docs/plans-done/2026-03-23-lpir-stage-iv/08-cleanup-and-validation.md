@@ -8,11 +8,11 @@ verify the lowering against the LPIR validator.
 ## Tasks
 
 ### Warnings
-- `cargo clippy -p lpir -p lp-glsl-naga -- -D warnings`
+- `cargo clippy -p lpir -p lps-naga -- -D warnings`
 - Fix all warnings. Don't suppress them.
 
 ### Formatting
-- `cargo +nightly fmt -p lpir -p lp-glsl-naga`
+- `cargo +nightly fmt -p lpir -p lps-naga`
 
 ### LPIR validation
 - After lowering, run `lpir::validate::validate_module()` on the output

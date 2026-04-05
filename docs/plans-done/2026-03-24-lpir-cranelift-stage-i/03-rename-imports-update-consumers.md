@@ -182,7 +182,7 @@ Update call sites in `ops.rs`:
 
 ### 3e. Rename `StdMathHandler`
 
-In `lp-glsl-naga/src/std_math_handler.rs`:
+In `lps-naga/src/std_math_handler.rs`:
 
 Rename `StdMathHandler` → `BuiltinImportHandler` (or `GlslLpirHandler`).
 Update to dispatch on both `"glsl"` and `"lpir"` module names:
@@ -243,18 +243,18 @@ These are standalone test imports — the names don't need to match the real
 builtins exactly, they just need to be internally consistent within each test.
 Replace `std.math` with `glsl` in all of them.
 
-**`lp-glsl-naga/tests/lower_print.rs`**:
+**`lps-naga/tests/lower_print.rs`**:
 - `assert!(s.contains("import @std.math::"), "{s}");` → update to check for
   `"import @glsl::"` or `"import @lpir::"`
 - `assert!(s.contains("call @std.math::"), "{s}");` → similar
 
-**`lp-glsl-naga/tests/lower_interp.rs`**:
+**`lps-naga/tests/lower_interp.rs`**:
 - `CombinedImports` delegates to `StdMathHandler` — update to use renamed
   handler and match on `"glsl"` / `"lpir"` module names.
 
 ### 3g. Update generator comment
 
-In `lp-glsl-builtins-gen-app/src/main.rs` line ~301, there's a comment:
+In `lps-builtins-gen-app/src/main.rs` line ~301, there's a comment:
 ```
 // GLSL: `atan(y, x)`; Naga lowers two-arg atan as `std.math::atan2`.
 ```
@@ -263,10 +263,10 @@ Update to `glsl::atan2`.
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo test -p lp-glsl-naga
-cargo check -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
+cargo check -p lps-naga
+cargo test -p lps-naga
+cargo check -p lps-wasm
+cargo test -p lps-wasm
 cargo check -p lpir
 cargo test -p lpir
 ```

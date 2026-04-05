@@ -6,7 +6,7 @@ Verify that increment/decrement, compound assignment, and binary/unary operation
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operators.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/6-operators.glsl`
 
 - Increment/decrement: `arr[i]++`, `++arr[i]`, `arr[i]--`, `--arr[i]`
 - Compound assignment: `arr[i] += x`, `arr[i] -= x`, `arr[i] *= x`, `arr[i] /= x`
@@ -17,7 +17,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operat
 
 ### 1. Verify Increment/Decrement
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/incdec.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/incdec.rs`
 
 - Should work automatically via LValue pattern
 - Verify `ArrayElement` works with `read_lvalue()` and `write_lvalue()`
@@ -25,7 +25,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operat
 
 ### 2. Verify Compound Assignment
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/assignment.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/assignment.rs`
 
 - Should work automatically via LValue pattern
 - Verify `ArrayElement` works with compound assignment operators
@@ -34,7 +34,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operat
 
 ### 3. Verify Binary Operations
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/binary.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/binary.rs`
 
 - Should work automatically - array elements as RValues
 - Verify `read_lvalue()` returns values that work in binary operations
@@ -44,7 +44,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operat
 
 ### 4. Verify Unary Operations
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/unary.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/unary.rs`
 
 - Should work automatically - array elements as RValues
 - Test unary: `+`, `-`, `!`
@@ -68,11 +68,11 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/6-operat
 
 ## Files to Verify/Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/incdec.rs` (verify)
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/assignment.rs` (verify)
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/binary.rs` (verify)
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/unary.rs` (verify)
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_check/operators.rs` (may need updates)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/incdec.rs` (verify)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/assignment.rs` (verify)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/binary.rs` (verify)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/unary.rs` (verify)
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/type_check/operators.rs` (may need updates)
 
 
 

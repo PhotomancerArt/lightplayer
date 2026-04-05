@@ -33,18 +33,18 @@ This pattern is repeated in:
 
 **LValue Creation:**
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 
 **LValue Access:**
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs` (lines 23-77, 79-125)
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs` (lines 24-96, 98-148)
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/read.rs` (lines 23-77, 79-125)
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/write.rs` (lines 24-96, 98-148)
 
 **Storage:**
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/context.rs` (`VarInfo.out_inout_ptr`)
-- `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs` (parameter declaration)
+- `lp-shader/lps-compiler/src/frontend/codegen/context.rs` (`VarInfo.out_inout_ptr`)
+- `lp-shader/lps-compiler/src/frontend/glsl_compiler.rs` (parameter declaration)
 
 ## Questions
 

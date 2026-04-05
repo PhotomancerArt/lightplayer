@@ -20,7 +20,7 @@ correctness, size, and integration.
 | `rustc`        | 1.96.0-nightly (2026-03-12)                                                                                                |
 | Branch / SHA   | `feature/lpir-cranelift` — record `git rev-parse --short HEAD` when reproducing                                            |
 | “New” compiler | `lpir-cranelift` (transitive from `lp-engine`)                                                                             |
-| “Old” compiler | Not re-measured in this session — compare when a checkout with `lp-glsl-cranelift` on the firmware path is still available |
+| “Old” compiler | Not re-measured in this session — compare when a checkout with `lps-cranelift` on the firmware path is still available |
 
 ## fw-emu gate (automated)
 

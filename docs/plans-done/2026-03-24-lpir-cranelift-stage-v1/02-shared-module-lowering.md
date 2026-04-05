@@ -39,7 +39,7 @@ needed by `JitModule` and optionally by the object path.
 - **Object-only tail** (phase 03): `finish` on `ObjectModule` — not in this phase.
 
 Preserve **sorted declaration order** if the object path will require stable
-symbol ordering (match `lp-glsl-cranelift` `emu.rs` sort-by-name if Cranelift
+symbol ordering (match `lps-cranelift` `emu.rs` sort-by-name if Cranelift
 object mapping is order-sensitive).
 
 ## Tests
@@ -50,7 +50,7 @@ object mapping is order-sensitive).
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift
 ```
 
 `cargo +nightly fmt`.

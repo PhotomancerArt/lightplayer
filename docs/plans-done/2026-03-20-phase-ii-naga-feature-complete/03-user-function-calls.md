@@ -156,7 +156,7 @@ to store.
 scripts/glsl-filetests.sh --target wasm.q32 "function/"
 scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
 scripts/glsl-filetests.sh --target wasm.q32 "vec/"
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 The `function/call-simple.glsl`, `function/define-simple.glsl`,

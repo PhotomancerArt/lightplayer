@@ -176,9 +176,9 @@ The LightPlayer GLSL stack is organized as follows:
 ```
 lp-shader/
 ├── lpir/                    # LPIR core library (types, ops, builder, parser, printer, interpreter, validator)
-├── lp-glsl-naga/            # Naga → LPIR lowering (GLSL frontend)
+├── lps-naga/            # Naga → LPIR lowering (GLSL frontend)
 ├── lpir-cranelift/          # LPIR → Cranelift → native machine code (RISC-V / host JIT)
-└── lp-glsl-wasm/            # LPIR → WebAssembly emission (browser preview)
+└── lps-wasm/            # LPIR → WebAssembly emission (browser preview)
 ```
 
 This layout reflects the separation of concerns: IR definition, frontend lowering, and per-target

@@ -1,12 +1,12 @@
-# Part i: Extract lp-glsl-frontend
+# Part i: Extract lps-frontend
 
 Roadmap: `docs/roadmaps/2026-03-13-glsl-wasm-playground/`
 
 ## Scope
 
-Extract the shared, target-independent frontend code from lp-glsl-compiler
-into a new crate `lp-glsl-frontend`. Rename `lp-glsl-compiler` to
-`lp-glsl-cranelift`. All existing tests pass unchanged. No new functionality.
+Extract the shared, target-independent frontend code from lps-compiler
+into a new crate `lps-frontend`. Rename `lps-compiler` to
+`lps-cranelift`. All existing tests pass unchanged. No new functionality.
 
 This is a mechanical refactor that establishes the crate boundary needed
 for the WASM backend (part ii) to depend on shared types without pulling
@@ -24,7 +24,7 @@ The `Type` enum has a `to_cranelift_type()` method that maps GLSL types to
 the core type system.
 
 **Fix**: Remove `to_cranelift_type()` from `Type`. Add a free function or
-extension trait in `lp-glsl-cranelift` that provides the same mapping.
+extension trait in `lps-cranelift` that provides the same mapping.
 Callers are all in the codegen (context.rs, helpers.rs) — update them to
 use the new location. The WASM backend will have its own equivalent
 mapping (GLSL Type → WASM value type).
@@ -35,7 +35,7 @@ mapping (GLSL Type → WASM value type).
 objects and work with `cranelift_codegen::ir::Value`. This is codegen
 support code that was placed in the semantic directory.
 
-**Fix**: Move `lpfx_sig.rs` to `lp-glsl-cranelift` (into the codegen
+**Fix**: Move `lpfx_sig.rs` to `lps-cranelift` (into the codegen
 directory alongside `lpfx_fns.rs`). It's only used by the Cranelift
 codegen path.
 
@@ -46,16 +46,16 @@ to GLSL source positions. This is used for error reporting on trap
 locations (division by zero, etc.).
 
 **Fix**: Replace the Cranelift `SourceLoc` type with a simple newtype
-wrapper `u32` in lp-glsl-frontend. The manager just needs an opaque ID →
-position mapping. lp-glsl-cranelift can convert between the frontend's
+wrapper `u32` in lps-frontend. The manager just needs an opaque ID →
+position mapping. lps-cranelift can convert between the frontend's
 ID and Cranelift's `SourceLoc` at the boundary (they're both u32). The
 WASM backend can reuse the same source location manager for its own
 error reporting.
 
-## What moves to lp-glsl-frontend
+## What moves to lps-frontend
 
 ```
-lp-glsl-frontend/src/
+lps-frontend/src/
 ├── lib.rs
 ├── error.rs                  # from error/ (GlslError, GlslDiagnostics, ErrorCode)
 ├── pipeline.rs               # from frontend/pipeline.rs
@@ -79,17 +79,17 @@ lp-glsl-frontend/src/
                               #   validation.rs
 ```
 
-## What stays in lp-glsl-cranelift (renamed from lp-glsl-compiler)
+## What stays in lps-cranelift (renamed from lps-compiler)
 
 Everything currently in `frontend/codegen/`, `frontend/glsl_compiler.rs`,
 `backend/`, and `exec/`. Plus `lpfx_sig.rs` moved from semantic to codegen.
 
-The crate adds `lp-glsl-frontend` as a dependency and re-imports from it
+The crate adds `lps-frontend` as a dependency and re-imports from it
 where needed.
 
 ## Dependencies
 
-**lp-glsl-frontend**:
+**lps-frontend**:
 
 - `glsl` (parser)
 - `hashbrown`
@@ -98,39 +98,39 @@ where needed.
 - `lp-model` (for GlslOpts, Q32Options)
 - NO cranelift crates
 
-**lp-glsl-cranelift** (renamed):
+**lps-cranelift** (renamed):
 
-- `lp-glsl-frontend` (new dependency)
+- `lps-frontend` (new dependency)
 - `cranelift-codegen`, `cranelift-frontend`, `cranelift-jit`,
   `cranelift-module`, `cranelift-object` (existing)
-- `lp-glsl-builtins`, `lp-glsl-jit-util` (existing)
+- `lps-builtins`, `lps-jit-util` (existing)
 - everything else it has today
 
 ## Workspace changes
 
 ### Cargo.toml (workspace root)
 
-Members: replace `lp-shader/lp-glsl-compiler` with:
+Members: replace `lp-shader/lps-compiler` with:
 
 ```
-"lp-shader/lp-glsl-frontend",
-"lp-shader/lp-glsl-cranelift",
+"lp-shader/lps-frontend",
+"lp-shader/lps-cranelift",
 ```
 
 Default-members: same replacement.
 
-### Downstream crates that depend on lp-glsl-compiler
+### Downstream crates that depend on lps-compiler
 
-These need their dependency renamed to `lp-glsl-cranelift`:
+These need their dependency renamed to `lps-cranelift`:
 
 - `lp-core/lp-engine` (uses glsl_jit, glsl_jit_streaming, GlslExecutable)
-- `lp-shader/lp-glsl-filetests` (uses compilation APIs)
-- `lp-shader/lp-glsl-filetests-app` (binary)
-- `lp-shader/lp-glsl-filetests-gen-app` (binary)
-- `lp-shader/lp-glsl-q32-metrics-app` (binary)
-- Any other crate that imports from `lp_glsl_compiler`
+- `lp-shader/lps-filetests` (uses compilation APIs)
+- `lp-shader/lps-filetests-app` (binary)
+- `lp-shader/lps-filetests-gen-app` (binary)
+- `lp-shader/lps-q32-metrics-app` (binary)
+- Any other crate that imports from `lps_compiler`
 
-Some of these may also want to depend on `lp-glsl-frontend` directly for
+Some of these may also want to depend on `lps-frontend` directly for
 types like `TypedShader`, `GlslError`, etc. Others only need the cranelift
 crate's public API.
 
@@ -149,13 +149,13 @@ crate's public API.
 3. Replace `cranelift_codegen::ir::SourceLoc` in `src_loc_manager.rs`
    with a local `SourceLocId(u32)` newtype. Add a
    `SourceLocId::to_cranelift_srcloc()` conversion method behind a
-   feature or in lp-glsl-cranelift.
+   feature or in lps-cranelift.
 
 4. Verify: `cargo build` and `cargo test` pass. No behavioral changes.
 
-### Phase 2: Create lp-glsl-frontend crate
+### Phase 2: Create lps-frontend crate
 
-1. Create `lp-shader/lp-glsl-frontend/Cargo.toml` with the dependencies
+1. Create `lp-shader/lps-frontend/Cargo.toml` with the dependencies
    listed above.
 
 2. Move the files listed in "What moves" above. This is `git mv` for
@@ -163,32 +163,32 @@ crate's public API.
 
 3. Set up `lib.rs` with the module structure and public re-exports.
 
-4. Verify the new crate compiles: `cargo build -p lp-glsl-frontend`.
+4. Verify the new crate compiles: `cargo build -p lps-frontend`.
 
-### Phase 3: Rename lp-glsl-compiler to lp-glsl-cranelift
+### Phase 3: Rename lps-compiler to lps-cranelift
 
-1. Rename the directory: `lp-shader/lp-glsl-compiler/` →
-   `lp-shader/lp-glsl-cranelift/`.
+1. Rename the directory: `lp-shader/lps-compiler/` →
+   `lp-shader/lps-cranelift/`.
 
 2. Update `Cargo.toml` (package name, lib name).
 
-3. Add `lp-glsl-frontend` as a dependency.
+3. Add `lps-frontend` as a dependency.
 
 4. Update all `use crate::frontend::semantic::*` to
-   `use lp_glsl_frontend::semantic::*` (and similar for error, pipeline,
+   `use lps_frontend::semantic::*` (and similar for error, pipeline,
    src_loc).
 
-5. Update all `use crate::error::*` to `use lp_glsl_frontend::error::*`.
+5. Update all `use crate::error::*` to `use lps_frontend::error::*`.
 
-6. Verify: `cargo build -p lp-glsl-cranelift`.
+6. Verify: `cargo build -p lps-cranelift`.
 
 ### Phase 4: Update downstream crates
 
 1. Update workspace `Cargo.toml` (members, default-members).
 
-2. Update every crate that depended on `lp-glsl-compiler`:
-    - Change dependency name to `lp-glsl-cranelift`
-    - Add `lp-glsl-frontend` dependency where needed for shared types
+2. Update every crate that depended on `lps-compiler`:
+    - Change dependency name to `lps-cranelift`
+    - Add `lps-frontend` dependency where needed for shared types
     - Update `use` statements
 
 3. Verify: `cargo build` (full workspace) and `cargo test` pass.

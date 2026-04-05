@@ -8,7 +8,7 @@ Port libfixmath's Taylor series implementation and wire it up through the transf
 
 ### 2.1 Port libfixmath Sin Implementation
 
-In `lp-glsl-builtins/src/q32/sin.rs`:
+In `lps-builtins/src/q32/sin.rs`:
 
 - Port libfixmath's accurate Taylor series sin implementation
 - Use constants from libfixmath: `fix16_pi = 205887`
@@ -21,27 +21,27 @@ In `lp-glsl-builtins/src/q32/sin.rs`:
 
 ### 2.2 Implement Cos
 
-In `lp-glsl-builtins/src/q32/cos.rs`:
+In `lps-builtins/src/q32/cos.rs`:
 
 - Implement as `sin(x + π/2)` (like libfixmath does)
 - Export as `#[no_mangle] pub extern "C" fn __lp_q32_cos(x: i32) -> i32`
 
 ### 2.3 Add to Module
 
-In `lp-glsl-builtins/src/q32/mod.rs`:
+In `lps-builtins/src/q32/mod.rs`:
 
 - Add `mod sin;` and `mod cos;`
 - Export `__lp_q32_sin` and `__lp_q32_cos`
 
 ### 2.4 Update Builtins App
 
-In `lp-glsl-builtins-emu-app/src/main.rs`:
+In `lps-builtins-emu-app/src/main.rs`:
 
 - Add references to `__lp_q32_sin` and `__lp_q32_cos` in `main()` to prevent dead code elimination
 
 ### 2.5 Add Transform Conversion Logic
 
-In `lp-glsl-compiler/src/backend/transform/q32/converters/calls.rs`:
+In `lps-compiler/src/backend/transform/q32/converters/calls.rs`:
 
 - Modify `convert_call()` to detect TestCase calls to math functions
 - Check if TestCase name matches mapping table

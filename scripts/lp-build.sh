@@ -17,7 +17,7 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Directory is relative to WORKSPACE_ROOT
 # ============================================================================
 declare -a COMMANDS=(
-    "GLSL filetests|lp-glsl|cargo test -p lp-glsl-filetests --test filetests"
+    "GLSL filetests|lps|cargo test -p lps-filetests --test filetests"
     "ESP32 firmware (compiler in tree)|.|cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server"
 )
 

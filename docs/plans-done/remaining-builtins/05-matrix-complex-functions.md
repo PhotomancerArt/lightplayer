@@ -17,7 +17,7 @@ Implement matrix builtins for complex operations: determinant and inverse.
 - 3x3: Use cofactor expansion
 - 4x4: Use cofactor expansion or block decomposition
 - Operates on q32 values (matrix elements are q32)
-- File: `lightplayer/crates/lp-glsl-builtins/src/q32/determinant.rs` (new file)
+- File: `lightplayer/crates/lps-builtins/src/q32/determinant.rs` (new file)
 - Note: These functions take multiple arguments (4 for 2x2, 9 for 3x3, 16 for 4x4)
 
 ### inverse
@@ -26,7 +26,7 @@ Implement matrix builtins for complex operations: determinant and inverse.
 - 3x3: Use adjugate method: `inv = (1/det) * adj(M)`
 - 4x4: Use adjugate method
 - Requires determinant calculation
-- File: `lightplayer/crates/lp-glsl-builtins/src/q32/inverse.rs` (new file)
+- File: `lightplayer/crates/lps-builtins/src/q32/inverse.rs` (new file)
 - Note: These functions take multiple arguments and return multiple values
 
 ## Considerations
@@ -39,8 +39,8 @@ Implement matrix builtins for complex operations: determinant and inverse.
 
 ## Files to Create/Modify
 
-- `lightplayer/crates/lp-glsl-builtins/src/q32/determinant.rs` - new file
-- `lightplayer/crates/lp-glsl-builtins/src/q32/inverse.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/determinant.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/inverse.rs` - new file
 - May need to update builtin generator to handle multi-arg/multi-return functions
 - Run builtin generator to update boilerplate
 

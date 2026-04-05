@@ -22,7 +22,7 @@
 - Still fails when `create_isa()` is called because it tries to use `cranelift_native`
 
 ### Host Functions
-- `HostId` enum in `lp-glsl-compiler/src/backend/host/registry.rs` identifies host functions (Debug, Println)
+- `HostId` enum in `lps-compiler/src/backend/host/registry.rs` identifies host functions (Debug, Println)
 - `get_host_function_pointer()` returns `None` in no_std mode (line 62-63)
 - Implementations in `impls.rs` use `std::println!` which requires std
 - Host functions are registered via `symbol_lookup_fn` in `gl_module.rs`

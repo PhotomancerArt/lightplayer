@@ -173,9 +173,9 @@ delegate to `lower_matrix`. Otherwise, component-wise.
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
-cargo clippy -p lp-glsl-naga
+cargo test -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
+cargo clippy -p lps-naga
 ```
 
 Vector arithmetic filetests (binary ops, unary ops, casts on vectors)

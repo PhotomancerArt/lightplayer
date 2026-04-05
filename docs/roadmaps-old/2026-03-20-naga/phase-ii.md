@@ -32,8 +32,8 @@ Out of scope:
 
 ## Deliverables
 
-- Full `lp-glsl-wasm` backend supporting rainbow.glsl feature set
-- LPFX prototype injection in `lp-glsl-naga`
+- Full `lps-wasm` backend supporting rainbow.glsl feature set
+- LPFX prototype injection in `lps-naga`
 - Updated `web-demo` crate
 - All wasm.q32 filetests passing, cross-validated against cranelift.q32
 

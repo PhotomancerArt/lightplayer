@@ -130,6 +130,7 @@ Statement::Store { pointer, value } => {
 ### 6. Q32 multiply and divide
 
 Q32 multiply (16.16 × 16.16):
+
 ```
 emit left    → i32 (Q16.16)
 i64.extend_i32_s
@@ -142,6 +143,7 @@ i32.wrap_i64
 ```
 
 Q32 divide (16.16 / 16.16):
+
 ```
 emit left    → i32 (Q16.16)
 i64.extend_i32_s
@@ -153,7 +155,7 @@ i64.div_s
 i32.wrap_i64
 ```
 
-Note: These match the existing lp-glsl-wasm Q32 sequences.
+Note: These match the existing lps-wasm Q32 sequences.
 
 ### 7. Handling Naga's Emit statement
 
@@ -182,6 +184,7 @@ we only allocate for expressions that appear in `Emit` ranges).
 ### 8. Additional tests
 
 Add unit tests for:
+
 - Comparison operators returning bool (0 or 1)
 - Int arithmetic (add, sub, mul, div, mod)
 - Type conversions (float→int, int→float in both modes)
@@ -193,7 +196,7 @@ Add unit tests for:
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-filetests -- scalar
+cargo test -p lps-filetests -- scalar
 ```
 
 All `scalar/float/`, `scalar/int/`, `scalar/uint/`, `scalar/bool/` tests
@@ -202,7 +205,7 @@ scope (e.g. function calls to user-defined functions, control flow) should
 be annotated with `// unimplemented: wasm`.
 
 ```bash
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 No warnings.

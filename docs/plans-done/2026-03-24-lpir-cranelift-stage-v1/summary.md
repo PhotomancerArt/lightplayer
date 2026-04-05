@@ -7,8 +7,8 @@
 - **`jit_module`:** Uses shared lowering; behavior unchanged for existing tests.
 - **`builtins`:** `declare_module_imports` / `declare_lpir_opcode_builtins` take `&mut impl Module`.
 - **Feature `riscv32-emu`:** `cranelift-codegen/riscv32`, `cranelift-object`, `lp-riscv-elf`, `lp-riscv-emu`.
-- **`build.rs`:** Embeds `lp-glsl-builtins-emu-app` when the feature is enabled (empty bytes + warning if missing).
-- **`object_module`:** RV32 imafc triple + flags aligned with `lp-glsl-cranelift` emulator target; `object_bytes_from_ir` → ELF object bytes.
+- **`build.rs`:** Embeds `lps-builtins-emu-app` when the feature is enabled (empty bytes + warning if missing).
+- **`object_module`:** RV32 imafc triple + flags aligned with `lps-cranelift` emulator target; `object_bytes_from_ir` → ELF object bytes.
 - **`object_link`:** `link_object_with_builtins`, `BuiltinId` verification (ported from `builtins_linker` semantics).
 - **`emu_run`:** `run_lpir_function_i32` (object → link → emulate); `run_loaded_function_i32` / `run_loaded_function_i32_with_sig`.
 - **Public re-exports:** `object_bytes_from_ir`, `run_lpir_function_i32` behind the feature.

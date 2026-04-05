@@ -12,7 +12,7 @@ from `1-foundation.glsl` should pass.
 
 ### 1. Detect Array AccessIndex in expr_type_inner
 
-In `lp-shader/lp-glsl-naga/src/naga_util.rs`, `expr_type_inner()` already handles `AccessIndex` on
+In `lp-shader/lps-naga/src/naga_util.rs`, `expr_type_inner()` already handles `AccessIndex` on
 arrays at lines 232-234:
 
 ```rust
@@ -23,7 +23,7 @@ This should already work - verify it's returning the correct element type.
 
 ### 2. Add Array AccessIndex Lowering
 
-In `lp-shader/lp-glsl-naga/src/lower_expr.rs`, extend the `AccessIndex` match arm:
+In `lp-shader/lps-naga/src/lower_expr.rs`, extend the `AccessIndex` match arm:
 
 ```rust
 Expression::AccessIndex { base, index } => {
@@ -89,7 +89,7 @@ Expression::AccessIndex { base, index } => {
 
 ### 3. Add Store Support for Array Elements
 
-In `lp-shader/lp-glsl-naga/src/lower_stmt.rs`, handle `Store` where the pointer is an array element
+In `lp-shader/lps-naga/src/lower_stmt.rs`, handle `Store` where the pointer is an array element
 access:
 
 ```rust

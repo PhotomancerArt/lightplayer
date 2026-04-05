@@ -35,7 +35,7 @@ not strand the `rv32.q32` / emulator path on the old compiler.
   - Mirror old crate's feature split where sensible
 
 **Out of scope (Stage V2):**
-- **`jit.q32` / `rv32.q32` filetest targets** in `lp-glsl-filetests` (runner wiring)
+- **`jit.q32` / `rv32.q32` filetest targets** in `lps-filetests` (runner wiring)
 - Embedded readiness (Stage VI-A)
 - lp-engine migration / fw-emu (Stage VI-B)
 - ESP32 firmware (Stage VI-C)

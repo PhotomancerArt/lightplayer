@@ -2,7 +2,7 @@
 
 Date: 2026-03-31  
 Auditor: Agent  
-Scope: All functions in `lp-shader/lp-glsl-builtins/src/builtins/lpfx/`
+Scope: All functions in `lp-shader/lps-builtins/src/builtins/lpfx/`
 
 ## Executive Summary
 

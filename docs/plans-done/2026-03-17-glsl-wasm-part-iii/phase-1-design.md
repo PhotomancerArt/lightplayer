@@ -239,6 +239,6 @@ Simpler: `emit_literal` returns `Type` based on expr variant. `emit_variable` re
 ## Validation
 
 After implementation:
-- `cargo test -p lp-glsl-wasm`
+- `cargo test -p lps-wasm`
 - `scripts/glsl-filetests.sh` or equivalent with `--target wasm.q32`
 - Expect: scalar int/uint/float tests passing (those without unimplemented features in other functions)

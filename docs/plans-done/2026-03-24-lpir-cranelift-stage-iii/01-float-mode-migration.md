@@ -3,7 +3,7 @@
 ## Scope
 
 Add `FloatMode` enum to the `lpir` crate's `types.rs`. Remove the definition
-from `lp-glsl-naga`. Update all consumers (`lp-glsl-naga`, `lp-glsl-wasm`)
+from `lps-naga`. Update all consumers (`lps-naga`, `lps-wasm`)
 to import from `lpir`. Rename `Float` variant to `F32`.
 
 ## Code Organization Reminders
@@ -32,7 +32,7 @@ pub enum FloatMode {
 pub use types::{CalleeRef, FloatMode, IrType, SlotId, VReg, VRegRange};
 ```
 
-### 3. Remove from `lp-glsl-naga/src/lib.rs`
+### 3. Remove from `lps-naga/src/lib.rs`
 
 Delete the `FloatMode` enum definition. Add a re-export for backward
 compatibility:
@@ -41,17 +41,18 @@ compatibility:
 pub use lpir::FloatMode;
 ```
 
-This keeps `lp_glsl_naga::FloatMode` working for existing consumers without
-code changes (the WASM emitter imports it as `lp_glsl_naga::FloatMode`).
+This keeps `lps_naga::FloatMode` working for existing consumers without
+code changes (the WASM emitter imports it as `lps_naga::FloatMode`).
 
 ### 4. Rename `Float` → `F32`
 
 The old enum had `FloatMode::Float`. Rename to `FloatMode::F32` for
 consistency with the rest of the codebase. Update all match arms in:
-- `lp-glsl-naga/src/` (wherever `FloatMode::Float` appears)
-- `lp-glsl-wasm/src/emit/imports.rs`
-- `lp-glsl-wasm/src/emit/mod.rs`
-- `lp-glsl-wasm/src/options.rs`
+
+- `lps-naga/src/` (wherever `FloatMode::Float` appears)
+- `lps-wasm/src/emit/imports.rs`
+- `lps-wasm/src/emit/mod.rs`
+- `lps-wasm/src/options.rs`
 
 Search for `FloatMode::Float` across the workspace to find all occurrences.
 
@@ -63,9 +64,9 @@ No behavioral changes — this is a pure type migration.
 
 ```
 cargo check -p lpir
-cargo check -p lp-glsl-naga
-cargo check -p lp-glsl-wasm
+cargo check -p lps-naga
+cargo check -p lps-wasm
 cargo test -p lpir
-cargo test -p lp-glsl-naga
-cargo test -p lp-glsl-wasm
+cargo test -p lps-naga
+cargo test -p lps-wasm
 ```

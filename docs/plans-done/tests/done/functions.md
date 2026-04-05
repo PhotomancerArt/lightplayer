@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL user-defined functions in `lightplayer/crates/lp-glsl-filetests/filetests/functions/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL function specification including function declarations, definitions, calls, parameter qualifiers (`in`, `out`, `inout`), return types, overloading, and edge cases. These tests are expected to fail initially, serving as a specification for implementing function support in the compiler.
+Create a complete test suite for GLSL user-defined functions in `lightplayer/crates/lps-filetests/filetests/functions/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL function specification including function declarations, definitions, calls, parameter qualifiers (`in`, `out`, `inout`), return types, overloading, and edge cases. These tests are expected to fail initially, serving as a specification for implementing function support in the compiler.
 
 ## Directory Structure
 
@@ -419,8 +419,8 @@ float test_function_operation_name() {
    - Return type checking
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/float/op-add.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec2/fn-length.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/float/op-add.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec2/fn-length.glsl`
    - GLSL spec: `statements.adoc` - Function Definitions section
 
 ## Files to Create

@@ -1,8 +1,8 @@
-# Phase 1: Add lp-glsl-builtins dependency and Q32 imports
+# Phase 1: Add lps-builtins dependency and Q32 imports
 
 ## Scope of phase
 
-Add `lp-glsl-builtins` as a dependency to `lp-engine` and import Q32 type for fixed-point math
+Add `lps-builtins` as a dependency to `lp-engine` and import Q32 type for fixed-point math
 operations.
 
 ## Code Organization Reminders
@@ -15,22 +15,22 @@ operations.
 
 ### 1. Update Cargo.toml
 
-Add `lp-glsl-builtins` dependency to `lp-app/crates/lp-engine/Cargo.toml`:
+Add `lps-builtins` dependency to `lp-app/crates/lp-engine/Cargo.toml`:
 
 ```toml
 [dependencies]
 # ... existing dependencies ...
-lp-glsl-builtins = { path = "../../../lp-shader/lp-glsl-builtins", default-features = false }
+lps-builtins = { path = "../../../lp-shader/lps-builtins", default-features = false }
 ```
 
 Note: We'll use `default-features = false` to keep it minimal for embedded use.
 
 ### 2. Verify Q32 is accessible
 
-Check that we can import Q32 from `lp-glsl-builtins`:
+Check that we can import Q32 from `lps-builtins`:
 
 ```rust
-use lp_glsl_builtins::glsl::q32::types::Q32;
+use lps_builtins::glsl::q32::types::Q32;
 ```
 
 We'll add this import in the next phase when we create `mapping_compute.rs`.

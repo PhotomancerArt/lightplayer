@@ -29,7 +29,7 @@ Array constructor syntax (`float[5](1.0, 2.0, 3.0, 4.0, 5.0)`).
 
 ## Test Files
 
-Each phase will have temporary test files in `lightplayer/crates/lp-glsl-filetests/filetests/arrays/phase/`:
+Each phase will have temporary test files in `lightplayer/crates/lps-filetests/filetests/arrays/phase/`:
 - `phase/1.glsl` - Phase 1 tests
 - `phase/2.glsl` - Phase 2 tests
 - etc.

@@ -6,7 +6,7 @@ Parse `#[lpfx_impl(...)]` attributes to extract variant type (if any) and GLSL s
 
 ## Implementation
 
-1. Create `lp-glsl-builtin-gen-app/src/lpfx/parse.rs`
+1. Create `lps-builtin-gen-app/src/lpfx/parse.rs`
 2. Implement `parse_lpfx_attribute()` function:
     - Parse attribute using `syn::Attribute::parse_args()`
     - Extract optional variant identifier (`f32` or `q32`)

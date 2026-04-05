@@ -62,7 +62,7 @@ fn scalar_type(&self) -> Type {
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
+cargo check -p lps-compiler --features std
 ```
 
 The enum arms for Q32 will initially not compile until all methods are

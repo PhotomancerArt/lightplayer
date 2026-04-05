@@ -43,7 +43,7 @@ next. Goal: reduce peak heap usage on ESP32 by ~25-30 KB.
 
 - Updated `lp-core/lp-engine/src/nodes/shader/runtime.rs` to use `glsl_jit_streaming` instead of
   `glsl_jit`
-- Created `lp-shader/lp-glsl-compiler/tests/test_streaming_integration.rs`:
+- Created `lp-shader/lps-compiler/tests/test_streaming_integration.rs`:
     - test_streaming_matches_batch_rainbow_shader (examples/basic rainbow shader)
     - test_streaming_matches_batch_multi_function (self-contained palette shader)
 - Verified no_std compilation: `cargo check --no-default-features --features core`
@@ -58,13 +58,13 @@ next. Goal: reduce peak heap usage on ESP32 by ~25-30 KB.
 
 ### New/Modified
 
-- `lp-shader/lp-glsl-compiler/src/frontend/semantic/mod.rs` - ast_node_count
-- `lp-shader/lp-glsl-compiler/src/frontend/mod.rs` - glsl_jit_streaming, build_target_for_jit
-- `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs` - compile_single_function_to_clif
-- `lp-shader/lp-glsl-compiler/src/backend/module/gl_module.rs` - transform_single_function
-- `lp-shader/lp-glsl-compiler/src/backend/codegen/jit.rs` - build_jit_executable_streaming
-- `lp-shader/lp-glsl-compiler/src/lib.rs` - export glsl_jit_streaming
-- `lp-shader/lp-glsl-compiler/tests/test_streaming_integration.rs` - integration tests
+- `lp-shader/lps-compiler/src/frontend/semantic/mod.rs` - ast_node_count
+- `lp-shader/lps-compiler/src/frontend/mod.rs` - glsl_jit_streaming, build_target_for_jit
+- `lp-shader/lps-compiler/src/frontend/glsl_compiler.rs` - compile_single_function_to_clif
+- `lp-shader/lps-compiler/src/backend/module/gl_module.rs` - transform_single_function
+- `lp-shader/lps-compiler/src/backend/codegen/jit.rs` - build_jit_executable_streaming
+- `lp-shader/lps-compiler/src/lib.rs` - export glsl_jit_streaming
+- `lp-shader/lps-compiler/tests/test_streaming_integration.rs` - integration tests
 - `lp-core/lp-engine/src/nodes/shader/runtime.rs` - ESP32 callsite
 
 ## Architecture

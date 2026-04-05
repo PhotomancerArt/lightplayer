@@ -6,7 +6,7 @@ Generate `lpfx_fns.rs` source code with `init_functions()` containing all `LpfxF
 
 ## Implementation
 
-1. Create `lp-glsl-builtin-gen-app/src/lpfx/generate.rs`
+1. Create `lps-builtin-gen-app/src/lpfx/generate.rs`
 2. Implement `generate_lpfx_fns()` function:
     - Generate `lpfx_fns()` function with caching logic
     - Generate `init_functions()` that returns array

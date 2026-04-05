@@ -9,8 +9,8 @@ Part of: `docs/roadmaps/2026-03-20-naga/phase-ii.md`
 
 ## Current state (post Phase I)
 
-- `lp-glsl-naga` parses GLSL → `naga::Module` + `FunctionInfo` metadata
-- `lp-glsl-wasm` emits WASM from `naga::Module` for scalars only
+- `lps-naga` parses GLSL → `naga::Module` + `FunctionInfo` metadata
+- `lps-wasm` emits WASM from `naga::Module` for scalars only
 - **432/432** scalar filetests pass on `wasm.q32`
 
 ## Phase 01 progress (control flow)
@@ -51,6 +51,7 @@ WASM has no vector instructions; vectors are N flat scalars on the WASM stack
 (multi-value returns) and in WASM locals.
 
 Key expressions:
+
 - `Expression::Compose { ty, components }` — build vec from scalar handles
 - `Expression::Splat { size, value }` — broadcast scalar to vec
 - `Expression::Swizzle { size, vector, pattern }` — reorder/extract components
@@ -66,13 +67,14 @@ vectors use N consecutive WASM locals.
 `Expression::Math { fun, arg, arg1, arg2, arg3 }` with `fun: MathFunction`.
 
 Key builtins for rainbow.glsl:
+
 - `Floor`, `Fract`, `Abs`, `Clamp`, `Min`, `Max`, `Mix`, `SmoothStep`, `Step`
 - `Sin`, `Cos`, `Atan2`
 - `Exp`, `Log`, `Pow`, `Sqrt`, `InverseSqrt`
 - `Mod` (handled as `Binary::Modulo` by naga)
 
 Q32 mode: these need WASM imports to `builtins` module (calling the
-`lp-glsl-builtins-wasm` implementation). Map `MathFunction` variants to
+`lps-builtins-wasm` implementation). Map `MathFunction` variants to
 `BuiltinId` for the import name.
 
 Float mode: use `f32.floor`, `f32.sqrt` etc. where WASM has native ops;
@@ -81,6 +83,7 @@ import the rest.
 ### User-defined function calls
 
 `Statement::Call { function, arguments, result }`:
+
 - Emit argument expressions
 - Emit `call $func_idx`
 - If `result` is `Some(h)`: `h` is `Expression::CallResult(func_handle)`.
@@ -98,10 +101,11 @@ body (the stub `void main() {}` pattern doesn't apply; Naga must see their
 declarations).
 
 Approach:
-1. In `lp-glsl-naga`: prepend GLSL forward declarations for all LPFX
+
+1. In `lps-naga`: prepend GLSL forward declarations for all LPFX
    functions before parsing. Use `#line 1` after prototypes to reset line
    numbers.
-2. In `lp-glsl-wasm`: detect LPFX calls by function name prefix (`lpfx_`)
+2. In `lps-wasm`: detect LPFX calls by function name prefix (`lpfx_`)
    or by matching against a known list. Emit as WASM imports to the
    `builtins` module instead of intra-module calls.
 
@@ -109,8 +113,10 @@ Approach:
 
 `Statement::Break` and `Statement::Continue` are already partially modeled
 by the `Loop` structure. In Naga's IR:
+
 - `while(cond) { body }` becomes `Loop { body: [if(!cond) break; ...body], continuing: [] }`
-- `for(init; cond; inc) { body }` becomes `init; Loop { body: [if(!cond) break; ...body], continuing: [inc] }`
+- `for(init; cond; inc) { body }` becomes
+  `init; Loop { body: [if(!cond) break; ...body], continuing: [inc] }`
 - `break` → `Statement::Break` inside the body block
 - `continue` → `Statement::Continue` exits the body block to `continuing`
 
@@ -119,6 +125,7 @@ Fix: `Break` → `br 2` (exit the outer `block`), `Continue` → `br 0`
 (re-enter inner `block` which jumps to continuing).
 
 Actually re-reading `emit.rs`: the current loop structure is:
+
 ```
 block $exit
   loop $loop
@@ -148,7 +155,7 @@ Need to check how Naga's GLSL frontend handles `out` parameters for external
 `module.bytes`. It already compiles after Phase I (`GlslWasmError` handling).
 For Phase II, the emitted WASM will include `builtins` imports; the web-demo
 JavaScript must provide those imports at instantiation time. The web-demo
-`www/index.html` already loads `lp_glsl_builtins_wasm.wasm` for this purpose.
+`www/index.html` already loads `lps_builtins_wasm.wasm` for this purpose.
 
 ## Questions
 
@@ -156,11 +163,11 @@ JavaScript must provide those imports at instantiation time. The web-demo
 
 **Context**: In Q32 mode, `floor(x)` on a Q16.16 value is `x & 0xFFFF0000`.
 `sin(x)`, `cos(x)`, etc. need lookup tables or polynomial approximations in
-the `lp-glsl-builtins-wasm` WASM module.
+the `lps-builtins-wasm` WASM module.
 
 **Approach**: Emit WASM imports for all `MathFunction` variants in Q32 mode.
 Map `MathFunction::Floor` → import `__lp_floor`, `MathFunction::Sin` →
-import `__lp_sin`, etc. The `lp-glsl-builtins-wasm` crate already provides
+import `__lp_sin`, etc. The `lps-builtins-wasm` crate already provides
 these.
 
 For Float mode, use native WASM instructions where available (`f32.floor`,
@@ -173,6 +180,7 @@ For Float mode, use native WASM instructions where available (`f32.floor`,
 to them without seeing their bodies.
 
 **Approach**: Prepend GLSL function prototypes:
+
 ```glsl
 float lpfx_psrdnoise(vec2 pos, vec2 per, float rot, out vec2 gradient, uint quality);
 float lpfx_worley(vec2 pos, uint quality);

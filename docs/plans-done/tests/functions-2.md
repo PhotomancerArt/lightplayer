@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan documents the existing function tests in `lightplayer/crates/lp-glsl-filetests/filetests/functions/`. These tests comprehensively cover GLSL user-defined functions including declarations, definitions, calls, parameter qualifiers, return types, overloading, and edge cases.
+This plan documents the existing function tests in `lightplayer/crates/lps-filetests/filetests/functions/`. These tests comprehensively cover GLSL user-defined functions including declarations, definitions, calls, parameter qualifiers, return types, overloading, and edge cases.
 
 ## Existing Test Structure
 

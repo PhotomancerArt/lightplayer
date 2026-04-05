@@ -9,7 +9,7 @@ This affects both user-defined functions and LPFX functions.
 
 ### Files to Modify
 
-1. **`lp-shader/lp-glsl-compiler/src/frontend/codegen/signature.rs`**
+1. **`lp-shader/lps-compiler/src/frontend/codegen/signature.rs`**
     - Update `add_parameters()` to check `param.qualifier`
     - Update `add_type_as_params()` to accept qualifier parameter
     - For `Out`/`InOut`: Add pointer type parameter

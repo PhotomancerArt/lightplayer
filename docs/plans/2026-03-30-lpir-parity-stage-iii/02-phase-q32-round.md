@@ -23,23 +23,23 @@ Edit `docs/design/q32.md` §5 "Named Constants":
    |---------|--------------|
    | `round(x)` | Round to nearest, halfway cases away from zero |
 
-3. Reference implementation: `__lp_glsl_round_q32` in
-   `lp-glsl-builtins/src/builtins/glsl/round_q32.rs`
+3. Reference implementation: `__lps_round_q32` in
+   `lps-builtins/src/builtins/glsl/round_q32.rs`
 
 ### Step 2: Verify lowering path
 
 Check if `round` is already wired in lowering:
 
 ```bash
-grep -n "round" lp-shader/lp-glsl-naga/src/lower*.rs
+grep -n "round" lp-shader/lps-naga/src/lower*.rs
 ```
 
 If missing, add to `lower_math.rs` or appropriate location to map `MathFunction::Round` to
-`__lp_glsl_round_q32`.
+`__lps_round_q32`.
 
 ### Step 3: Update test annotation
 
-Edit `lp-shader/lp-glsl-filetests/filetests/const/builtin/extended.glsl`:
+Edit `lp-shader/lps-filetests/filetests/const/builtin/extended.glsl`:
 
 Remove line 15-16:
 

@@ -184,7 +184,7 @@ mod tests {
             .join("../../../../../target")
             .join(target)
             .join(profile)
-            .join("lp-glsl-builtins-emu-app");
+            .join("lps-builtins-emu-app");
 
         // If not found, try workspace root directly (for when running from lightplayer/)
         let exe_path = if exe_path.exists() {
@@ -194,7 +194,7 @@ mod tests {
                 .join("../../../../target")
                 .join(target)
                 .join(profile)
-                .join("lp-glsl-builtins-emu-app")
+                .join("lps-builtins-emu-app")
         };
 
         if exe_path.exists() {

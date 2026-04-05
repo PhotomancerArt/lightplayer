@@ -6,7 +6,7 @@ Support arrays of vectors and matrices (`vec4 arr[5]`, `mat3 arr[3]`) with compo
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector-matrix-elements.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/4-vector-matrix-elements.glsl`
 
 - Array of vectors: `vec4 arr[3];`
 - Component access: `arr[0].x`, `arr[1].y`
@@ -17,7 +17,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector
 
 ### 1. Element Size Calculation
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs`
 
 - Update `declare_variable()` to calculate element size for vectors/matrices:
   - Vector: `component_count * base_type.bytes()` (e.g., `vec4` = 4 * 4 = 16 bytes)
@@ -26,7 +26,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector
 
 ### 2. Component Access from Array Elements
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - Update `resolve_lvalue()` to handle `Expr::Dot` on `ArrayElement`:
   - Extract component indices from field name
@@ -35,7 +35,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector
 
 ### 3. Read Component from Array Element
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - In `read_lvalue()` for `ArrayElement`:
   - If `component_indices` is `Some`, load only those components
@@ -45,7 +45,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector
 
 ### 4. Write Component to Array Element
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - In `write_lvalue()` for `ArrayElement`:
   - If `component_indices` is `Some`, store only to those components
@@ -74,8 +74,8 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/4-vector
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 
 

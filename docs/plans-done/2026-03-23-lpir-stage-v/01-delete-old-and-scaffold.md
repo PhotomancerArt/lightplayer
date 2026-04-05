@@ -28,10 +28,15 @@ pub(crate) fn emit_module(
 Initial implementation: return `Err("not yet implemented")`.
 
 ### `src/emit/func.rs`
+
 ### `src/emit/ops.rs`
+
 ### `src/emit/q32.rs`
+
 ### `src/emit/control.rs`
+
 ### `src/emit/memory.rs`
+
 ### `src/emit/imports.rs`
 
 All empty stubs.
@@ -39,17 +44,19 @@ All empty stubs.
 ### `Cargo.toml`
 
 Add `lpir` dependency:
+
 ```toml
 lpir = { path = "../lpir" }
 ```
 
 Remove `naga` direct dependency if no longer needed (check if `module.rs`
-or other kept files still reference it). Likely keep `lp-glsl-naga`
+or other kept files still reference it). Likely keep `lps-naga`
 (for `compile()` and `FloatMode`).
 
 ### `lib.rs`
 
 Update module declarations:
+
 ```rust
 mod emit;
 pub mod module;
@@ -59,10 +66,11 @@ pub mod options;
 Remove `emit_vec`, `locals`, `lpfx`, `types` module declarations.
 
 Update `glsl_wasm()` to call the new pipeline:
+
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lp_glsl_naga::compile(source)?;
-    let ir_module = lp_glsl_naga::lower::lower(&naga_module)
+    let naga_module = lps_naga::compile(source)?;
+    let ir_module = lps_naga::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;
@@ -75,10 +83,11 @@ pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslW
 
 Update `WasmExport` to not depend on deleted `types.rs`. The WASM
 `ValType` mapping is simple enough to inline or move into `module.rs`:
+
 - Q32: float → `I32`, int/uint/bool → `I32`
 - Float: float → `F32`, int/uint/bool → `I32`
 
-Keep `GlslType` from `lp-glsl-naga` for export metadata.
+Keep `GlslType` from `lps-naga` for export metadata.
 
 ### `collect_exports`
 
@@ -89,7 +98,7 @@ runner).
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Crate compiles. Tests will fail (emitter returns error). That's expected.

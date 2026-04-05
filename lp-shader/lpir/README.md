@@ -17,14 +17,14 @@ the compiler means running Cranelift.
 LPIR is an **anti-corruption layer** (sometimes called a *Ports and Adapters* or *Hexagonal
 Architecture* boundary). It lets the compiler core — parsing, type checking, scalarization, builtin
 decomposition — be written entirely in LightPlayer's own terms. Cranelift only appears in one
-place: `lpir-cranelift`, the backend adapter. The same IR feeds WASM emission (`lp-glsl-wasm`), an
+place: `lpir-cranelift`, the backend adapter. The same IR feeds WASM emission (`lps-wasm`), an
 in-process interpreter (`lpir::interp`), and any future backend.
 
 Concretely, this gives us:
 
 - **Decoupled testing.** The interpreter runs any LPIR program without Cranelift. Filetests can
   verify scalarization, control flow, builtins, and GLSL semantics using the interpreter alone.
-- **Multiple backends from one lowering.** `lp-glsl-naga` lowers GLSL once; three consumers
+- **Multiple backends from one lowering.** `lps-naga` lowers GLSL once; three consumers
   (Cranelift / WASM / interpreter) share the result.
 - **Stable compiler internals.** Cranelift version bumps, ABI changes, or ISA feature flags stay
   behind the `lpir-cranelift` boundary and do not ripple into the frontend or tests.
@@ -107,11 +107,11 @@ func @example(v0:f32) -> f32 {
 GLSL source
   │
   ▼
-lp-glsl-naga  (Naga glsl-in → IrModule)
+lps-naga  (Naga glsl-in → IrModule)
   │
   ├──► lpir::interp       (in-process interpreter, testing)
   ├──► lpir-cranelift      (Cranelift → RISC-V / host JIT)
-  └──► lp-glsl-wasm        (wasm-encoder → .wasm)
+  └──► lps-wasm        (wasm-encoder → .wasm)
 ```
 
 Lowering is **mode-unaware** (no f32-vs-Q32 in the IR). Backends are **mode-aware** and apply the

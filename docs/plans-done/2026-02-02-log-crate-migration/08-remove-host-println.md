@@ -17,13 +17,13 @@ levels (`log::info!` for what was println).
 
 ### 1. Remove host_println! Macro
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/macros.rs`
+**File**: `lp-shader/lps-builtins/src/host/macros.rs`
 
 Remove the `host_println!` macro definition entirely.
 
 ### 2. Remove __host_println Function Declarations
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/mod.rs`
+**File**: `lp-shader/lps-builtins/src/host/mod.rs`
 
 Remove exports and references to `__host_println`.
 
@@ -31,18 +31,18 @@ Remove exports and references to `__host_println`.
 
 **Files to update**:
 
-- `lp-shader/lp-glsl-builtins-emu-app/src/main.rs` - Remove emulator implementation
-- `lp-shader/lp-glsl-compiler/src/backend/host/impls.rs` - Remove JIT implementation
-- `lp-shader/lp-glsl-builtins/src/host/test.rs` - Remove test implementation
+- `lp-shader/lps-builtins-emu-app/src/main.rs` - Remove emulator implementation
+- `lp-shader/lps-compiler/src/backend/host/impls.rs` - Remove JIT implementation
+- `lp-shader/lps-builtins/src/host/test.rs` - Remove test implementation
 - `lp-riscv/lp-riscv-emu-guest/src/host.rs` - Remove guest implementation
 
 ### 4. Update Registry
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/registry.rs`
+**File**: `lp-shader/lps-builtins/src/host/registry.rs`
 
 Remove `Println` variant from `HostId` enum if it exists.
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/host/registry.rs`
+**File**: `lp-shader/lps-compiler/src/backend/host/registry.rs`
 
 Remove `Println` references from JIT registry.
 

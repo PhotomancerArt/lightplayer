@@ -1,7 +1,7 @@
 ## Scope of phase
 
 Implement **`object_module.rs`** (name may vary): create **RISC-V 32** ISA using
-the same **triple and flag defaults** as `lp-glsl-cranelift`’s
+the same **triple and flag defaults** as `lps-cranelift`’s
 `Target::riscv32_emulator()` / `default_riscv32_flags`, build **`ObjectModule`**
 via `ObjectBuilder::new(isa, b"lpir", default_libcall_names())`, run the shared
 `define_lpir_functions` from phase 02, then **`finish`** and return **`Vec<u8>`**
@@ -43,7 +43,7 @@ pub fn object_bytes_from_ir(
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
 ```
 
 Fix any new warnings in touched files. `cargo +nightly fmt`.

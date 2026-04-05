@@ -1,8 +1,8 @@
-# Phase 8: Refactor lp-glsl-builtins-emu-app
+# Phase 8: Refactor lps-builtins-emu-app
 
 ## Scope of Phase
 
-Refactor `lp-glsl-builtins-emu-app` to use `lp-riscv-emu-guest` crate instead of containing all the
+Refactor `lps-builtins-emu-app` to use `lp-riscv-emu-guest` crate instead of containing all the
 code
 itself. This involves updating dependencies, simplifying `main.rs`, and removing the build script.
 
@@ -18,17 +18,17 @@ itself. This involves updating dependencies, simplifying `main.rs`, and removing
 
 ### 1. Update Cargo.toml
 
-Update `lp-glsl-builtins-emu-app/Cargo.toml`:
+Update `lps-builtins-emu-app/Cargo.toml`:
 
 ```toml
 [package]
-name = "lp-glsl-builtins-emu-app"
+name = "lps-builtins-emu-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lp-glsl-builtins-emu-app"
+name = "lps-builtins-emu-app"
 path = "src/main.rs"
 test = false
 
@@ -38,7 +38,7 @@ std = []
 test = []
 
 [dependencies]
-lp-glsl-builtins = { path = "../../crates/lp-glsl-builtins" }
+lps-builtins = { path = "../../crates/lps-builtins" }
 lp-riscv-emu-guest = { path = "../../crates/lp-riscv-emu-guest" }
 ```
 
@@ -46,7 +46,7 @@ Add `lp-riscv-emu-guest` as a dependency.
 
 ### 2. Simplify main.rs
 
-Update `lp-glsl-builtins-emu-app/src/main.rs` to be a thin wrapper:
+Update `lps-builtins-emu-app/src/main.rs` to be a thin wrapper:
 
 ```rust
 #![no_std]
@@ -57,7 +57,7 @@ mod builtin_refs;
 // Re-export _print so macros can find it
 pub use lp_riscv_emu_guest::print::_print;
 
-use lp_glsl_builtins::host_debug;
+use lps_builtins::host_debug;
 use lp_riscv_emu_guest::entry;
 
 /// User _init pointer - will be overwritten by object loader to point to actual user _init()
@@ -93,12 +93,12 @@ pub extern "C" fn _lp_main() -> () {
 
     if user_init_ptr == 0 || user_init_ptr == 0xDEADBEEF {
         // No user _init set - halt gracefully
-        host_debug!("[lp-glsl-builtins-emu-app::main()] no user _init specified. halting.");
+        host_debug!("[lps-builtins-emu-app::main()] no user _init specified. halting.");
         lp_riscv_emu_guest::panic::ebreak();
     }
 
     host_debug!(
-        "[lp-glsl-builtins-emu-app::main()] jumping to user _init at 0x{:x}",
+        "[lps-builtins-emu-app::main()] jumping to user _init at 0x{:x}",
         user_init_ptr
     );
 
@@ -112,7 +112,7 @@ pub extern "C" fn _lp_main() -> () {
     };
 
     host_debug!(
-        "[lp-glsl-builtins-emu-app::main()] returned from user _init(): {}",
+        "[lps-builtins-emu-app::main()] returned from user _init(): {}",
         res
     );
 }
@@ -151,7 +151,7 @@ pub use panic::ebreak;
 But that won't work because `panic` module needs to be accessible for `#[panic_handler]`. Let's keep
 it as `mod panic` but export `ebreak`:
 
-Actually, let's check the original usage. In `lp-glsl-builtins-emu-app/src/main.rs`, `ebreak()` is
+Actually, let's check the original usage. In `lps-builtins-emu-app/src/main.rs`, `ebreak()` is
 defined
 locally. So we can just call `lp_riscv_emu_guest::panic::ebreak()` if we make it public, or we can
 provide
@@ -230,7 +230,7 @@ pub fn ebreak() -> ! {
 }
 ```
 
-Now update `lp-glsl-builtins-emu-app/src/main.rs`:
+Now update `lps-builtins-emu-app/src/main.rs`:
 
 ```rust
 use lp_riscv_emu_guest::ebreak;
@@ -255,7 +255,7 @@ mod builtin_refs;
 // Re-export _print so macros can find it
 pub use lp_riscv_emu_guest::print::_print;
 
-use lp_glsl_builtins::host_debug;
+use lps_builtins::host_debug;
 use lp_riscv_emu_guest::ebreak;
 
 /// User _init pointer - will be overwritten by object loader to point to actual user _init()
@@ -291,12 +291,12 @@ pub extern "C" fn _lp_main() -> () {
 
     if user_init_ptr == 0 || user_init_ptr == 0xDEADBEEF {
         // No user _init set - halt gracefully
-        host_debug!("[lp-glsl-builtins-emu-app::main()] no user _init specified. halting.");
+        host_debug!("[lps-builtins-emu-app::main()] no user _init specified. halting.");
         ebreak();
     }
 
     host_debug!(
-        "[lp-glsl-builtins-emu-app::main()] jumping to user _init at 0x{:x}",
+        "[lps-builtins-emu-app::main()] jumping to user _init at 0x{:x}",
         user_init_ptr
     );
 
@@ -310,7 +310,7 @@ pub extern "C" fn _lp_main() -> () {
     };
 
     host_debug!(
-        "[lp-glsl-builtins-emu-app::main()] returned from user _init(): {}",
+        "[lps-builtins-emu-app::main()] returned from user _init(): {}",
         res
     );
 }
@@ -318,7 +318,7 @@ pub extern "C" fn _lp_main() -> () {
 
 ### 3. Remove build.rs
 
-Delete `lp-glsl-builtins-emu-app/build.rs` since the linker script is now handled by
+Delete `lps-builtins-emu-app/build.rs` since the linker script is now handled by
 `lp-riscv-emu-guest`.
 
 ### 4. Update Previous Phases
@@ -341,7 +341,7 @@ And make `ebreak` public in `panic.rs` (already done in phase 3, but verify it's
 Run from workspace root:
 
 ```bash
-cargo check --package lp-glsl-builtins-emu-app --target riscv32imac-unknown-none-elf
+cargo check --package lps-builtins-emu-app --target riscv32imac-unknown-none-elf
 ```
 
 This should compile successfully. The app should now be a thin wrapper around `lp-riscv-emu-guest`.

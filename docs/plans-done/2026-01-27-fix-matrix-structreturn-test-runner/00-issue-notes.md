@@ -51,12 +51,12 @@ Signature: Signature { params: [AbiParam { value_type: types::I32, purpose: Stru
 
 ### Key Files to Investigate
 
-- `lp-shader/lp-glsl-compiler/src/exec/execute_fn.rs` - Test execution entry point
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/signature.rs` - Signature generation
-- `lp-shader/lp-glsl-compiler/src/exec/emu.rs` - Emulator execution (check `call_mat()`
+- `lp-shader/lps-compiler/src/exec/execute_fn.rs` - Test execution entry point
+- `lp-shader/lps-compiler/src/frontend/codegen/signature.rs` - Signature generation
+- `lp-shader/lps-compiler/src/exec/emu.rs` - Emulator execution (check `call_mat()`
   implementation)
-- `lp-shader/lp-glsl-compiler/src/exec/jit.rs` - JIT execution (check `call_mat()` implementation)
-- `lp-shader/lp-glsl-filetests/src/test_run/run_detail.rs` - Test harness
+- `lp-shader/lps-compiler/src/exec/jit.rs` - JIT execution (check `call_mat()` implementation)
+- `lp-shader/lps-filetests/src/test_run/run_detail.rs` - Test harness
 
 ## Expected Behavior
 

@@ -6,7 +6,7 @@ Support nested arrays (`float[5][3]`) with multi-dimensional indexing (`arr[i][j
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/5-multidimensional.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/5-multidimensional.glsl`
 
 - 2D array declaration: `int arr[3][2];`
 - Multi-dimensional indexing: `arr[0][0]`, `arr[1][1]`, `arr[2][0]`
@@ -15,14 +15,14 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/5-multid
 
 ### 1. Multi-dimensional Type Parsing
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_resolver.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/type_resolver.rs`
 
 - Already handled in Phase 1 (recursive parsing)
 - Verify it works for nested arrays: `float[5][3]` → `Array(Box<Array(Box<Float>, 3)>, 5)`
 
 ### 2. Multi-dimensional Storage
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs`
 
 - Calculate total size for multi-dimensional arrays:
   - For `float[5][3]`: total = 5 * 3 * 4 = 60 bytes
@@ -31,7 +31,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/5-multid
 
 ### 3. Multi-dimensional Indexing
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
 
 - Handle multiple dimensions in `ArraySpecifier`
 - Calculate flat offset: `offset = (i0 * size1 + i1) * element_size_bytes` for 2D
@@ -40,7 +40,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/5-multid
 
 ### 4. Multi-dimensional LValue Resolution
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - Update `resolve_lvalue()` to handle multiple dimensions:
   - Process each dimension in `ArraySpecifier`
@@ -66,9 +66,9 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/5-multid
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs` (verify multi-dim size calculation)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs` (verify multi-dim size calculation)
 
 
 

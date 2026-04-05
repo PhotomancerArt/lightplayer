@@ -2,7 +2,7 @@
 
 ## Overview
 
-Move `lp-app` and `lp-glsl` directories from the cranelift fork into a new standalone repository at
+Move `lp-app` and `lps` directories from the cranelift fork into a new standalone repository at
 `/Users/yona/dev/photomancer/lp2025`, preserving git history and updating all dependencies to
 reference the cranelift fork via git.
 
@@ -13,7 +13,7 @@ The new repo has:
 - `lp-app/` - LightPlayer application workspace
 - `lp-shader/` - LightPlayer GLSL compiler workspace
 - `scripts/` - Build and test scripts (lp-build.sh, glsl-filetests.sh, build-builtins.sh)
-- Root `Cargo.toml` - Unified workspace including all crates from both lp-app and lp-glsl
+- Root `Cargo.toml` - Unified workspace including all crates from both lp-app and lps
 
 ## Current Status
 
@@ -42,7 +42,7 @@ The new repo has:
 
 4. ✅ **Create Root Workspace**
     - Created root `Cargo.toml` with unified workspace
-    - Includes all crates from both lp-app and lp-glsl as workspace members
+    - Includes all crates from both lp-app and lps as workspace members
     - Defines shared workspace dependencies (cranelift crates via git, common deps)
     - Consolidated workspace-level configuration
 
@@ -51,12 +51,12 @@ The new repo has:
         - Repository: `https://github.com/Yona-Appletree/lp-cranelift.git`
         - Branch: `feature/lp2025`
     - Updated `lp-app/Cargo.toml` and `lp-shader/Cargo.toml` to reference workspace dependencies
-    - Commented out workspace sections in lp-app and lp-glsl Cargo.toml files (workspace now defined
+    - Commented out workspace sections in lp-app and lps Cargo.toml files (workspace now defined
       at root)
 
 6. ✅ **Update Cross-References**
     - Updated `lp-app/crates/lp-engine/Cargo.toml` line 20: Changed path from
-      `../../../lp-shader/lp-glsl-compiler` to `../../../lp-shader/lp-glsl-compiler` (
+      `../../../lp-shader/lps-compiler` to `../../../lp-shader/lps-compiler` (
       correct relative path)
     - Updated `lp-shader/Cargo.toml` to reference `lp-app/apps/lp-cli` (was `lp-core-cli`)
 
@@ -64,16 +64,16 @@ The new repo has:
     - Updated `scripts/lp-build.sh`: Removed cranelift-specific test (32-bit filetests), updated
       directory references
     - Updated `scripts/glsl-filetests.sh`: Removed cranelift directory check, updated workspace root
-      detection to look for `lp-glsl` instead of `cranelift`
+      detection to look for `lps` instead of `cranelift`
     - `scripts/build-builtins.sh`: Already uses correct paths
 
 ### In Progress / Remaining
 
 8. ✅ **Verify Build and Tests**
     - ✅ Fixed path issue: `lp-app/crates/lp-engine/Cargo.toml` - changed from
-      `../../lp-shader/lp-glsl-compiler` to `../../../lp-shader/lp-glsl-compiler`
+      `../../lp-shader/lps-compiler` to `../../../lp-shader/lps-compiler`
     - ✅ Fixed `cranelift-interpreter` dependency: Added to root workspace dependencies and updated
-      `lp-glsl-compiler` to use workspace reference
+      `lps-compiler` to use workspace reference
     - ✅ Added missing `runtime-embive` crate to workspace members (later removed due to embedded
       target issues)
     - ✅ Verified workspace structure with `cargo metadata --no-deps` - all packages resolve
@@ -82,8 +82,8 @@ The new repo has:
       public repo access
     - ✅ Fixed import paths in test files (`filetests.rs` and `format_glsl_value_tests.rs`)
     - ✅ Workspace compiles successfully (main crates)
-    - ⚠️ Some test failures in `lp-glsl-builtins` (pre-existing logic bugs, not blocking)
-    - ⚠️ Embedded targets (`esp32-glsl-jit`, `lp-glsl-builtins-emu-app`) have build issues but don't
+    - ⚠️ Some test failures in `lps-builtins` (pre-existing logic bugs, not blocking)
+    - ⚠️ Embedded targets (`esp32-glsl-jit`, `lps-builtins-emu-app`) have build issues but don't
       affect main workspace
 
 9. ✅ **Setup Git Remote and Push**
@@ -105,7 +105,7 @@ The new repo has:
     - Root `Cargo.toml` - defines cranelift git dependencies in workspace.dependencies
     - `lp-app/Cargo.toml` - references workspace cranelift dependencies
     - `lp-shader/Cargo.toml` - references workspace cranelift dependencies
-    - `lp-app/crates/lp-engine/Cargo.toml` - lp-glsl-compiler path (line 20)
+    - `lp-app/crates/lp-engine/Cargo.toml` - lps-compiler path (line 20)
 
 3. **Script Updates:**
     - `scripts/lp-build.sh` - removed cranelift test, updated paths
@@ -120,10 +120,10 @@ The new repo has:
 ## Known Issues
 
 1. ✅ **Path Issue**: Fixed - `lp-app/crates/lp-engine/Cargo.toml` line 20 now correctly references
-   `lp-glsl-compiler` with path `../../../lp-shader/lp-glsl-compiler`.
+   `lps-compiler` with path `../../../lp-shader/lps-compiler`.
 
 2. ✅ **Workspace Structure**: Cargo doesn't support nested workspaces, so we consolidated everything
-   into the root workspace. The lp-app and lp-glsl Cargo.toml files have their workspace sections
+   into the root workspace. The lp-app and lps Cargo.toml files have their workspace sections
    commented out but kept for reference.
 
 3. ✅ **Git Authentication**: Fixed - Added `.cargo/config.toml` with `git-fetch-with-cli = true` to
@@ -134,7 +134,7 @@ The new repo has:
 The git history was successfully extracted using `git filter-repo`:
 
 - lp-app history: Preserved with paths as `lp-app/...`
-- lp-glsl history: Preserved with paths as `lp-shader/...`
+- lps history: Preserved with paths as `lp-shader/...`
 - Both histories merged into the new repository
 
 ## Next Steps
@@ -144,7 +144,7 @@ The git history was successfully extracted using `git filter-repo`:
 3. ✅ Configure git authentication for cranelift dependencies - DONE (`.cargo/config.toml`)
 4. ✅ Run `cargo build --workspace` to verify build works - DONE (main workspace builds successfully)
 5. ✅ Run `cargo test --workspace` to verify tests pass - DONE (main tests pass, some pre-existing
-   failures in lp-glsl-builtins)
+   failures in lps-builtins)
 6. ✅ Fix import paths in test files - DONE
 7. ✅ Commit all changes - DONE
 8. ✅ Setup git remote - DONE
@@ -158,18 +158,18 @@ The git history was successfully extracted using `git filter-repo`:
 # Extract history
 cd /tmp
 git clone /Users/yona/dev/photomancer/lp-cranelift lp-app-temp
-git clone /Users/yona/dev/photomancer/lp-cranelift lp-glsl-temp
+git clone /Users/yona/dev/photomancer/lp-cranelift lps-temp
 cd lp-app-temp && git filter-repo --path lp-app --force
-cd lp-glsl-temp && git filter-repo --path lp-glsl --force
+cd lps-temp && git filter-repo --path lps --force
 
 # Merge into new repo
 cd /Users/yona/dev/photomancer/lp2025
 git remote add lp-app-temp /tmp/lp-app-temp
-git remote add lp-glsl-temp /tmp/lp-glsl-temp
+git remote add lps-temp /tmp/lps-temp
 git fetch lp-app-temp
-git fetch lp-glsl-temp
+git fetch lps-temp
 git merge --allow-unrelated-histories lp-app-temp/feature/lightplayer -m "Import lp-app history"
-git merge --allow-unrelated-histories lp-glsl-temp/feature/lightplayer -m "Import lp-glsl history"
+git merge --allow-unrelated-histories lps-temp/feature/lightplayer -m "Import lps history"
 ```
 
 ## Commit Messages (Conventional Commits Style)
@@ -177,7 +177,7 @@ git merge --allow-unrelated-histories lp-glsl-temp/feature/lightplayer -m "Impor
 - `feat: create root workspace and update cranelift dependencies to git`
 - `fix: update scripts for new repo structure`
 - `fix: consolidate workspaces into root to avoid nested workspace error`
-- `fix: correct lp-glsl-compiler path in lp-engine` ✅
+- `fix: correct lps-compiler path in lp-engine` ✅
 - `fix: add cranelift-interpreter to workspace dependencies` ✅
 - `fix: add runtime-embive to workspace members` ✅
 - `fix: update cranelift dependencies to use feature/lp2025 branch` ✅

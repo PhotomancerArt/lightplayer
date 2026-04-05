@@ -16,9 +16,10 @@ lp-engine/src/
 ## New Types and Functions
 
 ### Shader Runtime
+
 ```rust
 // nodes/shader/runtime.rs
-use lp_glsl_compiler::{GlslCompiler, GlslExecutable, GlslJitModule};
+use lps_compiler::{GlslCompiler, GlslExecutable, GlslJitModule};
 use lp_model::nodes::shader::{ShaderConfig, ShaderState};
 use crate::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
 
@@ -46,6 +47,7 @@ impl NodeRuntime for ShaderRuntime {
 ```
 
 ### Frame Time Tracking
+
 ```rust
 // project/runtime.rs (or new runtime/frame_time.rs)
 pub struct FrameTime {
@@ -64,6 +66,7 @@ impl ProjectRuntime {
 ```
 
 ### Render Context Updates
+
 ```rust
 // runtime/contexts.rs
 pub trait RenderContext {
@@ -75,6 +78,7 @@ pub trait RenderContext {
 ```
 
 ### Lazy Texture Rendering Updates
+
 ```rust
 // project/runtime.rs
 impl<'a> RenderContextImpl<'a> {
@@ -141,6 +145,7 @@ impl<'a> RenderContextImpl<'a> {
 ```
 
 ### Shader Execution
+
 ```rust
 // nodes/shader/runtime.rs
 impl NodeRuntime for ShaderRuntime {
@@ -203,23 +208,31 @@ impl NodeRuntime for ShaderRuntime {
 
 ## Design Decisions
 
-1. **Compilation Timing**: Compile during `init()`, not `render()`. This allows catching compilation errors early and avoids recompiling every frame.
+1. **Compilation Timing**: Compile during `init()`, not `render()`. This allows catching compilation
+   errors early and avoids recompiling every frame.
 
-2. **Executable Storage**: Use `Box<dyn GlslExecutable>` trait object to allow different execution backends (JIT, emulator) without changing the runtime code.
+2. **Executable Storage**: Use `Box<dyn GlslExecutable>` trait object to allow different execution
+   backends (JIT, emulator) without changing the runtime code.
 
-3. **Texture Mutability**: Add `get_texture_mut()` to `RenderContext` trait. This is cleaner than accessing texture runtime directly and maintains the abstraction.
+3. **Texture Mutability**: Add `get_texture_mut()` to `RenderContext` trait. This is cleaner than
+   accessing texture runtime directly and maintains the abstraction.
 
-4. **Time Calculation**: Track frame time with `delta_ms` and `total_ms` (like old engine). `tick()` takes `delta_ms: u32` parameter. Convert to seconds: `time = total_ms as f32 / 1000.0`. This allows variable frame rates and accurate time tracking.
+4. **Time Calculation**: Track frame time with `delta_ms` and `total_ms` (like old engine). `tick()`
+   takes `delta_ms: u32` parameter. Convert to seconds: `time = total_ms as f32 / 1000.0`. This
+   allows variable frame rates and accurate time tracking.
 
-5. **Error Handling**: Store compilation errors in state, don't fail initialization. Execution errors fail the render but don't crash the system.
+5. **Error Handling**: Store compilation errors in state, don't fail initialization. Execution
+   errors fail the render but don't crash the system.
 
-6. **Shader Finding**: For now, simplified approach: find all shader nodes. Full implementation needs to resolve `texture_spec` and compare handles. This can be optimized later.
+6. **Shader Finding**: For now, simplified approach: find all shader nodes. Full implementation
+   needs to resolve `texture_spec` and compare handles. This can be optimized later.
 
-7. **Render Order**: Sort shaders by `render_order` before execution. For now, assume all shaders have the same order (0), but structure supports sorting.
+7. **Render Order**: Sort shaders by `render_order` before execution. For now, assume all shaders
+   have the same order (0), but structure supports sorting.
 
 ## Implementation Notes
 
-- `lp-glsl-compiler` provides `GlslCompiler` and `GlslExecutable` traits
+- `lps-compiler` provides `GlslCompiler` and `GlslExecutable` traits
 - Shader main signature: `vec4 main(vec2 fragCoord, vec2 outputSize, float time)`
 - Texture pixels are RGBA8 format (4 bytes per pixel)
 - Shader execution is per-pixel (can be optimized with vectorization later)

@@ -21,8 +21,8 @@ VMContext (no uniforms or globals yet) through the entire system:
   vreg is currently the first user param.
 - **lpir-cranelift**: `signature_for_ir_func` builds signatures from `IrFunction` param/return
   counts. `DirectCall` and `invoke` assume user params only.
-- **lp-glsl-wasm**: Emits functions with user params only. `local.get 0` is first user param.
-- **lp-glsl-filetests**: Test harness creates and calls shaders without any context pointer.
+- **lps-wasm**: Emits functions with user params only. `local.get 0` is first user param.
+- **lps-filetests**: Test harness creates and calls shaders without any context pointer.
 
 ## Questions
 

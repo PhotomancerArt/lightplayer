@@ -4,7 +4,7 @@ Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpir-cranelift/sta
 
 ## Scope of work
 
-Full removal of the old `lp-glsl-cranelift` compiler chain and all dead code
+Full removal of the old `lps-cranelift` compiler chain and all dead code
 that only existed to support it. Clean up workspace manifests, justfile, docs,
 IDE config, scripts, and generated code paths. Re-check ignored tests.
 
@@ -12,29 +12,29 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 
 ### Crates to delete outright (old compiler chain)
 
-| Crate                     | Path                                 | Dependents                                  |
-|---------------------------|--------------------------------------|---------------------------------------------|
-| `lp-glsl-cranelift`       | `lp-shader/lp-glsl-cranelift/`       | `esp32-glsl-jit`, `lp-glsl-q32-metrics-app` |
-| `lp-glsl-jit-util`        | `lp-shader/lp-glsl-jit-util/`        | `lp-glsl-cranelift`, `esp32-glsl-jit`       |
-| `esp32-glsl-jit`          | `lp-shader/esp32-glsl-jit/`          | (none)                                      |
-| `lp-glsl-q32-metrics-app` | `lp-shader/lp-glsl-q32-metrics-app/` | (none)                                      |
+| Crate                 | Path                             | Dependents                              |
+|-----------------------|----------------------------------|-----------------------------------------|
+| `lps-cranelift`       | `lp-shader/lps-cranelift/`       | `esp32-glsl-jit`, `lps-q32-metrics-app` |
+| `lps-jit-util`        | `lp-shader/lps-jit-util/`        | `lps-cranelift`, `esp32-glsl-jit`       |
+| `esp32-glsl-jit`      | `lp-shader/esp32-glsl-jit/`      | (none)                                  |
+| `lps-q32-metrics-app` | `lp-shader/lps-q32-metrics-app/` | (none)                                  |
 
 ### Crates needing partial cleanup
 
-| Crate                      | Issue                                                                                                                                                                                          |
-|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `lp-glsl-builtins-gen-app` | Generates into both `lp-glsl-cranelift` (registry.rs, mapping.rs) **and** `lpir-cranelift` (generated_builtin_abi.rs). Old paths must be removed; `lp-glsl-frontend` dep may become droppable. |
-| `lp-glsl-frontend`         | Used by old compiler, filetests, and builtins-gen-app. Filetests + gen-app still depend on it — **not** deletable yet unless those deps are also unwound.                                      |
+| Crate                  | Issue                                                                                                                                                                                  |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lps-builtins-gen-app` | Generates into both `lps-cranelift` (registry.rs, mapping.rs) **and** `lpir-cranelift` (generated_builtin_abi.rs). Old paths must be removed; `lps-frontend` dep may become droppable. |
+| `lps-frontend`         | Used by old compiler, filetests, and builtins-gen-app. Filetests + gen-app still depend on it — **not** deletable yet unless those deps are also unwound.                              |
 
 ### Crates kept (new chain / shared)
 
-| Crate                      | Why kept                                                 |
-|----------------------------|----------------------------------------------------------|
-| `lp-glsl-builtins-emu-app` | `lpir-cranelift` build.rs embeds its ELF for riscv32-emu |
-| `lp-glsl-exec`             | Filetest runner trait (`GlslExecutable`)                 |
-| `lpvm`                     | Used by exec + filetests                                 |
-| `lp-glsl-diagnostics`      | Used by values, exec, filetests                          |
-| `lp-glsl-frontend`         | Filetests + gen-app (see Q1)                             |
+| Crate                  | Why kept                                                 |
+|------------------------|----------------------------------------------------------|
+| `lps-builtins-emu-app` | `lpir-cranelift` build.rs embeds its ELF for riscv32-emu |
+| `lps-exec`             | Filetest runner trait (`GlslExecutable`)                 |
+| `lpvm`                 | Used by exec + filetests                                 |
+| `lps-diagnostics`      | Used by values, exec, filetests                          |
+| `lps-frontend`         | Filetests + gen-app (see Q1)                             |
 
 ### Workspace / build references to clean
 
@@ -46,52 +46,52 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 - **`README.md`** (root), **`lp-shader/README.md`**, **`AGENTS.md`**: describe old crate
 - **`fw-esp32/Cargo.toml`:** orphan optional deps already deleted in VI-C (confirm)
 - **`Cargo.lock`:** auto-updates on next resolve
-- **`docs/`**: ~69 files reference `lp-glsl-cranelift` (plans-done, roadmaps,
+- **`docs/`**: ~69 files reference `lps-cranelift` (plans-done, roadmaps,
   reports) — historical docs are fine to leave; only update living docs
 
 ### Filetest status
 
 - `cranelift.q32` backend: **already gone** from filetests (removed in Stage V2).
-- `lp-glsl-filetests` depends on `lpir-cranelift` (new), `lp-glsl-naga`,
-  `lp-glsl-frontend`, `lp-glsl-exec`, etc. — **no** dep on `lp-glsl-cranelift`.
+- `lps-filetests` depends on `lpir-cranelift` (new), `lps-naga`,
+  `lps-frontend`, `lps-exec`, etc. — **no** dep on `lps-cranelift`.
 - `#[ignore]` on `lpfx_builtins_memory.rs` test: WASM ABI mismatch for vec3
   multi-return; roadmap says re-check in VII.
-- `map_testcase_to_builtin`: defined in `lp-glsl-cranelift`, generated by
-  `lp-glsl-builtins-gen-app`; delete the definition and generation path.
+- `map_testcase_to_builtin`: defined in `lps-cranelift`, generated by
+  `lps-builtins-gen-app`; delete the definition and generation path.
 
 ## Questions
 
-### Q1 — `lp-glsl-frontend`: keep or delete?
+### Q1 — `lps-frontend`: keep or delete?
 
-**Context:** `lp-glsl-frontend` is the old `glsl`-crate-based GLSL parser →
+**Context:** `lps-frontend` is the old `glsl`-crate-based GLSL parser →
 semantic analysis → LPIR bridge. It is used by:
 
-- `lp-glsl-cranelift` (being deleted)
-- `lp-glsl-filetests` (still active)
-- `lp-glsl-builtins-gen-app` (still active)
+- `lps-cranelift` (being deleted)
+- `lps-filetests` (still active)
+- `lps-builtins-gen-app` (still active)
 
-Filetests already have `lp-glsl-naga` as the primary frontend. The question is
-whether `lp-glsl-frontend` still serves a purpose in filetests (e.g. testing the
+Filetests already have `lps-naga` as the primary frontend. The question is
+whether `lps-frontend` still serves a purpose in filetests (e.g. testing the
 old `glsl` parser path or providing types) or if it is only a leftover dep.
 
 **Suggested answer:** Check what filetests actually import from
-`lp-glsl-frontend`. If it is only used for the `cranelift.q32` backend (already
+`lps-frontend`. If it is only used for the `cranelift.q32` backend (already
 removed), the dep is dead and can be dropped. If it provides types or a parser
 path still exercised by filetests, keep it for now and note a follow-up. Same
-analysis for `lp-glsl-builtins-gen-app` — it uses `lp_glsl_frontend::semantic::types::Type`.
+analysis for `lps-builtins-gen-app` — it uses `lps_frontend::semantic::types::Type`.
 
-**Answer:** Delete `lp-glsl-frontend`. Two remaining consumers need migration:
+**Answer:** Delete `lps-frontend`. Two remaining consumers need migration:
 
 - **Filetests** (`test_glsl.rs`): Replace `CompilationPipeline::parse()` with
   direct `glsl::syntax::TranslationUnit::parse()` — trivial, one call site.
-- **`lp-glsl-builtins-gen-app`**: Uses `FunctionSignature`, `Type`,
-  `extract_function_signature` from `lp-glsl-frontend::semantic`. These types
+- **`lps-builtins-gen-app`**: Uses `FunctionSignature`, `Type`,
+  `extract_function_signature` from `lps-frontend::semantic`. These types
   need to be inlined into the gen-app (or replaced with simpler local structs).
-  More involved but bounded — only 4 source files reference `lp_glsl_frontend`.
+  More involved but bounded — only 4 source files reference `lps_frontend`.
 
-### Q2 — `lp-glsl-q32-metrics-app`: delete or rewrite?
+### Q2 — `lps-q32-metrics-app`: delete or rewrite?
 
-**Context:** Standalone host binary that uses `lp-glsl-cranelift` to compute Q32
+**Context:** Standalone host binary that uses `lps-cranelift` to compute Q32
 precision metrics. Useful diagnostic tool but entirely wired to the old compiler.
 
 **Suggested answer:** Delete now; if you need a metrics tool later, rewrite
@@ -100,26 +100,26 @@ recovered from git history if needed.
 
 **Answer:** Delete.
 
-### Q3 — `lp-glsl-builtins-gen-app` cleanup scope
+### Q3 — `lps-builtins-gen-app` cleanup scope
 
-**Context:** Generates files for **both** old (`lp-glsl-cranelift/src/backend/builtins/registry.rs`,
+**Context:** Generates files for **both** old (`lps-cranelift/src/backend/builtins/registry.rs`,
 `mapping.rs`) **and** new (`lpir-cranelift/…/generated_builtin_abi.rs`). Also uses
-`lp-glsl-frontend` for type information.
+`lps-frontend` for type information.
 
-**Suggested answer:** Remove the generation paths that write into `lp-glsl-cranelift/`.
-Keep paths that write into `lpir-cranelift`, `lp-glsl-builtins`, `lp-glsl-builtins-wasm`,
-`lp-glsl-builtins-emu-app`, `lp-glsl-builtin-ids`. If the `lp-glsl-frontend`
+**Suggested answer:** Remove the generation paths that write into `lps-cranelift/`.
+Keep paths that write into `lpir-cranelift`, `lps-builtins`, `lps-builtins-wasm`,
+`lps-builtins-emu-app`, `lps-builtin-ids`. If the `lps-frontend`
 dep becomes unused after removing old generation, drop it. If not, keep it.
 
-**Answer:** Option B (full). Acceptance criteria: `lp-glsl-frontend` is fully
+**Answer:** Option B (full). Acceptance criteria: `lps-frontend` is fully
 deleted. This means:
 
-- Remove generation paths that write into `lp-glsl-cranelift/`
+- Remove generation paths that write into `lps-cranelift/`
 - Inline `FunctionSignature`, `Type`, `extract_function_signature` (and any
-  other `lp-glsl-frontend` types) into `lp-glsl-builtins-gen-app` or replace
+  other `lps-frontend` types) into `lps-builtins-gen-app` or replace
   with simpler local structs
-- Drop the `lp-glsl-frontend` dep from gen-app and filetests
-- Delete the `lp-glsl-frontend` crate entirely
+- Drop the `lps-frontend` dep from gen-app and filetests
+- Delete the `lps-frontend` crate entirely
 
 ### Q4 — `Dockerfile.rv32-jit` and `scripts/lp-build.sh`
 
@@ -151,7 +151,7 @@ failing (WASM ABI issue, not VII scope).
 
 ### Q6 — Historical docs under `docs/plans-done/` and `docs/roadmaps/`
 
-**Context:** ~69 files in `docs/` reference `lp-glsl-cranelift`. Most are
+**Context:** ~69 files in `docs/` reference `lps-cranelift`. Most are
 historical plans, completed roadmap stages, and reports.
 
 **Suggested answer:** Leave historical docs as-is (they document what happened).
@@ -163,10 +163,10 @@ Only update **living** docs: `README.md` (root), `lp-shader/README.md`,
 
 ## Notes
 
-- Q1: `lp-glsl-frontend` is dead. Remove it and migrate its two remaining
+- Q1: `lps-frontend` is dead. Remove it and migrate its two remaining
   consumers (filetests trivial; builtins-gen-app needs type inlining).
-- Q2: Delete `lp-glsl-q32-metrics-app`. Recoverable from git if needed.
-- Q3: Full cleanup (option B). Acceptance: `lp-glsl-frontend` fully deleted.
+- Q2: Delete `lps-q32-metrics-app`. Recoverable from git if needed.
+- Q3: Full cleanup (option B). Acceptance: `lps-frontend` fully deleted.
   Inline needed types into gen-app; remove old-backend generation paths.
 - Q4: Delete `Dockerfile.rv32-jit`, clean up `scripts/lp-build.sh`, delete
   `esp32-glsl-jit` (pre-`lp-fw` test app, superseded).

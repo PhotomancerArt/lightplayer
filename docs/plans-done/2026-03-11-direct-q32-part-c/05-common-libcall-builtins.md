@@ -47,5 +47,5 @@ the corresponding methods.
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
+cargo check -p lps-compiler --features std
 ```

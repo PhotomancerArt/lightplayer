@@ -3,7 +3,7 @@
 ## Reciprocal Division
 
 **Location (deleted)**:
-`lp-shader/crates/lp-glsl-compiler/src/backend/transform/fixed32/reference/div_recip.rs`  
+`lp-shader/crates/lps-compiler/src/backend/transform/fixed32/reference/div_recip.rs`  
 **Deleted in**: commit `1daa516` (refactor: finish renaming Fixed32 -> Q32)
 
 ### Algorithm (from div_recip.rs)

@@ -1,8 +1,8 @@
-# Plan: Extend lp-glsl-filetests-gen-app to Generate More Test Types
+# Plan: Extend lps-filetests-gen-app to Generate More Test Types
 
 ## Goal
 
-Extend `lp-glsl-filetests-gen-app` to generate additional test categories beyond comparison
+Extend `lps-filetests-gen-app` to generate additional test categories beyond comparison
 functions, reducing manual test file maintenance and ensuring consistency across all vector test
 types.
 
@@ -110,7 +110,7 @@ Based on `vec/vec4/` directory:
     - Coverage: generate tests for all vector types (`vec2/3/4`, `ivec2/3/4`, `uvec2/3/4`) for each
       category
     - Code compiles without warnings (except unused code that will be used later)
-    - Generator can be run via CLI: `lp-glsl-filetests-gen-app vec/vec4/fn-max --write`
+    - Generator can be run via CLI: `lps-filetests-gen-app vec/vec4/fn-max --write`
 
 ## Plan Phases
 
@@ -122,7 +122,7 @@ Based on `vec/vec4/` directory:
 **Step-by-step instructions**:
 
 1. **Create the module file**
-    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs`
+    - Create file: `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_max.rs`
     - Copy the structure from `src/vec/fn_equal.rs` as a template
     - Start with this skeleton:
 
@@ -263,7 +263,7 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 ```
 
 4. **Register the module**
-    - Open `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs`
+    - Open `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs`
     - Add line: `pub mod fn_max;`
     - File should look like:
 
@@ -280,7 +280,7 @@ pub mod util;
 ```
 
 5. **Add to generator dispatch**
-    - Open `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs`
+    - Open `lightplayer/crates/lps-filetests-gen-app/src/generator.rs`
     - Find the match statement around line 55
     - Add case: `"fn-max" => crate::vec::fn_max::generate(spec.vec_type, spec.dimension),`
     - Example:
@@ -301,21 +301,21 @@ let content = match spec.category.as_str() {
 
 6. **Test the generator**
 
-    - Build: `cd lightplayer && cargo build --bin lp-glsl-filetests-gen-app`
-    - Dry-run test: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max`
+    - Build: `cd lightplayer && cargo build --bin lps-filetests-gen-app`
+    - Dry-run test: `cargo run --bin lps-filetests-gen-app -- vec/vec4/fn-max`
     - Verify output matches `filetests/vec/vec4/fn-max.glsl` structure
-    - Generate file: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max --write`
+    - Generate file: `cargo run --bin lps-filetests-gen-app -- vec/vec4/fn-max --write`
     - Verify generated file:
-      `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-max.gen.glsl`
+      `lightplayer/crates/lps-filetests/filetests/vec/vec4/fn-max.gen.glsl`
 
 7. **Test all vector types**
 
-    - Generate for all types: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max --write`
+    - Generate for all types: `cargo run --bin lps-filetests-gen-app -- vec/fn-max --write`
     - This should create files for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
     - Verify each generated file compiles and has correct structure
 
 8. **Verify tests pass**
-    - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
+    - Run filetests: `cd lightplayer && cargo test --package lps-filetests`
     - Or run specific test: Check that generated `.gen.glsl` files are tested
 
 **Success criteria**:
@@ -327,14 +327,14 @@ let content = match spec.category.as_str() {
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs` (new file)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_max.rs` (new file)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lps-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_equal.rs` (structure template)
-- `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-max.glsl` (expected output)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_equal.rs` (structure template)
+- `lightplayer/crates/lps-filetests/filetests/vec/vec4/fn-max.glsl` (expected output)
 
 ---
 
@@ -357,11 +357,11 @@ let content = match spec.category.as_str() {
 - Return type: same as input (vec/ivec/uvec), use `==` for comparisons
 - Add module to `src/vec/mod.rs`
 - Add case to `generator.rs` match statement: `"fn-max" => crate::vec::fn_max::generate(...)`
-- Test generation: `lp-glsl-filetests-gen-app vec/vec4/fn-max` (dry-run)
-- Generate for all types: `lp-glsl-filetests-gen-app vec/fn-max --write` (should generate vec2/3/4,
+- Test generation: `lps-filetests-gen-app vec/vec4/fn-max` (dry-run)
+- Generate for all types: `lps-filetests-gen-app vec/fn-max --write` (should generate vec2/3/4,
   ivec2/3/4, uvec2/3/4)
 - **Success criteria**: All generated fn-max tests compile and pass
-- **Code compiles**: lp-glsl-filetests-gen-app builds without warnings
+- **Code compiles**: lps-filetests-gen-app builds without warnings
 - **Tests relevant**: Generated tests match manual test patterns
 
 ### Phase 2: Implement fn-min Generator
@@ -373,7 +373,7 @@ function
 
 1. **Create the module file**
 
-    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_min.rs`
+    - Create file: `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_min.rs`
     - Copy from `fn_max.rs` and modify function names and logic
     - Change `max()` to `min()` and reverse the logic (smaller values instead of larger)
 
@@ -433,22 +433,22 @@ fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> Strin
     - Add case: `"fn-min" => crate::vec::fn_min::generate(spec.vec_type, spec.dimension),`
 
 5. **Test the generator**
-    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-min`
-    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-min --write`
+    - Dry-run: `cargo run --bin lps-filetests-gen-app -- vec/vec4/fn-min`
+    - Generate: `cargo run --bin lps-filetests-gen-app -- vec/fn-min --write`
     - Verify output matches `filetests/vec/vec4/fn-min.glsl`
 
 **Success criteria**: Same as Phase 1, but for fn-min
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_min.rs` (new file)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_min.rs` (new file)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lps-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/fn_max.rs` (structure template)
-- `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/fn-min.glsl` (expected output)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/fn_max.rs` (structure template)
+- `lightplayer/crates/lps-filetests/filetests/vec/vec4/fn-min.glsl` (expected output)
 
 ---
 
@@ -469,7 +469,7 @@ point comparisons
 
 1. **Create the module file**
 
-    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_add.rs`
+    - Create file: `lightplayer/crates/lps-filetests-gen-app/src/vec/op_add.rs`
     - Start with header similar to fn-max, but change function name and comment
 
 2. **Add utility function for comparison operator**
@@ -601,9 +601,9 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
     - Add case: `"op-add" => crate::vec::op_add::generate(spec.vec_type, spec.dimension),`
 
 7. **Test the generator**
-    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-add`
+    - Dry-run: `cargo run --bin lps-filetests-gen-app -- vec/vec4/op-add`
     - Verify `~=` appears for vec type, `==` for ivec/uvec
-    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-add --write`
+    - Generate: `cargo run --bin lps-filetests-gen-app -- vec/op-add --write`
 
 **Success criteria**:
 
@@ -614,13 +614,13 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_add.rs` (new file)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/op_add.rs` (new file)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lps-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/op-add.glsl` (expected output)
+- `lightplayer/crates/lps-filetests/filetests/vec/vec4/op-add.glsl` (expected output)
 
 ---
 
@@ -634,7 +634,7 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
 
 1. **Create the module file**
 
-    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_multiply.rs`
+    - Create file: `lightplayer/crates/lps-filetests-gen-app/src/vec/op_multiply.rs`
     - Copy structure from `op_add.rs` and change operator from `+` to `*`
     - Use same `comparison_operator()` helper function
 
@@ -728,20 +728,20 @@ fn generate_test_by_one(vec_type: VecType, dimension: Dimension) -> String {
     - Add case: `"op-multiply" => crate::vec::op_multiply::generate(spec.vec_type, spec.dimension),`
 
 4. **Test the generator**
-    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-multiply`
-    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-multiply --write`
+    - Dry-run: `cargo run --bin lps-filetests-gen-app -- vec/vec4/op-multiply`
+    - Generate: `cargo run --bin lps-filetests-gen-app -- vec/op-multiply --write`
 
 **Success criteria**: Same as Phase 3, but for multiplication
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_multiply.rs` (new file)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/op_multiply.rs` (new file)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lps-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/op-multiply.glsl` (expected output)
+- `lightplayer/crates/lps-filetests/filetests/vec/vec4/op-multiply.glsl` (expected output)
 
 ---
 
@@ -762,7 +762,7 @@ operator tests (returns `bool`) and function tests (returns `bvec`)
 
 1. **Create the module file**
 
-    - Create file: `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_equal.rs`
+    - Create file: `lightplayer/crates/lps-filetests-gen-app/src/vec/op_equal.rs`
     - Import both `format_bvec_type_name` and `format_bvec_expected` utilities
 
 2. **Implement operator test generators (return `bool`)**
@@ -923,9 +923,9 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
     - Add case: `"op-equal" => crate::vec::op_equal::generate(spec.vec_type, spec.dimension),`
 
 6. **Test the generator**
-    - Dry-run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/op-equal`
+    - Dry-run: `cargo run --bin lps-filetests-gen-app -- vec/vec4/op-equal`
     - Verify both operator and function tests are generated
-    - Generate: `cargo run --bin lp-glsl-filetests-gen-app -- vec/op-equal --write`
+    - Generate: `cargo run --bin lps-filetests-gen-app -- vec/op-equal --write`
 
 **Success criteria**:
 
@@ -936,13 +936,13 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
 **Files to modify**:
 
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/op_equal.rs` (new file)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/vec/mod.rs` (add module)
-- `lightplayer/crates/lp-glsl-filetests-gen-app/src/generator.rs` (add match case)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/op_equal.rs` (new file)
+- `lightplayer/crates/lps-filetests-gen-app/src/vec/mod.rs` (add module)
+- `lightplayer/crates/lps-filetests-gen-app/src/generator.rs` (add match case)
 
 **Reference files**:
 
-- `lightplayer/crates/lp-glsl-filetests/filetests/vec/vec4/op-equal.glsl` (expected output)
+- `lightplayer/crates/lps-filetests/filetests/vec/vec4/op-equal.glsl` (expected output)
 
 ---
 
@@ -957,14 +957,14 @@ formatted
 
 1. **Verify all generated tests compile**
 
-    - Build the filetests: `cd lightplayer && cargo build --package lp-glsl-filetests`
+    - Build the filetests: `cd lightplayer && cargo build --package lps-filetests`
     - If there are compilation errors, fix them in the generator code
     - Re-generate tests:
-      `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write`
+      `cargo run --bin lps-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write`
 
 2. **Verify all generated tests pass**
 
-    - Run filetests: `cd lightplayer && cargo test --package lp-glsl-filetests`
+    - Run filetests: `cd lightplayer && cargo test --package lps-filetests`
     - Check for any failing tests
     - If tests fail, compare generated output with manual test files to identify issues
     - Fix generator logic and re-generate
@@ -979,20 +979,20 @@ formatted
 
 4. **Test generator for all types**
 
-    - Run: `cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max --write`
+    - Run: `cargo run --bin lps-filetests-gen-app -- vec/fn-max --write`
     - Verify files are created for: vec2, vec3, vec4, ivec2, ivec3, ivec4, uvec2, uvec3, uvec4
     - Repeat for each category: fn-min, op-add, op-multiply, op-equal
 
 5. **Remove temporary code**
 
-    - Search for TODOs: `grep -r "TODO" lightplayer/crates/lp-glsl-filetests-gen-app/`
-    - Search for debug prints: `grep -r "println!" lightplayer/crates/lp-glsl-filetests-gen-app/`
+    - Search for TODOs: `grep -r "TODO" lightplayer/crates/lps-filetests-gen-app/`
+    - Search for debug prints: `grep -r "println!" lightplayer/crates/lps-filetests-gen-app/`
     - Remove any temporary comments or unused code
     - Remove any test/debug code that was added during development
 
 6. **Fix all warnings**
 
-    - Build: `cd lightplayer && cargo build --bin lp-glsl-filetests-gen-app`
+    - Build: `cd lightplayer && cargo build --bin lps-filetests-gen-app`
     - Fix any compiler warnings
     - Common issues:
         - Unused imports: remove them
@@ -1014,8 +1014,8 @@ formatted
 9. **Final verification**
 
     - Build everything: `cd lightplayer && cargo build`
-    - Run all tests: `cd lightplayer && cargo test --package lp-glsl-filetests`
-    - Verify generator works: `cargo run --bin lp-glsl-filetests-gen-app -- vec/vec4/fn-max` (
+    - Run all tests: `cd lightplayer && cargo test --package lps-filetests`
+    - Verify generator works: `cargo run --bin lps-filetests-gen-app -- vec/vec4/fn-max` (
       dry-run)
 
 10. **Move plan file**
@@ -1026,7 +1026,7 @@ formatted
 
 - ✅ All generated tests compile without errors
 - ✅ All generated tests pass
-- ✅ No compiler warnings in lp-glsl-filetests-gen-app
+- ✅ No compiler warnings in lps-filetests-gen-app
 - ✅ Code is clean, readable, and properly formatted
 - ✅ All vector types (vec2/3/4, ivec2/3/4, uvec2/3/4) work for all categories
 - ✅ Plan file moved to `_done/` directory
@@ -1036,14 +1036,14 @@ formatted
 ```bash
 # Build and test
 cd lightplayer
-cargo build --bin lp-glsl-filetests-gen-app
-cargo test --package lp-glsl-filetests
+cargo build --bin lps-filetests-gen-app
+cargo test --package lps-filetests
 
 # Format code
 cargo +nightly fmt
 
 # Generate all tests (final check)
-cargo run --bin lp-glsl-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write
+cargo run --bin lps-filetests-gen-app -- vec/fn-max vec/fn-min vec/op-add vec/op-multiply vec/op-equal --write
 
 # Move plan
 mv plans/2026-01-02-filetests-gen-extend.md plans/_done/

@@ -9,7 +9,7 @@ compare against reference implementations or previous known-good outputs.
 
 ### 1. Add Image Generation Test
 
-**File**: `lp-shader/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add visual output test:
 
@@ -63,7 +63,7 @@ mod visual_tests {
 
 ### 2. Add Comparison Test Against noise-rs
 
-**File**: `lp-shader/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add comparison test:
 
@@ -107,7 +107,7 @@ mod comparison_tests {
 
 ### 3. Add Artifact Detection Test
 
-**File**: `lp-shader/lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
+**File**: `lp-shader/lps-builtins/src/builtins/q32/lpfx_snoise2.rs` (in test module)
 
 Add test to detect discontinuities:
 
@@ -149,7 +149,7 @@ fn test_simplex2_no_discontinuities() {
 Generate visual output:
 
 ```bash
-cargo test --features test_visual --package lp-glsl-builtins test_simplex2_generate_image -- --nocapture
+cargo test --features test_visual --package lps-builtins test_simplex2_generate_image -- --nocapture
 ```
 
 ## Success Criteria

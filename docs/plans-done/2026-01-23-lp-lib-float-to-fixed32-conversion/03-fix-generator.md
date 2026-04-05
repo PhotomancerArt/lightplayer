@@ -2,7 +2,7 @@
 
 ## Goal
 
-Update `lp-glsl-builtin-gen-app` to use `LpLibFn` enum as the source of truth instead of prefix
+Update `lps-builtin-gen-app` to use `LpLibFn` enum as the source of truth instead of prefix
 matching. The generator should read the enum to know what functions exist, then match discovered
 functions to expected names.
 
@@ -10,9 +10,9 @@ functions to expected names.
 
 ### 3.1 Read LpLibFn Enum in Generator
 
-In `lp-shader/lp-glsl-builtin-gen-app/src/main.rs`:
+In `lp-shader/lps-builtin-gen-app/src/main.rs`:
 
-- Import or parse `LpLibFn` enum from `lp-glsl-compiler` crate
+- Import or parse `LpLibFn` enum from `lps-compiler` crate
 - Iterate over all `LpLibFn` variants to know what functions should exist
 - For each variant, determine expected function name:
     - Use `q32_name()` if it returns `Some(_)` (simplex functions)

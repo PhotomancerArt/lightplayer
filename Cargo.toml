@@ -12,36 +12,36 @@ members = [
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lp-model",
-    # lp-glsl workspace members
-    "lp-shader/lp-glsl-builtin-ids",
-    "lp-shader/lp-glsl-builtins",
+    # lps workspace members
+    "lp-shader/lps-builtin-ids",
+    "lp-shader/lps-builtins",
     "lp-shader/lpfx-impl-macro",
-    "lp-shader/lp-glsl-filetests-gen-app",
+    "lp-shader/lps-filetests-gen-app",
     "lp-shader/lps-shared",
-    "lp-shader/lp-glsl-diagnostics",
-    "lp-shader/lp-glsl-exec",
+    "lp-shader/lps-diagnostics",
+    "lp-shader/legacy/lps-exec",
     "lp-shader/lpvm",
-    "lp-shader/lp-glsl-naga",
-    "lp-shader/lpir-cranelift",
+    "lp-shader/lps-naga",
+    "lp-shader/legacy/lpir-cranelift",
     "lp-shader/lpir",
-    "lp-shader/lp-glsl-filetests",
+    "lp-shader/lps-filetests",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
     "lp-riscv/lp-riscv-emu-guest",
     "lp-riscv/lp-riscv-emu-guest-test-app",
-    "lp-shader/lp-glsl-builtins-gen-app",
-    "lp-shader/lp-glsl-builtins-emu-app",
-    "lp-shader/lp-glsl-builtins-wasm",
-    "lp-shader/lp-glsl-filetests-app",
-    "lp-shader/lp-glsl-wasm",
+    "lp-shader/lps-builtins-gen-app",
+    "lp-shader/lps-builtins-emu-app",
+    "lp-shader/lps-builtins-wasm",
+    "lp-shader/lps-filetests-app",
+    "lp-shader/legacy/lps-wasm",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc",
 ]
 resolver = "2"
 
-# Exclude lp-glsl-builtins-emu-app, lp-glsl-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
+# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
 # Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
 default-members = [
@@ -55,23 +55,23 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lp-model",
-    # lp-glsl workspace members (excluding lp-glsl-builtins-emu-app)
-    "lp-shader/lp-glsl-builtin-ids",
-    "lp-shader/lp-glsl-builtins",
-    "lp-shader/lp-glsl-filetests-gen-app",
+    # lps workspace members (excluding lps-builtins-emu-app)
+    "lp-shader/lps-builtin-ids",
+    "lp-shader/lps-builtins",
+    "lp-shader/lps-filetests-gen-app",
     "lp-shader/lps-shared",
-    "lp-shader/lp-glsl-diagnostics",
-    "lp-shader/lp-glsl-exec",
+    "lp-shader/lps-diagnostics",
+    "lp-shader/legacy/lps-exec",
     "lp-shader/lpvm",
-    "lp-shader/lp-glsl-naga",
+    "lp-shader/lps-naga",
     "lp-shader/lpir",
-    "lp-shader/lp-glsl-filetests",
+    "lp-shader/lps-filetests",
     "lp-riscv/lp-riscv-emu-shared",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
-    "lp-shader/lp-glsl-builtins-gen-app",
-    "lp-shader/lp-glsl-filetests-app",
+    "lp-shader/lps-builtins-gen-app",
+    "lp-shader/lps-filetests-app",
 ]
 [workspace.package]
 version = "40.0.0"
@@ -178,7 +178,7 @@ opt-level = 3
 codegen-units = 4
 # Note: lto is inherited from workspace [profile.release]
 
-[profile.release.package.lp-glsl-builtins]
+[profile.release.package.lps-builtins]
 # Optimize for speed (hot path in shader execution)
 opt-level = 3
 # Keep multiple codegen units for faster compilation and better parallelization

@@ -48,7 +48,7 @@ affect the failing compilation.
 
 ### Step 2: Add Fastalloc Setting to Default RISC-V32 Flags
 
-**File:** `lp-shader/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-shader/lps-compiler/src/backend/target/target.rs`
 
 **Location:** `default_riscv32_flags()` function (around line 116-141)
 
@@ -94,7 +94,7 @@ behavior.
 
 ### Step 3: Add Fastalloc Setting to Default Host Flags (Optional)
 
-**File:** `lp-shader/lp-glsl-compiler/src/backend/target/target.rs`
+**File:** `lp-shader/lps-compiler/src/backend/target/target.rs`
 
 **Location:** `default_host_flags()` function (around line 145-169)
 
@@ -173,7 +173,7 @@ If Fastalloc causes unacceptable code quality or other issues:
 ## Related Files
 
 - `lp-shader/esp32-glsl-jit/src/main.rs` - ESP32 JIT compilation entry point
-- `lp-shader/lp-glsl-compiler/src/backend/target/target.rs` - Default flag configuration
+- `lp-shader/lps-compiler/src/backend/target/target.rs` - Default flag configuration
 -
 
 `/Users/yona/dev/photomancer/feature/lp-cranelift-lp2025/cranelift/codegen/src/machinst/compile.rs` -

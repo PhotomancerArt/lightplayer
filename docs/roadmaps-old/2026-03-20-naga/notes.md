@@ -2,7 +2,7 @@
 
 ## Scope
 
-Replace the custom GLSL frontend (`lp-glsl-frontend` + `glsl-parser` fork) with
+Replace the custom GLSL frontend (`lps-frontend` + `glsl-parser` fork) with
 Naga's GLSL frontend, and rewrite backends to consume `naga::Module` instead of
 `TypedShader`.
 
@@ -13,23 +13,23 @@ WASM backend first (web demo), Cranelift backend later (ESP32 / host JIT).
 ### Dependency graph (compiler path)
 
 ```
-fw-esp32 → lp-engine → lp-glsl-cranelift → lp-glsl-frontend → glsl-parser (fork)
-                                          → lp-glsl-builtin-ids
-web-demo → lp-glsl-wasm → lp-glsl-frontend → glsl-parser (fork)
-                         → lp-glsl-builtin-ids
-lp-glsl-filetests → lp-glsl-cranelift (cranelift.q32 target)
-                   → lp-glsl-wasm (wasm.q32 target)
+fw-esp32 → lp-engine → lps-cranelift → lps-frontend → glsl-parser (fork)
+                                          → lps-builtin-ids
+web-demo → lps-wasm → lps-frontend → glsl-parser (fork)
+                         → lps-builtin-ids
+lps-filetests → lps-cranelift (cranelift.q32 target)
+                   → lps-wasm (wasm.q32 target)
 ```
 
 ### Key interfaces
 
-- **lp-glsl-frontend** produces `TypedShader` (contains `TypedFunction`s,
+- **lps-frontend** produces `TypedShader` (contains `TypedFunction`s,
   `FunctionRegistry`, `global_constants`). Both backends consume this.
-- **lp-glsl-cranelift** exposes `glsl_jit_streaming(&str, GlslOptions) →
+- **lps-cranelift** exposes `glsl_jit_streaming(&str, GlslOptions) →
   Box<dyn GlslExecutable>`. Called by lp-engine.
-- **lp-glsl-wasm** exposes `glsl_wasm(&str, WasmOptions) → WasmModule`.
+- **lps-wasm** exposes `glsl_wasm(&str, WasmOptions) → WasmModule`.
   Called by web-demo.
-- **lp-glsl-filetests** tests both backends via `compile_for_target()`.
+- **lps-filetests** tests both backends via `compile_for_target()`.
   Default targets: `cranelift.q32` and `wasm.q32`.
 - **Builtins** identified by `BuiltinId` enum (generated). Frontend resolves
   by name; backends dispatch as inline code or imports.
@@ -43,7 +43,7 @@ lp-glsl-filetests → lp-glsl-cranelift (cranelift.q32 target)
 
 ### Size concern
 
-- Naga rlib (all features): 13M vs lp-glsl-frontend + glsl-parser: 5.1M.
+- Naga rlib (all features): 13M vs lps-frontend + glsl-parser: 5.1M.
 - With only `glsl-in` + LTO + dead code elimination, real delta is unknown.
 - Compiler runs on ESP32 at runtime (JIT). ROM impact must be measured
   empirically after a minimal integration.
@@ -52,31 +52,31 @@ lp-glsl-filetests → lp-glsl-cranelift (cranelift.q32 target)
 
 ### Q1: New frontend crate or modify existing?
 
-Should we create a new `lp-glsl-naga` crate that wraps Naga, or modify
-`lp-glsl-frontend` in place?
+Should we create a new `lps-naga` crate that wraps Naga, or modify
+`lps-frontend` in place?
 
-**Context**: Both backends currently depend on `lp-glsl-frontend`. During
+**Context**: Both backends currently depend on `lps-frontend`. During
 migration we need both paths working (old Cranelift backend on old frontend,
 new WASM backend on Naga). After migration, the old frontend can be deleted.
 
-**Suggestion**: New crate `lp-glsl-naga`. It wraps `naga::front::glsl` and
+**Suggestion**: New crate `lps-naga`. It wraps `naga::front::glsl` and
 exposes a compilation result containing `naga::Module` plus LP-specific
 metadata (float mode, builtin mappings). Old frontend stays untouched until
 Cranelift is ported. Clean separation, no risk of breaking the working system.
 
-**Answer**: New crate `lp-glsl-naga`. Clean break from old frontend. Copy
+**Answer**: New crate `lps-naga`. Clean break from old frontend. Copy
 useful code from old frontend as needed. Old frontend stays untouched until
 Cranelift is ported.
 
-### Q2: New WASM backend crate or modify lp-glsl-wasm in place?
+### Q2: New WASM backend crate or modify lps-wasm in place?
 
-**Context**: `lp-glsl-wasm` currently depends on `lp-glsl-frontend`. Rewriting
+**Context**: `lps-wasm` currently depends on `lps-frontend`. Rewriting
 it to use Naga means changing its fundamental input type. We could create a new
 crate or rewrite in place.
 
-**Answer**: Rewrite `lp-glsl-wasm` in place. It's not in production use yet,
+**Answer**: Rewrite `lps-wasm` in place. It's not in production use yet,
 has known bugs (scratch overflow, local.tee), and the whole point is to replace
-it. Switch dependency from `lp-glsl-frontend` to `lp-glsl-naga`.
+it. Switch dependency from `lps-frontend` to `lps-naga`.
 
 ### Q3: Filetest strategy during migration?
 

@@ -28,7 +28,7 @@ use fw_core::log::init_emu_logger;
 pub extern "C" fn _lp_main() -> ! {
     // Initialize logger first
     init_emu_logger();
-    
+
     // ... rest of code ...
 }
 ```
@@ -50,7 +50,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     });
 
     // Remove old esp_println::logger::init_logger_from_env() if present
-    
+
     // ... rest of code ...
 }
 ```
@@ -67,18 +67,18 @@ Ensure they initialize `env_logger`:
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .init();
-    
+
     // ... rest of main ...
 }
 ```
 
-**Example for filetest runner** (`lp-shader/lp-glsl-filetests/src/lib.rs` or main):
+**Example for filetest runner** (`lp-shader/lps-filetests/src/lib.rs` or main):
 
 ```rust
 pub fn run_tests() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .init();
-    
+
     // ... rest of code ...
 }
 ```
@@ -94,19 +94,19 @@ pub fn run_emulator(...) {
     // Initialize logging first
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .init();
-    
+
     // ... run guest code ...
 }
 ```
 
 ### 5. Update GLSL Builtins Initialization
 
-**File**: `lp-shader/lp-glsl-compiler/src/exec/executable.rs` or wherever GLSL code runs
+**File**: `lp-shader/lps-compiler/src/exec/executable.rs` or wherever GLSL code runs
 
 Initialize builtins logger before running GLSL code:
 
 ```rust
-use lp_glsl_builtins::host::init_logger;
+use lps_builtins::host::init_logger;
 
 // Before running GLSL code:
 init_logger();

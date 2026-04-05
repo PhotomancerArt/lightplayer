@@ -17,14 +17,14 @@ Re-check ignored tests, full validation sweep, grep for leftovers, write
 
 ### 1. Re-check ignored test
 
-In `lp-shader/lp-glsl-filetests/tests/lpfx_builtins_memory.rs`:
+In `lp-shader/lps-filetests/tests/lpfx_builtins_memory.rs`:
 
 - Remove `#[ignore = "..."]` from
   `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it`.
 - Run the test:
 
 ```bash
-cargo test -p lp-glsl-filetests --test lpfx_builtins_memory
+cargo test -p lps-filetests --test lpfx_builtins_memory
 ```
 
 - If it **passes**: leave it enabled.
@@ -64,15 +64,15 @@ cargo +nightly fmt
 
 ```bash
 # Host workspace
-cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lp-glsl-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
+cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lps-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 cargo test -p lp-engine
 cargo test -p lp-server
 cargo test -p lpir-cranelift
-cargo test -p lp-glsl-filetests -- test_glsl
+cargo test -p lps-filetests -- test_glsl
 cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
 
 # Builtins generation still works
-cargo run -p lp-glsl-builtins-gen-app
+cargo run -p lps-builtins-gen-app
 
 # Firmware builds
 just build-fw-emu
@@ -100,10 +100,10 @@ mv docs/plans/2026-03-26-lpir-cranelift-stage-vii docs/plans-done/
 ### 8. Commit
 
 ```
-refactor(lp-glsl): delete old compiler chain (Stage VII)
+refactor(lps): delete old compiler chain (Stage VII)
 
-- Delete lp-glsl-cranelift, lp-glsl-jit-util, lp-glsl-frontend, esp32-glsl-jit, lp-glsl-q32-metrics-app
-- Inline FunctionSignature/Type into lp-glsl-builtins-gen-app; drop lp-glsl-frontend dep
+- Delete lps-cranelift, lps-jit-util, lps-frontend, esp32-glsl-jit, lps-q32-metrics-app
+- Inline FunctionSignature/Type into lps-builtins-gen-app; drop lps-frontend dep
 - Replace CompilationPipeline::parse with TranslationUnit::parse in filetests
 - Remove old-backend generation paths from builtins gen-app
 - Clean up workspace Cargo.toml, justfile, scripts, Dockerfile, IDE config

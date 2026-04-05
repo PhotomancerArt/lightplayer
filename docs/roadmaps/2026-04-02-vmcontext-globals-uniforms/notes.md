@@ -15,9 +15,9 @@ Target backends: RISC-V32 (embedded) and WebAssembly (browser/emu).
 - **lpir**: Pure IR without GLSL metadata. Functions have explicit parameters only.
 - **lpir-cranelift**: JIT compilation for RISC-V32 and host ISAs. Uses `DirectCall` and `invoke` for
   calling shaders. Signatures are built from `IrFunction` param/return counts.
-- **lp-glsl-wasm**: WASM emission with shadow stack (`$sp` global). Functions exported directly; no
+- **lps-wasm**: WASM emission with shadow stack (`$sp` global). Functions exported directly; no
   context parameter currently.
-- **lp-glsl-naga**: Lowers GLSL to LPIR, but does not yet collect uniform/global metadata or emit
+- **lps-naga**: Lowers GLSL to LPIR, but does not yet collect uniform/global metadata or emit
   context-aware code.
 
 ## Questions

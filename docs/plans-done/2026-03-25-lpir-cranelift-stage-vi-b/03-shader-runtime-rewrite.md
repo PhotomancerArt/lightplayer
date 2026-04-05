@@ -37,15 +37,15 @@ recompile, etc.).
 ### 2. `compile_shader`
 
 - Build `CompileOptions`:
-  - `float_mode: lpir::FloatMode::Q32` (re-exported as `lpir_cranelift::FloatMode`
-    if needed)
-  - `q32_options`: map from `self.config.as_ref().map(|c| c.glsl_opts)` using
-    small helpers (`AddSubMode`, `MulMode`, `DivMode` in `lp-model` →
-    `lpir_cranelift` enums)
-  - `memory_strategy`: `LowMemory` on embedded-style builds if you have a cfg;
-    otherwise match old `GlslOptions::default_memory_optimized()` behavior
-  - `max_errors`: port `DEFAULT_MAX_ERRORS` constant into `lp-engine` or use a
-    literal consistent with old crate
+    - `float_mode: lpir::FloatMode::Q32` (re-exported as `lpir_cranelift::FloatMode`
+      if needed)
+    - `q32_options`: map from `self.config.as_ref().map(|c| c.glsl_opts)` using
+      small helpers (`AddSubMode`, `MulMode`, `DivMode` in `lp-model` →
+      `lpir_cranelift` enums)
+    - `memory_strategy`: `LowMemory` on embedded-style builds if you have a cfg;
+      otherwise match old `GlslOptions::default_memory_optimized()` behavior
+    - `max_errors`: port `DEFAULT_MAX_ERRORS` constant into `lp-engine` or use a
+      literal consistent with old crate
 
 - Drop old executable before compile (keep OOM-avoidance comment).
 
@@ -68,18 +68,18 @@ recompile, etc.).
   call — should not happen for standard shaders).
 
 - Replace `render_direct_call` body:
-  - Stack buffer `let mut rgba_q32 = [0i32; 4];`
-  - Args as `[i32; 5]` for frag coord (2), output size (2), time (1), all Q32
-    scaled like today
-  - `unsafe { dc.call_i32_buf(&args, &mut rgba_q32)? }` — map `CallError` to
-    `Error::Other`
+    - Stack buffer `let mut rgba_q32 = [0i32; 4];`
+    - Args as `[i32; 5]` for frag coord (2), output size (2), time (1), all Q32
+      scaled like today
+    - `unsafe { dc.call_i32_buf(&args, &mut rgba_q32)? }` — map `CallError` to
+      `Error::Other`
 
 - Remove the `else` branch that used `executable.call_vec` and
-  `lp_glsl_cranelift::GlslValue`.
+  `lps_cranelift::GlslValue`.
 
 ### 4. Imports
 
-Remove: `lp_glsl_cranelift`, `lp_glsl_jit_util`, `cranelift_codegen`.
+Remove: `lps_cranelift`, `lps_jit_util`, `cranelift_codegen`.
 
 Add: `lpir_cranelift` types as needed.
 

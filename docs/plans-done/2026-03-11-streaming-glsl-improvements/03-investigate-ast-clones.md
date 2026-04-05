@@ -58,7 +58,7 @@ Depends on investigation findings. Likely one of:
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lps-compiler && cargo test --features std -- test_streaming
 ```
 
 Re-run on ESP32 emulator with heap tracing to verify the `T::clone_one` entries

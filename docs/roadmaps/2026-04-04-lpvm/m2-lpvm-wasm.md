@@ -9,7 +9,7 @@ the strictest — wasmtime and browser APIs constrain the trait design.
 
 - **Shader layer** uses **`lps-*`** (e.g. `lps-naga` for GLSL → LPIR).
 - **Emission** today may still live under a transitional crate name
-  (`lp-glsl-wasm`); **`lpvm-wasm`** is the target home for LPIR → `.wasm` +
+  (`lps-wasm`); **`lpvm-wasm`** is the target home for LPIR → `.wasm` +
   optional runtime.
 
 If the repo already renamed WASM-related crates, align `Cargo.toml` paths with
@@ -37,7 +37,7 @@ with native vs `wasm32` target selection (see roadmap overview).
 
 ### How wasmtime runner works (today: often in `lps-filetests`)
 
-See `wasm_runner.rs` / `wasm_link.rs` (paths may be under `lp-glsl-filetests`
+See `wasm_runner.rs` / `wasm_link.rs` (paths may be under `lps-filetests`
 until renamed):
 
 1. Obtain `WasmModule` (bytes + exports).

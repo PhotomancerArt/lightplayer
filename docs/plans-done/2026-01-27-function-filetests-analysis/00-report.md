@@ -72,12 +72,12 @@ nested ones, OR the parser should be updated to support nested functions (if tha
 - Execution layer (`execute_fn.rs:152`) doesn't handle void return types
 - Error: `unsupported return type: Void`
 
-**Root Cause**: In `lp-shader/lp-glsl-compiler/src/exec/execute_fn.rs`, the `execute_function`
+**Root Cause**: In `lp-shader/lps-compiler/src/exec/execute_fn.rs`, the `execute_function`
 function has a match statement that handles all return types except `Type::Void`. When a void
 function is called, it hits the
 `_ => anyhow::bail!("unsupported return type: {:?}", sig.return_type)` case.
 
-**Code Location**: `lp-shader/lp-glsl-compiler/src/exec/execute_fn.rs:152`
+**Code Location**: `lp-shader/lps-compiler/src/exec/execute_fn.rs:152`
 
 **Fix Required**: Add `Type::Void => Ok(GlslValue::F32(0.0))` or similar to handle void functions.
 The test framework expects a value (typically `0.0`) when calling void functions.
@@ -248,15 +248,15 @@ analysis, or if failures are only due to void/out parameter issues.
 
 ### Void Return Types
 
-- Execution: `lp-shader/lp-glsl-compiler/src/exec/execute_fn.rs:152`
-- Codegen: `lp-shader/lp-glsl-compiler/src/frontend/codegen/helpers.rs:16-18`
-- Codegen: `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/return.rs:168-169`
+- Execution: `lp-shader/lps-compiler/src/exec/execute_fn.rs:152`
+- Codegen: `lp-shader/lps-compiler/src/frontend/codegen/helpers.rs:16-18`
+- Codegen: `lp-shader/lps-compiler/src/frontend/codegen/stmt/return.rs:168-169`
 
 ### Out/InOut Parameters
 
-- Parsing: `lp-shader/lp-glsl-compiler/src/frontend/semantic/passes/function_signature.rs:76-95`
-- Signature: `lp-shader/lp-glsl-compiler/src/frontend/codegen/signature.rs:57-60`
-- Call args: `lp-shader/lp-glsl-compiler/src/frontend/codegen/expr/function.rs:323-383`
+- Parsing: `lp-shader/lps-compiler/src/frontend/semantic/passes/function_signature.rs:76-95`
+- Signature: `lp-shader/lps-compiler/src/frontend/codegen/signature.rs:57-60`
+- Call args: `lp-shader/lps-compiler/src/frontend/codegen/expr/function.rs:323-383`
 
 ### Nested Functions
 

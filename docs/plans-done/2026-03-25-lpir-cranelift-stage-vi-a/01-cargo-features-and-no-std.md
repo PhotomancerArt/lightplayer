@@ -29,7 +29,7 @@ std = [
     "cranelift-module/std",
     "cranelift-jit/std",
     "cranelift-native",
-    "lp-glsl-builtins/std",
+    "lps-builtins/std",
 ]
 cranelift-optimizer = ["cranelift-codegen/optimizer"]
 cranelift-verifier = ["cranelift-codegen/verifier"]
@@ -54,7 +54,7 @@ cranelift-native = { workspace = true, optional = true }
 
 `cranelift-native` becomes optional (only present with `std`).
 
-`lp-glsl-builtins` dependency needs `default-features = false` so that
+`lps-builtins` dependency needs `default-features = false` so that
 `std` is forwarded only when our `std` feature is active.
 
 ### 2. Add `#![no_std]` to `lib.rs`
@@ -135,9 +135,9 @@ Grep for any remaining `use std::` or `std::` paths not behind `#[cfg]`.
 The only known ones are in `error.rs`, `values.rs`, and `process_sync.rs`
 (all handled above). If anything else surfaces, gate it.
 
-### 6. Verify `lp-glsl-builtins` has a `std` feature
+### 6. Verify `lps-builtins` has a `std` feature
 
-Check that `lp-glsl-builtins/Cargo.toml` has a `std` feature we can forward.
+Check that `lps-builtins/Cargo.toml` has a `std` feature we can forward.
 If not, add one or remove the forwarding from our `std` feature list.
 
 ## Tests

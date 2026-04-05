@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for float vector type `vec4` in `lightplayer/crates/lp-glsl-filetests/filetests/vec4/` following the flat naming convention with prefixes (like `bvec2/`, `vec2/`, `vec3/`). These tests will comprehensively cover the GLSL single-precision float vector specification for `vec4` and replace the existing nested directory structure with a cleaner, more maintainable flat structure.
+Create a complete test suite for float vector type `vec4` in `lightplayer/crates/lps-filetests/filetests/vec4/` following the flat naming convention with prefixes (like `bvec2/`, `vec2/`, `vec3/`). These tests will comprehensively cover the GLSL single-precision float vector specification for `vec4` and replace the existing nested directory structure with a cleaner, more maintainable flat structure.
 
 **Note**: This plan replaces the existing nested `vec4/` test structure (with subdirectories like `arithmetic/`, `assignment/`, `builtins/`, etc.) with a flat structure matching the pattern used in other type-based test suites.
 

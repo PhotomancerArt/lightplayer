@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL interface blocks in `lightplayer/crates/lp-glsl-filetests/filetests/interface-blocks/` following the flat naming convention with prefixes. These tests will comprehensively cover uniform blocks, buffer blocks (shader storage blocks), input/output blocks, block member declarations, instance names, and layout qualifiers. These tests are expected to fail initially, serving as a specification for implementing interface block support in the compiler.
+Create a complete test suite for GLSL interface blocks in `lightplayer/crates/lps-filetests/filetests/interface-blocks/` following the flat naming convention with prefixes. These tests will comprehensively cover uniform blocks, buffer blocks (shader storage blocks), input/output blocks, block member declarations, instance names, and layout qualifiers. These tests are expected to fail initially, serving as a specification for implementing interface block support in the compiler.
 
 ## Directory Structure
 
@@ -291,8 +291,8 @@ float test_uniform_block_access() {
    - Shared block matching
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-uniform.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/structs/access-scalar.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-uniform.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/structs/access-scalar.glsl`
    - GLSL spec: `variables.adoc` - Interface Blocks (lines 2727-3029)
 
 ## Files to Create

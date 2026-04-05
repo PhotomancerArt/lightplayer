@@ -9,7 +9,7 @@ and consistent.
 
 ### Files to Update
 
-1. **`lp-glsl-builtins/src/builtins/lpfx/worley/mod.rs`**
+1. **`lps-builtins/src/builtins/lpfx/worley/mod.rs`**
     - Add exports for all four Worley functions:
         - `pub mod worley2_q32;`
         - `pub mod worley2_value_q32;`

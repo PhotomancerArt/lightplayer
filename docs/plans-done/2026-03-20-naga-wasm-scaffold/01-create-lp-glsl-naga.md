@@ -1,14 +1,14 @@
-# Phase 1: Create lp-glsl-naga crate
+# Phase 1: Create lps-naga crate
 
 ## Scope
 
-Create `lp-shader/lp-glsl-naga/`, a `no_std`-compatible crate that wraps
+Create `lp-shader/lps-naga/`, a `no_std`-compatible crate that wraps
 `naga::front::glsl::Frontend` and returns a `NagaModule` (the `naga::Module`
 plus per-function metadata as `FunctionInfo`).
 
 This crate owns `FloatMode` and `GlslType` — the shared types that downstream
-crates (`lp-glsl-wasm`, `lp-glsl-filetests`) will use instead of the ones from
-`lp-glsl-frontend`.
+crates (`lps-wasm`, `lps-filetests`) will use instead of the ones from
+`lps-frontend`.
 
 ## Code Organization Reminders
 
@@ -24,7 +24,7 @@ crates (`lp-glsl-wasm`, `lp-glsl-filetests`) will use instead of the ones from
 
 ```toml
 [package]
-name = "lp-glsl-naga"
+name = "lps-naga"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -36,7 +36,7 @@ workspace = true
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 ```
 
-Add `"lp-shader/lp-glsl-naga"` to both `members` and `default-members` in the
+Add `"lp-shader/lps-naga"` to both `members` and `default-members` in the
 workspace `Cargo.toml`.
 
 ### 2. src/lib.rs
@@ -192,8 +192,8 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-naga
-cargo check -p lp-glsl-naga
+cargo test -p lps-naga
+cargo check -p lps-naga
 ```
 
 Ensure no warnings.

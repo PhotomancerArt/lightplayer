@@ -137,8 +137,8 @@ Replace the stub in the per-function loop:
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo check -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 At this point, simple GLSL programs (arithmetic, if/else, loops, local

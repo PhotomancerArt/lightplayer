@@ -21,12 +21,12 @@ Implement Milestone I from
 ## File structure
 
 ```
-lp-shader/lp-glsl-naga/src/
+lp-shader/lps-naga/src/
 ├── expr_scalar.rs              # UPDATE: expr_type_inner + expr_scalar_kind for Relational
 ├── lower_expr.rs               # UPDATE: lower_relational, isnan/isinf → lane false (Q32)
 └── ...
 
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── builtins/common-isnan.glsl  # UPDATE: no infinite literals
 ├── builtins/common-isinf.glsl # UPDATE: no infinite literals
 ├── vec/bvec{2,3,4}/…            # UPDATE: strip @unimplemented where fixed (relational-only)
@@ -68,7 +68,7 @@ Matrix `m1 == m2`:
 | `lower_relational` | Emits LPIR bool lanes (`I32`); Q32 `isnan`/`isinf` must not use IEEE tricks or div0 sentinel tests.                                                                       |
 | Filetests          | Prove **jit + wasm + rv32** pass for the [expected corpus](./expected-passing-tests.md); strip `@unimplemented(backend=…)` that blocked any backend once LPIR is correct. |
 
-**Note:** `lp-glsl-naga` lowering is **float-mode agnostic** at the IR level; all current filetest
+**Note:** `lps-naga` lowering is **float-mode agnostic** at the IR level; all current filetest
 targets are **q32** (`jit.q32`, `wasm.q32`, `rv32.q32`). Emitting constant-false `isnan`/`isinf`
 matches [`q32.md`](../../design/q32.md) for those targets. A future **jit.f32** target would need a
 separate policy or `LowerCtx` numeric mode (out of scope unless introduced).

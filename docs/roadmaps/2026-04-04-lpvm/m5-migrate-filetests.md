@@ -2,14 +2,14 @@
 
 ## Goal
 
-Port **`lps-filetests`** (rename of `lp-glsl-filetests`) from **`GlslExecutable`**
+Port **`lps-filetests`** (rename of `lps-filetests`) from **`GlslExecutable`**
 to the LPVM trait system. All three backends (JIT, RV32, WASM) exercise the same
 LPVM-shaped API. Primary validation step.
 
 ## Naming / paths
 
 Target crate: **`lps-filetests`**. During migration the directory or package may
-still be `lp-glsl-filetests`; use **`cargo test -p <actual-package-name>`**.
+still be `lps-filetests`; use **`cargo test -p <actual-package-name>`**.
 
 ## Context for Agents
 
@@ -50,7 +50,7 @@ filetests import explicitly.
 
 1. **Parallel path**: keep `GlslExecutable` working while LPVM path is built.
 2. **Switch** when LPVM path passes all tests on all backends.
-3. **Remove** `GlslExecutable` and `lp-glsl-exec` dependency from filetests.
+3. **Remove** `GlslExecutable` and `lps-exec` dependency from filetests.
 
 ## Dependencies after migration (illustrative)
 
@@ -65,7 +65,7 @@ lps-shared = { path = "../lps-shared" }
 lps-naga = { path = "../lps-naga" }
 ```
 
-**Remove** (once fully migrated): `lp-glsl-exec`, direct `lpvm`, direct
+**Remove** (once fully migrated): `lps-exec`, direct `lpvm`, direct
 `lpir-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
 if folded into `lpvm-wasm` runtime.
 
@@ -80,4 +80,4 @@ if folded into `lpvm-wasm` runtime.
 - All filetests pass on **Jit, RV32, WASM** via LPVM
 - `GlslExecutable` unused in filetests
 - **`lps-filetests`** (or current package name) depends on `lpvm` + three
-  backends, not on `lp-glsl-exec`
+  backends, not on `lps-exec`

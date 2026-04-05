@@ -8,7 +8,7 @@ Add tests and verify the implementation works end-to-end.
 
 ### 3.1 Add Unit Tests
 
-In `lp-glsl-builtins/src/q32/sin.rs`:
+In `lps-builtins/src/q32/sin.rs`:
 
 - Add tests using the test helper functions from phase 1
 - Test cases:
@@ -17,7 +17,7 @@ In `lp-glsl-builtins/src/q32/sin.rs`:
     - Range reduction: sin(2π) ≈ 0, sin(3π/2) ≈ -1
 - Use ~2-3% tolerance for assertions
 
-In `lp-glsl-builtins/src/q32/cos.rs`:
+In `lps-builtins/src/q32/cos.rs`:
 
 - Add tests using test helper functions
 - Test cases:

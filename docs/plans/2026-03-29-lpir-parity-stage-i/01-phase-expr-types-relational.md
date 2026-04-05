@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Add correct type inference for `Expression::Relational` in `lp-glsl-naga/src/expr_scalar.rs` so no
+Add correct type inference for `Expression::Relational` in `lps-naga/src/expr_scalar.rs` so no
 valid GLSL relational hits `expr_type_inner unsupported …`.
 
 ## Code organization reminders
@@ -18,11 +18,11 @@ valid GLSL relational hits `expr_type_inner unsupported …`.
 
 Add `Expression::Relational { fun, argument }`:
 
-| `RelationalFunction` | Result `TypeInner` |
-|---------------------|-------------------|
-| `All`, `Any` | `TypeInner::Scalar` with `ScalarKind::Bool`, width 4 (same as other bool scalars in this module). |
-| `IsNan`, `IsInf` | Same **vector size** as the float argument, **bool** element type. If argument is scalar float → scalar bool. Use `expr_type_inner` on `argument` and map `Vector { size, scalar }` → `Vector { size, bool_scalar }`; `Scalar(float)` → `Scalar(bool)`. |
-| `Not` | If Naga exposes it: same shape as argument, **bool** lanes (bvecN → bvecN). Verify enum in your Naga version; if `Not` is not `Relational`, skip and document in `00-notes.md`. |
+| `RelationalFunction` | Result `TypeInner`                                                                                                                                                                                                                                      |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `All`, `Any`         | `TypeInner::Scalar` with `ScalarKind::Bool`, width 4 (same as other bool scalars in this module).                                                                                                                                                       |
+| `IsNan`, `IsInf`     | Same **vector size** as the float argument, **bool** element type. If argument is scalar float → scalar bool. Use `expr_type_inner` on `argument` and map `Vector { size, scalar }` → `Vector { size, bool_scalar }`; `Scalar(float)` → `Scalar(bool)`. |
+| `Not`                | If Naga exposes it: same shape as argument, **bool** lanes (bvecN → bvecN). Verify enum in your Naga version; if `Not` is not `Relational`, skip and document in `00-notes.md`.                                                                         |
 
 ### `expr_scalar_kind`
 
@@ -35,14 +35,14 @@ Add `Expression::Relational { fun, argument }`:
 
 ### Tests
 
-- `cargo test -p lp-glsl-naga` (existing module tests).
+- `cargo test -p lps-naga` (existing module tests).
 - Optional: add a **small** unit test in `expr_scalar.rs` `mod tests` with a tiny `Function` + arena
   snippet if the crate already patterns that way; otherwise rely on filetests in phase 4.
 
 ## Validate
 
 ```bash
-cd lp-glsl && cargo test -p lp-glsl-naga && cargo check -p lp-glsl-naga
+cd lps && cargo test -p lps-naga && cargo check -p lps-naga
 ```
 
 ```bash

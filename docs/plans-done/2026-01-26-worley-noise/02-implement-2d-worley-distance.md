@@ -9,7 +9,7 @@ the nearest feature point.
 
 ### Files to Create
 
-1. **`lp-glsl-builtins/src/builtins/lpfx/worley/worley2_q32.rs`**
+1. **`lps-builtins/src/builtins/lpfx/worley/worley2_q32.rs`**
     - `__lpfx_worley2_q32(x: i32, y: i32, seed: u32) -> i32`
     - 2D Worley noise returning distance
 
@@ -29,7 +29,7 @@ Key components:
 ### Q32 Fixed-Point Considerations
 
 - All coordinates and return values are Q32 (i32 with 16.16 format)
-- Use Q32 arithmetic operations (from `lp-glsl-builtins/src/util/q32/q32.rs`)
+- Use Q32 arithmetic operations (from `lps-builtins/src/util/q32/q32.rs`)
 - Distance calculations use fixed-point arithmetic
 - Final scaling factor accounts for Q32 format
 
@@ -59,6 +59,6 @@ Key components:
 
 - Place helper utility functions at the bottom of files
 - Reference noise-rs implementation but adapt for Q32 fixed-point
-- Use existing Q32 utilities from `lp-glsl-builtins/src/util/q32/q32.rs`
+- Use existing Q32 utilities from `lps-builtins/src/util/q32/q32.rs`
 - Include comments explaining Worley noise algorithm steps
 - The `get_vec2` function from reference implementation generates feature point offsets

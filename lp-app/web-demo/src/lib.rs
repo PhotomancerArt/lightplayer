@@ -1,6 +1,6 @@
 //! GLSL → WASM compiler exposed to JavaScript via wasm-bindgen.
 
-use lp_glsl_wasm::{WasmOptions, glsl_wasm};
+use lps_wasm::{glsl_wasm, WasmOptions};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]

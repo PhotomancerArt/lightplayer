@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend `lp-glsl-builtin-gen-app` to automatically generate `lpfx_fns.rs` by discovering LPFX
+Extend `lps-builtin-gen-app` to automatically generate `lpfx_fns.rs` by discovering LPFX
 functions annotated with `#[lpfx_impl(...)]` attributes, parsing their GLSL signatures, and
 generating the registry code.
 
@@ -11,7 +11,7 @@ generating the registry code.
 The codegen will be organized into clean, well-separated modules:
 
 ```
-lp-glsl-builtin-gen-app/src/
+lps-builtin-gen-app/src/
 ├── main.rs                    # UPDATE: Add lpfx_fns generation
 ├── discovery.rs               # NEW: Discover LPFX functions with attributes
 ├── lpfx/
@@ -93,7 +93,7 @@ LpfxCodegenError - # NEW: Error type for codegen
 
 ## Data Flow
 
-1. **Discovery**: Walk `lp-glsl-builtins/src/builtins/lpfx` directory, find all functions with
+1. **Discovery**: Walk `lps-builtins/src/builtins/lpfx` directory, find all functions with
    `#[lpfx_impl]` attribute
 2. **Parsing**: Parse attributes to extract variant and GLSL signature, parse GLSL signatures to
    `FunctionSignature`
@@ -176,4 +176,4 @@ Create tests for:
 - Validation (missing pairs, mismatched signatures, etc.)
 - Code generation (output format, correctness)
 
-Tests should be in `lp-glsl-builtin-gen-app/tests/` or inline test modules.
+Tests should be in `lps-builtin-gen-app/tests/` or inline test modules.

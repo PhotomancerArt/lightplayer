@@ -1,7 +1,7 @@
 ## Scope of phase
 
 - Grep diff for **`TODO`**, **`dbg!`**, stray **`eprintln!`**; remove or ticket.
-- **Clippy / warnings:** `cargo clippy -p lp-glsl-filetests --all-features -D warnings`
+- **Clippy / warnings:** `cargo clippy -p lps-filetests --all-features -D warnings`
   (adjust features to match crate).
 - Ensure **`deny(missing_docs)`** satisfied for new public items (if any).
 
@@ -14,8 +14,8 @@
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lp-glsl-filetests
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo clippy -p lp-glsl-filetests -- -D warnings
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lps-filetests
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo clippy -p lps-filetests -- -D warnings
 cargo +nightly fmt
 ```
 
@@ -23,8 +23,8 @@ cargo +nightly fmt
 
 Conventional Commits, e.g.:
 
-`feat(filetests): switch to lpir targets; use lp-glsl-exec stack`
+`feat(filetests): switch to lpir targets; use lps-exec stack`
 
 Body: default `jit.q32`, CI wasm+rv32, remove legacy cranelift target, wire
-filetests to **`lp-glsl-exec`** / **`lpvm`**, adapters, docs. Legacy
-**`lp-glsl-frontend`** / **`lp-glsl-cranelift`** unchanged until Stage VII.
+filetests to **`lps-exec`** / **`lpvm`**, adapters, docs. Legacy
+**`lps-frontend`** / **`lps-cranelift`** unchanged until Stage VII.

@@ -9,13 +9,13 @@ same pattern as the `simplex/` module.
 
 ### Files to Create
 
-1. **`lp-glsl-builtins/src/builtins/lpfx/worley/mod.rs`**
+1. **`lps-builtins/src/builtins/lpfx/worley/mod.rs`**
     - Module file that will export the worley functions
     - Initially empty or with placeholder comments
 
 ### Files to Update
 
-1. **`lp-glsl-builtins/src/builtins/lpfx/mod.rs`**
+1. **`lps-builtins/src/builtins/lpfx/mod.rs`**
     - Add `pub mod worley;` to export the worley module
 
 ## Success Criteria

@@ -16,7 +16,7 @@ quality.
 5. Run `cargo +nightly fmt` on entire workspace
 6. Verify module exports are correct
 7. Check that all functions are properly registered (will be auto-discovered by
-   lp-glsl-builtin-gen-app)
+   lps-builtin-gen-app)
 
 ### Verification
 

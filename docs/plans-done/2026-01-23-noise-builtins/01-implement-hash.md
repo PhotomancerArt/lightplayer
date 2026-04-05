@@ -2,13 +2,13 @@
 
 ## Description
 
-Create the hash function implementation in `lp-glsl-builtins/src/builtins/q32/lpfx_hash.rs` with
+Create the hash function implementation in `lps-builtins/src/builtins/q32/lpfx_hash.rs` with
 three variants for 1D, 2D, and 3D hashing. The hash function uses the noiz algorithm optimized for
 noise generation.
 
 ## Implementation
 
-### File: `lp-glsl-builtins/src/builtins/q32/lpfx_hash.rs`
+### File: `lps-builtins/src/builtins/q32/lpfx_hash.rs`
 
 Implement three hash functions:
 

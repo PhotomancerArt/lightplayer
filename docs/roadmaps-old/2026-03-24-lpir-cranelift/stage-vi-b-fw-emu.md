@@ -2,7 +2,7 @@
 
 ## Goal
 
-Migrate `lp-engine` from `lp-glsl-cranelift` to `lpir-cranelift` and validate
+Migrate `lp-engine` from `lps-cranelift` to `lpir-cranelift` and validate
 by running `fw-emu` — the firmware compiled to RV32 and executed in
 `lp-riscv-emu` on desktop. This proves the full embedded compilation path
 (GLSL → LPIR → CLIF → RV32 JIT on device) works end-to-end **without
@@ -17,7 +17,7 @@ requiring ESP32 hardware**.
 **In scope:**
 
 - **lp-engine migration:**
-  - Replace `lp-glsl-cranelift` dependency with `lpir-cranelift`
+  - Replace `lps-cranelift` dependency with `lpir-cranelift`
   - Update `ShaderRuntime` to use `jit()` / `jit_from_ir()` → `JitModule`
   - Update render loop to use `DirectCall` (Level 3) for fast path
   - Wire `Q32Options` from `GlslOpts` → `CompileOptions`
@@ -26,7 +26,7 @@ requiring ESP32 hardware**.
     `DirectCall` successfully abstracts calling convention
 - **lp-server Cargo.toml:**
   - Forward new features (`std`, `cranelift-optimizer`, `cranelift-verifier`)
-    from `lpir-cranelift` instead of `lp-glsl-cranelift`
+    from `lpir-cranelift` instead of `lps-cranelift`
 - **fw-emu validation:**
   - Update `fw-emu` deps if needed (it depends on `lp-server` → `lp-engine`,
     so the compiler swap is mostly transitive)
@@ -56,7 +56,7 @@ requiring ESP32 hardware**.
 
 ## Deliverables
 
-- `lp-engine` compiles against `lpir-cranelift` instead of `lp-glsl-cranelift`
+- `lp-engine` compiles against `lpir-cranelift` instead of `lps-cranelift`
 - `fw-emu` builds, runs, and renders shaders correctly
 - Desktop host JIT (`lp-engine` tests) still passes
 - Known issues list (regressions, if any)

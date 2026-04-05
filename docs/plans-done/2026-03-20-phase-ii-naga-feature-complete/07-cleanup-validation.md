@@ -17,6 +17,7 @@ structs). Fix warnings. Format. Verify no Cranelift regression.
 ### 1. Grep for temporary code
 
 Search the git diff for:
+
 - `TODO` comments — remove or promote to tracked issues
 - `Phase I` / `Phase II` references in error messages — clean up
 - `debug_assert!`, `println!`, `eprintln!` left from debugging
@@ -26,17 +27,20 @@ Search the git diff for:
 ### 2. Annotate remaining unsupported tests
 
 Features intentionally out of scope for Phase II:
+
 - Arrays (`array/`)
 - Matrices (`mat2/`, `mat3/`, `mat4/`)
 - Structs (`struct/`)
 - Some edge cases (const-fold, specific integer builtins)
 
 For each failing test that uses out-of-scope features, add:
+
 ```glsl
 // unimplemented: wasm
 ```
 
 Use the `--fix` flag to clean up any unexpected passes:
+
 ```bash
 scripts/glsl-filetests.sh --target wasm.q32 --fix
 ```
@@ -44,9 +48,9 @@ scripts/glsl-filetests.sh --target wasm.q32 --fix
 ### 3. Fix warnings
 
 ```bash
-cargo check -p lp-glsl-naga 2>&1 | grep warning
-cargo check -p lp-glsl-wasm 2>&1 | grep warning
-cargo check -p lp-glsl-filetests 2>&1 | grep warning
+cargo check -p lps-naga 2>&1 | grep warning
+cargo check -p lps-wasm 2>&1 | grep warning
+cargo check -p lps-filetests 2>&1 | grep warning
 ```
 
 Fix all warnings.

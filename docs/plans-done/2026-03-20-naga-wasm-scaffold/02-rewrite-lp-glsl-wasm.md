@@ -1,8 +1,8 @@
-# Phase 2: Rewrite lp-glsl-wasm
+# Phase 2: Rewrite lps-wasm
 
 ## Scope
 
-Replace `lp-glsl-wasm`'s internals. The crate keeps its public API shape
+Replace `lps-wasm`'s internals. The crate keeps its public API shape
 (`glsl_wasm()` → `WasmModule`) but consumes `naga::Module` instead of
 `TypedShader`. The old `codegen/` tree (32 files) is deleted and replaced
 with a small set of files.
@@ -25,7 +25,7 @@ is independent).
 
 ```toml
 [package]
-name = "lp-glsl-wasm"
+name = "lps-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -34,7 +34,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-lp-glsl-naga = { path = "../lp-glsl-naga" }
+lps-naga = { path = "../lps-naga" }
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 wasm-encoder = "0.245"
 log = { workspace = true, default-features = false }
@@ -44,8 +44,8 @@ anyhow = { workspace = true }
 wasmtime = "42"
 ```
 
-Removed: `lp-glsl-frontend`, `lp-glsl-builtin-ids`, `glsl`, `hashbrown`.
-Added: `lp-glsl-naga`, `naga`.
+Removed: `lps-frontend`, `lps-builtin-ids`, `glsl`, `hashbrown`.
+Added: `lps-naga`, `naga`.
 
 ### 2. Delete old codegen tree
 
@@ -65,15 +65,15 @@ pub mod module;
 pub mod options;
 pub mod types;
 
-pub use lp_glsl_naga::{FloatMode, GlslType};
+pub use lps_naga::{FloatMode, GlslType};
 pub use module::{WasmExport, WasmModule};
 pub use options::WasmOptions;
 
 use alloc::vec::Vec;
-use lp_glsl_naga::{CompileError, NagaModule};
+use lps_naga::{CompileError, NagaModule};
 
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, CompileError> {
-    let naga_module = lp_glsl_naga::compile(source)?;
+    let naga_module = lps_naga::compile(source)?;
     let wasm_bytes = emit::emit_module(&naga_module, &options)?;
     let exports = collect_exports(&naga_module, &options);
     Ok(WasmModule {
@@ -111,7 +111,7 @@ fn collect_exports(naga_module: &NagaModule, options: &WasmOptions) -> Vec<WasmE
 #![allow(unused)]
 
 use alloc::{string::String, vec::Vec};
-use lp_glsl_naga::GlslType;
+use lps_naga::GlslType;
 pub use wasm_encoder::ValType as WasmValType;
 
 #[derive(Debug, Clone)]
@@ -132,12 +132,12 @@ pub struct WasmExport {
 
 Key change: `signature: FunctionSignature` replaced with `return_type: GlslType`
 and `param_types: Vec<GlslType>`. This removes the dependency on
-`lp-glsl-frontend`.
+`lps-frontend`.
 
 ### 5. src/options.rs
 
 ```rust
-use lp_glsl_naga::FloatMode;
+use lps_naga::FloatMode;
 
 #[derive(Debug, Clone)]
 pub struct WasmOptions {
@@ -157,11 +157,11 @@ Removed `max_errors` (Naga handles its own error collection).
 
 ### 6. src/types.rs
 
-Same logic as before but uses `GlslType` from `lp-glsl-naga`:
+Same logic as before but uses `GlslType` from `lps-naga`:
 
 ```rust
 use alloc::vec::Vec;
-use lp_glsl_naga::{FloatMode, GlslType};
+use lps_naga::{FloatMode, GlslType};
 use wasm_encoder::ValType;
 
 pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec<ValType> {
@@ -265,7 +265,7 @@ Core of the rewrite. Walks `naga::Module` and emits WASM via `wasm_encoder`.
 use alloc::vec::Vec;
 use crate::locals::LocalAlloc;
 use crate::options::WasmOptions;
-use lp_glsl_naga::{CompileError, FloatMode, NagaModule};
+use lps_naga::{CompileError, FloatMode, NagaModule};
 use naga::{BinaryOperator, Expression, Handle, Module, Function, Statement, TypeInner, ScalarKind, Literal};
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function as WasmFunction,
@@ -331,6 +331,7 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
 `emit_block(block)`: iterates statements, dispatches to `emit_stmt`.
 
 `emit_stmt(stmt)`:
+
 - `Statement::Emit(range)`: evaluates expressions in range that need it
   (Phase I: no-op, expressions are emitted on demand when referenced)
 - `Statement::Store { pointer, value }`: emit value, `local.set` the target
@@ -338,46 +339,47 @@ pub fn emit_module(naga_module: &NagaModule, options: &WasmOptions) -> Result<Ve
 - `Statement::Block(inner)`: recurse into `emit_block`
 
 `emit_expr(expr_handle)`: recursive, pushes one scalar value onto WASM stack.
+
 - `Expression::Literal(Float32(v))`:
-  - Float mode: `f32.const v`
-  - Q32 mode: `i32.const (v * 65536.0) as i32`
+    - Float mode: `f32.const v`
+    - Q32 mode: `i32.const (v * 65536.0) as i32`
 - `Expression::Literal(Sint32(v))`: `i32.const v`
 - `Expression::Literal(Uint32(v))`: `i32.const v as i32`
 - `Expression::Literal(Bool(b))`: `i32.const (b as i32)`
 - `Expression::FunctionArgument(idx)`: `local.get idx`
 - `Expression::Load { pointer }`:
-  - If `pointer` → `LocalVariable(lv)`: `local.get alloc.resolve(lv)`
+    - If `pointer` → `LocalVariable(lv)`: `local.get alloc.resolve(lv)`
 - `Expression::Binary { op, left, right }`:
-  - Emit left, emit right
-  - Match `(op, scalar_kind, mode)` to WASM instruction:
-    - `(Add, Float, Float)` → `f32.add`
-    - `(Add, Float, Q32)` → `i32.add` (TODO: saturating in Phase II)
-    - `(Add, Sint/Uint, _)` → `i32.add`
-    - `(Sub, ...)` → `f32.sub` / `i32.sub`
-    - `(Mul, Float, Float)` → `f32.mul`
-    - `(Mul, Float, Q32)` → Q32 multiply sequence (mul, shift)
-    - `(Mul, Sint/Uint, _)` → `i32.mul`
-    - `(Div, Float, Float)` → `f32.div`
-    - `(Div, Float, Q32)` → Q32 divide sequence
-    - `(Div, Sint, _)` → `i32.div_s`
-    - `(Div, Uint, _)` → `i32.div_u`
-    - `(Equal, ...)` → `f32.eq` / `i32.eq`
-    - `(NotEqual, ...)` → `f32.ne` / `i32.ne`
-    - `(Less, Float, Float)` → `f32.lt`
-    - `(Less, Sint, _)` → `i32.lt_s`
-    - `(Less, Uint, _)` → `i32.lt_u`
-    - (and so on for `LessEqual`, `Greater`, `GreaterEqual`)
+    - Emit left, emit right
+    - Match `(op, scalar_kind, mode)` to WASM instruction:
+        - `(Add, Float, Float)` → `f32.add`
+        - `(Add, Float, Q32)` → `i32.add` (TODO: saturating in Phase II)
+        - `(Add, Sint/Uint, _)` → `i32.add`
+        - `(Sub, ...)` → `f32.sub` / `i32.sub`
+        - `(Mul, Float, Float)` → `f32.mul`
+        - `(Mul, Float, Q32)` → Q32 multiply sequence (mul, shift)
+        - `(Mul, Sint/Uint, _)` → `i32.mul`
+        - `(Div, Float, Float)` → `f32.div`
+        - `(Div, Float, Q32)` → Q32 divide sequence
+        - `(Div, Sint, _)` → `i32.div_s`
+        - `(Div, Uint, _)` → `i32.div_u`
+        - `(Equal, ...)` → `f32.eq` / `i32.eq`
+        - `(NotEqual, ...)` → `f32.ne` / `i32.ne`
+        - `(Less, Float, Float)` → `f32.lt`
+        - `(Less, Sint, _)` → `i32.lt_s`
+        - `(Less, Uint, _)` → `i32.lt_u`
+        - (and so on for `LessEqual`, `Greater`, `GreaterEqual`)
 - `Expression::Unary { op: Negate, expr }`:
-  - Float mode: emit expr, `f32.neg`
-  - Q32/Int: `i32.const 0`, emit expr, `i32.sub`
+    - Float mode: emit expr, `f32.neg`
+    - Q32/Int: `i32.const 0`, emit expr, `i32.sub`
 - `Expression::As { expr, kind, convert }`: type conversions
-  - `float → int` (Q32): shift right 16, floor
-  - `int → float` (Q32): shift left 16
-  - `float → int` (Float): `i32.trunc_f32_s`
-  - `int → float` (Float): `f32.convert_i32_s`
-  - `uint → float`, `float → uint`, `int → uint`, `uint → int`: etc.
+    - `float → int` (Q32): shift right 16, floor
+    - `int → float` (Q32): shift left 16
+    - `float → int` (Float): `i32.trunc_f32_s`
+    - `int → float` (Float): `f32.convert_i32_s`
+    - `uint → float`, `float → uint`, `int → uint`, `uint → int`: etc.
 - `Expression::Select { condition, accept, reject }`: ternary
-  - emit accept, emit reject, emit condition, `select`
+    - emit accept, emit reject, emit condition, `select`
 
 ### Expression type resolution
 
@@ -386,6 +388,7 @@ to know the scalar type of the operands. Use `naga::Module::types` and the
 expression's result type.
 
 Helper `expr_scalar_kind(module, func, expr_handle) → ScalarKind`:
+
 - Walk expression to find its type. For `Literal`, `FunctionArgument`,
   `Binary`, `Load`, etc., resolve to `ScalarKind` (Float, Sint, Uint, Bool).
 
@@ -494,9 +497,9 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-wasm
-cargo check -p lp-glsl-wasm
+cargo test -p lps-wasm
+cargo check -p lps-wasm
 ```
 
-Ensure no warnings. The old `lp-glsl-wasm` tests will be removed with the
+Ensure no warnings. The old `lps-wasm` tests will be removed with the
 old codegen; new tests replace them.

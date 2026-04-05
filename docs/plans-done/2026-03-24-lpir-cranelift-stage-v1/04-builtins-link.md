@@ -1,7 +1,7 @@
 ## Scope of phase
 
 Port **`link_and_verify_builtins`** semantics from
-`lp-glsl-cranelift/src/backend/codegen/builtins_linker.rs` into
+`lps-cranelift/src/backend/codegen/builtins_linker.rs` into
 `lpir-cranelift` as **`object_link.rs`** (or similar), behind the same feature
 flag.
 
@@ -20,12 +20,12 @@ Output: **`ElfLoadInfo`** (or equivalent) from `lp_riscv_elf::load_elf` +
 
 ## Implementation details
 
-- **BuiltinId iteration:** use `lp_glsl_builtin_ids::BuiltinId::all()` and
+- **BuiltinId iteration:** use `lps_builtin_ids::BuiltinId::all()` and
   `name()` like the old linker — ensures symbol names match declared builtins.
 - **Empty builtins blob:** return a clear `CompilerError` / `CompileError` variant
   telling developers to run `scripts/build-builtins.sh` (same message spirit as
   old crate).
-- **build.rs:** when feature enabled, resolve path to `lp-glsl-builtins-emu-app`
+- **build.rs:** when feature enabled, resolve path to `lps-builtins-emu-app`
   artifact; when disabled, `build.rs` should be a no-op or not reference
   missing paths (Cargo always runs `build.rs` — use feature env from
   `CARGO_FEATURE_*` in `build.rs` if needed).
@@ -43,7 +43,7 @@ Output: **`ElfLoadInfo`** (or equivalent) from `lp_riscv_elf::load_elf` +
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
 ```
 
 If full link tests are ignored, still require `cargo check` with feature on.

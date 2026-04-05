@@ -6,7 +6,7 @@ Validate discovered LPFX functions for consistency, proper pairing, and correctn
 
 ## Implementation
 
-1. Create `lp-glsl-builtin-gen-app/src/lpfx/validate.rs`
+1. Create `lps-builtin-gen-app/src/lpfx/validate.rs`
 2. Implement validation functions:
     - `validate_lpfx_functions()` - main validation entry point
     - `validate_decimal_pairs()` - ensure all decimal functions have f32/q32 pairs

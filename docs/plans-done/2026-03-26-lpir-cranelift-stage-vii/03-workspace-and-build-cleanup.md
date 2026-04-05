@@ -20,13 +20,13 @@ Clean up all build system references to deleted crates: workspace `Cargo.toml`,
 **`rv32_packages` variable** (line ~6):
 
 - Remove `esp32-glsl-jit` from the string.
-- If `lp-glsl-builtins-emu-app` is the only remaining entry, simplify or
+- If `lps-builtins-emu-app` is the only remaining entry, simplify or
   remove the variable if it is no longer used by any recipe.
 
 **`build-rv32-jit-test` recipe** (line ~137–139):
 
-- Delete entirely — it builds `lp-glsl-builtins-emu-app` and `esp32-glsl-jit`.
-  The `lp-glsl-builtins-emu-app` build is still needed but should be in its
+- Delete entirely — it builds `lps-builtins-emu-app` and `esp32-glsl-jit`.
+  The `lps-builtins-emu-app` build is still needed but should be in its
   own recipe or folded into `build-rv32-builtins`.
 
 **`build-rv32` recipe** (line ~131):
@@ -38,12 +38,12 @@ Clean up all build system references to deleted crates: workspace `Cargo.toml`,
 
 **`build-glsl` and `build-glsl-release`** (lines ~184–187):
 
-- Remove `--package lp-glsl-cranelift --package lp-glsl-jit-util` from the
+- Remove `--package lps-cranelift --package lps-jit-util` from the
   `cargo build` commands.
 
 **`clippy-glsl` and `clippy-glsl-fix`** (lines ~260–263):
 
-- Remove `--package lp-glsl-cranelift --package lp-glsl-jit-util`.
+- Remove `--package lps-cranelift --package lps-jit-util`.
 
 **`clippy-rv32-jit`** (line ~212):
 
@@ -51,13 +51,13 @@ Clean up all build system references to deleted crates: workspace `Cargo.toml`,
 
 **`test-glsl`** (line ~293):
 
-- Remove `--package lp-glsl-cranelift --package lp-glsl-jit-util` from the
+- Remove `--package lps-cranelift --package lps-jit-util` from the
   `cargo test` command.
 
 **Workspace clippy** (line ~206):
 
 - Remove `--exclude esp32-glsl-jit` from `cargo clippy --workspace` — crate
-  no longer exists. Also remove `--exclude lp-glsl-builtins-emu-app` only if
+  no longer exists. Also remove `--exclude lps-builtins-emu-app` only if
   that crate is now host-compatible (check; likely still rv32-only, so keep
   the exclude).
 
@@ -79,36 +79,36 @@ rm Dockerfile.rv32-jit
 
 Remove `<sourceFolder>` entries for deleted crate paths:
 
-- `lp-glsl-cranelift`
-- `lp-glsl-jit-util`
+- `lps-cranelift`
+- `lps-jit-util`
 - `esp32-glsl-jit`
-- `lp-glsl-q32-metrics-app`
-- `lp-glsl-frontend`
+- `lps-q32-metrics-app`
+- `lps-frontend`
 
 ### 5. Stale comments in source
 
 Grep for remaining references to deleted crates in Rust source comments:
 
 ```bash
-rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-q32-metrics|lp-glsl-frontend' --type rust lp-shader/ lp-core/ lp-fw/
+rg 'lps-cranelift|lps-jit-util|esp32-glsl-jit|lps-q32-metrics|lps-frontend' --type rust lp-shader/ lp-core/ lp-fw/
 ```
 
 Update or remove stale comments. Key files from earlier analysis:
 
-- `lpir-cranelift/src/builtins.rs` — comment mentioning "shared with lp-glsl-cranelift registry"
-- `lpir-cranelift/src/object_module.rs` — comment "Same triple as lp-glsl-cranelift"
-- `lp-glsl-exec/src/lib.rs` — mentions legacy lp-glsl-cranelift / lp-glsl-jit-util
-- `lp-glsl-exec/src/executable.rs` — "copied from lp-glsl-cranelift"
-- `lp-glsl-builtins/src/host/mod.rs`, `macros.rs` — JIT delegate comments
-- `lp-glsl-builtins/build.rs` — old build.rs reference
-- `lp-glsl-diagnostics/src/lib.rs` — "retain copies" comment
-- `lpvm/src/lib.rs` — "copied from lp-glsl-cranelift"
+- `lpir-cranelift/src/builtins.rs` — comment mentioning "shared with lps-cranelift registry"
+- `lpir-cranelift/src/object_module.rs` — comment "Same triple as lps-cranelift"
+- `lps-exec/src/lib.rs` — mentions legacy lps-cranelift / lps-jit-util
+- `lps-exec/src/executable.rs` — "copied from lps-cranelift"
+- `lps-builtins/src/host/mod.rs`, `macros.rs` — JIT delegate comments
+- `lps-builtins/build.rs` — old build.rs reference
+- `lps-diagnostics/src/lib.rs` — "retain copies" comment
+- `lpvm/src/lib.rs` — "copied from lps-cranelift"
 
 ## Validate
 
 ```bash
 cargo metadata --format-version=1 > /dev/null
-cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lp-glsl-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
+cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lps-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 just build-fw-emu
 just build-fw-esp32
 ```

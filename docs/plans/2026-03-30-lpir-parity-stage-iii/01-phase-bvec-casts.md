@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Fix `As` and `Compose` lowering in `lp-glsl-naga/src/lower_expr.rs` to correctly handle bvec to numeric vector casts (`vec2(bvec2(...))`). Current failure: "assignment component count 1 vs 2".
+Fix `As` and `Compose` lowering in `lps-naga/src/lower_expr.rs` to correctly handle bvec to
+numeric vector casts (`vec2(bvec2(...))`). Current failure: "assignment component count 1 vs 2".
 
 ## Code organization reminders
 
@@ -15,6 +16,7 @@ Fix `As` and `Compose` lowering in `lp-glsl-naga/src/lower_expr.rs` to correctly
 ### The problem
 
 When GLSL does `vec2(bvec2(true, false))`, Naga produces either:
+
 - `As { expr: bvec_expr, kind: Float }` (cast)
 - `Compose { ty: vec2_ty, components: [bvec_expr] }` (construction)
 
@@ -23,6 +25,7 @@ Current lowering produces a single scalar instead of a 2-component vector.
 ### The fix
 
 For bvec -> numeric vector conversions, lower to component-wise select:
+
 - `true` -> `1.0` (Q32: `65536` / `0x10000`)
 - `false` -> `0.0` (Q32: `0`)
 
@@ -64,7 +67,8 @@ Expression::As { expr, kind, .. } => {
 
 ### Similar handling for Compose
 
-When `Compose { ty, components }` has a bvec as a component and the target type is a numeric vector, ensure the component is expanded correctly.
+When `Compose { ty, components }` has a bvec as a component and the target type is a numeric vector,
+ensure the component is expanded correctly.
 
 ## Validate
 
@@ -77,6 +81,6 @@ cd /Users/yona/dev/photomancer/lp2025
 ./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/"
 
 # Check compilation
-cargo check -p lp-glsl-naga
+cargo check -p lps-naga
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```

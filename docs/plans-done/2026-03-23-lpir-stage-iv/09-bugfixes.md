@@ -91,9 +91,9 @@ now unblocked:
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo clippy -p lp-glsl-naga -- -D warnings
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo test -p lps-naga
+cargo clippy -p lps-naga -- -D warnings
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 All tests pass, including the previously-ignored loop test and the

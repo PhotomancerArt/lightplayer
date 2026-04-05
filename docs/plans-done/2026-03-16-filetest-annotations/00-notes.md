@@ -23,7 +23,7 @@ annotation system that:
   `parse/parse_run.rs` handles `[expect-fail]`
 - Runner: `test_run/target.rs` maps target strings to `FiletestTarget` enum
   (Cranelift or Wasm), `run_summary.rs` and `run_detail.rs` dispatch by target
-- CLI: `lp-glsl-filetests-app` has `--fix` flag; `LP_FIX_XFAIL=1` and
+- CLI: `lps-filetests-app` has `--fix` flag; `LP_FIX_XFAIL=1` and
   `LP_MARK_FAILING_TESTS_EXPECTED=1` env vars for bulk annotation management
 - Gen-app: generates `.gen.glsl` files with `// target riscv32.q32` baked in
 
@@ -113,7 +113,7 @@ matrix as part of the wasm work. This keeps the annotation refactor
 independent from the wasm work.
 
 Answer: (b) — both cranelift.q32 and wasm.q32. The wasm backend is built and
-integrated (lp-glsl-wasm crate, wasmtime runner, one passing test). The whole
+integrated (lps-wasm crate, wasmtime runner, one passing test). The whole
 point of this refactor is to support multi-target. Most existing tests will
 need file-level `@unimplemented(backend=wasm)` until wasm support grows.
 
@@ -137,7 +137,7 @@ list valid target names. Per-axis flags (--backend, etc.) not needed initially.
 
 ### Q3: DecimalFormat → FloatMode rename scope
 
-`DecimalFormat` exists in `lp-glsl-cranelift` and `lp-glsl-wasm` as a public
+`DecimalFormat` exists in `lps-cranelift` and `lps-wasm` as a public
 type. Should we rename it to `FloatMode` everywhere, or only in the filetests
 crate?
 

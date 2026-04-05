@@ -21,13 +21,13 @@ Run the following validation commands:
 
 ```bash
 # Core crate tests
-cargo test -p lpvm -p lpir -p lpir-cranelift -p lp-glsl-naga
+cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-naga
 
 # WASM emission tests
-cargo test -p lp-glsl-wasm
+cargo test -p lps-wasm
 
 # Filetests (these will exercise the full pipeline)
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 
 # Embedded builds (must pass for embedded JIT)
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
@@ -97,19 +97,19 @@ After committing:
 - lpir-cranelift/src/emit/mod.rs
 - lpir-cranelift/src/lib.rs
 - lpir-cranelift/src/invoke.rs
-- lp-glsl-wasm/src/emit/mod.rs
-- lp-glsl-wasm/src/emit/func.rs
-- lp-glsl-filetests/src/test_run/q32_exec_common.rs
-- lp-glsl-filetests/src/test_run/wasm_runner.rs
+- lps-wasm/src/emit/mod.rs
+- lps-wasm/src/emit/func.rs
+- lps-filetests/src/test_run/q32_exec_common.rs
+- lps-filetests/src/test_run/wasm_runner.rs
 - docs/design/uniforms-globals.md (NEW)
 
 ## Validation
 
 All tests pass:
 
-- cargo test -p lpvm -p lpir -p lpir-cranelift -p lp-glsl-naga
-- cargo test -p lp-glsl-wasm
-- cargo test -p lp-glsl-filetests
+- cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-naga
+- cargo test -p lps-wasm
+- cargo test -p lps-filetests
 - cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 - cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 

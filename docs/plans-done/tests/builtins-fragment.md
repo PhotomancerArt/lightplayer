@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL fragment processing functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/fragment/` following the flat naming convention with prefixes. These tests will comprehensively cover derivative functions (dFdx, dFdy, fwidth) and interpolation functions. These tests are expected to fail initially, serving as a specification for implementing fragment processing function support in the compiler.
+Create a complete test suite for GLSL fragment processing functions in `lightplayer/crates/lps-filetests/filetests/builtins/fragment/` following the flat naming convention with prefixes. These tests will comprehensively cover derivative functions (dFdx, dFdy, fwidth) and interpolation functions. These tests are expected to fail initially, serving as a specification for implementing fragment processing function support in the compiler.
 
 ## Directory Structure
 

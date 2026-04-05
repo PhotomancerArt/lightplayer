@@ -107,7 +107,7 @@ CRASH HAPPENS HERE
 ### Relevant Code
 - `lpir-cranelift/src/jit_module.rs` - `JitModule` struct and `build_jit_module()`
 - `lpir-cranelift/src/jit_memory.rs` - `AllocJitMemoryProvider`
-- `lp-glsl-filetests/src/runner/concurrent.rs` - Worker thread lifecycle
+- `lps-filetests/src/runner/concurrent.rs` - Worker thread lifecycle
 - `lpir-cranelift/src/process_sync.rs` - Codegen serialization (existing lock)
 
 ## Decision

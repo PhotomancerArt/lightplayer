@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL integer and bit manipulation functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/integer/` following the flat naming convention with prefixes. These tests will cover the remaining integer/bit functions not yet covered in existing tests (uaddCarry and usubBorrow already exist). These tests are expected to fail initially, serving as a specification for implementing these built-in functions.
+Create a complete test suite for GLSL integer and bit manipulation functions in `lightplayer/crates/lps-filetests/filetests/builtins/integer/` following the flat naming convention with prefixes. These tests will cover the remaining integer/bit functions not yet covered in existing tests (uaddCarry and usubBorrow already exist). These tests are expected to fail initially, serving as a specification for implementing these built-in functions.
 
 ## Directory Structure
 
@@ -264,8 +264,8 @@ uint test_umul_extended_basic() {
    - Precision qualifier handling
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/builtins/integer-uaddcarry.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/builtins/integer-usubborrow.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/builtins/integer-uaddcarry.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/builtins/integer-usubborrow.glsl`
    - GLSL spec: `builtinfunctions.adoc` - Integer Functions (lines 1317-1468)
 
 ## Files to Create

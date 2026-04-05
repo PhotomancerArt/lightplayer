@@ -2671,13 +2671,13 @@ dependencies = [
  "log",
  "lp-client",
  "lp-engine-client",
- "lp-glsl-builtins",
  "lp-model",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
  "lp-server",
  "lp-shared",
+ "lps-builtins",
  "serde_json",
  "tokio",
  "unwinding",
@@ -3736,10 +3736,10 @@ dependencies = [
  "libm",
  "log",
  "lp-engine-client",
- "lp-glsl-builtins",
  "lp-model",
  "lp-shared",
  "lpir-cranelift",
+ "lps-builtins",
  "lpvm",
  "serde",
  "unwinding",
@@ -3751,128 +3751,6 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "lp-model",
-]
-
-[[package]]
-name = "lp-glsl-builtin-ids"
-version = "40.0.0"
-
-[[package]]
-name = "lp-glsl-builtins"
-version = "40.0.0"
-dependencies = [
- "log",
- "lpfx-impl-macro",
- "lpvm",
-]
-
-[[package]]
-name = "lp-glsl-builtins-emu-app"
-version = "40.0.0"
-dependencies = [
- "lp-glsl-builtins",
- "lp-riscv-emu-guest",
-]
-
-[[package]]
-name = "lp-glsl-builtins-gen-app"
-version = "40.0.0"
-dependencies = [
- "glsl",
- "proc-macro2",
- "quote",
- "syn",
- "walkdir",
-]
-
-[[package]]
-name = "lp-glsl-builtins-wasm"
-version = "40.0.0"
-dependencies = [
- "lp-glsl-builtins",
-]
-
-[[package]]
-name = "lp-glsl-diagnostics"
-version = "40.0.0"
-
-[[package]]
-name = "lp-glsl-exec"
-version = "40.0.0"
-dependencies = [
- "lp-glsl-diagnostics",
- "lps-shared",
- "lpvm",
-]
-
-[[package]]
-name = "lp-glsl-filetests"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "glob",
- "glsl",
- "lp-glsl-diagnostics",
- "lp-glsl-exec",
- "lp-glsl-naga",
- "lp-glsl-wasm",
- "lp-riscv-elf",
- "lp-riscv-emu",
- "lp-riscv-inst",
- "lpir",
- "lpir-cranelift",
- "lps-shared",
- "lpvm",
- "num_cpus",
- "regex",
- "walkdir",
- "wasm-encoder 0.245.1",
- "wasmprinter 0.245.1",
- "wasmtime",
-]
-
-[[package]]
-name = "lp-glsl-filetests-app"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger 0.10.2",
- "lp-glsl-filetests",
-]
-
-[[package]]
-name = "lp-glsl-filetests-gen-app"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "walkdir",
-]
-
-[[package]]
-name = "lp-glsl-naga"
-version = "40.0.0"
-dependencies = [
- "libm",
- "lp-glsl-builtin-ids",
- "lpir",
- "lps-shared",
- "naga 29.0.0",
- "smallvec",
-]
-
-[[package]]
-name = "lp-glsl-wasm"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "log",
- "lp-glsl-builtin-ids",
- "lp-glsl-naga",
- "lpir",
- "wasm-encoder 0.245.1",
- "wasmtime",
 ]
 
 [[package]]
@@ -4006,20 +3884,142 @@ dependencies = [
  "cranelift-native 0.127.0",
  "cranelift-object",
  "libm",
- "lp-glsl-builtin-ids",
- "lp-glsl-builtins",
- "lp-glsl-naga",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
+ "lps-builtin-ids",
+ "lps-builtins",
+ "lps-naga",
  "lps-shared",
  "lpvm",
  "target-lexicon",
 ]
 
 [[package]]
+name = "lps-builtin-ids"
+version = "40.0.0"
+
+[[package]]
+name = "lps-builtins"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpfx-impl-macro",
+ "lpvm",
+]
+
+[[package]]
+name = "lps-builtins-emu-app"
+version = "40.0.0"
+dependencies = [
+ "lp-riscv-emu-guest",
+ "lps-builtins",
+]
+
+[[package]]
+name = "lps-builtins-gen-app"
+version = "40.0.0"
+dependencies = [
+ "glsl",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "walkdir",
+]
+
+[[package]]
+name = "lps-builtins-wasm"
+version = "40.0.0"
+dependencies = [
+ "lps-builtins",
+]
+
+[[package]]
+name = "lps-diagnostics"
+version = "40.0.0"
+
+[[package]]
+name = "lps-exec"
+version = "40.0.0"
+dependencies = [
+ "lps-diagnostics",
+ "lps-shared",
+ "lpvm",
+]
+
+[[package]]
+name = "lps-filetests"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "glob",
+ "glsl",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lp-riscv-inst",
+ "lpir",
+ "lpir-cranelift",
+ "lps-diagnostics",
+ "lps-exec",
+ "lps-naga",
+ "lps-shared",
+ "lps-wasm",
+ "lpvm",
+ "num_cpus",
+ "regex",
+ "walkdir",
+ "wasm-encoder 0.245.1",
+ "wasmprinter 0.245.1",
+ "wasmtime",
+]
+
+[[package]]
+name = "lps-filetests-app"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger 0.10.2",
+ "lps-filetests",
+]
+
+[[package]]
+name = "lps-filetests-gen-app"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "walkdir",
+]
+
+[[package]]
+name = "lps-naga"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "lpir",
+ "lps-builtin-ids",
+ "lps-shared",
+ "naga 29.0.0",
+ "smallvec",
+]
+
+[[package]]
 name = "lps-shared"
 version = "40.0.0"
+
+[[package]]
+name = "lps-wasm"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "lpir",
+ "lps-builtin-ids",
+ "lps-naga",
+ "wasm-encoder 0.245.1",
+ "wasmtime",
+]
 
 [[package]]
 name = "lpvm"
@@ -7074,7 +7074,7 @@ dependencies = [
 name = "web-demo"
 version = "40.0.0"
 dependencies = [
- "lp-glsl-wasm",
+ "lps-wasm",
  "wasm-bindgen",
 ]
 

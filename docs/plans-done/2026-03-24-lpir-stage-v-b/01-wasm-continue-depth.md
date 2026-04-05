@@ -16,7 +16,7 @@ correct when there's no nesting inside the loop body.
 
 ## Implementation
 
-### `lp-shader/lp-glsl-wasm/src/emit/control.rs`
+### `lp-shader/lps-wasm/src/emit/control.rs`
 
 Change `innermost_loop_continue_depth` to accept `wasm_open: WasmOpenDepth`
 and compute the correct branch depth:
@@ -46,7 +46,7 @@ pub(crate) fn innermost_loop_continue_depth(
 }
 ```
 
-### `lp-shader/lp-glsl-wasm/src/emit/ops.rs`
+### `lp-shader/lps-wasm/src/emit/ops.rs`
 
 Update the `Op::Continue` call site to pass `wasm_open`:
 
@@ -69,7 +69,7 @@ doesn't nest inside the loop body). The real validation is the filetests:
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-wasm -q
+cargo test -p lps-wasm -q
 scripts/glsl-filetests.sh control/for/continue_nested.glsl
 scripts/glsl-filetests.sh control/while/continue.glsl
 scripts/glsl-filetests.sh control/while/nested_for.glsl

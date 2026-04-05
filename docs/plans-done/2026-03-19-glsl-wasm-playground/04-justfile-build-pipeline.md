@@ -2,7 +2,8 @@
 
 ## Scope
 
-Add justfile recipes so building and serving the web demo is a single command. Automate artifact copying.
+Add justfile recipes so building and serving the web demo is a single command. Automate artifact
+copying.
 
 ## Code organization reminders
 
@@ -40,7 +41,7 @@ web-demo-build: install-wasm32-target
 
     # Build builtins WASM
     echo "Building builtins WASM..."
-    cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release
+    cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release
 
     # Build compiler WASM via wasm-pack
     echo "Building compiler WASM..."
@@ -50,7 +51,7 @@ web-demo-build: install-wasm32-target
     WWW="lp-app/web-demo/www"
 
     # Copy builtins.wasm
-    cp target/wasm32-unknown-unknown/release/lp_glsl_builtins_wasm.wasm "$WWW/builtins.wasm"
+    cp target/wasm32-unknown-unknown/release/lps_builtins_wasm.wasm "$WWW/builtins.wasm"
 
     # Copy wasm-pack output (pkg/)
     rm -rf "$WWW/pkg"
@@ -98,7 +99,8 @@ Create `lp-app/web-demo/.gitignore`:
 
 These are build artifacts that shouldn't be committed.
 
-Also add `lp-app/web-demo/www/pkg/` and `lp-app/web-demo/www/builtins.wasm` patterns to the repo `.gitignore` if there is one, or rely on the local `.gitignore`.
+Also add `lp-app/web-demo/www/pkg/` and `lp-app/web-demo/www/builtins.wasm` patterns to the repo
+`.gitignore` if there is one, or rely on the local `.gitignore`.
 
 ## Validate
 

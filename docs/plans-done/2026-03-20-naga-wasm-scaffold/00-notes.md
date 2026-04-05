@@ -2,7 +2,7 @@
 
 ## Scope
 
-Create `lp-glsl-naga` frontend crate and rewrite `lp-glsl-wasm` to consume
+Create `lps-naga` frontend crate and rewrite `lps-wasm` to consume
 `naga::Module`. Wire up filetests. Pass scalar arithmetic filetests end-to-end.
 
 Part of: `docs/roadmaps/2026-03-20-naga/`
@@ -11,19 +11,19 @@ Part of: `docs/roadmaps/2026-03-20-naga/`
 
 - Spike (`spikes/naga-wasm-poc`) validated: Naga `glsl-in` compiles `no_std`,
   GLSL → naga IR → WASM → wasmtime works for f32 and Q32.
-- `lp-glsl-wasm` currently depends on `lp-glsl-frontend` and consumes
+- `lps-wasm` currently depends on `lps-frontend` and consumes
   `TypedShader`. Entry point: `glsl_wasm(&str, WasmOptions) → WasmModule`.
-- `lp-glsl-filetests` wasm_runner uses `FunctionSignature` and `Type` from
-  `lp-glsl-cranelift` (re-exported from `lp-glsl-frontend`) for call dispatch.
+- `lps-filetests` wasm_runner uses `FunctionSignature` and `Type` from
+  `lps-cranelift` (re-exported from `lps-frontend`) for call dispatch.
 - `WasmModule` contains `bytes: Vec<u8>` and `exports: Vec<WasmExport>`.
   `WasmExport` has `name`, `params`, `results`, and `signature: FunctionSignature`.
 
 ## Key decisions
 
-- `lp-glsl-naga` defines its own `FloatMode`, `GlslType`, `FunctionInfo` types
-  (no dependency on `lp-glsl-frontend`).
-- `lp-glsl-wasm` switches dependency from `lp-glsl-frontend` to `lp-glsl-naga`.
-- `lp-glsl-filetests` wasm_runner updated to use new types from `lp-glsl-wasm`.
+- `lps-naga` defines its own `FloatMode`, `GlslType`, `FunctionInfo` types
+  (no dependency on `lps-frontend`).
+- `lps-wasm` switches dependency from `lps-frontend` to `lps-naga`.
+- `lps-filetests` wasm_runner updated to use new types from `lps-wasm`.
 - Phase I scope limited to scalars (float, int, uint, bool), basic binary ops,
   literals, local variables, assignment. No vectors, builtins, control flow.
 

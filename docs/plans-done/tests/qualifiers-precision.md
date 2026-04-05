@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL precision qualifiers in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/precision/` following the flat naming convention with prefixes. These tests will comprehensively cover precision qualifiers (highp, mediump, lowp) and default precision qualifiers. These tests are expected to fail initially, serving as a specification for implementing precision qualifier support in the compiler.
+Create a complete test suite for GLSL precision qualifiers in `lightplayer/crates/lps-filetests/filetests/qualifiers/precision/` following the flat naming convention with prefixes. These tests will comprehensively cover precision qualifiers (highp, mediump, lowp) and default precision qualifiers. These tests are expected to fail initially, serving as a specification for implementing precision qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -243,8 +243,8 @@ float test_highp_precision() {
    - Vulkan-specific behavior
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-uniform.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/functions/param-in.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-uniform.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/functions/param-in.glsl`
    - GLSL spec: `variables.adoc` - Precision and Precision Qualifiers (lines 5650-6067)
 
 ## Files to Create

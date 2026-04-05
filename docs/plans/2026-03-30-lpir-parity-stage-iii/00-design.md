@@ -15,13 +15,13 @@ Implement **roadmap Milestone III**:
 
 ```
 lp-shader/
-├── lp-glsl-naga/src/
+├── lps-naga/src/
 │   └── lower_expr.rs          # UPDATE: As/Compose for bvec casts; round builtin
-├── lp-glsl-builtins/src/builtins/glsl/
-│   └── round_q32.rs           # EXISTS: __lp_glsl_round_q32 already correct
+├── lps-builtins/src/builtins/glsl/
+│   └── round_q32.rs           # EXISTS: __lps_round_q32 already correct
 ├── lpir-cranelift/src/
 │   └── emit/                  # MAY NEED: round emit if not already wired
-├── lp-glsl-filetests/filetests/
+├── lps-filetests/filetests/
 │   ├── const/builtin/extended.glsl      # UPDATE: remove @unimplemented
 │   └── vec/bvec{2,3,4}/fn-mix.glsl    # MAYBE: annotate or triage
 └── docs/design/
@@ -62,7 +62,7 @@ Q32 spec §5 "Named Constants" table
 - BEFORE: round listed under "Builtins not yet implemented"
 - AFTER: round in main table with half-away-from-zero semantics
 
-Implementation: __lp_glsl_round_q32 already exists in round_q32.rs
+Implementation: __lps_round_q32 already exists in round_q32.rs
 Lowering: verify path exists in lower_math.rs / lower.rs
 Test: remove @unimplemented from const/builtin/extended.glsl
 ```
@@ -89,7 +89,7 @@ Test fails?
 - **`q32.md`**: Single source of truth for Q32 semantics
     - Update builtins table to reflect round as implemented
 
-- **`lp-glsl-filetests`**: Validation corpus
+- **`lps-filetests`**: Validation corpus
     - Remove annotations from now-working tests
     - Add annotations for genuine limitations
     - Rewrite non-standard syntax tests

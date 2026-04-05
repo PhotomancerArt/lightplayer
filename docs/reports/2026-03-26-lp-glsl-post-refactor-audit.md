@@ -1,4 +1,4 @@
-# lp-glsl post-refactor audit — crates, READMEs, dependencies
+# lps post-refactor audit — crates, READMEs, dependencies
 
 **Date:** 2026-03-26  
 **Scope:** `lp-shader/` after removal of legacy compiler crates; root `README.md`, `AGENTS.md` (
@@ -20,26 +20,26 @@ All packages live under `lp-shader/` unless noted. Workspace membership follows 
 
 | Crate                       | Role (from code / `Cargo.toml`)                                             | README present             |
 |-----------------------------|-----------------------------------------------------------------------------|----------------------------|
-| `lp-glsl-builtin-ids`       | Generated `BuiltinId` and GLSL name mapping (written by gen app)            | No                         |
-| `lp-glsl-builtins`          | `#[no_mangle]` builtins (Q32 / f32), LPFX; links `lpfx-impl-macro`          | Yes (stale — see findings) |
-| `lp-glsl-builtins-gen-app`  | Scans `lp-glsl-builtins`, emits IDs, `generated_builtin_abi.rs`, refs, etc. | Yes (stale paths)          |
-| `lp-glsl-builtins-emu-app`  | RISC-V guest binary: links all builtins for emu / filetests                 | Yes (stale names)          |
-| `lp-glsl-builtins-wasm`     | `cdylib` WASM builtins (`import-memory`)                                    | Yes (accurate)             |
+| `lps-builtin-ids`       | Generated `BuiltinId` and GLSL name mapping (written by gen app)            | No                         |
+| `lps-builtins`          | `#[no_mangle]` builtins (Q32 / f32), LPFX; links `lpfx-impl-macro`          | Yes (stale — see findings) |
+| `lps-builtins-gen-app`  | Scans `lps-builtins`, emits IDs, `generated_builtin_abi.rs`, refs, etc. | Yes (stale paths)          |
+| `lps-builtins-emu-app`  | RISC-V guest binary: links all builtins for emu / filetests                 | Yes (stale names)          |
+| `lps-builtins-wasm`     | `cdylib` WASM builtins (`import-memory`)                                    | Yes (accurate)             |
 | `lps-shared`                | Shared type / function-signature shapes (`#![no_std]` + alloc)              | No                         |
-| `lp-glsl-diagnostics`       | `GlslError`, spans, codes                                                   | No                         |
-| `lp-glsl-exec`              | `GlslExecutable` + glue for filetests backends                              | No                         |
+| `lps-diagnostics`       | `GlslError`, spans, codes                                                   | No                         |
+| `lps-exec`              | `GlslExecutable` + glue for filetests backends                              | No                         |
 | `lpvm`                      | Runtime values / literals; uses `glsl` parser fork                          | No                         |
-| `lp-glsl-naga`              | GLSL → LPIR via **naga** `glsl-in`                                          | No                         |
+| `lps-naga`              | GLSL → LPIR via **naga** `glsl-in`                                          | No                         |
 | `lpir`                      | LPIR IR (`IrModule`, types, ops)                                            | No                         |
-| `lpir-cranelift`            | LPIR → Cranelift → JIT / object; optional `lp-glsl-naga` via `glsl` feature | No                         |
-| `lp-glsl-filetests`         | Corpus + harness (JIT / WASM / RV32)                                        | Yes (current)              |
-| `lp-glsl-filetests-app`     | CLI runner for filetests                                                    | No                         |
-| `lp-glsl-filetests-gen-app` | Generates repetitive `.glsl` tests                                          | No                         |
-| `lp-glsl-wasm`              | GLSL → WASM (Naga → LPIR → emit)                                            | Yes (stale architecture)   |
+| `lpir-cranelift`            | LPIR → Cranelift → JIT / object; optional `lps-naga` via `glsl` feature | No                         |
+| `lps-filetests`         | Corpus + harness (JIT / WASM / RV32)                                        | Yes (current)              |
+| `lps-filetests-app`     | CLI runner for filetests                                                    | No                         |
+| `lps-filetests-gen-app` | Generates repetitive `.glsl` tests                                          | No                         |
+| `lps-wasm`              | GLSL → WASM (Naga → LPIR → emit)                                            | Yes (stale architecture)   |
 | `lpfx-impl-macro`           | Proc-macros for LPFX builtins                                               | No                         |
 
 **Not under `lp-shader/` but part of the same pipeline:** `lp-core/lp-engine` → `lpir-cranelift` (+
-`lp-glsl-builtins`); `lp-riscv/*` for RV32 filetests.
+`lps-builtins`); `lp-riscv/*` for RV32 filetests.
 
 ## Dependency graph (conceptual)
 
@@ -48,15 +48,15 @@ Solid arrows are normal dependencies; dashed lines are optional or “tooling on
 ```mermaid
 flowchart TB
   subgraph frontend_ir["Frontend + IR"]
-    ids["lp-glsl-builtin-ids"]
+    ids["lps-builtin-ids"]
     lpir["lpir"]
-    naga["lp-glsl-naga"]
+    naga["lps-naga"]
     naga --> ids
     naga --> lpir
   end
 
   subgraph support["Shared helpers"]
-    diag["lp-glsl-diagnostics"]
+    diag["lps-diagnostics"]
     core["lps-shared"]
     values["lpvm"]
     values --> diag
@@ -65,7 +65,7 @@ flowchart TB
 
   subgraph builtins["Builtins"]
     pm["lpfx-impl-macro"]
-    builtins["lp-glsl-builtins"]
+    builtins["lps-builtins"]
     builtins --> pm
   end
 
@@ -78,18 +78,18 @@ flowchart TB
   end
 
   subgraph wasm["WASM preview"]
-    wasm["lp-glsl-wasm"]
+    wasm["lps-wasm"]
     wasm --> ids
     wasm --> naga
     wasm --> lpir
   end
 
   subgraph exec_tests["Execution / tests"]
-    exec["lp-glsl-exec"]
+    exec["lps-exec"]
     exec --> core
     exec --> diag
     exec --> values
-    ft["lp-glsl-filetests"]
+    ft["lps-filetests"]
     ft --> exec
     ft --> naga
     ft --> lpir
@@ -105,11 +105,11 @@ flowchart TB
 
 **Observations:**
 
-- **On-device compile path** (`lp-engine`): `lpir-cranelift` with `glsl` → `lp-glsl-naga` → `lpir`;
-  builtins from `lp-glsl-builtins`. No `lp-glsl-exec`, `lpvm`, or `glsl` parser crate on that
+- **On-device compile path** (`lp-engine`): `lpir-cranelift` with `glsl` → `lps-naga` → `lpir`;
+  builtins from `lps-builtins`. No `lps-exec`, `lpvm`, or `glsl` parser crate on that
   path — appropriate for splitting “compiler” vs “test harness helpers.”
-- **`lps-shared`**: Used by `lp-glsl-exec` and `lp-glsl-filetests` only. The crate-level doc
-  comment in `lps-shared/src/lib.rs` says it is used by `lp-glsl-naga`; **that is not true** in
+- **`lps-shared`**: Used by `lps-exec` and `lps-filetests` only. The crate-level doc
+  comment in `lps-shared/src/lib.rs` says it is used by `lps-naga`; **that is not true** in
   the current `Cargo.toml` graph (naga crate has no `lps-shared` dependency).
 - **`lpir-cranelift` `package.description`** still says “Experimental … (Stage II)”; the stack is
   now production for firmware — consider updating the string to avoid implying a spike.
@@ -118,11 +118,11 @@ flowchart TB
 
 ### `lp-shader/README.md`
 
-- Accurately lists the new crates (`lps-shared`, `lp-glsl-diagnostics`, `lpvm`,
-  `lp-glsl-exec`, `lp-glsl-wasm`) and the Naga → LPIR → Cranelift story.
+- Accurately lists the new crates (`lps-shared`, `lps-diagnostics`, `lpvm`,
+  `lps-exec`, `lps-wasm`) and the Naga → LPIR → Cranelift story.
 - Commands are generally valid from repo root (`./scripts/glsl-filetests.sh`,
   `cargo check -p fw-esp32 …`).
-- Minor nit: `cargo build` from “inside `lp-glsl`” without `-p` is ambiguous; the workspace root is
+- Minor nit: `cargo build` from “inside `lps`” without `-p` is ambiguous; the workspace root is
   the repo root — prefer `cargo build` from root or `cargo build -p <crate>`.
 
 ### Root `README.md` — “GLSL Compiler (`lp-shader/`)” section
@@ -131,17 +131,17 @@ Compared to the actual workspace crates, the following **are implemented but not
 bullet list:
 
 - `lps-shared`
-- `lp-glsl-diagnostics`
+- `lps-diagnostics`
 - `lpvm`
-- `lp-glsl-exec`
-- `lp-glsl-wasm`
+- `lps-exec`
+- `lps-wasm`
 
 Readers scanning the repo structure will miss the WASM backend and the shared “new stack” types
 unless they open `lp-shader/README.md`.
 
 ### `AGENTS.md`
 
-- Architecture diagram (GLSL → `lp-glsl-naga` → LPIR → `lpir-cranelift`) matches the current product
+- Architecture diagram (GLSL → `lps-naga` → LPIR → `lpir-cranelift`) matches the current product
   path.
 - The “Key Crates” table is intentionally minimal; no change required unless you want parity with
   root `README.md`.
@@ -150,18 +150,18 @@ unless they open `lp-shader/README.md`.
 
 | README                               | Issue                                                                                                                                                                                                                                                                                                                                         |
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `lp-glsl-builtins/README.md`         | References **removed** `lp-glsl-compiler`, wrong paths (`crates/`, `lightplayer/`), and “registry in lp-glsl-compiler”. Builtin registration is now via **`lp-glsl-builtins-gen-app`** → `lp-glsl-builtin-ids` + `lpir-cranelift/src/generated_builtin_abi.rs`.                                                                               |
-| `lp-glsl-builtins-gen-app/README.md` | Still describes outputs like `registry.rs`, `backend/builtins/`, and paths under `crates/lp-glsl-builtins`. Actual generator writes **`lp-glsl-builtin-ids`**, **`generated_builtin_abi.rs`**, **`builtin_refs.rs`**, etc., under `lp-shader/…`.                                                                                              |
-| `lp-glsl-builtins-emu-app/README.md` | References **`lp-glsl-compiler`** and **`lp-filetests`**; should reference **`lp-glsl-filetests`** / RV32 harness.                                                                                                                                                                                                                            |
-| `lp-glsl-wasm/README.md`             | Architecture still describes **`lp-glsl-frontend`** and AST tree-walk; **`lib.rs`** documents **Naga → LPIR → WASM** (`emit/`, not the old `codegen/` tree). “Why not Cranelift” rationale is partly historical; much of the “Key design decisions” may still apply to the emitter, but the **pipeline diagram and module layout are wrong**. |
-| `lp-glsl-filetests/README.md`        | Matches current scripts (`scripts/glsl-filetests.sh`, `just test-filetests`) and backend story.                                                                                                                                                                                                                                               |
-| `lp-glsl-builtins-wasm/README.md`    | Consistent with `justfile` / `cargo build -p lp-glsl-builtins-wasm`.                                                                                                                                                                                                                                                                          |
+| `lps-builtins/README.md`         | References **removed** `lps-compiler`, wrong paths (`crates/`, `lightplayer/`), and “registry in lps-compiler”. Builtin registration is now via **`lps-builtins-gen-app`** → `lps-builtin-ids` + `lpir-cranelift/src/generated_builtin_abi.rs`.                                                                               |
+| `lps-builtins-gen-app/README.md` | Still describes outputs like `registry.rs`, `backend/builtins/`, and paths under `crates/lps-builtins`. Actual generator writes **`lps-builtin-ids`**, **`generated_builtin_abi.rs`**, **`builtin_refs.rs`**, etc., under `lp-shader/…`.                                                                                              |
+| `lps-builtins-emu-app/README.md` | References **`lps-compiler`** and **`lp-filetests`**; should reference **`lps-filetests`** / RV32 harness.                                                                                                                                                                                                                            |
+| `lps-wasm/README.md`             | Architecture still describes **`lps-frontend`** and AST tree-walk; **`lib.rs`** documents **Naga → LPIR → WASM** (`emit/`, not the old `codegen/` tree). “Why not Cranelift” rationale is partly historical; much of the “Key design decisions” may still apply to the emitter, but the **pipeline diagram and module layout are wrong**. |
+| `lps-filetests/README.md`        | Matches current scripts (`scripts/glsl-filetests.sh`, `just test-filetests`) and backend story.                                                                                                                                                                                                                                               |
+| `lps-builtins-wasm/README.md`    | Consistent with `justfile` / `cargo build -p lps-builtins-wasm`.                                                                                                                                                                                                                                                                          |
 
 ### `scripts/build-builtins.sh` vs READMEs
 
 Several READMEs say to run **`scripts/build-builtins.sh`**. The script’s **hash inputs** still point
 at removed layout paths (`lp-shader/apps/…`, `lp-shader/crates/…`). The **build** portion (
-`cd "$LIGHTPLAYER_DIR"` + `cargo build -p lp-glsl-builtins-emu-app`) still matches the current crate
+`cd "$LIGHTPLAYER_DIR"` + `cargo build -p lps-builtins-emu-app`) still matches the current crate
 names. Risk: **incremental “skip codegen” may be wrong** because the watched directories may be
 empty or wrong. Worth fixing in a follow-up (not required for dependency correctness, but affects
 trust in docs).
@@ -170,26 +170,26 @@ trust in docs).
 
 - **`lpfx-impl-macro`** is **not** listed in the explicit `[workspace].members` array in the root
   `Cargo.toml`, but **`cargo metadata` includes it** in `workspace_members` (as a path dependency of
-  `lp-glsl-builtins` using `version.workspace = true`). This is easy to miss when editing the
+  `lps-builtins` using `version.workspace = true`). This is easy to miss when editing the
   workspace list.
 - **Recommendation:** Add `"lp-shader/lpfx-impl-macro"` explicitly to `[workspace].members` so the
   manifest matches tooling and onboarding expectations.
 
 ## Root `README.md` acknowledgments
 
-- **`glsl-parser` fork** remains relevant: `lpvm` and `lp-glsl-filetests` depend on the
+- **`glsl-parser` fork** remains relevant: `lpvm` and `lps-filetests` depend on the
   `glsl` crate (fork with spans).
-- **Naga** is the primary GLSL front end for **`lp-glsl-naga`**; the acknowledgments section does
+- **Naga** is the primary GLSL front end for **`lps-naga`**; the acknowledgments section does
   not mention Naga — optional doc improvement.
 
 ## Recommendations (prioritized) -- all resolved
 
 1. ~~**Rewrite** stale
-   READMEs (`lp-glsl-builtins`, `lp-glsl-builtins-gen-app`, `lp-glsl-builtins-emu-app`,
-   `lp-glsl-wasm`).~~ Done.
+   READMEs (`lps-builtins`, `lps-builtins-gen-app`, `lps-builtins-emu-app`,
+   `lps-wasm`).~~ Done.
 2. ~~**Extend** root `README.md` GLSL section with five missing crates.~~ Done (bullets + link to
    `lp-shader/README.md`).
-3. ~~**Fix** `lps-shared` crate docs (`lp-glsl-naga` claim).~~ Done.
+3. ~~**Fix** `lps-shared` crate docs (`lps-naga` claim).~~ Done.
 4. ~~**Refresh** `lpir-cranelift` `description` in `Cargo.toml`.~~ Done.
 5. ~~**Repair** `scripts/build-builtins.sh` hash paths.~~ Done.
 6. ~~**Add** `lp-shader/CRATES.md` + per-crate READMEs.~~ Done.
@@ -201,6 +201,6 @@ trust in docs).
 ## Conclusion
 
 The **dependency graph is coherent**: firmware and `lp-engine` pull *
-*`lpir-cranelift` + `lp-glsl-naga` + `lpir` + builtins** without pulling the filetest-only `glsl`
+*`lpir-cranelift` + `lps-naga` + `lpir` + builtins** without pulling the filetest-only `glsl`
 parser crate. Documentation now matches the post-refactor crate set across READMEs, the root README,
 `CRATES.md`, `AGENTS.md`, the `docs/lpir/` spec, and acknowledgments.

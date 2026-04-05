@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update `lp-shader/lp-glsl-builtins/src/builtins/lpir/fdiv_q32.rs` so that
+Update `lp-shader/lps-builtins/src/builtins/lpir/fdiv_q32.rs` so that
 `0 / 0` returns `0` instead of `MAX_FIXED`.
 
 ## Code Organization Reminders
@@ -54,5 +54,5 @@ assert_eq!(result_zero, 0, "0 / 0 should return 0");
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-builtins -- fdiv_q32
+cargo test -p lps-builtins -- fdiv_q32
 ```

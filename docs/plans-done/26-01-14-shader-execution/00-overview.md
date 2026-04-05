@@ -6,7 +6,7 @@ Implement shader runtime execution so that shaders can compile GLSL code and ren
 
 ## Scope
 
-- **Shader Runtime**: Load GLSL source from filesystem, compile using `lp-glsl-compiler`, store compiled executable, execute per-pixel to render to textures
+- **Shader Runtime**: Load GLSL source from filesystem, compile using `lps-compiler`, store compiled executable, execute per-pixel to render to textures
 - **Lazy Texture Rendering**: Update `ensure_texture_rendered()` to find shaders targeting a texture, execute them in render order, write results to texture
 - **Shader State**: Extract shader state (GLSL code, compilation errors) for sync API
 - **Time Parameter**: Provide frame time to shaders (from `ProjectRuntime.frame_id` or separate time tracking)
@@ -21,7 +21,7 @@ Implement shader runtime execution so that shaders can compile GLSL code and ren
 ## Success Criteria
 
 - Shaders can load GLSL source from node filesystem
-- Shaders compile successfully using `lp-glsl-compiler`
+- Shaders compile successfully using `lps-compiler`
 - Shaders execute per-pixel to render to textures
 - Lazy texture rendering triggers shader execution
 - Shader errors are captured and reported via state
@@ -29,7 +29,7 @@ Implement shader runtime execution so that shaders can compile GLSL code and ren
 
 ## Dependencies
 
-- `lp-glsl-compiler` crate (already a dependency)
+- `lps-compiler` crate (already a dependency)
 - Runtime contexts (already implemented)
 - Texture runtime (already implemented)
 - Node filesystem access (already implemented via `InitContext`)

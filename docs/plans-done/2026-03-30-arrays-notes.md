@@ -13,7 +13,7 @@ Key capabilities needed:
 
 ## Current State
 
-### Old Compiler (lp-glsl-compiler)
+### Old Compiler (lps-compiler)
 
 **Array Layout:**
 
@@ -249,15 +249,15 @@ access behavior.
 
 ## Related Files
 
-- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` - context with local_map
-- `lp-shader/lp-glsl-naga/src/lower_expr.rs` - expression lowering
-- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` - statement lowering
-- `lp-shader/lp-glsl-naga/src/naga_util.rs` - type mapping
+- `lp-shader/lps-naga/src/lower_ctx.rs` - context with local_map
+- `lp-shader/lps-naga/src/lower_expr.rs` - expression lowering
+- `lp-shader/lps-naga/src/lower_stmt.rs` - statement lowering
+- `lp-shader/lps-naga/src/naga_util.rs` - type mapping
 - `lp-shader/lpir/src/op.rs` - LPIR operations
 - `lp-shader/lpir/src/builder.rs` - slot allocation
 
 ## References
 
 - `docs/roadmaps/2026-03-29-lpir-parity/milestone-iv-array-lowering.md` - milestone spec
-- Old compiler: `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs`
-- Old compiler: `lp-shader/lp-glsl-compiler/src/frontend/semantic/types.rs`
+- Old compiler: `lp-shader/lps-compiler/src/frontend/codegen/stmt/declaration.rs`
+- Old compiler: `lp-shader/lps-compiler/src/frontend/semantic/types.rs`

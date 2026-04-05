@@ -44,7 +44,7 @@ use exact type matches only (no implicit conversions) for safety with builtin fu
 
 ### Q3: How should the codegen tool handle overloaded functions?
 
-**Context:** Currently, `lp-glsl-builtin-gen-app` groups functions by GLSL name in
+**Context:** Currently, `lps-builtin-gen-app` groups functions by GLSL name in
 `group_functions_by_name`, but then only uses the first function's signature. If we have
 `__lpfx_hsv2rgb_q32` with signature `vec3 lpfx_hsv2rgb(vec3)` and `__lpfx_hsv2rgb_vec4_q32` with
 signature `vec4 lpfx_hsv2rgb(vec4)`, both should be registered.

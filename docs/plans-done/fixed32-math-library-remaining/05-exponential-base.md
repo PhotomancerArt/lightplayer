@@ -9,7 +9,7 @@ power functions.
 
 ### 5.1 Port libfixmath Exp Implementation
 
-In `lp-glsl-builtins/src/q32/exp.rs`:
+In `lps-builtins/src/q32/exp.rs`:
 
 - Port libfixmath's exp implementation (power series)
 - Uses: exp(x) = 1 + x + x²/2! + x³/3! + ...
@@ -18,7 +18,7 @@ In `lp-glsl-builtins/src/q32/exp.rs`:
 
 ### 5.2 Port libfixmath Log Implementation
 
-In `lp-glsl-builtins/src/q32/log.rs`:
+In `lps-builtins/src/q32/log.rs`:
 
 - Port libfixmath's log implementation (Newton-Raphson method)
 - Uses iterative refinement with scaling
@@ -26,7 +26,7 @@ In `lp-glsl-builtins/src/q32/log.rs`:
 
 ### 5.3 Port fr_math Exp2 Implementation
 
-In `lp-glsl-builtins/src/q32/exp2.rs`:
+In `lps-builtins/src/q32/exp2.rs`:
 
 - Port fr_math's pow2 (exp2) implementation
 - Uses bit manipulation and polynomial approximation
@@ -34,7 +34,7 @@ In `lp-glsl-builtins/src/q32/exp2.rs`:
 
 ### 5.4 Port libfixmath Log2 Implementation
 
-In `lp-glsl-builtins/src/q32/log2.rs`:
+In `lps-builtins/src/q32/log2.rs`:
 
 - Port libfixmath's log2 implementation
 - Uses log2(x) = log(x) / log(2) relationship or direct implementation
@@ -42,20 +42,20 @@ In `lp-glsl-builtins/src/q32/log2.rs`:
 
 ### 5.5 Add to Module
 
-In `lp-glsl-builtins/src/q32/mod.rs`:
+In `lps-builtins/src/q32/mod.rs`:
 
 - Add `mod exp;`, `mod log;`, `mod exp2;`, `mod log2;`
 - Export all functions
 
 ### 5.6 Update Builtins App
 
-In `lp-glsl-builtins-emu-app/src/main.rs`:
+In `lps-builtins-emu-app/src/main.rs`:
 
 - Add references to all exponential functions
 
 ### 5.7 Add to Registry
 
-In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
+In `lps-compiler/src/backend/builtins/registry.rs`:
 
 - Add `Q32Exp`, `Q32Log`, `Q32Exp2`, `Q32Log2` to `BuiltinId` enum
 - All are (i32) -> i32 signatures
@@ -63,7 +63,7 @@ In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
 
 ### 5.8 Add Transform Conversion
 
-In `lp-glsl-compiler/src/backend/transform/q32/converters/math.rs`:
+In `lps-compiler/src/backend/transform/q32/converters/math.rs`:
 
 - Add mappings: `"expf"`, `"logf"`, `"exp2f"`, `"log2f"` and `"__lp_exp"`, `"__lp_log"`,
   `"__lp_exp2"`, `"__lp_log2"`

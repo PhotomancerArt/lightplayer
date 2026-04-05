@@ -5,11 +5,11 @@
 
 ## Scope of work
 
-Add builtin function calling to the `lp-glsl-wasm` backend. This involves:
+Add builtin function calling to the `lps-wasm` backend. This involves:
 
 1. **WASM import section infrastructure** — emit `(import "builtins" ...)` for builtins used by compiled shaders
 2. **Builtin call emission** — resolve GLSL builtin names to import indices and emit `call` instructions
-3. **Import satisfaction** — `builtins.wasm` (compiled from `lp-glsl-builtins` for `wasm32-unknown-unknown`) instantiated with **shared linear memory**; same linking path in wasmtime tests and in the browser. No separate “test-only” host path unless needed for debugging.
+3. **Import satisfaction** — `builtins.wasm` (compiled from `lps-builtins` for `wasm32-unknown-unknown`) instantiated with **shared linear memory**; same linking path in wasmtime tests and in the browser. No separate “test-only” host path unless needed for debugging.
 4. **Vector-argument builtins** — handle builtins that take/return vectors (flattened ABI)
 5. **LPFX function imports** — same pattern for `lpfx_worley`, `lpfx_fbm`, `lpfx_psrdnoise`
 6. **Out parameters** — WASM linear memory for `lpfx_psrdnoise`'s `out vec2 gradient`
@@ -19,17 +19,17 @@ Predecessors: phases 1–5 of part-iii are complete (scalar ops, type constructo
 
 ## Current state
 
-### lp-glsl-wasm module builder
+### lps-wasm module builder
 - Emits 4 sections: Type, Function, Export, Code
 - **No import section**, no memory section
 - FunCall handling: type constructors + user functions only; builtins → error
 - WasmExecutable instantiation: `Instance::new(&mut store, &module, &[])` — no imports
 
 ### Builtin infrastructure (existing)
-- `lp-glsl-builtin-ids`: `BuiltinId` enum, `name()` → `"__lp_q32_sin"`, `builtin_id_from_name()`
-- `lp-glsl-builtins`: `extern "C"` implementations, all i32-based for Q32
+- `lps-builtin-ids`: `BuiltinId` enum, `name()` → `"__lp_q32_sin"`, `builtin_id_from_name()`
+- `lps-builtins`: `extern "C"` implementations, all i32-based for Q32
 - Vector ABI: inputs scalarized (one i32 per component), vector returns via `*mut i32` (sret pointer as first param)
-- `lp-glsl-frontend`: `is_builtin_function(name)`, `check_builtin_call(name, &arg_types)`, `is_lpfx_fn(name)`
+- `lps-frontend`: `is_builtin_function(name)`, `check_builtin_call(name, &arg_types)`, `is_lpfx_fn(name)`
 
 ### Cranelift builtin calling pattern
 - GLSL name → string match in `emit_builtin_call` → per-builtin method
@@ -72,9 +72,9 @@ Cranelift has a complex chain: GLSL name → per-builtin method → libcall name
 - Create a direct GLSL name → BuiltinId mapping
 - Use the frontend's `check_builtin_call` which already resolves overloads
 
-**Suggested answer:** Create a mapping in lp-glsl-wasm that goes GLSL name + arg types → BuiltinId directly. Simpler than the Cranelift chain. Could be auto-generated or hand-written for the subset we need.
+**Suggested answer:** Create a mapping in lps-wasm that goes GLSL name + arg types → BuiltinId directly. Simpler than the Cranelift chain. Could be auto-generated or hand-written for the subset we need.
 
-**Decision:** Auto-generate `glsl_to_builtin_id(name, arg_count) -> Option<BuiltinId>` in `lp-glsl-builtin-ids` via `build-builtins.sh`. WASM backend checks inline implementations first, falls back to import call via this mapping. New builtins auto-resolve to imports with no compiler changes.
+**Decision:** Auto-generate `glsl_to_builtin_id(name, arg_count) -> Option<BuiltinId>` in `lps-builtin-ids` via `build-builtins.sh`. WASM backend checks inline implementations first, falls back to import call via this mapping. New builtins auto-resolve to imports with no compiler changes.
 
 ### Q5: Out parameter strategy for LPFX
 `lpfx_psrdnoise` has an `out vec2 gradient` parameter. Options:
@@ -96,7 +96,7 @@ Currently `Instance::new(&mut store, &module, &[])`. For builtins, we need to pr
 
 **Suggested answer:** Use `wasmtime::Linker`. Register all known builtins (or at least the ones we support). The linker will match them to the module's import declarations.
 
-**Decision (revised):** Satisfy shader imports from a **pre-built `builtins.wasm`** instance (same artifact as production), not per-builtin `func_wrap`. Use wasmtime `Linker` / `define` (or equivalent) to expose builtins exports under the `"builtins"` module name. Build `builtins.wasm` via a small crate (e.g. `lp-glsl-builtins-wasm`) in `build-builtins.sh`, mirroring `lp-glsl-builtins-emu-app`.
+**Decision (revised):** Satisfy shader imports from a **pre-built `builtins.wasm`** instance (same artifact as production), not per-builtin `func_wrap`. Use wasmtime `Linker` / `define` (or equivalent) to expose builtins exports under the `"builtins"` module name. Build `builtins.wasm` via a small crate (e.g. `lps-builtins-wasm`) in `build-builtins.sh`, mirroring `lps-builtins-emu-app`.
 
 ### Q6b: Shared memory across shader and builtins
 
@@ -115,7 +115,7 @@ impl-notes says Q32 mul triggers "expected i32, found i64" WASM validation. The 
 
 ## Notes
 
-- **Builtins crate for wasm:** New thin crate + `wasm32-unknown-unknown` build in `build-builtins.sh`, analogous to RISC-V `lp-glsl-builtins-emu-app`.
+- **Builtins crate for wasm:** New thin crate + `wasm32-unknown-unknown` build in `build-builtins.sh`, analogous to RISC-V `lps-builtins-emu-app`.
 - **Shader codegen:** Must emit memory **import** (not a private `(memory …)`) when using shared model; codegen for bump/out slots uses offsets in that imported memory.
 - **Scalar-only builtins** do not touch memory; shared memory is still imported so one instantiation story covers all shaders.
 - **Future:** Textures and other large buffers attach to the same memory region (or grow it); design stays consistent.

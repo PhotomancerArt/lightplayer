@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL texture functions in `lightplayer/crates/lp-glsl-filetests/filetests/textures/` following the flat naming convention with prefixes. These tests will comprehensively cover texture lookup functions, texture query functions, texture gather functions, and shadow samplers. These tests are expected to fail initially, serving as a specification for implementing texture function support in the compiler. Note: Tests will need texture setup infrastructure (TBD).
+Create a complete test suite for GLSL texture functions in `lightplayer/crates/lps-filetests/filetests/textures/` following the flat naming convention with prefixes. These tests will comprehensively cover texture lookup functions, texture query functions, texture gather functions, and shadow samplers. These tests are expected to fail initially, serving as a specification for implementing texture function support in the compiler. Note: Tests will need texture setup infrastructure (TBD).
 
 ## Directory Structure
 
@@ -303,8 +303,8 @@ textures/
    - Texture setup infrastructure
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/builtins/common-isnan.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/builtins/exp-pow.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/builtins/common-isnan.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/builtins/exp-pow.glsl`
    - GLSL spec: `builtinfunctions.adoc` - Texture Functions (lines 1470-2459)
 
 ## Files to Create

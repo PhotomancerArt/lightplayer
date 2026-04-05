@@ -15,8 +15,8 @@ Expected at peak:
 - T::clone_one should be gone or reduced
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
-cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lps-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo check --no-default-features --features core
 cargo +nightly fmt
 ```
 

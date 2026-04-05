@@ -20,7 +20,7 @@ Remove the **`#[cfg(not(feature = "std"))]`** **`compile_shader`** stub as the *
 
 2. **`src/nodes/shader/runtime.rs`**
    - Replace **`#[cfg(feature = "std")]` / `#[cfg(not(feature = "std"))]`** split on **`compile_shader`** with:
-     - **Real** implementation whenever **`lpir_cranelift::jit`** exists for this build (typically **`#[cfg(feature = "glsl")]`** on **`lp-engine`** *if* Phase 1 adds a forwarded **`glsl`** feature here, or **unconditional** if **`lp-glsl-naga`** becomes a required dep of **`lp-engine`**). Align **`cfg`** names with Phase 1’s **`Cargo.toml`**.
+     - **Real** implementation whenever **`lpir_cranelift::jit`** exists for this build (typically **`#[cfg(feature = "glsl")]`** on **`lp-engine`** *if* Phase 1 adds a forwarded **`glsl`** feature here, or **unconditional** if **`lps-naga`** becomes a required dep of **`lp-engine`**). Align **`cfg`** names with Phase 1’s **`Cargo.toml`**.
      - **Stub** only under an explicit **opt-out** feature (e.g. **`no-shader-compile`**) if such a profile is kept; otherwise remove the stub.
    - Keep **`panic-recovery`** **`catch_unwind`** around **`jit`** as today when that feature is on.
    - Host-only helpers (e.g. certain **`format!`** / logging) may stay behind **`std`** if needed; core compile path should use **`alloc`**.

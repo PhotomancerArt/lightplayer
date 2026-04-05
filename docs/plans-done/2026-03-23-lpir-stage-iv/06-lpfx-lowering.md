@@ -17,9 +17,9 @@ Remove the `todo!()` stub in `lower_stmt.rs` for LPFX calls.
 LPFX functions are Naga functions whose names start with `lpfx_`. They
 are declared in `lpfx_prologue.glsl` (included by `compile()`). The
 Naga module contains these as regular functions with bodies that are
-empty stubs — the real implementations live in `lp-glsl-builtins`.
+empty stubs — the real implementations live in `lps-builtins`.
 
-In the WASM emitter, LPFX calls go through `lp-glsl-builtin-ids` to
+In the WASM emitter, LPFX calls go through `lps-builtin-ids` to
 resolve to a `BuiltinId`, then emit a WASM import call. The LPIR
 lowering is similar but float-mode-unaware: we create `@lpfx::name`
 imports and let the downstream emitter decide how to dispatch them.
@@ -138,8 +138,8 @@ if callee_name.starts_with("lpfx_") {
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo check -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 After this phase, GLSL programs with scalar LPFX calls (hash, noise)

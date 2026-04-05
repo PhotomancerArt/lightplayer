@@ -4,7 +4,7 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
 
 ## Scope of work
 
-- Point `fw-esp32` at the new compiler story: remove dead `lp-glsl-cranelift` /
+- Point `fw-esp32` at the new compiler story: remove dead `lps-cranelift` /
   direct Cranelift optional deps (or replace only if something in-tree still
   needs them — currently none appear wired to features).
 - Build and flash ESP32-C6 firmware with `lp-server` + `lp-engine` (already
@@ -18,18 +18,18 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
 ## Current state (codebase)
 
 - **`lp-engine`:** Depends on `lpir-cranelift` with feature forwarding for
-  optimizer/verifier/std; old `lp-glsl-cranelift` / `cranelift-codegen` /
-  `lp-glsl-jit-util` removed from this crate.
+  optimizer/verifier/std; old `lps-cranelift` / `cranelift-codegen` /
+  `lps-jit-util` removed from this crate.
 - **`lp-server`:** `default-features = false` on `fw-esp32` with
   `features = ["panic-recovery"]` only — optimizer/verifier off for size (matches
   roadmap intent).
-- **`fw-esp32/Cargo.toml`:** Still declares optional `lp-glsl-cranelift`,
-  `lp-glsl-jit-util`, `lp-glsl-builtins`, `cranelift-codegen`, `cranelift-frontend`,
+- **`fw-esp32/Cargo.toml`:** Still declares optional `lps-cranelift`,
+  `lps-jit-util`, `lps-builtins`, `cranelift-codegen`, `cranelift-frontend`,
   `cranelift-module`, `cranelift-control`, `target-lexicon`. No `[features]`
   entry enables these dependencies, so they are **orphan optional deps** (likely
   pre–VI-B leftovers). Shader compilation path is **transitive**:
   `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
-- **Rust sources under `fw-esp32/src`:** No imports of `lp_glsl_cranelift`; JIT
+- **Rust sources under `fw-esp32/src`:** No imports of `lps_cranelift`; JIT
   host helpers (`jit_fns.rs`, log bridges) remain relevant for generated code.
 
 ## Questions (to resolve in order)
@@ -40,7 +40,7 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
 is `lp-engine` → `lpir-cranelift`.
 
 **Suggested answer:** Delete the orphan optional dependency block from
-`fw-esp32/Cargo.toml` (and `lp-glsl-builtins` if nothing enables it). Do **not**
+`fw-esp32/Cargo.toml` (and `lps-builtins` if nothing enables it). Do **not**
 add a duplicate `lpir-cranelift` edge unless a future `fw-esp32` binary needs
 to call the compiler API directly (it should not for VI-C).
 

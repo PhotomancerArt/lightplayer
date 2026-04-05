@@ -217,7 +217,7 @@ Builtins handle saturation internally, reducing code size:
 
 **Implementation:**
 
-- Add builtin implementations in `lp-glsl-builtins/src/builtins/q32/`
+- Add builtin implementations in `lps-builtins/src/builtins/q32/`
 - Register in builtin registry
 - Update `convert_fadd` and `convert_fsub` to use builtins
 

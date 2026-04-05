@@ -13,7 +13,7 @@ should emit TestCase calls that the q32 transform converts, matching the pattern
    to determine conversion requirements
 2. **Update codegen to emit TestCase calls** - Change `emit_lp_lib_fn_call()` to emit TestCase calls
    for functions that need q32 mapping
-3. **Fix generator to use LpLibFn as source of truth** - Update `lp-glsl-builtin-gen-app` to read
+3. **Fix generator to use LpLibFn as source of truth** - Update `lps-builtin-gen-app` to read
    `LpLibFn` enum instead of using prefix matching
 4. **Regenerate builtin registry** - Run generator to create correct `BuiltinId` variants (
    LpSimplex3, not Q32LpSimplex3)

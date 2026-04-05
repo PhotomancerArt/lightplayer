@@ -2,7 +2,7 @@
 
 ## Scope
 
-Extend the Naga → LPIR lowering (`lp-glsl-naga`) to scalarize all vector
+Extend the Naga → LPIR lowering (`lps-naga`) to scalarize all vector
 and matrix types and operations. After this stage, one Naga expression of
 type `vec3` maps to 3 scalar LPIR VRegs, a `mat4` maps to 16 VRegs, and
 all vector/matrix operations decompose into per-component scalar LPIR ops.
@@ -13,7 +13,7 @@ the majority of filetests.
 ## File structure
 
 ```
-lp-shader/lp-glsl-naga/
+lp-shader/lps-naga/
 ├── Cargo.toml                    # UPDATE: add smallvec dependency
 └── src/
     ├── lower_ctx.rs              # UPDATE: SmallVec expr cache, multi-VReg

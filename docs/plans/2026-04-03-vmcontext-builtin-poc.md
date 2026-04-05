@@ -13,7 +13,7 @@ context-aware builtins.
 Builtin GLSL files can declare `vmcontext` as a special parameter type:
 
 ```glsl
-// In lp-glsl-builtins-emu/builtins/vm/get_fuel.glsl
+// In lps-builtins-emu/builtins/vm/get_fuel.glsl
 uint __lp_get_fuel(vmcontext ctx);
 ```
 
@@ -26,7 +26,7 @@ The `vmcontext` type is:
 ### VmContext Structure
 
 ```rust
-// In lp-glsl-lpvm/src/vmcontext.rs
+// In lps-lpvm/src/vmcontext.rs
 #[repr(C)]
 pub struct VmContext {
     /// Remaining instruction fuel (decremented by interpreter/JIT)
@@ -70,7 +70,7 @@ impl VmContext {
                            |
                            v
               +---------------------------+
-              |  lp-glsl-builtins-gen     |
+              |  lps-builtins-gen     |
               |  Parse GLSL, detect       |
               |  vmcontext type, set      |
               |  needs_vmctx flag          |
@@ -80,7 +80,7 @@ impl VmContext {
               |                         |
               v                         v
     +-------------------+    +-------------------+
-    | lp-glsl-builtin-ids|    | Code generation   |
+    | lps-builtin-ids|    | Code generation   |
     | (BuiltinSignature   |    | for host & WASM   |
     |  with needs_vmctx)  |    | implementations  |
     +-------------------+    +-------------------+
@@ -114,31 +114,31 @@ lp-shader/
 │   └── src/
 │       └── vmcontext.rs          # VmContext struct, methods, docs
 │
-├── lp-glsl-builtin-ids/
+├── lps-builtin-ids/
 │   └── src/
 │       └── lib.rs                # BuiltinSignature.needs_vmctx flag
 │
-├── lp-glsl-builtins-emu/
+├── lps-builtins-emu/
 │   ├── builtins/
 │   │   └── vm/
 │   │       └── get_fuel.glsl     # PoC builtin definition
 │   └── src/
 │       └── lib.rs                # __lp_get_fuel implementation
 │
-├── lp-glsl-builtins-wasm/
+├── lps-builtins-wasm/
 │   └── src/
 │       └── lib.rs                # WASM stub (or impl)
 │
-├── lp-glsl-builtins-gen/        # Codegen tool
+├── lps-builtins-gen/        # Codegen tool
 │   └── src/
 │       └── (update to detect vmcontext type)
 │
-├── lp-glsl-naga/
+├── lps-naga/
 │   └── src/
 │       ├── lower_ctx.rs          # Copy needs_vmctx from builtin IDs
 │       └── lower_stmt.rs         # Conditionally add VMCTX_VREG
 │
-├── lp-glsl-filetests/
+├── lps-filetests/
 │   └── filetests/
 │       └── vmcontext/
 │           └── fuel-read.glsl    # PoC test
@@ -160,7 +160,7 @@ global access.
 
 ### Implementation Details
 
-**File: `lp-glsl-lpvm/src/vmcontext.rs`**
+**File: `lps-lpvm/src/vmcontext.rs`**
 
 ```rust
 //! VmContext is the central runtime structure for shader execution.
@@ -235,7 +235,7 @@ type.
 
 ### Implementation Details
 
-**File: `lp-glsl-builtin-ids/src/lib.rs`**
+**File: `lps-builtin-ids/src/lib.rs`**
 
 Add to `BuiltinSignature`:
 
@@ -250,7 +250,7 @@ pub struct BuiltinSignature {
 }
 ```
 
-**File: `lp-glsl-builtins-gen`** (codegen tool)
+**File: `lps-builtins-gen`** (codegen tool)
 
 Update parser to:
 
@@ -275,8 +275,8 @@ pub struct ImportDecl {
 ### Validate
 
 ```bash
-cargo build -p lp-glsl-builtins-gen-app
-cargo run -p lp-glsl-builtins-gen-app  # Regenerate builtins
+cargo build -p lps-builtins-gen-app
+cargo run -p lps-builtins-gen-app  # Regenerate builtins
 ```
 
 ---
@@ -289,7 +289,7 @@ Copy `needs_vmctx` from builtin IDs to ImportDecl, conditionally add VMContext t
 
 ### Implementation Details
 
-**File: `lp-glsl-lp-glsl-naga/src/lower_ctx.rs`**
+**File: `lps-lps-naga/src/lower_ctx.rs`**
 
 When building import map from builtin signatures, copy the flag:
 
@@ -297,7 +297,7 @@ When building import map from builtin signatures, copy the flag:
 import_decl.needs_vmctx = builtin_sig.needs_vmctx;
 ```
 
-**File: `lp-glsl-lp-glsl-naga/src/lower_stmt.rs`**
+**File: `lps-lps-naga/src/lower_stmt.rs`**
 
 In `lower_user_call()`, check before adding VMContext:
 
@@ -325,8 +325,8 @@ arg_vs.push(VMCTX_VREG);
 ### Validate
 
 ```bash
-cargo check -p lp-glsl-naga
-cargo test -p lp-glsl-naga
+cargo check -p lps-naga
+cargo test -p lps-naga
 ```
 
 ---
@@ -339,7 +339,7 @@ Include VMContext in import signatures when `needs_vmctx` is true.
 
 ### Implementation Details
 
-**File: `lp-glsl-lpir-cranelift/src/emit/mod.rs`**
+**File: `lps-lpir-cranelift/src/emit/mod.rs`**
 
 In `signature_for_ir_func()`, check if callee is an import with `needs_vmctx`:
 
@@ -383,14 +383,14 @@ Create `__lp_get_fuel()` builtin that reads `fuel` from VMContext.
 
 ### Implementation Details
 
-**File: `lp-glsl-builtins-emu/builtins/vm/get_fuel.glsl`**
+**File: `lps-builtins-emu/builtins/vm/get_fuel.glsl`**
 
 ```glsl
 // Returns remaining instruction fuel from VMContext
 uint __lp_get_fuel(vmcontext ctx);
 ```
 
-**File: `lp-glsl-builtins-emu/src/lib.rs`**
+**File: `lps-builtins-emu/src/lib.rs`**
 
 ```rust
 use lpvm::vmcontext::VmContext;
@@ -404,14 +404,14 @@ pub unsafe extern "C" fn __lp_get_fuel(ctx: &VmContext) -> u32 {
 }
 ```
 
-**File: `lp-glsl-builtins-wasm/src/lib.rs`**
+**File: `lps-builtins-wasm/src/lib.rs`**
 
 Stub or actual WASM implementation.
 
 ### Validate
 
 ```bash
-cargo build -p lp-glsl-builtins-emu-app
+cargo build -p lps-builtins-emu-app
 ```
 
 ---
@@ -424,7 +424,7 @@ Create test file and verify PoC works.
 
 ### Implementation Details
 
-**File: `lp-glsl-filetests/filetests/vmcontext/fuel-read.glsl`**
+**File: `lps-filetests/filetests/vmcontext/fuel-read.glsl`**
 
 ```glsl
 // test run
@@ -441,14 +441,14 @@ uint test_fuel_read() {
 
 ```bash
 # Build all builtins
-cargo build -p lp-glsl-builtins-emu-app
-cargo build -p lp-glsl-builtins-wasm
+cargo build -p lps-builtins-emu-app
+cargo build -p lps-builtins-wasm
 
 # Run PoC test
-cargo run -p lp-glsl-filetests-app -- test vmcontext/fuel-read.glsl
+cargo run -p lps-filetests-app -- test vmcontext/fuel-read.glsl
 
 # Run full tests to check for regressions
-cargo run -p lp-glsl-filetests-app -- test
+cargo run -p lps-filetests-app -- test
 ```
 
 ---
@@ -469,8 +469,8 @@ Final cleanup, documentation, commit.
 ### Validate
 
 ```bash
-cargo test -p lpvm -p lp-glsl-naga -p lpir-cranelift -p lp-glsl-filetests
-cargo clippy -p lpvm -p lp-glsl-naga -p lpir-cranelift
+cargo test -p lpvm -p lps-naga -p lpir-cranelift -p lps-filetests
+cargo clippy -p lpvm -p lps-naga -p lpir-cranelift
 ```
 
 ---
@@ -487,5 +487,5 @@ cargo clippy -p lpvm -p lp-glsl-naga -p lpir-cranelift
 ### Design decisions documented:
 
 - **Option B** (vmcontext type) selected for builtin signatures
-- **`lp-glsl-builtins-emu -> lpvm`** dependency is acceptable
+- **`lps-builtins-emu -> lpvm`** dependency is acceptable
 - **Direct field access** for simple fields like `fuel`, methods for complex operations

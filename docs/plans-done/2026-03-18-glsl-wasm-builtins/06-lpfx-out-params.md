@@ -4,7 +4,7 @@
 
 - **Codegen:** `lpfx_psrdnoise` and similar — allocate out slots in **shared** linear memory (bump pointer or static layout computed per function); emit `i32` pointer args; load results after `call`.
 - **Builtin side:** `builtins.wasm` must perform `i32.store` into the imported memory at the given offsets — verify Rust→wasm compilation for those code paths (may already be correct if Cranelift uses same symbols).
-- **Worley / FBM:** Scalar returns; confirm flattened argument lists match `lp-glsl-builtins` exports.
+- **Worley / FBM:** Scalar returns; confirm flattened argument lists match `lps-builtins` exports.
 
 ## Code organization reminders
 

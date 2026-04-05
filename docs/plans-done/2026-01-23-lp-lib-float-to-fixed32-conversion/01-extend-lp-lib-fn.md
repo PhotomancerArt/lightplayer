@@ -9,7 +9,7 @@ is. This keeps the source of truth in `LpLibFn` for conversion requirements.
 
 ### 1.1 Add `q32_name()` Method
 
-In `lp-shader/lp-glsl-compiler/src/frontend/semantic/lp_lib_fns.rs`:
+In `lp-shader/lps-compiler/src/frontend/semantic/lp_lib_fns.rs`:
 
 - Add `q32_name(&self) -> Option<&'static str>` method to `LpLibFn` impl
 - Return `Some("__lp_q32_lpfx_snoise1")` for `Simplex1`

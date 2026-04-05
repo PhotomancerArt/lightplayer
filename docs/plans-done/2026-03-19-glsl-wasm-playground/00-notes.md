@@ -7,17 +7,17 @@ build a browser-based playground that compiles GLSL to WASM and renders shader o
 Target: rainbow.shader renders in a browser with no server.
 
 Predecessor: `docs/plans-done/2026-03-19-glsl-wasm-builtins2/` — rainbow.shader compiles via
-`glsl_wasm()`, links with `lp_glsl_builtins_wasm.wasm` + shared `env.memory`, and runs under
+`glsl_wasm()`, links with `lps_builtins_wasm.wasm` + shared `env.memory`, and runs under
 wasmtime.
 
 ## Current state
 
 ### Compiler → WASM feasibility
 
-- `lp-glsl-frontend` is `#![no_std]` with `extern crate alloc`. All deps (`glsl` parser,
-  `hashbrown`, `log`, `libm`, `lp-glsl-builtin-ids`) are no_std-compatible.
-- `lp-glsl-wasm` is `#![no_std]` with `extern crate alloc`. Deps: `lp-glsl-frontend`,
-  `lp-glsl-builtin-ids`, `wasm-encoder`, `glsl`, `hashbrown`, `log`.
+- `lps-frontend` is `#![no_std]` with `extern crate alloc`. All deps (`glsl` parser,
+  `hashbrown`, `log`, `libm`, `lps-builtin-ids`) are no_std-compatible.
+- `lps-wasm` is `#![no_std]` with `extern crate alloc`. Deps: `lps-frontend`,
+  `lps-builtin-ids`, `wasm-encoder`, `glsl`, `hashbrown`, `log`.
 - `wasm-encoder` (v0.245): needs verification that it compiles to `wasm32-unknown-unknown`. It's
   pure Rust byte manipulation so should be fine, but may need `default-features = false`.
 - The `glsl` parser is from a custom fork (`light-player/glsl-parser`, `feature/spans` branch), used
@@ -25,11 +25,11 @@ wasmtime.
 
 ### Builtins WASM
 
-- `lp-glsl-builtins-wasm` is a `cdylib` that re-exports all `__lp_*` symbols from
-  `lp-glsl-builtins`.
-- Built via `cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release`.
+- `lps-builtins-wasm` is a `cdylib` that re-exports all `__lp_*` symbols from
+  `lps-builtins`.
+- Built via `cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release`.
 - `build.rs` adds `--import-memory` so the module imports `env.memory`.
-- Output: `target/wasm32-unknown-unknown/release/lp_glsl_builtins_wasm.wasm`.
+- Output: `target/wasm32-unknown-unknown/release/lps_builtins_wasm.wasm`.
 - Build script: `scripts/build-builtins.sh`.
 
 ### Linking pattern (from wasmtime tests)
@@ -105,13 +105,13 @@ this, but we're not there yet. 4096 calls/frame is fast enough for the POC.
 member. wasm-pack builds Rust → WASM with wasm-bindgen JS glue, outputting a `pkg/` directory with
 `.wasm` + JS modules.
 
-The playground crate would depend on `lp-glsl-frontend` and `lp-glsl-wasm` only (no Cranelift).
+The playground crate would depend on `lps-frontend` and `lps-wasm` only (no Cranelift).
 
 **Options:**
 
 - (a) `lp-app/playground/` — new directory as specified in roadmap
 - (b) `playground/` at workspace root — simpler path
-- (c) `lp-shader/lp-glsl-playground/` — alongside other lp-glsl crates
+- (c) `lp-shader/lps-playground/` — alongside other lps crates
 
 **Decision:** `lp-app/web-demo/`. Application-level code belongs outside `lp-shader/`. `web-demo` is
 more descriptive than `playground`.
@@ -127,7 +127,7 @@ output panel; keep rendering the last successful compilation while the user edit
 
 ### Q5: Builtins WASM distribution
 
-**Context:** The playground needs `lp_glsl_builtins_wasm.wasm` available in the browser. Options:
+**Context:** The playground needs `lps_builtins_wasm.wasm` available in the browser. Options:
 
 - (a) Fetch it as a separate file alongside the HTML (`fetch('builtins.wasm')`)
 - (b) Embed it in the compiler WASM module (include_bytes at compile time)
@@ -141,7 +141,7 @@ to the output directory.
 **Context:** During development, we need to build the compiler WASM, the builtins WASM, and serve
 the playground. This involves:
 
-1. `cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release`
+1. `cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release`
 2. `wasm-pack build lp-app/playground/ --target web`
 3. Copy `builtins.wasm` to the output directory
 4. Serve the playground directory

@@ -3,7 +3,7 @@
 //! Includes [`LpsType`] / [`LpsValue`], std430 [`layout`], string path parsing ([`path`]),
 //! and path projection on types and values ([`path_resolve`], [`value_path`]).
 //!
-//! Used by `lp-glsl-exec`, `lpvm`, and `lp-glsl-filetests`.
+//! Used by `lps-exec`, `lpvm`, and `lps-filetests`.
 
 #![no_std]
 

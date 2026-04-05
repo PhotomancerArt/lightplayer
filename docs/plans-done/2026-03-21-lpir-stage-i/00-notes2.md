@@ -33,14 +33,14 @@ deferred (which phase / why), or rejected (why).
 **Decision** (approved direction)
 
 **Baseline (revised)**  
-LPIR v1 is **not** limited to what `lp-glsl-wasm` implements *today* on the
+LPIR v1 is **not** limited to what `lps-wasm` implements *today* on the
 Naga path. It must support **local arrays with dynamic index** and **in/out
 (and inout) style parameters** so the Naga → LPIR → {WASM, Cranelift} pipeline
-can match the **capabilities** of the existing **`lp-glsl-cranelift` GLSL
+can match the **capabilities** of the existing **`lps-cranelift` GLSL
 frontend** (legacy AST), which already does runtime `imul`+`iadd`+`load`/`store`
 for arrays and **`PointerBased`** LValues for out/inout.
 
-**Important caveat**: `lp-glsl-cranelift` today does **not** consume Naga — it
+**Important caveat**: `lps-cranelift` today does **not** consume Naga — it
 uses the old `glsl` crate IR. “Align with Cranelift frontend” means **feature
 parity** (arrays + pointer parameters), not “copy its IR.” The Naga lowering
 fills the gap the WASM emitter currently has.
@@ -75,7 +75,7 @@ tagged `supported` | `deferred` | `out of scope`, with one-line notes.
 
 ### Expressions — matrix (research + revised v1 intent)
 
-**Column “wasm today”** = direct `lp-glsl-wasm` Naga path without LPIR.
+**Column “wasm today”** = direct `lps-wasm` Naga path without LPIR.
 **Column “v1 LPIR spec”** = what we commit to document and lower from Naga.
 
 | Naga `Expression` | wasm today | v1 LPIR spec | Notes |
@@ -176,7 +176,7 @@ types, who allocates scratch). That breaks “validate on WASM, ship on device.�
 
 **Decision**:
 
-1. **Versioned profile — `wasm-lp-v0` (matches `lp-glsl-wasm` today)**  
+1. **Versioned profile — `wasm-lp-v0` (matches `lps-wasm` today)**  
    Capture this in the eventual `05-calls.md` (or `10-abi.md`) subsection
    **“WASM LightPlayer embedding”** so Cranelift and WASM emitters can claim
    the same host boundary.
@@ -335,7 +335,7 @@ for v1.
    call graphs. The IR does not restrict the call graph topology.
 
 2. **GLSL version target**: The pipeline uses **GLSL 4.50 core** (`#version
-   450 core` in `lp-glsl-naga`). GLSL 4.50 allows recursion (only GLSL ES
+   450 core` in `lps-naga`). GLSL 4.50 allows recursion (only GLSL ES
    1.00 forbids it). Record the target GLSL version in the LPIR spec
    preamble or the Naga lowering chapter so it's clear which language
    features the lowering must handle.

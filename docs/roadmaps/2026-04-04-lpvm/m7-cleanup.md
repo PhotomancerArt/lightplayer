@@ -7,7 +7,7 @@ green.
 
 ## Repository state
 
-Package names on disk may still mix `lp-glsl-*` and `lps-*`. Delete only after
+Package names on disk may still mix `lps-*` and `lps-*`. Delete only after
 **no remaining dependents**. Grep `Cargo.toml` and `use` statements before
 removing workspace members.
 
@@ -16,9 +16,9 @@ removing workspace members.
 | Obsolete                                    | Replaced by                   | Notes                        |
 |---------------------------------------------|-------------------------------|------------------------------|
 | `lpvm`                                      | `lpvm`                        | Runtime ABI + values         |
-| `lp-glsl-exec`                              | `lpvm` traits                 | `GlslExecutable` → LPVM      |
+| `lps-exec`                              | `lpvm` traits                 | `GlslExecutable` → LPVM      |
 | `lpir-cranelift` (bulk)                     | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
-| `lp-glsl-wasm` (or transitional WASM crate) | `lpvm-wasm`                   | Emission + runtime           |
+| `lps-wasm` (or transitional WASM crate) | `lpvm-wasm`                   | Emission + runtime           |
 
 **Keep `lps-shared`** (and the whole **`lps-*` shader layer**). Do **not** delete
 the logical-type crate — it is not absorbed into `lpir`.

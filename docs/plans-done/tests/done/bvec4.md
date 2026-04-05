@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for boolean vector type `bvec4` in `lightplayer/crates/lp-glsl-filetests/filetests/bvec4/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL boolean vector specification for `bvec4` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for boolean vector type `bvec4` in `lightplayer/crates/lps-filetests/filetests/bvec4/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL boolean vector specification for `bvec4` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -313,11 +313,11 @@ bvec4 test_bvec_operation_name() {
 
 5. **Reference Files**:
 
-- Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/equal.glsl`
-- Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/not.glsl`
-- Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/simple-assignment.glsl`
-- Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/indexing/swizzling.glsl` (for access-swizzle.glsl)
-- Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/element-assignment.glsl` (for assign-element.glsl)
+- Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/equal.glsl`
+- Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/not.glsl`
+- Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/simple-assignment.glsl`
+- Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/indexing/swizzling.glsl` (for access-swizzle.glsl)
+- Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/element-assignment.glsl` (for assign-element.glsl)
 
 ## Files to Create
 

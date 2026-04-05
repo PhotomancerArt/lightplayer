@@ -185,7 +185,7 @@ fn test_constant_phi() {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-builtins -- q32
+cargo test -p lps-builtins -- q32
 ```
 
 All new tests should pass. No existing tests should break (if they do,

@@ -13,29 +13,31 @@ make BuiltinId self-describing.
 ## Scope
 
 **In scope:**
-- Redesign `BuiltinId` in `lp-glsl-builtin-ids` to be self-describing:
+
+- Redesign `BuiltinId` in `lps-builtin-ids` to be self-describing:
   given (module, name, mode) it derives symbol name, LPIR import path,
   file path. Replace the flat generated enum (`LpQ32Sin`, `LpfxFbm2F32`,
   etc.) with a structured representation.
 - Rename all builtin symbols:
-  - `__lp_q32_sin` → `__lp_glsl_sin_q32`
-  - `__lpfx_fbm2_f32` → `__lp_lpfx_fbm2_f32`
-  - `__lp_q32_add` (etc.) → `__lp_lpir_fadd_q32` (intrinsic math)
-  - Mode-independent functions (hash) get no suffix
-- Update `lp-glsl-builtins`: rename `#[no_mangle]` symbols
-- Update `lp-glsl-builtins-gen-app`: generate new naming
-- Update WASM emitter import resolution (`lp-glsl-wasm/src/emit/imports.rs`)
+    - `__lp_q32_sin` → `__lps_sin_q32`
+    - `__lpfx_fbm2_f32` → `__lp_lpfx_fbm2_f32`
+    - `__lp_q32_add` (etc.) → `__lp_lpir_fadd_q32` (intrinsic math)
+    - Mode-independent functions (hash) get no suffix
+- Update `lps-builtins`: rename `#[no_mangle]` symbols
+- Update `lps-builtins-gen-app`: generate new naming
+- Update WASM emitter import resolution (`lps-wasm/src/emit/imports.rs`)
 - Update Cranelift backend builtin declaration/mapping (old crate still
   needs to compile on main — or we accept breakage on branch)
 - Update LPIR import module names: `std.math` → `glsl`
-- Update `lp-glsl-naga` lowering: register imports as `glsl::sin` etc.
+- Update `lps-naga` lowering: register imports as `glsl::sin` etc.
 - Update `StdMathHandler` and any test import handlers
-- Update `lp-glsl-filetests` if it references symbol names
+- Update `lps-filetests` if it references symbol names
 - All existing tests pass after rename
 
 **Out of scope:**
+
 - New crate (Stage II)
-- File path reorganization in lp-glsl-builtins (nice to have, can be
+- File path reorganization in lps-builtins (nice to have, can be
   deferred — the symbol rename is the critical part)
 - Adding new builtins
 
@@ -48,7 +50,7 @@ make BuiltinId self-describing.
 - `BuiltinId` should support: `symbol() -> &str`, `module() -> Module`,
   `name() -> &str`, `mode() -> Option<Mode>`
 - The `glsl_q32_math_builtin_id` and `glsl_lpfx_q32_builtin_id` mapping
-  functions in `lp-glsl-builtin-ids` should be updated to work with the
+  functions in `lps-builtin-ids` should be updated to work with the
   new naming. These become the shared import resolution used by both WASM
   and Cranelift emitters.
 
@@ -58,12 +60,12 @@ make BuiltinId self-describing.
   derives) or become a struct `{ module, name, mode }`? Enum is better for
   exhaustive matching and known-at-compile-time sets. Struct is more
   flexible. Likely enum with derive macros, but worth considering.
-- **Generator changes**: The builtins generator (`lp-glsl-builtins-gen-app`)
+- **Generator changes**: The builtins generator (`lps-builtins-gen-app`)
   currently generates `registry.rs`, `mapping.rs`, `builtin_refs.rs` for
   multiple consumers. The rename may simplify some of this (if BuiltinId
   is self-describing, less generated mapping code is needed). Worth
   understanding the generator before committing to implementation approach.
-- **Branch strategy**: The old `lp-glsl-cranelift` still compiles on this
+- **Branch strategy**: The old `lps-cranelift` still compiles on this
   branch (we haven't deleted it yet). Do we update its builtin references
   too, or accept that it's broken? Since we're abandoning it, breaking it
   is fine — but tests that exercise the old path will fail. May want to
@@ -75,7 +77,7 @@ make BuiltinId self-describing.
 ## Deliverables
 
 - Restructured `BuiltinId` with self-describing API
-- All `__lp_*` symbols renamed across `lp-glsl-builtins`
+- All `__lp_*` symbols renamed across `lps-builtins`
 - Updated generator
 - LPIR imports use `glsl::` and `lpfx::` module names
 - WASM emitter import resolution updated

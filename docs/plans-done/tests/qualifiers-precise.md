@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL precise qualifier in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/precise/` following the flat naming convention with prefixes. These tests will comprehensively cover the precise qualifier which ensures operations are done in their stated order and with operator consistency. These tests are expected to fail initially, serving as a specification for implementing precise qualifier support in the compiler.
+Create a complete test suite for GLSL precise qualifier in `lightplayer/crates/lps-filetests/filetests/qualifiers/precise/` following the flat naming convention with prefixes. These tests will comprehensively cover the precise qualifier which ensures operations are done in their stated order and with operator consistency. These tests are expected to fail initially, serving as a specification for implementing precise qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -209,8 +209,8 @@ void test_precise_output() {
    - Consumption tracking
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-out.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/functions/return-vector.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-out.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/functions/return-vector.glsl`
    - GLSL spec: `variables.adoc` - The Precise Qualifier (lines 6270-6418)
 
 ## Files to Create

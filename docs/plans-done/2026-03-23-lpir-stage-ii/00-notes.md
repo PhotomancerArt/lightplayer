@@ -13,8 +13,8 @@ Spec: `docs/lpir/` (chapters 00–09).
 
 ## Current state
 
-- **No `lpir` crate exists.** The `lp-shader/` directory has `lp-glsl-naga`,
-  `lp-glsl-wasm`, `lp-glsl-cranelift`, and others, but no `lpir/` subdirectory.
+- **No `lpir` crate exists.** The `lp-shader/` directory has `lps-naga`,
+  `lps-wasm`, `lps-cranelift`, and others, but no `lpir/` subdirectory.
 - The LPIR spec is complete (10 chapters in `docs/lpir/`).
 - Existing crates use `#![no_std]` + `extern crate alloc`; the `lpir` crate
   should follow this pattern.
@@ -25,17 +25,17 @@ Spec: `docs/lpir/` (chapters 00–09).
 ### 1. Crate naming and path
 
 The roadmap spec overview says `lp-shader/lpir/`. Other crates under `lp-shader/`
-follow a `lp-glsl-<name>` convention (e.g. `lp-glsl-naga`, `lp-glsl-wasm`).
+follow a `lps-<name>` convention (e.g. `lps-naga`, `lps-wasm`).
 
 Should the crate be:
 
 - `lp-shader/lpir/` with package name `lpir` (as in roadmap)
-- `lp-shader/lp-glsl-lpir/` with package name `lp-glsl-lpir` (matching convention)
+- `lp-shader/lps-lpir/` with package name `lps-lpir` (matching convention)
 
 **Suggested**: `lp-shader/lpir/` with package name `lpir`. The `lpir` crate is the
-IR core and will be depended on by `lp-glsl-naga` (for lowering), `lp-glsl-wasm`
-(for emission), and `lp-glsl-cranelift`. A shorter name reflects that it is a
-foundational module, not just another `lp-glsl-*` plugin.
+IR core and will be depended on by `lps-naga` (for lowering), `lps-wasm`
+(for emission), and `lps-cranelift`. A shorter name reflects that it is a
+foundational module, not just another `lps-*` plugin.
 
 **Answer**: `lp-shader/lpir/` with package name `lpir`.
 

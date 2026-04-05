@@ -12,17 +12,17 @@ instructions.
 ### Deletions
 
 ```
-lp-glsl-wasm/src/emit.rs      # OLD: 1970-line Naga-direct emitter
-lp-glsl-wasm/src/emit_vec.rs   # OLD: vector lowering (LPIR is scalarized)
-lp-glsl-wasm/src/locals.rs     # OLD: complex local allocation
-lp-glsl-wasm/src/lpfx.rs       # OLD: LPFX resolution from Naga
-lp-glsl-wasm/src/types.rs      # OLD: Naga type → WASM type mapping
+lps-wasm/src/emit.rs      # OLD: 1970-line Naga-direct emitter
+lps-wasm/src/emit_vec.rs   # OLD: vector lowering (LPIR is scalarized)
+lps-wasm/src/locals.rs     # OLD: complex local allocation
+lps-wasm/src/lpfx.rs       # OLD: LPFX resolution from Naga
+lps-wasm/src/types.rs      # OLD: Naga type → WASM type mapping
 ```
 
 ### New structure
 
 ```
-lp-glsl-wasm/src/
+lps-wasm/src/
   emit/
     mod.rs          # emit_module(IrModule, WasmOptions) → Vec<u8>
     func.rs         # per-function: local declaration, prologue/epilogue
@@ -39,12 +39,14 @@ lp-glsl-wasm/src/
 ### Dependency changes (`Cargo.toml`)
 
 Add:
+
 - `lpir = { path = "../lpir" }`
 
 Keep:
-- `lp-glsl-naga` (for `compile()`, `NagaModule`, `FloatMode`)
-- `lp-glsl-builtin-ids` (for `BuiltinId`, name resolution)
-- `naga` (transitive via lp-glsl-naga, but direct dep can be removed if
+
+- `lps-naga` (for `compile()`, `NagaModule`, `FloatMode`)
+- `lps-builtin-ids` (for `BuiltinId`, name resolution)
+- `naga` (transitive via lps-naga, but direct dep can be removed if
   not needed after old emitter deletion)
 - `wasm-encoder`
 
@@ -54,13 +56,13 @@ Keep:
 GLSL source
   │
   ▼
-compile(glsl) ──────────── lp-glsl-naga (existing)
+compile(glsl) ──────────── lps-naga (existing)
   │
   ▼
 NagaModule
   │
   ▼
-lower(&NagaModule) ─────── lp-glsl-naga::lower (Stage IV)
+lower(&NagaModule) ─────── lps-naga::lower (Stage IV)
   │
   ▼
 IrModule
@@ -102,37 +104,39 @@ VReg N maps directly to WASM local N. Parameters are the first
 Non-parameter VRegs are declared as function-local variables.
 
 Type mapping (Q32 mode):
+
 - `IrType::F32` → `ValType::I32` (Q16.16 fixed-point)
 - `IrType::I32` → `ValType::I32`
 
 Additional scratch locals per function:
+
 - One `i64` local for Q32 widening/saturation (only when float ops exist)
 
 ### Q32 arithmetic expansion
 
 LPIR float ops expand to Q16.16 integer arithmetic:
 
-| LPIR Op | Q32 WASM expansion |
-|---------|--------------------|
-| `Fadd` | i64 extend both → i64.add → saturate → i32.wrap |
-| `Fsub` | i64 extend both → i64.sub → saturate → i32.wrap |
-| `Fmul` | i64 extend both → i64.mul → i64.shr_s 16 → saturate → i32.wrap |
-| `Fdiv` | numerator i64 extend → shl 16 → i64.div_s → i32.wrap |
-| `Fneg` | 0 - src (i32.sub) |
-| `Fabs` | call `builtins::__lp_q32_abs` or inline (compare + negate) |
-| `Fsqrt` | call `builtins::__lp_q32_sqrt` |
-| `Fmin` | inline: compare + select |
-| `Fmax` | inline: compare + select |
-| `Ffloor` | inline: mask off fractional bits (and 0xFFFF0000), adjust for negative |
-| `Fceil` | inline: floor + conditional add 0x10000 |
-| `Ftrunc` | inline: toward-zero truncation |
-| `Fnearest` | call `builtins::__lp_q32_roundeven` |
-| `FconstF32` | `i32.const (value * 65536.0) as i32` (clamped) |
-| `FtoiSatS` | Q32 → int: shr_s 16, clamp |
-| `FtoiSatU` | Q32 → uint: shr_u 16, clamp |
-| `ItofS` | int → Q32: shl 16, clamp |
-| `ItofU` | uint → Q32: shl 16, clamp |
-| `Feq/Fne/Flt/...` | `i32.eq`/`i32.ne`/`i32.lt_s`/... (Q32 values are ordered as i32) |
+| LPIR Op           | Q32 WASM expansion                                                     |
+|-------------------|------------------------------------------------------------------------|
+| `Fadd`            | i64 extend both → i64.add → saturate → i32.wrap                        |
+| `Fsub`            | i64 extend both → i64.sub → saturate → i32.wrap                        |
+| `Fmul`            | i64 extend both → i64.mul → i64.shr_s 16 → saturate → i32.wrap         |
+| `Fdiv`            | numerator i64 extend → shl 16 → i64.div_s → i32.wrap                   |
+| `Fneg`            | 0 - src (i32.sub)                                                      |
+| `Fabs`            | call `builtins::__lp_q32_abs` or inline (compare + negate)             |
+| `Fsqrt`           | call `builtins::__lp_q32_sqrt`                                         |
+| `Fmin`            | inline: compare + select                                               |
+| `Fmax`            | inline: compare + select                                               |
+| `Ffloor`          | inline: mask off fractional bits (and 0xFFFF0000), adjust for negative |
+| `Fceil`           | inline: floor + conditional add 0x10000                                |
+| `Ftrunc`          | inline: toward-zero truncation                                         |
+| `Fnearest`        | call `builtins::__lp_q32_roundeven`                                    |
+| `FconstF32`       | `i32.const (value * 65536.0) as i32` (clamped)                         |
+| `FtoiSatS`        | Q32 → int: shr_s 16, clamp                                             |
+| `FtoiSatU`        | Q32 → uint: shr_u 16, clamp                                            |
+| `ItofS`           | int → Q32: shl 16, clamp                                               |
+| `ItofU`           | uint → Q32: shl 16, clamp                                              |
+| `Feq/Fne/Flt/...` | `i32.eq`/`i32.ne`/`i32.lt_s`/... (Q32 values are ordered as i32)       |
 
 Integer ops (`Iadd`, `Imul`, etc.) emit directly as `i32.*`.
 
@@ -161,20 +165,20 @@ fn emit_q32_sat(wasm_fn):
 
 ### Control flow mapping
 
-| LPIR | WASM |
-|------|------|
-| `IfStart` | `local.get cond`, `if (blocktype)` |
-| `Else` | `else` |
-| `End` (if) | `end` |
-| `LoopStart` | `block { loop { block {` (3-construct pattern) |
-| `End` (loop body inner block) | `end` (close inner block) |
-| continuing section | emitted between inner block end and loop end |
-| `End` (loop) | `br 0` (back to loop top), `end` (loop), `end` (outer block) |
-| `Break` | `br N` (to outer block) |
-| `Continue` | `br N` (to inner block end → falls into continuing) |
-| `BrIfNot` | `local.get cond`, `i32.eqz`, `br_if N` (to outer block = break) |
-| `SwitchStart` | nested WASM blocks + `br_table` |
-| `Return` | load return values, `return` |
+| LPIR                          | WASM                                                            |
+|-------------------------------|-----------------------------------------------------------------|
+| `IfStart`                     | `local.get cond`, `if (blocktype)`                              |
+| `Else`                        | `else`                                                          |
+| `End` (if)                    | `end`                                                           |
+| `LoopStart`                   | `block { loop { block {` (3-construct pattern)                  |
+| `End` (loop body inner block) | `end` (close inner block)                                       |
+| continuing section            | emitted between inner block end and loop end                    |
+| `End` (loop)                  | `br 0` (back to loop top), `end` (loop), `end` (outer block)    |
+| `Break`                       | `br N` (to outer block)                                         |
+| `Continue`                    | `br N` (to inner block end → falls into continuing)             |
+| `BrIfNot`                     | `local.get cond`, `i32.eqz`, `br_if N` (to outer block = break) |
+| `SwitchStart`                 | nested WASM blocks + `br_table`                                 |
+| `Return`                      | load return values, `return`                                    |
 
 The emitter maintains a depth counter and a control stack to compute
 `br` target depths, similar to the current `EmitCtx`.
@@ -191,6 +195,7 @@ module for Q32 mode:
 - etc.
 
 The `imports.rs` module:
+
 1. Walks all `ImportDecl` in the `IrModule`
 2. Maps each to a `BuiltinId` by name matching
 3. Looks up the Q32 WASM signature
@@ -227,8 +232,8 @@ one function has slots.
 
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lp_glsl_naga::compile(source)?;
-    let ir_module = lp_glsl_naga::lower::lower(&naga_module)
+    let naga_module = lps_naga::compile(source)?;
+    let ir_module = lps_naga::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;

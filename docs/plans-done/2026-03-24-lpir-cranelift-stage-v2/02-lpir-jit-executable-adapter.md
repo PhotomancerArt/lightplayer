@@ -1,8 +1,8 @@
 ## Scope of phase
 
-**Prerequisite:** Phase **04** wired filetests to **`lp-glsl-exec`** /
-**`lpvm`** (and **`lp-glsl-diagnostics`** for **`GlslError`**). Trait
-definition lives in **`lp-glsl-exec`**, not **`lp-glsl-frontend`**.
+**Prerequisite:** Phase **04** wired filetests to **`lps-exec`** /
+**`lpvm`** (and **`lps-diagnostics`** for **`GlslError`**). Trait
+definition lives in **`lps-exec`**, not **`lps-frontend`**.
 
 Add **`lpir_jit_executable.rs`** implementing **`GlslExecutable`** for
 **`lpir_cranelift::JitModule`** (Q32 primary).
@@ -25,7 +25,7 @@ Add **`lpir_jit_executable.rs`** implementing **`GlslExecutable`** for
 - **`CompileOptions`:** `float_mode: FloatMode::Q32` for `jit.q32`; align with
   `target.float_mode` for future `jit.f32`.
 - **Errors:** map **`lpir_cranelift::CompilerError`** / **`CallError`** into
-  **`lp_glsl_diagnostics::GlslError`** with usable messages (pattern after
+  **`lps_diagnostics::GlslError`** with usable messages (pattern after
   **`WasmExecutable`**).
 - **`format_emulator_state` / CLIF / VCode:** return `None` / empty for JIT
   unless cheap to forward from `lpir-cranelift` later.
@@ -38,7 +38,7 @@ Add **`lpir_jit_executable.rs`** implementing **`GlslExecutable`** for
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lp-glsl-filetests --lib
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lps-filetests --lib
 ```
 
 `cargo +nightly fmt`.

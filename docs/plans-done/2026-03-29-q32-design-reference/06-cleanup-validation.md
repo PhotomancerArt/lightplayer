@@ -3,6 +3,7 @@
 ## Cleanup
 
 Grep the git diff for:
+
 - TODO comments added during this plan
 - Debug `println!` statements
 - Temporary code
@@ -16,11 +17,11 @@ Run the full validation suite:
 
 ```bash
 # Q32 struct and builtin tests
-cargo test -p lp-glsl-builtins -- q32
-cargo test -p lp-glsl-builtins -- fdiv_q32
+cargo test -p lps-builtins -- q32
+cargo test -p lps-builtins -- fdiv_q32
 
 # Filetests
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 
 # ESP32 build (compiler included)
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

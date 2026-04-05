@@ -20,9 +20,9 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 9
 ```bash
 cargo build
 cargo test
-cargo build -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
-cargo test -p lp-glsl-filetests
+cargo build -p lps-wasm
+cargo test -p lps-wasm
+cargo test -p lps-filetests
 ```
 
 **Fix:** Any compilation errors or test failures.
@@ -49,14 +49,14 @@ cargo test -p lp-glsl-filetests
 
 **Command:** `just build-fw-esp32`
 
-**Purpose:** Ensures lp-glsl changes don't break the ESP32 firmware build. If the workspace has this
+**Purpose:** Ensures lps changes don't break the ESP32 firmware build. If the workspace has this
 target, it must succeed.
 
 ---
 
 ## 5. README updates
 
-**lp-glsl-wasm/README.md:**
+**lps-wasm/README.md:**
 
 - Document supported features (scalars, vectors, control flow, builtins, LPFX)
 - Builtin import mechanism (module "builtins", function names)
@@ -64,7 +64,7 @@ target, it must succeed.
 - Q32 mode
 - Limitations (no matrices, no arrays, no structs)
 
-**lp-glsl-filetests/README.md:**
+**lps-filetests/README.md:**
 
 - Current wasm.q32 pass count
 - Annotation patterns (@unimplemented(backend=wasm))
@@ -72,7 +72,7 @@ target, it must succeed.
 
 **lp-shader/README.md:**
 
-- Crate table: update lp-glsl-wasm description
+- Crate table: update lps-wasm description
 - Any new crates or changes
 
 ---
@@ -84,9 +84,9 @@ target, it must succeed.
 ```bash
 cargo build
 cargo test
-cargo build -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
-cargo test -p lp-glsl-filetests
+cargo build -p lps-wasm
+cargo test -p lps-wasm
+cargo test -p lps-filetests
 scripts/glsl-filetests.sh
 cargo +nightly fmt --check
 just build-fw-esp32
@@ -101,6 +101,6 @@ just build-fw-esp32
 | File                                  | Changes                          |
 |---------------------------------------|----------------------------------|
 | Various                               | Fix warnings, formatting         |
-| lp-shader/lp-glsl-wasm/README.md      | Document features, mechanism     |
-| lp-shader/lp-glsl-filetests/README.md | Pass counts, annotation patterns |
+| lp-shader/lps-wasm/README.md      | Document features, mechanism     |
+| lp-shader/lps-filetests/README.md | Pass counts, annotation patterns |
 | lp-shader/README.md                   | Crate table if needed            |

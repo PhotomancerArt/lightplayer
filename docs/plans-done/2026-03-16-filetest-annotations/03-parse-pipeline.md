@@ -177,8 +177,8 @@ In `parse/mod.rs` or a new `parse/tests.rs`:
 ## Validate
 
 ```
-cargo build -p lp-glsl-filetests
-cargo test -p lp-glsl-filetests
+cargo build -p lps-filetests
+cargo test -p lps-filetests
 cargo +nightly fmt -- --check
 ```
 

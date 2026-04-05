@@ -9,7 +9,7 @@ not expressions.
 
 ### Files to Modify
 
-1. **`lp-shader/lp-glsl-compiler/src/frontend/codegen/expr/function.rs`**
+1. **`lp-shader/lps-compiler/src/frontend/codegen/expr/function.rs`**
     - Add `validate_out_inout_arguments()` function
     - Call validation before preparing call arguments
 

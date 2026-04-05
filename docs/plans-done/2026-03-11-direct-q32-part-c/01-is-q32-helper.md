@@ -24,7 +24,7 @@ All subsequent phases use `self.is_q32()` to branch on numeric mode.
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
+cargo check -p lps-compiler --features std
 scripts/glsl-filetests.sh
 ```
 

@@ -3,14 +3,14 @@
 ## Repository state
 
 Renames may already be in progress (RustRover, find/replace). **This document
-describes the target layout.** If paths on disk still say `lp-glsl-*`, map them
+describes the target layout.** If paths on disk still say `lps-*`, map them
 mentally to the `lps-*` names in [overview.md](overview.md).
 
 ## Goal
 
 Establish the **three-layer naming** and crate boundaries:
 
-1. **`lps-shared`** — logical shader types (rename/evolution of `lp-glsl-core`).
+1. **`lps-shared`** — logical shader types (rename/evolution of `lps-core`).
 2. **`lpvm`** — VM/runtime types, traits, values, layout, VMContext.
 3. **`lpir`** — unchanged role: **scalarized IR only** (no absorption of
    `Type` / `FunctionSignature` from the shader layer).
@@ -42,20 +42,20 @@ types in **`lps-shared`**.
 
 ## What Moves Where
 
-### `lps-shared` (shader layer — rename from `lp-glsl-core`)
+### `lps-shared` (shader layer — rename from `lps-core`)
 
 | Transitional crate | Target package | Public types (target names)                                                           |
 |--------------------|----------------|---------------------------------------------------------------------------------------|
-| `lp-glsl-core`     | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
+| `lps-core`     | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
 
 Use a consistent **`Lps*`** prefix for this crate’s public types so they never
 collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
 
 **Dependents** (update imports in this milestone as renames land): `lps-naga`,
-`lps-filetests`, any crate that still depended on `lp-glsl-exec` for signatures
+`lps-filetests`, any crate that still depended on `lps-exec` for signatures
 (see below).
 
-### `lpvm` (new crate — absorbs `lpvm` + replaces `lp-glsl-exec` traits)
+### `lpvm` (new crate — absorbs `lpvm` + replaces `lps-exec` traits)
 
 Create `lpvm/lpvm/` at repo root. `#![no_std]` with `extern crate alloc`.
 
@@ -85,7 +85,7 @@ Paths: use whatever directory layout exists after renames (`lp-shader/lpir`,
 | `VmContext`                    | `LpvmVmContext`                                 |                                                                                                                                       |
 | Paths, layout fns, constants   | `lpvm::path`, `lpvm::layout`, `lpvm::vmcontext` |                                                                                                                                       |
 
-**From `lp-glsl-exec`:**
+**From `lps-exec`:**
 
 Replace **`GlslExecutable`** with new traits (design in this milestone;
 implementations in M2–M4):
@@ -100,7 +100,7 @@ implementations in M2–M4):
 
 Prefer **`LpvmError`** inside `lpvm` rather than depending on a “glsl”-named
 diagnostics crate long-term. During migration, temporary bridges to
-`lps-diagnostics` / old `lp-glsl-diagnostics` are OK.
+`lps-diagnostics` / old `lps-diagnostics` are OK.
 
 ## Crate layout (`lpvm` core)
 
@@ -142,11 +142,11 @@ Add `lpvm/lpvm` and `lps-shared` (or transitional path) to members as they appea
 **Will eventually use `lpvm` instead of `lpvm`:**
 
 - `lp-engine`, `lps-builtins`, `lps-naga`, `lpir-cranelift`, `lps-filetests`,
-  `lp-glsl-exec` (until removed)
+  `lps-exec` (until removed)
 
 **Use `lps-shared` for logical signatures:**
 
-- `lps-naga`, `lps-filetests`, `lp-glsl-exec` / future test harness,
+- `lps-naga`, `lps-filetests`, `lps-exec` / future test harness,
   anything that describes user-visible function types
 
 ## Done When

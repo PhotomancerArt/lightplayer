@@ -100,12 +100,12 @@ arrays (small), the difference is negligible. Can optimize with `Memcpy` later i
 
 ## Files to Modify
 
-- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` - Add array_map, slot allocation
-- `lp-shader/lp-glsl-naga/src/lower_expr.rs` - Add array Access/AccessIndex
-- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` - Add array Store
-- `lp-shader/lp-glsl-naga/src/lower_array.rs` - NEW: Array lowering helpers
-- `lp-shader/lp-glsl-naga/src/naga_util.rs` - Add array type utilities
-- `lp-shader/lp-glsl-naga/src/lib.rs` - Export new module
+- `lp-shader/lps-naga/src/lower_ctx.rs` - Add array_map, slot allocation
+- `lp-shader/lps-naga/src/lower_expr.rs` - Add array Access/AccessIndex
+- `lp-shader/lps-naga/src/lower_stmt.rs` - Add array Store
+- `lp-shader/lps-naga/src/lower_array.rs` - NEW: Array lowering helpers
+- `lp-shader/lps-naga/src/naga_util.rs` - Add array type utilities
+- `lp-shader/lps-naga/src/lib.rs` - Export new module
 
 ## Validation
 
@@ -122,7 +122,7 @@ scripts/glsl-filetests.sh array/phase/2-bounds-checking.glsl
 scripts/glsl-filetests.sh array/phase/3-initialization.glsl
 
 # Full validation
-cargo test -p lp-glsl-filetests --test filetests -- jit.q32
+cargo test -p lps-filetests --test filetests -- jit.q32
 ```
 
 ## Notes

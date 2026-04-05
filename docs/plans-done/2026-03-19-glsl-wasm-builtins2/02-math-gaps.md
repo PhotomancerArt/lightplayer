@@ -17,7 +17,7 @@ through the existing import path. After this phase, every standard GLSL builtin 
 
 ### 1. Inline `floor` Q32
 
-File: `lp-shader/lp-glsl-wasm/src/codegen/expr/builtin_inline.rs`
+File: `lp-shader/lps-wasm/src/codegen/expr/builtin_inline.rs`
 
 Add `("floor", 1)` to the `try_emit_inline_builtin` match and to `q32_builtin_import_suppressed`.
 
@@ -74,13 +74,13 @@ the existing `sin(1.0)` test.
 
 ### 5. Tests
 
-In `lp-glsl-wasm/tests/basic.rs`:
+In `lps-wasm/tests/basic.rs`:
 
 - `test_q32_floor_inline` — compile shader with `floor(1.7)`, verify no import emitted (inline path)
 - `test_q32_fract_inline` — compile shader with `fract(1.7)`, verify no import emitted
 - `test_q32_floor_vec3` — floor on a vec3
 
-In `lp-glsl-wasm/tests/q32_builtin_link.rs` (or basic.rs compile-only):
+In `lps-wasm/tests/q32_builtin_link.rs` (or basic.rs compile-only):
 
 - `test_q32_atan2_compiles` — `atan(1.0, 0.5)` compiles and produces correct import
 - `test_q32_cos_compiles` — `cos(1.0)` compiles
@@ -89,7 +89,7 @@ In `lp-glsl-wasm/tests/q32_builtin_link.rs` (or basic.rs compile-only):
 ## Validate
 
 ```bash
-cd lp-glsl && cargo test -p lp-glsl-wasm
+cd lps && cargo test -p lps-wasm
 cargo +nightly fmt
 ```
 

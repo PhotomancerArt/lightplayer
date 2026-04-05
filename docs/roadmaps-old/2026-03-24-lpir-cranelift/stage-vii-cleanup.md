@@ -2,7 +2,7 @@
 
 ## Goal
 
-Remove the old `lp-glsl-cranelift` crate, the `lp-glsl-frontend` crate
+Remove the old `lps-cranelift` crate, the `lps-frontend` crate
 (if no longer needed), and any dead code from the migration. Verify
 everything still builds and passes.
 
@@ -14,8 +14,8 @@ everything still builds and passes.
 
 **In scope:**
 
-- Delete `lp-shader/lp-glsl-cranelift/` (the old AST→CLIF compiler)
-- Delete `lp-shader/lp-glsl-frontend/` (the old GLSL frontend/parser) if
+- Delete `lp-shader/lps-cranelift/` (the old AST→CLIF compiler)
+- Delete `lp-shader/lps-frontend/` (the old GLSL frontend/parser) if
   nothing else depends on it
 - Delete the `glsl` crate dependency chain if unused (the old hand-written
   GLSL parser)
@@ -40,7 +40,7 @@ everything still builds and passes.
 
 - This is a deletion-heavy stage. The goal is a clean codebase with no
   remnants of the old compiler.
-- The `glsl` crate (Rust GLSL parser) was only used by `lp-glsl-frontend`.
+- The `glsl` crate (Rust GLSL parser) was only used by `lps-frontend`.
   If nothing else uses it, it can be removed from the workspace.
 - Filetests that were annotated with `// @ignore(backend=jit)` or
   `// @unimplemented(backend=jit)` should be reviewed — some may now be
@@ -48,17 +48,17 @@ everything still builds and passes.
 
 ## Open questions
 
-- **`lp-glsl-frontend` dependents**: Does anything besides the old
-  `lp-glsl-cranelift` depend on `lp-glsl-frontend`? If so, those need
+- **`lps-frontend` dependents**: Does anything besides the old
+  `lps-cranelift` depend on `lps-frontend`? If so, those need
   migration first. Check workspace dependency graph.
-- **`lp-glsl-builtins-gen-app`**: The generator creates code for both old
+- **`lps-builtins-gen-app`**: The generator creates code for both old
   and new builtins infrastructure. After deleting the old crate, simplify
   the generator to only produce what the new system needs. This may be a
   meaningful simplification (remove `registry.rs`, `mapping.rs` generation
   for the old Cranelift backend).
-- **Example code**: `lp-glsl-cranelift/examples/simple.rs` — anything to
+- **Example code**: `lps-cranelift/examples/simple.rs` — anything to
   preserve or replace with a new-crate example?
-- **Integration tests**: `lp-glsl-cranelift/tests/` — review if any test
+- **Integration tests**: `lps-cranelift/tests/` — review if any test
   logic should be ported to the new crate's tests before deletion.
 - **Web demo**: Does the web demo use the old compiler path at all, or is
   it purely WASM? If WASM-only, unaffected.
@@ -88,6 +88,6 @@ nothing breaks.
 These were ignored while LPIR / builtins / WASM linking is in flux. Before
 closing Stage VII, remove `#[ignore]`, run the tests, and fix any failures.
 
-| Location                                                                                                               | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-|------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `lp-shader/lp-glsl-filetests/tests/lpfx_builtins_memory.rs` — `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it` | Links shader WASM with `lp_glsl_builtins_wasm.wasm`. Failed with `incompatible import type for builtins::__lpfx_saturate_vec3_q32`: Naga/LPIR lowers `vec3 lpfx_saturate(vec3)` as a WASM import with three i32 params and three i32 results, while the Rust builtin is `(result_ptr: i32, x, y, z) -> ()`. **Re-check:** align LPIR import + `lp-glsl-wasm` emission with the result-pointer ABI (or document an adapter), then un-ignore and verify scratch-memory behavior. |
+| Location                                                                                                           | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|--------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lp-shader/lps-filetests/tests/lpfx_builtins_memory.rs` — `shader_lpfx_saturate_vec3_writes_scratch_then_reads_it` | Links shader WASM with `lps_builtins_wasm.wasm`. Failed with `incompatible import type for builtins::__lpfx_saturate_vec3_q32`: Naga/LPIR lowers `vec3 lpfx_saturate(vec3)` as a WASM import with three i32 params and three i32 results, while the Rust builtin is `(result_ptr: i32, x, y, z) -> ()`. **Re-check:** align LPIR import + `lps-wasm` emission with the result-pointer ABI (or document an adapter), then un-ignore and verify scratch-memory behavior. |

@@ -18,14 +18,14 @@ purely about:
 
 ### BuiltinId (from Stage I)
 
-Self-describing enum in `lp-glsl-builtin-ids`. Variants like `LpGlslSinQ32`,
+Self-describing enum in `lps-builtin-ids`. Variants like `LpGlslSinQ32`,
 `LpLpirFaddQ32`, `LpLpfxFbm2Q32`. Methods: `name()` → symbol string,
 `module()` → `Module::{Glsl,Lpir,Lpfx}`, `fn_name()` → logical name,
 `mode()` → `Option<Mode::{Q32,F32}>`.
 
 ### Import resolution (existing, shared)
 
-`glsl_builtin_mapping.rs` in `lp-glsl-builtin-ids` provides:
+`glsl_builtin_mapping.rs` in `lps-builtin-ids` provides:
 - `glsl_q32_math_builtin_id(name, arg_count) → Option<BuiltinId>` — glsl module
 - `lpir_q32_builtin_id(name, arg_count) → Option<BuiltinId>` — lpir module
 - `glsl_lpfx_q32_builtin_id(base, &[GlslParamKind]) → Option<BuiltinId>` — lpfx
@@ -66,7 +66,7 @@ value is stored as a signed Q16.16 integer. This affects:
 
 Q16.16 format: `value_i32 = (f64_value * 65536.0).round() as i32` with
 saturation to `[i32::MIN, 0x7FFF_FFFF]`. The `Q32` struct in
-`lp-glsl-builtins` has `from_f32` (truncating) and test helpers use a
+`lps-builtins` has `from_f32` (truncating) and test helpers use a
 rounding+saturating variant. No `const fn` available.
 
 ### Old crate's declare_builtins + symbol_lookup
@@ -113,10 +113,10 @@ add/sub/mul/div, sqrt, fnearest).
 ### Q2: Where should Q32 constant encoding live?
 
 **Context**: The emitter needs to convert `Fconst(1.5f32)` to `iconst(98304i32)`
-at compile time. The `Q32::from_f32` in `lp-glsl-builtins` is not `const` and
+at compile time. The `Q32::from_f32` in `lps-builtins` is not `const` and
 lives in a different crate. Options:
 
-- (a) Depend on `lp-glsl-builtins` for `Q32::from_f32`. Heavy dependency
+- (a) Depend on `lps-builtins` for `Q32::from_f32`. Heavy dependency
   for one function.
 - (b) Add a small `q32_encode(f32) -> i32` function directly in `lpir-cranelift`.
   Self-contained.
@@ -126,14 +126,14 @@ lives in a different crate. Options:
 `((value as f64) * 65536.0).round() as i32` with saturation. Extract later
 if needed.
 
-### Q3: Should `lpir-cranelift` depend on `lp-glsl-builtin-ids` directly?
+### Q3: Should `lpir-cranelift` depend on `lps-builtin-ids` directly?
 
 **Context**: The crate needs to resolve LPIR imports to BuiltinId, then
 declare them as Cranelift imports and set up symbol lookup. The WASM emitter
-depends on `lp-glsl-builtin-ids` directly.
+depends on `lps-builtin-ids` directly.
 
-**Answer**: Yes, direct dependencies on both `lp-glsl-builtin-ids` and
-`lp-glsl-builtins`. Same pattern as the WASM emitter.
+**Answer**: Yes, direct dependencies on both `lps-builtin-ids` and
+`lps-builtins`. Same pattern as the WASM emitter.
 
 ### Q4: Where does `FloatMode` live?
 
@@ -144,11 +144,11 @@ API.
 Options:
 - (a) Define `FloatMode` in `lpir-cranelift`. Keep it simple.
 - (b) Put it in `lpir` crate (shared with interpreter, WASM emitter).
-- (c) Put it in `lp-glsl-builtin-ids` (where `Mode` already exists).
+- (c) Put it in `lps-builtin-ids` (where `Mode` already exists).
 
 **Answer**: Move `FloatMode` into the `lpir` crate (`types.rs`), rename
 `Float` → `F32` for consistency. Re-export from `lpir::FloatMode`. Update
-`lp-glsl-naga` and `lp-glsl-wasm` to `use lpir::FloatMode`. The `lpir` crate
+`lps-naga` and `lps-wasm` to `use lpir::FloatMode`. The `lpir` crate
 is the natural home — it describes how consumers interpret `IrType::F32`.
 
 ### Q5: Q32 comparisons — fcmp becomes icmp?

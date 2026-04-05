@@ -240,7 +240,7 @@ provides:
 - `set_pixel()` writes based on format: shaders always return vec4 (RGBA), but only relevant bytes
   are written (RGB8=first 3 bytes, R8=first byte, RGBA8=all 4 bytes)
 
-This will eventually move to `lp-glsl-builtins` as part of the core GLSL system.
+This will eventually move to `lps-builtins` as part of the core GLSL system.
 
 ### Node Lifecycle
 

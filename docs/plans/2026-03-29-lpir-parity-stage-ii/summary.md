@@ -2,7 +2,7 @@
 
 ## Completed
 
-- `lp-glsl-naga`: new `lower_access.rs` — dynamic `Expression::Access` loads (vector/matrix column, inout pointer args), nested `Access` matrix element reads, `Store` through `Access`, dynamic column / element matrix stores (`merge_flat_index_store`, `store_matrix_column_dynamic`).
+- `lps-naga`: new `lower_access.rs` — dynamic `Expression::Access` loads (vector/matrix column, inout pointer args), nested `Access` matrix element reads, `Store` through `Access`, dynamic column / element matrix stores (`merge_flat_index_store`, `store_matrix_column_dynamic`).
 - `lower_stmt.rs`: matrix **`AccessIndex`** column store (constant column) via direct `Copy` into flat layout; `Store` dispatches `Access` to `store_through_access`.
 - `lower_expr.rs`: `Load` peels `Access`; nested `Access` uses `ValuePointer` result typing; delegates to `lower_access`.
 - `expr_scalar.rs`: `expr_type_inner` for `Expression::Access` (mirrors `AccessIndex` without const index checks).

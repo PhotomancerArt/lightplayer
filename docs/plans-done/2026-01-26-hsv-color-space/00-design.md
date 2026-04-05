@@ -2,14 +2,14 @@
 
 ## Overview
 
-Port HSV/HSB color space conversion functions from lygia to lp-glsl-builtins, using Q32 fixed-point
+Port HSV/HSB color space conversion functions from lygia to lps-builtins, using Q32 fixed-point
 arithmetic and the new q32 vector helpers (Vec3Q32, Vec4Q32). This enables easy porting of GLSL
 color manipulation code to Rust.
 
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/builtins/lpfx/
+lp-shader/lps-builtins/src/builtins/lpfx/
 ├── color/
 │   └── space/
 │       ├── mod.rs                    # NEW: Module declaration for color/space

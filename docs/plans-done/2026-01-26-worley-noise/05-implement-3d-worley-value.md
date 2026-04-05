@@ -9,7 +9,7 @@ nearest cell.
 
 ### Files to Create
 
-1. **`lp-glsl-builtins/src/builtins/lpfx/worley/worley3_value_q32.rs`**
+1. **`lps-builtins/src/builtins/lpfx/worley/worley3_value_q32.rs`**
     - `__lpfx_worley3_value_q32(x: i32, y: i32, z: i32, seed: u32) -> i32`
     - 3D Worley noise returning hash value
 

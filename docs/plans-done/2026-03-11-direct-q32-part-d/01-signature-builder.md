@@ -76,7 +76,7 @@ For Q32 mode: pass `types::I32` (or `numeric.scalar_type()`).
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
+cargo check -p lps-compiler --features std
 scripts/glsl-filetests.sh
 ```
 

@@ -1,6 +1,6 @@
 # For builds from parent context (cd .. && docker build -f lp2025/Dockerfile.ci .)
 # Copy to parent as .dockerignore before building
-# Exclude Cargo target dirs only - do NOT use **/target (excludes lp-glsl-compiler/src/backend/target/)
+# Exclude Cargo target dirs only - do NOT use **/target (excludes lps-compiler/src/backend/target/)
 lp2025/target
 lp-regalloc2/target
 lp2025/lp-shader/target

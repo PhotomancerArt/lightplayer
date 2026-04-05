@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL layout qualifiers in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/layout/` following the flat naming convention with prefixes. These tests will comprehensively cover layout qualifiers for uniforms, buffers, inputs, outputs, and various shader stages. These tests are expected to fail initially, serving as a specification for implementing layout qualifier support in the compiler.
+Create a complete test suite for GLSL layout qualifiers in `lightplayer/crates/lps-filetests/filetests/qualifiers/layout/` following the flat naming convention with prefixes. These tests will comprehensively cover layout qualifiers for uniforms, buffers, inputs, outputs, and various shader stages. These tests are expected to fail initially, serving as a specification for implementing layout qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -355,8 +355,8 @@ float test_layout_location() {
    - Interface matching
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-uniform.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/interface-blocks/uniform-basic.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-uniform.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/interface-blocks/uniform-basic.glsl`
    - GLSL spec: `variables.adoc` - Layout Qualifiers (lines 3030-5490)
 
 ## Files to Create

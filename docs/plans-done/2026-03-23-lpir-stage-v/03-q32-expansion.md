@@ -291,7 +291,7 @@ local.set dst
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 All arithmetic ops (integer and float Q32) now emit valid WASM.

@@ -9,7 +9,7 @@ noise-rs as a test-only dependency and create comparison tests.
 
 ### Add Test Dependency
 
-Update `lp-glsl-builtins/Cargo.toml`:
+Update `lps-builtins/Cargo.toml`:
 
 ```toml
 [dev-dependencies]

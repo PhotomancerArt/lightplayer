@@ -9,7 +9,7 @@ point in a grid.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/builtins/lpfx/
+lp-shader/lps-builtins/src/builtins/lpfx/
 ├── hash.rs                    # EXISTING: Hash functions
 ├── simplex/                    # EXISTING: Simplex noise functions
 │   └── ...
@@ -36,10 +36,10 @@ lpfx_worley3(vec3 p, uint seed)     -> __lpfx_worley3_q32(i32 x, i32 y, i32 z, u
 lpfx_worley3_value(vec3 p, uint seed) -> __lpfx_worley3_value_q32(i32 x, i32 y, i32 z, u32 seed) -> i32
 ```
 
-Internal functions are automatically registered by `lp-glsl-builtin-gen-app` which scans
-`lp-glsl-builtins/src/builtins/lpfx/` and adds them to the `BuiltinId` enum.
+Internal functions are automatically registered by `lps-builtin-gen-app` which scans
+`lps-builtins/src/builtins/lpfx/` and adds them to the `BuiltinId` enum.
 
-### Builtin Implementations (`lp-glsl-builtins/src/builtins/lpfx/worley/`)
+### Builtin Implementations (`lps-builtins/src/builtins/lpfx/worley/`)
 
 ```
 worley2_q32.rs:
@@ -69,9 +69,9 @@ worley3_value_q32.rs:
 
 Worley noise functions follow the same pattern as Simplex noise:
 
-- Implemented in `lp-glsl-builtins/src/builtins/lpfx/worley/` subdirectory
+- Implemented in `lps-builtins/src/builtins/lpfx/worley/` subdirectory
 - Use `#[lpfx_impl_macro::lpfx_impl]` attribute for auto-registration
-- Functions are automatically discovered and registered by `lp-glsl-builtin-gen-app`
+- Functions are automatically discovered and registered by `lps-builtin-gen-app`
 
 ### 2. Distance Function
 
@@ -119,7 +119,7 @@ Simplex noise.
 ### 7. Q32 Fixed-Point Considerations
 
 - All coordinates and return values are Q32 (i32 with 16.16 format)
-- Use Q32 arithmetic operations (from `lp-glsl-builtins/src/util/q32/q32.rs`)
+- Use Q32 arithmetic operations (from `lps-builtins/src/util/q32/q32.rs`)
 - Distance calculations use fixed-point arithmetic
 - Final scaling accounts for Q32 format
 
@@ -180,7 +180,7 @@ Reference implementation: noise-rs `worley_2d` and `worley_3d` functions.
 ### Module Declaration
 
 Worley noise functions are declared as builtins via the existing builtin system. The internal
-`__lpfx_worley*` functions are registered automatically by `lp-glsl-builtin-gen-app` which scans the
+`__lpfx_worley*` functions are registered automatically by `lps-builtin-gen-app` which scans the
 `lpfx/worley/` directory.
 
 ### Function Call Codegen

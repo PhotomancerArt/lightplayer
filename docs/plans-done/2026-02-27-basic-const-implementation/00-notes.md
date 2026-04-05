@@ -2,7 +2,7 @@
 
 ## Scope of Work
 
-Implement basic `const` support in the lp-glsl compiler so that:
+Implement basic `const` support in the lps compiler so that:
 - Global const declarations like `const float PI = 3.14159;` compile and can be used in functions
 - Local const (already partially works) is properly validated (read-only, must-init)
 - Const qualifier semantics are enforced (spec variables.adoc §4.3.3, §4.3.3.1)
@@ -23,11 +23,11 @@ The main goal is to allow basic const support for simple things like PI. The pla
 - **StorageClass**: VarDecl uses only `Local`; no `Const` storage class.
 
 ### Key files
-- `lp-glsl-compiler/src/frontend/semantic/passes/function_extraction.rs` — only extracts FunctionDefinition
-- `lp-glsl-compiler/src/frontend/semantic/scope.rs` — VarDecl, StorageClass (Local only)
-- `lp-glsl-compiler/src/frontend/semantic/type_resolver.rs` — parse_array_dimensions requires IntConst
-- `lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` — emit_declaration
-- `lp-glsl-compiler/src/frontend/glsl_compiler.rs` — compile flow, TypedShader has no global_constants
+- `lps-compiler/src/frontend/semantic/passes/function_extraction.rs` — only extracts FunctionDefinition
+- `lps-compiler/src/frontend/semantic/scope.rs` — VarDecl, StorageClass (Local only)
+- `lps-compiler/src/frontend/semantic/type_resolver.rs` — parse_array_dimensions requires IntConst
+- `lps-compiler/src/frontend/codegen/stmt/declaration.rs` — emit_declaration
+- `lps-compiler/src/frontend/glsl_compiler.rs` — compile flow, TypedShader has no global_constants
 
 ### glsl crate
 - Uses `FullySpecifiedType` with qualifiers; `TypeQualifier` has `TypeQualifierSpec::Storage(StorageQualifier::Const)`

@@ -177,7 +177,7 @@ fn call_multi_return_f32_2(jit: &JITModule, fid: FuncId, a: f32, b: f32) -> (f32
 ```
 
 For functions with more return values that do use struct-return, we may need
-`lp-glsl-jit-util::call_structreturn`. Check whether our test cases stay
+`lps-jit-util::call_structreturn`. Check whether our test cases stay
 within register-return limits. 2x f32 should be fine on all platforms.
 
 ## Validate

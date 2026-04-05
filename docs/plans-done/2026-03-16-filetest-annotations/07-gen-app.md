@@ -2,7 +2,7 @@
 
 ## Scope
 
-Update the `lp-glsl-filetests-gen-app` templates to emit the new annotation
+Update the `lps-filetests-gen-app` templates to emit the new annotation
 format instead of `// target riscv32.q32`. Regenerate all `.gen.glsl` files.
 
 ## Code Organization Reminders
@@ -15,14 +15,14 @@ format instead of `// target riscv32.q32`. Regenerate all `.gen.glsl` files.
 
 ## Implementation Details
 
-### Update `lp-glsl-filetests-gen-app/src/util.rs`
+### Update `lps-filetests-gen-app/src/util.rs`
 
 The `generate_header` function currently returns:
 
 ```
 // This file is GENERATED. Do not edit manually.
 // To regenerate, run:
-//   lp-glsl-filetests-gen-app {specifier} --write
+//   lps-filetests-gen-app {specifier} --write
 //
 ```
 
@@ -71,14 +71,14 @@ content.push_str(&format!("// run: ..."));
 ### Regenerate all files
 
 ```bash
-cd lp-glsl
-cargo run -p lp-glsl-filetests-gen-app -- --write
+cd lps
+cargo run -p lps-filetests-gen-app -- --write
 ```
 
 Or regenerate specific categories:
 
 ```bash
-cargo run -p lp-glsl-filetests-gen-app -- vec --write
+cargo run -p lps-filetests-gen-app -- vec --write
 ```
 
 ### Verification
@@ -87,8 +87,8 @@ After regeneration, no `.gen.glsl` file should contain `// target` or
 `[expect-fail]`:
 
 ```bash
-grep -r '// target' lp-shader/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
-grep -r '\[expect-fail\]' lp-shader/lp-glsl-filetests/filetests/ --include='*.gen.glsl'
+grep -r '// target' lp-shader/lps-filetests/filetests/ --include='*.gen.glsl'
+grep -r '\[expect-fail\]' lp-shader/lps-filetests/filetests/ --include='*.gen.glsl'
 ```
 
 ## Validate

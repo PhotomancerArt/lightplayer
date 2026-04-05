@@ -263,6 +263,6 @@ now use only the streaming loop.
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lps-compiler && cargo test --features std
 ```

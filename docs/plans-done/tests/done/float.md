@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for scalar floating-point type `float` in `lightplayer/crates/lp-glsl-filetests/filetests/float/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL single-precision floating-point scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for scalar floating-point type `float` in `lightplayer/crates/lps-filetests/filetests/float/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL single-precision floating-point scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -308,8 +308,8 @@ Note: Use `~=` for approximate equality due to floating-point precision issues.
    - NaN/Inf handling
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/bool/op-equal.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/math/float-add.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/bool/op-equal.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/math/float-add.glsl`
 
 ## Files to Create
 

@@ -9,7 +9,7 @@ fixed-point arithmetic.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/util/
+lp-shader/lps-builtins/src/util/
 ├── vec2_q32.rs              # NEW: Vec2Q32 type and implementation
 ├── vec3_q32.rs              # NEW: Vec3Q32 type and implementation
 ├── vec4_q32.rs              # NEW: Vec4Q32 type and implementation
@@ -266,7 +266,7 @@ Comprehensive tests similar to reference implementation:
 
 ### Module Structure
 
-Vector types are added to `lp-glsl-builtins/src/util/`:
+Vector types are added to `lps-builtins/src/util/`:
 
 - `vec2_q32.rs` - Vec2Q32 implementation
 - `vec3_q32.rs` - Vec3Q32 implementation
@@ -282,7 +282,7 @@ Vector types are added to `lp-glsl-builtins/src/util/`:
 ### Usage Example
 
 ```rust
-use lp_glsl_builtins::util::{Vec2Q32, Vec3Q32, Q32};
+use lps_builtins::util::{Vec2Q32, Vec3Q32, Q32};
 
 // Create vectors
 let v2 = Vec2Q32::from_f32(1.0, 2.0);

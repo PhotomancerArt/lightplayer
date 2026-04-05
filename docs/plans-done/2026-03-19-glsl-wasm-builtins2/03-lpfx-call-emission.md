@@ -20,7 +20,7 @@ out-param pointers, memory reads).
 
 ### 1. `memory.rs`
 
-File: `lp-shader/lp-glsl-wasm/src/codegen/memory.rs`
+File: `lp-shader/lps-wasm/src/codegen/memory.rs`
 
 Minimal — just constants for the out-param scratch region:
 
@@ -35,7 +35,7 @@ pub const LPFX_OUT_PARAM_SIZE: u32 = 8;
 
 ### 2. FunCall dispatch
 
-File: `lp-shader/lp-glsl-wasm/src/codegen/expr/mod.rs`
+File: `lp-shader/lps-wasm/src/codegen/expr/mod.rs`
 
 Add LPFX branch after the Q32 math import branch:
 
@@ -53,7 +53,7 @@ Add `mod lpfx_call;` and import `lpfx_fn_registry`.
 
 ### 3. `lpfx_call.rs`
 
-File: `lp-shader/lp-glsl-wasm/src/codegen/expr/lpfx_call.rs`
+File: `lp-shader/lps-wasm/src/codegen/expr/lpfx_call.rs`
 
 Main entry point:
 `emit_lpfx_call(ctx, sink, full_call, name, args, options) -> Result<WasmRValue, GlslDiagnostics>`
@@ -131,7 +131,7 @@ error for now — Rainbow only uses `gradient` as a plain `vec2` local.
 
 ### 4. Tests
 
-In `lp-glsl-wasm/tests/basic.rs` (compile-only):
+In `lps-wasm/tests/basic.rs` (compile-only):
 
 - `test_lpfx_worley_compiles` — shader calling `lpfx_worley(vec2(1.0, 2.0), 0u)` compiles
 - `test_lpfx_fbm_compiles` — shader calling `lpfx_fbm(vec2(1.0, 2.0), 3, 0u)` compiles
@@ -139,7 +139,7 @@ In `lp-glsl-wasm/tests/basic.rs` (compile-only):
   `lpfx_psrdnoise(vec2(1.0), vec2(0.0), 0.5, gradient, 0u)` compiles, produces correct imports
   including memory
 
-In `lp-glsl-wasm/tests/q32_builtin_link.rs` (linked execution):
+In `lps-wasm/tests/q32_builtin_link.rs` (linked execution):
 
 - `test_lpfx_worley_linked` — compile + link + run, verify non-zero return
 - `test_lpfx_psrdnoise_linked` — compile + link + run, verify gradient local is written
@@ -147,7 +147,7 @@ In `lp-glsl-wasm/tests/q32_builtin_link.rs` (linked execution):
 ## Validate
 
 ```bash
-cd lp-glsl && cargo test -p lp-glsl-wasm
+cd lps && cargo test -p lps-wasm
 cargo +nightly fmt
 ```
 

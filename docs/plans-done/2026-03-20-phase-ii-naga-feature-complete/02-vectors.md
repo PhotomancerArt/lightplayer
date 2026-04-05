@@ -289,7 +289,7 @@ need to branch based on dimension.
 ```bash
 scripts/glsl-filetests.sh --target wasm.q32 "vec/"
 scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Scalar tests must remain passing. Most `vec/` tests for basic construction and

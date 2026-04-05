@@ -8,7 +8,7 @@ Implement `pow(x, y)` function using fpm's approach (pow(x,y) = exp2(log2(x) * y
 
 ### 7.1 Port fpm Pow Implementation
 
-In `lp-glsl-builtins/src/q32/pow.rs`:
+In `lps-builtins/src/q32/pow.rs`:
 
 - Port fpm's pow implementation
 - Uses: `pow(x, y) = exp2(log2(x) * y)` for fractional exponents
@@ -19,20 +19,20 @@ In `lp-glsl-builtins/src/q32/pow.rs`:
 
 ### 7.2 Add to Module
 
-In `lp-glsl-builtins/src/q32/mod.rs`:
+In `lps-builtins/src/q32/mod.rs`:
 
 - Add `mod pow;`
 - Export `__lp_q32_pow`
 
 ### 7.3 Update Builtins App
 
-In `lp-glsl-builtins-emu-app/src/main.rs`:
+In `lps-builtins-emu-app/src/main.rs`:
 
 - Add reference to `__lp_q32_pow`
 
 ### 7.4 Add to Registry
 
-In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
+In `lps-compiler/src/backend/builtins/registry.rs`:
 
 - Add `Q32Pow` to `BuiltinId` enum
 - Signature: (i32, i32) -> i32
@@ -40,7 +40,7 @@ In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
 
 ### 7.5 Add Transform Conversion
 
-In `lp-glsl-compiler/src/backend/transform/q32/converters/math.rs`:
+In `lps-compiler/src/backend/transform/q32/converters/math.rs`:
 
 - Add mappings: `"powf"` and `"__lp_pow"` -> `(Q32Pow, 2)`
 - This should already work with the 2-arg support added in Phase 4

@@ -20,11 +20,11 @@ in read/write functions, and `out_inout_ptr` from `VarInfo`. This completes the 
 
 ### Files to Modify
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/types.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/context.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/types.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/read.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/write.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/context.rs`
+- `lp-shader/lps-compiler/src/frontend/glsl_compiler.rs`
 
 ### Changes
 

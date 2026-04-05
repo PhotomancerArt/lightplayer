@@ -2,16 +2,16 @@
 
 ## Description
 
-Integrate LPFX codegen into the main `lp-glsl-builtin-gen-app` flow and update file generation.
+Integrate LPFX codegen into the main `lps-builtin-gen-app` flow and update file generation.
 
 ## Implementation
 
-1. Update `lp-glsl-builtin-gen-app/src/main.rs`:
+1. Update `lps-builtin-gen-app/src/main.rs`:
     - Add call to discover LPFX functions
     - Add call to validate LPFX functions
     - Add call to generate `lpfx_fns.rs`
     - Add generated file to formatting list
-2. Set output path: `lp-shader/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_fns.rs`
+2. Set output path: `lp-shader/lps-compiler/src/frontend/semantic/lpfx/lpfx_fns.rs`
 3. Ensure generated file is formatted with `cargo fmt`
 
 ## Success Criteria

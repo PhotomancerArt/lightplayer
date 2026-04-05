@@ -2,13 +2,13 @@
 
 ## Description
 
-Update `lp-glsl-builtin-gen-app` to generate multiple `LpfxFn` entries for functions with the same
+Update `lps-builtin-gen-app` to generate multiple `LpfxFn` entries for functions with the same
 GLSL name but different signatures. Add validation to ensure overloads have distinct parameter
 signatures.
 
 ## Implementation
 
-### File: `lp-shader/lp-glsl-builtin-gen-app/src/lpfx/generate.rs`
+### File: `lp-shader/lps-builtin-gen-app/src/lpfx/generate.rs`
 
 **Update `generate_lpfx_fns`:**
 
@@ -22,7 +22,7 @@ signatures.
 - Helper function to compare function signatures (name + parameters)
 - Use this to identify unique signatures within a name group
 
-### File: `lp-shader/lp-glsl-builtin-gen-app/src/lpfx/validate.rs`
+### File: `lp-shader/lps-builtin-gen-app/src/lpfx/validate.rs`
 
 **Add validation:**
 

@@ -13,7 +13,7 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 ## Scope
 
 **In scope:**
-- Rewrite `lp-glsl-wasm/src/emit.rs` to walk `IrFunction.body` (Vec<Op>)
+- Rewrite `lps-wasm/src/emit.rs` to walk `IrFunction.body` (Vec<Op>)
 - Local declaration: count VRegs by type, declare as function locals
   (f32 locals for Float VRegs, i32 for Int VRegs)
 - Op emission: 1:1 map for most ops
@@ -50,9 +50,9 @@ is trivial (VReg N → local N). Validate with wasmtime smoke tests.
 
 ## Deliverables
 
-- Rewritten `lp-glsl-wasm/src/emit.rs` (~300 lines)
-- Deleted `lp-glsl-wasm/src/locals.rs`, `emit_vec.rs`
-- Simplified `lp-glsl-wasm/src/types.rs`
+- Rewritten `lps-wasm/src/emit.rs` (~300 lines)
+- Deleted `lps-wasm/src/locals.rs`, `emit_vec.rs`
+- Simplified `lps-wasm/src/types.rs`
 - Wasmtime-based tests exercising the full pipeline
   (GLSL → Naga → LPIR → WASM emitter [Q32 inside] → run)
 

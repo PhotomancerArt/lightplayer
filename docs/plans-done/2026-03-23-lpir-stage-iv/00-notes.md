@@ -2,7 +2,7 @@
 
 ## Scope
 
-Implement `lp-glsl-naga/src/lower.rs` — the lowering pass that converts a
+Implement `lps-naga/src/lower.rs` — the lowering pass that converts a
 `naga::Module` into an `IrModule` of LPIR functions. Covers scalar expressions,
 control flow, user function calls, math builtin decomposition, and LPFX call
 structure. The lowering is completely float-mode-unaware.
@@ -32,7 +32,7 @@ structure. The lowering is completely float-mode-unaware.
 
 ## Current state
 
-### `lp-glsl-naga` crate (`lp-shader/lp-glsl-naga/`)
+### `lps-naga` crate (`lp-shader/lps-naga/`)
 
 Thin wrapper around `naga::front::glsl`. Provides:
 
@@ -42,7 +42,7 @@ Thin wrapper around `naga::front::glsl`. Provides:
 - Prepends LPFX prototypes and a dummy `main` entry point
 - `#![no_std]`, depends only on `naga`
 
-### `lp-glsl-wasm` crate (existing Naga → WASM emitter)
+### `lps-wasm` crate (existing Naga → WASM emitter)
 
 The reference for what Naga IR patterns the lowering must handle. Key files:
 
@@ -97,21 +97,21 @@ Complete as of Stage III. Key API surface for the lowering:
 
 ### Q1: Crate placement and dependency
 
-The roadmap places `lower.rs` in `lp-glsl-naga`, requiring `lpir` as a new
-dependency of `lp-glsl-naga`.
+The roadmap places `lower.rs` in `lps-naga`, requiring `lpir` as a new
+dependency of `lps-naga`.
 
-**Current state:** `lp-glsl-naga` depends only on `naga`. Adding `lpir` creates
-a dependency: `lp-glsl-naga` → `lpir` (and `lp-glsl-naga` → `naga`). Both are
+**Current state:** `lps-naga` depends only on `naga`. Adding `lpir` creates
+a dependency: `lps-naga` → `lpir` (and `lps-naga` → `naga`). Both are
 `no_std` + `alloc`, so compatible.
 
-**Alternative:** Create a new crate (e.g. `lp-glsl-lower`) that depends on both
-`lp-glsl-naga` and `lpir`.
+**Alternative:** Create a new crate (e.g. `lps-lower`) that depends on both
+`lps-naga` and `lpir`.
 
-**Suggested:** Follow the roadmap. Add `lpir` dependency to `lp-glsl-naga`. The
+**Suggested:** Follow the roadmap. Add `lpir` dependency to `lps-naga`. The
 lowering is tightly coupled to the Naga frontend's output (`NagaModule`) and
 keeping them together avoids crate proliferation.
 
-**Answer:** Follow the roadmap. `lower.rs` in `lp-glsl-naga`, add `lpir` dep.
+**Answer:** Follow the roadmap. `lower.rs` in `lps-naga`, add `lpir` dep.
 
 ### Q2: Math builtin handling
 
@@ -215,19 +215,19 @@ out-params." In LPIR, this means:
 3. For out-parameters: allocate slots via `FunctionBuilder::alloc_slot`,
    pass slot address as i32 arg, load results from slot after call
 
-The existing LPFX resolution logic lives in `lp-glsl-wasm/src/lpfx.rs` and
-depends on `lp-glsl-builtin-ids` for `BuiltinId` resolution.
+The existing LPFX resolution logic lives in `lps-wasm/src/lpfx.rs` and
+depends on `lps-builtin-ids` for `BuiltinId` resolution.
 
 **Suggested:** Implement full LPFX lowering as described. This requires adding
-`lp-glsl-builtin-ids` as a dependency of `lp-glsl-naga` (for `BuiltinId`
+`lps-builtin-ids` as a dependency of `lps-naga` (for `BuiltinId`
 resolution) or reimplementing the name-based mapping.
 
 **Alternative:** Defer LPFX to a follow-up. Stage IV covers only user functions
 and `std.math` builtins. LPFX testing without a runtime executor is limited to
 print-output verification anyway.
 
-**Answer:** A — include LPFX in Stage IV. Add `lp-glsl-builtin-ids` dependency
-to `lp-glsl-naga`. Test via print-output verification.
+**Answer:** A — include LPFX in Stage IV. Add `lps-builtin-ids` dependency
+to `lps-naga`. Test via print-output verification.
 
 ### Q5: `uint` and `bool` type mapping
 
@@ -269,5 +269,5 @@ calls (if we use imports for some math builtins per Q2).
 
 **Answer:** Tests in separate files. `StdMathHandler` in its own module
 (reusable by both lower tests and future consumers). Test files under
-`lp-glsl-naga/tests/` for end-to-end GLSL→LPIR tests. Validate every
+`lps-naga/tests/` for end-to-end GLSL→LPIR tests. Validate every
 lowered module. LPFX: print-output only.

@@ -66,6 +66,23 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpir/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lpir-cranelift/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-exec/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-wasm/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtin-ids/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-emu-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-gen-app/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-diagnostics/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests-gen-app/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-naga/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-naga/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

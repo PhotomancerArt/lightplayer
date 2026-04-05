@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend the `lp-glsl-q32-metrics-app` app to generate vcode and assembly files in addition to CLIF
+Extend the `lps-q32-metrics-app` app to generate vcode and assembly files in addition to CLIF
 files, enabling size comparison at multiple compilation stages. The app will switch from `JITModule`
 to `ObjectModule` to access compiled code, use RISC-V 32-bit target, and add vcode/assembly size
 metrics to statistics.
@@ -10,7 +10,7 @@ metrics to statistics.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-q32-metrics-app/
+lp-shader/lps-q32-metrics-app/
 ├── src/
 │   ├── main.rs                    # UPDATE: Change to use ObjectModule
 │   ├── cli.rs                     # No changes
@@ -18,7 +18,7 @@ lp-shader/lp-glsl-q32-metrics-app/
 │   ├── clif.rs                    # UPDATE: Rename to codegen.rs, add vcode/assembly writing
 │   ├── stats.rs                   # UPDATE: Add vcode_size, assembly_size fields
 │   └── report.rs                  # UPDATE: Include new size fields in reports
-└── Cargo.toml                     # UPDATE: Add emulator feature to lp-glsl-compiler dependency
+└── Cargo.toml                     # UPDATE: Add emulator feature to lps-compiler dependency
 ```
 
 ## Report Structure
@@ -399,7 +399,7 @@ fn process_test(
 
 ```toml
 [dependencies]
-lp-glsl-compiler = { path = "../../crates/lp-glsl-compiler", default-features = false, features = ["std", "emulator"] }  # UPDATE: Add emulator feature
+lps-compiler = { path = "../../crates/lps-compiler", default-features = false, features = ["std", "emulator"] }  # UPDATE: Add emulator feature
 ```
 
 ## Implementation Notes
@@ -422,7 +422,7 @@ lp-glsl-compiler = { path = "../../crates/lp-glsl-compiler", default-features = 
 6. **File Naming**: Use `.vcode` extension for vcode files and `.s` extension for assembly files,
    following the pattern of `.pre` and `.post` suffixes.
 
-7. **Feature Requirement**: The `emulator` feature must be enabled in `lp-glsl-compiler` dependency
+7. **Feature Requirement**: The `emulator` feature must be enabled in `lps-compiler` dependency
    to access RISC-V target and Capstone disassembly.
 
 ## Success Criteria

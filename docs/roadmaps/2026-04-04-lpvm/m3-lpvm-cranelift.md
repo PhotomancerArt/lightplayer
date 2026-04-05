@@ -195,7 +195,7 @@ What stays in `lpir-cranelift` temporarily:
   product — see AGENTS.md.
 - Do NOT delete `lpir-cranelift` yet. It coexists until consumers are migrated.
 - Do NOT update `lp-engine` to use this yet. That's M6.
-- Builtin crate path may still read `lp-glsl-builtins` on disk until rename
+- Builtin crate path may still read `lps-builtins` on disk until rename
   completes; use workspace reality.
 - Do NOT add `#[cfg(feature = "std")]` to any compile/execute path.
 

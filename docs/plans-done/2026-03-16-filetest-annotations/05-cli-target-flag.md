@@ -2,7 +2,7 @@
 
 ## Scope
 
-Add `--target <name>` flag to `lp-glsl-filetests-app` CLI. Thread the
+Add `--target <name>` flag to `lps-filetests-app` CLI. Thread the
 target filter through `lib.rs::run()` to the runner. Update
 `scripts/glsl-filetests.sh` help text.
 
@@ -16,7 +16,7 @@ target filter through `lib.rs::run()` to the runner. Update
 
 ## Implementation Details
 
-### Update `lp-glsl-filetests-app/src/main.rs`
+### Update `lps-filetests-app/src/main.rs`
 
 Add `--target` option to `TestOptions`:
 
@@ -35,12 +35,12 @@ struct TestOptions {
 ```
 
 Resolve the target name to a `&Target` using `Target::from_name()`. Pass it
-through to `lp_glsl_filetests::run()`.
+through to `lps_filetests::run()`.
 
 If the target name is invalid, print the error (which includes valid names)
 and exit.
 
-### Update `lp_glsl_filetests::run()` signature
+### Update `lps_filetests::run()` signature
 
 ```rust
 pub fn run(files: &[String], fix_xfail: bool, target_filter: Option<&Target>) -> Result<()>
@@ -49,10 +49,10 @@ pub fn run(files: &[String], fix_xfail: bool, target_filter: Option<&Target>) ->
 Inside `run()`:
 
 ```rust
-let active_targets: Vec<&Target> = if let Some(t) = target_filter {
-    vec![t]
+let active_targets: Vec< & Target> = if let Some(t) = target_filter {
+vec![t]
 } else {
-    DEFAULT_TARGETS.iter().collect()
+DEFAULT_TARGETS.iter().collect()
 };
 ```
 
@@ -69,15 +69,15 @@ flag and list valid targets.
 
 ### Tests
 
-- Manual testing: `cargo run -p lp-glsl-filetests-app -- test --target wasm.q32`
+- Manual testing: `cargo run -p lps-filetests-app -- test --target wasm.q32`
   should run only wasm tests
-- Manual testing: `cargo run -p lp-glsl-filetests-app -- test --target invalid`
+- Manual testing: `cargo run -p lps-filetests-app -- test --target invalid`
   should print valid target names and exit with error
 
 ## Validate
 
 ```
-cargo build -p lp-glsl-filetests-app
-cargo test -p lp-glsl-filetests
+cargo build -p lps-filetests-app
+cargo test -p lps-filetests
 cargo +nightly fmt -- --check
 ```

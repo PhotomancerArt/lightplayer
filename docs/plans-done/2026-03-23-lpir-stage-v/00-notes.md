@@ -2,10 +2,10 @@
 
 ## Current state
 
-Stage IV is implemented: `lp-glsl-naga::lower()` produces an `IrModule`
+Stage IV is implemented: `lps-naga::lower()` produces an `IrModule`
 from a `NagaModule`. The LPIR is flat, scalarized, and float-mode-unaware.
 
-The current WASM emitter (`lp-glsl-wasm/src/emit.rs`, ~1970 lines) walks
+The current WASM emitter (`lps-wasm/src/emit.rs`, ~1970 lines) walks
 Naga IR directly. It handles:
 - Float mode: native `f32.*` WASM instructions
 - Q32 mode: inline i32 fixed-point arithmetic via i64 widening/saturation
@@ -27,7 +27,7 @@ either (errors on unsupported MathFunction variants).
 
 Options:
 - A) Map to WASM host imports (`env::sin`, etc.). Host must provide.
-- B) Map to `builtins` module imports (from lp-glsl-builtins-wasm).
+- B) Map to `builtins` module imports (from lps-builtins-wasm).
 - C) Error for now (matches current emitter limitation).
 - D) Import from `builtins` module alongside LPFX — the builtins WASM
      already contains Q32 math implementations.
@@ -43,8 +43,8 @@ for native float support. For now, Q32-only; float mode errors.
 
 LPIR has `@lpfx::lpfx_hash1(f32, f32) -> f32` etc. The WASM emitter
 needs to create `builtins` module imports with the correct Q32 WASM
-signature. Currently, `lp-glsl-wasm/src/lpfx.rs` resolves via
-`lp-glsl-builtin-ids::BuiltinId` → `q32_lpfx_wasm_signature`.
+signature. Currently, `lps-wasm/src/lpfx.rs` resolves via
+`lps-builtin-ids::BuiltinId` → `q32_lpfx_wasm_signature`.
 
 For the new emitter, the LPIR import carries the *logical* signature
 (generic, float-mode-unaware). The emitter needs to:
@@ -61,7 +61,7 @@ Options:
 - B) LPIR ImportDecl carries an optional BuiltinId hint.
 
 **Answer:** A — emitter resolves by name. Keeps LPIR backend-agnostic.
-The emitter already depends on `lp-glsl-builtin-ids`.
+The emitter already depends on `lps-builtin-ids`.
 
 ### Q3: Shadow stack for slots
 
@@ -96,7 +96,7 @@ is small, targeted modules in directory modules.
 
 Proposed structure:
 ```
-lp-glsl-wasm/src/
+lps-wasm/src/
   emit/
     mod.rs          # entry: emit_module()
     func.rs         # per-function: locals, prologue/epilogue

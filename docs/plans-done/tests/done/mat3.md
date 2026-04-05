@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for matrix type `mat3` in `lightplayer/crates/lp-glsl-filetests/filetests/mat3/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL 3x3 float matrix specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for matrix type `mat3` in `lightplayer/crates/lps-filetests/filetests/mat3/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL 3x3 float matrix specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -281,9 +281,9 @@ Note: Use `~=` for approximate equality due to floating-point precision issues. 
    - Increment/decrement operators
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/matrix/arithmetic/addition.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/matrix/constructors/from-scalar.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/matrix/indexing/column-access.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/matrix/arithmetic/addition.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/matrix/constructors/from-scalar.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/matrix/indexing/column-access.glsl`
 
 ## Files to Create
 

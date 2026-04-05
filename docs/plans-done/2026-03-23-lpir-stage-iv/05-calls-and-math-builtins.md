@@ -212,8 +212,8 @@ impl lpir::interp::ImportHandler for StdMathHandler {
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo check -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 After this phase, GLSL programs with user function calls and math

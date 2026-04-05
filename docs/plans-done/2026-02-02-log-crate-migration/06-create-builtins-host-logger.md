@@ -17,7 +17,7 @@ to `__host_log` function which delegates to syscalls (emulator) or log crate (JI
 
 ### 1. Create Builtins Logger Module
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/logger.rs` (NEW)
+**File**: `lp-shader/lps-builtins/src/host/logger.rs` (NEW)
 
 ```rust
 //! Logger implementation for GLSL builtins.
@@ -97,7 +97,7 @@ pub fn init() {
 
 ### 2. Export Logger
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/mod.rs`
+**File**: `lp-shader/lps-builtins/src/host/mod.rs`
 
 Add:
 
@@ -109,7 +109,7 @@ pub use logger::{init as init_logger};
 
 ### 3. Update Cargo.toml
 
-**File**: `lp-shader/lp-glsl-builtins/Cargo.toml`
+**File**: `lp-shader/lps-builtins/Cargo.toml`
 
 Ensure log dependency:
 
@@ -127,7 +127,7 @@ No tests needed for this phase - logger will be tested when integrated with GLSL
 Run from workspace root:
 
 ```bash
-cargo check --package lp-glsl-builtins
+cargo check --package lps-builtins
 ```
 
 Ensure:

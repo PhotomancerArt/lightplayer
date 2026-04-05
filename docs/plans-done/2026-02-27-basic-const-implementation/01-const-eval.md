@@ -23,6 +23,6 @@ Add `ConstValue` enum and `eval_constant_expr` for evaluating constant expressio
 ## Validate
 
 ```
-cargo build -p lp-glsl-compiler
+cargo build -p lps-compiler
 just filetest const/qualifier/
 ```

@@ -19,14 +19,14 @@ deps, and forward features through `lp-server`.
 
 **Remove:**
 
-- `lp-glsl-cranelift`
+- `lps-cranelift`
 - `cranelift-codegen`
-- `lp-glsl-jit-util`
+- `lps-jit-util`
 
 **Add:**
 
 ```toml
-lpir-cranelift = { path = "../../lp-shader/lpir-cranelift", default-features = false }
+lpir-cranelift = { path = "../../lp-shader/legacy/lpir-cranelift", default-features = false }
 ```
 
 **Features** (mirror `lpir-cranelift`):
@@ -45,12 +45,12 @@ std = [
 
 ### 2. `lp-server/Cargo.toml`
 
-Replace any `lp-engine/...` feature edges that still name `lp-glsl-cranelift`
+Replace any `lp-engine/...` feature edges that still name `lps-cranelift`
 with `lpir-cranelift` equivalents (optimizer / verifier / `std`).
 
 ### 3. Workspace / other crates
 
-Grep for `lp-glsl-cranelift` under `lp-core/` and `lp-fw/` that exist only to
+Grep for `lps-cranelift` under `lp-core/` and `lp-fw/` that exist only to
 satisfy `lp-engine`. Remove or redirect if obsolete.
 
 ### 4. Do not edit `runtime.rs` yet

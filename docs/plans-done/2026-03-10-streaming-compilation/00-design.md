@@ -15,7 +15,7 @@ starting the next function. Goal: reduce peak heap usage on ESP32 by ~25-30 KB.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── mod.rs                          # UPDATE: Add glsl_jit_streaming() entry point
 │   ├── glsl_compiler.rs                # UPDATE: Extract per-function CLIF gen method

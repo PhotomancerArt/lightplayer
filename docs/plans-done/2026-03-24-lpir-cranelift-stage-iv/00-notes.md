@@ -26,7 +26,7 @@ lp-engine (Stage VI).
   results.
 - No `GlslQ32` / `call()` / `DirectCall`.
 
-### `lp-glsl-naga`
+### `lps-naga`
 
 - `compile(source) -> NagaModule` — Naga `Module` + `functions: Vec<(Handle, FunctionInfo)>`.
 - `FunctionInfo { name, params: Vec<(String, GlslType)>, return_type }` — **no
@@ -55,7 +55,7 @@ at the GLSL ABI level.
 
 **Answer:** **`lpir` crate** — main home for IR model and companion metadata.
 Add `glsl_metadata.rs` (or similar): `GlslParamQualifier`, `GlslParamMeta`,
-`GlslFunctionMeta`, `GlslModuleMeta`. `lp-glsl-naga` produces it during `lower`;
+`GlslFunctionMeta`, `GlslModuleMeta`. `lps-naga` produces it during `lower`;
 `lpir-cranelift` consumes it for `call()`.
 
 ### Q2: How to expose the memory-conscious lowering path vs borrowed IR?
@@ -74,7 +74,7 @@ lowering.
 **Context:** Roadmap wants `call(args: *const u32, results: *mut u32)`. Cranelift
 may use struct-return, different reg counts per platform.
 
-**Answer:** **Rust-side trampoline** (or `lp-glsl-jit-util`-style helpers) per
+**Answer:** **Rust-side trampoline** (or `lps-jit-util`-style helpers) per
 function signature — handles struct-return / ABI inside; callers see flat
 `u32` buffers. No JIT-generated trampoline in Stage IV unless needed later.
 

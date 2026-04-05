@@ -200,8 +200,8 @@ let off_vreg = if offset_idx == 0 {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-naga -q
-cargo test -p lp-glsl-wasm -q
+cargo test -p lps-naga -q
+cargo test -p lps-wasm -q
 scripts/glsl-filetests.sh function/edge-inout-both.glsl
 scripts/glsl-filetests.sh function/
 ```

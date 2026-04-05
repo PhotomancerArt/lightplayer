@@ -19,7 +19,7 @@ cargo +nightly fmt
 3. **Tests and checks**
 
 ```bash
-cargo test -p lp-glsl-naga -p lpir -p lpir-cranelift -p lp-glsl-filetests -p lp-glsl-wasm
+cargo test -p lps-naga -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm
 ./scripts/glsl-filetests.sh
 just test-filetests
 ```
@@ -36,7 +36,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 5. **Clippy** (if the repo expects it for touched crates)
 
 ```bash
-cargo clippy -p lp-glsl-naga -p lpir -p lpir-cranelift -p lp-glsl-filetests -p lp-glsl-wasm -- -D warnings
+cargo clippy -p lps-naga -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm -- -D warnings
 ```
 
 6. Fix **all** new warnings introduced by this plan’s work.
@@ -44,9 +44,9 @@ cargo clippy -p lp-glsl-naga -p lpir -p lpir-cranelift -p lp-glsl-filetests -p l
 ## Plan cleanup
 
 - Add **`summary.md`** to this directory with:
-  - What shipped (phases completed)
-  - Known follow-ups (arrays/structs, any deferred harness work)
-  - Final filetest pass rates (jit / wasm / rv32) if measured
+    - What shipped (phases completed)
+    - Known follow-ups (arrays/structs, any deferred harness work)
+    - Final filetest pass rates (jit / wasm / rv32) if measured
 - **Move** the entire `docs/plans/2026-03-29-lpir-feature-parity/` directory to
   `docs/plans-done/2026-03-29-lpir-feature-parity/` (preserve date + name).
 
@@ -55,9 +55,9 @@ cargo clippy -p lp-glsl-naga -p lpir -p lpir-cranelift -p lp-glsl-filetests -p l
 Example message (adjust body to match actual changes):
 
 ```
-feat(lp-glsl): LPIR filetest parity (matrix, relational, invoke)
+feat(lps): LPIR filetest parity (matrix, relational, invoke)
 
-- Lower Relational (all/any/not, vector isnan/isinf) in lp-glsl-naga
+- Lower Relational (all/any/not, vector isnan/isinf) in lps-naga
 - Matrix metadata, stores, builtins; Cranelift invoke sret for large returns
 - WASM parity checks; type_errors diagnostics; Q32 edge @unsupported
 - Filetest harness fixes; rename stats field unsupported

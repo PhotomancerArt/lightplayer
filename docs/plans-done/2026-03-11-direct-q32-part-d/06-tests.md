@@ -14,7 +14,7 @@ correct.
 ## Unit tests
 
 ```bash
-cargo test -p lp-glsl-compiler --features std
+cargo test -p lps-compiler --features std
 ```
 
 Includes the streaming-specific tests in `frontend/mod.rs::tests`:
@@ -30,7 +30,7 @@ now use direct emission, they should produce identical results.
 ## Emulator tests (if emulator feature is available)
 
 ```bash
-cargo test -p lp-glsl-compiler --features std,emulator
+cargo test -p lps-compiler --features std,emulator
 ```
 
 ## What to watch for

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL discard statements in `lightplayer/crates/lp-glsl-filetests/filetests/control/discard/` following the flat naming convention with prefixes. These tests will comprehensively cover the discard statement which is only available in fragment shaders. These tests are expected to fail initially, serving as a specification for implementing discard statement support in the compiler.
+Create a complete test suite for GLSL discard statements in `lightplayer/crates/lps-filetests/filetests/control/discard/` following the flat naming convention with prefixes. These tests will comprehensively cover the discard statement which is only available in fragment shaders. These tests are expected to fail initially, serving as a specification for implementing discard statement support in the compiler.
 
 ## Directory Structure
 
@@ -171,8 +171,8 @@ void test_discard_basic() {
    - Derivative undefined behavior
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/control/if/basic.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/control/return/early.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/control/if/basic.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/control/return/early.glsl`
    - GLSL spec: `statements.adoc` - Jumps section (lines 680-744)
 
 ## Files to Create

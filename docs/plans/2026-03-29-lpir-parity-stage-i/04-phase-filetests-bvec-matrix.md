@@ -21,7 +21,8 @@ Paths:
 - `matrix/mat3/op-equal.glsl`, `matrix/mat3/op-not-equal.glsl`
 - `matrix/mat4/op-equal.glsl`, `matrix/mat4/op-not-equal.glsl`
 
-Remove `// @unimplemented(backend=jit)` when tests pass. If a file still fails for **non-relational**
+Remove `// @unimplemented(backend=jit)` when tests pass. If a file still fails for **non-relational
+**
 reasons (e.g. mat4 return ABI), re-add marker or move to Milestone V per roadmap.
 
 ### Bvec (bool vectors)
@@ -58,7 +59,7 @@ Tier B (after triage), same pattern per file or directory:
 ```
 
 ```bash
-cd lp-glsl && cargo test -p lp-glsl-filetests
+cd lps && cargo test -p lps-filetests
 ```
 
 Corpus definition: [`expected-passing-tests.md`](./expected-passing-tests.md).

@@ -3,7 +3,7 @@
 ## Scope of work
 
 Same as `00-notes.md`: RV32 object emission from LPIR, merge with builtins ELF,
-run in `lp-riscv-emu`, validate in-crate. No `lp-glsl-filetests` wiring (V2).
+run in `lp-riscv-emu`, validate in-crate. No `lps-filetests` wiring (V2).
 
 ## Decisions
 
@@ -15,7 +15,7 @@ run in `lp-riscv-emu`, validate in-crate. No `lp-glsl-filetests` wiring (V2).
 ## File structure
 
 ```
-lp-shader/lpir-cranelift/
+lp-shader/legacy/lpir-cranelift/
 ├── build.rs                         # NEW (feature riscv32-emu): embed builtins ELF path
 ├── Cargo.toml                       # UPDATE: optional riscv32 / object / riscv deps
 └── src/
@@ -52,7 +52,7 @@ lp-shader/lpir-cranelift/
   only the `Module` implementation and ISA differ.
 - **Object path output:** relocatable ELF object bytes from Cranelift
   `ObjectModule::finish`.
-- **Link step:** identical semantics to `lp-glsl-cranelift`:
+- **Link step:** identical semantics to `lps-cranelift`:
   load base builtins executable, relocate/load shader object, verify `__lp_*`
   symbols from `BuiltinId` (or a filtered subset if we narrow declared imports).
 

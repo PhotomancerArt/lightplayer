@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL atomic counter and atomic memory functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/atomics/` following the flat naming convention with prefixes. These tests will comprehensively cover atomic counter functions and atomic memory operations on buffer/shared variables. These tests are expected to fail initially, serving as a specification for implementing atomic function support in the compiler.
+Create a complete test suite for GLSL atomic counter and atomic memory functions in `lightplayer/crates/lps-filetests/filetests/builtins/atomics/` following the flat naming convention with prefixes. These tests will comprehensively cover atomic counter functions and atomic memory operations on buffer/shared variables. These tests are expected to fail initially, serving as a specification for implementing atomic function support in the compiler.
 
 ## Directory Structure
 

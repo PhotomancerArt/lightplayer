@@ -33,7 +33,7 @@ LP_FILETESTS_THREADS=1 ./scripts/glsl-filetests.sh 2>&1 | grep fn-equal
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 LP_FILETESTS_THREADS=1 ./scripts/glsl-filetests.sh
 ./scripts/glsl-filetests.sh uvec2/fn-equal.glsl vec/uvec2/fn-equal.gen.glsl
 ```

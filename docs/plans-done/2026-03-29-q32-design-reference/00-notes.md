@@ -11,7 +11,7 @@
     - **Relational / builtin edge policy**: `isnan`, `isinf`, comparisons vs IEEE, and what is *
       *`@unsupported(float_mode=q32, …)`** vs implemented behavior.
     - Named constants (`Q32::PI`, etc.) and their intended numeric meaning.
-- Bring the **reference implementation** (`lp-glsl-builtins` `Q32` and closely related helpers) in
+- Bring the **reference implementation** (`lps-builtins` `Q32` and closely related helpers) in
   line with that document:
     - Make `Q32` operators saturating (matching JIT builtins).
     - Fix `Q32::div` to match agreed div-by-zero semantics.
@@ -39,9 +39,9 @@ WASM emitter audit is deferred to a separate task.
 There is **no** `docs/design/` file today; Q32 behavior is inferred from the above plus emitter
 code.
 
-### Reference type: `lp-glsl-builtins` `Q32`
+### Reference type: `lps-builtins` `Q32`
 
-File: `lp-shader/lp-glsl-builtins/src/glsl/q32/types/q32.rs`
+File: `lp-shader/lps-builtins/src/glsl/q32/types/q32.rs`
 
 - Q16.16: `SHIFT = 16`, raw `i32` payload.
 - **Public surface**: constants, `from_fixed` / `from_f32` / `from_i32`, `to_f32` / `to_fixed`,
@@ -61,7 +61,7 @@ File: `lp-shader/lp-glsl-builtins/src/glsl/q32/types/q32.rs`
 
 ### JIT `extern "C"` builtins
 
-Files: `lp-shader/lp-glsl-builtins/src/builtins/lpir/{fadd,fsub,fmul,fdiv,fsqrt,fnearest}_q32.rs`
+Files: `lp-shader/lps-builtins/src/builtins/lpir/{fadd,fsub,fmul,fdiv,fsqrt,fnearest}_q32.rs`
 
 - `fadd`, `fsub`, `fmul`: all saturate via i64 widening + clamp. Tests cover basic ops, signs,
   overflow/underflow.
@@ -84,7 +84,7 @@ Files: `lp-shader/lp-glsl-builtins/src/builtins/lpir/{fadd,fsub,fmul,fdiv,fsqrt,
 
 ### Compiler / runtime paths (for cross-references in the doc)
 
-- Naga → LPIR lowering (`lp-glsl-naga`): relational `isnan`/`isinf` behavior has been **mixed** (
+- Naga → LPIR lowering (`lps-naga`): relational `isnan`/`isinf` behavior has been **mixed** (
   IEEE-style vs sentinel-style) relative to written docs — to be aligned after the normative Q32
   section exists.
 - `lower_expr.rs` has `Q32_DIV0_POS`/`Q32_DIV0_NEG` sentinel constants used for `isinf` lowering —
@@ -103,8 +103,8 @@ are not surfaced through `isinf`.
 
 ### Q2 — Scope of "reference implementation"
 
-**Context:** Q32 appears in `lp-glsl-builtins`, Q32 builtins under `glsl/q32/fns/`, LPIR interpreter
-tests, and `lp-shader/lpir-cranelift`.
+**Context:** Q32 appears in `lps-builtins`, Q32 builtins under `glsl/q32/fns/`, LPIR interpreter
+tests, and `lp-shader/legacy/lpir-cranelift`.
 
 **Answer:** Primary reference = `Q32` struct + `fns/` + JIT `extern "C"` builtins + filetests. All
 must agree. Design doc is the single source of truth; filetests are the executable proof.
@@ -114,7 +114,7 @@ must agree. Design doc is the single source of truth; filetests are the executab
 **Context:** LPIR overview mentions WASM may use `i64` paths; Q32 JIT may differ.
 
 **Answer:** Design doc gets a short "Backend conformance" section: all backends must agree with the
-Q32 spec. WASM implementation details are left to `lp-glsl-wasm` crate docs. This plan does not
+Q32 spec. WASM implementation details are left to `lps-wasm` crate docs. This plan does not
 audit the WASM emitter.
 
 ## References
@@ -142,7 +142,7 @@ Three layers had three different behaviors — now normalized to:
 - `neg / 0` → `Q32(i32::MIN)` (max negative; sign-preserving saturation)
 
 This matches `__lp_lpir_fdiv_q32` for the nonzero cases. The reference `Q32::div` in
-`lp-glsl-builtins` needs to be updated from "always zero" to this behavior.
+`lps-builtins` needs to be updated from "always zero" to this behavior.
 
 `Rem` by zero: stays as `Q32(0)` (GLSL `mod(x, 0.0)` is undefined; zero is safe).
 

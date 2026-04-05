@@ -3,13 +3,13 @@
 # Variables
 
 rv32_target := "riscv32imac-unknown-none-elf"
-rv32_packages := "lp-glsl-builtins-emu-app"
+rv32_packages := "lps-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32"
 
 # fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
 
 fw_esp32_profile := "release-esp32"
-lp_glsl_dir := "lp-shader"
+lps_dir := "lp-shader"
 
 # Default recipe - show available commands
 default:
@@ -30,7 +30,7 @@ install-rv32-target:
 
 # Generate builtin boilerplate code
 generate-builtins:
-    cargo run --bin lp-glsl-builtins-gen-app -p lp-glsl-builtins-gen-app
+    cargo run --bin lps-builtins-gen-app -p lps-builtins-gen-app
 
 # Ensure wasm32-unknown-unknown target is installed (web-demo, builtins wasm)
 
@@ -53,7 +53,7 @@ web-demo-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Building builtins WASM..."
-    cargo build -p lp-glsl-builtins-wasm --target wasm32-unknown-unknown --release
+    cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release
     echo "Building web-demo (compiler) for wasm32..."
     cargo build -p web-demo --target wasm32-unknown-unknown --release
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp target/wasm32-unknown-unknown/release/lp_glsl_builtins_wasm.wasm lp-app/web-demo/www/builtins.wasm
+    cp target/wasm32-unknown-unknown/release/lps_builtins_wasm.wasm lp-app/web-demo/www/builtins.wasm
     cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
     echo "Artifacts: lp-app/web-demo/www/ (index.html, builtins.wasm, pkg/)"
 
@@ -156,7 +156,7 @@ build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
-    cargo build --target {{ rv32_target }} -p lp-glsl-builtins-emu-app --release
+    cargo build --target {{ rv32_target }} -p lps-builtins-emu-app --release
 
 [parallel]
 build: build-host build-rv32
@@ -175,14 +175,14 @@ build-app-release:
     cargo build --release --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
 
 # ============================================================================
-# Build commands - lp-glsl only
+# Build commands - lps only
 # ============================================================================
 
 build-glsl:
-    cargo build --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpir-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-naga --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 build-glsl-release:
-    cargo build --release --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpir-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-naga --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Formatting
@@ -201,7 +201,7 @@ fmt-check:
 # ============================================================================
 
 clippy-host:
-    cargo clippy --workspace --exclude lp-glsl-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
 
 clippy-rv32: install-rv32-target clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
@@ -247,14 +247,14 @@ clippy-app-fix:
                  --package lp-model
 
 # ============================================================================
-# Linting - lp-glsl only
+# Linting - lps only
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm -- --no-deps -D warnings
+    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpir-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-naga --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpir-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-naga --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -280,11 +280,11 @@ test-app:
     cargo test --package lp-engine --package lp-engine-client --package lp-shared --package lp-server --package lp-cli --package lp-model
 
 # ============================================================================
-# Testing - lp-glsl only
+# Testing - lps only
 # ============================================================================
 
 test-glsl:
-    cargo test --package lp-glsl-builtins --package lp-glsl-filetests-gen-app --package lpir-cranelift --package lp-glsl-filetests --package lp-riscv-emu-shared --package lp-glsl-builtins-gen-app --package lp-glsl-filetests-app --package lp-glsl-naga --package lp-glsl-exec --package lpvm --package lp-glsl-diagnostics --package lps-shared --package lpir --package lp-glsl-builtin-ids --package lp-glsl-wasm
+    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpir-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-naga --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
     scripts/glsl-filetests.sh
@@ -310,7 +310,7 @@ build-then-test: build test
 [parallel]
 ci-app: fmt-check clippy-app build-app test-app
 
-# lp-glsl specific CI
+# lps specific CI
 [parallel]
 ci-glsl: fmt-check clippy-glsl build-glsl test-glsl test-glsl-filetests
 
@@ -325,7 +325,7 @@ fci-app:
     @just clippy-app-fix
     @just ci-app
 
-# Fix code issues then run CI for lp-glsl (sequential, not parallel)
+# Fix code issues then run CI for lps (sequential, not parallel)
 fci-glsl:
     @just fmt
     @just clippy-glsl-fix
@@ -341,7 +341,7 @@ clean:
 
 # Clean everything including target directories
 clean-all: clean
-    rm -rf {{ lp_glsl_dir }}/target
+    rm -rf {{ lps_dir }}/target
 
 # ============================================================================
 # Git workflows

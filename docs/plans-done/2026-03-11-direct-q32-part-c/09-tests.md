@@ -43,7 +43,7 @@ Q32 mode and verify:
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
-cargo test -p lp-glsl-compiler --features std
+cargo check -p lps-compiler --features std
+cargo test -p lps-compiler --features std
 scripts/glsl-filetests.sh
 ```

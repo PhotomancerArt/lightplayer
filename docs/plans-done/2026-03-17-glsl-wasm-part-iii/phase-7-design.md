@@ -51,7 +51,7 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 7
 
 ## 4. LPFX as imports
 
-Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpfx_psrdnoise" (or whatever) to import name "__lpfx_psrdnoise3_q32" etc. Provide host function that calls lp-glsl-builtins.
+Same pattern as Phase 6 builtins. Add LPFX to the import set. Map GLSL name "lpfx_psrdnoise" (or whatever) to import name "__lpfx_psrdnoise3_q32" etc. Provide host function that calls lps-builtins.
 
 **Host for psrdnoise with out:** The Rust impl has signature `(p_x, p_y, p_z, period_x, period_y, period_z, gradient_ptr: i32) -> i32`. It computes result and gradient. It needs to write gradient to memory. It receives a `Store<T>` or `Caller` to access memory. `caller.get_export("memory")` and write at gradient_ptr.
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL geometry shader functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/geometry/` following the flat naming convention with prefixes. These tests will comprehensively cover EmitVertex() and EndPrimitive() functions. These tests are expected to fail initially, serving as a specification for implementing geometry shader function support in the compiler.
+Create a complete test suite for GLSL geometry shader functions in `lightplayer/crates/lps-filetests/filetests/builtins/geometry/` following the flat naming convention with prefixes. These tests will comprehensively cover EmitVertex() and EndPrimitive() functions. These tests are expected to fail initially, serving as a specification for implementing geometry shader function support in the compiler.
 
 ## Directory Structure
 

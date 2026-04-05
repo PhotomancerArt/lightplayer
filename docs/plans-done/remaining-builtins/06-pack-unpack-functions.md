@@ -37,12 +37,12 @@ Implement pack/unpack builtins for converting between float and uint bit pattern
 
 ## Files to Create/Modify
 
-- `lightplayer/crates/lp-glsl-builtins/src/q32/pack_half.rs` - new file
-- `lightplayer/crates/lp-glsl-builtins/src/q32/pack_double.rs` - new file (if needed)
-- `lightplayer/crates/lp-glsl-builtins/src/q32/pack_unorm.rs` - new file
-- `lightplayer/crates/lp-glsl-builtins/src/q32/unpack_half.rs` - new file
-- `lightplayer/crates/lp-glsl-builtins/src/q32/unpack_double.rs` - new file (if needed)
-- `lightplayer/crates/lp-glsl-builtins/src/q32/unpack_unorm.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/pack_half.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/pack_double.rs` - new file (if needed)
+- `lightplayer/crates/lps-builtins/src/q32/pack_unorm.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/unpack_half.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/unpack_double.rs` - new file (if needed)
+- `lightplayer/crates/lps-builtins/src/q32/unpack_unorm.rs` - new file
 - Run builtin generator to update boilerplate
 
 ## Success Criteria

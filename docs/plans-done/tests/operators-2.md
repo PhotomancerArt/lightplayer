@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan documents the existing operator tests in `lightplayer/crates/lp-glsl-filetests/filetests/operators/`. These tests cover increment and decrement operators (pre/post) for scalars, vectors, matrices, and components.
+This plan documents the existing operator tests in `lightplayer/crates/lps-filetests/filetests/operators/`. These tests cover increment and decrement operators (pre/post) for scalars, vectors, matrices, and components.
 
 ## Existing Test Structure
 

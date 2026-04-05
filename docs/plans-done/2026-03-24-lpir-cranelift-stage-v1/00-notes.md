@@ -6,7 +6,7 @@
   LPIR → CLIF emitter (`emit/`) with a RISC-V 32-bit ISA instead of host JIT.
 - **Emit relocatable object** bytes (ELF) for the shader module.
 - **Link** shader object into the pre-built **builtins emulator ELF** (same
-  pattern as `lp-glsl-cranelift`: `lp-riscv-elf` + `lp-glsl-builtins-emu-app`
+  pattern as `lps-cranelift`: `lp-riscv-elf` + `lps-builtins-emu-app`
   bytes).
 - **Run** linked code in **`lp-riscv-emu`** and validate with **in-crate tests**
   (hand-written or parsed LPIR, and optionally a thin GLSL → LPIR wrapper reusing
@@ -14,7 +14,7 @@
 - **Feature-gate** RV32/object/emulator deps so default `lpir-cranelift` stays
   host-JIT-oriented unless the feature is enabled.
 
-**Out of scope:** `lp-glsl-filetests` targets `jit.q32` / `rv32.q32` (Stage V2).
+**Out of scope:** `lps-filetests` targets `jit.q32` / `rv32.q32` (Stage V2).
 
 ## Current state of the codebase
 
@@ -27,7 +27,7 @@
   `define_function`, `finalize_definitions`.
 - No `ObjectModule`, no `riscv32` ISA in this crate’s `Cargo.toml`.
 
-### `lp-glsl-cranelift` (reference)
+### `lps-cranelift` (reference)
 
 - `Target::riscv32_emulator()` → `isa_builder` + `riscv32` triple, flags via
   `default_riscv32_flags`.
@@ -39,11 +39,11 @@
 - `backend/codegen/emu.rs`: defines all funcs in sorted name order, finishes
   object, links, runs emulator (`GlslEmulatorModule`).
 - Builtins ELF: `build.rs` + `include!` generated `lp_builtins_lib.rs` (path to
-  prebuilt `lp-glsl-builtins-emu-app`).
+  prebuilt `lps-builtins-emu-app`).
 
 ## Questions
 
-### Q1: How much should we share with `lp-glsl-cranelift` vs duplicate?
+### Q1: How much should we share with `lps-cranelift` vs duplicate?
 
 **Context:** Linking and emulator orchestration already exist in the old crate;
 `lpir-cranelift` should stay the LPIR consumer and avoid pulling AST types.
@@ -67,7 +67,7 @@ JIT, `finalize_definitions` + `JitModule` wrapper. Object-specific: RV32 ISA,
 
 ### Q3: Builtins ELF bytes — same build script as old crate?
 
-**Context:** Emulator tests need the `lp-glsl-builtins-emu-app` artifact at
+**Context:** Emulator tests need the `lps-builtins-emu-app` artifact at
 compile time.
 
 **Suggested answer:** **Reuse the same mechanism:** `build.rs` in

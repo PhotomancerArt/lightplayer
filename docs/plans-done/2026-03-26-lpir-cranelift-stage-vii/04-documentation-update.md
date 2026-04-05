@@ -19,10 +19,10 @@ docs (`plans-done/`, old roadmaps, reports) untouched.
 
 Remove from the crate table:
 
-- `lp-glsl-cranelift` entry
-- `lp-glsl-jit-util` entry
-- `lp-glsl-frontend` entry (if listed)
-- `lp-glsl-q32-metrics-app` entry (if listed)
+- `lps-cranelift` entry
+- `lps-jit-util` entry
+- `lps-frontend` entry (if listed)
+- `lps-q32-metrics-app` entry (if listed)
 - `esp32-glsl-jit` entry (if listed)
 
 Update any prose that mentions "two compiler backends" or similar to reflect
@@ -36,15 +36,15 @@ compiler path.
 
 ### 3. `AGENTS.md`
 
-- Remove the "Do NOT confuse `lpir-cranelift` with `lp-glsl-cranelift`" note
+- Remove the "Do NOT confuse `lpir-cranelift` with `lps-cranelift`" note
   (the old crate no longer exists).
-- Remove `lp-glsl-cranelift` from the "Key Crates" table if present.
+- Remove `lps-cranelift` from the "Key Crates" table if present.
 - Update any architecture diagrams or prose that references the old crate.
 
 ### 4. `.cursor/rules/no-std-compile-path.mdc`
 
 Remove the "Crate confusion warning" section that explains the difference
-between `lpir-cranelift` and `lp-glsl-cranelift`. The old crate is gone;
+between `lpir-cranelift` and `lps-cranelift`. The old crate is gone;
 the warning is unnecessary.
 
 ### 5. `.cursorrules`
@@ -63,7 +63,7 @@ stage references old crates as if they exist, update.
 No code changes — visual review of updated docs. Optionally:
 
 ```bash
-rg 'lp-glsl-cranelift|lp-glsl-jit-util|esp32-glsl-jit|lp-glsl-frontend' README.md AGENTS.md .cursorrules .cursor/rules/ lp-shader/README.md
+rg 'lps-cranelift|lps-jit-util|esp32-glsl-jit|lps-frontend' README.md AGENTS.md .cursorrules .cursor/rules/ lp-shader/README.md
 ```
 
 Should return zero matches (or only historical context like "was deleted in

@@ -9,11 +9,11 @@ Any shader node can opt in via config. esp32 demo project uses it as an example.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── exec/executable.rs           # UPDATE: Add fast_math to GlslOptions
 ├── frontend/mod.rs              # UPDATE: Pass options.fast_math to Q32Transform
 
-lp-shader/lp-glsl-compiler/src/backend/transform/q32/
+lp-shader/lps-compiler/src/backend/transform/q32/
 ├── transform.rs                 # UPDATE: Add fast_math field, pass to pipeline
 ├── instructions.rs              # UPDATE: Pass fast_math to convert_fadd/convert_fsub
 └── converters/
@@ -62,7 +62,7 @@ lp-fw/fw-esp32/src/
 2. **GlslOpts** (lp-model): New struct with `fast_math: bool`. Default false. Serialize/Deserialize
    for JSON.
 
-3. **GlslOptions** (lp-glsl-compiler): Adds `fast_math: bool` (default false). Passed to compile
+3. **GlslOptions** (lps-compiler): Adds `fast_math: bool` (default false). Passed to compile
    functions.
 
 4. **Q32Transform**: Adds `fast_math: bool` field, passed through to `convert_all_instructions` →

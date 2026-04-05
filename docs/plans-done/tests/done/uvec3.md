@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for unsigned integer vector type `uvec3` in `lightplayer/crates/lp-glsl-filetests/filetests/uvec3/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL unsigned integer vector specification for `uvec3` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for unsigned integer vector type `uvec3` in `lightplayer/crates/lps-filetests/filetests/uvec3/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL unsigned integer vector specification for `uvec3` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 

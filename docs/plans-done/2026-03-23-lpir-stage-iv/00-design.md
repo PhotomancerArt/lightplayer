@@ -2,7 +2,7 @@
 
 ## Scope
 
-Implement the Naga → LPIR lowering pass in `lp-glsl-naga`. Covers scalar
+Implement the Naga → LPIR lowering pass in `lps-naga`. Covers scalar
 expressions, control flow, user function calls, math builtin decomposition,
 LPFX call structure, and interpreter-based testing. The lowering is completely
 float-mode-unaware.
@@ -10,8 +10,8 @@ float-mode-unaware.
 ## File structure
 
 ```
-lp-shader/lp-glsl-naga/
-├── Cargo.toml                    # UPDATE: add lpir, lp-glsl-builtin-ids deps
+lp-shader/lps-naga/
+├── Cargo.toml                    # UPDATE: add lpir, lps-builtin-ids deps
 └── src/
     ├── lib.rs                    # UPDATE: pub mod lower + submodules
     ├── lower.rs                  # NEW: entry point (lower fn, LowerError)
@@ -22,7 +22,7 @@ lp-shader/lp-glsl-naga/
     ├── lower_lpfx.rs             # NEW: LPFX detection, import creation, out-param ABI
     └── std_math_handler.rs       # NEW: StdMathHandler (ImportHandler for tests)
 
-lp-shader/lp-glsl-naga/tests/
+lp-shader/lps-naga/tests/
     ├── lower_interp.rs           # NEW: GLSL → LPIR → interpret → verify results
     └── lower_print.rs            # NEW: GLSL → LPIR → print → verify text output
 
@@ -37,7 +37,7 @@ lp-shader/lpir/src/
 GLSL source
   │
   ▼
-compile(glsl) ──────────────────── lp-glsl-naga (existing)
+compile(glsl) ──────────────────── lps-naga (existing)
   │
   ▼
 NagaModule { module, functions }
@@ -148,7 +148,7 @@ acosh, atanh, exp, log, exp2, log2, pow, inversesqrt, fma, ldexp
 ### `lower_lpfx.rs` — LPFX handling
 
 Detects `lpfx_*` calls via name + parameter type matching (reuses
-`lp-glsl-builtin-ids` for resolution). Creates `@lpfx::name(...)` import
+`lps-builtin-ids` for resolution). Creates `@lpfx::name(...)` import
 declarations. For out-parameters: allocates slots via `alloc_slot`, passes
 slot address as i32 arg, loads results from slot after call.
 

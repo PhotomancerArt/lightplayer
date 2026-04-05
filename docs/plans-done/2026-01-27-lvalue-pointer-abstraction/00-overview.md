@@ -185,12 +185,12 @@ enum StorageLocation {
 
 ## Files Affected
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/types.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/read.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/write.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/glsl_compiler.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/types.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/read.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/write.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-shader/lps-compiler/src/frontend/glsl_compiler.rs`
 
 ## Notes
 

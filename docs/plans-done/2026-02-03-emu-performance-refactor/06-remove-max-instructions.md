@@ -37,8 +37,8 @@ that's no longer needed.
 
 Key places to check:
 
-- `lp-shader/lp-glsl-compiler/src/backend/codegen/emu.rs` - Uses `with_max_instructions()`
-- `lp-shader/lp-glsl-compiler/src/exec/emu.rs` - May use `set_max_instructions()`
+- `lp-shader/lps-compiler/src/backend/codegen/emu.rs` - Uses `with_max_instructions()`
+- `lp-shader/lps-compiler/src/exec/emu.rs` - May use `set_max_instructions()`
 - Test files - May use `with_max_instructions()`
 
 For example:
@@ -90,7 +90,7 @@ cargo test
 Also check dependent crates:
 
 ```bash
-cd lp-shader/lp-glsl-compiler
+cd lp-shader/lps-compiler
 cargo check
 cargo test
 ```

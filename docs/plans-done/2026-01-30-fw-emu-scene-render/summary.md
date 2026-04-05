@@ -89,7 +89,7 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 
 - All unit tests pass for `lp-riscv-emu`
 - Integration test structure is complete (may need minor adjustments when run)
-- Code compiles successfully (except unrelated `lp-glsl-compiler` dependency issues)
+- Code compiles successfully (except unrelated `lps-compiler` dependency issues)
 
 ## Notes
 
@@ -100,6 +100,6 @@ Successfully implemented an end-to-end integration test for `fw-emu` that loads 
 
 ## Next Steps
 
-1. Run the integration test once `lp-glsl-compiler` dependency issues are resolved
+1. Run the integration test once `lps-compiler` dependency issues are resolved
 2. Add output verification if needed (currently deferred)
 3. Consider adding more test scenarios (error cases, multiple projects, etc.)

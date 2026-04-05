@@ -119,9 +119,9 @@ helpers** (e.g. `lower_access_*`) so matrix `Access` (column / element) can reus
 
 ## Notes
 
-### Legacy `lp-glsl-compiler` (`feature/lightplayer-main`) behavior
+### Legacy `lps-compiler` (`feature/lightplayer-main`) behavior
 
-- **Reads** (`translate_matrix_indexing` in `lp-glsl-compiler/.../expr/component.rs`): variable
+- **Reads** (`translate_matrix_indexing` in `lps-compiler/.../expr/component.rs`): variable
   index on a **vector** uses **`emit_bounds_check`** (trapnz) then a **select chain** over
   components; variable **matrix column** uses bounds check then **per-row** selects across columns.
 - **Writes (LValue bracket indexing)** (`resolve_matrix_vector_indexing` in
@@ -129,7 +129,7 @@ helpers** (e.g. `lower_access_*`) so matrix `Access` (column / element) can reus
   which requires a **compile-time constant** (`IntConst`, etc.). So **`v[i] = …` with runtime `i`**
   was **not** supported on the **assignment** path in that compiler — only **constant** `v[0] = …`
   style for matrix/vector LValues.
-- **Stage II in `lp-glsl-naga`:** we **do** need to support whatever **Naga emits** (including
+- **Stage II in `lps-naga`:** we **do** need to support whatever **Naga emits** (including
   `Expression::Access` for `a[0] =` and compound updates), which goes **beyond** the old compiler’s
   constant-only LValue indexing.
 

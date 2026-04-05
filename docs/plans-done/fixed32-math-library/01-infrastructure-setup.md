@@ -9,7 +9,7 @@ transform mapping.
 
 ### 1.1 Create Test Helper Functions
 
-Create shared test utilities in `lp-glsl-builtins/src/q32/test_helpers.rs`:
+Create shared test utilities in `lps-builtins/src/q32/test_helpers.rs`:
 
 - Abstract the `float_to_fixed` and `fixed_to_float` helpers from `sqrt.rs`
 - Create a test helper function that accepts:
@@ -20,7 +20,7 @@ Create shared test utilities in `lp-glsl-builtins/src/q32/test_helpers.rs`:
 
 ### 1.2 Add Builtin Registry Entries
 
-In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
+In `lps-compiler/src/backend/builtins/registry.rs`:
 
 - Add `Q32Sin` and `Q32Cos` to `BuiltinId` enum
 - Add symbol names: `"__lp_q32_sin"` and `"__lp_q32_cos"`
@@ -30,7 +30,7 @@ In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
 
 ### 1.3 Create Mapping Table
 
-In `lp-glsl-compiler/src/backend/transform/q32/converters/math.rs`:
+In `lps-compiler/src/backend/transform/q32/converters/math.rs`:
 
 - Create mapping table: `TestCase name -> BuiltinId`
     - `"sinf" -> BuiltinId::Q32Sin`

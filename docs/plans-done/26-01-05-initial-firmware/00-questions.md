@@ -132,9 +132,9 @@ This plan will create the initial firmware framework for LightPlayer with three 
 ---
 
 ### 7. Shader Compilation Integration
-**Question**: How should we integrate the existing `lp-glsl-compiler` compiler into the firmware?
+**Question**: How should we integrate the existing `lps-compiler` compiler into the firmware?
 
-**Context**: `lp-glsl-compiler` already exists and can compile GLSL to machine code. We need to:
+**Context**: `lps-compiler` already exists and can compile GLSL to machine code. We need to:
 - Store GLSL source in filesystem
 - Load and compile on demand
 - Execute compiled shaders
@@ -144,7 +144,7 @@ This plan will create the initial firmware framework for LightPlayer with three 
 - How do we handle shader errors (compile-time vs runtime)?
 - Should shaders be compiled at project load time or on-demand?
 
-**Suggested**: Start with on-demand compilation. Cache compiled shaders in filesystem later. Use existing `lp-glsl-compiler` compiler as-is.
+**Suggested**: Start with on-demand compilation. Cache compiled shaders in filesystem later. Use existing `lps-compiler` compiler as-is.
 
 ---
 

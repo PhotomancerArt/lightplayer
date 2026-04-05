@@ -1,10 +1,10 @@
-# Phase 3: Update lp-glsl-filetests for new WASM backend
+# Phase 3: Update lps-filetests for new WASM backend
 
 ## Scope
 
-Update the filetest WASM runner to use the new types from `lp-glsl-wasm`
+Update the filetest WASM runner to use the new types from `lps-wasm`
 (`GlslType`, `WasmExport`) instead of `FunctionSignature`/`Type` from
-`lp-glsl-frontend`. Keep the `compile.rs` dispatch intact but adapt the
+`lps-frontend`. Keep the `compile.rs` dispatch intact but adapt the
 type conversions.
 
 ## Code Organization Reminders
@@ -17,23 +17,24 @@ type conversions.
 
 ## Implementation Details
 
-### 1. Update lp-glsl-filetests/Cargo.toml
+### 1. Update lps-filetests/Cargo.toml
 
-Add `lp-glsl-naga` as a dependency (needed for `GlslType`, `FloatMode`):
+Add `lps-naga` as a dependency (needed for `GlslType`, `FloatMode`):
 
 ```toml
-lp-glsl-naga = { path = "../lp-glsl-naga" }
+lps-naga = { path = "../lps-naga" }
 ```
 
 ### 2. Update src/test_run/wasm_runner.rs
 
 The runner currently uses:
-- `lp_glsl_cranelift::semantic::functions::FunctionSignature` — for
+
+- `lps_cranelift::semantic::functions::FunctionSignature` — for
   `exports: HashMap<String, FunctionSignature>`
-- `lp_glsl_cranelift::semantic::types::Type` — for type dispatch in
+- `lps_cranelift::semantic::types::Type` — for type dispatch in
   `call_bvec`, `call_ivec`, `call_uvec`, `call_vec`
-- `lp_glsl_wasm::types::glsl_type_to_wasm_components` — for result type sizing
-- `lp_glsl_wasm::FloatMode` — re-exported from `lp-glsl-frontend`
+- `lps_wasm::types::glsl_type_to_wasm_components` — for result type sizing
+- `lps_wasm::FloatMode` — re-exported from `lps-frontend`
 
 Changes:
 
@@ -41,9 +42,9 @@ Changes:
 `WasmExport`:
 
 ```rust
-use lp_glsl_naga::GlslType;
-use lp_glsl_wasm::{WasmExport, WasmOptions, glsl_wasm};
-use lp_glsl_wasm::types::glsl_type_to_wasm_components;
+use lps_naga::GlslType;
+use lps_wasm::{WasmExport, WasmOptions, glsl_wasm};
+use lps_wasm::types::glsl_type_to_wasm_components;
 ```
 
 **`WasmExecutable` struct**: Change `exports` field:
@@ -53,7 +54,7 @@ pub struct WasmExecutable {
     store: Store<()>,
     instance: Instance,
     exports: HashMap<String, WasmExport>,
-    float_mode: lp_glsl_naga::FloatMode,
+    float_mode: lps_naga::FloatMode,
     wasm_bytes: Vec<u8>,
 }
 ```
@@ -101,10 +102,11 @@ WASM types are already in `WasmExport.params`.
 to `wasmtime::Val` based on expected `WasmValType`).
 
 **`GlslExecutable` trait**: The `get_function_signature()` method returns
-`&FunctionSignature`. This trait is defined in `lp-glsl-cranelift` and the
+`&FunctionSignature`. This trait is defined in `lps-cranelift` and the
 WASM runner must implement it.
 
 Options:
+
 1. **Keep returning `FunctionSignature`** by constructing one from `WasmExport`.
    This is a bridge: build a `FunctionSignature` from `GlslType` info.
    Requires a conversion function `glsl_type_to_frontend_type()`.
@@ -140,7 +142,7 @@ fn to_function_signature(export: &WasmExport) -> FunctionSignature {
         name: export.name.clone(),
         return_type: to_frontend_type(&export.return_type),
         parameters: export.param_types.iter().enumerate().map(|(i, ty)| {
-            lp_glsl_cranelift::semantic::functions::Parameter {
+            lps_cranelift::semantic::functions::Parameter {
                 name: format!("p{i}"),
                 ty: to_frontend_type(ty),
             }
@@ -155,13 +157,13 @@ Store the converted signatures alongside the WasmExport data in the
 ### 3. Update src/test_run/compile.rs
 
 The `to_wasm_float_mode()` function converts filetest `FloatMode` to
-`lp_glsl_wasm::FloatMode`. Update to use `lp_glsl_naga::FloatMode`:
+`lps_wasm::FloatMode`. Update to use `lps_naga::FloatMode`:
 
 ```rust
-fn to_wasm_float_mode(fm: FloatMode) -> lp_glsl_naga::FloatMode {
+fn to_wasm_float_mode(fm: FloatMode) -> lps_naga::FloatMode {
     match fm {
-        FloatMode::Q32 => lp_glsl_naga::FloatMode::Q32,
-        FloatMode::F32 => lp_glsl_naga::FloatMode::Float,
+        FloatMode::Q32 => lps_naga::FloatMode::Q32,
+        FloatMode::F32 => lps_naga::FloatMode::Float,
     }
 }
 ```
@@ -180,7 +182,7 @@ Backend::Wasm => {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-filetests -- scalar::float::op_add
+cargo test -p lps-filetests -- scalar::float::op_add
 ```
 
 This runs `scalar/float/op-add.glsl` on both `cranelift.q32` and `wasm.q32`
@@ -190,7 +192,7 @@ target should now pass through the new Naga pipeline.
 Then run the broader scalar suite:
 
 ```bash
-cargo test -p lp-glsl-filetests -- scalar
+cargo test -p lps-filetests -- scalar
 ```
 
 Fix any failures. Expect: `scalar/float/op-add`, `op-subtract`, `op-multiply`,

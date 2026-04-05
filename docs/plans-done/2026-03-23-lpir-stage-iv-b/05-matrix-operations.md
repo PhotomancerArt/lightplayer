@@ -230,9 +230,9 @@ For `Math { fun: Transpose/Determinant/Inverse }`, dispatch to
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
-cargo clippy -p lp-glsl-naga
+cargo test -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
+cargo clippy -p lps-naga
 ```
 
 Matrix filetests (mat*vec, mat*mat, transpose, determinant, inverse)

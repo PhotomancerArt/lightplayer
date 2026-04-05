@@ -28,26 +28,26 @@ members = [
 ]
 ```
 
-Add it in the `lp-glsl` section, after `lp-shader/lp-riscv-tools`.
+Add it in the `lps` section, after `lp-shader/lp-riscv-tools`.
 
 **Note**: `lp-riscv-emu-guest` should NOT be added to `default-members` since it's `no_std` and only
-builds for RISC-V target, similar to `lp-glsl-builtins-emu-app`.
+builds for RISC-V target, similar to `lps-builtins-emu-app`.
 
 ### 2. Verify Build Scripts
 
-Check if any build scripts reference `lp-glsl-builtins-emu-app` and need updating:
+Check if any build scripts reference `lps-builtins-emu-app` and need updating:
 
-- `lp-shader/lp-glsl-compiler/build.rs` - This references `lp-glsl-builtins-emu-app`
+- `lp-shader/lps-compiler/build.rs` - This references `lps-builtins-emu-app`
   executable. This
-  should still work since `lp-glsl-builtins-emu-app` still exists, just as a thin wrapper.
+  should still work since `lps-builtins-emu-app` still exists, just as a thin wrapper.
 
-No changes needed here - `lp-glsl-builtins-emu-app` still produces the same binary output.
+No changes needed here - `lps-builtins-emu-app` still produces the same binary output.
 
 ### 3. Verify Justfile/scripts
 
 Check `justfile` and `scripts/build-builtins.sh` to see if they need updates:
 
-- They should still work since they build `lp-glsl-builtins-emu-app` which still exists
+- They should still work since they build `lps-builtins-emu-app` which still exists
 - The build process should be the same
 
 No changes needed unless there are specific references to source files that moved.
@@ -60,8 +60,8 @@ Run from workspace root:
 # Check that lp-riscv-emu-guest compiles
 cargo check --package lp-riscv-emu-guest --target riscv32imac-unknown-none-elf
 
-# Check that lp-glsl-builtins-emu-app still compiles
-cargo check --package lp-glsl-builtins-emu-app --target riscv32imac-unknown-none-elf
+# Check that lps-builtins-emu-app still compiles
+cargo check --package lps-builtins-emu-app --target riscv32imac-unknown-none-elf
 
 # Check that workspace still works
 cargo check --workspace

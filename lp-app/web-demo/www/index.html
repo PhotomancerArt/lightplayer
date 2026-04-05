@@ -11,7 +11,9 @@
             --preview-size: min(512px, 25vw);
         }
 
-        *, *::before, *::after { box-sizing: border-box; }
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
 
         html, body {
             margin: 0;
@@ -109,9 +111,17 @@
             cursor: pointer;
         }
 
-        .toolbar button:hover { background: #383838; }
-        .toolbar button:active { background: #444; }
-        .toolbar .flash { color: #8c8; }
+        .toolbar button:hover {
+            background: #383838;
+        }
+
+        .toolbar button:active {
+            background: #444;
+        }
+
+        .toolbar .flash {
+            color: #8c8;
+        }
 
         #errors {
             flex: 0 0 auto;
@@ -127,7 +137,9 @@
             overflow: auto;
         }
 
-        #errors:empty { display: none; }
+        #errors:empty {
+            display: none;
+        }
 
         #sidebar-meta {
             margin-top: 12px;
@@ -137,13 +149,27 @@
             max-width: var(--preview-size);
         }
 
-        #sidebar-meta h1 { margin: 0; font-size: 16px; }
-        #sidebar-meta p { margin: 0; font-size: 11px; color: #666; line-height: 1.5; }
-        #sidebar-meta a { color: #7a9; }
+        #sidebar-meta h1 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        #sidebar-meta p {
+            margin: 0;
+            font-size: 11px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        #sidebar-meta a {
+            color: #7a9;
+        }
 
         /* ── Mobile / narrow: code top, preview bottom ── */
         @media (max-width: 768px) {
-            :root { --preview-size: min(512px, 25vh); }
+            :root {
+                --preview-size: min(512px, 25vh);
+            }
 
             #app {
                 grid-template-columns: 1fr;
@@ -176,7 +202,8 @@
         </div>
         <div id="sidebar-meta">
             <h1>LightPlayer Shader Demo</h1>
-            <p>Edit GLSL on the left; the compiler runs in the browser and recompiles after a short pause.</p>
+            <p>Edit GLSL on the left; the compiler runs in the browser and recompiles after a short
+                pause.</p>
             <div class="toolbar">
                 <button id="btn-reset">Reset</button>
                 <button id="btn-copy-link">Copy link</button>
@@ -212,41 +239,149 @@
   });
 
   const LPFX_COMPLETIONS = [
-    {v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',             c: 'float lpfx_fbm(vec2 p, int octaves, uint seed)',     d: 'Fractal Brownian Motion (2D)'},
-    {v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',             c: 'float lpfx_fbm(vec3 p, int octaves, uint seed)',     d: 'Fractal Brownian Motion (3D)'},
-    {v: 'lpfx_fbm(${1:p}, ${2:tileLength}, ${3:octaves}, ${4:seed})', c: 'float lpfx_fbm(vec3 p, float tileLength, int octaves, uint seed)', d: 'FBM tileable (3D)'},
-    {v: 'lpfx_gnoise(${1:x}, ${2:seed})',                        c: 'float lpfx_gnoise(float x, uint seed)',              d: 'Gradient noise (1D)'},
-    {v: 'lpfx_gnoise(${1:p}, ${2:seed})',                        c: 'float lpfx_gnoise(vec2 p, uint seed)',               d: 'Gradient noise (2D)'},
-    {v: 'lpfx_gnoise(${1:p}, ${2:seed})',                        c: 'float lpfx_gnoise(vec3 p, uint seed)',               d: 'Gradient noise (3D)'},
-    {v: 'lpfx_gnoise(${1:p}, ${2:tileLength}, ${3:seed})',       c: 'float lpfx_gnoise(vec3 p, float tileLength, uint seed)', d: 'Gradient noise tileable (3D)'},
-    {v: 'lpfx_hash(${1:x}, ${2:seed})',                          c: 'uint lpfx_hash(uint x, uint seed)',                  d: 'Integer hash (1D)'},
-    {v: 'lpfx_hash(${1:xy}, ${2:seed})',                         c: 'uint lpfx_hash(uvec2 xy, uint seed)',                d: 'Integer hash (2D)'},
-    {v: 'lpfx_hash(${1:xyz}, ${2:seed})',                        c: 'uint lpfx_hash(uvec3 xyz, uint seed)',               d: 'Integer hash (3D)'},
-    {v: 'lpfx_hsv2rgb(${1:hsv})',                                c: 'vec3 lpfx_hsv2rgb(vec3 hsv)',                         d: 'HSV to RGB'},
-    {v: 'lpfx_hsv2rgb(${1:hsv})',                                c: 'vec4 lpfx_hsv2rgb(vec4 hsv)',                         d: 'HSV to RGB (vec4)'},
-    {v: 'lpfx_hue2rgb(${1:hue})',                                c: 'vec3 lpfx_hue2rgb(float hue)',                        d: 'Hue to RGB'},
-    {v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})', c: 'float lpfx_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)', d: 'Periodic simplex rotation-derivative noise (2D)'},
-    {v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})', c: 'float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)', d: 'Periodic simplex rotation-derivative noise (3D)'},
-    {v: 'lpfx_random(${1:x}, ${2:seed})',                        c: 'float lpfx_random(float x, uint seed)',              d: 'Pseudo-random [0,1] (1D)'},
-    {v: 'lpfx_random(${1:p}, ${2:seed})',                        c: 'float lpfx_random(vec2 p, uint seed)',               d: 'Pseudo-random [0,1] (2D)'},
-    {v: 'lpfx_random(${1:p}, ${2:seed})',                        c: 'float lpfx_random(vec3 p, uint seed)',               d: 'Pseudo-random [0,1] (3D)'},
-    {v: 'lpfx_rgb2hsv(${1:rgb})',                                c: 'vec3 lpfx_rgb2hsv(vec3 rgb)',                         d: 'RGB to HSV'},
-    {v: 'lpfx_rgb2hsv(${1:rgb})',                                c: 'vec4 lpfx_rgb2hsv(vec4 rgb)',                         d: 'RGB to HSV (vec4)'},
-    {v: 'lpfx_saturate(${1:x})',                                 c: 'float lpfx_saturate(float x)',                        d: 'Clamp to [0,1]'},
-    {v: 'lpfx_saturate(${1:v})',                                 c: 'vec3 lpfx_saturate(vec3 v)',                           d: 'Clamp to [0,1] (vec3)'},
-    {v: 'lpfx_saturate(${1:v})',                                 c: 'vec4 lpfx_saturate(vec4 v)',                           d: 'Clamp to [0,1] (vec4)'},
-    {v: 'lpfx_snoise(${1:x}, ${2:seed})',                        c: 'float lpfx_snoise(float x, uint seed)',              d: 'Simplex noise (1D)'},
-    {v: 'lpfx_snoise(${1:p}, ${2:seed})',                        c: 'float lpfx_snoise(vec2 p, uint seed)',               d: 'Simplex noise (2D)'},
-    {v: 'lpfx_snoise(${1:p}, ${2:seed})',                        c: 'float lpfx_snoise(vec3 p, uint seed)',               d: 'Simplex noise (3D)'},
-    {v: 'lpfx_srandom(${1:x}, ${2:seed})',                       c: 'float lpfx_srandom(float x, uint seed)',             d: 'Signed random [-1,1] (1D)'},
-    {v: 'lpfx_srandom(${1:p}, ${2:seed})',                       c: 'float lpfx_srandom(vec2 p, uint seed)',              d: 'Signed random [-1,1] (2D)'},
-    {v: 'lpfx_srandom(${1:p}, ${2:seed})',                       c: 'float lpfx_srandom(vec3 p, uint seed)',              d: 'Signed random [-1,1] (3D)'},
-    {v: 'lpfx_srandom3_tile(${1:p}, ${2:tileLength}, ${3:seed})',c: 'vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)', d: 'Signed random vec3 tileable'},
-    {v: 'lpfx_srandom3_vec(${1:p}, ${2:seed})',                  c: 'vec3 lpfx_srandom3_vec(vec3 p, uint seed)',          d: 'Signed random vec3'},
-    {v: 'lpfx_worley(${1:p}, ${2:seed})',                        c: 'float lpfx_worley(vec2 p, uint seed)',               d: 'Worley (cellular) noise (2D)'},
-    {v: 'lpfx_worley(${1:p}, ${2:seed})',                        c: 'float lpfx_worley(vec3 p, uint seed)',               d: 'Worley (cellular) noise (3D)'},
-    {v: 'lpfx_worley_value(${1:p}, ${2:seed})',                  c: 'float lpfx_worley_value(vec2 p, uint seed)',         d: 'Worley value noise (2D)'},
-    {v: 'lpfx_worley_value(${1:p}, ${2:seed})',                  c: 'float lpfx_worley_value(vec3 p, uint seed)',         d: 'Worley value noise (3D)'},
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfx_fbm(vec2 p, int octaves, uint seed)',
+      d: 'Fractal Brownian Motion (2D)'
+    },
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:octaves}, ${3:seed})',
+      c: 'float lpfx_fbm(vec3 p, int octaves, uint seed)',
+      d: 'Fractal Brownian Motion (3D)'
+    },
+    {
+      v: 'lpfx_fbm(${1:p}, ${2:tileLength}, ${3:octaves}, ${4:seed})',
+      c: 'float lpfx_fbm(vec3 p, float tileLength, int octaves, uint seed)',
+      d: 'FBM tileable (3D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:x}, ${2:seed})',
+      c: 'float lpfx_gnoise(float x, uint seed)',
+      d: 'Gradient noise (1D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_gnoise(vec2 p, uint seed)',
+      d: 'Gradient noise (2D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_gnoise(vec3 p, uint seed)',
+      d: 'Gradient noise (3D)'
+    },
+    {
+      v: 'lpfx_gnoise(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'float lpfx_gnoise(vec3 p, float tileLength, uint seed)',
+      d: 'Gradient noise tileable (3D)'
+    },
+    {
+      v: 'lpfx_hash(${1:x}, ${2:seed})',
+      c: 'uint lpfx_hash(uint x, uint seed)',
+      d: 'Integer hash (1D)'
+    },
+    {
+      v: 'lpfx_hash(${1:xy}, ${2:seed})',
+      c: 'uint lpfx_hash(uvec2 xy, uint seed)',
+      d: 'Integer hash (2D)'
+    },
+    {
+      v: 'lpfx_hash(${1:xyz}, ${2:seed})',
+      c: 'uint lpfx_hash(uvec3 xyz, uint seed)',
+      d: 'Integer hash (3D)'
+    },
+    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec3 lpfx_hsv2rgb(vec3 hsv)', d: 'HSV to RGB'},
+    {v: 'lpfx_hsv2rgb(${1:hsv})', c: 'vec4 lpfx_hsv2rgb(vec4 hsv)', d: 'HSV to RGB (vec4)'},
+    {v: 'lpfx_hue2rgb(${1:hue})', c: 'vec3 lpfx_hue2rgb(float hue)', d: 'Hue to RGB'},
+    {
+      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfx_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)',
+      d: 'Periodic simplex rotation-derivative noise (2D)'
+    },
+    {
+      v: 'lpfx_psrdnoise(${1:x}, ${2:period}, ${3:alpha}, ${4:gradient}, ${5:seed})',
+      c: 'float lpfx_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)',
+      d: 'Periodic simplex rotation-derivative noise (3D)'
+    },
+    {
+      v: 'lpfx_random(${1:x}, ${2:seed})',
+      c: 'float lpfx_random(float x, uint seed)',
+      d: 'Pseudo-random [0,1] (1D)'
+    },
+    {
+      v: 'lpfx_random(${1:p}, ${2:seed})',
+      c: 'float lpfx_random(vec2 p, uint seed)',
+      d: 'Pseudo-random [0,1] (2D)'
+    },
+    {
+      v: 'lpfx_random(${1:p}, ${2:seed})',
+      c: 'float lpfx_random(vec3 p, uint seed)',
+      d: 'Pseudo-random [0,1] (3D)'
+    },
+    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec3 lpfx_rgb2hsv(vec3 rgb)', d: 'RGB to HSV'},
+    {v: 'lpfx_rgb2hsv(${1:rgb})', c: 'vec4 lpfx_rgb2hsv(vec4 rgb)', d: 'RGB to HSV (vec4)'},
+    {v: 'lpfx_saturate(${1:x})', c: 'float lpfx_saturate(float x)', d: 'Clamp to [0,1]'},
+    {v: 'lpfx_saturate(${1:v})', c: 'vec3 lpfx_saturate(vec3 v)', d: 'Clamp to [0,1] (vec3)'},
+    {v: 'lpfx_saturate(${1:v})', c: 'vec4 lpfx_saturate(vec4 v)', d: 'Clamp to [0,1] (vec4)'},
+    {
+      v: 'lpfx_snoise(${1:x}, ${2:seed})',
+      c: 'float lpfx_snoise(float x, uint seed)',
+      d: 'Simplex noise (1D)'
+    },
+    {
+      v: 'lpfx_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_snoise(vec2 p, uint seed)',
+      d: 'Simplex noise (2D)'
+    },
+    {
+      v: 'lpfx_snoise(${1:p}, ${2:seed})',
+      c: 'float lpfx_snoise(vec3 p, uint seed)',
+      d: 'Simplex noise (3D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:x}, ${2:seed})',
+      c: 'float lpfx_srandom(float x, uint seed)',
+      d: 'Signed random [-1,1] (1D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfx_srandom(vec2 p, uint seed)',
+      d: 'Signed random [-1,1] (2D)'
+    },
+    {
+      v: 'lpfx_srandom(${1:p}, ${2:seed})',
+      c: 'float lpfx_srandom(vec3 p, uint seed)',
+      d: 'Signed random [-1,1] (3D)'
+    },
+    {
+      v: 'lpfx_srandom3_tile(${1:p}, ${2:tileLength}, ${3:seed})',
+      c: 'vec3 lpfx_srandom3_tile(vec3 p, float tileLength, uint seed)',
+      d: 'Signed random vec3 tileable'
+    },
+    {
+      v: 'lpfx_srandom3_vec(${1:p}, ${2:seed})',
+      c: 'vec3 lpfx_srandom3_vec(vec3 p, uint seed)',
+      d: 'Signed random vec3'
+    },
+    {
+      v: 'lpfx_worley(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley(vec2 p, uint seed)',
+      d: 'Worley (cellular) noise (2D)'
+    },
+    {
+      v: 'lpfx_worley(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley(vec3 p, uint seed)',
+      d: 'Worley (cellular) noise (3D)'
+    },
+    {
+      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley_value(vec2 p, uint seed)',
+      d: 'Worley value noise (2D)'
+    },
+    {
+      v: 'lpfx_worley_value(${1:p}, ${2:seed})',
+      c: 'float lpfx_worley_value(vec3 p, uint seed)',
+      d: 'Worley value noise (3D)'
+    },
   ];
 
   const lpfxCompleter = {
@@ -312,18 +447,20 @@
     texSizeLabel.textContent = `${n}\u00d7${n}`;
     resetFrameSamples();
   }
+
   let builtinsInstance = null;
   let shaderInstance = null;
   let compileTimeout = null;
   let lastError = '';
 
-  const LS_KEY = 'lp-glsl-source';
+  const LS_KEY = 'lps-source';
 
   async function fetchDefaultSource() {
     try {
       const res = await fetch('rainbow-default.glsl');
       if (res.ok) return await res.text();
-    } catch (_) { /* ignore */ }
+    } catch (_) { /* ignore */
+    }
     return 'vec4 main(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(1.0, 0.0, 1.0, 1.0);\n}\n';
   }
 
@@ -340,7 +477,8 @@
         editor.setValue(src, -1);
         history.replaceState(null, '', location.pathname + location.search);
         return;
-      } catch (_) { /* bad base64, fall through */ }
+      } catch (_) { /* bad base64, fall through */
+      }
     }
 
     const saved = localStorage.getItem(LS_KEY);
@@ -369,7 +507,10 @@
       const btn = document.getElementById('btn-copy-link');
       btn.textContent = 'Copied!';
       btn.classList.add('flash');
-      setTimeout(() => { btn.textContent = 'Copy link'; btn.classList.remove('flash'); }, 1500);
+      setTimeout(() => {
+        btn.textContent = 'Copy link';
+        btn.classList.remove('flash');
+      }, 1500);
     });
   }
 
@@ -517,7 +658,7 @@
     const builtinsBytes = await builtinsRes.arrayBuffer();
 
     // Must be >= builtins `env.memory` import minimum (currently 17 pages from
-    // `lp_glsl_builtins_wasm.wasm`; wasmtime tests use max(shader, builtins)).
+    // `lps_builtins_wasm.wasm`; wasmtime tests use max(shader, builtins)).
     sharedMemory = new WebAssembly.Memory({initial: 17, maximum: 256});
     const builtinsMod = await WebAssembly.instantiate(builtinsBytes, {
       env: {memory: sharedMemory},
@@ -529,7 +670,10 @@
     ensureWasmMemoryForPixelBuffer();
     applyTextureSizeIndex(Number(texSizeInput.value));
     compileShader(editor.getValue());
-    editor.session.on('change', () => { scheduleCompile(); saveSource(); });
+    editor.session.on('change', () => {
+      scheduleCompile();
+      saveSource();
+    });
 
     document.getElementById('btn-reset').addEventListener('click', resetSource);
     document.getElementById('btn-copy-link').addEventListener('click', copyLink);

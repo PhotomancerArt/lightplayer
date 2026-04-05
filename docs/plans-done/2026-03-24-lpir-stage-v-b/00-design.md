@@ -9,15 +9,15 @@ Fix ~40 failing GLSL filetests: 5 correctness bugs (P0), test maintenance
 
 ```
 lp-shader/
-├── lp-glsl-wasm/src/emit/
+├── lps-wasm/src/emit/
 │   └── control.rs                # FIX: continue depth calculation
-├── lp-glsl-naga/src/
+├── lps-naga/src/
 │   ├── lower.rs                  # UPDATE: two-pass function registration
 │   ├── lower_ctx.rs              # UPDATE: handle Pointer-typed args (inout)
 │   ├── lower_stmt.rs             # UPDATE: inout call-site slot plumbing
 │   ├── lower_expr.rs             # UPDATE: Load/Store through pointer args
 │   └── expr_scalar.rs            # UPDATE: As with Bool target type
-└── lp-glsl-filetests/filetests/
+└── lps-filetests/filetests/
     ├── function/overload-ambiguous.glsl    # FIX: stale run directives
     ├── function/recursive-static-error.glsl # FIX: stale run directives
     ├── debug/rainbow.glsl                  # FIX: bless expected values

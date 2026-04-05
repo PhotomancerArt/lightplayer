@@ -21,7 +21,7 @@ perform final cleanup. This phase ensures the refactoring is complete and correc
 
 1. **Run Existing Tests**:
     - Run all unit tests: `cargo test`
-    - Run all filetests: `just lp-glsl-filetests`
+    - Run all filetests: `just lps-filetests`
     - Verify no regressions
 
 2. **Add New Tests**:
@@ -47,8 +47,8 @@ perform final cleanup. This phase ensures the refactoring is complete and correc
 
 ### Files to Review/Modify
 
-- Test files in `lp-shader/lp-glsl-compiler/tests/`
-- Filetests in `lp-shader/lp-glsl-filetests/filetests/function/`
+- Test files in `lp-shader/lps-compiler/tests/`
+- Filetests in `lp-shader/lps-filetests/filetests/function/`
 - Specifically review:
     - `param-out.glsl`
     - `param-inout.glsl`

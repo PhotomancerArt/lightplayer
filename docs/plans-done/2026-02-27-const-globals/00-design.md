@@ -8,7 +8,7 @@ implementation of const support in this plan.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── const/                         # NEW: const category
 │   ├── qualifier/
 │   │   ├── must-init.glsl

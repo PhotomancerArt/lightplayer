@@ -5,14 +5,14 @@
 - Publish a **`light-player/pp-rs`** fork (GitHub) of the crates.io **`pp-rs`** crate (v0.2.1, Naga’s GLSL preprocessor dependency).
 - Make the fork **`#![no_std]` + `alloc`** so **`naga` `glsl-in`** can compile for **`riscv32imac-unknown-none-elf`** (and other `*-none-*` targets with `alloc`).
 - Wire **`lp2025`** to use the fork via **`[patch.crates-io]`** (same pattern as **`esp-println`** fork in-tree, **`lp-cranelift`** git deps).
-- **Out of scope for this plan (follow-up):** re-plumbing **`lp-engine` / `lpir-cranelift`** embedded GLSL→JIT on **`fw-esp32`** once **`lp-glsl-naga`** builds for the firmware target. This plan stops at **“`cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf` succeeds.”**
+- **Out of scope for this plan (follow-up):** re-plumbing **`lp-engine` / `lpir-cranelift`** embedded GLSL→JIT on **`fw-esp32`** once **`lps-naga`** builds for the firmware target. This plan stops at **“`cargo check -p lps-naga --target riscv32imac-unknown-none-elf` succeeds.”**
 
 ## Current state of the codebase
 
-- **`lp-glsl-naga`** is **`#![no_std]`** and depends on **`naga`** with **`default-features = false, features = ["glsl-in"]`**.
+- **`lps-naga`** is **`#![no_std]`** and depends on **`naga`** with **`default-features = false, features = ["glsl-in"]`**.
 - **`naga` `glsl-in`** enables optional **`pp-rs`**. **`pp-rs` 0.2.1** uses **`std::collections::{HashMap, HashSet}`**, **`std::rc::Rc`**, **`std::str::Chars`**, etc. — no **`no_std`** mode.
 - **`wasm32-unknown-unknown`** provides **`libstd`**, so **web-demo** compiles **`pp-rs`** unchanged.
-- **`riscv32imac-unknown-none-elf`** has **no `libstd`**; **`cargo check -p lp-glsl-naga --target riscv32imac-unknown-none-elf`** fails in **`pp-rs`** with **`can't find crate for std`**.
+- **`riscv32imac-unknown-none-elf`** has **no `libstd`**; **`cargo check -p lps-naga --target riscv32imac-unknown-none-elf`** fails in **`pp-rs`** with **`can't find crate for std`**.
 - **`lp2025`** root **`Cargo.toml`** already uses **`[patch.crates-io]`** for **`esp-println`** and commented local patches for **`lp-cranelift`** / **`lp-regalloc2`** using **`../…`** siblings.
 
 ## Questions (resolved / open)

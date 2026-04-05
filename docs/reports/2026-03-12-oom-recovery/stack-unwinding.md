@@ -66,7 +66,7 @@ panic = "unwind"
 panic = "unwind"
 ```
 
-Note: `panic = "unwind"` must be consistent across all crates in the dependency graph. You cannot mix `panic = "abort"` and `panic = "unwind"` in crates that are linked together. This means all of lp-engine, lp-server, lp-glsl-compiler, cranelift, etc. would be compiled with `panic = "unwind"`.
+Note: `panic = "unwind"` must be consistent across all crates in the dependency graph. You cannot mix `panic = "abort"` and `panic = "unwind"` in crates that are linked together. This means all of lp-engine, lp-server, lps-compiler, cranelift, etc. would be compiled with `panic = "unwind"`.
 
 ### Linker scripts
 
@@ -92,7 +92,7 @@ The `__executable_start`, `__etext`, and `__eh_frame` symbols are used by the `f
 
 **fw-esp32** — uses esp-hal's linker scripts. ESP32's linker scripts already retain `.eh_frame` in flash (not discarded like the emulator). May need to add the `__eh_frame` symbol if not already provided. The esp-hal linker scripts would need to be checked/patched.
 
-**lp-glsl-builtins-emu-app (`memory.ld`)** — same change as fw-emu.
+**lps-builtins-emu-app (`memory.ld`)** — same change as fw-emu.
 
 ### Panic handler
 
@@ -219,7 +219,7 @@ This is likely not a problem for OOM recovery because:
 
 ### 4. `panic = "unwind"` is all-or-nothing
 
-All crates in the dependency graph must use the same panic strategy. Switching to `panic = "unwind"` affects everything: Cranelift, regalloc2, lp-glsl-compiler, lp-engine, lp-server, etc. This increases binary size across the board, not just for the code paths we want to protect.
+All crates in the dependency graph must use the same panic strategy. Switching to `panic = "unwind"` affects everything: Cranelift, regalloc2, lps-compiler, lp-engine, lp-server, etc. This increases binary size across the board, not just for the code paths we want to protect.
 
 There is no way to say "use unwind for lp-engine but abort for cranelift." It's a whole-binary decision.
 

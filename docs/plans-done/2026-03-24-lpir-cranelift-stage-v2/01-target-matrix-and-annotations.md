@@ -19,15 +19,15 @@
 
 - Keep **`ALL_TARGETS`** and **`DEFAULT_TARGETS`** adjacent with a short comment
   on **CI vs local** policy.
-- **`Backend`** / **`Target`** code should not assume **`lp-glsl-cranelift`**;
-  execution types come from **`lp-glsl-exec`** / **`lpvm`** after phase
+- **`Backend`** / **`Target`** code should not assume **`lps-cranelift`**;
+  execution types come from **`lps-exec`** / **`lpvm`** after phase
   **04** (see **`04-compile-dispatch-and-cargo.md`**).
 
 ## Implementation details
 
 - **`lib.rs` / runner:** default invocations use **`DEFAULT_TARGETS`**; CI passes
   expanded list (env or duplicate test target — see phase 05).
-- **`lp-glsl-filetests-app`:** help text lists **`from_name`** targets =
+- **`lps-filetests-app`:** help text lists **`from_name`** targets =
   **`ALL_TARGETS`**.
 
 ## Tests
@@ -38,7 +38,7 @@
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lp-glsl-filetests --lib
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lps-filetests --lib
 ```
 
 `cargo +nightly fmt`.

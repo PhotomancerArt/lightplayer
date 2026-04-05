@@ -16,7 +16,7 @@ instead of saturating builtin calls. This trades overflow safety for performance
 ### Q32 arithmetic conversion
 
 - **Add/Sub**: `convert_fadd` and `convert_fsub` in
-  `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs` always emit a call
+  `lp-shader/lps-compiler/src/backend/transform/q32/converters/arithmetic.rs` always emit a call
   to `__lp_q32_add` or `__lp_q32_sub` builtins
 - **Mul/Div**: Same pattern with `__lp_q32_mul` and `__lp_q32_div` - these use i64 internally and
   must stay as builtins
@@ -31,10 +31,10 @@ instead of saturating builtin calls. This trades overflow safety for performance
 
 ### Q32 transform configuration
 
-- `Q32Transform` in `lp-shader/lp-glsl-compiler/src/backend/transform/q32/transform.rs` takes only
+- `Q32Transform` in `lp-shader/lps-compiler/src/backend/transform/q32/transform.rs` takes only
   `FixedPointFormat` (Fixed16x16 or Q32x32)
 - No compile-time options exist for math mode
-- Transform is used from `lp-glsl-compiler/src/frontend/mod.rs` when compiling for q32
+- Transform is used from `lps-compiler/src/frontend/mod.rs` when compiling for q32
 
 ### Call flow for q32
 
@@ -93,7 +93,7 @@ compile options.
 ### Q6: Where is Q32Transform constructed, and how do we pass the option from the application?
 
 **Context**: Q32Transform is built in `frontend/mod.rs` (compile_glsl_to_gl_module_jit and
-compile_glsl_to_gl_module_object), `esp32-glsl-jit`, `lp-glsl-q32-metrics-app`, and test utilities.
+compile_glsl_to_gl_module_object), `esp32-glsl-jit`, `lps-q32-metrics-app`, and test utilities.
 Options flow from `GlslOptions` (run_mode, float_mode) into the compile functions.
 
 **Answered**: Add `fast_math: bool` to `GlslOptions`. Introduce per-shader-node config (e.g.

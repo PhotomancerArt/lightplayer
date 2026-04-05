@@ -4,9 +4,9 @@
 
 - Grep for **`TODO`**, **`dbg!`**, temporary **`@unimplemented`** left without reason.
 - Run **`cargo +nightly fmt`** on touched Rust.
-- **`cargo test -p lp-glsl-naga`**
+- **`cargo test -p lps-naga`**
 - **`cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`**
-- **`cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`** (per `AGENTS.md` when `lp-glsl` / `lp-fw` touched)
+- **`cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`** (per `AGENTS.md` when `lps` / `lp-fw` touched)
 - Fix **warnings** introduced in this work.
 
 ## Plan cleanup
@@ -19,7 +19,7 @@
 Conventional commit, e.g.:
 
 ```
-feat(lp-glsl-naga): lower Access for vector/matrix load/store
+feat(lps-naga): lower Access for vector/matrix load/store
 
 - Select-chain dynamic index for vec2–4 / ivec / bvec
 - Store through Access; matrix column and inc/dec patterns

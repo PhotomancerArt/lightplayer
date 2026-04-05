@@ -47,6 +47,6 @@ Same pattern as `compile_to_gl_module_jit` in Phase 3: accept
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std,emulator
-cargo test -p lp-glsl-compiler --features std,emulator
+cargo check -p lps-compiler --features std,emulator
+cargo test -p lps-compiler --features std,emulator
 ```

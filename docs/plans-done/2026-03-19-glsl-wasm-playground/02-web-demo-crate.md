@@ -41,8 +41,8 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-lp-glsl-frontend = { path = "../../lp-shader/lp-glsl-frontend" }
-lp-glsl-wasm = { path = "../../lp-shader/lp-glsl-wasm" }
+lps-frontend = { path = "../../lp-shader/lps-frontend" }
+lps-wasm = { path = "../../lp-shader/lps-wasm" }
 wasm-bindgen = "0.2"
 ```
 
@@ -51,12 +51,12 @@ Notes:
 - `cdylib` is required by wasm-pack.
 - No `#![no_std]` — this crate uses wasm-bindgen which requires std (the allocator + panic handler
   come from wasm-bindgen's runtime).
-- Depends only on `lp-glsl-frontend` and `lp-glsl-wasm`. No Cranelift.
+- Depends only on `lps-frontend` and `lps-wasm`. No Cranelift.
 
 ### 3. Create src/lib.rs
 
 ```rust
-use lp_glsl_wasm::{glsl_wasm, FloatMode, WasmOptions};
+use lps_wasm::{glsl_wasm, FloatMode, WasmOptions};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -88,17 +88,17 @@ members = [
 
 Do NOT add to `default-members`.
 
-### 5. Handle lp-glsl-wasm no_std vs web-demo std
+### 5. Handle lps-wasm no_std vs web-demo std
 
-`lp-glsl-frontend` and `lp-glsl-wasm` are `#![no_std]` with `extern crate alloc`. When compiled as a
+`lps-frontend` and `lps-wasm` are `#![no_std]` with `extern crate alloc`. When compiled as a
 dependency of `web-demo` (which uses std via wasm-bindgen), the allocator is provided by
 wasm-bindgen's runtime. This should just work — `alloc` types (`Vec`, `String`, `Box`) resolve to
 the global allocator provided by the cdylib's std.
 
-If `lp-glsl-frontend` or `lp-glsl-wasm` have conditional `std` features, enable them:
+If `lps-frontend` or `lps-wasm` have conditional `std` features, enable them:
 
 ```toml
-lp-glsl-frontend = { path = "../../lp-shader/lp-glsl-frontend", features = ["std"] }
+lps-frontend = { path = "../../lp-shader/lps-frontend", features = ["std"] }
 ```
 
 But only if needed — try without first.

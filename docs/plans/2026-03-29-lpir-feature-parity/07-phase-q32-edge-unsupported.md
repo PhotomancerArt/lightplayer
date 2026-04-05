@@ -34,7 +34,7 @@ After edits, confirm the runner reports them as **unsupported**, not **failed**.
 
 ```bash
 ./scripts/glsl-filetests.sh builtins/edge-trig-domain.glsl builtins/edge-exp-domain.glsl builtins/edge-nan-inf-propagation.glsl
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 ```
 
 ```bash

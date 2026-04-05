@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Update `lp-glsl-wasm` to include VMContext as the first local variable (`local.get 0`) in all shader functions.
+Update `lps-wasm` to include VMContext as the first local variable (`local.get 0`) in all shader
+functions.
 
 ## Code Organization Reminders
 
@@ -12,7 +13,7 @@ Update `lp-glsl-wasm` to include VMContext as the first local variable (`local.g
 
 ## Implementation Details
 
-### 1. Update `lp-glsl-wasm/src/emit/mod.rs`
+### 1. Update `lps-wasm/src/emit/mod.rs`
 
 Add `vmctx_local` to `FuncEmitCtx`:
 
@@ -52,7 +53,7 @@ for f in &ir.functions {
 }
 ```
 
-### 2. Update `lp-glsl-wasm/src/emit/func.rs`
+### 2. Update `lps-wasm/src/emit/func.rs`
 
 Update local indexing. User locals now start at index 1 (after VMContext at index 0):
 
@@ -106,9 +107,11 @@ if ctx.vmctx_local.is_some() {
 // Then push other args
 ```
 
-Wait—builtins don't need VMContext. Only shader functions do. So builtins keep their current signatures, shader functions add VMContext.
+Wait—builtins don't need VMContext. Only shader functions do. So builtins keep their current
+signatures, shader functions add VMContext.
 
-Actually, for consistency, let's pass VMContext to builtins too (they can ignore it). This keeps the ABI uniform.
+Actually, for consistency, let's pass VMContext to builtins too (they can ignore it). This keeps the
+ABI uniform.
 
 ## Tests to Write
 
@@ -126,8 +129,8 @@ fn wasm_function_has_vmctx_local() {
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-wasm
-cargo check -p lp-glsl-wasm --target riscv32imac-unknown-none-elf
+cargo test -p lps-wasm
+cargo check -p lps-wasm --target riscv32imac-unknown-none-elf
 ```
 
 ## Notes

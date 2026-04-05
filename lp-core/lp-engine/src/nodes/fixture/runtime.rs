@@ -1,17 +1,17 @@
 use crate::error::Error;
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
-    MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
-    generate_mapping_points,
+    accumulate_from_mapping, compute_mapping, generate_mapping_points, MappingPoint,
+    PrecomputedMapping,
 };
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
-use lp_glsl_builtins::glsl::q32::types::q32::ToQ32;
-use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
+use lp_model::FrameId;
 use lp_shared::fs::fs_event::FsChange;
+use lps_builtins::glsl::q32::types::q32::ToQ32;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
@@ -440,8 +440,8 @@ mod tests {
         // Test that pixel_index advances correctly
         // Simulate: pixel 0 has 2 entries (channels 0 and 1), pixel 1 has 1 entry (channel 0)
         use crate::nodes::fixture::mapping::{PixelMappingEntry, PrecomputedMapping};
-        use lp_glsl_builtins::glsl::q32::types::q32::Q32;
         use lp_model::FrameId;
+        use lps_builtins::glsl::q32::types::q32::Q32;
 
         let mut mapping = PrecomputedMapping::new(2, 1, FrameId::new(1));
         // Pixel 0: channel 0 (has_more = true)

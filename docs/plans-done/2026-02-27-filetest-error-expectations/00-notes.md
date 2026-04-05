@@ -44,7 +44,7 @@ Each has:
 
 ### Compiler error format
 
-- `lp-glsl-compiler` uses `GlslError` with `ErrorCode` enum (e.g. E0001, E0100, E0112, E0400).
+- `lps-compiler` uses `GlslError` with `ErrorCode` enum (e.g. E0001, E0100, E0112, E0400).
 - Display format: `error[E0100]: message`
 - `GlslError` has `code`, `message`, `location` (with line number via `GlSourceLoc`).
 - `glsl_emu_riscv32_with_metadata` returns `Result<..., GlslError>` on failure.

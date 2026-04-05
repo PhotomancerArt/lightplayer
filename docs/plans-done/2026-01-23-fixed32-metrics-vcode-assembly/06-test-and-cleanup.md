@@ -7,7 +7,7 @@ metrics, fix any issues, and clean up code.
 
 ## Implementation
 
-- Run `./scripts/lp-glsl-q32-metrics-app.sh` to generate a report
+- Run `./scripts/lps-q32-metrics-app.sh` to generate a report
 - Verify vcode files (`.pre.vcode`, `.post.vcode`) are generated for all functions
 - Verify assembly files (`.pre.s`, `.post.s`) are generated for all functions
 - Check that `stats.toml` includes vcode_size and assembly_size fields

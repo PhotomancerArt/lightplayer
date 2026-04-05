@@ -18,9 +18,9 @@ out/inout params use the new variant, and remove `name` field usage for pointer 
 
 ### Files to Modify
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 - Any other sites that create LValues for out/inout parameters
 
 ### Changes

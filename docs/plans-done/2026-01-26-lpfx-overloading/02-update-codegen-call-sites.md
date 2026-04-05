@@ -7,7 +7,7 @@ available arguments and pass them to the updated function signature.
 
 ## Implementation
 
-### File: `lp-shader/lp-glsl-compiler/src/frontend/codegen/lpfx_fns.rs`
+### File: `lp-shader/lps-compiler/src/frontend/codegen/lpfx_fns.rs`
 
 **Update `emit_lp_lib_fn_call`:**
 
@@ -15,7 +15,7 @@ available arguments and pass them to the updated function signature.
 - Pass `arg_types` to `find_lpfx_fn(name, &arg_types)`
 - Update error message if needed to handle ambiguous/no match cases
 
-### File: `lp-shader/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`
+### File: `lp-shader/lps-compiler/src/frontend/codegen/lp_lib_fns.rs`
 
 **Update `emit_lp_lib_fn_call`:**
 

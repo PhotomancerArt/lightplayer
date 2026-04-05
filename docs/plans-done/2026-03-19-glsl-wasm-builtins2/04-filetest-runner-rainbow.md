@@ -8,7 +8,7 @@ now pass.
 
 ## Code organization reminders
 
-- Shared linking helper in `lp-glsl-filetests/src/test_run/wasm_link.rs`.
+- Shared linking helper in `lps-filetests/src/test_run/wasm_link.rs`.
 - Isolate builtins.wasm file path resolution in one place with a clear error message.
 - Tests first in test modules; helpers at bottom.
 
@@ -16,10 +16,10 @@ now pass.
 
 ### 1. `wasm_link.rs`
 
-File: `lp-shader/lp-glsl-filetests/src/test_run/wasm_link.rs`
+File: `lp-shader/lps-filetests/src/test_run/wasm_link.rs`
 
 Shared helper that encapsulates the builtins.wasm + memory + linker pattern. Reference:
-`lp-glsl-wasm/tests/q32_builtin_link.rs`.
+`lps-wasm/tests/q32_builtin_link.rs`.
 
 ```rust
 pub struct WasmLinkedInstance {
@@ -33,7 +33,7 @@ pub fn instantiate_with_builtins(
     store: &mut Store<()>,
     shader_module: &Module,
 ) -> Result<Instance, ...> {
-    // 1. Locate builtins.wasm (LP_GLSL_BUILTINS_WASM env var or CARGO_MANIFEST_DIR-relative)
+    // 1. Locate builtins.wasm (lps_BUILTINS_WASM env var or CARGO_MANIFEST_DIR-relative)
     // 2. Load and instantiate builtins module
     // 3. Create shared Memory (1 page min)
     // 4. Build Linker:
@@ -49,7 +49,7 @@ compatibility with simple shaders that don't use builtins.
 
 ### 2. Update `wasm_runner.rs`
 
-File: `lp-shader/lp-glsl-filetests/src/test_run/wasm_runner.rs`
+File: `lp-shader/lps-filetests/src/test_run/wasm_runner.rs`
 
 Replace the `Instance::new(&mut store, &wasm_module, &[])` call in `WasmExecutable::from_source`
 with a call to `wasm_link::instantiate_with_builtins`. The rest of the `GlslExecutable`
@@ -57,7 +57,7 @@ implementation stays the same.
 
 ### 3. Rainbow compilation test
 
-Add a test (in `lp-glsl-wasm/tests/` or as a filetest) that:
+Add a test (in `lps-wasm/tests/` or as a filetest) that:
 
 1. Compiles `examples/basic/src/rainbow.shader/main.glsl` with `glsl_wasm` Q32
 2. Links with builtins.wasm + shared memory
@@ -97,15 +97,15 @@ Check that Cranelift filetests are not regressed:
 
 ### 5. `test_q32_float_mul` ignore removal
 
-Check whether `test_q32_float_mul` in `lp-glsl-wasm/tests/basic.rs` still has `#[ignore]`. The Q32
+Check whether `test_q32_float_mul` in `lps-wasm/tests/basic.rs` still has `#[ignore]`. The Q32
 mul/div bug was reportedly fixed (per the predecessor plan notes). If the test passes, remove the
 `#[ignore]`.
 
 ## Validate
 
 ```bash
-cd lp-glsl && cargo test -p lp-glsl-wasm
-cd lp-glsl && cargo test -p lp-glsl-filetests
+cd lps && cargo test -p lps-wasm
+cd lps && cargo test -p lps-filetests
 cargo build
 cargo +nightly fmt --check
 ./scripts/glsl-filetests.sh --target wasm.q32

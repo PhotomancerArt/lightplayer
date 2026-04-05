@@ -14,9 +14,12 @@ Plan reference: `2026-03-17-glsl-wasm-part-iii.md` Phase 2
 
 ## 1. Scalar type constructors
 
-**Syntax:** `FunCall` with type name as function identifier: `int(x)`, `float(x)`, `bool(x)`, `uint(x)`.
+**Syntax:** `FunCall` with type name as function identifier: `int(x)`, `float(x)`, `bool(x)`,
+`uint(x)`.
 
-**Detection:** In `emit_rvalue`, when we see `Expr::FunCall`, check if the identifier is a scalar type name (`int`, `float`, `bool`, `uint`). Use `lp_glsl_frontend::semantic::type_check::is_scalar_type_name`.
+**Detection:** In `emit_rvalue`, when we see `Expr::FunCall`, check if the identifier is a scalar
+type name (`int`, `float`, `bool`, `uint`). Use
+`lps_frontend::semantic::type_check::is_scalar_type_name`.
 
 **Arguments:** Scalar constructors take exactly one argument (per Cranelift constructor.rs).
 
@@ -55,7 +58,8 @@ emit_rvalue(ctx, sink, &args[0], options)?;
 
 ## 2. Implicit type coercion
 
-**When:** Binary ops, assignments, constructor args. The frontend validates; we apply the coercion at emission time when types differ.
+**When:** Binary ops, assignments, constructor args. The frontend validates; we apply the coercion
+at emission time when types differ.
 
 **int → float (Q32):** `i32.shl` by 16. Value `a` becomes `a * 65536` in Q16.16.
 
@@ -65,7 +69,9 @@ emit_rvalue(ctx, sink, &args[0], options)?;
 
 **float → int:** `i32.shr_s` by 16 for Q32.
 
-**Where to apply:** In `emit_binary_op` when promoting operands; or a `coerce_to_type(ctx, sink, val_on_stack, from_ty, to_ty)` helper. May need to emit extra instructions after `emit_rvalue` when types don't match expected.
+**Where to apply:** In `emit_binary_op` when promoting operands; or a
+`coerce_to_type(ctx, sink, val_on_stack, from_ty, to_ty)` helper. May need to emit extra
+instructions after `emit_rvalue` when types don't match expected.
 
 ---
 
@@ -94,6 +100,7 @@ emit_rvalue(ctx, sink, &args[0], options)?;
 ```
 
 Simpler: `if (result i32) (then 0) (else (b != 0 ? 1 : 0))`. So:
+
 - If `a == 0`: result 0.
 - Else: evaluate `b`, result is `b != 0 ? 1 : 0`.
 
@@ -111,9 +118,11 @@ sink.i32_ne();           // b != 0 → 1 or 0
 sink.end();
 ```
 
-Need to check wasm-encoder API for `if` with result type. May need `BlockType::Empty` and use different structure.
+Need to check wasm-encoder API for `if` with result type. May need `BlockType::Empty` and use
+different structure.
 
-**wasm-encoder `if`:** Typically `sink.if_(block_type)` then `sink.instruction(...)` for then/else. For `(if (result i32) ...)`, block_type has a result.
+**wasm-encoder `if`:** Typically `sink.if_(block_type)` then `sink.instruction(...)` for then/else.
+For `(if (result i32) ...)`, block_type has a result.
 
 ---
 
@@ -139,9 +148,11 @@ sink.end();
 
 ## 5. Ternary `? :`
 
-**GLSL:** `cond ? then_expr : else_expr`. Condition must be bool. Result type is the common type of both branches.
+**GLSL:** `cond ? then_expr : else_expr`. Condition must be bool. Result type is the common type of
+both branches.
 
-**WASM:** `(if (result i32) (then ...) (else ...))` — both branches must produce a value of the same type.
+**WASM:** `(if (result i32) (then ...) (else ...))` — both branches must produce a value of the same
+type.
 
 ```rust
 // cond ? a : b
@@ -156,7 +167,8 @@ emit_rvalue(ctx, sink, else_expr, options)?;
 sink.end();
 ```
 
-**Multi-value:** For vectors (Phase 5), ternary needs component-wise select. For Phase 2, scalars only.
+**Multi-value:** For vectors (Phase 5), ternary needs component-wise select. For Phase 2, scalars
+only.
 
 ---
 
@@ -165,6 +177,7 @@ sink.end();
 **Current:** `Expr::FunCall` is unimplemented.
 
 **New flow:**
+
 1. If scalar type constructor → emit constructor (section 1)
 2. If vector constructor → Phase 5
 3. If builtin → Phase 6
@@ -178,21 +191,24 @@ For Phase 2, implement (1) only. Defer (2)–(4).
 ## 7. Binary op: enable And, Or
 
 Phase 1 has `And | Or | Xor => Err(...)`. For Phase 2:
+
 - `And` → short-circuit AND (section 3)
 - `Or` → short-circuit OR (section 4)
-- `Xor` → can use non-short-circuit: `(a != 0) != (b != 0)` → `a ^ b` when both are 0/1. Or `i32.xor` then normalize. For bool, `a ^ b` gives 0 or 1. Use `sink.i32_xor()` if both are bool (0/1).
+- `Xor` → can use non-short-circuit: `(a != 0) != (b != 0)` → `a ^ b` when both are 0/1. Or
+  `i32.xor` then normalize. For bool, `a ^ b` gives 0 or 1. Use `sink.i32_xor()` if both are bool (
+  0/1).
 
 ---
 
 ## File change summary
 
-| File | Changes |
-|------|---------|
-| `codegen/expr/mod.rs` | Add FunCall handling; dispatch to constructor, ternary, binary And/Or |
-| `codegen/expr/constructor.rs` | New: emit_scalar_constructor (int, float, bool, uint) |
-| `codegen/expr/ternary.rs` | New: emit_ternary_rvalue |
-| `codegen/expr/binary.rs` | Implement And (short-circuit), Or (short-circuit), Xor |
-| `codegen/expr/coercion.rs` | New: coerce_scalar (optional helper) |
+| File                          | Changes                                                               |
+|-------------------------------|-----------------------------------------------------------------------|
+| `codegen/expr/mod.rs`         | Add FunCall handling; dispatch to constructor, ternary, binary And/Or |
+| `codegen/expr/constructor.rs` | New: emit_scalar_constructor (int, float, bool, uint)                 |
+| `codegen/expr/ternary.rs`     | New: emit_ternary_rvalue                                              |
+| `codegen/expr/binary.rs`      | Implement And (short-circuit), Or (short-circuit), Xor                |
+| `codegen/expr/coercion.rs`    | New: coerce_scalar (optional helper)                                  |
 
 ---
 

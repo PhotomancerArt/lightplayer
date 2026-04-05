@@ -2,7 +2,7 @@
 
 ## Scope of Phase
 
-Extract the print macros and writer implementation from `lp-glsl-builtins-emu-app/src/print.rs` into
+Extract the print macros and writer implementation from `lps-builtins-emu-app/src/print.rs` into
 `lp-riscv-emu-guest/src/print.rs`.
 
 ## Code Organization Reminders
@@ -17,7 +17,7 @@ Extract the print macros and writer implementation from `lp-glsl-builtins-emu-ap
 
 ### 1. Extract Print Code
 
-Read `lp-glsl-builtins-emu-app/src/print.rs` and extract the entire file content.
+Read `lps-builtins-emu-app/src/print.rs` and extract the entire file content.
 
 ### 2. Create print.rs
 
@@ -126,7 +126,7 @@ pub use print::{print, println};
 **Note**: We can't re-export `#[macro_export]` macros directly, but they'll be available as
 `lp_riscv_emu_guest::print!` and `lp_riscv_emu_guest::println!`. Alternatively, we can create
 wrapper macros.
-Let's check how `lp-glsl-builtins-emu-app` uses them.
+Let's check how `lps-builtins-emu-app` uses them.
 
 Actually, looking at the original code, the macros are `#[macro_export]` which means they're
 available at the crate root. When we re-export them, they'll be available as
@@ -134,9 +134,9 @@ available at the crate root. When we re-export them, they'll be available as
 etc. But for convenience, we might want to also provide `host_debug!` and `host_println!` macros
 that use the host functions.
 
-Let's check if `lp-glsl-builtins` provides these macros... Actually, `host_debug!` is used in
-`lp-glsl-builtins-emu-app/src/main.rs` but it's not defined there. It must come from
-`lp-glsl-builtins`.
+Let's check if `lps-builtins` provides these macros... Actually, `host_debug!` is used in
+`lps-builtins-emu-app/src/main.rs` but it's not defined there. It must come from
+`lps-builtins`.
 We don't
 need to provide it here.
 

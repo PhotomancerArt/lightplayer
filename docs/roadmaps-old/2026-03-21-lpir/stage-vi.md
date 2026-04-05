@@ -12,7 +12,7 @@ Verify the web-demo still renders.
 ## Scope
 
 **In scope:**
-- Wire `lp-glsl-naga::compile()` → LPIR lowering → WASM emission
+- Wire `lps-naga::compile()` → LPIR lowering → WASM emission
   (Q32 inside the WASM emitter) in the public API
 - Pass all existing scalar filetests (wasm.q32 + wasm.float where applicable)
   - `filetests/scalar/arithmetic/`

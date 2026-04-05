@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan documents the existing global variable tests in `lightplayer/crates/lp-glsl-filetests/filetests/globals/`. These tests comprehensively cover GLSL global variables including declarations, storage qualifiers, initialization, scope, access from functions, and edge cases.
+This plan documents the existing global variable tests in `lightplayer/crates/lps-filetests/filetests/globals/`. These tests comprehensively cover GLSL global variables including declarations, storage qualifiers, initialization, scope, access from functions, and edge cases.
 
 ## Existing Test Structure
 

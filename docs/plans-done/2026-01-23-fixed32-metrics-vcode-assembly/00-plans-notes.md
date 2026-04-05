@@ -4,7 +4,7 @@
 
 ### Q1: When should we compile functions to get vcode/assembly?
 
-**Context**: Currently, `lp-glsl-q32-metrics-app` compiles GLSL to CLIF IR (before and after
+**Context**: Currently, `lps-q32-metrics-app` compiles GLSL to CLIF IR (before and after
 transform) but doesn't actually compile the functions to machine code. To get vcode and assembly, we
 need to actually compile the functions using `define_function`, which generates the compiled code.
 
@@ -20,7 +20,7 @@ files. This means:
 ### Q2: How do we access compiled_code from JITModule?
 
 **Context**: Looking at `build_emu_executable` in `emu.rs`, it accesses `ctx.compiled_code()` after
-calling `define_function`. However, `lp-glsl-q32-metrics-app` uses `JITModule`, not `ObjectModule`.
+calling `define_function`. However, `lps-q32-metrics-app` uses `JITModule`, not `ObjectModule`.
 The JIT codegen in `jit.rs` doesn't currently capture vcode/disassembly.
 
 **Answer**: We should **switch from JITModule to ObjectModule**. The emulator already does this
@@ -58,7 +58,7 @@ representation.
 
 - Try to generate real assembly using Capstone disassembler (preferred)
 - If Capstone fails for some reason, fall back to vcode (same pattern as emulator code)
-- The `emulator` feature will be required for the lp-glsl-q32-metrics-app app
+- The `emulator` feature will be required for the lps-q32-metrics-app app
 
 ### Q5: Should we add vcode/assembly sizes to the statistics?
 

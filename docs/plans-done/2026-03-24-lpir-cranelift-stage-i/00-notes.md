@@ -8,9 +8,9 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 
 ## Current state
 
-### BuiltinId (lp-glsl-builtin-ids)
+### BuiltinId (lps-builtin-ids)
 
-- **Auto-generated** by `lp-glsl-builtins-gen-app`. `#![no_std]`, no deps.
+- **Auto-generated** by `lps-builtins-gen-app`. `#![no_std]`, no deps.
 - **Flat enum** with 96 variants: 29 `LpQ32*` (Q32 math) + 67 `Lpfx*` (LPFX).
 - **Methods**: `name() -> &'static str`, `builtin_id_from_name(name) -> Option`,
   `all() -> &'static [BuiltinId]`.
@@ -29,22 +29,22 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 
 ### What the generator produces
 
-`lp-glsl-builtins-gen-app/src/main.rs` (~1600 lines) walks `builtins/q32/` and
+`lps-builtins-gen-app/src/main.rs` (~1600 lines) walks `builtins/q32/` and
 `builtins/lpfx/`, parses with `syn`, and emits:
 
-| Output | Path |
-|--------|------|
-| `BuiltinId` enum + methods | `lp-glsl-builtin-ids/src/lib.rs` |
-| GLSL→BuiltinId mapping | `lp-glsl-builtin-ids/src/glsl_builtin_mapping.rs` |
-| Cranelift registry | `lp-glsl-cranelift/src/backend/builtins/registry.rs` |
-| Cranelift testcase mapping | `lp-glsl-cranelift/src/backend/builtins/mapping.rs` |
-| Emulator DCE refs | `lp-glsl-builtins-emu-app/src/builtin_refs.rs` |
-| WASM DCE refs | `lp-glsl-builtins-wasm/src/builtin_refs.rs` |
-| Q32 mod.rs | `lp-glsl-builtins/src/builtins/q32/mod.rs` |
-| WASM import valtypes | `lp-glsl-wasm/src/codegen/builtin_wasm_import_types.rs` |
-| LPFX frontend registry | `lp-glsl-frontend/src/semantic/lpfx/lpfx_fns.rs` |
+| Output                     | Path                                                |
+|----------------------------|-----------------------------------------------------|
+| `BuiltinId` enum + methods | `lps-builtin-ids/src/lib.rs`                        |
+| GLSL→BuiltinId mapping     | `lps-builtin-ids/src/glsl_builtin_mapping.rs`       |
+| Cranelift registry         | `lps-cranelift/src/backend/builtins/registry.rs`    |
+| Cranelift testcase mapping | `lps-cranelift/src/backend/builtins/mapping.rs`     |
+| Emulator DCE refs          | `lps-builtins-emu-app/src/builtin_refs.rs`          |
+| WASM DCE refs              | `lps-builtins-wasm/src/builtin_refs.rs`             |
+| Q32 mod.rs                 | `lps-builtins/src/builtins/q32/mod.rs`              |
+| WASM import valtypes       | `lps-wasm/src/codegen/builtin_wasm_import_types.rs` |
+| LPFX frontend registry     | `lps-frontend/src/semantic/lpfx/lpfx_fns.rs`        |
 
-### Builtin source files (lp-glsl-builtins)
+### Builtin source files (lps-builtins)
 
 - `builtins/q32/*.rs`: one file per Q32 op. Function identifier = symbol name
   (e.g. `pub extern "C" fn __lp_q32_sin`). `#[unsafe(no_mangle)]`.
@@ -64,6 +64,7 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 ### WASM emitter import resolution
 
 `imports.rs` does: `resolve_builtin_id(decl)` → matches on `module_name`:
+
 - `"std.math"` → `glsl_q32_math_builtin_id(func_name, arity)` → `BuiltinId`
 - `"lpfx"` → strip naga suffix → `glsl_lpfx_q32_builtin_id(base, kinds)`
 - WASM import: `("builtins", BuiltinId::name())` e.g. `"__lp_q32_sin"`.
@@ -71,6 +72,7 @@ self-describing. Three modules: `lpir`, `glsl`, `lpfx`.
 ### WASM emitter float op handling
 
 Not all Q32 builtins are reached via imports. Some LPIR opcodes are inlined:
+
 - `Fadd/Fsub/Fmul` → inline Q32 i64 arithmetic (no builtin call)
 - `Fdiv` → inline Q32 division
 - `Fabs/Ffloor/Fceil/Ftrunc` → inline Q32 bit ops
@@ -101,6 +103,7 @@ rather than `sin` — these are hand-written LPIR test strings, not from Naga.)
 "self-describing" with `module()`, `name()`, `mode()` methods.
 
 Two options:
+
 - **(A) Enum with generated derive methods**: Keep enum, add `module() -> Module`,
   `fn_name() -> &str`, `mode() -> Option<Mode>` as generated match arms.
   Exhaustive matching preserved. Generator derives all forms from the
@@ -141,6 +144,7 @@ inversesqrt, mod, roundEven.
 **Answer — classification by "has matching LPIR opcode"**:
 
 `lpir` (6 builtins — has matching Op):
+
 - `add` → `__lp_lpir_fadd_q32` (Op::Fadd)
 - `sub` → `__lp_lpir_fsub_q32` (Op::Fsub)
 - `mul` → `__lp_lpir_fmul_q32` (Op::Fmul)
@@ -149,12 +153,14 @@ inversesqrt, mod, roundEven.
 - `roundeven` → `__lp_lpir_fnearest_q32` (Op::Fnearest, ties-to-even)
 
 `glsl` (23 builtins — no matching Op):
+
 - Trig: sin, cos, tan, asin, acos, atan, atan2
 - Hyperbolic: sinh, cosh, tanh, asinh, acosh, atanh
 - Exponential: exp, exp2, log, log2
 - Other: pow, inversesqrt, ldexp, round, fma, mod
 
 Key decisions:
+
 - `sqrt` is `lpir` because LPIR has `Op::Fsqrt`, WASM has `f32.sqrt`,
   Cranelift has `sqrt`. Naga lowering imports it as `@lpir::sqrt`.
 - `round` stays `glsl` — GLSL `round()` is half-away-from-zero, different
@@ -166,7 +172,7 @@ Key decisions:
 ### Q3: Generator output for old Cranelift crate
 
 **Context**: The generator currently emits `registry.rs` and `mapping.rs` into
-`lp-glsl-cranelift/`. Renaming builtins will break these files. Options:
+`lps-cranelift/`. Renaming builtins will break these files. Options:
 
 - **(A) Update generator to emit new names into old crate too**: More work,
   the old crate may need other updates to compile.
@@ -184,6 +190,7 @@ exercising the old Cranelift path will fail — that's acceptable.
 **Context**: Currently `std.math`. Roadmap says rename to `glsl`.
 
 **Affected locations**:
+
 - `lower.rs`: `register_std_math_imports` → module_name changes from
   `"std.math"` to `"glsl"`
 - `lower_ctx.rs`: import_map keys change from `"std.math::{name}"` to
@@ -212,16 +219,19 @@ across affected files.
 separator patterns. New convention is `__lp_lpfx_<fn>_<mode>`.
 
 **Hash functions** are mode-independent (integer-only):
+
 - `__lpfx_hash_1` → `__lp_lpfx_hash1` (no mode suffix)
 - `__lpfx_hash_2` → `__lp_lpfx_hash2`
 - `__lpfx_hash_3` → `__lp_lpfx_hash3`
 
 **Mode-dependent LPFX** with vec variants:
+
 - `__lpfx_saturate_q32` → `__lp_lpfx_saturate_q32`
 - `__lpfx_saturate_vec3_q32` → `__lp_lpfx_saturate_vec3_q32`
 - `__lpfx_hsv2rgb_vec4_q32` → `__lp_lpfx_hsv2rgb_vec4_q32`
 
 **Tile/vec variants**:
+
 - `__lpfx_fbm3_tile_q32` → `__lp_lpfx_fbm3_tile_q32`
 - `__lpfx_srandom3_vec_q32` → `__lp_lpfx_srandom3_vec_q32`
 
@@ -231,14 +241,14 @@ Mode suffix stays in place where present; hash keeps no mode suffix.
 Examples: `__lpfx_fbm2_q32` → `__lp_lpfx_fbm2_q32`,
 `__lpfx_hash_1` → `__lp_lpfx_hash_1`.
 
-### Q6: Scope of function renaming in lp-glsl-builtins
+### Q6: Scope of function renaming in lps-builtins
 
-**Context**: The actual Rust function identifiers in `lp-glsl-builtins` ARE the
+**Context**: The actual Rust function identifiers in `lps-builtins` ARE the
 symbol names (via `#[unsafe(no_mangle)]`). Renaming symbols means renaming the
 Rust functions themselves.
 
 - `builtins/q32/sin.rs`: `pub extern "C" fn __lp_q32_sin` →
-  `pub extern "C" fn __lp_glsl_sin_q32`
+  `pub extern "C" fn __lps_sin_q32`
 - `builtins/lpfx/hash.rs`: `pub extern "C" fn __lpfx_hash_1` →
   `pub extern "C" fn __lp_lpfx_hash1`
 - All test code referencing these functions by name needs updating.
@@ -246,15 +256,16 @@ Rust functions themselves.
 **Answer**: Straightforward rename of Rust function identifiers.
 
 Approach:
+
 1. **Generated files**: Update generator logic, re-run
-   `cargo run -p lp-glsl-builtins-gen-app`. Handles `lib.rs`,
+   `cargo run -p lps-builtins-gen-app`. Handles `lib.rs`,
    `glsl_builtin_mapping.rs`, `builtin_refs.rs`, `q32/mod.rs`,
    `builtin_wasm_import_types.rs` automatically.
-2. **Source function renames in `lp-glsl-builtins`**: Unique strings, use
-   text search-and-replace. Each `__lp_q32_sin` → `__lp_glsl_sin_q32` is
+2. **Source function renames in `lps-builtins`**: Unique strings, use
+   text search-and-replace. Each `__lp_q32_sin` → `__lps_sin_q32` is
    a unique substitution.
 3. **String references** (`imports.rs`, `StdMathHandler`, test files): Text
    search-and-replace. `rg "std.math"` finds everything.
 
 The generator discovers functions by `fn __*` with `#[unsafe(no_mangle)]`,
-still works. PascalCase derivation: `__lp_glsl_sin_q32` → `LpGlslSinQ32`.
+still works. PascalCase derivation: `__lps_sin_q32` → `LpGlslSinQ32`.

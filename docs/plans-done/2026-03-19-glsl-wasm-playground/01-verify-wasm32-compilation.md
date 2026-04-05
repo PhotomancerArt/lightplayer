@@ -2,7 +2,9 @@
 
 ## Scope
 
-Verify that `lp-glsl-frontend` and `lp-glsl-wasm` (and all transitive deps) compile to `wasm32-unknown-unknown`. This is a feasibility gate before creating the web-demo crate. Fix any issues found.
+Verify that `lps-frontend` and `lps-wasm` (and all transitive deps) compile to
+`wasm32-unknown-unknown`. This is a feasibility gate before creating the web-demo crate. Fix any
+issues found.
 
 ## Code organization reminders
 
@@ -20,23 +22,25 @@ Verify that `lp-glsl-frontend` and `lp-glsl-wasm` (and all transitive deps) comp
 rustup target add wasm32-unknown-unknown
 ```
 
-### 2. Try compiling lp-glsl-frontend
+### 2. Try compiling lps-frontend
 
 ```bash
-cargo build -p lp-glsl-frontend --target wasm32-unknown-unknown
+cargo build -p lps-frontend --target wasm32-unknown-unknown
 ```
 
 Expected: should work — it's `#![no_std]`, all deps are no_std-compatible.
 
-If `wasm-encoder` causes issues (it's a dep of `lp-glsl-wasm`, not `lp-glsl-frontend`), this step should pass regardless.
+If `wasm-encoder` causes issues (it's a dep of `lps-wasm`, not `lps-frontend`), this step
+should pass regardless.
 
-### 3. Try compiling lp-glsl-wasm
+### 3. Try compiling lps-wasm
 
 ```bash
-cargo build -p lp-glsl-wasm --target wasm32-unknown-unknown
+cargo build -p lps-wasm --target wasm32-unknown-unknown
 ```
 
-Potential issue: `wasm-encoder = "0.245"` without `default-features = false`. If it pulls in std features, add:
+Potential issue: `wasm-encoder = "0.245"` without `default-features = false`. If it pulls in std
+features, add:
 
 ```toml
 wasm-encoder = { version = "0.245", default-features = false }
@@ -54,8 +58,8 @@ Common problems and fixes:
 ### 5. Verify both crates build cleanly
 
 ```bash
-cargo build -p lp-glsl-frontend --target wasm32-unknown-unknown
-cargo build -p lp-glsl-wasm --target wasm32-unknown-unknown
+cargo build -p lps-frontend --target wasm32-unknown-unknown
+cargo build -p lps-wasm --target wasm32-unknown-unknown
 ```
 
 Both must succeed with no errors.
@@ -64,8 +68,8 @@ Both must succeed with no errors.
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo build -p lp-glsl-frontend --target wasm32-unknown-unknown
-cargo build -p lp-glsl-wasm --target wasm32-unknown-unknown
+cargo build -p lps-frontend --target wasm32-unknown-unknown
+cargo build -p lps-wasm --target wasm32-unknown-unknown
 cargo build  # host build still works
 cargo test   # no regressions
 ```

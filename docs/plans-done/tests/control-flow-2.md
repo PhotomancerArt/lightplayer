@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan documents the existing control flow tests in `lightplayer/crates/lp-glsl-filetests/filetests/control/`. These tests cover if/else statements, loops (for/while/do-while), break/continue statements, return statements, and nested control flow.
+This plan documents the existing control flow tests in `lightplayer/crates/lps-filetests/filetests/control/`. These tests cover if/else statements, loops (for/while/do-while), break/continue statements, return statements, and nested control flow.
 
 ## Existing Test Structure
 

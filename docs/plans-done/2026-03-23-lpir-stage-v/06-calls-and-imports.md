@@ -28,7 +28,7 @@ For each `ImportDecl` in `ir.imports`:
 1. **`@std.math::*`** — map to Q32 builtins:
 
    | LPIR import | BuiltinId | WASM name |
-   |-------------|-----------|-----------|
+      |-------------|-----------|-----------|
    | `@std.math::sin` | `LpQ32Sin` | `__lp_q32_sin` |
    | `@std.math::cos` | `LpQ32Cos` | `__lp_q32_cos` |
    | `@std.math::pow` | `LpQ32Pow` | `__lp_q32_pow` |
@@ -44,16 +44,16 @@ For each `ImportDecl` in `ir.imports`:
 2. **`@lpfx::*`** — map to Q32 LPFX builtins:
 
    | LPIR import | BuiltinId | WASM name |
-   |-------------|-----------|-----------|
+      |-------------|-----------|-----------|
    | `@lpfx::lpfx_hash1` | `LpfxHash1` | `__lpfx_hash_1` |
    | `@lpfx::lpfx_snoise2` | `LpfxSnoise2Q32` | `__lpfx_snoise2_q32` |
    | etc. | | |
 
-   Name mapping: use `lp_glsl_builtin_ids` resolution functions.
+   Name mapping: use `lps_builtin_ids` resolution functions.
 
    WASM signature: look up via `q32_lpfx_wasm_signature(bid)` from the
    existing `lpfx.rs` logic (moved to `imports.rs` or referenced from
-   `lp-glsl-builtin-ids`).
+   `lps-builtin-ids`).
 
 3. Any unresolved import → `Err("unsupported import @module::name")`.
 
@@ -61,12 +61,14 @@ For each `ImportDecl` in `ir.imports`:
 
 WASM function indices: imports come first (0..N), then defined functions
 (N..N+M). This matches LPIR's `CalleeRef` encoding:
+
 - LPIR `CalleeRef(i)` where `i < imports.len()` → WASM import index `i`
 - LPIR `CalleeRef(i)` where `i >= imports.len()` → WASM function index
   `import_count + (i - imports.len())`
 
 Wait — WASM function indices are: imports 0..N, then defined 0..M with
 absolute index N..N+M. So:
+
 - LPIR import `i` → WASM func index `i` (if imports are 1:1)
 - LPIR function `j` → WASM func index `N + j`
 
@@ -97,6 +99,7 @@ Pop in reverse order to match VReg ordering.
 ### Tier 1 math ops that use builtins
 
 Some LPIR ops from Phase 3 were marked as builtin calls:
+
 - `Fsqrt` → `builtins::__lp_q32_sqrt`
 - `Fnearest` → `builtins::__lp_q32_roundeven`
 
@@ -118,8 +121,8 @@ Each unique function signature gets a type index. Build a dedup map:
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
+cargo check -p lps-wasm
+cargo test -p lps-wasm
 ```
 
 At this point, the full op set is covered. Programs with calls, math

@@ -133,11 +133,11 @@ helper).
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_transform_single
+cd lp-shader/lps-compiler && cargo test --features std -- test_transform_single
 ```
 
 Ensure all existing tests still pass:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 ```

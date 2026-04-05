@@ -24,7 +24,8 @@ expect `true` from `isinf` need `@unsupported(float_mode=q32, reason="...")`.
 
 Update:
 
-- Add file-level `@unsupported(float_mode=q32, reason="Q32 has no Inf encoding; isinf is always false")`
+- Add file-level
+  `@unsupported(float_mode=q32, reason="Q32 has no Inf encoding; isinf is always false")`
   This skips the entire file under Q32, which is correct — every test that
   expects `true` from `isinf` is IEEE-only.
 - Remove per-test `@unimplemented(backend=jit)` on `test_isinf_normal` and
@@ -45,7 +46,8 @@ The `isnan(inf)` tests assume IEEE inf exists.
 
 Update:
 
-- Add file-level `@unsupported(float_mode=q32, reason="Q32 has no NaN encoding; tests assume IEEE intermediates")`
+- Add file-level
+  `@unsupported(float_mode=q32, reason="Q32 has no NaN encoding; tests assume IEEE intermediates")`
 - Remove per-test `@unimplemented(backend=jit)` annotations (the file is
   now properly scoped).
 
@@ -110,7 +112,7 @@ matches the design doc's language. No changes expected.
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 ```
 
 Or if there's a more targeted command for running specific filetests,

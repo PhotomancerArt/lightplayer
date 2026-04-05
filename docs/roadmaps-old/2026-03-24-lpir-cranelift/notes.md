@@ -21,16 +21,16 @@ feature parity with the existing Cranelift backend.
 
 - **lpir crate**: Complete — Op enum, IrFunction, IrModule, builder,
   text printer, parser, interpreter, validator.
-- **Naga → LPIR lowering** (`lp-glsl-naga/src/lower.rs`): Handles scalar
+- **Naga → LPIR lowering** (`lps-naga/src/lower.rs`): Handles scalar
   expressions, control flow, calls, LPFX, std.math. Enough to run the
   example shader.
-- **LPIR → WASM emission** (`lp-glsl-wasm`): Working, consumes LPIR modules.
+- **LPIR → WASM emission** (`lps-wasm`): Working, consumes LPIR modules.
 - **Filetests**: `cranelift.q32` and `wasm.q32` targets. WASM target uses
   the Naga→LPIR→WASM path. Cranelift target uses the direct AST→CLIF path.
 
 ### What the existing Cranelift backend looks like
 
-- **`lp-glsl-cranelift`**: ~6000+ lines. Parses GLSL via `lp-glsl-frontend`,
+- **`lps-cranelift`**: ~6000+ lines. Parses GLSL via `lps-frontend`,
   walks the typed AST, emits CLIF directly. Handles Q32 inline via
   `NumericMode` dispatch. Manages `GlModule<M: Module>` with JIT and
   object/emulator backends.
@@ -66,15 +66,15 @@ feature parity with the existing Cranelift backend.
 
 ## Questions
 
-### 1. Crate structure: new crate or integrate into `lp-glsl-cranelift`?
+### 1. Crate structure: new crate or integrate into `lps-cranelift`?
 
 **Answer**: New standalone crate. Clean slate, no compatibility constraints
-with the old compiler. The old `lp-glsl-cranelift` is effectively abandoned
+with the old compiler. The old `lps-cranelift` is effectively abandoned
 on this branch. We copy what we need (builtin declaration patterns, ISA
 creation), but design fresh types and APIs.
 
 Rationale: the duplication is temporary and bounded. Shared crates
-(`lp-glsl-builtin-ids`, `lp-glsl-builtins`, `lp-glsl-jit-util`, `lp-model`)
+(`lps-builtin-ids`, `lps-builtins`, `lps-jit-util`, `lp-model`)
 are already separate. The backend infra that looks big in the old crate
 (GlModule, SignatureBuilder, etc.) is mostly managing AST-specific
 complexity that LPIR doesn't have. The new crate will be simpler.
@@ -84,6 +84,7 @@ firmware, then delete the old crate. A/B comparison against main via
 git worktree.
 
 Additional decisions:
+
 - **Host JIT first** for filetests (much faster than emulator path).
   Add host-jit as a filetest target — this is independently useful.
   ESP32/emulator path comes later for firmware integration.
@@ -109,6 +110,7 @@ SSA construction automatically.
     __lp_<module>_<fn>_<mode>
 
 Three modules:
+
 - `lpir` — ops the IR has opcodes for but need library impl for some
   modes (fdiv, sqrt, ftoi_sat, itof). NOT LPIR imports — emitter-internal.
 - `glsl` — GLSL built-in functions (SPIR-V GLSL.std.450: sin, cos,
@@ -120,7 +122,8 @@ Mode suffix: `_q32` / `_f32` for functions that operate on float values.
 No suffix for mode-independent functions (integer-only, like hash).
 
 The convention renders consistently across all contexts:
-- **ELF symbol**: `__lp_glsl_sin_q32`
+
+- **ELF symbol**: `__lps_sin_q32`
 - **LPIR import**: `glsl::sin` (mode is emitter's concern, not IR's)
 - **File path**: `lp-builtins/src/lp/glsl/sin_q32.rs`
 - **GLSL code**: `sin` (module implied by language)
@@ -136,8 +139,8 @@ The rename is mechanical — a dedicated (short) stage of this roadmap.
 
 Import resolution: LPIR `ImportDecl` with `module_name = "glsl"`,
 `func_name = "sin"` → `BuiltinId { module: Glsl, name: "sin" }` →
-emitter adds mode → `__lp_glsl_sin_q32`. This resolution logic lives in
-`lp-glsl-builtin-ids` (shared by WASM and Cranelift emitters). Each
+emitter adds mode → `__lps_sin_q32`. This resolution logic lives in
+`lps-builtin-ids` (shared by WASM and Cranelift emitters). Each
 emitter maps `BuiltinId` → target-specific linkage (WASM import string
 vs Cranelift func ref).
 
@@ -150,13 +153,13 @@ wrapping is out of scope.
 
 Q32 saturating: LPIR float ops (`fadd`, `fmul`, etc.) → calls to
 `__lp_lpir_<op>_q32` builtins. LPIR `glsl::sin` import → call to
-`__lp_glsl_sin_q32`. Structurally straightforward — the emitter maps
+`__lps_sin_q32`. Structurally straightforward — the emitter maps
 LPIR ops to function calls, not inline instruction sequences.
 
 ### 6. Feature gating strategy for lp-engine
 
 **Answer**: No feature flags. Clean switch. On this branch, lp-engine
-swaps its dependency from `lp-glsl-cranelift` to the new crate and uses
+swaps its dependency from `lps-cranelift` to the new crate and uses
 the new API directly. A/B comparison against the old compiler is done
 via git worktree on main. Feature flags would create messy conditional
 compilation for a temporary migration state.
@@ -172,12 +175,14 @@ Abstract later if we ever have a non-Cranelift native backend.
 **Answer**: Name targets by where the code runs, not how it got there.
 
 Final state target names:
+
 - `wasm.q32` — LPIR → WASM → wasmtime (existing)
 - `jit.q32` — LPIR → CLIF → machine code → host CPU (new, primary)
 - `rv32.q32` — LPIR → CLIF → RV32 object → RISC-V emulator (replaces
   `cranelift.q32`)
 
 Future targets (not in this roadmap):
+
 - `lpir.q32` — LPIR interpreter
 - `clif.q32` — Cranelift interpreter
 
@@ -187,6 +192,7 @@ removed when the LPIR pipeline replaces it.
 ### 9. Scope of language support
 
 **Answer**: Match WASM emitter coverage exactly:
+
 - All scalar LPIR ops (arithmetic, comparison, casts, constants, select, copy)
 - Structured CF → Cranelift CFG (if/loop/break/continue/return)
 - `glsl::*` import calls
@@ -202,6 +208,7 @@ what Cranelift provides natively.
 **Answer**: Clean slate API for the new crate. Major simplification.
 
 **Compilation**:
+
 - `jit(source: &str, options: CompileOptions) -> Result<JitModule>`
 - `jit_from_ir(ir: &IrModule, options: CompileOptions) -> Result<JitModule>`
 - No `GlslCompiler` struct, no streaming, no `RunMode` enum.
@@ -209,6 +216,7 @@ what Cranelift provides natively.
 **Execution — two levels**:
 
 Level 1 — typed, mode-aware (tests/filetests):
+
 - `module.call("main", &[GlslQ32::Vec2(0.5, 0.3), ...]) -> CallResult<GlslQ32>`
 - Returns `GlslReturn<GlslQ32>` with `.value: Option<GlslQ32>` (return value)
   and `.outs: Vec<GlslQ32>` (out/inout params, positional).
@@ -219,6 +227,7 @@ Level 1 — typed, mode-aware (tests/filetests):
 - `CallError` covers fuel, emulator crash, type mismatch, etc.
 
 Level 3 — direct call, convention-abstracted (engine hot path):
+
 - `module.direct_call("main") -> Option<DirectCall>`
 - `DirectCall` provides `call(args: *const u32, results: *mut u32)`.
 - Calling convention (struct-return, registers) is hidden.

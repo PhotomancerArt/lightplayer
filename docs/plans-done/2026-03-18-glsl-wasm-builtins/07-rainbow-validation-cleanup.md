@@ -5,7 +5,7 @@
 - Compile **`examples/.../rainbow.shader/main.glsl`** (or canonical path) via `glsl_wasm` + full linking; fix remaining gaps.
 - Add or extend **integration test**: deterministic pixel/vec outputs vs Cranelift for a few inputs (if policy allows comparison), or snapshot hashes.
 - **Filetests:** Remove `@unimplemented(backend=wasm)` where wasm.q32 passes; run broader `./scripts/glsl-filetests.sh --target wasm.q32` and ensure **cranelift.q32** unchanged.
-- **Docs:** Update `lp-glsl-wasm/README.md`, `lp-glsl-filetests/README.md`, `impl-notes.md` — document builtins.wasm build, memory import, linking order.
+- **Docs:** Update `lps-wasm/README.md`, `lps-filetests/README.md`, `impl-notes.md` — document builtins.wasm build, memory import, linking order.
 - **Plan:** Write `summary.md`, move plan directory to `docs/plans-done/` per project convention.
 
 ## Code organization reminders

@@ -93,7 +93,7 @@ Verify all previously-failing tests now pass (or are correctly annotated).
 
 - Grep the git diff for TODOs, debug prints, temporary code.
 - Run `cargo +nightly fmt` on all changed files.
-- Run `cargo clippy -p lp-glsl-wasm -p lp-glsl-naga -- -D warnings`.
+- Run `cargo clippy -p lps-wasm -p lps-naga -- -D warnings`.
 
 ## Plan cleanup
 
@@ -103,7 +103,7 @@ Verify all previously-failing tests now pass (or are correctly annotated).
 ## Commit
 
 ```
-fix(lp-glsl): filetest failures — continue depth, bool casts, prototypes, inout
+fix(lps): filetest failures — continue depth, bool casts, prototypes, inout
 
 - Fix WASM continue branch depth in nested constructs (control.rs)
 - Handle As expressions with Bool target type (expr_scalar.rs)
@@ -115,9 +115,9 @@ fix(lp-glsl): filetest failures — continue depth, bool casts, prototypes, inou
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-wasm -q
-cargo test -p lp-glsl-naga -q
-cargo +nightly fmt --check -p lp-glsl-wasm -p lp-glsl-naga
-cargo clippy -p lp-glsl-wasm -p lp-glsl-naga -- -D warnings
+cargo test -p lps-wasm -q
+cargo test -p lps-naga -q
+cargo +nightly fmt --check -p lps-wasm -p lps-naga
+cargo clippy -p lps-wasm -p lps-naga -- -D warnings
 scripts/glsl-filetests.sh
 ```

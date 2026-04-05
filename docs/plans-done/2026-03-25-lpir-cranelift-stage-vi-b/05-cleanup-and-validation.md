@@ -18,7 +18,7 @@ summary, move to `plans-done`.
 ### 1. Grep
 
 ```bash
-git diff | grep -E 'TODO|FIXME|dbg!|println!|lp_glsl_cranelift|glsl_jit_streaming'
+git diff | grep -E 'TODO|FIXME|dbg!|println!|lps_cranelift|glsl_jit_streaming'
 ```
 
 Remove stray references. Ensure no `lp-engine` path still imports the old crate.
@@ -65,7 +65,7 @@ Conventional commit, e.g.:
 ```
 feat(lp-engine): use lpir-cranelift for shader JIT (Stage VI-B)
 
-- Replace lp-glsl-cranelift with lpir-cranelift; drop cranelift-codegen and lp-glsl-jit-util
+- Replace lps-cranelift with lpir-cranelift; drop cranelift-codegen and lps-jit-util
 - ShaderRuntime stores JitModule + DirectCall; render uses call_i32_buf
 - Forward optimizer/verifier features via lp-server
 - Add DirectCall::call_i32_buf and invoke buffer path in lpir-cranelift

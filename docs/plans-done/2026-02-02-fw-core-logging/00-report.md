@@ -32,14 +32,14 @@
    - No structured logging levels or scoping
 
 4. **Emulator (fw-emu)**
-   - Uses `host_debug!` macro from `lp-glsl-builtins`
+   - Uses `host_debug!` macro from `lps-builtins`
    - Syscalls available:
      - `SYSCALL_WRITE` (always prints)
      - `SYSCALL_DEBUG` (currently routes to host's `debug!` macro)
    - Emulator routes `SYSCALL_DEBUG` to host's `debug!` macro which checks `DEBUG=1` env var
 
 5. **Ad-hoc Debug Macros**
-   - `lp-glsl-compiler/src/debug.rs`: Checks `DEBUG=1` env var, only works with `std`
+   - `lps-compiler/src/debug.rs`: Checks `DEBUG=1` env var, only works with `std`
    - `lp-riscv-inst/src/debug.rs`: Similar pattern
    - Various other debug macros scattered throughout codebase
 

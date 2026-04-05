@@ -1,0 +1,19 @@
+[package]
+name = "lps-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lps-builtin-ids = { path = "../../lps-builtin-ids" }
+lps-naga = { path = "../../lps-naga" }
+lpir = { path = "../../lpir" }
+wasm-encoder = "0.245"
+log = { workspace = true, default-features = false }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+wasmtime = "42"

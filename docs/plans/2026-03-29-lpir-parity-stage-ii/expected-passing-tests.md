@@ -1,6 +1,6 @@
 # Stage II — expected passing filetests
 
-All paths are relative to `lp-shader/lp-glsl-filetests/filetests/`.
+All paths are relative to `lp-shader/lps-filetests/filetests/`.
 
 After implementation, each listed file should pass on **`jit.q32`**, **`wasm.q32`**, and *
 *`rv32.q32`** unless a `// run:` (or file) carries a justified **`@unsupported(...)`** (document

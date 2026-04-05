@@ -228,7 +228,7 @@ which implementation to use based on target.
 
 ### Implementation Strategy
 
-1. **Fix Generator** - Update `lp-glsl-builtin-gen-app` to use `LpLibFn` enum as source of truth:
+1. **Fix Generator** - Update `lps-builtin-gen-app` to use `LpLibFn` enum as source of truth:
     - Read `LpLibFn` enum from `lp_lib_fns.rs`
     - Match discovered functions to `LpLibFn::symbol_name()` values
     - Use `LpLibFn::builtin_id()` to determine `BuiltinId` variant

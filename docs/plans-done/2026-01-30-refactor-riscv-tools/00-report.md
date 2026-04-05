@@ -15,7 +15,7 @@ confusing because:
 - The crate is `#![no_std]` by default
 - Some core emulator functionality (time tracking, debug output) conditionally uses `std`
 - ELF loading is completely gated behind `std` feature
-- Consumers have different needs: `fw-emu` needs `no_std`, `lp-glsl-compiler` needs `std`
+- Consumers have different needs: `fw-emu` needs `no_std`, `lps-compiler` needs `std`
 
 ## Current Structure
 
@@ -88,7 +88,7 @@ lp-riscv/lp-riscv-tools/
 
 **Usage:**
 
-- `lp-glsl-compiler` uses this when `emulator` feature is enabled
+- `lps-compiler` uses this when `emulator` feature is enabled
 - Tests use this for loading test binaries
 
 ### 2. Time Tracking (`emu/emulator/state.rs`) - **OPTIONAL std**
@@ -170,7 +170,7 @@ lp-riscv-tools = { path = "../../lp-riscv/lp-riscv-tools", default-features = fa
 
 **Current status:** ✅ Works with `no_std`
 
-### 2. `lp-glsl-compiler`
+### 2. `lps-compiler`
 
 **Usage:**
 
@@ -366,7 +366,7 @@ These have different use cases and dependencies.
 
 4. **Update consumers:**
    - `fw-emu`: Use `lp-riscv-emu` only
-   - `lp-glsl-compiler`: Use `lp-riscv-emu` and `lp-riscv-elf`
+   - `lps-compiler`: Use `lp-riscv-emu` and `lp-riscv-elf`
 
 5. **Deprecate `lp-riscv-tools`:**
    - Keep as thin wrapper re-exporting from new crates

@@ -28,7 +28,7 @@ The web-demo JavaScript instantiates the compiled WASM module. With Phase 4+,
 the module now has `builtins` imports. The JavaScript must provide these
 imports at instantiation time.
 
-The current `index.html` likely already loads `lp_glsl_builtins_wasm.wasm`
+The current `index.html` likely already loads `lps_builtins_wasm.wasm`
 for the old backend's imports. Verify the linkage still works:
 
 ```javascript

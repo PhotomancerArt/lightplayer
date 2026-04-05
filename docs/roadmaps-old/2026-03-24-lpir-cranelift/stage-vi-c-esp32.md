@@ -15,7 +15,7 @@ device. Run A/B performance comparisons against the old compiler.
 **In scope:**
 
 - **ESP32 firmware build:**
-  - Update `fw-esp32` Cargo.toml: replace `lp-glsl-cranelift` (+ direct
+  - Update `fw-esp32` Cargo.toml: replace `lps-cranelift` (+ direct
     cranelift crate deps) with `lpir-cranelift` (without default `std` feature)
   - Resolve any remaining `no_std` / linker / ISA issues specific to
     ESP32-C6 (`riscv32imac`)

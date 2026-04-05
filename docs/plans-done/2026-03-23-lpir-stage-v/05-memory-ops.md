@@ -109,7 +109,7 @@ If `memory.copy` is not available, fall back to a byte-by-byte loop
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Functions with slots now emit valid WASM with shadow stack management.

@@ -92,7 +92,7 @@ lp-shader/
 ├── lpvm/
 │   └── src/
 │       └── vmcontext.rs        # VmContextHeader, constants, builder
-├── lp-glsl-naga/
+├── lps-naga/
 │   └── src/
 │       └── lower.rs              # Collect uniforms/globals, build VMContext type
 ├── lpir/
@@ -103,11 +103,11 @@ lp-shader/
 │   │   ├── emit/mod.rs           # Thread VMContext through signatures
 │   │   └── jit_module.rs         # Store memcpy metadata (globals offset, defaults offset, size)
 │   └── src/lib.rs                # DirectCall takes VMContext pointer
-├── lp-glsl-wasm/
+├── lps-wasm/
 │   └── src/
 │       ├── emit/mod.rs           # Add i32 param to all signatures
 │       └── func.rs               # local.get 0 is VMContext
-└── lp-glsl-filetests/
+└── lps-filetests/
     └── src/
         └── test_run/             # Harness allocates VMContext, sets uniforms
 

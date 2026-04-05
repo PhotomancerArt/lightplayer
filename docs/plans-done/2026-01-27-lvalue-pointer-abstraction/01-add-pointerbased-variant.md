@@ -18,7 +18,7 @@ behavior.
 
 ### Files to Modify
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/types.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/types.rs`
 
 ### Changes
 

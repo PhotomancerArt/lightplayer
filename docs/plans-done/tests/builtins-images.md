@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL image functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/images/` following the flat naming convention with prefixes. These tests will comprehensively cover image load/store/atomic functions for various image types. These tests are expected to fail initially, serving as a specification for implementing image function support in the compiler.
+Create a complete test suite for GLSL image functions in `lightplayer/crates/lps-filetests/filetests/builtins/images/` following the flat naming convention with prefixes. These tests will comprehensively cover image load/store/atomic functions for various image types. These tests are expected to fail initially, serving as a specification for implementing image function support in the compiler.
 
 ## Directory Structure
 

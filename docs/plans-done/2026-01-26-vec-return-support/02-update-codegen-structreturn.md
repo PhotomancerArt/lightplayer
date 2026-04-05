@@ -7,7 +7,7 @@ includes allocating a stack slot, passing the pointer, and loading return values
 
 ## Changes
 
-### `lp-shader/lp-glsl-compiler/src/frontend/codegen/lpfx_fns.rs`
+### `lp-shader/lps-compiler/src/frontend/codegen/lpfx_fns.rs`
 
 - Update `emit_lp_lib_fn_call()` to:
     - Check if function uses StructReturn (check signature)

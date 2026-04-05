@@ -89,8 +89,8 @@ the old version. The new version is ~80-100 lines.
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
-cargo test -p lp-glsl-compiler --features std -- streaming
+cargo check -p lps-compiler --features std
+cargo test -p lps-compiler --features std -- streaming
 scripts/glsl-filetests.sh
 ```
 

@@ -10,7 +10,7 @@ should emit TestCase calls that the q32 transform converts, matching the pattern
 ## File Structure
 
 ```
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── semantic/
 │   │   └── lp_lib_fns.rs              # UPDATE: Add needs_q32_mapping() and q32_name() methods
@@ -26,7 +26,7 @@ lp-shader/lp-glsl-compiler/src/
 │               ├── calls.rs           # VERIFY: Already handles TestCase→builtin conversion correctly
 │               └── math.rs            # VERIFY: map_testcase_to_builtin() already has correct mappings
 
-lp-shader/lp-glsl-builtin-gen-app/
+lp-shader/lps-builtin-gen-app/
 └── src/
     └── main.rs                        # UPDATE: Use LpLibFn enum as source of truth instead of prefix matching
 ```
@@ -59,7 +59,7 @@ emit_lp_lib_fn_call() - # UPDATE: Change implementation
     └── Let q32 transform handle conversion
 ```
 
-### Generator Changes (`apps/lp-glsl-builtin-gen-app/src/main.rs`)
+### Generator Changes (`apps/lps-builtin-gen-app/src/main.rs`)
 
 ```
 discover_builtins() - # UPDATE: Use LpLibFn enum as source of truth

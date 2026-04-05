@@ -2,24 +2,24 @@
 
 ## Scope
 
-Replace `lp-glsl-cranelift` with `lpir-cranelift` in `lp-engine`. Rewrite
+Replace `lps-cranelift` with `lpir-cranelift` in `lp-engine`. Rewrite
 `ShaderRuntime` to compile via `lpir_cranelift::jit()`, store `JitModule`
 directly (no trait object), and render via `DirectCall::call_i32_buf`
-(zero-alloc per pixel). Drop `cranelift-codegen` and `lp-glsl-jit-util` from
+(zero-alloc per pixel). Drop `cranelift-codegen` and `lps-jit-util` from
 `lp-engine`. Validate via `fw-emu` and desktop tests.
 
 ## File structure
 
 ```
-lp-shader/lpir-cranelift/src/
+lp-shader/legacy/lpir-cranelift/src/
 ├── direct_call.rs                # UPDATE: add call_i32_buf (non-allocating)
 ├── invoke.rs                     # UPDATE: add invoke_i32_buf variant
 ├── jit_module.rs                 # UPDATE: unsafe impl Send + Sync for JitModule
 └── ...                           # rest unchanged
 
 lp-core/lp-engine/
-├── Cargo.toml                    # UPDATE: replace lp-glsl-cranelift → lpir-cranelift;
-│                                 #   drop cranelift-codegen, lp-glsl-jit-util
+├── Cargo.toml                    # UPDATE: replace lps-cranelift → lpir-cranelift;
+│                                 #   drop cranelift-codegen, lps-jit-util
 └── src/nodes/shader/
     └── runtime.rs                # UPDATE: rewrite compile + render paths
 
@@ -99,31 +99,31 @@ unsafe impl Sync for JitModule {}
 use lpir_cranelift::{jit, CompileOptions, MemoryStrategy, Q32Options, FloatMode};
 
 let q32_options = Q32Options {
-    add_sub: map_add_sub(config.glsl_opts.add_sub),
-    mul: map_mul(config.glsl_opts.mul),
-    div: map_div(config.glsl_opts.div),
+add_sub: map_add_sub(config.glsl_opts.add_sub),
+mul: map_mul(config.glsl_opts.mul),
+div: map_div(config.glsl_opts.div),
 };
 
 let options = CompileOptions {
-    float_mode: FloatMode::Q32,
-    q32_options,
-    memory_strategy: MemoryStrategy::LowMemory,  // embedded default
-    max_errors: Some(16),
+float_mode: FloatMode::Q32,
+q32_options,
+memory_strategy: MemoryStrategy::LowMemory,  // embedded default
+max_errors: Some(16),
 };
 
-let module = jit(glsl_source, &options)?;
+let module = jit(glsl_source, & options) ?;
 let direct_call = module.direct_call("main");
-self.module = Some(module);
-self.direct_call = direct_call;
+self .module = Some(module);
+self .direct_call = direct_call;
 ```
 
 **`render`:**
 
 ```rust
-let dc = self.direct_call.as_ref().ok_or(...)?;
+let dc = self .direct_call.as_ref().ok_or(...) ?;
 let mut result = [0i32; 4];
 let args = [frag_x_q32, frag_y_q32, size_x_q32, size_y_q32, time_q32];
-unsafe { dc.call_i32_buf(&args, &mut result)?; }
+unsafe { dc.call_i32_buf( & args, & mut result) ?; }
 // result[0..4] = r, g, b, a in Q32
 ```
 
@@ -143,12 +143,12 @@ fn map_div(m: lp_model::glsl_opts::DivMode) -> lpir_cranelift::DivMode { ... }
 
 ```toml
 # Remove:
-lp-glsl-cranelift = { ... }
+lps-cranelift = { ... }
 cranelift-codegen = { ... }
-lp-glsl-jit-util = { ... }
+lps-jit-util = { ... }
 
 # Add:
-lpir-cranelift = { path = "../../lp-shader/lpir-cranelift", default-features = false }
+lpir-cranelift = { path = "../../lp-shader/legacy/lpir-cranelift", default-features = false }
 ```
 
 Features:

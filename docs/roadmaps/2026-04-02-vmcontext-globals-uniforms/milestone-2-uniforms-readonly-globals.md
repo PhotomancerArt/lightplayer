@@ -36,7 +36,7 @@ readonly access to uniforms and globals.
 
 ## Deliverables
 
-- `lp-glsl-naga` collects uniform/global metadata
+- `lps-naga` collects uniform/global metadata
 - `VmContextBuilder` in `lpvm` constructs full type
 - Path-based offset resolution with caching
 - Filetests demonstrating uniform reads

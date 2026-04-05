@@ -21,7 +21,7 @@ or lower-level pieces so tests compose.
 
 ## Implementation details
 
-- Reuse **trap/timeout** handling patterns from `lp-glsl-cranelift` where
+- Reuse **trap/timeout** handling patterns from `lps-cranelift` where
   applicable; do not copy large slabs of `GlslEmulatorModule` if a minimal path
   suffices for V1.
 - **Multi-return / struct return:** defer to follow-up if blocking; document in
@@ -37,7 +37,7 @@ or lower-level pieces so tests compose.
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
 ```
 
 `cargo +nightly fmt`.

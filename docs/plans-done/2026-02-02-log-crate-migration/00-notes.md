@@ -6,7 +6,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
 
 1. **Std Applications**: Use `env_logger` with `RUST_LOG` environment variable
    - CLI (`lp-cli`)
-   - Filetest runner (`lp-glsl-filetests`)
+   - Filetest runner (`lps-filetests`)
    - Other std binaries
 
 2. **Tests**: Use `env_logger` in tests (with proper feature flag handling)
@@ -32,7 +32,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
 
 ### Custom Debug Macros
 
-1. **lp-glsl-compiler/src/debug.rs**
+1. **lps-compiler/src/debug.rs**
    - Checks `DEBUG=1` env var
    - Only works with `std` feature
    - Used extensively throughout compiler code
@@ -45,7 +45,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
    - Inline debug macro definition
    - Checks `DEBUG=1`
 
-4. **lp-glsl-builtins/src/host/macros.rs**
+4. **lps-builtins/src/host/macros.rs**
    - `host_debug!` macro for emulator guest
    - Uses syscalls in no_std mode
    - Has complex feature flag handling
@@ -64,7 +64,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
 ### Environment-Specific Code
 
 1. **fw-emu** (`lp-fw/fw-emu`)
-   - Uses `host_debug!` from `lp-glsl-builtins`
+   - Uses `host_debug!` from `lps-builtins`
    - Runs in `no_std` environment
    - Syscalls available: `SYSCALL_WRITE`, `SYSCALL_DEBUG`
 
@@ -79,7 +79,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
 
 ### Usage Patterns
 
-- `crate::debug!("message")` - Used in lp-glsl-compiler extensively
+- `crate::debug!("message")` - Used in lps-compiler extensively
 - `host_debug!("message")` - Used in emulator guest code
 - Direct `println!` - Used in ESP32 and some std code
 
@@ -106,7 +106,7 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
      - Emulator: `__host_log` uses `SYSCALL_LOG` syscall (no_std)
      - JIT: `__host_log` uses `log` crate directly (std context)
      - Tests: Use `log` crate directly (std context)
-   - Create a logger implementation in `lp-glsl-builtins` that routes to appropriate backend
+   - Create a logger implementation in `lps-builtins` that routes to appropriate backend
    - Signature: `__host_log(level: u8, module_path_ptr: *const u8, module_path_len: usize, msg_ptr: *const u8, msg_len: usize)`
 
 ## Notes
@@ -119,5 +119,5 @@ Migrate the entire codebase from custom `debug!` macros to the standard `log` cr
 - Use `test-log` crate for automatic test logger initialization - tests use `#[test_log::test]` attribute
 - `test-log` works with both regular and tokio tests by stacking attributes
 - Refactor `SYSCALL_DEBUG` to `SYSCALL_LOG` with level parameter: args[0] = level (u8: 0=error, 1=warn, 2=info, 3=debug), args[1] = module_path ptr, args[2] = module_path len, args[3] = message ptr, args[4] = message len
-- Refactor `__host_debug` to `__host_log` in `lp-glsl-builtins` with same signature as SYSCALL_LOG
+- Refactor `__host_debug` to `__host_log` in `lps-builtins` with same signature as SYSCALL_LOG
 - Remove `__host_println` and `host_println!` macro - replace usages with `log::info!` or appropriate level

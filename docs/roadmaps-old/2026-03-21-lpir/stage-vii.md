@@ -12,7 +12,7 @@ is clean.
 ## Scope
 
 **In scope:**
-- Delete dead code from `lp-glsl-wasm` (old emit.rs, emit_vec.rs, locals.rs
+- Delete dead code from `lps-wasm` (old emit.rs, emit_vec.rs, locals.rs
   should already be gone from Stage V)
 - Remove any `#[allow(dead_code)]` or feature gates added during migration
 - Update README.md files to reflect new architecture

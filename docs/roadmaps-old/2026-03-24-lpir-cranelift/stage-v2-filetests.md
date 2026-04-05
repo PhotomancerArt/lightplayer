@@ -2,12 +2,12 @@
 
 ## Goal
 
-Wire **`lp-glsl-filetests`** to **`lpir-cranelift`** for **`jit.q32`** (host CPU)
+Wire **`lps-filetests`** to **`lpir-cranelift`** for **`jit.q32`** (host CPU)
 and **`rv32.q32`** (emulator), using the RV32 object + link + emulator path built
-in **Stage V1**. **Remove** the legacy **`cranelift.q32`** target and **`lp-glsl-cranelift`**
-from the filetest runner. Shared boundary: **`lp-glsl-exec`** (**`GlslExecutable`**),
-**`lpvm`** (**`GlslValue`**), **`lp-glsl-diagnostics`**, **`lps-shared`**
-as needed — **legacy `lp-glsl-frontend` / `lp-glsl-cranelift` stay unchanged** until
+in **Stage V1**. **Remove** the legacy **`cranelift.q32`** target and **`lps-cranelift`**
+from the filetest runner. Shared boundary: **`lps-exec`** (**`GlslExecutable`**),
+**`lpvm`** (**`GlslValue`**), **`lps-diagnostics`**, **`lps-shared`**
+as needed — **legacy `lps-frontend` / `lps-cranelift` stay unchanged** until
 a later deprecation pass.
 
 ## Suggested plan name
@@ -23,9 +23,9 @@ there)
 
 - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations
 - **`rv32.q32`:** LPIR → Stage V1 object + link + emulator
-- **`wasm.q32`:** unchanged backend; **`impl GlslExecutable`** uses **`lp-glsl-exec`**
-- **Wire** filetests + wasm to **`lp-glsl-exec`** / **`lpvm`** (etc.);
-  **remove `lp-glsl-cranelift` dependency from `lp-glsl-filetests`**
+- **`wasm.q32`:** unchanged backend; **`impl GlslExecutable`** uses **`lps-exec`**
+- **Wire** filetests + wasm to **`lps-exec`** / **`lpvm`** (etc.);
+  **remove `lps-cranelift` dependency from `lps-filetests`**
 - **Remove** legacy **`cranelift.q32`** / **`Backend::Cranelift`**; migrate
   annotations (`backend=cranelift` → `jit` or `rv32`)
 - **`DEFAULT_TARGETS`:** **`[jit.q32]` only** (fast local runs; adjust later if needed)
@@ -38,7 +38,7 @@ there)
 - lp-engine migration / fw-emu (Stage VI-B)
 - ESP32 firmware (Stage VI-C)
 - Vector filetests (future)
-- **Deleting** the **`lp-glsl-cranelift`** crate entirely (**Stage VII** — filetests
+- **Deleting** the **`lps-cranelift`** crate entirely (**Stage VII** — filetests
   no longer need it after V2, but other workspace crates may until VII)
 
 ## Key decisions
@@ -50,7 +50,7 @@ there)
 
 ## Open questions
 
-- **Trait surface:** **`lp-glsl-exec`** already omits Cranelift-only hooks (e.g.
+- **Trait surface:** **`lps-exec`** already omits Cranelift-only hooks (e.g.
   **`DirectCallInfo`**); extend only if filetests need more without pulling in
   codegen crates.
 
@@ -58,7 +58,7 @@ there)
 
 - **`jit.q32`**, **`rv32.q32`**, **`wasm.q32`** selectable; **`cranelift.q32`**
   removed
-- **`lp-glsl-filetests`** does not depend on **`lp-glsl-cranelift`**
+- **`lps-filetests`** does not depend on **`lps-cranelift`**
 - CI runs multi-target matrix; README documents defaults vs CI
 - Majority of scalar tests passing (annotation migration as needed)
 

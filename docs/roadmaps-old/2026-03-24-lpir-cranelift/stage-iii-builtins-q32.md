@@ -13,32 +13,34 @@ in Q32 mode.
 ## Scope
 
 **In scope:**
+
 - Import resolution: LPIR `ImportDecl` → `BuiltinId` → Cranelift func ref
-  - `glsl::sin` + Q32 → `__lp_glsl_sin_q32` → declared import, resolved
-    via symbol lookup
-  - `lpfx::fbm2` + Q32 → `__lp_lpfx_fbm2_q32` → same path
-  - Resolution logic shared with WASM emitter (from Stage I's BuiltinId)
+    - `glsl::sin` + Q32 → `__lps_sin_q32` → declared import, resolved
+      via symbol lookup
+    - `lpfx::fbm2` + Q32 → `__lp_lpfx_fbm2_q32` → same path
+    - Resolution logic shared with WASM emitter (from Stage I's BuiltinId)
 - Builtin declaration in JIT module:
-  - Iterate relevant BuiltinIds for current float mode
-  - Declare as imports with Cranelift signatures
-  - Symbol lookup function providing `lp-glsl-builtins` function pointers
+    - Iterate relevant BuiltinIds for current float mode
+    - Declare as imports with Cranelift signatures
+    - Symbol lookup function providing `lps-builtins` function pointers
 - Q32 float mode:
-  - LPIR float ops (`Fadd`, `Fmul`, `Fdiv`, etc.) → calls to
-    `__lp_lpir_<op>_q32` builtins instead of native CLIF instructions
-  - LPIR float params/returns: `IrType::F32` → Cranelift `I32` in Q32 mode
-  - LPIR `Fconst` → Q32-encoded i32 constant
-  - Math calls (`glsl::sin`) → `__lp_glsl_sin_q32`
+    - LPIR float ops (`Fadd`, `Fmul`, `Fdiv`, etc.) → calls to
+      `__lp_lpir_<op>_q32` builtins instead of native CLIF instructions
+    - LPIR float params/returns: `IrType::F32` → Cranelift `I32` in Q32 mode
+    - LPIR `Fconst` → Q32-encoded i32 constant
+    - Math calls (`glsl::sin`) → `__lps_sin_q32`
 - Memory ops:
-  - `Op::SlotAddr` → Cranelift stack slot address
-  - `Op::Load` / `Op::Store` → Cranelift load/store from slot
-  - `Op::Memcpy` → byte-level copy
-  - Stack slot declarations from `IrFunction.slots`
+    - `Op::SlotAddr` → Cranelift stack slot address
+    - `Op::Load` / `Op::Store` → Cranelift load/store from slot
+    - `Op::Memcpy` → byte-level copy
+    - Stack slot declarations from `IrFunction.slots`
 - `Op::Call` for local (intra-module) function calls
 - `Op::MathCall` if present — route through BuiltinId resolution
 - Tests: hand-built LPIR with Q32 ops, builtin calls, memory ops
   → JIT compile → call → verify results match Q32 semantics
 
 **Out of scope:**
+
 - `jit()` from GLSL source (Stage IV)
 - Level 1 typed call interface (Stage IV)
 - GlslMetadata (Stage IV)
@@ -56,7 +58,7 @@ in Q32 mode.
   The emitter doesn't contain symbol name strings — it asks BuiltinId.
 - The symbol lookup function for JIT follows the same pattern as the old
   crate: iterate BuiltinId variants, match by name, return function
-  pointer from `lp-glsl-builtins`.
+  pointer from `lps-builtins`.
 
 ## Open questions
 

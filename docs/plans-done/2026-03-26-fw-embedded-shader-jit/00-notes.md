@@ -36,8 +36,8 @@ Related roadmap context:
 
 ## Current state of the codebase
 
-- **`pp-rs` / `lp-glsl-naga`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
-- **`lpir-cranelift`:** `glsl` feature enables **`lp-glsl-naga`**; **`jit()`** is *
+- **`pp-rs` / `lps-naga`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
+- **`lpir-cranelift`:** `glsl` feature enables **`lps-naga`**; **`jit()`** is *
   *`#[cfg(feature = "glsl")]`**, not `std`. Default features are **`std` + `glsl`** for host;
   embedded uses **`glsl`** without **`std`**. RISC-V32 uses **StructReturn** when a function returns
   more than two scalar words (Cranelift #9510).
@@ -91,7 +91,7 @@ ESP32 target with **`server`** + shader/JIT features enabled, in addition to **`
 
 ### Q3 — Cargo feature shape: extend `std` vs new flags?
 
-**Context:** Today **`std`** means "host + `lp-glsl-naga` + `cranelift-native`". Firmware must not
+**Context:** Today **`std`** means "host + `lps-naga` + `cranelift-native`". Firmware must not
 enable **`libstd`**.
 
 **Suggested default (superseded by discussion):** Avoid treating GLSL+JIT as an **opt-in** "premium"
@@ -102,7 +102,7 @@ product path. Use **`cfg` / features** for **host vs embedded** (e.g. **`std`** 
 *`libstd` + `cranelift-native`** and other host conveniences), not for "compiler exists." Optional
 Cargo features should be **opt-out** (e.g. **`minimal`** / **`no-shader-compile`**) for stripped or
 test-only builds, not **`shader-jit`** as a separate enable. **`lpir-cranelift`** may still use a
-dependency feature for **`lp-glsl-naga`** where callers need **`jit_from_ir`** only without the
+dependency feature for **`lps-naga`** where callers need **`jit_from_ir`** only without the
 front end; **`lp-engine` + `lp-server`** treat the full pipeline as **non-optional**.
 
 ## Anti-patterns — things that are NOT acceptable solutions
@@ -132,8 +132,9 @@ These have happened in the past and must not happen again:
   reference target**; `fw-emu` proves the same pipeline in CI.
 - **Cargo philosophy for this plan:** compiler is **baseline**; flags carve out **embedded vs host**
   and **size-saving opt-out**, not "enable the compiler."
-- **Crate disambiguation:** `lpir-cranelift` (in `lp-shader/lpir-cranelift/`) is used by `lp-engine`
-  and is the crate this plan modifies. `lp-glsl-cranelift` (in `lp-shader/lp-glsl-cranelift/`) is a
+- **Crate disambiguation:** `lpir-cranelift` (in `lp-shader/legacy/lpir-cranelift/`) is used by
+  `lp-engine`
+  and is the crate this plan modifies. `lps-cranelift` (in `lp-shader/lps-cranelift/`) is a
   separate frontend path not used by firmware. Do not confuse them.
 - **Binary size:** If the full compiler exceeds ESP32 flash, investigate LTO, `opt-level = "z"`,
   strip, and disabling `cranelift-optimizer`/`cranelift-verifier` before anything else. The compiler

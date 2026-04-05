@@ -9,7 +9,7 @@ arithmetic.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/util/
+lp-shader/lps-builtins/src/util/
 ├── mat2_q32.rs              # NEW: Mat2Q32 type and implementation
 ├── mat3_q32.rs              # NEW: Mat3Q32 type and implementation
 ├── mat4_q32.rs              # NEW: Mat4Q32 type and implementation
@@ -242,7 +242,7 @@ Comprehensive tests similar to reference implementation:
 
 ### Module Structure
 
-Matrix types are added to `lp-glsl-builtins/src/util/`:
+Matrix types are added to `lps-builtins/src/util/`:
 
 - `mat2_q32.rs` - Mat2Q32 implementation
 - `mat3_q32.rs` - Mat3Q32 implementation
@@ -260,7 +260,7 @@ Matrix types are added to `lp-glsl-builtins/src/util/`:
 ### Usage Example
 
 ```rust
-use lp_glsl_builtins::util::{Mat2Q32, Mat3Q32, Vec2Q32, Vec3Q32, Q32};
+use lps_builtins::util::{Mat2Q32, Mat3Q32, Vec2Q32, Vec3Q32, Q32};
 
 // Create matrices
 let m2 = Mat2Q32::identity();

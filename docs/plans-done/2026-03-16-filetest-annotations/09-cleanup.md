@@ -21,20 +21,20 @@ Search the diff and codebase for:
 
 ```bash
 # Old format remnants in test files
-grep -r '// target' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl'
-grep -r '\[expect-fail\]' lp-shader/lp-glsl-filetests/filetests/ --include='*.glsl'
+grep -r '// target' lp-shader/lps-filetests/filetests/ --include='*.glsl'
+grep -r '\[expect-fail\]' lp-shader/lps-filetests/filetests/ --include='*.glsl'
 
 # Old type references in code
-grep -r 'FiletestTarget' lp-shader/lp-glsl-filetests/src/
-grep -r 'expect_fail' lp-shader/lp-glsl-filetests/src/
-grep -r 'DecimalFormat' lp-shader/lp-glsl-filetests/src/
+grep -r 'FiletestTarget' lp-shader/lps-filetests/src/
+grep -r 'expect_fail' lp-shader/lps-filetests/src/
+grep -r 'DecimalFormat' lp-shader/lps-filetests/src/
 
 # TODOs introduced during this work
-grep -r 'TODO' lp-shader/lp-glsl-filetests/src/ --include='*.rs'
+grep -r 'TODO' lp-shader/lps-filetests/src/ --include='*.rs'
 
 # Debug prints
-grep -r 'println!' lp-shader/lp-glsl-filetests/src/ --include='*.rs' | grep -v 'eprintln\|format_'
-grep -r 'dbg!' lp-shader/lp-glsl-filetests/src/ --include='*.rs'
+grep -r 'println!' lp-shader/lps-filetests/src/ --include='*.rs' | grep -v 'eprintln\|format_'
+grep -r 'dbg!' lp-shader/lps-filetests/src/ --include='*.rs'
 ```
 
 Remove any temporary code, unused imports, dead code.
@@ -42,9 +42,9 @@ Remove any temporary code, unused imports, dead code.
 ### Fix warnings
 
 ```bash
-cargo build -p lp-glsl-filetests 2>&1 | grep warning
-cargo build -p lp-glsl-filetests-app 2>&1 | grep warning
-cargo build -p lp-glsl-filetests-gen-app 2>&1 | grep warning
+cargo build -p lps-filetests 2>&1 | grep warning
+cargo build -p lps-filetests-app 2>&1 | grep warning
+cargo build -p lps-filetests-gen-app 2>&1 | grep warning
 ```
 
 Fix all warnings.
@@ -77,7 +77,7 @@ scripts/glsl-filetests.sh --target wasm.q32
 cargo +nightly fmt -- --check
 
 # Clippy
-cargo clippy -p lp-glsl-filetests -p lp-glsl-filetests-app -p lp-glsl-filetests-gen-app
+cargo clippy -p lps-filetests -p lps-filetests-app -p lps-filetests-gen-app
 
 # Verify ESP32 firmware still builds
 just build-fw-esp32

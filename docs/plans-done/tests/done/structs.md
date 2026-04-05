@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL structures in `lightplayer/crates/lp-glsl-filetests/filetests/structs/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL structure specification including struct definitions, constructors, member access, assignment, and operations. These tests are expected to fail initially, serving as a specification for implementing struct support in the compiler.
+Create a complete test suite for GLSL structures in `lightplayer/crates/lps-filetests/filetests/structs/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL structure specification including struct definitions, constructors, member access, assignment, and operations. These tests are expected to fail initially, serving as a specification for implementing struct support in the compiler.
 
 ## Directory Structure
 

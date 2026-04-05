@@ -22,7 +22,7 @@ struct is defined but not fully populated.
 [dependencies]
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 lpir = { path = "../lpir" }
-lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lps-builtin-ids = { path = "../lps-builtin-ids" }
 ```
 
 ### `lib.rs` — expose new modules
@@ -118,10 +118,10 @@ Create empty stub files so the crate compiles:
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo test -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo check -p lps-naga
+cargo test -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
-Existing `lp-glsl-naga` tests must still pass. The `lower()` function
+Existing `lps-naga` tests must still pass. The `lower()` function
 compiles but produces empty function bodies.

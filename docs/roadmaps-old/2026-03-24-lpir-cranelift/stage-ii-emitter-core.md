@@ -16,7 +16,7 @@ native f32.
 
 **In scope:**
 
-- New crate `lp-shader/lpir-cranelift/` with Cargo.toml, `no_std` + `alloc`
+- New crate `lp-shader/legacy/lpir-cranelift/` with Cargo.toml, `no_std` + `alloc`
   support, cranelift dependencies (cranelift-codegen, cranelift-frontend,
   cranelift-module, cranelift-jit)
 - `emit.rs` — the core translation:
@@ -87,7 +87,7 @@ native f32.
 
 ## Deliverables
 
-- `lp-shader/lpir-cranelift/` crate
+- `lp-shader/legacy/lpir-cranelift/` crate
 - Core emitter handling all scalar LPIR ops and structured CF
 - Basic JitModule with function calling
 - Tests proving arithmetic, conditionals, loops, multi-return work

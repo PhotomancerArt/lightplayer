@@ -8,7 +8,7 @@ Implement hyperbolic trigonometric functions using mathematical formulas with ex
 
 ### 6.1 Implement Sinh
 
-In `lp-glsl-builtins/src/q32/sinh.rs`:
+In `lps-builtins/src/q32/sinh.rs`:
 
 - Implement using: `sinh(x) = (exp(x) - exp(-x)) / 2`
 - Use `__lp_q32_exp` and `__lp_q32_div`
@@ -17,7 +17,7 @@ In `lp-glsl-builtins/src/q32/sinh.rs`:
 
 ### 6.2 Implement Cosh
 
-In `lp-glsl-builtins/src/q32/cosh.rs`:
+In `lps-builtins/src/q32/cosh.rs`:
 
 - Implement using: `cosh(x) = (exp(x) + exp(-x)) / 2`
 - Use `__lp_q32_exp` and `__lp_q32_div`
@@ -26,7 +26,7 @@ In `lp-glsl-builtins/src/q32/cosh.rs`:
 
 ### 6.3 Implement Tanh
 
-In `lp-glsl-builtins/src/q32/tanh.rs`:
+In `lps-builtins/src/q32/tanh.rs`:
 
 - Implement using: `tanh(x) = sinh(x) / cosh(x)`
 - Use `__lp_q32_sinh` and `__lp_q32_cosh`
@@ -35,7 +35,7 @@ In `lp-glsl-builtins/src/q32/tanh.rs`:
 
 ### 6.4 Implement Asinh
 
-In `lp-glsl-builtins/src/q32/asinh.rs`:
+In `lps-builtins/src/q32/asinh.rs`:
 
 - Implement using: `asinh(x) = log(x + sqrt(x² + 1))`
 - Use `__lp_q32_log`, `__lp_q32_sqrt`, `__lp_q32_mul`, `__lp_q32_add`
@@ -44,7 +44,7 @@ In `lp-glsl-builtins/src/q32/asinh.rs`:
 
 ### 6.5 Implement Acosh
 
-In `lp-glsl-builtins/src/q32/acosh.rs`:
+In `lps-builtins/src/q32/acosh.rs`:
 
 - Implement using: `acosh(x) = log(x + sqrt(x² - 1))` for x >= 1
 - Use `__lp_q32_log`, `__lp_q32_sqrt`, `__lp_q32_mul`, `__lp_q32_sub`
@@ -53,7 +53,7 @@ In `lp-glsl-builtins/src/q32/acosh.rs`:
 
 ### 6.6 Implement Atanh
 
-In `lp-glsl-builtins/src/q32/atanh.rs`:
+In `lps-builtins/src/q32/atanh.rs`:
 
 - Implement using: `atanh(x) = (1/2) * log((1+x)/(1-x))` for |x| < 1
 - Use `__lp_q32_log`, `__lp_q32_div`, `__lp_q32_add`, `__lp_q32_sub`
@@ -62,20 +62,20 @@ In `lp-glsl-builtins/src/q32/atanh.rs`:
 
 ### 6.7 Add to Module
 
-In `lp-glsl-builtins/src/q32/mod.rs`:
+In `lps-builtins/src/q32/mod.rs`:
 
 - Add all hyperbolic modules
 - Export all functions
 
 ### 6.8 Update Builtins App
 
-In `lp-glsl-builtins-emu-app/src/main.rs`:
+In `lps-builtins-emu-app/src/main.rs`:
 
 - Add references to all hyperbolic functions
 
 ### 6.9 Add to Registry
 
-In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
+In `lps-compiler/src/backend/builtins/registry.rs`:
 
 - Add all hyperbolic BuiltinIds to enum
 - All are (i32) -> i32 signatures
@@ -83,7 +83,7 @@ In `lp-glsl-compiler/src/backend/builtins/registry.rs`:
 
 ### 6.10 Add Transform Conversion
 
-In `lp-glsl-compiler/src/backend/transform/q32/converters/math.rs`:
+In `lps-compiler/src/backend/transform/q32/converters/math.rs`:
 
 - Add mappings for all hyperbolic functions (sinhf, coshf, tanhf, asinhf, acoshf, atanhf and __lp_*
   versions)

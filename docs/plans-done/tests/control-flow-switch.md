@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL switch statements in `lightplayer/crates/lp-glsl-filetests/filetests/control/switch/` following the flat naming convention with prefixes. These tests will comprehensively cover switch/case/default statements, break in switch, fall-through behavior, and scope rules. These tests are expected to fail initially, serving as a specification for implementing switch statement support in the compiler.
+Create a complete test suite for GLSL switch statements in `lightplayer/crates/lps-filetests/filetests/control/switch/` following the flat naming convention with prefixes. These tests will comprehensively cover switch/case/default statements, break in switch, fall-through behavior, and scope rules. These tests are expected to fail initially, serving as a specification for implementing switch statement support in the compiler.
 
 ## Directory Structure
 
@@ -263,8 +263,8 @@ int test_switch_basic() {
    - Type conversion in case labels
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/control/if/basic.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/control/loop_break/for-loop.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/control/if/basic.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/control/loop_break/for-loop.glsl`
    - GLSL spec: `statements.adoc` - Selection section (lines 525-604)
 
 ## Files to Create

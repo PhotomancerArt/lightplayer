@@ -125,7 +125,7 @@ v_mod = fsub(x, v_mul)
 ### Helper: `expr_scalar_kind`
 
 Resolve `Handle<Expression>` → `ScalarKind`. Follow the same logic as
-`lp-glsl-wasm/src/emit.rs::expr_scalar_kind`:
+`lps-wasm/src/emit.rs::expr_scalar_kind`:
 - `Literal` → kind from literal variant
 - `FunctionArgument(i)` → from argument type
 - `LocalVariable(lv)` → from local variable type
@@ -141,8 +141,8 @@ Resolve `Handle<Expression>` → `ScalarKind`. Follow the same logic as
 ## Validate
 
 ```
-cargo check -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo check -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 The crate compiles. Expression lowering is exercisable but not yet

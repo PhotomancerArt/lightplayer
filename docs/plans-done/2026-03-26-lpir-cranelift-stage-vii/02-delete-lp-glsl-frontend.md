@@ -1,9 +1,9 @@
-# Phase 2: Delete `lp-glsl-frontend`
+# Phase 2: Delete `lps-frontend`
 
 ## Scope
 
-Migrate the two remaining consumers of `lp-glsl-frontend`, then delete the
-crate. Acceptance criteria: `lp-glsl-frontend` directory is gone and workspace
+Migrate the two remaining consumers of `lps-frontend`, then delete the
+crate. Acceptance criteria: `lps-frontend` directory is gone and workspace
 compiles.
 
 ## Code Organization Reminders
@@ -16,11 +16,11 @@ compiles.
 
 ## Implementation Details
 
-### 1. `lp-glsl-filetests` — replace `CompilationPipeline::parse`
+### 1. `lps-filetests` — replace `CompilationPipeline::parse`
 
-In `lp-shader/lp-glsl-filetests/src/test_run/test_glsl.rs`:
+In `lp-shader/lps-filetests/src/test_run/test_glsl.rs`:
 
-- Replace `use lp_glsl_frontend::CompilationPipeline;` with
+- Replace `use lps_frontend::CompilationPipeline;` with
   `use glsl::parser::Parse;` and `use glsl::syntax::TranslationUnit;`.
 - Change `CompilationPipeline::parse(source)` → `TranslationUnit::parse(source)`.
 - `CompilationPipeline::parse` returns `ParseResult { shader, .. }`.
@@ -43,11 +43,11 @@ match glsl_for_fn_graph( & tu, ...) {
 
 Same for the test functions that use `CompilationPipeline::parse`.
 
-Drop `lp-glsl-frontend` from `lp-glsl-filetests/Cargo.toml`.
+Drop `lps-frontend` from `lps-filetests/Cargo.toml`.
 
-### 2. `lp-glsl-builtins-gen-app` — inline types
+### 2. `lps-builtins-gen-app` — inline types
 
-The gen-app uses these from `lp-glsl-frontend`:
+The gen-app uses these from `lps-frontend`:
 
 - `semantic::types::Type` — enum (~20 variants)
 - `semantic::functions::FunctionSignature` — struct (name, return_type, parameters)
@@ -55,7 +55,7 @@ The gen-app uses these from `lp-glsl-frontend`:
 - `semantic::functions::ParamQualifier` — enum (In, Out, InOut)
 - `semantic::passes::function_signature::extract_function_signature` — function
 
-**Action:** Create a new module `lp-glsl-builtins-gen-app/src/lpfx/types.rs`
+**Action:** Create a new module `lps-builtins-gen-app/src/lpfx/types.rs`
 with inlined versions of these types. Only include the variants/fields actually
 used by the gen-app. The types are simple data structs with no complex logic.
 
@@ -110,7 +110,7 @@ pub enum ParamQualifier {
 ```
 
 Then inline or rewrite `extract_function_signature`. Read the current
-implementation in `lp-glsl-frontend/src/semantic/passes/function_signature.rs`
+implementation in `lps-frontend/src/semantic/passes/function_signature.rs`
 to understand what it does — it maps `glsl::syntax::FunctionPrototype` fields
 to `FunctionSignature`. The mapping is straightforward: extract name, map
 `glsl` type specifiers to `Type` variants, extract parameters. Write a local
@@ -118,21 +118,21 @@ version in `types.rs` or `glsl_parse.rs`.
 
 **Update imports** in:
 
-- `src/main.rs` — `use lp_glsl_frontend::semantic::types::Type` →
+- `src/main.rs` — `use lps_frontend::semantic::types::Type` →
   `use crate::lpfx::types::Type`
-- `src/lpfx/glsl_parse.rs` — replace `lp_glsl_frontend` imports with local
+- `src/lpfx/glsl_parse.rs` — replace `lps_frontend` imports with local
 - `src/lpfx/validate.rs` — same
 - `src/lpfx/generate.rs` — same
 
-Drop `lp-glsl-frontend` from `lp-glsl-builtins-gen-app/Cargo.toml`.
+Drop `lps-frontend` from `lps-builtins-gen-app/Cargo.toml`.
 
 ### 3. Remove old generation paths from gen-app `main.rs`
 
 Delete or comment out these generation calls and their functions:
 
-- `generate_registry(...)` — writes into `lp-glsl-cranelift/` (deleted)
-- `generate_testcase_mapping(...)` — writes into `lp-glsl-cranelift/` (deleted)
-- `generate_lpfx_fns_file(...)` — writes into `lp-glsl-frontend/` (deleted)
+- `generate_registry(...)` — writes into `lps-cranelift/` (deleted)
+- `generate_testcase_mapping(...)` — writes into `lps-cranelift/` (deleted)
+- `generate_lpfx_fns_file(...)` — writes into `lps-frontend/` (deleted)
 
 Remove `registry_path`, `mapping_rs_path`, `lpfx_fns_path` from the
 `format_generated_files` call.
@@ -140,33 +140,33 @@ Remove `registry_path`, `mapping_rs_path`, `lpfx_fns_path` from the
 Delete the corresponding `generate_*` function bodies at the bottom of
 `main.rs`.
 
-### 4. Delete `lp-glsl-frontend`
+### 4. Delete `lps-frontend`
 
 ```bash
-rm -rf lp-shader/lp-glsl-frontend
+rm -rf lp-shader/lps-frontend
 ```
 
 Remove from root `Cargo.toml`:
 
-- `[workspace] members`: `"lp-shader/lp-glsl-frontend"`
-- `[workspace] default-members`: `"lp-shader/lp-glsl-frontend"`
+- `[workspace] members`: `"lp-shader/lps-frontend"`
+- `[workspace] default-members`: `"lp-shader/lps-frontend"`
 
 ### 5. Also check: `glsl` crate dependency
 
-`lp-glsl-frontend` depended on the `glsl` crate (Rust GLSL parser, git dep).
+`lps-frontend` depended on the `glsl` crate (Rust GLSL parser, git dep).
 Other crates still use `glsl` directly:
 
-- `lp-glsl-filetests` (via `Cargo.toml`)
-- `lp-glsl-builtins-gen-app` (via `Cargo.toml`)
+- `lps-filetests` (via `Cargo.toml`)
+- `lps-builtins-gen-app` (via `Cargo.toml`)
 
 So the `glsl` workspace dependency stays. Just verify no workspace-level
-`[patch]` or `[dependencies]` entry exists solely for `lp-glsl-frontend`.
+`[patch]` or `[dependencies]` entry exists solely for `lps-frontend`.
 
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-builtins-gen-app
-cargo check -p lp-glsl-filetests
-cargo run -p lp-glsl-builtins-gen-app   # verify generation still works
-cargo test -p lp-glsl-filetests -- test_glsl   # verify filetest GLSL parsing
+cargo check -p lps-builtins-gen-app
+cargo check -p lps-filetests
+cargo run -p lps-builtins-gen-app   # verify generation still works
+cargo test -p lps-filetests -- test_glsl   # verify filetest GLSL parsing
 ```

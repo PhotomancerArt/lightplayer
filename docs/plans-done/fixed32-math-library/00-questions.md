@@ -4,16 +4,16 @@
 
 We have:
 
-- `lp-glsl-builtins` crate with q32 implementations for `div`, `mul`, `sqrt`
+- `lps-builtins` crate with q32 implementations for `div`, `mul`, `sqrt`
 - GLSL codegen that currently uses `get_math_libcall()` to call external functions like "sinf", "
   cosf", etc.
-- Builtin registry system in `lp-glsl-compiler/src/backend/builtins/registry.rs` that supports both
+- Builtin registry system in `lps-compiler/src/backend/builtins/registry.rs` that supports both
   JIT and emulator modes
 - Many failing builtin tests in `scripts/glsl-filetests.sh builtins`
 
 ## Goal
 
-Refactor GLSL builtin math functions to call `lp-glsl-builtins` functions directly instead of using
+Refactor GLSL builtin math functions to call `lps-builtins` functions directly instead of using
 GLSL intrinsics. We need both float and q32 implementations, with float being simple wrappers around
 Rust std math functions.
 

@@ -36,7 +36,7 @@ why not SSA, why Q32 is in the emitter, etc.) — absorbing content from
 ## Source language
 
 The input to the Naga → LPIR lowering is **GLSL 4.50 core** (`#version 450
-core`), as used by `lp-glsl-naga`. GLSL 4.50 allows recursion, user
+core`), as used by `lps-naga`. GLSL 4.50 allows recursion, user
 functions, arrays, `out`/`inout` parameters, and the full set of builtins
 the pipeline supports. LPIR's feature scope (recursion, call conventions,
 memory model) is designed to cover GLSL 4.50 core semantics.

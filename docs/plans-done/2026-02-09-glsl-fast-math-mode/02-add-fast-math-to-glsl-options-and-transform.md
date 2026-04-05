@@ -17,7 +17,7 @@ the field to `Q32Transform` so it can be passed to the q32 arithmetic converters
 
 ### 1. Add fast_math to GlslOptions
 
-**File**: `lp-shader/lp-glsl-compiler/src/exec/executable.rs`
+**File**: `lp-shader/lps-compiler/src/exec/executable.rs`
 
 ```rust
 pub struct GlslOptions {
@@ -35,7 +35,7 @@ Update all constructors:
 
 ### 2. Pass fast_math to Q32Transform in frontend
 
-**File**: `lp-shader/lp-glsl-compiler/src/frontend/mod.rs`
+**File**: `lp-shader/lps-compiler/src/frontend/mod.rs`
 
 In `compile_glsl_to_gl_module_jit` and `compile_glsl_to_gl_module_object`, when building
 Q32Transform:
@@ -54,7 +54,7 @@ better.
 
 ### 3. Add fast_math to Q32Transform
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/transform/q32/transform.rs`
+**File**: `lp-shader/lps-compiler/src/backend/transform/q32/transform.rs`
 
 - Add `fast_math: bool` field to `Q32Transform`
 - Update `new(format)` to set `fast_math: false`
@@ -71,7 +71,7 @@ as a separate capture.
 
 ### 4. Update convert_all_instructions signature
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/transform/q32/instructions.rs`
+**File**: `lp-shader/lps-compiler/src/backend/transform/q32/instructions.rs`
 
 - Add `fast_math: bool` parameter to `convert_all_instructions`
 - Pass it to `convert_instruction`, which passes it to `convert_fadd` and `convert_fsub`
@@ -87,7 +87,7 @@ arithmetic converters. So in phase 2:
 
 ### 5. Update convert_fadd and convert_fsub signatures
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`
+**File**: `lp-shader/lps-compiler/src/backend/transform/q32/converters/arithmetic.rs`
 
 Add `fast_math: bool` parameter. For now, ignore it (phase 3 implements the behavior). Just pass it
 through from the instruction router.
@@ -95,6 +95,6 @@ through from the instruction router.
 ## Validate
 
 ```bash
-cargo build -p lp-glsl-compiler
-cargo test -p lp-glsl-compiler
+cargo build -p lps-compiler
+cargo test -p lps-compiler
 ```

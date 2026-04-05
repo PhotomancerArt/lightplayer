@@ -16,7 +16,7 @@ should be the single source of truth. This is brittle and error-prone.
 
 ### Issues Found
 
-1. **Generator code (`lp-glsl-builtin-gen-app/src/main.rs`)**:
+1. **Generator code (`lps-builtin-gen-app/src/main.rs`)**:
     - Lines 37, 201-203, 259-262: Direct `starts_with()` checks for `__lpfx_hash_` and
       `__lpfx_snoise`
     - Lines 440, 443, 459, 549, 553, 595, 603, 763: More direct string checks

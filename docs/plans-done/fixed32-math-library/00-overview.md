@@ -8,7 +8,7 @@ functions using the same pattern.
 
 ## Current State
 
-- `lp-glsl-builtins` crate has q32 implementations for `div`, `mul`, `sqrt`
+- `lps-builtins` crate has q32 implementations for `div`, `mul`, `sqrt`
 - GLSL codegen uses `get_math_libcall()` to emit TestCase external function calls (e.g., "sinf", "
   cosf")
 - Q32 transform exists but doesn't convert math function calls yet

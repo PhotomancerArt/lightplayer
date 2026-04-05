@@ -6,7 +6,7 @@ Parse GLSL signature strings into `FunctionSignature` structures using the GLSL 
 
 ## Implementation
 
-1. Add dependency on `lp-glsl-compiler` crate (or extract utilities)
+1. Add dependency on `lps-compiler` crate (or extract utilities)
 2. Implement `parse_glsl_signature()` function:
    - Wrap signature string in a function call: `void wrapper() { func(); }`
    - Parse using `glsl::parser::Parse`

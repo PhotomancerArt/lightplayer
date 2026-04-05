@@ -31,12 +31,12 @@ WASM cannot do runtime native code generation, but it CAN dynamically
 compile and instantiate new WASM modules via WebAssembly.instantiate().
 
 The GLSL compiler is being split into:
-- **lp-glsl-frontend**: shared parser + semantic analysis (no_std, WASM-compatible)
-- **lp-glsl-cranelift**: Cranelift backend (native/rv32, not WASM-compatible)
-- **lp-glsl-wasm**: WASM codegen backend (TypedShader → WASM bytes)
+- **lps-frontend**: shared parser + semantic analysis (no_std, WASM-compatible)
+- **lps-cranelift**: Cranelift backend (native/rv32, not WASM-compatible)
+- **lps-wasm**: WASM codegen backend (TypedShader → WASM bytes)
 
 The WASM backend walks the same TypedShader AST but emits WASM bytecode
-(via wasm-encoder) instead of CLIF. Builtins (lp-glsl-builtins) compile
+(via wasm-encoder) instead of CLIF. Builtins (lps-builtins) compile
 to a separate .wasm module and are linked via WASM imports at
 instantiation time.
 

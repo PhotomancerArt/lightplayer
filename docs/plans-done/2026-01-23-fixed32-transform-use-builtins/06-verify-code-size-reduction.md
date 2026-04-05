@@ -2,14 +2,14 @@
 
 ## Goal
 
-Run the lp-glsl-q32-metrics-app script to compare code sizes before and after the changes, verifying
+Run the lps-q32-metrics-app script to compare code sizes before and after the changes, verifying
 that we've achieved the expected code size reduction.
 
 ## Tasks
 
 ### 6.1 Run Q32 Metrics Script
 
-Execute `scripts/lp-glsl-q32-metrics-app.sh`:
+Execute `scripts/lps-q32-metrics-app.sh`:
 
 - This will generate a new report in `docs/reports/q32/`
 - Report will include pre and post transform CLIF files
@@ -37,7 +37,7 @@ Expected reductions:
 
 ## Success Criteria
 
-- lp-glsl-q32-metrics-app script runs successfully
+- lps-q32-metrics-app script runs successfully
 - New report generated with post-builtin code
 - Code size reduction verified in comparison
 - Instruction counts reduced as expected

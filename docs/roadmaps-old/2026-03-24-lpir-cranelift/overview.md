@@ -43,7 +43,7 @@ Naga frontend (parse + type check)            ── existing, unchanged
   ▼
 naga::Module                                   ── existing, unchanged
   │
-  ▼  lp-glsl-naga  ── Naga → LPIR lowering    ── existing, shared with WASM
+  ▼  lps-naga  ── Naga → LPIR lowering    ── existing, shared with WASM
   │   • scalarizes vectors
   │   • decomposes builtins (smoothstep → scalar math)
   │   • handles LPFX calls and out-pointer ABI
@@ -58,7 +58,7 @@ IrModule + GlslMetadata                        ── LPIR (float-agnostic)
   ┌──────────┴──────────┐
   ▼                     ▼
 WASM emitter            NEW: LPIR → CLIF emitter
-(lp-glsl-wasm)          (lpir-cranelift)
+(lps-wasm)          (lpir-cranelift)
   │ Q32: inline i64       │ Q32: builtin calls (__lp_lpir_*_q32)
   │ glsl/lpfx: WASM       │ glsl/lpfx: Cranelift func refs
   │   imports              │   via BuiltinId
@@ -96,10 +96,10 @@ the design from the start.
 ```
 lp-shader/
 ├── lpir/                      # LPIR core (existing, unchanged)
-├── lp-glsl-naga/              # Naga → LPIR lowering (existing)
+├── lps-naga/              # Naga → LPIR lowering (existing)
 │                              #   UPDATE: extract GlslMetadata during lowering
-├── lp-glsl-wasm/              # LPIR → WASM (existing, unchanged)
-├── lp-glsl-cranelift/         # OLD: AST → CLIF (abandoned, deleted at end)
+├── lps-wasm/              # LPIR → WASM (existing, unchanged)
+├── lps-cranelift/         # OLD: AST → CLIF (abandoned, deleted at end)
 ├── lpir-cranelift/            # NEW: LPIR → CLIF → JIT/object
 │   └── src/
 │       ├── lib.rs             #   Public API: jit(), jit_from_ir(), CompileOptions
@@ -109,9 +109,9 @@ lp-shader/
 │       ├── module.rs          #   JitModule, DirectCall
 │       ├── values.rs          #   GlslQ32, GlslF32, GlslReturn, CallResult
 │       └── error.rs           #   CompileError, CallError
-├── lp-glsl-builtin-ids/       # UPDATE: new naming, self-describing BuiltinId
-├── lp-glsl-builtins/          # UPDATE: rename symbols to __lp_<module>_<fn>_<mode>
-└── lp-glsl-filetests/         # UPDATE: Stage V2 — jit.q32 + rv32.q32 targets
+├── lps-builtin-ids/       # UPDATE: new naming, self-describing BuiltinId
+├── lps-builtins/          # UPDATE: rename symbols to __lp_<module>_<fn>_<mode>
+└── lps-filetests/         # UPDATE: Stage V2 — jit.q32 + rv32.q32 targets
 ```
 
 ### Builtin naming convention
@@ -134,7 +134,7 @@ Mode suffix:
 
 Examples:
   __lp_lpir_fdiv_q32        LPIR fdiv op, Q32 implementation
-  __lp_glsl_sin_q32         GLSL sin(), Q32 implementation
+  __lps_sin_q32         GLSL sin(), Q32 implementation
   __lp_lpfx_fbm2_q32        LPFX fbm2, Q32 implementation
   __lp_lpfx_hash11          LPFX hash11, mode-independent
 ```
@@ -196,7 +196,7 @@ Each LPIR VReg maps to one Cranelift `Variable`. `def_var`/`use_var` handles
 SSA construction (block params / phi nodes) automatically.
 
 Q32 float ops (`fadd`, `fmul`, etc.) → calls to `__lp_lpir_<op>_q32`
-builtins. LPIR `glsl::sin` import → call to `__lp_glsl_sin_q32`. All
+builtins. LPIR `glsl::sin` import → call to `__lps_sin_q32`. All
 resolved via BuiltinId → Cranelift func ref.
 
 ### Filetest targets
@@ -222,16 +222,16 @@ Future (not this roadmap): `lpir.q32` (LPIR interpreter), `clif.q32`
    `lpir-cranelift`
 3. **Stage VI-A:** Make `lpir-cranelift` embedded-ready (`no_std`, explicit
    ISA, memory strategy, `CompileOptions` expansion)
-4. **Stage VI-B:** Migrate `lp-engine` from `lp-glsl-cranelift` to
+4. **Stage VI-B:** Migrate `lp-engine` from `lps-cranelift` to
    `lpir-cranelift` (clean swap). Validate via `fw-emu` (RV32 emulator on
    desktop — no hardware required)
 5. **Stage VI-C:** Build and run `fw-esp32` on real hardware. A/B compare
    against old compiler on main via git worktree
-6. Delete old `lp-glsl-cranelift` and `lp-glsl-frontend` (Stage VII)
+6. Delete old `lps-cranelift` and `lps-frontend` (Stage VII)
 
 ## Alternatives considered
 
-**Integrate LPIR path into existing `lp-glsl-cranelift`**: The crate's
+**Integrate LPIR path into existing `lps-cranelift`**: The crate's
 backend infrastructure (GlModule, GlslExecutable) is tightly coupled to
 the AST pipeline. Adding LPIR alongside would grow the crate without
 improving it. Since the AST path will be deleted, the shared-crate
@@ -254,13 +254,13 @@ both without benefiting either.
   complex.
 
 - **Builtin rename scope**: The `__lp_<module>_<fn>_<mode>` rename touches
-  `lp-glsl-builtin-ids`, `lp-glsl-builtins`, WASM import resolution, the
+  `lps-builtin-ids`, `lps-builtins`, WASM import resolution, the
   builtins generator, and test code. Mechanical but wide. Mitigated by
   doing it as a dedicated stage.
 
 - **LPIR coverage gaps**: The Naga→LPIR lowering may not cover all
   constructs the target shaders use. Gaps discovered during Cranelift
-  integration need fixes in `lp-glsl-naga`, not workarounds.
+  integration need fixes in `lps-naga`, not workarounds.
 
 - **Performance validation ambiguity**: If LPIR-path binaries are larger
   or slower, attributing the cause (LPIR overhead? different CLIF shape?

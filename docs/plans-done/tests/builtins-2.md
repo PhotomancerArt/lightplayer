@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan documents the existing built-in function tests in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/`. These tests cover math functions (trigonometry, exponential, common), matrix functions, integer/bit manipulation functions, and floating-point pack/unpack functions.
+This plan documents the existing built-in function tests in `lightplayer/crates/lps-filetests/filetests/builtins/`. These tests cover math functions (trigonometry, exponential, common), matrix functions, integer/bit manipulation functions, and floating-point pack/unpack functions.
 
 ## Existing Test Structure
 

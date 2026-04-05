@@ -89,7 +89,7 @@ Based on existing patterns (vectors, matrices), need:
 - `array_dimensions() -> Vec<usize>` - get all dimensions for multi-dim arrays
 - Update `is_numeric()` to handle arrays of numeric types recursively
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/types.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/types.rs`
 
 **Current State**: `Array(Box<Type>, usize)` exists but no helper methods.
 
@@ -101,7 +101,7 @@ Based on existing patterns (vectors, matrices), need:
 - Example: `Array(Box<Float>, 5)` → `F32` (not an array type)
 - Storage is handled separately (arrays stored as multiple variables)
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/types.rs` (line 157)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/types.rs` (line 157)
 
 ### Phase 2: Type Resolution and Parsing
 
@@ -119,8 +119,8 @@ Based on existing patterns (vectors, matrices), need:
 
 **Files**:
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_resolver.rs` (line 7)
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` (line 137)
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/type_resolver.rs` (line 7)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/stmt/declaration.rs` (line 137)
 
 **Current State**: Both functions ignore `array_specifier` field.
 
@@ -156,7 +156,7 @@ Based on existing patterns (vectors, matrices), need:
 - Update `declare_variable()` to allocate stack slot for arrays
 - Update `LValue::ArrayElement` to use pointer + offset instead of variable indices
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs` (line 139)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs` (line 139)
 
 **Current State**: `declare_variable()` doesn't handle `Type::Array`.
 
@@ -175,7 +175,7 @@ Based on existing patterns (vectors, matrices), need:
 - For multi-dimensional: recursively process nested lists
 - For partial initialization: GLSL allows this, fill remaining with zeros/defaults
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` (line 170)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/stmt/declaration.rs` (line 170)
 
 **Current State**: Only handles `Initializer::Simple`.
 
@@ -197,7 +197,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Use both paths - RValue loads all components, LValue loads only needed components (via component selection in `LValue::ArrayElement`).
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs` (line 63)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs` (line 63)
 
 **Current State**: Explicitly rejects arrays (line 81-87).
 
@@ -227,7 +227,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Calculate flat offset in one step, generalize for N dimensions.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
 
 ### Phase 5: Runtime Bounds Checking
 
@@ -244,7 +244,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Always check bounds for writes, check for reads by default (can add feature flag later).
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
 
 **Current State**: Pattern exists for matrices, can be reused.
 
@@ -271,7 +271,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Use separate fields for compile-time vs runtime indices, include component selection support.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs` (line 27)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs` (line 27)
 
 **Current State**: No `ArrayElement` variant exists.
 
@@ -287,7 +287,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: `resolve_lvalue()` handles `Expr::Bracket` for arrays, `Expr::Dot` extracts components.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs` (line 208)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs` (line 208)
 
 **Current State**: Rejects arrays (line 324-332).
 
@@ -303,7 +303,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Calculate byte offset, then use `load` with pointer + offset. For component access, load only needed components.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs` (line 378)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs` (line 378)
 
 **Current State**: No `ArrayElement` case in match.
 
@@ -318,7 +318,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Calculate byte offset, generate bounds check, then use `store` with pointer + offset for each component.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs` (line 444)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs` (line 444)
 
 **Current State**: No `ArrayElement` case in match.
 
@@ -333,7 +333,7 @@ Based on existing patterns (vectors, matrices), need:
 - If array: return element type (recursive for multi-dim)
 - Validate index type is `Int`
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_check/inference.rs` (line 206)
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/type_check/inference.rs` (line 206)
 
 **Current State**: Rejects arrays (line 210-216).
 
@@ -347,7 +347,7 @@ Based on existing patterns (vectors, matrices), need:
 - Once `ArrayElement` is added to LValue, increment/decrement will work automatically
 - No changes needed in `incdec.rs`
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/incdec.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/incdec.rs`
 
 #### Q22: Will compound assignment work automatically?
 
@@ -357,7 +357,7 @@ Based on existing patterns (vectors, matrices), need:
 - Already supports `+=`, `-=`, `*=`, `/=`
 - Missing `%=` operator - need to check if GLSL supports it
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/assignment.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/assignment.rs`
 
 #### Q23: Will binary/unary operations work automatically?
 
@@ -369,8 +369,8 @@ Based on existing patterns (vectors, matrices), need:
 
 **Files**:
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/binary.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/unary.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/binary.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/unary.rs`
 
 ### Phase 9: Advanced Features
 
@@ -385,7 +385,7 @@ Based on existing patterns (vectors, matrices), need:
 
 **Decision**: Defer to later phase - check GLSL parser structure first, then implement array constructors.
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/constructor.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/constructor.rs`
 
 **Status**: Need to check if constructor support exists.
 

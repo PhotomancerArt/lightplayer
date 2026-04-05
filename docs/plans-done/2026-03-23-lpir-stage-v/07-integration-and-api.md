@@ -13,8 +13,8 @@ and the public API is complete.
 
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lp_glsl_naga::compile(source)?;
-    let ir_module = lp_glsl_naga::lower::lower(&naga_module)
+    let naga_module = lps_naga::compile(source)?;
+    let ir_module = lps_naga::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;
@@ -70,7 +70,7 @@ fn glsl_type_to_wasm_valtypes(ty: &GlslType, mode: FloatMode) -> Vec<WasmValType
 
 ### `module.rs` — minimal update
 
-Remove the `use lp_glsl_wasm::types::*` if it existed. The `WasmValType`
+Remove the `use lps_wasm::types::*` if it existed. The `WasmValType`
 re-export from `wasm_encoder::ValType` stays.
 
 ### Error handling
@@ -81,13 +81,13 @@ Add a variant or use `Codegen` for LPIR lowering errors too (converting
 
 ### Filetest runner update
 
-`lp-glsl-filetests/src/test_run/wasm_runner.rs` calls `glsl_wasm()` and
+`lps-filetests/src/test_run/wasm_runner.rs` calls `glsl_wasm()` and
 gets a `WasmModule`. Since the public API signature hasn't changed, the
 filetest runner should work without modifications.
 
 However, `wasm_link.rs` needs to link builtins when the WASM module
 imports from the `builtins` module. This already works — the linker
-checks for `builtins` imports and links `lp_glsl_builtins_wasm.wasm`.
+checks for `builtins` imports and links `lps_builtins_wasm.wasm`.
 
 Check that the import module name in the new emitter matches what
 `wasm_link.rs` expects (it expects `"builtins"` for function imports
@@ -96,8 +96,8 @@ and `"env"` for memory).
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
-cargo check -p lp-glsl-filetests
+cargo check -p lps-wasm
+cargo check -p lps-filetests
 ```
 
 The full pipeline compiles. The public API is unchanged. The filetest

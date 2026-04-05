@@ -19,7 +19,7 @@ and Q32 cast ops (FtoiSat, Itof). Port from old crate's `Q32Strategy` in
 
 ### 1. Add Q32 inline emitters to `q32.rs`
 
-Port from `lp-glsl-cranelift/src/frontend/codegen/numeric.rs` Q32Strategy
+Port from `lps-cranelift/src/frontend/codegen/numeric.rs` Q32Strategy
 methods. Each function takes `&mut FunctionBuilder` + operand `Value`s,
 returns a result `Value`.
 

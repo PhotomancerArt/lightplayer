@@ -75,7 +75,7 @@ The function should:
 
 ### 2. Export from crate
 
-File: `lp-shader/lp-glsl-compiler/src/lib.rs`
+File: `lp-shader/lps-compiler/src/lib.rs`
 
 Add `pub use frontend::glsl_jit_streaming;` alongside the existing
 `pub use frontend::glsl_jit;`.
@@ -84,7 +84,7 @@ Add `pub use frontend::glsl_jit_streaming;` alongside the existing
 
 Add a basic test that calls `glsl_jit_streaming` with a simple shader and
 verifies it produces a working executable. This can go in
-`lp-shader/lp-glsl-compiler/src/frontend/mod.rs` or as an integration test.
+`lp-shader/lps-compiler/src/frontend/mod.rs` or as an integration test.
 
 ```rust
 #[test]
@@ -127,11 +127,11 @@ fn test_glsl_jit_streaming_multi_function() {
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_glsl_jit_streaming
+cd lp-shader/lps-compiler && cargo test --features std -- test_glsl_jit_streaming
 ```
 
 Ensure all existing tests still pass:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 ```

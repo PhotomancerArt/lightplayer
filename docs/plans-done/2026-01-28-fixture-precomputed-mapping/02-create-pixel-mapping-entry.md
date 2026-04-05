@@ -21,7 +21,7 @@ Create `lp-app/crates/lp-engine/src/nodes/fixture/mapping_compute.rs`:
 ```rust
 //! Pre-computed texture-to-fixture mapping utilities
 
-use lp_glsl_builtins::glsl::q32::types::Q32;
+use lps_builtins::glsl::q32::types::Q32;
 
 /// Sentinel value for channel index indicating no mapping (SKIP)
 pub const CHANNEL_SKIP: u32 = 0x7FFF; // Max value for 15-bit channel index

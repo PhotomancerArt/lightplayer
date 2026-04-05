@@ -20,12 +20,12 @@ use core::cell::RefCell;
 
 use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
-use lp_glsl_builtins::host_debug;
 use lp_model::AsLpPath;
 use lp_riscv_emu_guest::allocator;
 use lp_server::LpServer;
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
+use lps_builtins::host_debug;
 
 use output::SyscallOutputProvider;
 use serial::SyscallSerialIo;

@@ -38,7 +38,7 @@ since last session), but fails for hand-written LPIR that contains
 `Fsqrt` / `Fnearest` without a corresponding import.
 
 **Acceptable for now:** the only producer of `IrModule` is
-`lp-glsl-naga::lower`, which always registers these imports. Document
+`lps-naga::lower`, which always registers these imports. Document
 this coupling; revisit if a second IR producer appears.
 
 ### `$sp` global index — hard-coded `0u32`

@@ -51,15 +51,15 @@ embedded builds remain functional.
 
 ```bash
 # Core tests
-cargo test -p lpvm -p lpir-cranelift -p lp-glsl-naga
+cargo test -p lpvm -p lpir-cranelift -p lps-naga
 
 # Filetests
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 
 # Embedded builds
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 
 # WASM build
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```

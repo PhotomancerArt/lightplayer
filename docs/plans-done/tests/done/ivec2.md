@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for integer vector type `ivec2` in `lightplayer/crates/lp-glsl-filetests/filetests/ivec2/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL signed integer vector specification for `ivec2` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for integer vector type `ivec2` in `lightplayer/crates/lps-filetests/filetests/ivec2/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL signed integer vector specification for `ivec2` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -376,11 +376,11 @@ ivec2 test_ivec_operation_name() {
    - Increment/decrement operators
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/equal.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/not.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/simple-assignment.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/indexing/swizzling.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/element-assignment.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/equal.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/not.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/simple-assignment.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/indexing/swizzling.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/element-assignment.glsl`
 
 ## Files to Create
 

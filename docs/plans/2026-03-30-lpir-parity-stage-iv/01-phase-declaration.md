@@ -10,7 +10,7 @@ Target: `test_declaration()` and `test_type_stored()` from `1-foundation.glsl` s
 
 ### 1. Add Array Type Utilities
 
-In `lp-shader/lp-glsl-naga/src/naga_util.rs`:
+In `lp-shader/lps-naga/src/naga_util.rs`:
 
 ```rust
 /// Check if a TypeInner represents an array
@@ -63,7 +63,7 @@ fn element_size_bytes(inner: &TypeInner) -> Option<u32> {
 
 ### 2. Add ArrayInfo struct and array_map
 
-In `lp-shader/lp-glsl-naga/src/lower_ctx.rs`:
+In `lp-shader/lps-naga/src/lower_ctx.rs`:
 
 ```rust
 /// Metadata for array-typed local variables

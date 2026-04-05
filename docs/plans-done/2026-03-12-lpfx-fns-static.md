@@ -12,13 +12,13 @@ registry by using static/const data in ROM. Also eliminate temporary Vec allocat
 ## File structure
 
 ```
-lp-shader/lp-glsl-compiler/src/frontend/semantic/lpfx/
+lp-shader/lps-compiler/src/frontend/semantic/lpfx/
 ├── lpfx_fn.rs           # UPDATE: LpfxFn uses FunctionSignatureRef; add ParameterRef, FunctionSignatureRef
 ├── lpfx_fns.rs          # REPLACE: static LPFX_FNS array (generated), lpfx_fns() returns &LPFX_FNS directly
 ├── lpfx_fn_registry.rs  # UPDATE: find_lpfx_fn loop-based (no Vec allocs); use new ref types
 └── lpfx_sig.rs          # UPDATE: build_call_signature uses FunctionSignatureRef (same field names)
 
-lp-shader/lp-glsl-builtins-gen-app/src/lpfx/
+lp-shader/lps-builtins-gen-app/src/lpfx/
 └── generate.rs          # UPDATE: emit static const array with &'static str, &[ParameterRef]
 ```
 
@@ -63,7 +63,7 @@ uses parallel `ParameterRef` and `FunctionSignatureRef` with `&'static str` and
 
 **Implementation details:**
 
-1. In `lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_fn.rs`:
+1. In `lps-compiler/src/frontend/semantic/lpfx/lpfx_fn.rs`:
     - Add `ParameterRef` (mirrors `Parameter` with `&'static str`):
       ```rust
       use crate::semantic::functions::ParamQualifier;
@@ -95,7 +95,7 @@ uses parallel `ParameterRef` and `FunctionSignatureRef` with `&'static str` and
 2. Ensure `ParamQualifier` is re-exported or accessible (it lives in `semantic::functions`).
    `ParameterRef` and `FunctionSignatureRef` use it directly.
 
-**Validate:** `cargo build -p lp-glsl-compiler` — will fail until Phase 2. Run only to confirm the
+**Validate:** `cargo build -p lps-compiler` — will fail until Phase 2. Run only to confirm the
 new types compile; do not run full test suite yet.
 
 ---
@@ -125,20 +125,20 @@ the type changes, so most code needs no edits. Fix any `param.ty.clone()` — `T
    `use alloc::vec::Vec` once Phase 4 refactors the lookup. For now keep the filter/collect logic —
    it will still compile with `FunctionSignatureRef`.
 
-**Validate:** `cargo build -p lp-glsl-compiler` succeeds. Tests will fail because `lpfx_fns.rs`
+**Validate:** `cargo build -p lps-compiler` succeeds. Tests will fail because `lpfx_fns.rs`
 still has the old `init_functions` format.
 
 ---
 
 ### Phase 3: Update codegen to emit static array; replace init_functions
 
-**Scope:** Change `lp-glsl-builtins-gen-app` to emit a `static` array with `&'static str` and
+**Scope:** Change `lps-builtins-gen-app` to emit a `static` array with `&'static str` and
 `&'static [ParameterRef]` instead of `init_functions()` with `String::from` and `vec![]`. Replace
 `lpfx_fns()` body to return the static slice directly.
 
 **Implementation details:**
 
-1. In **lp-glsl-builtins-gen-app/src/lpfx/generate.rs**:
+1. In **lps-builtins-gen-app/src/lpfx/generate.rs**:
     - Change imports in emitted code: remove `alloc::{boxed::Box, string::String, vec, vec::Vec}`.
       Add `use crate::semantic::functions::ParamQualifier;` and ensure `ParameterRef`,
       `FunctionSignatureRef` are used (from `super::lpfx_fn`).
@@ -174,8 +174,8 @@ still has the old `init_functions` format.
 **Validate:**
 
 - `scripts/build-builtins.sh`
-- `cargo test -p lp-glsl-compiler --features std`
-- `cargo test -p lp-glsl-filetests` (if LPFX is exercised in filetests)
+- `cargo test -p lps-compiler --features std`
+- `cargo test -p lps-filetests` (if LPFX is exercised in filetests)
 
 ---
 
@@ -215,7 +215,7 @@ finds the matching function without allocating.
 2. Remove `use alloc::{format, string::String, vec::Vec};` — keep `format` and `String` if still
    used by `check_lpfx_fn_call` (they are). Remove only `Vec` if it's unused.
 
-**Validate:** `cargo test -p lp-glsl-compiler --features std`
+**Validate:** `cargo test -p lps-compiler --features std`
 
 ---
 
@@ -227,16 +227,16 @@ finds the matching function without allocating.
 
 1. Grep the diff for TODOs, debug prints, and temporary code. Remove any found.
 2. Run `cargo +nightly fmt` on changed files.
-3. Run `cargo clippy -p lp-glsl-compiler -p lp-glsl-builtins-gen-app -- -D warnings` and fix any
+3. Run `cargo clippy -p lps-compiler -p lps-builtins-gen-app -- -D warnings` and fix any
    issues.
-4. Run `cargo test -p lp-glsl-compiler --features std` and `cargo test -p lp-glsl-builtins-gen-app`.
+4. Run `cargo test -p lps-compiler --features std` and `cargo test -p lps-builtins-gen-app`.
 5. Run `scripts/build-builtins.sh` one final time to ensure generation is idempotent.
 
 **Validate:**
 
 - `scripts/build-builtins.sh`
-- `cargo test -p lp-glsl-compiler --features std`
-- `cargo test -p lp-glsl-builtins-gen-app`
+- `cargo test -p lps-compiler --features std`
+- `cargo test -p lps-builtins-gen-app`
 
 ---
 

@@ -10,7 +10,7 @@ Plan name: **`lpir-cranelift-stage-vi-a`**. Roadmap:
 
 ## Scope of work
 
-Bring **`lpir-cranelift`** to parity with the old **`lp-glsl-cranelift`** embedded
+Bring **`lpir-cranelift`** to parity with the old **`lps-cranelift`** embedded
 story so **VI-B** can swap the engine dependency without also inventing
 `no_std` / ISA / memory / Q32-option plumbing:
 
@@ -32,7 +32,7 @@ story so **VI-B** can swap the engine dependency without also inventing
 
 ## Current codebase state
 
-### `lpir-cranelift` (`lp-shader/lpir-cranelift/`)
+### `lpir-cranelift` (`lp-shader/legacy/lpir-cranelift/`)
 
 - **`lib.rs`:** Uses `extern crate alloc` but **no** `#![no_std]` — still pulls
   `std` transitively via dependencies.
@@ -49,11 +49,11 @@ story so **VI-B** can swap the engine dependency without also inventing
 - **`compile_options`:** Only **`float_mode: FloatMode`**.
 - **`process_sync`:** **`std::sync::Mutex` + `OnceLock`** — global codegen lock for
   parallel filetests; **requires `std`**.
-- **`compile::jit`:** **`lp_glsl_naga::compile`** — needs **`naga`** / **`lp-glsl-naga`**
-  on the dependency graph. **`lp-glsl-naga`** already uses **`naga`** with
+- **`compile::jit`:** **`lps_naga::compile`** — needs **`naga`** / **`lps-naga`**
+  on the dependency graph. **`lps-naga`** already uses **`naga`** with
   **`default-features = false`** (good sign for future `no_std`).
 
-### Old crate reference (`lp-glsl-cranelift`)
+### Old crate reference (`lps-cranelift`)
 
 - **`default = ["std", "cranelift-optimizer", "cranelift-verifier"]`**
 - **`core` feature:** `cranelift-codegen/core`, `cranelift-frontend/core`,
@@ -91,7 +91,7 @@ this workspace.
   object helpers). Document that on-device GLSL compile requires **`std`** or a
   future task to verify Naga **`no_std`**.
 - **B)** Investigate and, if possible, keep **`jit()`** available under **`no_std`**
-  by fixing / enabling Naga + **`lp-glsl-naga`** for **`no_std`** in the same
+  by fixing / enabling Naga + **`lps-naga`** for **`no_std`** in the same
   phase (larger scope).
 
 ### Q2 — `Q32Options` type location
@@ -106,7 +106,7 @@ semantics for add/mul/div modes.
   single source of truth.
 - **B)** Define **`Q32Options`** in **`lpir-cranelift`** mirroring **`lp-model`** enums
   (duplicate types); engine maps **`GlslOpts` → Q32Options** at the call site —
-  avoids **`lp-glsl` → `lp-core`** dependency if you want to keep layers strict.
+  avoids **`lps` → `lp-core`** dependency if you want to keep layers strict.
 
 ### Q3 — `process_sync` under `no_std`
 
@@ -181,13 +181,13 @@ reduce peak memory.
 **Answer: No gating needed.** `jit()` must work on embedded — that's the whole
 point (firmware compiles GLSL on-device). The dependency chain is already
 `no_std`-compatible: `naga` (crates.io 29.0.0, `default-features = false,
-features = ["glsl-in"]`), `lp-glsl-naga` (`#![no_std]`), `lpir` (`#![no_std]`).
+features = ["glsl-in"]`), `lps-naga` (`#![no_std]`), `lpir` (`#![no_std]`).
 All entry points (`jit`, `jit_from_ir`, `jit_from_ir_owned`) remain available
 in both `std` and `no_std` builds.
 
 ### Q2 — `Q32Options` type location
 
-**Answer: Own types in `lpir-cranelift`; `lp-engine` maps.** `lp-glsl` is upstream
+**Answer: Own types in `lpir-cranelift`; `lp-engine` maps.** `lps` is upstream
 of `lp-core` — adding `lp-model` as a dep would invert the layering. Define
 `Q32Options` (with `AddSubMode`, `MulMode`, `DivMode` equivalents) inside
 `lpir-cranelift` as compiler-internal types. They serve a different purpose than

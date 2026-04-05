@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for scalar unsigned integer type `uint` in `lightplayer/crates/lp-glsl-filetests/filetests/uint/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL unsigned integer scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for scalar unsigned integer type `uint` in `lightplayer/crates/lps-filetests/filetests/uint/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL unsigned integer scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -255,8 +255,8 @@ uint test_uint_operation_name() {
    - Control flow with uint conditions
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/bool/op-equal.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/bool/to-int.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/bool/op-equal.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/bool/to-int.glsl`
 
 ## Files to Create
 

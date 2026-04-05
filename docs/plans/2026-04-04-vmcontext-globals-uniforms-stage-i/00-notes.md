@@ -17,7 +17,7 @@ causing crashes when the guest tries to dereference them.
 
 ### The Bug
 
-In `lp-shader/lpir-cranelift/src/emu_run.rs` (lines 87-88 and 221-222):
+In `lp-shader/legacy/lpir-cranelift/src/emu_run.rs` (lines 87-88 and 221-222):
 
 ```rust
 // WRONG: Host stack pointer passed to guest

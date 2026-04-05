@@ -6,7 +6,7 @@ Notes: [00-notes.md](./00-notes.md)
 ## Scope
 
 - Remove **orphan** optional compiler dependencies from `fw-esp32` (old
-  `lp-glsl-cranelift` stack); shader compilation remains **transitive**:
+  `lps-cranelift` stack); shader compilation remains **transitive**:
   `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
 - **Gate:** `fw-emu` builds and automated smoke/integration tests pass on the
   branch before treating hardware validation as the next step.

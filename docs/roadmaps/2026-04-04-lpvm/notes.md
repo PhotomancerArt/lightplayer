@@ -26,11 +26,11 @@ vec3/mat4 as IR types).
 ### Crates that would be affected
 
 - `lpvm` → **`lpvm`** — values, layout, runtime metadata, VmContext.
-- `lp-glsl-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
-- `lp-glsl-core` → **`lps-shared`** — logical `LpsType`, `LpsFunctionSignature`, etc.
+- `lps-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
+- `lps-core` → **`lps-shared`** — logical `LpsType`, `LpsFunctionSignature`, etc.
 - `lpir-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
 - `lpir` — scalarized IR + interpreter only.
-- `lp-glsl-wasm` → **`lpvm-wasm`**.
+- `lps-wasm` → **`lpvm-wasm`**.
 - `lp-riscv-emu` — refactor for module/memory/instance; still general-purpose.
 - `lp-engine` — becomes generic over `LpvmModule`; today uses `JitModule`/`DirectCall`.
 
@@ -40,7 +40,7 @@ vec3/mat4 as IR types).
 |-------------------------------|-------------------------------------------|-------------------------|
 | Cranelift JIT (host+embedded) | `lpir-cranelift`                          | cranelift-*             |
 | RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`)  | lp-riscv-*              |
-| WASM emission                 | `lp-glsl-wasm`                            | wasm-encoder            |
+| WASM emission                 | `lps-wasm`                            | wasm-encoder            |
 | WASM runner (desktop)         | `lps-filetests` (transitional names vary) | wasmtime                |
 | WASM runner (browser)         | `web-demo`                                | browser WebAssembly API |
 | LPIR interpreter              | `lpir::interp`                            | (none beyond lpir)      |
@@ -101,14 +101,14 @@ ABI side → `Lpvm*` types that may reference **`lps-shared`**), layout function
 VmContext, Module/Instance/Memory traits, `LpvmData`, path accessors.
 
 **Context**: Spread across `lpvm`, **`lps-shared`** (logical signatures),
-and `lp-glsl-exec` (trait).
+and `lps-exec` (trait).
 
 **Answer**: One **`lpvm`** crate for **VM/runtime** surface: traits, `LpvmValue`,
 layout, VMContext, runtime-oriented metadata. **Logical** shader types
 (`LpsType`, `LpsFunctionSignature`, …) stay in **`lps-shared`** — they are not
 LPIR (scalarized) and not VM-only; frontend and runtime both use them.
 **`lpvm`** depends on **`lps-shared`** and **`lpir`**. Replaces `lpvm` and
-`lp-glsl-exec`; does **not** absorb `lps-shared`.
+`lps-exec`; does **not** absorb `lps-shared`.
 
 ### Q2: Backend crate organization
 
@@ -129,7 +129,7 @@ exactly what it needs.
 WASM has two runtime paths: wasmtime (desktop/CI) and browser WebAssembly API.
 How should the emission vs runtime split work?
 
-**Context**: `lp-glsl-wasm` emits .wasm bytes (no_std, wasm-encoder).
+**Context**: `lps-wasm` emits .wasm bytes (no_std, wasm-encoder).
 Filetests run those bytes via wasmtime. web-demo hands them to the browser.
 The browser path has no Rust runtime — the browser IS the runtime.
 

@@ -20,4 +20,4 @@ Introduce **`IrType::Pointer`** and surface it in text as **`ptr`**. **`v0` (VMC
 
 ## Dependency note
 
-If Phase 1 lands alone, **`lpir-cranelift` and `lp-glsl-naga` may fail** until they map `Pointer` → Cranelift type. Prefer **Phase 2 in the same merge train** or feature branch that includes both.
+If Phase 1 lands alone, **`lpir-cranelift` and `lps-naga` may fail** until they map `Pointer` → Cranelift type. Prefer **Phase 2 in the same merge train** or feature branch that includes both.

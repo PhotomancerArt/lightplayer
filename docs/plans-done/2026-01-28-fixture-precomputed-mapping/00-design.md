@@ -26,7 +26,7 @@ lp-app/crates/lp-engine/src/nodes/fixture/
     ├── compute_mapping()                     # Main pre-computation function
     └── tests                                 # Comprehensive tests
 
-lp-app/crates/lp-engine/Cargo.toml            # UPDATE: Add lp-glsl-builtins dependency
+lp-app/crates/lp-engine/Cargo.toml            # UPDATE: Add lps-builtins dependency
 ```
 
 ## Conceptual Architecture

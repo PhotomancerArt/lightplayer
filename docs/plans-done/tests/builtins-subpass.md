@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL subpass input functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/subpass/` following the flat naming convention with prefixes. These tests will comprehensively cover subpassLoad() function for reading from input attachments in Vulkan. These tests are expected to fail initially, serving as a specification for implementing subpass input function support in the compiler.
+Create a complete test suite for GLSL subpass input functions in `lightplayer/crates/lps-filetests/filetests/builtins/subpass/` following the flat naming convention with prefixes. These tests will comprehensively cover subpassLoad() function for reading from input attachments in Vulkan. These tests are expected to fail initially, serving as a specification for implementing subpass input function support in the compiler.
 
 ## Directory Structure
 

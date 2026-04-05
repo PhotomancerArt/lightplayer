@@ -21,6 +21,6 @@ operation to a single function call, following the same pattern already establis
 - `__lp_q32_add` and `__lp_q32_sub` builtins implemented and working
 - `convert_fadd`, `convert_fsub`, `convert_fdiv` use builtins instead of inline code
 - All tests pass (including unignored `test_q32_fdiv`)
-- Code size reduction verified via lp-glsl-q32-metrics-app comparison
+- Code size reduction verified via lps-q32-metrics-app comparison
 - Code formatted with `cargo +nightly fmt`
 - All warnings fixed

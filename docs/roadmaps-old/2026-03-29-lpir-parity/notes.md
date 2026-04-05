@@ -3,7 +3,7 @@
 ## Scope
 
 Bring the Naga → LPIR → (Cranelift | WASM) pipeline to feature parity with the old
-`lp-glsl-cranelift` compiler for the **GLSL subset actually used by product shaders and filetests**.
+`lps-cranelift` compiler for the **GLSL subset actually used by product shaders and filetests**.
 Includes **arrays**; excludes **structs** (not used in production, low test count, high IR cost).
 
 ## Current state (2026-03-29, after initial parity plan work)

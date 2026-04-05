@@ -22,9 +22,9 @@ Delete the entire block (lines may shift):
 
 ```toml
 # Dependencies for optional GLSL compilation features
-lp-glsl-cranelift = { ... }
-lp-glsl-jit-util = { ... }
-lp-glsl-builtins = { ... }
+lps-cranelift = { ... }
+lps-jit-util = { ... }
+lps-builtins = { ... }
 cranelift-codegen = { ... }
 cranelift-frontend = { ... }
 cranelift-module = { ... }
@@ -39,7 +39,7 @@ Keep the comment above `lp-server` about **not** enabling optimizer/verifier on
 ### 2. Verify nothing references removed crates
 
 ```bash
-rg 'lp-glsl-cranelift|lp-glsl-jit-util|cranelift-codegen|cranelift-frontend|cranelift-module|cranelift-control|target-lexicon' lp-fw/fw-esp32
+rg 'lps-cranelift|lps-jit-util|cranelift-codegen|cranelift-frontend|cranelift-module|cranelift-control|target-lexicon' lp-fw/fw-esp32
 ```
 
 Expect **no** matches in `src/` or `Cargo.toml`.

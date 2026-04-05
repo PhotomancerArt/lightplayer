@@ -6,7 +6,7 @@ Support arrays as function parameters and return values, passing by pointer.
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/7-function-parameters.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/7-function-parameters.glsl`
 
 - Array as function parameter: `int sum_array(int arr[5])`
 - Pass array to function: `sum_array(arr)`
@@ -16,7 +16,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/7-functi
 
 ### 1. Function Signature with Arrays
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/signature.rs`
 
 - Update signature building to handle array types
 - Arrays passed as pointers (not by value)
@@ -24,14 +24,14 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/7-functi
 
 ### 2. Parameter Parsing
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/passes/function_signature.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/passes/function_signature.rs`
 
 - Update parameter type parsing to handle arrays
 - Use unified `parse_type_specifier()` (from Phase 1)
 
 ### 3. Function Call with Array Arguments
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/function.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/function.rs`
 
 - When calling function with array argument:
   - Get array pointer from `VarInfo`
@@ -65,9 +65,9 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/7-functi
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/signature.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/passes/function_signature.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/function.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/signature.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/passes/function_signature.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/function.rs`
 
 
 

@@ -2,7 +2,7 @@
 
 ## Shipped
 
-- **`fw-esp32/Cargo.toml`:** Removed orphan optional dependencies (`lp-glsl-cranelift`, `lp-glsl-jit-util`, `lp-glsl-builtins`, `cranelift-codegen`, `cranelift-frontend`, `cranelift-module`, `cranelift-control`, `target-lexicon`) and the unused optional **`lp-engine`** edge. Shader compilation remains **transitive**: `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
+- **`fw-esp32/Cargo.toml`:** Removed orphan optional dependencies (`lps-cranelift`, `lps-jit-util`, `lps-builtins`, `cranelift-codegen`, `cranelift-frontend`, `cranelift-module`, `cranelift-control`, `target-lexicon`) and the unused optional **`lp-engine`** edge. Shader compilation remains **transitive**: `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
 - **`lp-client`:** `[[test]]` entry for `scene_render_emu_async` with `required-features = ["serial"]` so default `cargo test -p lp-client` does not compile the emulator integration test without features.
 - **`lp-engine`:** `let _ = ctx` in the `#[cfg(not(feature = "std"))]` `render` path to avoid unused-parameter warnings when building `fw-emu`.
 - **`lpir-cranelift`:** Split tests: `tests_options` always runs under `--no-default-features`; host **`jit_from_ir`** execution tests live in `#[cfg(all(test, feature = "std"))] mod tests` (without `std`, JIT targets RV32 — not executable on the host).

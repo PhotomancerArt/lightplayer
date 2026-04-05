@@ -2,18 +2,18 @@
 
 ## Removed crates (paths)
 
-- `lp-shader/lp-glsl-cranelift` — legacy TypedShader → Cranelift
-- `lp-shader/lp-glsl-jit-util` — JIT calling convention helpers for that stack
-- `lp-shader/lp-glsl-frontend` — `glsl`-crate semantic frontend used only by the above
+- `lp-shader/lps-cranelift` — legacy TypedShader → Cranelift
+- `lp-shader/lps-jit-util` — JIT calling convention helpers for that stack
+- `lp-shader/lps-frontend` — `glsl`-crate semantic frontend used only by the above
 - `lp-shader/esp32-glsl-jit` — pre-`lp-fw` ESP32 test app
-- `lp-shader/lp-glsl-q32-metrics-app` — Q32 metrics tool wired to the old compiler
+- `lp-shader/lps-q32-metrics-app` — Q32 metrics tool wired to the old compiler
 
 ## Migrations
 
-- **`lp-glsl-builtins-gen-app`:** Local `lpfx/types.rs` + `signature_parse.rs` replace
-  `lp-glsl-frontend` types; `grouping.rs` replaces the old `generate.rs` LPFX table output. Stopped
+- **`lps-builtins-gen-app`:** Local `lpfx/types.rs` + `signature_parse.rs` replace
+  `lps-frontend` types; `grouping.rs` replaces the old `generate.rs` LPFX table output. Stopped
   generating `registry.rs`, `mapping.rs`, and `lpfx_fns.rs` (deleted targets).
-- **`lp-glsl-filetests`:** `TranslationUnit::parse` via `glsl::parser::Parse` instead of
+- **`lps-filetests`:** `TranslationUnit::parse` via `glsl::parser::Parse` instead of
   `CompilationPipeline::parse`.
 - **Workspace:** Dropped members/default-members and `profile.release.package.esp32-glsl-jit`;
   removed `Dockerfile.rv32-jit`.

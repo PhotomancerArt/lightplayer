@@ -17,7 +17,7 @@ calling the saturating builtins. When false, keep existing builtin call behavior
 
 ### 1. convert_fadd - fast math path
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`
+**File**: `lp-shader/lps-compiler/src/backend/transform/q32/converters/arithmetic.rs`
 
 When `fast_math` is true:
 
@@ -68,8 +68,8 @@ instruction router.
 ## Validate
 
 ```bash
-cargo build -p lp-glsl-compiler
-cargo test -p lp-glsl-compiler
+cargo build -p lps-compiler
+cargo test -p lps-compiler
 scripts/glsl-filetests.sh
 ```
 

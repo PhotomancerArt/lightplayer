@@ -13,7 +13,7 @@ Target: render `basic/rainbow.shader` in a browser with no server.
 
 ```
 lp-shader/
-├── lp-glsl-frontend/              # NEW: shared parser + semantic analysis
+├── lps-frontend/              # NEW: shared parser + semantic analysis
 │   ├── Cargo.toml                 #   deps: glsl, hashbrown, serde, log, lp-model
 │   └── src/
 │       ├── lib.rs
@@ -23,8 +23,8 @@ lp-shader/
 │       ├── src_loc.rs
 │       └── src_loc_manager.rs
 │
-├── lp-glsl-cranelift/             # RENAMED from lp-glsl-compiler
-│   ├── Cargo.toml                 #   deps: lp-glsl-frontend, cranelift-*, lp-glsl-builtins
+├── lps-cranelift/             # RENAMED from lps-compiler
+│   ├── Cargo.toml                 #   deps: lps-frontend, cranelift-*, lps-builtins
 │   └── src/
 │       ├── lib.rs                 #   glsl_jit, glsl_jit_streaming, glsl_emu_riscv32
 │       ├── codegen/               #   60 files (unchanged CLIF emission)
@@ -33,8 +33,8 @@ lp-shader/
 │       ├── target/                #   Target ISA config
 │       └── exec/                  #   GlslExecutable, execute_fn, etc.
 │
-├── lp-glsl-wasm/                  # NEW: WASM codegen backend
-│   ├── Cargo.toml                 #   deps: lp-glsl-frontend, wasm-encoder
+├── lps-wasm/                  # NEW: WASM codegen backend
+│   ├── Cargo.toml                 #   deps: lps-frontend, wasm-encoder
 │   └── src/
 │       ├── lib.rs                 #   glsl_wasm(source, options) → WasmShaderModule
 │       ├── codegen/               #   AST walker → WASM bytecode
@@ -47,14 +47,14 @@ lp-shader/
 │       │   └── numeric.rs         #     NumericMode → WASM ops
 │       └── types.rs               #     WasmShaderModule output type
 │
-├── lp-glsl-builtins/              # EXISTING (unchanged, also compiled to .wasm)
-├── lp-glsl-filetests/             # EXISTING: extended with wasmtime runner
-├── lp-glsl-jit-util/              # EXISTING (unchanged, cranelift-only)
+├── lps-builtins/              # EXISTING (unchanged, also compiled to .wasm)
+├── lps-filetests/             # EXISTING: extended with wasmtime runner
+├── lps-jit-util/              # EXISTING (unchanged, cranelift-only)
 └── ...
 
 lp-app/
 └── playground/                    # NEW: web playground
-    ├── Cargo.toml                 #   deps: lp-glsl-frontend, lp-glsl-wasm, wasm-bindgen
+    ├── Cargo.toml                 #   deps: lps-frontend, lps-wasm, wasm-bindgen
     ├── src/
     │   └── lib.rs                 #   wasm-bindgen API: compile(source) → WasmBytes
     └── www/
@@ -64,43 +64,43 @@ lp-app/
 ## Architecture
 
 ```
-                    lp-glsl-frontend
+                    lps-frontend
                    (parse → TypedShader)
                     /              \
-       lp-glsl-cranelift        lp-glsl-wasm
+       lps-cranelift        lps-wasm
     (TypedShader → CLIF →      (TypedShader →
      native/rv32)               WASM bytes)
           |                        |
-    lp-glsl-jit-util          wasm-encoder
+    lps-jit-util          wasm-encoder
     cranelift-*                    |
           |                   ┌────┴────┐
      native exec              │ browser │
      rv32 emulator            │ wasmtime│
                               └─────────┘
                                    ↑
-                          lp-glsl-builtins.wasm
+                          lps-builtins.wasm
                           (imports at instantiation)
 ```
 
 ### Key architectural properties
 
-**Shared frontend**: lp-glsl-frontend owns parsing, semantic analysis, and
+**Shared frontend**: lps-frontend owns parsing, semantic analysis, and
 the TypedShader representation. Both backends depend on it. No Cranelift
 types in the shared code.
 
-**Parallel backends**: lp-glsl-cranelift and lp-glsl-wasm are symmetric.
+**Parallel backends**: lps-cranelift and lps-wasm are symmetric.
 Both walk the same TypedShader AST. Both use the same pluggable NumericMode
 architecture (Q32 first, float later). They produce different output
 (native code vs WASM bytes) but share the same compilation options.
 
-**WASM import-based builtin linking**: lp-glsl-builtins compiles to a
+**WASM import-based builtin linking**: lps-builtins compiles to a
 `.wasm` binary. Shader WASM modules declare builtins as imports. At
 instantiation, the builtins module's exports are provided as the import
 object. Type-safe linking at instantiation time. Same pattern in the
 browser and in wasmtime tests.
 
 **No Cranelift in the WASM dependency tree**: The playground depends on
-lp-glsl-frontend + lp-glsl-wasm + lp-glsl-builtins. No cranelift-*
+lps-frontend + lps-wasm + lps-builtins. No cranelift-*
 crates are pulled in.
 
 ### WASM codegen simplifications vs Cranelift backend
@@ -113,7 +113,7 @@ crates are pulled in.
 
 ### Playground execution flow
 
-1. Page loads compiler WASM (lp-glsl-frontend + lp-glsl-wasm) and
+1. Page loads compiler WASM (lps-frontend + lps-wasm) and
    builtins WASM
 2. User edits GLSL source in textarea, clicks "compile"
 3. JS calls compiler: GLSL source → WASM bytes

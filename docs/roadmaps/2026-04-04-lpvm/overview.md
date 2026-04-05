@@ -2,7 +2,7 @@
 
 ## Repository state (during renames)
 
-Work on this roadmap may overlap with crate/path renames (`lp-glsl-*` → `lps-*`,
+Work on this roadmap may overlap with crate/path renames (`lps-*` → `lps-*`,
 new `lpvm/` tree). **These roadmap documents are the intended target naming.**
 If the tree on disk still uses old paths or a find/replace left odd wording
 elsewhere, trust this folder and fix drift when you touch files.
@@ -31,23 +31,23 @@ lpvm-*     ──► lpvm, lpir  (backends)
 lps-filetests ──► lps-*, lpir, lpvm-*   (integration tests)
 ```
 
-**Important:** `lp-glsl-core`’s `Type` / `FunctionSignature` are **not** LPIR
+**Important:** `lps-core`’s `Type` / `FunctionSignature` are **not** LPIR
 concepts. LPIR is scalarized; it does not carry logical vec3/mat4 as a first-class
-IR type. Those types live in **`lps-shared`** (rename of `lp-glsl-core`), not in
+IR type. Those types live in **`lps-shared`** (rename of `lps-core`), not in
 `lpir`.
 
 ### Target crate map (shader layer)
 
 | Current / transitional | Target (`lps-*`)                                   |
 |------------------------|----------------------------------------------------|
-| `lp-glsl-core`         | `lps-shared`                                       |
-| `lp-glsl-naga`         | `lps-naga`                                         |
-| `lp-glsl-builtins`     | `lps-builtins`                                     |
-| `lp-glsl-builtin-ids`  | `lps-builtin-ids`                                  |
-| `lp-glsl-filetests`    | `lps-filetests`                                    |
-| `lp-glsl-diagnostics`  | `lps-diagnostics` (or keep name if shared tooling) |
+| `lps-core`         | `lps-shared`                                       |
+| `lps-naga`         | `lps-naga`                                         |
+| `lps-builtins`     | `lps-builtins`                                     |
+| `lps-builtin-ids`  | `lps-builtin-ids`                                  |
+| `lps-filetests`    | `lps-filetests`                                    |
+| `lps-diagnostics`  | `lps-diagnostics` (or keep name if shared tooling) |
 
-ABI/runtime types from `lpvm` and exec traits from `lp-glsl-exec` move
+ABI/runtime types from `lpvm` and exec traits from `lps-exec` move
 into **`lpvm`**, not into `lps-shared`.
 
 ## What is LPVM?
@@ -69,7 +69,7 @@ abstracting the runtime behind traits that are monomorphized per firmware target
 
 **Naming cleanup**: retire the `lp-shader/` catch-all. Use **`lps-*`** for the
 shader/language layer, **`lpir`** for scalarized IR only, **`lpvm-*`** for the
-runtime. Long-term, the old `lp-glsl` directory name goes away.
+runtime. Long-term, the old `lps` directory name goes away.
 
 ## Architecture
 
@@ -119,7 +119,7 @@ Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 
 Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
 **`lpir`** (IR module, lowering inputs) and **`lps-shared`** (what callers think
-functions look like). Replaces **`lpvm`** and **`lp-glsl-exec`** (trait
+functions look like). Replaces **`lpvm`** and **`lps-exec`** (trait
 concepts → `LpvmModule` / `LpvmInstance` / `LpvmMemory`).
 
 Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,

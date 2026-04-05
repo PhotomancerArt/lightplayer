@@ -23,8 +23,8 @@ emission yet — this phase sets up the JIT plumbing.
 Add dependencies:
 
 ```toml
-lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
-lp-glsl-builtins = { path = "../lp-glsl-builtins" }
+lps-builtin-ids = { path = "../lps-builtin-ids" }
+lps-builtins = { path = "../lps-builtins" }
 ```
 
 ### 2. Create `src/builtins.rs`
@@ -32,10 +32,10 @@ lp-glsl-builtins = { path = "../lp-glsl-builtins" }
 #### resolve_import
 
 Same logic as WASM emitter's `resolve_builtin_id` in
-`lp-glsl-wasm/src/emit/imports.rs`. Dispatches on `ImportDecl.module_name`:
+`lps-wasm/src/emit/imports.rs`. Dispatches on `ImportDecl.module_name`:
 
 ```rust
-use lp_glsl_builtin_ids::{
+use lps_builtin_ids::{
     BuiltinId, glsl_builtin_mapping::{
         glsl_q32_math_builtin_id, lpir_q32_builtin_id, glsl_lpfx_q32_builtin_id,
         GlslParamKind,
@@ -101,8 +101,8 @@ pub(crate) fn declare_builtins(
     let call_conv = module.isa().default_call_conv();
     for builtin in BuiltinId::all() {
         match builtin.mode() {
-            Some(m) if mode == FloatMode::Q32 && m != lp_glsl_builtin_ids::Mode::Q32 => continue,
-            Some(m) if mode == FloatMode::F32 && m != lp_glsl_builtin_ids::Mode::F32 => continue,
+            Some(m) if mode == FloatMode::Q32 && m != lps_builtin_ids::Mode::Q32 => continue,
+            Some(m) if mode == FloatMode::F32 && m != lps_builtin_ids::Mode::F32 => continue,
             _ => {} // None = mode-independent, declare for all
         }
         let sig = signature_for_builtin(*builtin, call_conv, mode);
@@ -162,8 +162,8 @@ Same pattern as old crate's `registry.rs`. Each arm looks like:
 ```rust
 pub(crate) fn get_function_pointer(id: BuiltinId) -> *const u8 {
     match id {
-        BuiltinId::LpGlslSinQ32 => lp_glsl_builtins::builtins::glsl::sin_q32::__lp_glsl_sin_q32 as *const u8,
-        BuiltinId::LpLpirFaddQ32 => lp_glsl_builtins::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32 as *const u8,
+        BuiltinId::LpGlslSinQ32 => lps_builtins::builtins::glsl::sin_q32::__lps_sin_q32 as *const u8,
+        BuiltinId::LpLpirFaddQ32 => lps_builtins::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32 as *const u8,
         // ... all variants ...
     }
 }
@@ -210,15 +210,15 @@ let mut jit_module = JITModule::new(jit_builder);
 After module creation, declare imports:
 
 ```rust
-let builtin_ids = builtins::declare_module_imports(&mut jit_module, ir, mode)?;
+let builtin_ids = builtins::declare_module_imports( & mut jit_module, ir, mode) ?;
 ```
 
 Per-function, create import FuncRefs:
 
 ```rust
-let import_func_refs: Vec<FuncRef> = builtin_ids.iter().map(|bid| {
-    let fid = jit_module.get_name(bid.name()).expect("declared");
-    jit_module.declare_func_in_func(fid, builder.func)
+let import_func_refs: Vec<FuncRef> = builtin_ids.iter().map( | bid| {
+let fid = jit_module.get_name(bid.name()).expect("declared");
+jit_module.declare_func_in_func(fid, builder.func)
 }).collect();
 ```
 
@@ -237,8 +237,8 @@ Each declared import gives a `FuncId`. Store them. Per-function:
 
 ```rust
 let import_func_refs: Vec<FuncRef> = import_func_ids.iter()
-    .map(|fid| jit_module.declare_func_in_func(*fid, builder.func))
-    .collect();
+.map( | fid| jit_module.declare_func_in_func( * fid, builder.func))
+.collect();
 ```
 
 Pass `&import_func_refs` in `EmitCtx`.
@@ -270,7 +270,7 @@ pub use lpir::FloatMode;
 Update existing test to pass `FloatMode::F32`:
 
 ```rust
-let (jit, ids) = jit_from_ir(&ir, FloatMode::F32).expect("jit");
+let (jit, ids) = jit_from_ir( & ir, FloatMode::F32).expect("jit");
 ```
 
 ### 6. Test

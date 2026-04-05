@@ -28,7 +28,7 @@ baseline.
 - Show summary of how many tests were marked
 - Exit with appropriate code
 
-### `apps/lp-glsl-filetests-app/src/main.rs`
+### `apps/lps-filetests-app/src/main.rs`
 
 - Document `LP_MARK_FAILING_TESTS_EXPECTED` in help text (but don't add as flag - keep it env var
   only)

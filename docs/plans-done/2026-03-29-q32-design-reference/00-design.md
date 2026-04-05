@@ -12,14 +12,14 @@ docs/
 └── design/
     └── q32.md                              # NEW: single source of truth for Q32 semantics
 
-lp-shader/lp-glsl-builtins/src/
+lp-shader/lps-builtins/src/
 ├── glsl/q32/types/
 │   └── q32.rs                              # UPDATE: saturating operators, fixed div-by-zero,
 │                                           #         fixed constant comments
 ├── builtins/lpir/
 │   └── fdiv_q32.rs                         # UPDATE: 0/0 → 0 (currently returns MAX_FIXED)
 
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── builtins/
 │   ├── common-isinf.glsl                   # UPDATE: Q32-specific expectations / @unsupported
 │   └── common-isnan.glsl                   # UPDATE: same

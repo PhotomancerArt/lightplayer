@@ -32,7 +32,7 @@ Currently, `lp-core` has:
 
 2. **Runtime State Storage**: ✅ **DECIDED**: State lives in the `*NodeRuntime` structs. Need raw
    access to contiguous memory (Vec might work, but may need direct alloc calls). Texture helper
-   will eventually move to `lp-glsl-builtins`. `ProjectRuntime` uses separate
+   will eventually move to `lps-builtins`. `ProjectRuntime` uses separate
    `HashMap<u32, *NodeRuntime>` per node type. Runtime must provide access to other nodes during
    rendering.
 

@@ -20,7 +20,7 @@ This accounts for a significant portion of the 31,820 bytes attributed to
 
 Change `TransformContext` to borrow the maps instead of owning them:
 
-File: `lp-shader/lp-glsl-compiler/src/backend/transform/pipeline.rs`
+File: `lp-shader/lps-compiler/src/backend/transform/pipeline.rs`
 
 ```rust
 // Before:
@@ -59,12 +59,12 @@ Then update all callers:
 ## Validate
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 ```
 
 Also run the Q32 transform tests specifically since we're changing TransformContext:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- q32
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- transform
+cd lp-shader/lps-compiler && cargo test --features std -- q32
+cd lp-shader/lps-compiler && cargo test --features std -- transform
 ```

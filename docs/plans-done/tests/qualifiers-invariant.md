@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL invariant qualifier in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/invariant/` following the flat naming convention with prefixes. These tests will comprehensively cover the invariant qualifier which ensures output variables have the same value across different programs when given the same inputs. These tests are expected to fail initially, serving as a specification for implementing invariant qualifier support in the compiler.
+Create a complete test suite for GLSL invariant qualifier in `lightplayer/crates/lps-filetests/filetests/qualifiers/invariant/` following the flat naming convention with prefixes. These tests will comprehensively cover the invariant qualifier which ensures output variables have the same value across different programs when given the same inputs. These tests are expected to fail initially, serving as a specification for implementing invariant qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -267,8 +267,8 @@ void test_invariant_output() {
    - Error detection
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-out.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/functions/return-vector.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-out.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/functions/return-vector.glsl`
    - GLSL spec: `variables.adoc` - Variance and the Invariant Qualifier (lines 6068-6270)
 
 ## Files to Create

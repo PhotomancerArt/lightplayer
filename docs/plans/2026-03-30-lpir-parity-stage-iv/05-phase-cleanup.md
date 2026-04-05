@@ -18,8 +18,8 @@ Search for and remove:
 ### Fix Warnings
 
 ```bash
-cargo check -p lp-glsl-naga
-cargo clippy -p lp-glsl-naga -- -D warnings
+cargo check -p lps-naga
+cargo clippy -p lps-naga -- -D warnings
 ```
 
 Common issues to fix:
@@ -32,7 +32,7 @@ Common issues to fix:
 ### Format Code
 
 ```bash
-cargo +nightly fmt -p lp-glsl-naga
+cargo +nightly fmt -p lps-naga
 ```
 
 ## Validation
@@ -57,7 +57,7 @@ Each should show all tests passing.
 Ensure existing tests still pass:
 
 ```bash
-cargo test -p lp-glsl-filetests --test filetests -- jit.q32
+cargo test -p lps-filetests --test filetests -- jit.q32
 ```
 
 Verify no new unexpected failures.
@@ -106,13 +106,13 @@ Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of arr
 
 ## Files Modified
 
-- `lp-shader/lp-glsl-naga/src/lower_ctx.rs` - Array metadata tracking
-- `lp-shader/lp-glsl-naga/src/lower_expr.rs` - Array read access
-- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` - Array store
-- `lp-shader/lp-glsl-naga/src/naga_util.rs` - Array type utilities  
-- `lp-shader/lp-glsl-naga/src/lower_array.rs` - NEW: Array helpers
-- `lp-shader/lp-glsl-naga/src/lib.rs` - Export new module
-- `lp-shader/lp-glsl-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
+- `lp-shader/lps-naga/src/lower_ctx.rs` - Array metadata tracking
+- `lp-shader/lps-naga/src/lower_expr.rs` - Array read access
+- `lp-shader/lps-naga/src/lower_stmt.rs` - Array store
+- `lp-shader/lps-naga/src/naga_util.rs` - Array type utilities  
+- `lp-shader/lps-naga/src/lower_array.rs` - NEW: Array helpers
+- `lp-shader/lps-naga/src/lib.rs` - Export new module
+- `lp-shader/lps-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
 
 ## Test Results
 
@@ -149,7 +149,7 @@ mv docs/plans/2026-03-30-lpir-parity-stage-iv docs/plans-done/
 Commit message:
 
 ```
-feat(lp-glsl): implement 1D scalar array lowering
+feat(lps): implement 1D scalar array lowering
 
 Add array support to LPIR lowering:
 - Array declaration with slot allocation

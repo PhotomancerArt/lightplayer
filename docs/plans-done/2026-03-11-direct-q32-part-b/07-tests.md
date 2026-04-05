@@ -50,8 +50,8 @@ testing.
 After all methods are implemented:
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
-cargo test -p lp-glsl-compiler --features std -- numeric
+cargo check -p lps-compiler --features std
+cargo test -p lps-compiler --features std -- numeric
 ```
 
 The Q32Strategy doesn't affect compiler output yet (it's not wired into

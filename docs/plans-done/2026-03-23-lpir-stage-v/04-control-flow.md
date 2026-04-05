@@ -152,7 +152,7 @@ end
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Programs with control flow now emit valid WASM. Combined with Phases 2-3,

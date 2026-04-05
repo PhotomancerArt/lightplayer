@@ -12,7 +12,7 @@ Question log: `00-notes.md`
   memory; correct WASM function indices (imports first, then user functions).
 - **Builtin resolution:** auto-generated `glsl_to_builtin_id` (and related glue); inline compound
   builtins (match Cranelift); scalar imports + component-wise vectors.
-- **`builtins.wasm`:** thin `wasm32-unknown-unknown` crate linking `lp-glsl-builtins`, built by
+- **`builtins.wasm`:** thin `wasm32-unknown-unknown` crate linking `lps-builtins`, built by
   `build-builtins.sh`, **imported memory** (`--import-memory` or equivalent).
 - **Runtime:** host-owned `Memory`; instantiate `builtins.wasm` then shader with the same memory and
   builtins exports — **same path** in wasmtime tests and browser.
@@ -38,12 +38,12 @@ Non-goals for this plan: browser UI (playground shell is separate); matrix built
 
 ```
 lp-shader/
-├── lp-glsl-builtin-ids/
+├── lps-builtin-ids/
 │   └── src/
 │       └── lib.rs                         # UPDATE: generated glsl_to_builtin_id (etc.)
-├── lp-glsl-builtins-gen-app/              # UPDATE: emit new generated helpers
-├── lp-glsl-builtins-wasm/                 # NEW: wasm32 crate → builtins.wasm, import memory
-├── lp-glsl-wasm/
+├── lps-builtins-gen-app/              # UPDATE: emit new generated helpers
+├── lps-builtins-wasm/                 # NEW: wasm32 crate → builtins.wasm, import memory
+├── lps-wasm/
 │   └── src/
 │       ├── codegen/
 │       │   ├── mod.rs                     # UPDATE: sections order, pre-scan, indices
@@ -55,7 +55,7 @@ lp-shader/
 │       │       └── builtins/            # NEW: inline + import dispatch
 │       ├── module.rs
 │       └── lib.rs
-├── lp-glsl-filetests/
+├── lps-filetests/
 │   └── src/test_run/
 │       ├── wasm_runner.rs               # UPDATE: memory + builtins.wasm + linker
 │       └── wasm_link_builtins.rs        # NEW (optional): shared link helper / codegen hook
@@ -65,7 +65,7 @@ scripts/
 
 Generated artifacts (paths TBD in implementation):
 
-- `builtins.wasm` (output of `lp-glsl-builtins-wasm`)
+- `builtins.wasm` (output of `lps-builtins-wasm`)
 - Optional: generated wasmtime linker glue next to existing generated builtin refs
 
 ## Architecture
@@ -114,7 +114,7 @@ Generated artifacts (paths TBD in implementation):
 | `imports`                        | WASM import section: builtins funcs + memory; stable ordering |
 | `glsl_to_builtin_id` (generated) | Map GLSL name + arg count → `Option<BuiltinId>`               |
 | `codegen/expr/builtins`          | Inline set (clamp, mix, …) vs `call` to import                |
-| `lp-glsl-builtins-wasm`          | Produces `builtins.wasm` with imported memory                 |
+| `lps-builtins-wasm`          | Produces `builtins.wasm` with imported memory                 |
 | `wasm_runner`                    | Loads `builtins.wasm`, wires memory + exports, runs shader    |
 
 ## Phases

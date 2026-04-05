@@ -25,9 +25,9 @@
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lpir-cranelift --features riscv32-emu
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo clippy -p lpir-cranelift --all-features -- -D warnings
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo clippy -p lpir-cranelift --all-features -- -D warnings
 ```
 
 ```bash

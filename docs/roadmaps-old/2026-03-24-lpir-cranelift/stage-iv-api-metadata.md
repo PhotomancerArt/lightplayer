@@ -16,7 +16,7 @@ complete compiler: GLSL in, callable module out.
 **In scope:**
 - `compile.rs` — full pipeline orchestration:
   - GLSL → Naga (via naga's GLSL frontend)
-  - Naga → LPIR (via `lp-glsl-naga::lower`)
+  - Naga → LPIR (via `lps-naga::lower`)
   - Drop Naga module after lowering
   - Lower IrFunctions → CLIF one at a time, biggest first
   - Drop each IrFunction after defining in Cranelift module
@@ -26,7 +26,7 @@ complete compiler: GLSL in, callable module out.
   - Per-function: name, GLSL-typed params with in/out/inout qualifiers,
     GLSL return type
   - Stored in JitModule alongside compiled code
-  - Update `lp-glsl-naga` lowering to produce this metadata
+  - Update `lps-naga` lowering to produce this metadata
 - `values.rs` — typed value types:
   - `GlslQ32` enum: `Float(f64)`, `Vec2(f64, f64)`, `Vec3(..)`, `Vec4(..)`,
     `Int(i32)`, `IVec2(..)`, etc.
@@ -66,7 +66,7 @@ complete compiler: GLSL in, callable module out.
   (biggest first), lowers each to CLIF individually, and drops the
   IrFunction after `define_function`. Peak memory = largest IrFunction +
   its CLIF.
-- GlslMetadata is extracted during `lp-glsl-naga::lower()`. This requires
+- GlslMetadata is extracted during `lps-naga::lower()`. This requires
   a small update to the lowering API — either a new return type
   `(IrModule, GlslMetadata)` or metadata attached to IrModule.
 - The Level 3 `DirectCall` wraps the raw function pointer with a thin
@@ -79,7 +79,7 @@ complete compiler: GLSL in, callable module out.
 ## Open questions
 
 - **GlslMetadata location**: Should it live in the `lpir` crate (since
-  it's metadata about LPIR functions), in `lp-glsl-naga` (since that's
+  it's metadata about LPIR functions), in `lps-naga` (since that's
   where it's extracted), or in the new `lpir-cranelift` crate (since
   that's the primary consumer)? It's also needed by the WASM emitter's
   test harness and potentially by filetests. Probably a shared location
@@ -98,7 +98,7 @@ complete compiler: GLSL in, callable module out.
   transparently if we set up the signature right. Need to investigate
   what Cranelift does automatically.
 - **Naga dependency**: The `jit()` function takes GLSL source, so the
-  crate depends on `naga` (for parsing) and `lp-glsl-naga` (for LPIR
+  crate depends on `naga` (for parsing) and `lps-naga` (for LPIR
   lowering). These are `std`-only (naga requires `std`). On ESP32,
   `jit_from_ir()` would be used with pre-lowered LPIR — but currently
   the firmware compiles from GLSL source. How does Naga work on
@@ -114,7 +114,7 @@ complete compiler: GLSL in, callable module out.
 ## Deliverables
 
 - `jit()` and `jit_from_ir()` public API
-- GlslMetadata extraction in `lp-glsl-naga`
+- GlslMetadata extraction in `lps-naga`
 - Level 1 typed call interface with `GlslQ32`
 - Level 3 direct call interface with `DirectCall`
 - Memory-conscious per-function compilation
@@ -128,5 +128,5 @@ complete compiler: GLSL in, callable module out.
 ## Estimated scope
 
 ~500–700 lines (compile orchestration, values, metadata, API) + ~200
-lines of tests. Plus ~100 lines of changes to `lp-glsl-naga` for
+lines of tests. Plus ~100 lines of changes to `lps-naga` for
 metadata extraction.

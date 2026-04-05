@@ -2,7 +2,8 @@
 
 ## Scope
 
-Final cleanup, warning fixes, formatting, and full validation of the web demo and the rest of the workspace.
+Final cleanup, warning fixes, formatting, and full validation of the web demo and the rest of the
+workspace.
 
 ## Code organization reminders
 
@@ -29,7 +30,7 @@ Remove any that aren't intentional.
 
 ```bash
 cargo build 2>&1 | grep warning
-cargo build -p lp-glsl-wasm --target wasm32-unknown-unknown 2>&1 | grep warning
+cargo build -p lps-wasm --target wasm32-unknown-unknown 2>&1 | grep warning
 ```
 
 Fix all warnings.
@@ -58,6 +59,7 @@ just web-demo-build
 ```
 
 Then manually verify in browser:
+
 - Rainbow shader renders correctly
 - Auto-compile on edit works
 - Error handling works (introduce syntax error, fix it)
@@ -66,6 +68,7 @@ Then manually verify in browser:
 ### 6. Plan cleanup
 
 Create `summary.md` in the plan directory with:
+
 - What was shipped
 - Known limitations
 - Follow-ups

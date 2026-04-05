@@ -12,7 +12,7 @@ Run the builtin generator to automatically discover the new `__lp_*` functions a
 Execute the builtin generator:
 
 ```bash
-cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-shader/lp-glsl-builtins-gen-app/Cargo.toml
+cargo run --bin lps-builtins-gen-app --manifest-path lp-shader/lps-builtins-gen-app/Cargo.toml
 ```
 
 Or use the build script:
@@ -25,7 +25,7 @@ scripts/build-builtins.sh
 
 The generator will:
 
-1. Scan `lp-glsl-builtins/src/builtins/q32/` for new functions
+1. Scan `lps-builtins/src/builtins/q32/` for new functions
 2. Detect `__lpfx_hash_1`, `__lpfx_hash_2`, `__lpfx_hash_3`, `__lpfx_snoise1`, `__lpfx_snoise2`,
    `__lpfx_snoise3`
 3. Add enum variants to `BuiltinId`: `LpHash1`, `LpHash2`, `LpHash3`, `LpSimplex1`, `LpSimplex2`,

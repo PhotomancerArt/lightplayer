@@ -15,9 +15,9 @@
 
 ```
 lp-shader/
-├── lp-glsl-naga/                 # UPDATE: already no_std; remains front end
+├── lps-naga/                 # UPDATE: already no_std; remains front end
 ├── lpir-cranelift/
-│   ├── Cargo.toml                # UPDATE: split `std` vs `glsl`; `lp-glsl-naga` not std-only
+│   ├── Cargo.toml                # UPDATE: split `std` vs `glsl`; `lps-naga` not std-only
 │   └── src/
 │       ├── lib.rs                # UPDATE: export `jit()` under `glsl`, not `std`
 │       ├── compile.rs            # UPDATE: `jit()` cfg + docs
@@ -60,7 +60,7 @@ lp-fw/fw-tests/
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  lpir-cranelift                                              │
-│  jit(glsl):  lp-glsl-naga → LPIR → build_jit_module          │
+│  jit(glsl):  lps-naga → LPIR → build_jit_module          │
 │  `std` branch: cranelift-native, host ISA autodetect         │
 │  `!std` branch: explicit RISC-V32 ISA + jit_memory alloc     │
 └──────────────────────────┬──────────────────────────────────┘
@@ -74,7 +74,7 @@ lp-fw/fw-tests/
 ## Main components and interactions
 
 1. **`lpir-cranelift`:** Owns **GLSL → IR → machine code**. **`glsl`** (or default dep) pulls *
-   *`lp-glsl-naga`**; **`jit()`** runs under **`glsl` + alloc**, without **`std`**. **`std`** adds *
+   *`lps-naga`**; **`jit()`** runs under **`glsl` + alloc**, without **`std`**. **`std`** adds *
    *host** codegen discovery (`cranelift-native`) and any **`std`-only helpers**.
 2. **`lp-engine`:** **`ShaderRuntime`** calls **`lpir_cranelift::jit`** (or thin wrapper). **No**
    “enable compiler” feature for normal builds; **optional** **`minimal`** / **`no-shader-compile`**
@@ -89,6 +89,6 @@ lp-fw/fw-tests/
 
 ## Dependencies
 
-- **`pp-rs` / `lp-glsl-naga` no_std** (prior plan) — prerequisite.
+- **`pp-rs` / `lps-naga` no_std** (prior plan) — prerequisite.
 - Roadmap **Stage VI-A** (`stage-vi-a-embedded-readiness.md`) — overlapping goals for *
   *`lpir-cranelift`** embedded profile; this plan closes the loop through **engine + fw-tests**.

@@ -41,7 +41,7 @@ Add `test-log` as a dev-dependency to crates that have tests:
 - `lp-core/lp-client/Cargo.toml`
 - `lp-core/lp-server/Cargo.toml`
 - `lp-fw/fw-tests/Cargo.toml`
-- `lp-shader/lp-glsl-filetests/Cargo.toml`
+- `lp-shader/lps-filetests/Cargo.toml`
 - Any other crate with tests
 
 **Example** (for `lp-core/lp-shared/Cargo.toml`):

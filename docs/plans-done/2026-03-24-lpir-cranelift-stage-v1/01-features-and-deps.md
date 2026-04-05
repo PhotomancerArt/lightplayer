@@ -17,7 +17,7 @@ Gate **all** new code behind `#[cfg(feature = "riscv32-emu")]` so default
 
 ## Implementation details
 
-- Mirror dependency versions/features from `lp-glsl-cranelift/Cargo.toml`
+- Mirror dependency versions/features from `lps-cranelift/Cargo.toml`
   (`emulator` feature block) but trim anything AST-specific.
 - Default features for `lpir-cranelift` should remain usable for host JIT only.
 - If `build.rs` is required for later phases, add a **stub** `build.rs` that
@@ -33,8 +33,8 @@ Gate **all** new code behind `#[cfg(feature = "riscv32-emu")]` so default
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo check -p lpir-cranelift
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo check -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo check -p lpir-cranelift
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo check -p lpir-cranelift --features riscv32-emu
 ```
 
 Run `cargo +nightly fmt` on touched files.

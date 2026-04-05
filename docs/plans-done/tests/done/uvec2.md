@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for unsigned integer vector type `uvec2` in `lightplayer/crates/lp-glsl-filetests/filetests/uvec2/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL unsigned integer vector specification for `uvec2` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for unsigned integer vector type `uvec2` in `lightplayer/crates/lps-filetests/filetests/uvec2/` following the organizational pattern used in `vec4/` and `bool/`. These tests will comprehensively cover the GLSL unsigned integer vector specification for `uvec2` and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -322,12 +322,12 @@ uvec2 test_uvec_operation_name() {
    - Increment/decrement operators
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/equal.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/relational/not.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/simple-assignment.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/indexing/swizzling.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/assignment/element-assignment.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/constructors/shortening.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/equal.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/relational/not.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/simple-assignment.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/indexing/swizzling.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/assignment/element-assignment.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/constructors/shortening.glsl`
 
 ## Files to Create
 

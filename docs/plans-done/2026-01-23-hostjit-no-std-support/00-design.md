@@ -11,16 +11,16 @@ Expand `HostJit` target to support both std and no_std environments, enabling JI
 ## File Structure
 
 ```
-lp-glsl-compiler/src/backend/target/
+lps-compiler/src/backend/target/
 ├── target.rs                    # MODIFY: Add create_host_isa() helper, update create_isa()
 └── builder.rs                   # No changes needed
 
-lp-glsl-compiler/src/backend/host/
+lps-compiler/src/backend/host/
 ├── mod.rs                       # MODIFY: Export extern declarations for no_std
 ├── registry.rs                  # MODIFY: Update get_host_function_pointer() for no_std
 └── impls.rs                     # No changes (std-only implementations)
 
-lp-glsl-compiler/src/backend/module/
+lps-compiler/src/backend/module/
 └── gl_module.rs                 # MODIFY: Update symbol_lookup_fn to handle no_std extern functions
 ```
 

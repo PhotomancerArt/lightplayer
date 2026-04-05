@@ -2,7 +2,7 @@
 
 ## Motivation / rationale
 
-The current WASM backend (`lp-glsl-wasm`) hit a fundamental architectural
+The current WASM backend (`lps-wasm`) hit a fundamental architectural
 limitation: WASM requires all local variables declared upfront in
 `Function::new()`, but the single-pass tree-walk emitter doesn't know how many
 it needs until after emission. This manifested as a hard-coded 8-slot scratch
@@ -25,19 +25,19 @@ support.
 
 ```
 lp-shader/
-├── lp-glsl-naga/                # NEW: Naga-based frontend
+├── lps-naga/                # NEW: Naga-based frontend
 │   └── src/
 │       ├── lib.rs               # compile() entry point, wraps naga::front::glsl
 │       └── builtins.rs          # LPFX prototype injection, #line reset
-├── lp-glsl-wasm/                # REWRITE: Naga IR → WASM emission
+├── lps-wasm/                # REWRITE: Naga IR → WASM emission
 │   └── src/
 │       ├── lib.rs               # glsl_wasm() entry point
 │       ├── emit.rs              # Walk naga::Module, emit wasm-encoder instructions
 │       └── builtins.rs          # MathFunction → inline/import, lpfx → import
-├── lp-glsl-frontend/            # UNCHANGED during migration (Cranelift uses it)
-├── lp-glsl-cranelift/           # UNCHANGED during Phase I-II
-├── lp-glsl-builtin-ids/         # UNCHANGED (shared by old and new stacks)
-└── lp-glsl-filetests/           # UPDATE: wasm.q32 target uses new stack
+├── lps-frontend/            # UNCHANGED during migration (Cranelift uses it)
+├── lps-cranelift/           # UNCHANGED during Phase I-II
+├── lps-builtin-ids/         # UNCHANGED (shared by old and new stacks)
+└── lps-filetests/           # UPDATE: wasm.q32 target uses new stack
 ```
 
 Data flow (new stack):
@@ -46,7 +46,7 @@ Data flow (new stack):
 GLSL source
     │
     ▼
-lp-glsl-naga: prepend lpfx prototypes + #line 1
+lps-naga: prepend lpfx prototypes + #line 1
     │
     ▼
 naga::front::glsl::Frontend::parse()
@@ -61,7 +61,7 @@ naga::Module
   └── entry_points
     │
     ▼
-lp-glsl-wasm: emit_module()
+lps-wasm: emit_module()
   ├── Expression::Math → inline WASM or BuiltinId import
   ├── Statement::Call (lpfx_*) → BuiltinId import
   ├── Expression::Binary → f32.add / i32.add (Q32)
@@ -98,7 +98,7 @@ lp-glsl-wasm: emit_module()
 ## Phases
 
 ```
-Phase I:   Scaffold lp-glsl-naga + rewrite lp-glsl-wasm foundation
+Phase I:   Scaffold lps-naga + rewrite lps-wasm foundation
 Phase II:  Feature completeness — rainbow.glsl renders in web demo
 Phase III: Cranelift backend port + lp-engine integration
 Phase IV:  Cleanup, old frontend removal, validation

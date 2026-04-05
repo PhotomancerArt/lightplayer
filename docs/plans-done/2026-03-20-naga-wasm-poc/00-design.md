@@ -89,7 +89,7 @@ During emission (not as a separate IR pass), `float` binary ops are emitted as
 - `f32.add` → `i32.add` (with i32 saturation clamp)
 - params and return type become `i32` instead of `f32`
 
-This mirrors the existing `lp-glsl-wasm` approach where Q32 is a 16.16
+This mirrors the existing `lps-wasm` approach where Q32 is a 16.16
 fixed-point representation stored in i32.
 
 ## Phases

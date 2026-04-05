@@ -11,7 +11,7 @@ hand-built LPIR.
 ## File structure
 
 ```
-lp-shader/lpir-cranelift/
+lp-shader/legacy/lpir-cranelift/
 └── src/
     ├── lib.rs                  # UPDATE: re-exports, expanded tests
     ├── jit_module.rs           # UPDATE: EmitCtx setup, FuncRef wiring, remove guards

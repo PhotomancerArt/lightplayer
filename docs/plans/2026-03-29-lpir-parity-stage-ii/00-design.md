@@ -3,7 +3,7 @@
 ## Scope of work
 
 Close gaps between **Naga’s** `Expression::Access` / compound-update **store** shapes and *
-*`lp-glsl-naga`** lowering so Milestone II filetests pass on **`jit.q32`**, **`wasm.q32`**, and *
+*`lps-naga`** lowering so Milestone II filetests pass on **`jit.q32`**, **`wasm.q32`**, and *
 *`rv32.q32`** (see [`expected-passing-tests.md`](./expected-passing-tests.md)). In scope:
 
 - **Loads** through **`Access`** on local vectors (and matching **Load** peel rules).
@@ -17,14 +17,14 @@ Out of scope: general **arrays** (Milestone IV), **structs**, matrix **invoke** 
 ## File structure
 
 ```
-lp-shader/lp-glsl-naga/src/
+lp-shader/lps-naga/src/
 ├── lower_expr.rs              # UPDATE: Expression::Access, Load { pointer: Access… }
 ├── lower_stmt.rs              # UPDATE: Statement::Store through Access / matrix column
 ├── lower_access.rs            # NEW (optional): shared Access index → vreg helpers
 ├── expr_scalar.rs             # UPDATE if Access types need expr_type_inner fixes
 └── lower_ctx.rs               # TOUCH only if new helpers need layout helpers
 
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── matrix/**/incdec-matrix-*.glsl
 ├── operators/incdec-matrix*.glsl
 └── vec/bvec*/assign-element.glsl, index-variable*.glsl, access-array.glsl
@@ -46,7 +46,7 @@ If `lower_access.rs` would be tiny, keep helpers at the **bottom** of `lower_exp
 ## Conceptual architecture
 
 ```
-GLSL  →  Naga IR  →  lp-glsl-naga
+GLSL  →  Naga IR  →  lps-naga
               │              │
               │    Expression::Access { base, index }
               │              │

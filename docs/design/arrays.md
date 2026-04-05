@@ -235,7 +235,7 @@ For N-dimensional arrays:
 ### File Structure
 
 ```
-lp-shader/lp-glsl-naga/src/
+lp-shader/lps-naga/src/
 ├── lower_ctx.rs          # Add array_map, fat pointer handling
 ├── lower_expr.rs         # Add Access/AccessIndex for arrays
 ├── lower_stmt.rs         # Add array Store handling
@@ -367,9 +367,9 @@ Naga GLSL parsing
 
 - `docs/roadmaps/2026-03-29-lpir-parity/milestone-iv-array-lowering.md` - Implementation milestone
 - `docs/plans/2026-03-30-arrays-notes.md` - Working notes and analysis
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs` - Old compiler array
+- `lp-shader/lps-compiler/src/frontend/codegen/stmt/declaration.rs` - Old compiler array
   declaration
-- `lp-shader/lp-glsl-compiler/src/frontend/semantic/types.rs` - Old compiler type system
+- `lp-shader/lps-compiler/src/frontend/semantic/types.rs` - Old compiler type system
 
 ## Changelog
 

@@ -25,6 +25,6 @@ alongside the BuiltinId registry where it belongs.
 ## Validate
 
 ```bash
-cargo check -p lp-glsl-compiler --features std
-cargo test -p lp-glsl-compiler --features std -- map_testcase
+cargo check -p lps-compiler --features std
+cargo test -p lps-compiler --features std -- map_testcase
 ```

@@ -9,8 +9,8 @@ proper exports.
 
 ### Create Directories
 
-- `lp-shader/lp-glsl-builtins/src/builtins/lpfx/color/space/`
-- `lp-shader/lp-glsl-builtins/src/builtins/lpfx/math/`
+- `lp-shader/lps-builtins/src/builtins/lpfx/color/space/`
+- `lp-shader/lps-builtins/src/builtins/lpfx/math/`
 
 ### Create Module Files
 

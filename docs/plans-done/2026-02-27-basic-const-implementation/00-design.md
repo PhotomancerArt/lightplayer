@@ -12,7 +12,7 @@ Implement basic `const` support so that:
 ## File Structure
 
 ```
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── semantic/
 │   │   ├── mod.rs

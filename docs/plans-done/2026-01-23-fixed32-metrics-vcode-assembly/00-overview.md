@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend the `lp-glsl-q32-metrics-app` app to generate vcode and assembly files in addition to CLIF
+Extend the `lps-q32-metrics-app` app to generate vcode and assembly files in addition to CLIF
 files, enabling size comparison at multiple compilation stages (CLIF → VCode → Assembly). The app
 will switch from `JITModule` to `ObjectModule` to access compiled code, use RISC-V 32-bit target,
 and add vcode/assembly size metrics to statistics.

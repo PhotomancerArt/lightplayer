@@ -4,12 +4,12 @@ Roadmap: `docs/roadmaps/2026-03-13-glsl-wasm-playground/`
 
 ## Prerequisites
 
-Part i is complete: `lp-glsl-frontend` extracted, `lp-glsl-compiler`
-renamed to `lp-glsl-cranelift`, workspace builds clean.
+Part i is complete: `lps-frontend` extracted, `lps-compiler`
+renamed to `lps-cranelift`, workspace builds clean.
 
 ## Scope
 
-Create the `lp-glsl-wasm` crate with enough codegen to compile and
+Create the `lps-wasm` crate with enough codegen to compile and
 execute trivial GLSL functions (scalar arithmetic, return values).
 Extend the filetest infrastructure to run the same tests against both
 the Cranelift (rv32 emulator) and WASM (wasmtime) backends. End state:
@@ -23,14 +23,14 @@ builtins, or the web playground. Those are parts iii and iv.
 The extraction was mechanical and the workspace builds, but a few items
 should be tidied before building on top:
 
-1. **Verify no Cranelift types leak through lp-glsl-frontend's public
-   API.** Audit `lp-glsl-frontend/src/lib.rs` re-exports and ensure no
+1. **Verify no Cranelift types leak through lps-frontend's public
+   API.** Audit `lps-frontend/src/lib.rs` re-exports and ensure no
    `cranelift_codegen` types appear. (Confirmed clean in current code,
    but worth a grep.)
 
-2. **Remove stale comment in lp-glsl-cranelift `exec/execution.rs`.**
+2. **Remove stale comment in lps-cranelift `exec/execution.rs`.**
    The file says `// Re-exports the shared execute functions from
-   lp-glsl-compiler.` — update to say `lp-glsl-cranelift`.
+   lps-compiler.` — update to say `lps-cranelift`.
 
 3. **Verify `cargo test` passes for all crates.** The extraction commit
    was tested with `cargo build` but full `cargo test` should be run
@@ -38,10 +38,10 @@ should be tidied before building on top:
 
 ## Design
 
-### lp-glsl-wasm crate
+### lps-wasm crate
 
 ```
-lp-shader/lp-glsl-wasm/
+lp-shader/lps-wasm/
 ├── Cargo.toml
 └── src/
     ├── lib.rs              # Public API: glsl_wasm(source, options) → WasmModule
@@ -72,8 +72,8 @@ This mirrors the Cranelift codegen's structure (`codegen/expr/`,
 
 ```toml
 [dependencies]
-lp-glsl-frontend = { path = "../lp-glsl-frontend" }
-lp-glsl-builtin-ids = { path = "../lp-glsl-builtin-ids" }
+lps-frontend = { path = "../lps-frontend" }
+lps-builtin-ids = { path = "../lps-builtin-ids" }
 wasm-encoder = "0.227"      # WASM binary encoding
 log = { workspace = true, default-features = false }
 
@@ -223,13 +223,13 @@ Changes:
    directly. Refactor so the compilation step is dispatched by target.
 
 3. **Implement `GlslExecutable` for WASM modules** (via wasmtime).
-   This is a `WasmExecutable` struct in `lp-glsl-filetests` that:
-    - Takes `WasmModule` bytes from `lp-glsl-wasm`
+   This is a `WasmExecutable` struct in `lps-filetests` that:
+    - Takes `WasmModule` bytes from `lps-wasm`
     - Instantiates via wasmtime
     - Implements `call_i32`, `call_f32`, etc. by calling exported WASM
       functions and converting results
 
-4. **Add `wasmtime` as a dependency of `lp-glsl-filetests`.**
+4. **Add `wasmtime` as a dependency of `lps-filetests`.**
 
 5. **Support multi-target test files.**
    Currently: `// target riscv32.q32` (one target per file).
@@ -277,20 +277,20 @@ int test_add_params(int a, int b) {
 
 1. Run `cargo test` across the workspace, fix any failures.
 2. Fix stale comment in `exec/execution.rs`.
-3. Grep for any remaining `lp-glsl-compiler` or `lp_glsl_compiler`
+3. Grep for any remaining `lps-compiler` or `lps_compiler`
    references in code, docs, configs.
 4. Run `cargo +nightly fmt`.
 
-### Phase 2: Create lp-glsl-wasm crate scaffolding
+### Phase 2: Create lps-wasm crate scaffolding
 
-1. Create `lp-shader/lp-glsl-wasm/Cargo.toml` with dependencies.
+1. Create `lp-shader/lps-wasm/Cargo.toml` with dependencies.
 2. Create the directory structure and stub files.
 3. Implement `WasmOptions`, `WasmModule`, type mapping (`types.rs`).
 4. Implement the public API entry point (`glsl_wasm()`) that parses,
    analyzes, and calls the codegen.
 5. Stub the codegen to produce a valid but empty WASM module.
 6. Add to workspace `Cargo.toml` members (NOT default-members).
-7. Verify: `cargo build -p lp-glsl-wasm` compiles.
+7. Verify: `cargo build -p lps-wasm` compiles.
 
 ### Phase 3: Scalar codegen
 
@@ -307,12 +307,12 @@ int test_add_params(int a, int b) {
    section, code section.
 7. Write unit tests in the crate: compile simple GLSL, validate the
    output WASM bytes with wasmtime.
-8. Verify: `cargo test -p lp-glsl-wasm` passes.
+8. Verify: `cargo test -p lps-wasm` passes.
 
 ### Phase 4: GlslExecutable for WASM (wasmtime)
 
-1. Add `wasmtime` as a dependency of `lp-glsl-filetests`.
-2. Add `lp-glsl-wasm` as a dependency of `lp-glsl-filetests`.
+1. Add `wasmtime` as a dependency of `lps-filetests`.
+2. Add `lps-wasm` as a dependency of `lps-filetests`.
 3. Create `test_run/wasm_runner.rs` in filetests:
     - `WasmExecutable` struct wrapping a wasmtime `Instance`
     - Implement `GlslExecutable` trait (`call_i32`, `call_f32`, etc.)
@@ -322,7 +322,7 @@ int test_add_params(int a, int b) {
 5. Refactor `run_detail.rs` to dispatch compilation by target:
     - `riscv32.*` → existing `glsl_emu_riscv32_with_metadata` path
     - `wasm32.*` → `glsl_wasm()` + `WasmExecutable`
-6. Verify: `cargo build -p lp-glsl-filetests` compiles.
+6. Verify: `cargo build -p lps-filetests` compiles.
 
 ### Phase 5: First filetests passing on WASM
 
@@ -337,7 +337,7 @@ int test_add_params(int a, int b) {
 3. Try running existing simple filetests (those that only use scalars
    and basic arithmetic) with `// target wasm32.q32`. Note which pass
    and which need features from phase iii.
-4. Verify: `cargo test -p lp-glsl-filetests` still passes for all
+4. Verify: `cargo test -p lps-filetests` still passes for all
    existing riscv32 tests (no regressions).
 
 ### Phase 6: Final validation
@@ -348,10 +348,10 @@ int test_add_params(int a, int b) {
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-    - `lp-shader/README.md`: add lp-glsl-wasm to the crate table.
-    - `lp-shader/lp-glsl-wasm/README.md`: create with purpose, usage,
-      and relationship to lp-glsl-frontend and lp-glsl-cranelift.
-    - `lp-shader/lp-glsl-filetests/README.md`: document the new
+    - `lp-shader/README.md`: add lps-wasm to the crate table.
+    - `lp-shader/lps-wasm/README.md`: create with purpose, usage,
+      and relationship to lps-frontend and lps-cranelift.
+    - `lp-shader/lps-filetests/README.md`: document the new
       `wasm32.q32` target and wasmtime runner.
 
 ## Validate
@@ -359,9 +359,9 @@ int test_add_params(int a, int b) {
 ```
 cargo build
 cargo test
-cargo build -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
-cargo test -p lp-glsl-filetests
+cargo build -p lps-wasm
+cargo test -p lps-wasm
+cargo test -p lps-filetests
 cargo +nightly fmt --check
 just build-fw-esp32
 ```

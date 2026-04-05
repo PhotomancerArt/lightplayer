@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL noise functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/noise/` following the flat naming convention with prefixes. These tests will comprehensively cover noise1, noise2, noise3, and noise4 functions. Note: These functions are deprecated and return 0.0 when not generating SPIR-V, and are not declared when generating SPIR-V.
+Create a complete test suite for GLSL noise functions in `lightplayer/crates/lps-filetests/filetests/builtins/noise/` following the flat naming convention with prefixes. These tests will comprehensively cover noise1, noise2, noise3, and noise4 functions. Note: These functions are deprecated and return 0.0 when not generating SPIR-V, and are not declared when generating SPIR-V.
 
 ## Directory Structure
 

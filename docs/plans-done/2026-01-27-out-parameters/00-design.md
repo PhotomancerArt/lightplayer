@@ -38,7 +38,7 @@ user-defined functions and native LPFX functions like `psrdnoise`.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── codegen/
 │   │   ├── signature.rs                    # UPDATE: Check qualifiers, pass pointers for out/inout

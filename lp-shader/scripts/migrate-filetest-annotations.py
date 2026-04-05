@@ -5,7 +5,7 @@ import os
 import re
 import sys
 
-FILETESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "lp-glsl-filetests", "filetests")
+FILETESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "lps-filetests", "filetests")
 
 # Files known to work on wasm (none - wasm backend has many gaps).
 # Previously listed files were incorrect; use @unimplemented or @unsupported as needed.

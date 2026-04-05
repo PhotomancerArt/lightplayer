@@ -3,7 +3,7 @@
 ## Scope
 
 Enable LPFX (`lpfx_*`) function calls by injecting GLSL prototypes into
-`lp-glsl-naga` and emitting them as WASM imports in `lp-glsl-wasm`. This
+`lps-naga` and emitting them as WASM imports in `lps-wasm`. This
 unblocks the 13 `lpfx/` test files.
 
 ## Code Organization Reminders
@@ -16,10 +16,10 @@ unblocks the 13 `lpfx/` test files.
 
 ## Implementation Details
 
-### 1. Create lp-glsl-naga/src/builtins.rs
+### 1. Create lps-naga/src/builtins.rs
 
 Define GLSL forward declarations for all known LPFX functions. These must
-match the signatures used by `lp-glsl-builtins-wasm`.
+match the signatures used by `lps-builtins-wasm`.
 
 ```rust
 /// GLSL forward declarations for all LPFX builtin functions.
@@ -43,11 +43,11 @@ vec3 lpfx_hue2rgb(float hue);
 ```
 
 **Important**: Check these signatures against the actual exports in
-`lp-glsl-builtins-wasm`. The parameter types and counts must match exactly.
+`lps-builtins-wasm`. The parameter types and counts must match exactly.
 
 Also check the actual LPFX filetest source to see what signatures they use.
 
-### 2. Update lp-glsl-naga compile() for prototype injection
+### 2. Update lps-naga compile() for prototype injection
 
 ```rust
 pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
@@ -75,12 +75,13 @@ correct.
 If `#line` is not supported by `pp-rs`, fall back to counting prototype
 lines and adjusting error offsets manually.
 
-### 4. LPFX function detection in lp-glsl-wasm
+### 4. LPFX function detection in lps-wasm
 
 In `imports.rs`, when scanning for required imports, also scan for
 `Statement::Call` where the called function's name starts with `lpfx_`.
 
 Map LPFX function names to import names:
+
 - `lpfx_psrdnoise` → `__lp_psrdnoise`
 - `lpfx_worley` → `__lp_worley`
 - etc.
@@ -131,15 +132,17 @@ For WASM imports, `out` parameters must be passed via linear memory (the
 import function writes results to a memory address). Alternatively, the
 WASM import can return the out values as additional return values.
 
-Check how `lp-glsl-builtins-wasm` handles `out` parameters. The old backend
+Check how `lps-builtins-wasm` handles `out` parameters. The old backend
 likely passed them via `env.memory`.
 
 If the builtins use `env.memory`:
+
 1. Allocate a memory region (e.g. a fixed address) for out parameters
 2. Pass the memory offset as an i32 argument
 3. After the call, load the results from memory
 
 If the builtins use multi-value returns:
+
 1. The import type includes extra return values for out params
 2. After the call, store the extra results to the caller's local variables
 
@@ -168,8 +171,8 @@ fn extract_functions(module: &Module) -> Result<Vec<(Handle<Function>, FunctionI
 ```bash
 scripts/glsl-filetests.sh --target wasm.q32 "lpfx/"
 scripts/glsl-filetests.sh --target wasm.q32
-cargo check -p lp-glsl-wasm
-cargo check -p lp-glsl-naga
+cargo check -p lps-wasm
+cargo check -p lps-naga
 ```
 
 All LPFX filetests should pass (or have known tolerance differences annotated).

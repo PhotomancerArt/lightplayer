@@ -14,7 +14,7 @@ Question log: `00-notes.md`
   pointer at memory offset 0, post-call loads.
 - **Shared memory for out params:** Static offset 0 (8 bytes) for gradient scratch. Documented in
   `impl-notes.md` with future growth notes.
-- **Filetest runner:** Shared `wasm_link.rs` helper in `lp-glsl-filetests` for builtins.wasm +
+- **Filetest runner:** Shared `wasm_link.rs` helper in `lps-filetests` for builtins.wasm +
   memory + linker instantiation.
 - **Rainbow end-to-end:** Compile and run `main.glsl` via wasmtime.
 
@@ -29,19 +29,19 @@ Non-goals: browser playground, matrix builtins, memory allocator beyond static o
 | psrdnoise seed   | Fix bug: add `seed: UInt` to GLSL sig, update Cranelift registry + shaders  |
 | LPFX codegen     | New `lpfx_call.rs`, separate from `builtin_call.rs` (match Cranelift split) |
 | Out-param memory | Static offset 0, 8 bytes for gradient. No allocator.                        |
-| Filetest linking | Shared helper `wasm_link.rs` in `lp-glsl-filetests`                         |
+| Filetest linking | Shared helper `wasm_link.rs` in `lps-filetests`                         |
 
 ## File structure
 
 ```
 lp-shader/
-├── lp-glsl-frontend/
+├── lps-frontend/
 │   └── src/semantic/lpfx/
 │       └── lpfx_fns.rs                          # UPDATE: add seed param to psrdnoise sigs
-├── lp-glsl-cranelift/
+├── lps-cranelift/
 │   └── src/backend/builtins/
 │       └── registry.rs                           # UPDATE: fix psrdnoise sig (add seed param)
-├── lp-glsl-wasm/
+├── lps-wasm/
 │   └── src/codegen/
 │       ├── mod.rs                                # UPDATE: memory import policy
 │       ├── expr/
@@ -50,11 +50,11 @@ lp-shader/
 │       │   ├── builtin_call.rs                   # (no changes)
 │       │   └── lpfx_call.rs                      # NEW: LPFX call emission + arg flatten + out
 │       └── memory.rs                             # NEW: out-param offset constants
-├── lp-glsl-filetests/
+├── lps-filetests/
 │   └── src/test_run/
 │       ├── wasm_runner.rs                        # UPDATE: use wasm_link for builtins+memory
 │       └── wasm_link.rs                          # NEW: shared linking helper
-├── lp-glsl-builtins-gen-app/                     # UPDATE: regenerate after lpfx_fns.rs change
+├── lps-builtins-gen-app/                     # UPDATE: regenerate after lpfx_fns.rs change
 examples/
 ├── basic/src/rainbow.shader/main.glsl            # UPDATE: psrdnoise calls add seed arg
 ├── basic2/src/rainbow.shader/main.glsl           # UPDATE: same

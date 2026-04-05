@@ -34,10 +34,14 @@ end $exit
 ```
 
 Actually tracing the br depths more carefully from inside `<body>`:
-- `br 0` → end of `$body` block → falls to `<continuing>`, then `br 0` restarts `$loop` = **continue**
-- `br 1` → end of `$loop` → falls to end of `$exit` = **not right**, that exits the loop but not via `$exit` branch...
+
+- `br 0` → end of `$body` block → falls to `<continuing>`, then `br 0` restarts `$loop` = **continue
+  **
+- `br 1` → end of `$loop` → falls to end of `$exit` = **not right**, that exits the loop but not via
+  `$exit` branch...
 
 Let me re-check. From inside `<body>`:
+
 - depth 0 = `$body` block
 - depth 1 = `$loop` loop
 - depth 2 = `$exit` block
@@ -47,6 +51,7 @@ unconditional branch targets the `$loop` loop (restarts it) = **continue**
 `br 2` → exits `$exit` block = **break**
 
 For `break_if`, from inside `<continuing>`:
+
 - depth 0 = `$loop` loop
 - depth 1 = `$exit` block
 
@@ -78,7 +83,9 @@ respectively for break and continue). When entering an `If`, increment both by 1
 When entering a nested `Loop`, push new values.
 
 Simpler approach: use a `Vec<LoopContext>` stack. Each entry records the WASM
-block nesting depth at the point the loop was entered. Break = `br (current_depth - loop_entry_depth + break_offset)`, Continue = `br (current_depth - loop_entry_depth + continue_offset)`.
+block nesting depth at the point the loop was entered. Break =
+`br (current_depth - loop_entry_depth + break_offset)`, Continue =
+`br (current_depth - loop_entry_depth + continue_offset)`.
 
 Actually, simplest: maintain a counter `wasm_block_depth` that increments for
 every `block`, `loop`, or `if` instruction, and record the loop's depths at
@@ -99,12 +106,14 @@ On `Loop` entry: push 3 blocks (block/loop/block), record `break_depth = wasm_de
 On `If`: push 1 block.
 
 Then:
+
 - `Break` → `br(wasm_depth - break_depth)`
 - `Continue` → `br(wasm_depth - continue_depth)`
 
 Where `wasm_depth` is the depth **inside** the body.
 
 Let me think again. After entering the loop:
+
 ```
 block     ;; wasm_depth was D, now D+1
   loop    ;; D+2
@@ -112,13 +121,16 @@ block     ;; wasm_depth was D, now D+1
 ```
 
 Inside body at depth D+3:
+
 - break targets the outermost `block` at D+1: `br(D+3 - (D+1)) = br(2)`
 - continue targets the inner `block` at D+3: `br(D+3 - D+3) = br(0)`
 
 If there's an `if` inside the body:
+
 ```
       if    ;; D+4
 ```
+
 - break: `br(D+4 - (D+1)) = br(3)`
 - continue: `br(D+4 - D+3) = br(1)`
 
@@ -188,7 +200,7 @@ in `emit.rs` implements the detection.
 ```bash
 scripts/glsl-filetests.sh --target wasm.q32 "control/"
 scripts/glsl-filetests.sh --target wasm.q32 "scalar/"
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Scalar tests must remain passing. Control flow tests should have reduced failures.

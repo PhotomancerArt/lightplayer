@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Try to find workspace root if script is run from elsewhere
-# Look for Cargo.toml and lp-glsl directory
+# Look for Cargo.toml and lps directory
 find_workspace_root() {
   local dir="$1"
   while [ "$dir" != "/" ]; do
@@ -32,9 +32,9 @@ cd "$WORKSPACE_ROOT" || {
   exit 1
 }
 
-# Check if lp-glsl directory exists
+# Check if lps directory exists
 if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
+  echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
@@ -180,11 +180,11 @@ fi
 
 # Show list of tests if requested
 if [ "$SHOW_LIST" = true ]; then
-  FILETESTS_DIR="$WORKSPACE_ROOT/lp-shader/lp-glsl-filetests/filetests"
+  FILETESTS_DIR="$WORKSPACE_ROOT/lp-shader/lps-filetests/filetests"
 
-  # Ensure lp-glsl directory exists
+  # Ensure lps directory exists
   if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
-    echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
+    echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
     exit 1
   fi
 
@@ -235,36 +235,36 @@ if [ "$SHOW_LIST" = true ]; then
   exit 0
 fi
 
-# Ensure lp-glsl directory exists before running tests
+# Ensure lps directory exists before running tests
 if [ ! -d "$WORKSPACE_ROOT/lp-shader" ]; then
-  echo "Error: lp-glsl directory not found at $WORKSPACE_ROOT/lp-shader" >&2
+  echo "Error: lps directory not found at $WORKSPACE_ROOT/lp-shader" >&2
   exit 1
 fi
 
 # Build builtins executable before running tests to catch any changes
-echo "Building lp-glsl-builtins-emu-app..."
+echo "Building lps-builtins-emu-app..."
 "$SCRIPT_DIR/build-builtins.sh" || {
-  echo "Error: Failed to build lp-glsl-builtins-emu-app" >&2
+  echo "Error: Failed to build lps-builtins-emu-app" >&2
   exit 1
 }
 
-# Change to lp-glsl directory where lp-glsl-filetests-app workspace is located
+# Change to lps directory where lps-filetests-app workspace is located
 cd "$WORKSPACE_ROOT/lp-shader" || {
-  echo "Error: Failed to change to lp-glsl directory" >&2
+  echo "Error: Failed to change to lps directory" >&2
   exit 1
 }
 
 # Regenerate .gen.glsl files if -g flag is set
 if [ "$REGEN_GEN_FILES" = true ]; then
   # Pass all test args to the generator - it will handle expansion
-  cargo run -p lp-glsl-filetests-gen-app -- "${TEST_ARGS[@]}" --write || {
+  cargo run -p lps-filetests-gen-app -- "${TEST_ARGS[@]}" --write || {
     echo "Error: Failed to regenerate test files" >&2
     exit 1
   }
 fi
 
-# Run the GLSL filetests using lp-glsl-filetests-app binary with cargo run
-# This ensures cargo run picks up all compilation changes in the lp-glsl workspace
+# Run the GLSL filetests using lps-filetests-app binary with cargo run
+# This ensures cargo run picks up all compilation changes in the lps workspace
 # Pass all remaining arguments directly to the test runner
 # Pass through DEBUG environment variable for debug logging
-cargo run -p lp-glsl-filetests-app --bin lp-glsl-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"
+cargo run -p lps-filetests-app --bin lps-filetests-app -- test "${TARGET_ARG[@]}" "${TEST_ARGS[@]}"

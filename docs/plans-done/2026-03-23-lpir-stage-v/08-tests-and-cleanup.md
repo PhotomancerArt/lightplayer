@@ -77,12 +77,12 @@ fn run_q32_i32(source: &str, func_name: &str, args_i32: &[i32]) -> i32 {
 
 ### Warnings
 ```
-cargo clippy -p lp-glsl-wasm -- -D warnings
+cargo clippy -p lps-wasm -- -D warnings
 ```
 
 ### Formatting
 ```
-cargo +nightly fmt -p lp-glsl-wasm
+cargo +nightly fmt -p lps-wasm
 ```
 
 ### Dead code audit
@@ -96,16 +96,16 @@ Verify no remnants of the old emitter remain:
 
 ```
 cargo check --workspace
-cargo test -p lp-glsl-wasm
+cargo test -p lps-wasm
 ```
 
 ### Filetest spot-check
 
 Run a few scalar filetests manually to verify:
 ```
-cargo test -p lp-glsl-filetests -- scalar::float::op_add
-cargo test -p lp-glsl-filetests -- scalar::int::op_add
-cargo test -p lp-glsl-filetests -- scalar::bool::ctrl_if
+cargo test -p lps-filetests -- scalar::float::op_add
+cargo test -p lps-filetests -- scalar::int::op_add
+cargo test -p lps-filetests -- scalar::bool::ctrl_if
 ```
 
 Full filetest validation is Stage VI, but a spot-check here catches
@@ -114,9 +114,9 @@ obvious issues early.
 ## Validate
 
 ```
-cargo test -p lp-glsl-wasm
-cargo clippy -p lp-glsl-wasm -- -D warnings
-cargo +nightly fmt -p lp-glsl-wasm -- --check
+cargo test -p lps-wasm
+cargo clippy -p lps-wasm -- -D warnings
+cargo +nightly fmt -p lps-wasm -- --check
 ```
 
 All smoke tests pass. The LPIR → WASM pipeline works end-to-end.

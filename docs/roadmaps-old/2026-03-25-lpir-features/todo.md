@@ -16,7 +16,7 @@ as a backlog when extending the Naga → LPIR → Cranelift path.
 - **AArch64 JIT multi-return**: read `x0`–`x3` after `blr` for 2–4 `i32` returns; `repr(C)` struct
   returns do not match Cranelift’s per-return GPR layout on Apple.
 - **Vector component assign / read**: `Store(AccessIndex(…))` and `AccessIndex` on Naga’s
-  `Pointer → Vector` (locals and pointer parameters) in `lp-glsl-naga` (`lower_stmt.rs`,
+  `Pointer → Vector` (locals and pointer parameters) in `lps-naga` (`lower_stmt.rs`,
   `lower_expr.rs`). Unblocks e.g. `function/param-in.glsl`, `operators/preinc-component.glsl`.
 
 ## Gap categories
@@ -101,9 +101,9 @@ Rough mapping (many files per dir):
 
 ## Code touchpoints (bookmark)
 
-- `lp-shader/lp-glsl-naga/src/lower_stmt.rs` — statements, `Store`, calls.
-- `lp-shader/lp-glsl-naga/src/lower_expr.rs` — expressions, `AccessIndex`, loads.
-- `lp-shader/lpir-cranelift/src/invoke.rs` — host JIT calling; `call.rs` / `values.rs` —
+- `lp-shader/lps-naga/src/lower_stmt.rs` — statements, `Store`, calls.
+- `lp-shader/lps-naga/src/lower_expr.rs` — expressions, `AccessIndex`, loads.
+- `lp-shader/legacy/lpir-cranelift/src/invoke.rs` — host JIT calling; `call.rs` / `values.rs` —
   flatten/decode.
 - `lp-shader/lpir/src/glsl_metadata.rs` — `GlslType` / function metadata for host calls.
 - Cranelift ABI / flags: `enable_multi_ret_implicit_sret`, return-area pointer (`x8` on AArch64)

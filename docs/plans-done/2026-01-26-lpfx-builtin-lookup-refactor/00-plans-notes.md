@@ -22,7 +22,7 @@ suffixes, requiring string manipulation. This is fragile and incorrect.
 `BuiltinId` enum variant.
 
 **Answer**: Add `builtin_id_from_name(name: &str) -> Option<BuiltinId>` to
-`lp-shader/lp-glsl-compiler/src/backend/builtins/registry.rs` as an `impl BuiltinId` method.
+`lp-shader/lps-compiler/src/backend/builtins/registry.rs` as an `impl BuiltinId` method.
 This is the natural place since:
 
 - `BuiltinId::name()` already exists there (reverse mapping)
@@ -70,7 +70,7 @@ and should be tested.
 
 ## Notes
 
-- The codegen tool (`lp-glsl-builtin-gen-app`) needs to generate `builtin_id_from_name` in
+- The codegen tool (`lps-builtin-gen-app`) needs to generate `builtin_id_from_name` in
   `registry.rs`
 - The Q32 transform in `calls.rs` needs to be updated to use the proper lookup chain
 - We should verify that all existing tests still pass after the refactor

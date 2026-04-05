@@ -6,7 +6,7 @@ Implement basic 1D scalar arrays with literal integer sizes, using stack allocat
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-foundation.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/1-foundation.glsl`
 
 - Array declaration: `int arr[5];`
 - Array write: `arr[0] = 10;`
@@ -16,7 +16,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 1. Type System Extensions
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/types.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/types.rs`
 
 - Add `is_array() -> bool`
 - Add `array_element_type() -> Option<Type>` (recursive for multi-dim)
@@ -26,7 +26,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 2. Type Parsing
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_resolver.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/type_resolver.rs`
 
 - Update `parse_type_specifier()` to check `type_spec.ty.array_specifier`
 - Parse `ArraySpecifier` dimensions recursively (outermost-first)
@@ -36,7 +36,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 3. Variable Declaration with Stack Allocation
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs`
 
 - Update `VarInfo` to support arrays:
   ```rust
@@ -52,7 +52,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 4. Array Indexing (RValue Path)
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
 
 - Extend `emit_indexing()` to handle arrays before matrix/vector check
 - For arrays:
@@ -64,7 +64,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 5. Array Indexing (LValue Path)
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
 
 - Add `ArrayElement` variant to `LValue` enum:
   ```rust
@@ -85,7 +85,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ### 6. Type Inference
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_check/inference.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/semantic/type_check/inference.rs`
 
 - Update `infer_expr_type_with_registry()` for `Expr::Bracket`
 - Check if base type is array before matrix/vector
@@ -106,11 +106,11 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/1-founda
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/types.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_resolver.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/context.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/expr/component.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/lvalue.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_check/inference.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/types.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/type_resolver.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/stmt/declaration.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/context.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/expr/component.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/lvalue.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/type_check/inference.rs`
 

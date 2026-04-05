@@ -31,16 +31,16 @@ lp-shader/
 │   │   ├── lib.rs                    # UPDATE: DirectCall takes vmctx param
 │   │   └── jit_module.rs             # UPDATE: Store vmctx in module
 │   └── src/invoke.rs                 # UPDATE: Prepend vmctx to args
-├── lp-glsl-wasm/
+├── lps-wasm/
 │   └── src/
 │       ├── emit/mod.rs               # UPDATE: Add vmctx_local to FuncEmitCtx
 │       └── func.rs                   # UPDATE: local.get 0 is vmctx
-├── lp-glsl-filetests/
+├── lps-filetests/
 │   └── src/
 │       └── test_run/                 # UPDATE: Allocate VMContext in tests
 │           ├── q32_exec_common.rs    # UPDATE: Add vmctx allocation
 │           └── wasm_runner.rs        # UPDATE: Add vmctx allocation
-└── lp-glsl-exec/
+└── lps-exec/
     └── src/
         └── executable.rs             # UPDATE: Add vmctx param to calls
 
@@ -196,7 +196,7 @@ pub fn signature_for_ir_func(
 }
 ```
 
-### 4. WASM Emission (`lp-glsl-wasm`)
+### 4. WASM Emission (`lps-wasm`)
 
 ```rust
 // emit/mod.rs

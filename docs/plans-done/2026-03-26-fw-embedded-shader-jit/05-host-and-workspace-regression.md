@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Prove **host** workflows (CLI, tests, `lp-server` with **`std`**) still work after embedded-focused changes. Align with **`justfile`** / CI expectations where practical.
+Prove **host** workflows (CLI, tests, `lp-server` with **`std`**) still work after embedded-focused
+changes. Align with **`justfile`** / CI expectations where practical.
 
 ## Code Organization Reminders
 
@@ -14,7 +15,8 @@ Prove **host** workflows (CLI, tests, `lp-server` with **`std`**) still work aft
 
 ## Implementation Details
 
-1. Run **`cargo check`** / **`cargo test`** for representative packages: **`lp-server`**, **`lp-client`**, **`lp-glsl-filetests`** (or a lighter subset if full run is heavy).
+1. Run **`cargo check`** / **`cargo test`** for representative packages: **`lp-server`**, *
+   *`lp-client`**, **`lps-filetests`** (or a lighter subset if full run is heavy).
 2. Fix **feature unification** issues (e.g. **`std` + `glsl`** both on for host defaults).
 3. Update **docs** (roadmap stage VI-A pointer, this plan **`00-notes`**) if behavior changed.
 
@@ -28,7 +30,7 @@ Prove **host** workflows (CLI, tests, `lp-server` with **`std`**) still work aft
 cargo check -p lp-server
 cargo test -p lp-server --no-run
 # Optional depth (timeboxed):
-# cargo test -p lp-glsl-filetests --no-run
+# cargo test -p lps-filetests --no-run
 # just clippy (or workspace clippy excluding cross-only crates per repo convention)
 ```
 

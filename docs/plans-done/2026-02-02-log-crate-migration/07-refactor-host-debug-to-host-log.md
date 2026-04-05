@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Refactor `__host_debug` to `__host_log` in `lp-glsl-builtins` and update all implementations (
+Refactor `__host_debug` to `__host_log` in `lps-builtins` and update all implementations (
 emulator, JIT, tests) to use the new signature with level support.
 
 ## Code Organization Reminders
@@ -17,13 +17,13 @@ emulator, JIT, tests) to use the new signature with level support.
 
 ### 1. Update Function Declaration
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/mod.rs`
+**File**: `lp-shader/lps-builtins/src/host/mod.rs`
 
 Update comments and exports to reference `__host_log` instead of `__host_debug`.
 
 ### 2. Update Emulator Implementation
 
-**File**: `lp-shader/lp-glsl-builtins-emu-app/src/main.rs` (or wherever `__host_debug` is
+**File**: `lp-shader/lps-builtins-emu-app/src/main.rs` (or wherever `__host_debug` is
 implemented)
 
 Replace `__host_debug` with `__host_log`:
@@ -60,7 +60,7 @@ pub extern "C" fn __host_log(
 
 ### 3. Update JIT Implementation
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/host/impls.rs`
+**File**: `lp-shader/lps-compiler/src/backend/host/impls.rs`
 
 Replace `__host_debug` with `__host_log`:
 
@@ -101,7 +101,7 @@ pub extern "C" fn __host_log(
 
 ### 4. Update Test Implementation
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/test.rs`
+**File**: `lp-shader/lps-builtins/src/host/test.rs`
 
 Replace `__host_debug` with `__host_log`:
 
@@ -139,7 +139,7 @@ pub extern "C" fn __host_log(
 
 ### 5. Update Registry
 
-**File**: `lp-shader/lp-glsl-builtins/src/host/registry.rs`
+**File**: `lp-shader/lps-builtins/src/host/registry.rs`
 
 Update `HostId` enum if it references `Debug`:
 
@@ -166,7 +166,7 @@ impl HostId {
 
 ### 6. Update JIT Registry
 
-**File**: `lp-shader/lp-glsl-compiler/src/backend/host/registry.rs`
+**File**: `lp-shader/lps-compiler/src/backend/host/registry.rs`
 
 Update to use `__host_log` instead of `__host_debug`.
 
@@ -180,7 +180,7 @@ Run from workspace root:
 
 ```bash
 cargo check --workspace
-cargo test --package lp-glsl-builtins --features test
+cargo test --package lps-builtins --features test
 ```
 
 Ensure:

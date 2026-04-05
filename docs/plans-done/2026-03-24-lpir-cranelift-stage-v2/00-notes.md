@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-- Extend **`lp-glsl-filetests`** for **`lpir-cranelift`**:
+- Extend **`lps-filetests`** for **`lpir-cranelift`**:
     - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations via
       **`GlslExecutable`** adapter.
     - **`rv32.q32`:** GLSL → LPIR → **Stage V1** object + link + emulator → same
@@ -10,11 +10,11 @@
 - Keep **`wasm.q32`** (unchanged backend).
 - **Remove the legacy `cranelift.q32` target** and **`Backend::Cranelift`**:
   no `glsl_emu_riscv32` / old AST compiler in the filetest runner.
-- **Drop `lp-glsl-cranelift` from `lp-glsl-filetests` dependencies** by depending
-  on **new small crates** (copies; legacy crates unchanged): **`lp-glsl-diagnostics`**,
-  **`lps-shared`**, **`lpvm`**, **`lp-glsl-exec`**. Implement the trait
-  in **`lp-glsl-wasm`** and the lpir adapters against **`lp-glsl-exec`**. Old
-  **`lp-glsl-cranelift`** keeps its own copies for non-filetests callers until
+- **Drop `lps-cranelift` from `lps-filetests` dependencies** by depending
+  on **new small crates** (copies; legacy crates unchanged): **`lps-diagnostics`**,
+  **`lps-shared`**, **`lpvm`**, **`lps-exec`**. Implement the trait
+  in **`lps-wasm`** and the lpir adapters against **`lps-exec`**. Old
+  **`lps-cranelift`** keeps its own copies for non-filetests callers until
   Stage VII deletes that crate.
 - **`DEFAULT_TARGETS`:** **`[jit.q32]` only** for fast local runs (adjust later if
   needed).
@@ -29,7 +29,7 @@
 - **Triage** scalar corpus on the new matrix.
 
 **Out of scope:** lp-engine (Stage VI), vector filetests. **Deleting the entire
-`lp-glsl-cranelift` crate** remains **Stage VII**; V2 only removes it from
+`lps-cranelift` crate** remains **Stage VII**; V2 only removes it from
 **filetests** after the new-crate wiring (phase 04).
 
 ## Current state of the codebase
@@ -43,11 +43,11 @@
 
 ### Execution
 
-- **New stack (in repo):** **`lp-glsl-exec`** (`GlslExecutable`), **`lpvm`**
-  (`GlslValue`), **`lp-glsl-diagnostics`** (`GlslError`), **`lps-shared`**
-  (signatures for the trait). **Legacy:** **`lp-glsl-cranelift`** still holds the
+- **New stack (in repo):** **`lps-exec`** (`GlslExecutable`), **`lpvm`**
+  (`GlslValue`), **`lps-diagnostics`** (`GlslError`), **`lps-shared`**
+  (signatures for the trait). **Legacy:** **`lps-cranelift`** still holds the
   old trait/value definitions until rewired or removed.
-- **V2 target:** **`WasmExecutable`** implements **`lp_glsl_exec::GlslExecutable`**;
+- **V2 target:** **`WasmExecutable`** implements **`lps_exec::GlslExecutable`**;
   **`compile_for_target`** dispatches Wasm / Jit / Rv32 (no Cranelift).
 
 ### `lpir-cranelift`
@@ -66,14 +66,14 @@
 
 ### Q2: Where do `GlslExecutable` adapters live?
 
-**Context:** Filetests must not depend on **`lp-glsl-cranelift`** after legacy
+**Context:** Filetests must not depend on **`lps-cranelift`** after legacy
 removal.
 
-**Answer:** **Dedicated crates:** **`lp-glsl-exec`** (trait), **`lpvm`**
-(value types), plus **`lp-glsl-diagnostics`** / **`lps-shared`** as needed.
-Adapters stay in **`lp-glsl-filetests`** (`lpir_jit_executable`,
-`lpir_rv32_executable`); **`lp-glsl-wasm`** implements the trait without the old
-compiler crate. **No hoist into `lp-glsl-frontend`** for V2—frontend stays as-is
+**Answer:** **Dedicated crates:** **`lps-exec`** (trait), **`lpvm`**
+(value types), plus **`lps-diagnostics`** / **`lps-shared`** as needed.
+Adapters stay in **`lps-filetests`** (`lpir_jit_executable`,
+`lpir_rv32_executable`); **`lps-wasm`** implements the trait without the old
+compiler crate. **No hoist into `lps-frontend`** for V2—frontend stays as-is
 until a later deprecation pass consolidates or deletes duplicates.
 
 ### Q3: Annotation `backend=` vocabulary

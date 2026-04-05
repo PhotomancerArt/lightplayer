@@ -48,6 +48,7 @@ after their definition.
 
 **If Naga doesn't include prototype-only functions:** The GLSL frontend may
 not emit them to `module.functions` until the body is parsed. In that case:
+
 - Check if Naga's GLSL frontend handles prototypes at all.
 - If it does, prototype + definition should share the same function handle.
 - If it doesn't, we may need to handle this at the `NagaModule` level by
@@ -67,7 +68,7 @@ a prototype has no body, but its definition (later in source) does.
 ## Validate
 
 ```bash
-cargo test -p lp-glsl-naga -q
+cargo test -p lps-naga -q
 scripts/glsl-filetests.sh function/declare-prototype.glsl
 scripts/glsl-filetests.sh function/recursive-static-error.glsl
 ```

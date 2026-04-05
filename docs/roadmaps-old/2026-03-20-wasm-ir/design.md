@@ -145,7 +145,7 @@ struct IrFunction {
 
 ```
 GLSL source
-  → lp-glsl-frontend (parse, type-check)
+  → lps-frontend (parse, type-check)
   → TypedShader AST
   → IR lowering (new code, replaces current codegen/expr + codegen/stmt)
       - walks AST

@@ -10,8 +10,8 @@ for edge cases, clean up dead code and warnings.
 ### Run filetests
 
 ```
-cargo test -p lp-glsl-naga
-cargo test -p lp-glsl-filetests
+cargo test -p lps-naga
+cargo test -p lps-filetests
 ```
 
 Triage failures:
@@ -27,7 +27,7 @@ Triage failures:
 Run GLSL → LPIR → interpret for key vector programs:
 
 ```
-cargo test -p lp-glsl-naga --test lower_interp
+cargo test -p lps-naga --test lower_interp
 ```
 
 Add or verify tests for:
@@ -62,8 +62,8 @@ Update doc comments on changed functions to reflect vector support:
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo test -p lp-glsl-filetests
+cargo test -p lps-naga
+cargo test -p lps-filetests
 cargo +nightly fmt -- --check
 cargo clippy --workspace
 ```

@@ -8,7 +8,7 @@ tolerances, vec comparison functions, and vec conversion.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── control/
 │   ├── for/variable-scope.glsl              # UPDATE: Fix test expectations
 │   └── if/variable-scope.glsl               # UPDATE: Fix test expectations
@@ -26,7 +26,7 @@ lp-shader/lp-glsl-filetests/filetests/
     ├── vec2/fn-equal.gen.glsl                # UPDATE: Fix test (investigate equal() bug)
     └── uvec2/from-scalars.glsl               # UPDATE: Fix test expectation (uint conversion)
 
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── codegen/
 │   │   ├── builtins/

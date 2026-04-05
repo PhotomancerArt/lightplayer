@@ -18,9 +18,9 @@ safety.
 
 ### Files to Modify
 
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
-- `lp-shader/lp-glsl-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/variable.rs`
+- `lp-shader/lps-compiler/src/frontend/codegen/lvalue/resolve/component/mod.rs`
 
 ### Changes
 

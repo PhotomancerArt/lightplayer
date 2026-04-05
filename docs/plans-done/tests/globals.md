@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL global variables in `lightplayer/crates/lp-glsl-filetests/filetests/globals/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL global variable specification including declarations, storage qualifiers (`const`, `uniform`, `in`, `out`, `buffer`, `shared`), initialization, scope, access from functions, and edge cases. These tests are expected to fail initially, serving as a specification for implementing global variable support in the compiler.
+Create a complete test suite for GLSL global variables in `lightplayer/crates/lps-filetests/filetests/globals/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL global variable specification including declarations, storage qualifiers (`const`, `uniform`, `in`, `out`, `buffer`, `shared`), initialization, scope, access from functions, and edge cases. These tests are expected to fail initially, serving as a specification for implementing global variable support in the compiler.
 
 ## Directory Structure
 
@@ -380,8 +380,8 @@ float test_global_operation_name() {
    - Proper initialization handling
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/float/op-add.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/functions/scope-global.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/float/op-add.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/functions/scope-global.glsl`
    - GLSL spec: `variables.adoc` - Storage Qualifiers, Scoping sections
 
 ## Files to Create

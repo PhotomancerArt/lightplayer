@@ -23,11 +23,11 @@ The callsite is in `ShaderRuntime::compile_shader` (around line 536):
 
 ```rust
 // Before:
-use lp_glsl_compiler::glsl_jit;
+use lps_compiler::glsl_jit;
 match glsl_jit(glsl_source, options) {
 
 // After:
-use lp_glsl_compiler::glsl_jit_streaming;
+use lps_compiler::glsl_jit_streaming;
 match glsl_jit_streaming(glsl_source, options) {
 ```
 
@@ -38,10 +38,10 @@ Update the import at the top of the file:
 
 ```rust
 // Before:
-use lp_glsl_compiler::glsl_jit;
+use lps_compiler::glsl_jit;
 
 // After:
-use lp_glsl_compiler::glsl_jit_streaming;
+use lps_compiler::glsl_jit_streaming;
 ```
 
 ### 2. Conditional compilation (optional)
@@ -56,10 +56,10 @@ cleaner. The old `glsl_jit` path remains available if we need to revert.
 Add a test that compiles the actual `examples/basic` rainbow shader through
 the streaming path. This exercises the full pipeline with a real-world shader:
 
-File: `lp-shader/lp-glsl-compiler/tests/test_streaming_integration.rs` (new file)
+File: `lp-shader/lps-compiler/tests/test_streaming_integration.rs` (new file)
 
 ```rust
-use lp_glsl_compiler::{GlslOptions, glsl_jit, glsl_jit_streaming};
+use lps_compiler::{GlslOptions, glsl_jit, glsl_jit_streaming};
 
 #[test]
 fn test_streaming_matches_batch_rainbow_shader() {
@@ -119,7 +119,7 @@ fn test_streaming_matches_batch_multi_function() {
 The streaming path must compile under `no_std` (ESP32 target). Verify:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lps-compiler && cargo check --no-default-features --features core
 ```
 
 If there are `std`-only imports (e.g., `std::collections`), replace with
@@ -129,13 +129,13 @@ If there are `std`-only imports (e.g., `std::collections`), replace with
 
 ```bash
 # Integration tests
-cd lp-shader/lp-glsl-compiler && cargo test --features std -- test_streaming
+cd lp-shader/lps-compiler && cargo test --features std -- test_streaming
 
 # Full test suite
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 
 # no_std check
-cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lps-compiler && cargo check --no-default-features --features core
 
 # Engine tests (uses the updated callsite)
 cd lp-core/lp-engine && cargo test --features std

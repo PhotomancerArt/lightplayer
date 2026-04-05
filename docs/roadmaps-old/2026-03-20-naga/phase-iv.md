@@ -8,7 +8,7 @@ all targets. Documentation updates.
 ## Scope
 
 In scope:
-- Remove `lp-glsl-frontend` crate
+- Remove `lps-frontend` crate
 - Remove `glsl-parser` fork dependency
 - Remove any compatibility shims or dual-path code in filetests
 - Update architecture documentation

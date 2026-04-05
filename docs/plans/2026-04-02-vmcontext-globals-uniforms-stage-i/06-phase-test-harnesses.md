@@ -4,8 +4,8 @@
 
 Update all test harnesses to allocate and pass VMContext when calling shaders. This includes:
 
-- `lp-glsl-filetests` (Q32 and WASM runners)
-- `lp-glsl-exec` (executable helpers)
+- `lps-filetests` (Q32 and WASM runners)
+- `lps-exec` (executable helpers)
 - Any integration tests
 
 ## Code Organization Reminders
@@ -16,7 +16,7 @@ Update all test harnesses to allocate and pass VMContext when calling shaders. T
 
 ## Implementation Details
 
-### 1. Update `lp-glsl-filetests/src/test_run/q32_exec_common.rs`
+### 1. Update `lps-filetests/src/test_run/q32_exec_common.rs`
 
 Add VMContext allocation:
 
@@ -64,7 +64,7 @@ impl Q32ExecContext {
 }
 ```
 
-### 2. Update `lp-glsl-filetests/src/test_run/wasm_runner.rs`
+### 2. Update `lps-filetests/src/test_run/wasm_runner.rs`
 
 For WASM, VMContext is allocated in WASM memory:
 
@@ -140,7 +140,7 @@ fn write_vmcontext_header(
 }
 ```
 
-### 3. Update `lp-glsl-exec/src/executable.rs`
+### 3. Update `lps-exec/src/executable.rs`
 
 If this crate has execution helpers, update them similarly.
 
@@ -173,11 +173,11 @@ fn vmctx_passed_to_shader() {
 
 ```bash
 # Run filetests
-cargo test -p lp-glsl-filetests
+cargo test -p lps-filetests
 
 # Check all affected crates
-cargo check -p lp-glsl-filetests
-cargo check -p lp-glsl-exec
+cargo check -p lps-filetests
+cargo check -p lps-exec
 ```
 
 ## Notes

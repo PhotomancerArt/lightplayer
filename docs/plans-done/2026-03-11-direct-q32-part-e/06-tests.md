@@ -16,9 +16,9 @@ unchanged after all cleanup.
 - **Dead code warnings**: After removing the transform, check for
   newly-unused code that was only needed by the transform (e.g.,
   `FixedPointFormat` methods that nothing else calls).
-- **`lp-glsl-q32-metrics-app`**: Uses `Q32Options` — verify it still
+- **`lps-q32-metrics-app`**: Uses `Q32Options` — verify it still
   compiles after the path change.
-- **`lp-glsl-builtins-gen-app`**: Was updated in Plan C to generate
+- **`lps-builtins-gen-app`**: Was updated in Plan C to generate
   `mapping.rs` instead of `math.rs`. Verify it doesn't reference the
   deleted transform directory.
 

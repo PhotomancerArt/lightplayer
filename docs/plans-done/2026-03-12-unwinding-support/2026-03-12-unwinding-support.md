@@ -21,7 +21,7 @@ cost.
 lp-riscv/lp-riscv-emu-guest/
 └── memory.ld                     # UPDATE: retain .eh_frame in ROM, add __eh_frame
 
-lp-shader/lp-glsl-builtins-emu-app/
+lp-shader/lps-builtins-emu-app/
 └── memory.ld                     # UPDATE: same (has own copy, uses lp-riscv-emu-guest script)
 
 lp-fw/fw-esp32/
@@ -73,12 +73,12 @@ keeps .eh_frame in ROM          supplements esp-hal, puts              compile_s
 
 ### Phase 1: Record baseline sizes
 
-**Scope:** Capture `size` output for fw-emu, lp-glsl-builtins-emu-app, fw-esp32 (release) before any
+**Scope:** Capture `size` output for fw-emu, lps-builtins-emu-app, fw-esp32 (release) before any
 changes.
 
 **Implementation Details:**
 
-- Build fw-emu, lp-glsl-builtins-emu-app, fw-esp32 (release).
+- Build fw-emu, lps-builtins-emu-app, fw-esp32 (release).
 - Run `size` on each binary; append to Notes section or create
   `docs/plans/2026-03-12-unwinding-support-baseline.txt`.
 - fw-esp32 binary: `target/riscv32imac-unknown-none-elf/release/fw-esp32`
@@ -90,7 +90,7 @@ just build-rv32-builtins
 just build-fw-emu  # or: cargo build -t riscv32imac-unknown-none-elf -p fw-emu --release
 just build-fw-esp32  # or: cd lp-fw/fw-esp32 && cargo build -t riscv32imac-unknown-none-elf --release --features esp32c6
 size target/riscv32imac-unknown-none-elf/release/fw-emu
-size target/riscv32imac-unknown-none-elf/release/lp-glsl-builtins-emu-app
+size target/riscv32imac-unknown-none-elf/release/lps-builtins-emu-app
 size target/riscv32imac-unknown-none-elf/release/fw-esp32
 ```
 
@@ -122,7 +122,7 @@ size target/riscv32imac-unknown-none-elf/release/fw-esp32
 ### Phase 3: Emu linker scripts
 
 **Scope:** Update lp-riscv-emu-guest/memory.ld to retain `.eh_frame` in ROM and add `__eh_frame`.
-lp-glsl-builtins-emu-app uses lp-riscv-emu-guest's script, so no separate change needed.
+lps-builtins-emu-app uses lp-riscv-emu-guest's script, so no separate change needed.
 
 **Implementation Details:**
 
@@ -140,7 +140,7 @@ lp-glsl-builtins-emu-app uses lp-riscv-emu-guest's script, so no separate change
 - Reference: stack-unwinding.md lines 82–88.
 
 **Validate:** `cargo build -t riscv32imac-unknown-none-elf -p fw-emu --release` succeeds.
-`cargo build -t riscv32imac-unknown-none-elf -p lp-glsl-builtins-emu-app --release` succeeds.
+`cargo build -t riscv32imac-unknown-none-elf -p lps-builtins-emu-app --release` succeeds.
 `readelf -S` on fw-emu shows `.eh_frame` section present.
 
 ---
@@ -264,7 +264,7 @@ succeed. No duplicate lang item errors. Run fw-emu in emulator; normal boot work
       `Result<(), Error>`; we need to return the executable and update self. The pattern:
         - Extract `glsl_source` and `options` (they're already local).
         -
-        `match catch_unwind(AssertUnwindSafe(|| { glsl_jit_streaming(glsl_source, options) })) { Ok(Ok(executable)) => { ... }, Ok(Err(e)) => { ... }, Err(_) => { /* panic (OOM) */ ... } }`
+      `match catch_unwind(AssertUnwindSafe(|| { glsl_jit_streaming(glsl_source, options) })) { Ok(Ok(executable)) => { ... }, Ok(Err(e)) => { ... }, Err(_) => { /* panic (OOM) */ ... } }`
     - On panic (Err from catch_unwind): set compilation_error, clear executable, set state.error,
       return Err.
 - lp-engine needs unwinding only for no_std. Add:
@@ -369,7 +369,7 @@ real-world test.
 
 **Implementation Details:**
 
-- Rebuild fw-emu, lp-glsl-builtins-emu-app, fw-esp32 (release).
+- Rebuild fw-emu, lps-builtins-emu-app, fw-esp32 (release).
 - Run `size` on each, compare to baseline.
 - Update plan Notes with delta table.
 - Run `just test` or `cargo test`.
@@ -401,7 +401,7 @@ real-world test.
 | Binary                   | text      | data   | bss     | dec       |
 |--------------------------|-----------|--------|---------|-----------|
 | fw-emu                   | 1,301,600 | 32     | 524,848 | 1,826,480 |
-| lp-glsl-builtins-emu-app | 53,344    | 8      | 524,552 | 577,904   |
+| lps-builtins-emu-app | 53,344    | 8      | 524,552 | 577,904   |
 | fw-esp32                 | 1,588,236 | 23,272 | 323,224 | 1,934,732 |
 
 ### Size deltas after unwinding (fw-emu)

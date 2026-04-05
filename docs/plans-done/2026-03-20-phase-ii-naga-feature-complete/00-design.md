@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-Expand `lp-glsl-wasm` and `lp-glsl-naga` from scalar-only emission to full
+Expand `lps-wasm` and `lps-naga` from scalar-only emission to full
 feature set. Definition of done: `rainbow.glsl` renders in the web demo and
 all existing wasm.q32 filetests pass (or are annotated as out-of-scope).
 
@@ -10,11 +10,11 @@ all existing wasm.q32 filetests pass (or are annotated as out-of-scope).
 
 ```
 lp-shader/
-├── lp-glsl-naga/
+├── lps-naga/
 │   └── src/
 │       ├── lib.rs               # UPDATE: LPFX prototype injection in compile()
 │       └── builtins.rs          # NEW: LPFX prototype definitions, #line reset
-├── lp-glsl-wasm/
+├── lps-wasm/
 │   └── src/
 │       ├── lib.rs               # UPDATE: import section in emit pipeline
 │       ├── emit.rs              # UPDATE: vectors, builtins, calls, control flow
@@ -26,7 +26,7 @@ lp-shader/
 │       ├── module.rs            # unchanged
 │       ├── options.rs           # unchanged
 │       └── types.rs             # UPDATE: vector type helpers
-└── lp-glsl-filetests/
+└── lps-filetests/
     └── src/test_run/
         └── wasm_runner.rs       # MINOR: fix any new type dispatch issues
 ```
@@ -37,7 +37,7 @@ lp-shader/
 GLSL source
     │
     ▼
-lp-glsl-naga::compile()
+lps-naga::compile()
     ├── prepend LPFX prototypes
     ├── append #line 1
     ├── append dummy main() if needed
@@ -48,7 +48,7 @@ lp-glsl-naga::compile()
 naga::Module
     │
     ▼
-lp-glsl-wasm::emit_module()
+lps-wasm::emit_module()
     │
     ├── Build import section:
     │   ├── Scan all functions for MathFunction refs → builtin imports
@@ -90,7 +90,7 @@ lp-glsl-wasm::emit_module()
 
 ## Main components
 
-### lp-glsl-naga builtins.rs
+### lps-naga builtins.rs
 
 - `fn lpfx_prototypes() -> &'static str`: returns GLSL forward declarations
   for all known LPFX functions

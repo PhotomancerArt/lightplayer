@@ -14,23 +14,23 @@ phases depend on the GLSL signature being correct.
 
 - Generated files (`glsl_builtin_mapping.rs`, `builtin_wasm_import_types.rs`, `builtin_refs.rs`,
   etc.) must be regenerated via `scripts/build-builtins.sh` or
-  `cargo run -p lp-glsl-builtins-gen-app` — do not hand-edit.
+  `cargo run -p lps-builtins-gen-app` — do not hand-edit.
 - Prefer running the generator once after all source-of-truth changes are made.
 
 ## Implementation details
 
 ### 1. Update GLSL signatures in `lpfx_fns.rs`
 
-File: `lp-shader/lp-glsl-frontend/src/semantic/lpfx/lpfx_fns.rs`
+File: `lp-shader/lps-frontend/src/semantic/lpfx/lpfx_fns.rs`
 
 Add `seed: UInt` as the last `In` parameter for both `lpfx_psrdnoise` overloads (vec2 at ~line 299
 and vec3 at ~line 331):
 
 ```rust
 ParameterRef {
-    name: "seed",
-    ty: Type::UInt,
-    qualifier: ParamQualifier::In,
+name: "seed",
+ty: Type::UInt,
+qualifier: ParamQualifier::In,
 },
 ```
 
@@ -39,21 +39,21 @@ The vec2 overload goes from 4 params `[vec2, vec2, float, out vec2]` to 5 params
 
 ### 2. Fix Cranelift registry
 
-File: `lp-shader/lp-glsl-cranelift/src/backend/builtins/registry.rs`
+File: `lp-shader/lps-cranelift/src/backend/builtins/registry.rs`
 
 `signature_for_builtin` for `LpfxPsrdnoise2F32 | LpfxPsrdnoise2Q32` currently has 6 params (5× i32 +
 pointer). Add the seed param (i32) to make it 7:
 
 ```rust
 BuiltinId::LpfxPsrdnoise2F32 | BuiltinId::LpfxPsrdnoise2Q32 => {
-    sig.params.push(AbiParam::new(types::I32)); // x
-    sig.params.push(AbiParam::new(types::I32)); // y
-    sig.params.push(AbiParam::new(types::I32)); // period_x
-    sig.params.push(AbiParam::new(types::I32)); // period_y
-    sig.params.push(AbiParam::new(types::I32)); // alpha
-    sig.params.push(AbiParam::new(pointer_type)); // gradient_out
-    sig.params.push(AbiParam::new(types::I32)); // seed
-    sig.returns.push(AbiParam::new(types::I32));
+sig.params.push(AbiParam::new(types::I32)); // x
+sig.params.push(AbiParam::new(types::I32)); // y
+sig.params.push(AbiParam::new(types::I32)); // period_x
+sig.params.push(AbiParam::new(types::I32)); // period_y
+sig.params.push(AbiParam::new(types::I32)); // alpha
+sig.params.push(AbiParam::new(pointer_type)); // gradient_out
+sig.params.push(AbiParam::new(types::I32)); // seed
+sig.returns.push(AbiParam::new(types::I32));
 }
 ```
 
@@ -92,12 +92,12 @@ float noiseValue = lpfx_psrdnoise(
 ### 4. Regenerate
 
 ```bash
-cargo run -p lp-glsl-builtins-gen-app
+cargo run -p lps-builtins-gen-app
 ```
 
 This updates:
 
-- `lp-glsl-builtin-ids/src/glsl_builtin_mapping.rs` — psrdnoise param kinds gain
+- `lps-builtin-ids/src/glsl_builtin_mapping.rs` — psrdnoise param kinds gain
   `GlslParamKind::UInt`
 - Other generated files should be unaffected (WASM import types already encode the full extern "C"
   ABI which includes seed)
@@ -110,11 +110,11 @@ regressions in overload resolution or the LPFX call path.
 ## Validate
 
 ```bash
-cargo run -p lp-glsl-builtins-gen-app
-cd lp-glsl && cargo test -p lp-glsl-frontend
-cd lp-glsl && cargo test -p lp-glsl-cranelift
-cd lp-glsl && cargo test -p lp-glsl-builtin-ids
-cd lp-glsl && cargo test -p lp-glsl-wasm
+cargo run -p lps-builtins-gen-app
+cd lps && cargo test -p lps-frontend
+cd lps && cargo test -p lps-cranelift
+cd lps && cargo test -p lps-builtin-ids
+cd lps && cargo test -p lps-wasm
 cargo +nightly fmt
 ```
 

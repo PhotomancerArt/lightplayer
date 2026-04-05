@@ -113,17 +113,17 @@ See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and
 GLSL source (#version 450 core)
   │
   ▼
-lp-glsl-naga           Naga glsl-in → IrModule
+lps-naga           Naga glsl-in → IrModule
   │
   ▼
 LPIR                    flat, scalarized, mode-agnostic IR
   │
   ├──► lpir-cranelift     → native machine code (RISC-V / host JIT)
-  ├──► lp-glsl-wasm       → .wasm (browser preview, wasm.q32 filetests)
+  ├──► lps-wasm       → .wasm (browser preview, wasm.q32 filetests)
   └──► lpir::interp       → in-process interpreter (testing)
 ```
 
-**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lp-glsl-naga`** walks Naga's
+**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lps-naga`** walks Naga's
 expression arena and lowers to **LPIR** — a flat, scalarized IR with structured control flow and
 virtual registers. Lowering is mode-agnostic: Q32 vs float is a backend decision.
 
@@ -137,10 +137,10 @@ and stable compiler internals across Cranelift version bumps.
 
 - **`lpir-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
   primary target is RISC-V 32-bit (`riscv32imac`) for ESP32-C6. Host JIT uses `cranelift-native`
-  for development and testing. Optional `glsl` feature pulls in `lp-glsl-naga` for
+  for development and testing. Optional `glsl` feature pulls in `lps-naga` for
   string-to-machine-code entry points.
 
-- **`lp-glsl-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
+- **`lps-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
   WASM for the web demo and `wasm.q32` filetests without requiring Cranelift.
 
 - **`lpir::interp`** — Tree-walking interpreter inside the `lpir` crate. Runs LPIR directly for
@@ -149,22 +149,22 @@ and stable compiler internals across Cranelift version bumps.
 ### Builtins
 
 GLSL math builtins (`sin`, `cos`, `sqrt`, `pow`, etc.), LPFX generative functions (noise, hash,
-color space), and LPIR helpers are provided as `extern "C"` functions in **`lp-glsl-builtins`**.
+color space), and LPIR helpers are provided as `extern "C"` functions in **`lps-builtins`**.
 Both Q32 (fixed-point) and f32 (float) implementations exist. The generator app
-(**`lp-glsl-builtins-gen-app`**) scans builtin sources and emits:
+(**`lps-builtins-gen-app`**) scans builtin sources and emits:
 
-- `BuiltinId` enum and mappings (`lp-glsl-builtin-ids`)
+- `BuiltinId` enum and mappings (`lps-builtin-ids`)
 - Cranelift ABI glue (`lpir-cranelift/src/generated_builtin_abi.rs`)
-- WASM import types (`lp-glsl-wasm/src/emit/builtin_wasm_import_types.rs`)
+- WASM import types (`lps-wasm/src/emit/builtin_wasm_import_types.rs`)
 - Dead-code-prevention refs for the RV32 emu app and WASM cdylib
 
 ### Filetests
 
-Cranelift-style file-based tests under `lp-glsl-filetests/filetests/`. Each `.glsl` file declares
+Cranelift-style file-based tests under `lps-filetests/filetests/`. Each `.glsl` file declares
 expected results; the harness compiles and executes on three backends:
 
 - **jit.q32** — Host JIT via `lpir-cranelift` (default, fast local iteration)
-- **wasm.q32** — WASM via `lp-glsl-wasm` + Wasmtime
+- **wasm.q32** — WASM via `lps-wasm` + Wasmtime
 - **rv32.q32** — RV32 via `lpir-cranelift` object mode + `lp-riscv-emu`
 
 Run with `./scripts/glsl-filetests.sh` or `just test-filetests`.

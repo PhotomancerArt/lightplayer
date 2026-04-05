@@ -12,7 +12,7 @@ Reference: `docs/roadmaps/2026-04-02-vmcontext-globals-uniforms/milestone-1-jit-
 1. **VMContext** — LPIR `v0` typed as pointer width; Cranelift user-function and import signatures use `pointer_type` for that argument on native JIT ISAs; `invoke` / `JitModule::call` / `direct_call` pass a full-width pointer (no `as i32` truncation on 64-bit).
 2. **Other pointer sites (Cranelift path)** — Audit and align anything that is semantically an address in generated **host** code: e.g. **StructReturn** / **result-pointer** hidden args (already often `pointer_type` in CLIF), **stack slot addresses** (`SlotAddr` → `stack_addr`), **Load/Store** address operands, and **future array / out-param** surfaces as they appear in LPIR/lowering. Where LPIR still uses `i32` for an address, either widen to `IrType::Pointer` or document a deliberate “offset in i32” split for 32-bit-only targets.
 3. **Emulator / object** — RV32 object + `emu_run` remain **32-bit guest addresses**; vmctx must be a **guest** pointer (see `rv32-notes.md`), not host stack — may land in same plan or adjacent phase if shared `ElfLoadInfo` / alloc work is ready.
-4. **`lp-glsl-naga`** — Lowering must produce correct `vreg_types[0]` and any new pointer-typed vregs; update builtin / call lowering as needed.
+4. **`lps-naga`** — Lowering must produce correct `vreg_types[0]` and any new pointer-typed vregs; update builtin / call lowering as needed.
 
 **Likely crate touch list**
 
@@ -23,8 +23,8 @@ Reference: `docs/roadmaps/2026-04-02-vmcontext-globals-uniforms/milestone-1-jit-
 | Builtins ABI | `lpir-cranelift`: `generated_builtin_abi.rs`, `builtins.rs` (already uses `pointer_type` in places — reconcile with LPIR) |
 | JIT call | `lpir-cranelift`: `call.rs`, `direct_call.rs`, `invoke.rs`, `lib.rs` tests using `jit_test_vmctx` |
 | Emulator glue | `lpir-cranelift`: `emu_run.rs` (guest vmctx + DataValue width) |
-| Frontend | `lp-glsl-naga`: lowering that sets `vreg_types` and call operands |
-| WASM | `lp-glsl-wasm`: **minimal** — types stay i32; comments / mapping if LPIR uses `ptr` (emit still lowers ptr → i32 for wasm32) |
+| Frontend | `lps-naga`: lowering that sets `vreg_types` and call operands |
+| WASM | `lps-wasm`: **minimal** — types stay i32; comments / mapping if LPIR uses `ptr` (emit still lowers ptr → i32 for wasm32) |
 | Filetests / engine | Any harness that assumes vmctx is always one i32 word on host |
 
 ## Current state of the codebase
@@ -40,7 +40,7 @@ Reference: `docs/roadmaps/2026-04-02-vmcontext-globals-uniforms/milestone-1-jit-
 
 ### Downstream coupling
 
-- `lp-glsl-naga`, `lpir-cranelift`, filetests, and JIT `call.rs` assume vmctx is a single **i32** word at the **host** invoke boundary today (`call.rs`, `direct_call.rs` push `as i32`).
+- `lps-naga`, `lpir-cranelift`, filetests, and JIT `call.rs` assume vmctx is a single **i32** word at the **host** invoke boundary today (`call.rs`, `direct_call.rs` push `as i32`).
 - Cranelift already uses **`pointer_type`** for StructReturn, result-pointer stack bases, and `stack_addr`; LPIR still types **vmctx** and **SlotAddr** as **I32** and forces vmctx to I32 in the **Cranelift signature** (`emit/mod.rs`), which is the JIT 64-bit bug.
 - `generated_builtin_abi.rs` already pushes `AbiParam::new(pointer_type)` for many builtins — must stay consistent with LPIR import typing and vmctx ordering.
 

@@ -1,0 +1,22 @@
+[package]
+name = "lps-builtins"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[features]
+default = []
+std = ["log/std"]
+test = ["std"]
+
+[dependencies]
+lpvm = { path = "../lpvm", default-features = false }
+lpfx-impl-macro = { path = "../lpfx-impl-macro" }
+log = { workspace = true, default-features = false }
+
+[dev-dependencies]

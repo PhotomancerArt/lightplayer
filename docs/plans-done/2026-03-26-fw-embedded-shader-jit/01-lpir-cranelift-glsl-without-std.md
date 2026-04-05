@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Decouple **`lp-glsl-naga`** and **`jit()`** from the **`std`** feature. **`std`** must mean **host-only** (`cranelift-native`, `extern crate std`, etc.). **`jit(source)`** (GLSL entry) must compile under **`#![no_std]` + `alloc`** when **`glsl`** (or equivalent) is enabled.
+Decouple **`lps-naga`** and **`jit()`** from the **`std`** feature. **`std`** must mean **host-only** (`cranelift-native`, `extern crate std`, etc.). **`jit(source)`** (GLSL entry) must compile under **`#![no_std]` + `alloc`** when **`glsl`** (or equivalent) is enabled.
 
 ## Code Organization Reminders
 
@@ -15,8 +15,8 @@ Decouple **`lp-glsl-naga`** and **`jit()`** from the **`std`** feature. **`std`*
 ## Implementation Details
 
 1. **`Cargo.toml`**
-   - Add a feature (e.g. **`glsl`**) that enables **`dep:lp-glsl-naga`**.
-   - Remove **`lp-glsl-naga`** from the **`std`** feature list; **`std`** keeps **`cranelift-native`** and other host-only deps.
+   - Add a feature (e.g. **`glsl`**) that enables **`dep:lps-naga`**.
+   - Remove **`lps-naga`** from the **`std`** feature list; **`std`** keeps **`cranelift-native`** and other host-only deps.
    - Decide **`default`** features: either **`default = ["std", "glsl"]`** for host ergonomics, or **`default = ["glsl"]`** and **`std` as additive — document so **`lp-engine`** can use **`default-features = false, features = ["glsl", …]`** without **`std`**.
 
 2. **`src/compile.rs`**

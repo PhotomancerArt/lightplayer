@@ -1,6 +1,6 @@
 ## Scope of phase
 
-**Prerequisite:** same **`lp_glsl_exec::GlslExecutable`** boundary as phase 02
+**Prerequisite:** same **`lps_exec::GlslExecutable`** boundary as phase 02
 (phase 04 wiring complete).
 
 Add **`lpir_rv32_executable.rs`**: **`GlslExecutable`** backed by **Stage V1**
@@ -8,7 +8,7 @@ pipeline (object + link + emulator).
 
 - **Compile path:** GLSL → Naga → LPIR (reuse same lowering as `jit` — e.g. share
   a small internal `fn glsl_to_ir(source) -> (IrModule, GlslModuleMeta)` or call
-  `lp_glsl_naga` + match `lpir_cranelift` compile helpers) → **object bytes** →
+  `lps_naga` + match `lpir_cranelift` compile helpers) → **object bytes** →
   **link** with builtins ELF → **emulator** instance.
 - Mirror **emulator options** from `compile.rs` constants (`DEFAULT_MAX_MEMORY`,
   `DEFAULT_MAX_INSTRUCTIONS`, `log_level` from `run_detail`).
@@ -23,7 +23,7 @@ with V1 plan.
 ## Code organization reminders
 
 - Isolate **ELF / emu** state in a struct; keep **`GlslExecutable`** methods thin.
-- Host-only code is OK (`std`); match **`lp-glsl-filetests`** features.
+- Host-only code is OK (`std`); match **`lps-filetests`** features.
 
 ## Implementation details
 
@@ -43,9 +43,9 @@ with V1 plan.
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lp-glsl && cargo test -p lp-glsl-filetests --lib
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lps-filetests --lib
 # With V1 + builtins:
-cargo test -p lp-glsl-filetests --test filetests --features ... 
+cargo test -p lps-filetests --test filetests --features ... 
 ```
 
 `cargo +nightly fmt`.

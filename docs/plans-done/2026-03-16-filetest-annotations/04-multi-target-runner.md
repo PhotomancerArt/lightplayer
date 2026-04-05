@@ -103,13 +103,13 @@ fn compile_for_target(
             let options = GlslOptions {
                 run_mode,
                 float_mode: match target.float_mode {
-                    FloatMode::Q32 => lp_glsl_cranelift::FloatMode::Q32,
-                    FloatMode::F32 => lp_glsl_cranelift::FloatMode::F32,
+                    FloatMode::Q32 => lps_cranelift::FloatMode::Q32,
+                    FloatMode::F32 => lps_cranelift::FloatMode::F32,
                 },
-                q32_opts: lp_glsl_cranelift::Q32Options::default(),
+                q32_opts: lps_cranelift::Q32Options::default(),
                 memory_optimized: false,
                 target_override: None,
-                max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+                max_errors: lps_cranelift::DEFAULT_MAX_ERRORS,
             };
             let exec = glsl_emu_riscv32_with_metadata(source, options, Some(relative_path.to_string()))?;
             Ok(exec)
@@ -117,10 +117,10 @@ fn compile_for_target(
         Backend::Wasm => {
             let options = WasmOptions {
                 float_mode: match target.float_mode {
-                    FloatMode::Q32 => lp_glsl_wasm::FloatMode::Q32,
-                    FloatMode::F32 => lp_glsl_wasm::FloatMode::F32,
+                    FloatMode::Q32 => lps_wasm::FloatMode::Q32,
+                    FloatMode::F32 => lps_wasm::FloatMode::F32,
                 },
-                max_errors: lp_glsl_cranelift::DEFAULT_MAX_ERRORS,
+                max_errors: lps_cranelift::DEFAULT_MAX_ERRORS,
             };
             let exec = wasm_runner::WasmExecutable::from_source(source, options)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -132,7 +132,7 @@ fn compile_for_target(
 
 Note: The exact FloatMode type mapping depends on whether the
 DecimalFormat→FloatMode rename (Q3) has been done. If not yet, use the
-existing `DecimalFormat` type from `lp_glsl_cranelift` and `lp_glsl_wasm`.
+existing `DecimalFormat` type from `lps_cranelift` and `lps_wasm`.
 Adapt accordingly.
 
 ### Update `src/test_run/run.rs`
@@ -169,6 +169,7 @@ pub fn run(
 ```
 
 Key changes:
+
 1. Replace `target::parse_target(target_str)` with the passed-in `Target`
 2. Replace the `match &filetest_target` compilation block with the
    `compile_for_target` helper
@@ -180,6 +181,7 @@ Key changes:
 ### Update `src/test_run/run_detail.rs`
 
 Same pattern as run_summary.rs:
+
 1. Accept `&Target` parameter
 2. Use `compile_for_target` helper
 3. Use `directive_disposition` + `record_result`
@@ -187,6 +189,7 @@ Same pattern as run_summary.rs:
 ### Update `src/lib.rs`
 
 Update `run_filetest_with_line_filter` to:
+
 1. Determine active targets (for now, use `DEFAULT_TARGETS`; CLI filtering
    comes in phase 5)
 2. For `test run`: loop over targets, call the runner for each
@@ -226,8 +229,8 @@ Add unit tests in run_summary or a test helper:
 ## Validate
 
 ```
-cargo build -p lp-glsl-filetests
-cargo test -p lp-glsl-filetests
+cargo build -p lps-filetests
+cargo test -p lps-filetests
 cargo +nightly fmt -- --check
 ```
 

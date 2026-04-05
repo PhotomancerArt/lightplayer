@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL built-in functions that are NOT covered by type-specific tests (e.g., vec2, vec4, etc.) in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/` following the flat naming convention with prefixes. These tests will comprehensively cover math functions (trigonometry, exponential, common), matrix functions, integer/bit manipulation functions, and floating-point pack/unpack functions. These tests are expected to fail initially, serving as a specification for implementing built-in function support in the compiler.
+Create a complete test suite for GLSL built-in functions that are NOT covered by type-specific tests (e.g., vec2, vec4, etc.) in `lightplayer/crates/lps-filetests/filetests/builtins/` following the flat naming convention with prefixes. These tests will comprehensively cover math functions (trigonometry, exponential, common), matrix functions, integer/bit manipulation functions, and floating-point pack/unpack functions. These tests are expected to fail initially, serving as a specification for implementing built-in function support in the compiler.
 
 ## Directory Structure
 
@@ -490,8 +490,8 @@ float test_builtin_function_name() {
    - NaN/Inf propagation
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/float/op-add.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/vec4/fn-length.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/float/op-add.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/vec4/fn-length.glsl`
    - GLSL spec: `builtinfunctions.adoc` - All function sections
 
 ## Files to Create

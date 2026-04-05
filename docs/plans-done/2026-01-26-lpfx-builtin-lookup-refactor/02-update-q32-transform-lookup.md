@@ -11,7 +11,7 @@ Update `convert_call` in `calls.rs` to use the proper lookup chain for LPFX func
 
 ## Implementation
 
-1. Update `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/calls.rs`:
+1. Update `lp-shader/lps-compiler/src/backend/transform/q32/converters/calls.rs`:
     - In `convert_call`, when handling TestCase names:
         - Call `BuiltinId::builtin_id_from_name(testcase_name)`
         - If `Some(builtin_id)`, call `find_lpfx_fn_by_builtin_id(builtin_id)`

@@ -73,7 +73,7 @@ All are mechanical replacements. Each site is guarded by a
 ## Validate
 
 ```bash
-cargo test --features std -p lp-glsl-compiler
+cargo test --features std -p lps-compiler
 ```
 
 All tests must pass unchanged. The FloatStrategy emits identical instructions.

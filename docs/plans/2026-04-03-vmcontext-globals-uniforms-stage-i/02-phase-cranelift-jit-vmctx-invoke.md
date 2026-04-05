@@ -27,7 +27,7 @@ Document the cfg or `CompileOptions` field that selects the path.
 ## Exit criteria
 
 - `cargo test -p lpir-cranelift` passes on **64-bit host**.
-- `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` (if `lp-glsl` / engine pulls these crates).
+- `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` (if `lps` / engine pulls these crates).
 - No regression for existing JIT filetests / builtins.
 
 ## Validation

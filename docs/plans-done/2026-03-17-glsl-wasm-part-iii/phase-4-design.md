@@ -80,7 +80,7 @@ sink.call(*idx);
 
 ## 5. Global const
 
-**Scope:** Consts can be at shader scope (global) or function scope (local). For function-scope, they're in `ctx.locals` after allocation. For global scope: the TypedShader may have a global scope. Need to check how lp-glsl-frontend represents globals.
+**Scope:** Consts can be at shader scope (global) or function scope (local). For function-scope, they're in `ctx.locals` after allocation. For global scope: the TypedShader may have a global scope. Need to check how lps-frontend represents globals.
 
 **TypedShader:** Has main_function and user_functions. Does it have global variables? Check frontend. If globals exist, they may need to be passed as function params or defined as WASM globals. WASM has a Global section. For constant globals, we could define them as immutable globals. For simplicity, if rainbow.shader's CYCLE_PALETTE is in main(), it's a local const. Phase 4 focuses on that.
 

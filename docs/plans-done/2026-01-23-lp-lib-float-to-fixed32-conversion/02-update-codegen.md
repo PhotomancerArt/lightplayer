@@ -9,7 +9,7 @@ of directly calling builtins. This allows the q32 transform to handle the conver
 
 ### 2.1 Update `emit_lp_lib_fn_call()` Logic
 
-In `lp-shader/lp-glsl-compiler/src/frontend/codegen/lp_lib_fns.rs`:
+In `lp-shader/lps-compiler/src/frontend/codegen/lp_lib_fns.rs`:
 
 - Check `needs_q32_mapping()` to determine if function needs TestCase conversion
 - If `true` (simplex functions):

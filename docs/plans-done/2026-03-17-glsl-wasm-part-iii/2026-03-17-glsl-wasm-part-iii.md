@@ -4,7 +4,7 @@ Roadmap: `docs/roadmaps/2026-03-13-glsl-wasm-playground/`
 
 ## Prerequisites
 
-Part ii is complete: `lp-glsl-wasm` compiles scalar GLSL to valid WASM
+Part ii is complete: `lps-wasm` compiles scalar GLSL to valid WASM
 modules, `WasmExecutable` runs them via wasmtime, the filetest runner
 dispatches to both `cranelift.q32` and `wasm.q32` targets with an
 annotation system tracking expected failures.
@@ -90,7 +90,7 @@ pub struct WasmRValue {
 }
 ```
 
-This parallels lp-glsl-cranelift's `RValue` pattern. The type
+This parallels lps-cranelift's `RValue` pattern. The type
 information drives dispatch in binary ops, coercion, and return
 handling.
 
@@ -150,11 +150,11 @@ Generated WASM modules declare builtins as imports:
 ```
 
 The import module name is `"builtins"`. Function names match the
-`BuiltinId::name()` strings from `lp-glsl-builtin-ids`.
+`BuiltinId::name()` strings from `lps-builtin-ids`.
 
 For wasmtime tests, imports are satisfied by host functions that call
-the native Rust implementations in `lp-glsl-builtins`. Phase iv
-replaces these with a precompiled `lp-glsl-builtins.wasm` module for
+the native Rust implementations in `lps-builtins`. Phase iv
+replaces these with a precompiled `lps-builtins.wasm` module for
 the browser.
 
 The codegen tracks which builtins are used during compilation and only
@@ -266,7 +266,7 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
 3. Map GLSL builtin names to `BuiltinId` for the import name.
 4. In the wasmtime `WasmExecutable`, provide host functions for each
    declared import. The host functions call the native Rust builtin
-   implementations from `lp-glsl-builtins`.
+   implementations from `lps-builtins`.
 5. Handle vector-argument builtins: `clamp(vec3, float, float)`,
    `mix(vec3, vec3, float)` — may need flattened signatures
    (each component as a separate i32 param) or memory-based passing.
@@ -308,9 +308,9 @@ parameter) in rainbow.shader. Implement as needed rather than up-front.
 4. Fix any warnings.
 5. Verify `just build-fw-esp32` still works.
 6. Update READMEs:
-    - `lp-shader/lp-glsl-wasm/README.md`: document supported features,
+    - `lp-shader/lps-wasm/README.md`: document supported features,
       builtin import mechanism, vector representation.
-    - `lp-shader/lp-glsl-filetests/README.md`: update with current
+    - `lp-shader/lps-filetests/README.md`: update with current
       wasm.q32 pass counts and annotation patterns.
     - `lp-shader/README.md`: update crate table if needed.
 
@@ -337,9 +337,9 @@ for this plan. They can remain `@unimplemented(backend=wasm)`.
 ```
 cargo build
 cargo test
-cargo build -p lp-glsl-wasm
-cargo test -p lp-glsl-wasm
-cargo test -p lp-glsl-filetests
+cargo build -p lps-wasm
+cargo test -p lps-wasm
+cargo test -p lps-filetests
 scripts/glsl-filetests.sh
 cargo +nightly fmt --check
 just build-fw-esp32

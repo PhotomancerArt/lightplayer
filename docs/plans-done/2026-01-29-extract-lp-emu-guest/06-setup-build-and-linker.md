@@ -2,7 +2,7 @@
 
 ## Scope of Phase
 
-Move the linker script (`memory.ld`) and build script (`build.rs`) from `lp-glsl-builtins-emu-app`
+Move the linker script (`memory.ld`) and build script (`build.rs`) from `lps-builtins-emu-app`
 to
 `lp-riscv-emu-guest` crate.
 
@@ -18,10 +18,10 @@ to
 
 ### 1. Copy memory.ld
 
-Copy `lp-glsl-builtins-emu-app/memory.ld` to `lp-riscv-emu-guest/memory.ld`:
+Copy `lps-builtins-emu-app/memory.ld` to `lp-riscv-emu-guest/memory.ld`:
 
 ```bash
-cp lp-shader/lp-glsl-builtins-emu-app/memory.ld lp-shader/lp-riscv-emu-guest/memory.ld
+cp lp-shader/lps-builtins-emu-app/memory.ld lp-shader/lp-riscv-emu-guest/memory.ld
 ```
 
 The file should remain unchanged.
@@ -41,7 +41,7 @@ fn main() {
 }
 ```
 
-This is the same as the original `lp-glsl-builtins-emu-app/build.rs`.
+This is the same as the original `lps-builtins-emu-app/build.rs`.
 
 ### 3. Update Cargo.toml
 

@@ -12,7 +12,7 @@ Migrate all ~634 test files and update the gen-app.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-filetests/
+lp-shader/lps-filetests/
 └── src/
     ├── lib.rs                          # UPDATE: multi-target dispatch
     ├── parse/
@@ -46,16 +46,16 @@ lp-shader/lp-glsl-filetests/
         ├── file_update.rs              # UPDATE: new annotation format
         └── ...                         # unchanged
 
-lp-shader/lp-glsl-filetests-app/
+lp-shader/lps-filetests-app/
 └── src/
     └── main.rs                         # UPDATE: --target flag
 
-lp-shader/lp-glsl-filetests-gen-app/
+lp-shader/lps-filetests-gen-app/
 └── src/
     ├── util.rs                         # UPDATE: remove target from header
     └── vec/*.rs                        # UPDATE: remove target line from generators
 
-lp-shader/lp-glsl-filetests/filetests/
+lp-shader/lps-filetests/filetests/
 ├── scalar/**/*.glsl                    # UPDATE: remove // target, convert [expect-fail]
 ├── vec/**/*.gen.glsl                   # REGENERATE: via gen-app
 ├── builtins/**/*.glsl                  # UPDATE: remove // target, convert [expect-fail]
@@ -241,7 +241,7 @@ Auto-skip for non-cranelift targets. The test type implies the backend.
 ### CLI
 
 ```
-lp-glsl-filetests-app test [files...] [--target <name>] [--fix]
+lps-filetests-app test [files...] [--target <name>] [--fix]
 
 --target cranelift.q32   Run only cranelift.q32 target
 --target wasm.q32        Run only wasm.q32 target

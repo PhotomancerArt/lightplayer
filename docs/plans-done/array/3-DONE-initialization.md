@@ -6,7 +6,7 @@ Implement array initializer lists with full and partial initialization support, 
 
 ## Success Criteria
 
-Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/3-initialization.glsl`
+Test file: `lightplayer/crates/lps-filetests/filetests/array/phases/3-initialization.glsl`
 
 - Full initialization: `int arr[3] = {10, 20, 30};`
 - Partial initialization: `int arr[5] = {1, 2, 3};` (remaining zeros)
@@ -16,7 +16,7 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/3-initia
 
 ### 1. Handle Initializer::List
 
-**File**: `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs`
+**File**: `lightplayer/crates/lps-compiler/src/frontend/codegen/stmt/declaration.rs`
 
 - Update `emit_initializer()` to handle `Initializer::List`
 - Currently only handles `Initializer::Simple`
@@ -66,6 +66,6 @@ Test file: `lightplayer/crates/lp-glsl-filetests/filetests/array/phases/3-initia
 
 ## Files to Modify
 
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/codegen/stmt/declaration.rs`
-- `lightplayer/crates/lp-glsl-compiler/src/frontend/semantic/type_resolver.rs` (for unsized array handling)
+- `lightplayer/crates/lps-compiler/src/frontend/codegen/stmt/declaration.rs`
+- `lightplayer/crates/lps-compiler/src/frontend/semantic/type_resolver.rs` (for unsized array handling)
 

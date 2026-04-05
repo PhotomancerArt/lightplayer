@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL arrays in `lightplayer/crates/lp-glsl-filetests/filetests/arrays/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL array specification including explicitly-sized arrays, array constructors, indexing, assignment, and operations. These tests are expected to fail initially, serving as a specification for implementing array support in the compiler.
+Create a complete test suite for GLSL arrays in `lightplayer/crates/lps-filetests/filetests/arrays/` following the flat naming convention with prefixes. These tests will comprehensively cover the GLSL array specification including explicitly-sized arrays, array constructors, indexing, assignment, and operations. These tests are expected to fail initially, serving as a specification for implementing array support in the compiler.
 
 ## Directory Structure
 

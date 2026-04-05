@@ -38,8 +38,8 @@ Fix any clippy warnings, formatting issues, or test failures.
 ### Update other GlslOptions construction sites
 
 Ensure all places that construct `GlslOptions` include `fast_math`:
-- `lp-glsl-compiler` examples, tests
-- `lp-glsl-filetests` if it constructs GlslOptions
+- `lps-compiler` examples, tests
+- `lps-filetests` if it constructs GlslOptions
 - `esp32-glsl-jit` if it uses GlslOptions directly (it may use a different path)
 
 ### Plan cleanup
@@ -56,7 +56,7 @@ Implemented fast math mode for q32 fixed-point add/sub: when enabled, emits inli
 ## Changes
 
 - lp-model: GlslOpts struct, ShaderConfig.glsl_opts
-- lp-glsl-compiler: GlslOptions.fast_math, Q32Transform.fast_math, conditional iadd/isub in converters
+- lps-compiler: GlslOptions.fast_math, Q32Transform.fast_math, conditional iadd/isub in converters
 - lp-engine: ShaderRuntime uses glsl_opts for GlslOptions
 - fw-esp32: Demo project rainbow.shader uses fast_math
 ```

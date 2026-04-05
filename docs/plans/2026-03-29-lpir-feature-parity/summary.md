@@ -15,9 +15,9 @@ This file records what landed while closing **reasonably obtainable** items from
 ### Phase 8 — “Harness” follow-up
 
 - `uvec2/fn-equal.glsl` inconsistency was **not** suite ordering: the failing case used nested `Relational::All` and **`expr_scalar_kind`** did not handle `Expression::Relational`, producing an opaque lowering error.
-- **Fix:** extend `expr_scalar_kind` in `lp-glsl-naga/src/expr_scalar.rs` to recurse through `Relational` (`all` / `any` / `isnan` / `isinf` argument kinds).
+- **Fix:** extend `expr_scalar_kind` in `lps-naga/src/expr_scalar.rs` to recurse through `Relational` (`all` / `any` / `isnan` / `isinf` argument kinds).
 
-### `lp-glsl-nagma` already in tree (prior work)
+### `lps-nagma` already in tree (prior work)
 
 - LPFX prefix helpers, `float main()` vs synthetic `void main()`, error-test diagnostics pipeline, matrix / relational / invoke work as described in the audit and phase docs.
 

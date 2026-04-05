@@ -10,7 +10,7 @@ automatically have the marker removed (unless `LP_KEEP_XFAIL=1` is set).
 ## File Structure
 
 ```
-lp-shader/lp-glsl-filetests/src/
+lp-shader/lps-filetests/src/
 ├── parse/
 │   ├── parse_run.rs                    # UPDATE: Parse [expect-fail] marker
 │   └── test_type.rs                    # UPDATE: Add expect_fail field to RunDirective
@@ -21,7 +21,7 @@ lp-shader/lp-glsl-filetests/src/
 │   └── file_update.rs                  # UPDATE: Add remove_expect_fail_marker() method
 └── lib.rs                              # UPDATE: Update reporting format, exit code logic, add fix_xfail parameter
 
-lp-shader/lp-glsl-filetests-app/src/
+lp-shader/lps-filetests-app/src/
 └── main.rs                             # UPDATE: Add --fix flag to TestOptions, pass to run()
 ```
 
@@ -133,7 +133,7 @@ add_expect_fail_marker(&self, line_number: usize) -> Result<()>
   # Handle multiple additions in same file (track line_diff)
 ```
 
-### TestOptions (`apps/lp-glsl-filetests-app/src/main.rs`)
+### TestOptions (`apps/lps-filetests-app/src/main.rs`)
 
 ```
 TestOptions - # UPDATE: Add fix flag
@@ -207,7 +207,7 @@ This is useful for establishing a baseline when introducing this feature to an e
 4. **Backward Compatibility:** Existing tests without `[expect-fail]` work unchanged
 5. **CI Integration:** Tests fail on unexpected passes by default (no file modifications), use
    `LP_FIX_XFAIL=1` or `--fix` to enable auto-removal
-6. **Command-line flag:** Add `--fix` flag to `TestOptions` in `lp-glsl-filetests-app/src/main.rs`,
+6. **Command-line flag:** Add `--fix` flag to `TestOptions` in `lps-filetests-app/src/main.rs`,
    pass to `run()` function
 7. **Flag precedence:** Check both `LP_FIX_XFAIL` env var and `--fix` flag (either enables
    auto-removal)

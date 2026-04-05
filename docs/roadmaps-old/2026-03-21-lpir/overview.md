@@ -36,7 +36,7 @@ Naga frontend (parse + type check)            ── existing, unchanged
   ▼
 naga::Module (expression arena + statements)  ── existing, unchanged
   │
-  ▼  lp-glsl-naga  ─── mode-UNAWARE ─────────── middle-end (shared)
+  ▼  lps-naga  ─── mode-UNAWARE ─────────── middle-end (shared)
   │   • walks Naga expression arena + statements
   │   • scalarizes vectors: vec3 add → 3× fadd
   │   • decomposes builtins: smoothstep → scalar math
@@ -50,7 +50,7 @@ IrFunction { body: Vec<Op>, vreg_count, vreg_types }   ── LPIR (float-agnost
   ┌──────┴──────┐
   ▼             ▼
 WASM emitter   CLIF emitter (future)
-(lp-glsl-wasm) (lp-glsl-cranelift)
+(lps-wasm) (lps-cranelift)
   │ mode-AWARE  │ mode-AWARE
   │ • Float: fadd → f32.add
   │ • Q32:   fadd → i64 widen + add + saturate
@@ -71,11 +71,11 @@ lp-shader/
 │       ├── print.rs         #   IR → text format
 │       ├── parse.rs         #   text format → IR
 │       └── interp.rs        #   interpreter/emulator for testing
-├── lp-glsl-naga/            # UPDATE: add Naga → LPIR lowering
+├── lps-naga/            # UPDATE: add Naga → LPIR lowering
 │   └── src/
 │       ├── lib.rs           #   existing: compile(), LPFX injection
 │       └── lower.rs         #   NEW: Naga Module → Vec<IrFunction>
-├── lp-glsl-wasm/            # REWRITE: LPIR → WASM emission
+├── lps-wasm/            # REWRITE: LPIR → WASM emission
 │   └── src/
 │       ├── lib.rs           #   public API (unchanged interface)
 │       ├── emit.rs          #   REWRITE: IrFunction → wasm_encoder
@@ -84,7 +84,7 @@ lp-shader/
 │       ├── types.rs         #   UPDATE: simplify
 │       ├── locals.rs        #   DELETE
 │       └── emit_vec.rs      #   DELETE
-└── lp-glsl-cranelift/       # FUTURE: LPIR → CLIF emission
+└── lps-cranelift/       # FUTURE: LPIR → CLIF emission
 ```
 
 ### IR classification
@@ -285,7 +285,7 @@ use case.
 - **VReg-per-value creates many WASM locals**: WASM engines handle this fine.
   A liveness pass for local reuse can be added later if needed.
 
-- **Rewrite scope**: ~3100 lines replaced in lp-glsl-wasm. But the lowering
+- **Rewrite scope**: ~3100 lines replaced in lps-wasm. But the lowering
   is structurally similar to existing code and net lines likely decrease.
 
 - **Two-backend maintenance**: The CLIF emitter is future work. If LPIR
@@ -303,7 +303,7 @@ use case.
 
 ## Future work (beyond Stage VII)
 
-- **Cranelift backend migration**: Rewrite `lp-glsl-cranelift` to consume
+- **Cranelift backend migration**: Rewrite `lps-cranelift` to consume
   LPIR. Multi-return calling convention (StructReturn for large tuples like
   `mat4` → 16× `f32`) is a known implementation task for the Cranelift
   `GlslExecutable`.
@@ -327,8 +327,8 @@ use case.
 | Text printer                    | ~150       | lpir/src/print.rs                 |
 | Text parser                     | ~300       | lpir/src/parse.rs                 |
 | Interpreter                     | ~250       | lpir/src/interp.rs                |
-| Naga → LPIR lowering (scalar)   | ~800       | lp-glsl-naga/src/lower.rs         |
-| LPIR → WASM emission (incl Q32) | ~500       | lp-glsl-wasm/src/emit.rs          |
+| Naga → LPIR lowering (scalar)   | ~800       | lps-naga/src/lower.rs         |
+| LPIR → WASM emission (incl Q32) | ~500       | lps-wasm/src/emit.rs          |
 | Tests                           | ~400       | across crates                     |
 | **Total new**                   | **~2600**  |                                   |
 | **Total deleted**               | **~3100**  | emit.rs + emit_vec.rs + locals.rs |

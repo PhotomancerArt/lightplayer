@@ -9,14 +9,14 @@ but specific to Lightplayer's needs.
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/builtins/q32/
+lp-shader/lps-builtins/src/builtins/q32/
 ├── lpfx_hash.rs                 # NEW: Hash function (1D, 2D, 3D overloads)
 ├── lpfx_snoise1.rs             # NEW: 1D Simplex noise
 ├── lpfx_snoise2.rs             # NEW: 2D Simplex noise
 ├── lpfx_snoise3.rs             # NEW: 3D Simplex noise
 └── mod.rs                     # UPDATE: Add exports for new functions
 
-lp-shader/lp-glsl-compiler/src/
+lp-shader/lps-compiler/src/
 ├── frontend/
 │   ├── semantic/
 │   │   └── lp_lib_fns.rs      # NEW: Semantic checking for lp_* functions
@@ -40,8 +40,8 @@ lpfx_snoise2(i32, i32, u32) -> __lpfx_snoise2(i32, i32, u32) -> i32
 lpfx_snoise3(i32, i32, i32, u32) -> __lpfx_snoise3(i32, i32, i32, u32) -> i32
 ```
 
-Internal functions (`__lp_*`) are automatically registered by `lp-glsl-builtin-gen-app` which scans
-`lp-glsl-builtins/src/builtins/q32/` and adds them to the `BuiltinId` enum. The builtin generator
+Internal functions (`__lp_*`) are automatically registered by `lps-builtin-gen-app` which scans
+`lps-builtins/src/builtins/q32/` and adds them to the `BuiltinId` enum. The builtin generator
 will
 create enum variants like `LpHash1`, `LpSimplex1`, etc.
 
@@ -68,7 +68,7 @@ emit_lp_lib_fn_call() - # NEW: Generate code for LP library function call
 └── Generate function call instruction
 ```
 
-### Builtin Implementations (`lp-glsl-builtins/src/builtins/q32/`)
+### Builtin Implementations (`lps-builtins/src/builtins/q32/`)
 
 ```
 lpfx_hash.rs:
@@ -91,7 +91,7 @@ lpfx_snoise3.rs:
 ### 1. Integration with Builtin System
 
 LP library functions are implemented as internal builtins (`__lp_*` functions) in
-`lp-glsl-builtins/src/builtins/q32/`, similar to existing `__lp_q32_*` functions. The user-facing
+`lps-builtins/src/builtins/q32/`, similar to existing `__lp_q32_*` functions. The user-facing
 `lp_*`
 names are mapped to these internal implementations during semantic checking and codegen.
 

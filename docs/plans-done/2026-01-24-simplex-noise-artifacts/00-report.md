@@ -10,7 +10,7 @@ for 2D and 3D simplex noise that cause discontinuities at cell boundaries.
 
 ### 1. **Sign Error in 2D Offset Calculation** (CRITICAL)
 
-**Location**: `lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs:98-99`
+**Location**: `lps-builtins/src/builtins/q32/lpfx_snoise2.rs:98-99`
 
 **Current (WRONG)**:
 
@@ -37,7 +37,7 @@ diagonal artifacts.
 
 ### 2. **Sign Error in 3D Offset Calculations** (CRITICAL)
 
-**Location**: `lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs:163-165`
+**Location**: `lps-builtins/src/builtins/q32/lpfx_snoise3.rs:163-165`
 
 **Current (WRONG)**:
 

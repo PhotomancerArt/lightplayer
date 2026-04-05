@@ -142,7 +142,7 @@ pub(crate) struct EmitCtx {
 ## Validate
 
 ```
-cargo check -p lp-glsl-wasm
+cargo check -p lps-wasm
 ```
 
 Integer-only GLSL programs could work end-to-end at this point

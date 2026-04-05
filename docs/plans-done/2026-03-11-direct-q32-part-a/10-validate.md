@@ -15,7 +15,7 @@ scripts/glsl-filetests.sh
 Then the compiler unit tests:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo test --features std
+cd lp-shader/lps-compiler && cargo test --features std
 ```
 
 And the full workspace if needed:
@@ -29,7 +29,7 @@ cargo test --workspace
 The codegen runs on ESP32 (no_std). Verify it compiles without std:
 
 ```bash
-cd lp-shader/lp-glsl-compiler && cargo check --no-default-features --features core
+cd lp-shader/lps-compiler && cargo check --no-default-features --features core
 ```
 
 ## Grep for remaining hardcoded float ops
@@ -39,7 +39,7 @@ instruction calls that should have been routed through the strategy:
 
 ```bash
 rg '\.ins\(\)\.(f32const|fadd|fsub|fmul|fdiv|fneg|fabs|fcmp|fmin|fmax|sqrt|floor|ceil|fcvt_from_sint|fcvt_to_sint|fcvt_from_uint|fcvt_to_uint)' \
-  lp-shader/lp-glsl-compiler/src/frontend/codegen/
+  lp-shader/lps-compiler/src/frontend/codegen/
 ```
 
 Any remaining hits should be:

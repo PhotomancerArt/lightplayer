@@ -6,7 +6,7 @@ Add comprehensive tests for attribute parsing, GLSL signature parsing, and valid
 
 ## Implementation
 
-1. Create `lp-glsl-builtin-gen-app/tests/` directory (or add inline tests)
+1. Create `lps-builtin-gen-app/tests/` directory (or add inline tests)
 2. Add tests for attribute parsing:
     - Valid non-decimal attribute
     - Valid decimal f32 attribute

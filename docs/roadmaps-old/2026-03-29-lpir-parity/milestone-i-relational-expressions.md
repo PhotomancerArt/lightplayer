@@ -12,7 +12,7 @@ All filetest files that fail due to `Relational` expression handling pass on `ji
 
 **In scope:**
 
-- Fix `expr_type_inner` (or equivalent) in `lp-glsl-naga/src/expr_scalar.rs` so it returns a
+- Fix `expr_type_inner` (or equivalent) in `lps-naga/src/expr_scalar.rs` so it returns a
   valid type for `Expression::Relational { All, Any, Not, IsNan, IsInf }`. The phase-8 fix was
   partial — some callers still hit the unsupported path.
 - Ensure `lower_expr.rs` correctly decomposes `Relational` to scalarized ops:
@@ -41,7 +41,7 @@ All filetest files that fail due to `Relational` expression handling pass on `ji
 
 ## Deliverables
 
-- Updated `expr_scalar.rs`, `lower_expr.rs` in `lp-glsl-naga`.
+- Updated `expr_scalar.rs`, `lower_expr.rs` in `lps-naga`.
 - Rewritten `common-isnan.glsl`, `common-isinf.glsl` (avoid unparseable literals).
 - **Explicit test corpus + three-target bar:** see
   [`docs/plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md`](../../plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md)

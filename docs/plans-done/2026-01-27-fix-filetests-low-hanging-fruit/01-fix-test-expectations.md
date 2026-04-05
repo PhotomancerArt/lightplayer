@@ -7,7 +7,7 @@ variables shadow outer scope variables, so outer variables should remain unchang
 
 ## Changes
 
-### `lp-shader/lp-glsl-filetests/filetests/control/for/variable-scope.glsl`
+### `lp-shader/lps-filetests/filetests/control/for/variable-scope.glsl`
 
 - **Line 31**: Change `test_for_loop_init_shadowing() == 3` to `== 100`
     - The outer `i` should remain 100 (shadowed by loop variable)
@@ -18,7 +18,7 @@ variables shadow outer scope variables, so outer variables should remain unchang
       `for (int i = 0; int j = i < 3; i++)`
     - This is invalid GLSL syntax - either remove test or fix to valid syntax
 
-### `lp-shader/lp-glsl-filetests/filetests/control/if/variable-scope.glsl`
+### `lp-shader/lps-filetests/filetests/control/if/variable-scope.glsl`
 
 - **Line 38**: Change `test_if_variable_shadowing() == 10` to `== 5`
     - The outer `x` should remain 5 (shadowed by inner `x`)

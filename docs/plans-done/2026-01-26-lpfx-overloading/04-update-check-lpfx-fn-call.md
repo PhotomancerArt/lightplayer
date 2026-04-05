@@ -7,7 +7,7 @@ Extract the return type from the resolved function.
 
 ## Implementation
 
-### File: `lp-shader/lp-glsl-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
+### File: `lp-shader/lps-compiler/src/frontend/semantic/lpfx/lpfx_fn_registry.rs`
 
 **Update `check_lpfx_fn_call`:**
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for scalar signed integer type `int` in `lightplayer/crates/lp-glsl-filetests/filetests/int/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL signed integer scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
+Create a complete test suite for scalar signed integer type `int` in `lightplayer/crates/lps-filetests/filetests/int/` following the organizational pattern used in `bool/`. These tests will comprehensively cover the GLSL signed integer scalar specification and are expected to fail initially, serving as a specification for implementing the rest of the compiler.
 
 ## Directory Structure
 
@@ -262,8 +262,8 @@ int test_int_operation_name() {
    - Control flow with int conditions
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/bool/op-equal.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/math/int-add.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/bool/op-equal.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/math/int-add.glsl`
 
 ## Files to Create
 

@@ -4,6 +4,7 @@
 
 Write integration tests that validate the full GLSL → LPIR pipeline.
 Two test files:
+
 - `lower_interp.rs`: GLSL → LPIR → interpret → verify computed results
 - `lower_print.rs`: GLSL → LPIR → print → verify text output
 
@@ -23,8 +24,8 @@ Two test files:
 
 ```rust
 fn compile_and_lower(glsl: &str) -> lpir::module::IrModule {
-    let naga = lp_glsl_naga::compile(glsl).unwrap();
-    lp_glsl_naga::lower::lower(&naga).unwrap()
+    let naga = lps_naga::compile(glsl).unwrap();
+    lps_naga::lower::lower(&naga).unwrap()
 }
 
 fn run(glsl: &str, func: &str, args: &[Value]) -> Vec<Value> {
@@ -50,6 +51,7 @@ fn assert_f32_close(actual: f32, expected: f32, epsilon: f32) {
 ### `lower_interp.rs` — interpreter tests
 
 #### Arithmetic basics
+
 - `interp_float_add`: `float f(float a, float b) { return a + b; }`
 - `interp_float_sub_mul_div`: test -, *, /
 - `interp_int_arithmetic`: `int f(int a, int b) { return a + b; }` etc.
@@ -57,15 +59,18 @@ fn assert_f32_close(actual: f32, expected: f32, epsilon: f32) {
 - `interp_int_negation`: `int f(int x) { return -x; }`
 
 #### Constants and literals
+
 - `interp_literal_return`: `float f() { return 42.0; }`
 - `interp_int_literal`: `int f() { return 7; }`
 - `interp_bool_literal`: `bool f() { return true; }` → i32(1)
 
 #### Comparisons
+
 - `interp_float_comparisons`: test <, <=, >, >=, ==, !=
 - `interp_int_comparisons`: same for int
 
 #### Control flow
+
 - `interp_if_else`: `float f(float x) { if (x > 0.0) return 1.0; else return -1.0; }`
 - `interp_loop_sum`: `int f(int n) { int s = 0; for (int i = 0; i < n; i++) s += i; return s; }`
 - `interp_loop_break`: loop with explicit break condition
@@ -73,21 +78,27 @@ fn assert_f32_close(actual: f32, expected: f32, epsilon: f32) {
 - `interp_nested_if`: nested if/else chains
 
 #### Local variables
+
 - `interp_local_var`: `float f(float x) { float y = x * 2.0; return y + 1.0; }`
 - `interp_multiple_locals`: multiple local variables with reassignment
 
 #### Casts
+
 - `interp_float_to_int`: `int f(float x) { return int(x); }`
 - `interp_int_to_float`: `float f(int x) { return float(x); }`
 
 #### Select
+
 - `interp_ternary`: `float f(float x) { return x > 0.0 ? 1.0 : -1.0; }`
 
 #### User function calls
-- `interp_call_user_func`: `float double(float x) { return x * 2.0; } float f(float x) { return double(x) + 1.0; }`
+
+- `interp_call_user_func`:
+  `float double(float x) { return x * 2.0; } float f(float x) { return double(x) + 1.0; }`
 - `interp_call_chain`: A calls B calls C, verify result
 
 #### Math builtins — Tier 1
+
 - `interp_abs_float`: `float f(float x) { return abs(x); }`
 - `interp_abs_int`: `int f(int x) { return abs(x); }`
 - `interp_sqrt`: `float f(float x) { return sqrt(x); }`
@@ -96,6 +107,7 @@ fn assert_f32_close(actual: f32, expected: f32, epsilon: f32) {
 - `interp_min_max_int`: test min/max for integers
 
 #### Math builtins — Tier 2
+
 - `interp_mix`: `float f(float a, float b, float t) { return mix(a, b, t); }`
 - `interp_smoothstep`: verify polynomial shape (0 at edge0, 1 at edge1)
 - `interp_step`: test edge cases
@@ -105,6 +117,7 @@ fn assert_f32_close(actual: f32, expected: f32, epsilon: f32) {
 - `interp_fma`: `float f(float a, float b, float c) { return fma(a, b, c); }`
 
 #### Math builtins — Tier 3
+
 - `interp_sin_cos`: verify sin(0)≈0, cos(0)≈1, sin(π/2)≈1
 - `interp_pow`: `float f(float x, float y) { return pow(x, y); }`
 - `interp_exp_log`: verify exp(0)=1, log(1)=0
@@ -127,8 +140,8 @@ brittleness with VReg numbering).
 ## Validate
 
 ```
-cargo test -p lp-glsl-naga
-cargo +nightly fmt -p lp-glsl-naga -- --check
+cargo test -p lps-naga
+cargo +nightly fmt -p lps-naga -- --check
 ```
 
 All tests pass. The full pipeline is exercised end-to-end.

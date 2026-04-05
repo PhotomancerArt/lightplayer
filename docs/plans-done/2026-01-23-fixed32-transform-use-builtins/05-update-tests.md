@@ -8,7 +8,7 @@ Unignore the div test and verify all tests pass, including filetests.
 
 ### 5.1 Unignore Div Test
 
-In `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
+In `lp-shader/lps-compiler/src/backend/transform/q32/converters/arithmetic.rs`:
 
 - Remove `#[ignore]` attribute from `test_q32_fdiv`
 - Test should now pass with the builtin
@@ -17,7 +17,7 @@ In `lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/arithmetic.r
 
 Execute tests for arithmetic converters:
 
-- `cargo test --package lp-glsl-compiler --lib backend::transform::q32::converters::arithmetic`
+- `cargo test --package lps-compiler --lib backend::transform::q32::converters::arithmetic`
 - Verify all tests pass:
     - `test_q32_fadd`
     - `test_q32_fsub`

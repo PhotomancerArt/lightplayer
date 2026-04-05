@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL memory qualifiers in `lightplayer/crates/lp-glsl-filetests/filetests/qualifiers/memory/` following the flat naming convention with prefixes. These tests will comprehensively cover memory qualifiers (coherent, volatile, restrict, readonly, writeonly) for buffer blocks and image variables. These tests are expected to fail initially, serving as a specification for implementing memory qualifier support in the compiler.
+Create a complete test suite for GLSL memory qualifiers in `lightplayer/crates/lps-filetests/filetests/qualifiers/memory/` following the flat naming convention with prefixes. These tests will comprehensively cover memory qualifiers (coherent, volatile, restrict, readonly, writeonly) for buffer blocks and image variables. These tests are expected to fail initially, serving as a specification for implementing memory qualifier support in the compiler.
 
 ## Directory Structure
 
@@ -269,8 +269,8 @@ float test_coherent_buffer() {
    - Error detection
 
 5. **Reference Files**:
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/globals/declare-buffer.glsl`
-   - Pattern: `lightplayer/crates/lp-glsl-filetests/filetests/interface-blocks/buffer-basic.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/globals/declare-buffer.glsl`
+   - Pattern: `lightplayer/crates/lps-filetests/filetests/interface-blocks/buffer-basic.glsl`
    - GLSL spec: `variables.adoc` - Memory Qualifiers (lines 6419-6600)
 
 ## Files to Create

@@ -9,7 +9,7 @@ Run the builtin generator to register all new functions in the builtin system.
 Run the builtin generator:
 
 ```bash
-cargo run --bin lp-glsl-builtins-gen-app --manifest-path lp-shader/lp-glsl-builtins-gen-app/Cargo.toml
+cargo run --bin lps-builtins-gen-app --manifest-path lp-shader/lps-builtins-gen-app/Cargo.toml
 ```
 
 Or use the build script:

@@ -1,4 +1,4 @@
-# Extract lp-glsl-frontend (finish Part i)
+# Extract lps-frontend (finish Part i)
 
 Roadmap: `docs/roadmaps/2026-03-13-glsl-wasm-playground/`
 Builds on: Phase 1 of `docs/plans/2026-03-13-glsl-wasm-part-i/` (complete)
@@ -7,19 +7,19 @@ Builds on: Phase 1 of `docs/plans/2026-03-13-glsl-wasm-part-i/` (complete)
 
 ### Scope
 
-Complete the lp-glsl-frontend extraction: create lp-glsl-builtin-ids, create lp-glsl-frontend,
-rename lp-glsl-compiler to lp-glsl-cranelift, move shared code, update downstream. Phase 1 (
+Complete the lps-frontend extraction: create lps-builtin-ids, create lps-frontend,
+rename lps-compiler to lps-cranelift, move shared code, update downstream. Phase 1 (
 Cranelift decoupling) is done.
 
 ### File structure
 
 ```
 lp-shader/
-├── lp-glsl-builtin-ids/           # NEW: shared BuiltinId enum
+├── lps-builtin-ids/           # NEW: shared BuiltinId enum
 │   ├── Cargo.toml
 │   └── src/
 │       └── lib.rs                 # enum + name() + builtin_id_from_name() + all() (generated)
-├── lp-glsl-frontend/              # NEW: parser, semantic, types, errors (no Cranelift)
+├── lps-frontend/              # NEW: parser, semantic, types, errors (no Cranelift)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -28,35 +28,35 @@ lp-shader/
 │       ├── src_loc.rs
 │       ├── src_loc_manager.rs
 │       └── semantic/              # types, functions, type_check, lpfx, passes, etc.
-├── lp-glsl-cranelift/             # RENAMED from lp-glsl-compiler
+├── lps-cranelift/             # RENAMED from lps-compiler
 │   └── ...                        # codegen, backend, exec; depends on frontend + builtin-ids
-├── lp-glsl-compiler/              # DELETED (renamed to cranelift)
-└── lp-glsl-builtins-gen-app/      # UPDATE: emit to builtin-ids + cranelift registry
+├── lps-compiler/              # DELETED (renamed to cranelift)
+└── lps-builtins-gen-app/      # UPDATE: emit to builtin-ids + cranelift registry
 ```
 
 ### Conceptual architecture
 
 ```
-lp-glsl-builtin-ids (no deps on cranelift/lp-core)
+lps-builtin-ids (no deps on cranelift/lp-core)
     ↑                    ↑
     |                    |
-lp-glsl-frontend    lp-glsl-cranelift
+lps-frontend    lps-cranelift
     ↑                    |
     |                    |
     +--------------------+
          (frontend depends on builtin-ids for LpfxFn; cranelift depends on both)
 ```
 
-- **lp-glsl-builtin-ids**: Enum `BuiltinId`, `name()`, `builtin_id_from_name()`, `all()`. No
+- **lps-builtin-ids**: Enum `BuiltinId`, `name()`, `builtin_id_from_name()`, `all()`. No
   format(), no Cranelift, no lp-model.
-- **lp-glsl-frontend**: Error, pipeline, src_loc, semantic (including lpfx with BuiltinId from
+- **lps-frontend**: Error, pipeline, src_loc, semantic (including lpfx with BuiltinId from
   builtin-ids). DEFAULT_MAX_ERRORS.
-- **lp-glsl-cranelift**: Re-exports BuiltinId from builtin-ids, adds format(), signature(),
+- **lps-cranelift**: Re-exports BuiltinId from builtin-ids, adds format(), signature(),
   declare_*. Depends on frontend + builtin-ids.
 
 ## Phases
 
-### Phase 1: Create lp-glsl-builtin-ids + update gen-app
+### Phase 1: Create lps-builtin-ids + update gen-app
 
 **Scope**: New crate with enum and `name()` / `builtin_id_from_name()` / `all()`. Gen-app emits
 there; cranelift registry re-exports and adds format/signature/declare.
@@ -66,11 +66,11 @@ builtin-ids minimal: no_std, no cranelift, no lp-model.
 
 **Implementation details**:
 
-1. Create `lp-shader/lp-glsl-builtin-ids/Cargo.toml`:
+1. Create `lp-shader/lps-builtin-ids/Cargo.toml`:
     - `edition.workspace`, `version.workspace`, etc.
     - No cranelift or lp-model deps.
 
-2. Add `generate_builtin_ids()` in gen-app that emits to `lp-glsl-builtin-ids/src/lib.rs`:
+2. Add `generate_builtin_ids()` in gen-app that emits to `lps-builtin-ids/src/lib.rs`:
     - Enum variants
     - `name()` method
     - `builtin_id_from_name()` method
@@ -78,37 +78,37 @@ builtin-ids minimal: no_std, no cranelift, no lp-model.
     - No `format()`, no `signature()`, no `declare_*`
 
 3. Refactor `generate_registry()`:
-    - Emit `pub use lp_glsl_builtin_ids::BuiltinId;`
+    - Emit `pub use lps_builtin_ids::BuiltinId;`
     - Add `format()` via trait or extension module: `impl BuiltinIdFormat for BuiltinId` in
       cranelift (trait in registry, impl uses `crate::DecimalFormat`)
     - Keep `signature()`, `declare_for_jit()`, `declare_for_emulator()` — they stay in registry
-    - Update `all()` to delegate to `lp_glsl_builtin_ids::BuiltinId::all()` or remove if redundant
+    - Update `all()` to delegate to `lps_builtin_ids::BuiltinId::all()` or remove if redundant
 
-4. Add lp-glsl-builtin-ids to workspace members and default-members.
+4. Add lps-builtin-ids to workspace members and default-members.
 
-5. Update lp-glsl-compiler Cargo.toml: add `lp-glsl-builtin-ids` dependency.
+5. Update lps-compiler Cargo.toml: add `lps-builtin-ids` dependency.
 
-6. Update compiler's backend/builtins to use `lp_glsl_builtin_ids::BuiltinId` (or re-export). Update
-   lpfx_fns.rs gen to use `lp_glsl_builtin_ids::BuiltinId`.
+6. Update compiler's backend/builtins to use `lps_builtin_ids::BuiltinId` (or re-export). Update
+   lpfx_fns.rs gen to use `lps_builtin_ids::BuiltinId`.
 
-**Validate**: `cargo run -p lp-glsl-builtins-gen-app`, `cargo build -p lp-glsl-compiler`,
-`cargo test -p lp-glsl-compiler --features std`
+**Validate**: `cargo run -p lps-builtins-gen-app`, `cargo build -p lps-compiler`,
+`cargo test -p lps-compiler --features std`
 
 ---
 
-### Phase 2: Create lp-glsl-frontend crate
+### Phase 2: Create lps-frontend crate
 
 **Scope**: New crate with error, pipeline, src_loc, src_loc_manager, semantic. Move files from
-lp-glsl-compiler.
+lps-compiler.
 
 **Code organization reminders**: Match Design file structure. Place entry points and public API
 first; helpers at bottom. Keep related functionality grouped.
 
 **Implementation details**:
 
-1. Create `lp-shader/lp-glsl-frontend/Cargo.toml`:
-    - Dependencies: `glsl`, `hashbrown`, `serde` (no_std, alloc), `log`, `lp-glsl-builtin-ids`
-    - No cranelift, no lp-model (frontend stands alone within lp-glsl)
+1. Create `lp-shader/lps-frontend/Cargo.toml`:
+    - Dependencies: `glsl`, `hashbrown`, `serde` (no_std, alloc), `log`, `lps-builtin-ids`
+    - No cranelift, no lp-model (frontend stands alone within lps)
 
 2. Move files (git mv or copy then delete):
     - `error.rs` from compiler src
@@ -118,77 +118,77 @@ first; helpers at bottom. Keep related functionality grouped.
     - `frontend/semantic/` → `semantic/` (entire dir, including lpfx)
 
 3. Fix imports in moved files:
-    - `crate::` → `lp_glsl_frontend::` or `crate::` (internal)
+    - `crate::` → `lps_frontend::` or `crate::` (internal)
     - `crate::frontend::` → `crate::`
     - `crate::error` → `crate::error`
-    - `crate::backend::builtins::BuiltinId` → `lp_glsl_builtin_ids::BuiltinId`
+    - `crate::backend::builtins::BuiltinId` → `lps_builtin_ids::BuiltinId`
 
 4. Add `DEFAULT_MAX_ERRORS` to frontend (from `exec/executable.rs`). Update
    `GlslDiagnostics::From<GlslError>` and `semantic::analyze()` to use it.
 
 5. Set up `lib.rs` with module structure and public re-exports.
 
-6. Add lp-glsl-frontend to workspace.
+6. Add lps-frontend to workspace.
 
-7. Update gen-app: change `lpfx_fns_path` from `lp-glsl-compiler/.../semantic/lpfx/lpfx_fns.rs` to
-   `lp-glsl-frontend/.../semantic/lpfx/lpfx_fns.rs`. Ensure generated code uses
-   `lp_glsl_builtin_ids::BuiltinId`. Re-run gen-app.
+7. Update gen-app: change `lpfx_fns_path` from `lps-compiler/.../semantic/lpfx/lpfx_fns.rs` to
+   `lps-frontend/.../semantic/lpfx/lpfx_fns.rs`. Ensure generated code uses
+   `lps_builtin_ids::BuiltinId`. Re-run gen-app.
 
-**Validate**: `cargo run -p lp-glsl-builtins-gen-app`, `cargo build -p lp-glsl-frontend`
+**Validate**: `cargo run -p lps-builtins-gen-app`, `cargo build -p lps-frontend`
 
 ---
 
-### Phase 3: Rename lp-glsl-compiler to lp-glsl-cranelift
+### Phase 3: Rename lps-compiler to lps-cranelift
 
-**Scope**: Rename crate, add lp-glsl-frontend dep, remove moved files from compiler, update all
+**Scope**: Rename crate, add lps-frontend dep, remove moved files from compiler, update all
 imports.
 
 **Code organization reminders**: Keep backward-compatible re-exports in lib.rs for API stability.
 
 **Implementation details**:
 
-1. Rename directory: `lp-shader/lp-glsl-compiler` → `lp-shader/lp-glsl-cranelift`
+1. Rename directory: `lp-shader/lps-compiler` → `lp-shader/lps-cranelift`
 
-2. Update `Cargo.toml`: package name `lp-glsl-cranelift`, add `lp-glsl-frontend` dependency.
+2. Update `Cargo.toml`: package name `lps-cranelift`, add `lps-frontend` dependency.
 
 3. Delete moved files from cranelift (error, pipeline, src_loc, src_loc_manager, frontend/semantic).
    Keep codegen, backend, exec, glsl_compiler.
 
-4. Update all `use crate::frontend::` to `use lp_glsl_frontend::`
-5. Update `use crate::error` to `use lp_glsl_frontend::`
-6. Update `use crate::frontend::semantic::` to `use lp_glsl_frontend::semantic::`
-7. Re-export from lib.rs: `pub use lp_glsl_frontend::{DEFAULT_MAX_ERRORS, ...}` for backward
+4. Update all `use crate::frontend::` to `use lps_frontend::`
+5. Update `use crate::error` to `use lps_frontend::`
+6. Update `use crate::frontend::semantic::` to `use lps_frontend::semantic::`
+7. Re-export from lib.rs: `pub use lps_frontend::{DEFAULT_MAX_ERRORS, ...}` for backward
    compatibility.
 
 8. Update backend/builtins/registry: ensure it re-exports BuiltinId and provides
    format/signature/declare.
 
-**Validate**: `cargo build -p lp-glsl-cranelift`, `cargo test -p lp-glsl-cranelift --features std`
+**Validate**: `cargo build -p lps-cranelift`, `cargo test -p lps-cranelift --features std`
 
 ---
 
 ### Phase 4: Update workspace and downstream crates
 
-**Scope**: Workspace Cargo.toml, lp-engine, lp-glsl-filetests, lp-glsl-filetests-app,
-lp-glsl-q32-metrics-app, tests.
+**Scope**: Workspace Cargo.toml, lp-engine, lps-filetests, lps-filetests-app,
+lps-q32-metrics-app, tests.
 
-**Code organization reminders**: Update imports systematically; grep for `lp_glsl_compiler` to find
+**Code organization reminders**: Update imports systematically; grep for `lps_compiler` to find
 all usages.
 
 **Implementation details**:
 
-1. Workspace `Cargo.toml`: Replace `lp-glsl-compiler` with `lp-glsl-frontend` and
-   `lp-glsl-cranelift` in members and default-members. Add `lp-glsl-builtin-ids`.
+1. Workspace `Cargo.toml`: Replace `lps-compiler` with `lps-frontend` and
+   `lps-cranelift` in members and default-members. Add `lps-builtin-ids`.
 
-2. Downstream crates that depended on lp-glsl-compiler:
-    - Change to `lp-glsl-cranelift`
-    - Add `lp-glsl-frontend` where they need shared types (TypedShader, GlslError, etc.)
-    - Update `use lp_glsl_compiler::` to `use lp_glsl_cranelift::` (or `lp_glsl_frontend::` as
+2. Downstream crates that depended on lps-compiler:
+    - Change to `lps-cranelift`
+    - Add `lps-frontend` where they need shared types (TypedShader, GlslError, etc.)
+    - Update `use lps_compiler::` to `use lps_cranelift::` (or `lps_frontend::` as
       appropriate)
 
-3. Crates to update: lp-core/lp-engine, lp-shader/lp-glsl-filetests,
-   lp-shader/lp-glsl-filetests-app, lp-shader/lp-glsl-q32-metrics-app, esp32-glsl-jit (if it uses
-   compiler), tests in lp-glsl-cranelift.
+3. Crates to update: lp-core/lp-engine, lp-shader/lps-filetests,
+   lp-shader/lps-filetests-app, lp-shader/lps-q32-metrics-app, esp32-glsl-jit (if it uses
+   compiler), tests in lps-cranelift.
 
 **Validate**: `cargo build`, `cargo test`, `just build-fw-esp32`
 
@@ -206,7 +206,7 @@ all usages.
 
 2. `cargo +nightly fmt`
 
-3. Fix any remaining warnings in lp-glsl-frontend, lp-glsl-builtin-ids, lp-glsl-cranelift.
+3. Fix any remaining warnings in lps-frontend, lps-builtin-ids, lps-cranelift.
 
 4. Run: `cargo build`, `cargo test`, `cargo +nightly fmt --check`, `just build-fw-esp32`
 
@@ -217,10 +217,10 @@ Conventional Commits.
 
 ## Notes
 
-**Q1–Q4 answers**: See Design section. BuiltinId in lp-glsl-builtin-ids; format() in cranelift via
+**Q1–Q4 answers**: See Design section. BuiltinId in lps-builtin-ids; format() in cranelift via
 extension trait; gen-app emits two outputs; DEFAULT_MAX_ERRORS in frontend.
 
 **format() implementation**: Rust does not allow adding inherent methods to types from other crates.
-Use an extension trait in lp-glsl-cranelift:
-`trait BuiltinIdFormat { fn format(&self) -> Option<DecimalFormat>; } impl BuiltinIdFormat for lp_glsl_builtin_ids::BuiltinId { ... }`.
+Use an extension trait in lps-cranelift:
+`trait BuiltinIdFormat { fn format(&self) -> Option<DecimalFormat>; } impl BuiltinIdFormat for lps_builtin_ids::BuiltinId { ... }`.
 Callers `use crate::backend::builtins::BuiltinIdFormat;` then call `id.format()`.

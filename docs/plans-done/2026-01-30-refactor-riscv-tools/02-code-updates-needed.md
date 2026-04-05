@@ -95,14 +95,14 @@ After you move the files, these code files will need import path updates.
 
 ## Consumer code that needs updates
 
-### `lp-shader/lp-glsl-compiler/src/exec/emu.rs`
+### `lp-shader/lps-compiler/src/exec/emu.rs`
 
 - Change `use lp_riscv_tools::emu::error::{EmulatorError, trap_code_to_string}` to
   `use lp_riscv_emu::EmulatorError`
 - Change `lp_riscv_tools::emu::emulator::Riscv32Emulator` to `lp_riscv_emu::Riscv32Emulator`
 - Change `lp_riscv_tools::format_instruction` to `lp_riscv_inst::format_instruction`
 
-### `lp-shader/lp-glsl-compiler/src/backend/codegen/emu.rs`
+### `lp-shader/lps-compiler/src/backend/codegen/emu.rs`
 
 - Change `use lp_riscv_tools::Gpr` to `use lp_riscv_inst::Gpr`
 - Change `use lp_riscv_tools::StepResult` to `use lp_riscv_emu::StepResult`
@@ -110,7 +110,7 @@ After you move the files, these code files will need import path updates.
 - Change `use lp_riscv_tools::emu::LogLevel` to `use lp_riscv_emu::LogLevel`
 - Change `use lp_riscv_tools::emu::emulator::Riscv32Emulator` to `use lp_riscv_emu::Riscv32Emulator`
 
-### `lp-shader/lp-glsl-compiler/src/backend/codegen/builtins_linker.rs`
+### `lp-shader/lps-compiler/src/backend/codegen/builtins_linker.rs`
 
 - Change `lp_riscv_tools::ElfLoadInfo` to `lp_riscv_elf::ElfLoadInfo`
 - Change `lp_riscv_tools::load_elf` to `lp_riscv_elf::load_elf`

@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The Naga → LPIR → (Cranelift | WASM) pipeline replaced the legacy `lp-glsl-cranelift` compiler.
+The Naga → LPIR → (Cranelift | WASM) pipeline replaced the legacy `lps-cranelift` compiler.
 It is structurally complete, validated on ESP32-C6, and works for product shaders. However, 50 of
 651 filetest files still fail on `jit.q32` due to missing GLSL feature coverage — concentrated in
 relational expressions on bvec, matrix element stores, bvec casts/dynamic indexing, and arrays.
@@ -34,7 +34,7 @@ pre-mark every current failure as an expected gap:
 5. While implementing a milestone, remove annotations only for the tests you are fixing; use
    `LP_FIX_XFAIL=1` / `--fix` to strip markers from tests that now pass.
 
-Requires: `cargo run -p lp-glsl-filetests-app -- test --target jit.q32 --mark-unimplemented`
+Requires: `cargo run -p lps-filetests-app -- test --target jit.q32 --mark-unimplemented`
 (or equivalent via `scripts/glsl-filetests.sh` with those flags in the argument list).
 
 ## Architecture
@@ -43,7 +43,7 @@ No new crates. Work is within existing crates:
 
 ```
 lp-shader/
-├── lp-glsl-naga/src/
+├── lps-naga/src/
 │   ├── lower_expr.rs              # Relational, bvec casts, dynamic index
 │   ├── lower_stmt.rs              # Matrix/bvec element stores
 │   ├── expr_scalar.rs             # Type inference for Relational
@@ -52,11 +52,11 @@ lp-shader/
 │   └── glsl_metadata.rs           # GlslType (matrix variants from WIP)
 ├── lpir-cranelift/src/
 │   └── invoke.rs                  # sret for large returns
-├── lp-glsl-wasm/                  # Verify multi-return emit
-├── lp-glsl-filetests/
+├── lps-wasm/                  # Verify multi-return emit
+├── lps-filetests/
 │   ├── src/                       # `--mark-unimplemented`, multi-target report (later)
 │   └── filetests/                 # Annotation cleanup
-└── lp-glsl-filetests-app/         # CLI: `--fix`, `--mark-unimplemented`, `--assume-yes`
+└── lps-filetests-app/         # CLI: `--fix`, `--mark-unimplemented`, `--assume-yes`
 ```
 
 ## Alternatives considered
@@ -80,11 +80,11 @@ lp-shader/
 
 | #      | Focus                                                                    | Files unblocked         | Primary crate          |
 |--------|--------------------------------------------------------------------------|-------------------------|------------------------|
-| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lp-glsl-filetests`    |
-| I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lp-glsl-naga`         |
-| II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lp-glsl-naga`         |
-| III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lp-glsl-naga`         |
-| IV     | Array type lowering                                                      | ~5+                     | `lp-glsl-naga`, `lpir` |
+| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lps-filetests`    |
+| I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lps-naga`         |
+| II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lps-naga`         |
+| III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lps-naga`         |
+| IV     | Array type lowering                                                      | ~5+                     | `lps-naga`, `lpir` |
 | V      | Matrix invoke / sret (large returns)                                     | unlocks mat3/mat4 tests | `lpir-cranelift`       |
-| VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lp-glsl-filetests`    |
+| VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lps-filetests`    |
 | VII    | Annotations, polish, closure                                             | remaining edge cases    | all                    |

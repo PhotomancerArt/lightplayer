@@ -17,27 +17,27 @@ Implement q32 builtins for common functions: mod, round, roundeven.
 - Formula: `mod(x, y) = x - y * floor(x/y)`
 - Uses existing div builtin
 - Follow pattern from existing two-arg functions (atan2, pow)
-- File: `lightplayer/crates/lp-glsl-builtins/src/q32/mod.rs` (already exists, needs implementation)
+- File: `lightplayer/crates/lps-builtins/src/q32/mod.rs` (already exists, needs implementation)
 
 ### round
 
 - Round to nearest integer (0.5 rounds up)
 - Algorithm: similar to ceil/floor but with rounding
 - Reference: fpm library `round()` implementation
-- File: `lightplayer/crates/lp-glsl-builtins/src/q32/round.rs` (new file)
+- File: `lightplayer/crates/lps-builtins/src/q32/round.rs` (new file)
 
 ### roundeven
 
 - Round to nearest even integer (banker's rounding)
 - Algorithm: round to nearest, but if exactly halfway, round to even
 - Reference: fpm library or standard algorithm
-- File: `lightplayer/crates/lp-glsl-builtins/src/q32/roundeven.rs` (new file)
+- File: `lightplayer/crates/lps-builtins/src/q32/roundeven.rs` (new file)
 
 ## Files to Create/Modify
 
-- `lightplayer/crates/lp-glsl-builtins/src/q32/mod.rs` - implement mod function
-- `lightplayer/crates/lp-glsl-builtins/src/q32/round.rs` - new file
-- `lightplayer/crates/lp-glsl-builtins/src/q32/roundeven.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/mod.rs` - implement mod function
+- `lightplayer/crates/lps-builtins/src/q32/round.rs` - new file
+- `lightplayer/crates/lps-builtins/src/q32/roundeven.rs` - new file
 - Run builtin generator to update boilerplate
 
 ## Success Criteria

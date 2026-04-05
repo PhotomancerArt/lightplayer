@@ -6,7 +6,7 @@ Add import resolution, builtin declaration, Q32 float mode, and inline Q32
 ops to `lpir-cranelift`. After this stage, the emitter can compile hand-built
 LPIR in Q32 mode — float ops become builtin calls or inline integer ops,
 imports resolve to `BuiltinId` → Cranelift func refs, and JIT symbol lookup
-provides `lp-glsl-builtins` function pointers. GLSL source compilation and
+provides `lps-builtins` function pointers. GLSL source compilation and
 the typed call interface are Stage IV.
 
 ## File structure
@@ -15,15 +15,15 @@ the typed call interface are Stage IV.
 lp-shader/lpir/src/
 └── types.rs                        # UPDATE: add FloatMode { Q32, F32 }
 
-lp-shader/lp-glsl-naga/src/
+lp-shader/lps-naga/src/
 └── lib.rs                          # UPDATE: remove FloatMode, re-export lpir::FloatMode
 
-lp-shader/lp-glsl-wasm/src/
+lp-shader/lps-wasm/src/
 ├── emit/imports.rs                 # UPDATE: use lpir::FloatMode
 └── options.rs                      # UPDATE: use lpir::FloatMode
 
-lp-shader/lpir-cranelift/
-├── Cargo.toml                      # UPDATE: add lp-glsl-builtin-ids, lp-glsl-builtins deps
+lp-shader/legacy/lpir-cranelift/
+├── Cargo.toml                      # UPDATE: add lps-builtin-ids, lps-builtins deps
 └── src/
     ├── lib.rs                      # UPDATE: re-exports, FloatMode in public API
     ├── jit_module.rs               # UPDATE: FloatMode param, symbol_lookup_fn, import FuncRefs
@@ -60,7 +60,7 @@ lp-shader/lpir-cranelift/
     │ get_function_pointer │        │ 3. Per-function:             │
     │   BuiltinId          │        │    import FuncRefs (builtins)│
     │   → fn as *const u8  │        │    + local FuncRefs          │
-    │   (lp-glsl-builtins) │        │    → EmitCtx                 │
+    │   (lps-builtins) │        │    → EmitCtx                 │
     └──────────────────────┘        └──────────────────────────────┘
 
         emit/scalar.rs — Q32 dispatch
@@ -113,8 +113,8 @@ lp-shader/lpir-cranelift/
           → builtins::resolve_import(decl, FloatMode::Q32)
           → BuiltinId::LpGlslSinQ32
           → jit_module declares as Linkage::Import
-          → symbol_lookup_fn resolves "__lp_glsl_sin_q32"
-          → get_function_pointer → __lp_glsl_sin_q32 as *const u8
+          → symbol_lookup_fn resolves "__lps_sin_q32"
+          → get_function_pointer → __lps_sin_q32 as *const u8
 ```
 
 ## Main components and interactions
@@ -123,13 +123,13 @@ lp-shader/lpir-cranelift/
 
 - `resolve_import(decl: &ImportDecl, mode: FloatMode) → Result<BuiltinId>`:
   dispatches on `decl.module_name` ("glsl"/"lpir"/"lpfx"), calls into
-  `lp-glsl-builtin-ids` mapping functions. Same logic as WASM emitter's
+  `lps-builtin-ids` mapping functions. Same logic as WASM emitter's
   `resolve_builtin_id`.
 - `declare_builtins(module: &mut JITModule, mode: FloatMode)`: iterates
   `BuiltinId::all()`, filters by mode, declares each as `Linkage::Import`.
   Derives Cranelift signature from the LPIR `ImportDecl` param/return types.
 - `get_function_pointer(id: BuiltinId) → *const u8`: big match mapping each
-  `BuiltinId` to the corresponding `lp-glsl-builtins` function pointer.
+  `BuiltinId` to the corresponding `lps-builtins` function pointer.
 - `symbol_lookup_fn(mode: FloatMode) → Box<dyn Fn(&str) → Option<*const u8>>`:
   closure for `JITBuilder` that resolves symbol names via `BuiltinId::all()`
   and `get_function_pointer`.
@@ -184,5 +184,5 @@ Extends the existing Call handler. If `callee.0 < import_count`, index into
 
 ### `lpir/types.rs` — FloatMode migration
 
-Add `FloatMode { Q32, F32 }` to the `lpir` crate. Update `lp-glsl-naga` to
-re-export or alias it. Update `lp-glsl-wasm` imports.
+Add `FloatMode { Q32, F32 }` to the `lpir` crate. Update `lps-naga` to
+re-export or alias it. Update `lps-wasm` imports.

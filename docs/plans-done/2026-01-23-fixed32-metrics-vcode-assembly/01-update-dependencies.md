@@ -2,13 +2,13 @@
 
 ## Description
 
-Update `Cargo.toml` to enable the `emulator` feature for `lp-glsl-compiler`, and update type
+Update `Cargo.toml` to enable the `emulator` feature for `lps-compiler`, and update type
 signatures throughout the codebase to use `ObjectModule` instead of `JITModule`.
 
 ## Implementation
 
-- Update `lp-shader/lp-glsl-q32-metrics-app/Cargo.toml`:
-    - Add `emulator` feature to `lp-glsl-compiler` dependency
+- Update `lp-shader/lps-q32-metrics-app/Cargo.toml`:
+    - Add `emulator` feature to `lps-compiler` dependency
 - Update imports in `src/main.rs`:
     - Change from `cranelift_jit::JITModule` to `cranelift_object::ObjectModule`
 - Update type signatures in `src/main.rs`:

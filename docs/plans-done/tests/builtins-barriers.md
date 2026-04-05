@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create a complete test suite for GLSL barrier and memory barrier functions in `lightplayer/crates/lp-glsl-filetests/filetests/builtins/barriers/` following the flat naming convention with prefixes. These tests will comprehensively cover barrier() and memory barrier functions (memoryBarrier, groupMemoryBarrier, etc.). These tests are expected to fail initially, serving as a specification for implementing barrier function support in the compiler.
+Create a complete test suite for GLSL barrier and memory barrier functions in `lightplayer/crates/lps-filetests/filetests/builtins/barriers/` following the flat naming convention with prefixes. These tests will comprehensively cover barrier() and memory barrier functions (memoryBarrier, groupMemoryBarrier, etc.). These tests are expected to fail initially, serving as a specification for implementing barrier function support in the compiler.
 
 ## Directory Structure
 

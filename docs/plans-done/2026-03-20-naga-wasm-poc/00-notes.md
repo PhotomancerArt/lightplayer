@@ -22,7 +22,7 @@ The goal is NOT a production backend. It's a proof-of-concept to validate:
 - Naga is checked out at `/Users/yona/dev/photomancer/oss/wgpu`
 - Naga is `#![no_std]`, GLSL frontend has no `std` usage outside feature-gated error display
 - Naga's GLSL frontend depends on `pp-rs` (preprocessor), no_std status unclear
-- Existing WASM backend (`lp-glsl-wasm`) uses wasmtime in tests — same pattern here
+- Existing WASM backend (`lps-wasm`) uses wasmtime in tests — same pattern here
 - Workspace already has `wasmtime = "42"` and `wasm-encoder = "0.245"` as deps
 
 ## Questions

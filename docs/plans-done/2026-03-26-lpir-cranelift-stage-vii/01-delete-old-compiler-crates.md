@@ -3,8 +3,8 @@
 ## Scope
 
 Delete the four crates that form the old compiler chain and have no remaining
-consumers: `lp-glsl-cranelift`, `lp-glsl-jit-util`, `esp32-glsl-jit`,
-`lp-glsl-q32-metrics-app`.
+consumers: `lps-cranelift`, `lps-jit-util`, `esp32-glsl-jit`,
+`lps-q32-metrics-app`.
 
 ## Code Organization Reminders
 
@@ -19,25 +19,25 @@ consumers: `lp-glsl-cranelift`, `lp-glsl-jit-util`, `esp32-glsl-jit`,
 ### 1. Delete directories
 
 ```bash
-rm -rf lp-shader/lp-glsl-cranelift
-rm -rf lp-shader/lp-glsl-jit-util
+rm -rf lp-shader/lps-cranelift
+rm -rf lp-shader/lps-jit-util
 rm -rf lp-shader/esp32-glsl-jit
-rm -rf lp-shader/lp-glsl-q32-metrics-app
+rm -rf lp-shader/lps-q32-metrics-app
 ```
 
 ### 2. Root `Cargo.toml`
 
 Remove from `[workspace] members`:
 
-- `"lp-shader/lp-glsl-cranelift"`
-- `"lp-shader/lp-glsl-jit-util"`
+- `"lp-shader/lps-cranelift"`
+- `"lp-shader/lps-jit-util"`
 - `"lp-shader/esp32-glsl-jit"`
-- `"lp-shader/lp-glsl-q32-metrics-app"`
+- `"lp-shader/lps-q32-metrics-app"`
 
 Remove from `[workspace] default-members`:
 
-- `"lp-shader/lp-glsl-cranelift"`
-- `"lp-shader/lp-glsl-jit-util"`
+- `"lp-shader/lps-cranelift"`
+- `"lp-shader/lps-jit-util"`
 
 Remove any `[profile.*.package.esp32-glsl-jit]` sections.
 
@@ -46,8 +46,8 @@ sections (e.g. the cross-target exclusion comment for `esp32-glsl-jit`).
 
 ### 3. Check for stale `[patch]` or `[workspace.dependencies]`
 
-Grep for `lp-glsl-cranelift`, `lp-glsl-jit-util`, `esp32-glsl-jit`,
-`lp-glsl-q32-metrics-app` in the root `Cargo.toml` beyond members lists.
+Grep for `lps-cranelift`, `lps-jit-util`, `esp32-glsl-jit`,
+`lps-q32-metrics-app` in the root `Cargo.toml` beyond members lists.
 
 ### 4. Verify workspace resolves
 
@@ -56,10 +56,10 @@ cargo metadata --format-version=1 > /dev/null
 ```
 
 This will error if any remaining crate still has a path dependency on a
-deleted crate. That is expected — `lp-glsl-builtins-gen-app` references
-`lp-glsl-frontend` which references `lp-glsl-cranelift`'s types, but
-`lp-glsl-frontend` is not deleted yet (Phase 2). The workspace should still
-resolve because `lp-glsl-frontend` has no path dep on `lp-glsl-cranelift`.
+deleted crate. That is expected — `lps-builtins-gen-app` references
+`lps-frontend` which references `lps-cranelift`'s types, but
+`lps-frontend` is not deleted yet (Phase 2). The workspace should still
+resolve because `lps-frontend` has no path dep on `lps-cranelift`.
 
 ## Validate
 
@@ -70,5 +70,5 @@ cargo check -p lp-engine
 cargo check -p lpir-cranelift
 ```
 
-The `lp-glsl-builtins-gen-app` and `lp-glsl-filetests` may have warnings or
+The `lps-builtins-gen-app` and `lps-filetests` may have warnings or
 won't be checked yet — that's fine, they are Phase 2 scope.

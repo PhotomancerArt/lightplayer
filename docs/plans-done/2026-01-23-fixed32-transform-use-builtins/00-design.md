@@ -9,20 +9,20 @@ operation to a single function call, following the same pattern already establis
 ## File Structure
 
 ```
-lp-shader/lp-glsl-builtins/src/builtins/q32/
+lp-shader/lps-builtins/src/builtins/q32/
 ├── add.rs                    # NEW: __lp_q32_add builtin implementation
 ├── sub.rs                    # NEW: __lp_q32_sub builtin implementation
 ├── div.rs                    # EXISTS: Verify edge case handling
 ├── mul.rs                    # EXISTS: Reference implementation pattern
 └── mod.rs                    # AUTO-GENERATED: Will include add/sub exports
 
-lp-shader/lp-glsl-compiler/src/backend/transform/q32/converters/
+lp-shader/lps-compiler/src/backend/transform/q32/converters/
 └── arithmetic.rs             # UPDATE: convert_fadd, convert_fsub, convert_fdiv to use builtins
 
-lp-shader/lp-glsl-compiler/src/backend/builtins/
+lp-shader/lps-compiler/src/backend/builtins/
 └── registry.rs               # AUTO-GENERATED: Will include Q32Add, Q32Sub
 
-lp-shader/lp-glsl-builtins-emu-app/src/
+lp-shader/lps-builtins-emu-app/src/
 └── builtin_refs.rs           # AUTO-GENERATED: Will include add/sub references
 ```
 
@@ -132,7 +132,7 @@ After creating `add.rs` and `sub.rs`:
 
 1. Unignore `test_q32_fdiv` test in `arithmetic.rs`
 2. Run filetests to verify correctness
-3. Run lp-glsl-q32-metrics-app script to compare code sizes
+3. Run lps-q32-metrics-app script to compare code sizes
 
 ## Constants
 
@@ -145,5 +145,5 @@ After creating `add.rs` and `sub.rs`:
 - `convert_fadd`, `convert_fsub`, `convert_fdiv` use builtins instead of inline code
 - Builtin registry auto-generated with new entries
 - All tests pass (including unignored `test_q32_fdiv`)
-- Code size reduction verified via lp-glsl-q32-metrics-app comparison
+- Code size reduction verified via lps-q32-metrics-app comparison
 - Code formatted with `cargo +nightly fmt`

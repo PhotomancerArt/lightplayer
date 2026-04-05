@@ -20,7 +20,7 @@ Clean up code, fix warnings, ensure all tests pass, and format code.
 
 ### 8.3 Verify All Tests Pass
 
-- Run all unit tests: `cargo test --package lp-glsl-builtins q32`
+- Run all unit tests: `cargo test --package lps-builtins q32`
 - Run all filetests: `scripts/glsl-filetests.sh builtins/phases/`
 - Verify acceptance criteria for all phases:
     - Phase 3: `builtins/phases/02-basic-trig.glsl` passes

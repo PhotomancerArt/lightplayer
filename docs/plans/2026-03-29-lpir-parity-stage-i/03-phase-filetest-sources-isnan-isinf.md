@@ -14,7 +14,7 @@ still exercising `isnan` / `isinf` where possible under Q32 semantics.
 
 ## Implementation details
 
-- Read current `lp-glsl-filetests/filetests/builtins/common-isnan.glsl` and `common-isinf.glsl`.
+- Read current `lps-filetests/filetests/builtins/common-isnan.glsl` and `common-isinf.glsl`.
 - Replace `1.0/0.0` or infinite literals with:
   - finite values + `isnan`/`isinf` expectations **false**, and/or
   - file-level or per-case `@unsupported(float_mode=q32, …)` **only** where the test truly requires

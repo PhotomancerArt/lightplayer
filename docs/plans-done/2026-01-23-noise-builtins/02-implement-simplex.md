@@ -9,15 +9,15 @@ Create Simplex noise implementations in three files: `lpfx_snoise1.rs`, `lpfx_sn
 
 ### Files to Create
 
-1. **`lp-glsl-builtins/src/builtins/q32/lpfx_snoise1.rs`**
+1. **`lps-builtins/src/builtins/q32/lpfx_snoise1.rs`**
     - `__lpfx_snoise1(x: i32, seed: u32) -> i32`
     - 1D Simplex noise
 
-2. **`lp-glsl-builtins/src/builtins/q32/lpfx_snoise2.rs`**
+2. **`lps-builtins/src/builtins/q32/lpfx_snoise2.rs`**
     - `__lpfx_snoise2(x: i32, y: i32, seed: u32) -> i32`
     - 2D Simplex noise
 
-3. **`lp-glsl-builtins/src/builtins/q32/lpfx_snoise3.rs`**
+3. **`lps-builtins/src/builtins/q32/lpfx_snoise3.rs`**
     - `__lpfx_snoise3(x: i32, y: i32, z: i32, seed: u32) -> i32`
     - 3D Simplex noise
 
@@ -36,7 +36,7 @@ Key components:
 ### Q32 Fixed-Point Considerations
 
 - All coordinates and return values are Q32 (i32 with 16.16 format)
-- Use Q32 arithmetic operations (from `lp-glsl-builtins/src/q32/q32.rs`)
+- Use Q32 arithmetic operations (from `lps-builtins/src/q32/q32.rs`)
 - Skew/unskew calculations need to work with fixed-point
 - Interpolation uses fixed-point arithmetic
 - Final scaling factor accounts for Q32 format
@@ -54,5 +54,5 @@ Key components:
 
 - Place helper utility functions at the bottom of files
 - Reference noise-rs implementation but adapt for Q32 fixed-point
-- Use existing Q32 utilities from `lp-glsl-builtins/src/q32/q32.rs`
+- Use existing Q32 utilities from `lps-builtins/src/q32/q32.rs`
 - Include comments explaining Simplex noise algorithm steps
