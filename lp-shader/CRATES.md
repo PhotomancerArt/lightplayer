@@ -13,7 +13,7 @@ Overview of this directory lives in [`README.md`](README.md). Paths are relative
 | [`lpfx-impl-macro`](lpfx-impl-macro/)             | Proc-macros for LPFX builtin definitions.                                   |
 | [`lps-builtins-gen-app`](lps-builtins-gen-app/)   | Scans builtins; emits IDs, ABI, refs, `mod.rs`, WASM import types.          |
 | [`lps-builtins-emu-app`](lps-builtins-emu-app/)   | RV32 guest linking all builtins (emulator filetests).                       |
-| [`lps-builtins-wasm`](lps-builtins-wasm/)         | WASM `cdylib` of builtins (`import-memory`).                                |
+| [`lps-builtins-wasm`](legacy/lps-builtins-wasm/)  | WASM `cdylib` of builtins (`import-memory`).                                |
 | [`lps-shared`](lps-shared/)                       | Shared GLSL type / function-signature shapes (no parser).                   |
 | [`lps-diagnostics`](lps-diagnostics/)             | `GlslError`, codes, source locations.                                       |
 | [`lpvm`](lpvm/)                                   | Runtime values and literal parsing (`glsl` fork).                           |

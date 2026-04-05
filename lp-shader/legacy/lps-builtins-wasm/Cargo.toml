@@ -17,4 +17,4 @@ path = "src/lib.rs"
 
 [dependencies]
 # `std` enables the log path in lps-builtins; wasm32-unknown-unknown has `std` and supplies the global allocator for `cdylib`.
-lps-builtins = { path = "../lps-builtins", default-features = false, features = ["std"] }
+lps-builtins = { path = "../../lps-builtins", default-features = false, features = ["std"] }

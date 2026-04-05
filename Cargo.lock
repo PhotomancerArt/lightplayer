@@ -4030,6 +4030,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpvm-wasm"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpir",
+ "lps-builtin-ids",
+ "lps-frontend",
+ "lps-shared",
+ "lpvm",
+ "wasm-encoder 0.245.1",
+ "wasmtime",
+]
+
+[[package]]
 name = "mach2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

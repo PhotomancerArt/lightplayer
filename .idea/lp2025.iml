@@ -53,7 +53,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-emu-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-gen-app/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-gen-app/tests" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-builtins/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-diagnostics/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests-app/src" isTestSource="false" />
@@ -62,6 +61,9 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-filetests/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-frontend/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-frontend/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-builtins-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-wasm/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -34,7 +34,7 @@ members = [
     "lp-riscv/lp-riscv-emu-guest-test-app",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
-    "lp-shader/lps-builtins-wasm",
+    "lp-shader/legacy/lps-builtins-wasm",
     "lp-shader/lps-filetests-app",
     "lp-shader/legacy/lps-wasm",
     "lp-app/web-demo",
