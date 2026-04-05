@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use lp_riscv_elf::ElfLoadInfo;
 use lpir::{FloatMode as LpirFloatMode, IrModule};
 use lpir_cranelift::{
-    glsl_q32_call_emulated, link_object_with_builtins, object_bytes_from_ir, CompileOptions,
-    CompilerError,
+    CompileOptions, CompilerError, glsl_q32_call_emulated, link_object_with_builtins,
+    object_bytes_from_ir,
 };
 use lpir_cranelift::{GlslQ32, GlslReturn};
 use lps_diagnostics::GlslError;
@@ -15,9 +15,9 @@ use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
 
 use super::q32_exec_common::{
-    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
-    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
+    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
+    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
+    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
@@ -35,8 +35,9 @@ impl LpirRv32Executable {
         source: &str,
         float_mode: crate::targets::FloatMode,
     ) -> Result<Self, CompilerError> {
-        let naga = lps_naga::compile(source).map_err(|e| CompilerError::Parse(format!("{e}")))?;
-        let (ir, meta) = lps_naga::lower(&naga).map_err(CompilerError::Lower)?;
+        let naga =
+            lps_frontend::compile(source).map_err(|e| CompilerError::Parse(format!("{e}")))?;
+        let (ir, meta) = lps_frontend::lower(&naga).map_err(CompilerError::Lower)?;
         let fm = match float_mode {
             crate::targets::FloatMode::Q32 => LpirFloatMode::Q32,
             crate::targets::FloatMode::F32 => LpirFloatMode::F32,

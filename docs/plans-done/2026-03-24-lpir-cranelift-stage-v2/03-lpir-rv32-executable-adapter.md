@@ -8,7 +8,7 @@ pipeline (object + link + emulator).
 
 - **Compile path:** GLSL → Naga → LPIR (reuse same lowering as `jit` — e.g. share
   a small internal `fn glsl_to_ir(source) -> (IrModule, GlslModuleMeta)` or call
-  `lps_naga` + match `lpir_cranelift` compile helpers) → **object bytes** →
+  `lps_frontend` + match `lpir_cranelift` compile helpers) → **object bytes** →
   **link** with builtins ELF → **emulator** instance.
 - Mirror **emulator options** from `compile.rs` constants (`DEFAULT_MAX_MEMORY`,
   `DEFAULT_MAX_INSTRUCTIONS`, `log_level` from `run_detail`).

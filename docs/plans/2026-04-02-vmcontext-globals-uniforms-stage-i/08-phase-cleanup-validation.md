@@ -21,7 +21,7 @@ Run the following validation commands:
 
 ```bash
 # Core crate tests
-cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-naga
+cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-frontend
 
 # WASM emission tests
 cargo test -p lps-wasm
@@ -107,7 +107,7 @@ After committing:
 
 All tests pass:
 
-- cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-naga
+- cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-frontend
 - cargo test -p lps-wasm
 - cargo test -p lps-filetests
 - cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

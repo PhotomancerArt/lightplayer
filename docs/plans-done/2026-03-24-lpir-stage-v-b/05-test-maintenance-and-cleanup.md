@@ -93,7 +93,7 @@ Verify all previously-failing tests now pass (or are correctly annotated).
 
 - Grep the git diff for TODOs, debug prints, temporary code.
 - Run `cargo +nightly fmt` on all changed files.
-- Run `cargo clippy -p lps-wasm -p lps-naga -- -D warnings`.
+- Run `cargo clippy -p lps-wasm -p lps-frontend -- -D warnings`.
 
 ## Plan cleanup
 
@@ -116,8 +116,8 @@ fix(lps): filetest failures — continue depth, bool casts, prototypes, inout
 
 ```bash
 cargo test -p lps-wasm -q
-cargo test -p lps-naga -q
-cargo +nightly fmt --check -p lps-wasm -p lps-naga
-cargo clippy -p lps-wasm -p lps-naga -- -D warnings
+cargo test -p lps-frontend -q
+cargo +nightly fmt --check -p lps-wasm -p lps-frontend
+cargo clippy -p lps-wasm -p lps-frontend -- -D warnings
 scripts/glsl-filetests.sh
 ```

@@ -50,7 +50,7 @@ lpir = { path = "../lpir" }
 ```
 
 Remove `naga` direct dependency if no longer needed (check if `module.rs`
-or other kept files still reference it). Likely keep `lps-naga`
+or other kept files still reference it). Likely keep `lps-frontend`
 (for `compile()` and `FloatMode`).
 
 ### `lib.rs`
@@ -69,8 +69,8 @@ Update `glsl_wasm()` to call the new pipeline:
 
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lps_naga::compile(source)?;
-    let ir_module = lps_naga::lower::lower(&naga_module)
+    let naga_module = lps_frontend::compile(source)?;
+    let ir_module = lps_frontend::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;
@@ -87,7 +87,7 @@ Update `WasmExport` to not depend on deleted `types.rs`. The WASM
 - Q32: float → `I32`, int/uint/bool → `I32`
 - Float: float → `F32`, int/uint/bool → `I32`
 
-Keep `GlslType` from `lps-naga` for export metadata.
+Keep `GlslType` from `lps-frontend` for export metadata.
 
 ### `collect_exports`
 

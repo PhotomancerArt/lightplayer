@@ -5,7 +5,7 @@
 Treat **native addresses in LPIR** consistently: **`SlotAddr`** (and *
 *`Iadd` / `Isub` / `IaddImm` / `IsubImm`** on address chains used for loads and stores) use **`ptr`
 ** in validation and type maps. **`emit/memory.rs`** maps LPIR `ptr` to **`pointer_type`** without
-redundant “always widen from i32” hacks where the IR is already `ptr`. **`lps-naga`** sets *
+redundant “always widen from i32” hacks where the IR is already `ptr`. **`lps-frontend`** sets *
 *`vreg_types`** and lowering so vmctx and address vregs are **`ptr`**. **`lps-wasm`** lowers *
 *`ptr` → i32** for wasm32.
 
@@ -17,7 +17,7 @@ redundant “always widen from i32” hacks where the IR is already `ptr`. **`lp
    *base − offset** style addresses, not only **`Iadd`**.
 2. **`emit/memory.rs`** — `SlotAddr` produces `pointer_type`; `Load`/`Store` address operands typed
    consistently; remove or simplify `widen_to_ptr` when source is already `ptr`.
-3. **`lps-naga`** — Any place that seeds **`vreg_types[0]`** or slot/import lowering: use *
+3. **`lps-frontend`** — Any place that seeds **`vreg_types[0]`** or slot/import lowering: use *
    *`ptr`** for vmctx and for lowered pointer temps as needed.
 4. **`lps-wasm`** — If LPIR text or internal types expose `ptr`, WASM emission maps to **i32**;
    add brief comments at mapping sites.
@@ -27,7 +27,7 @@ redundant “always widen from i32” hacks where the IR is already `ptr`. **`lp
 ## Exit criteria
 
 - `cargo test -p lpir` and `cargo test -p lpir-cranelift` pass.
-- `cargo check -p lps-naga` passes.
+- `cargo check -p lps-frontend` passes.
 - WASM pipeline still targets wasm32 i32 at the module boundary.
 
 ## Validation
@@ -35,6 +35,6 @@ redundant “always widen from i32” hacks where the IR is already `ptr`. **`lp
 ```bash
 cargo test -p lpir
 cargo test -p lpir-cranelift
-cargo check -p lps-naga
+cargo check -p lps-frontend
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```

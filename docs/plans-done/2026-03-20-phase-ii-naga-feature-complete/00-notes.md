@@ -9,7 +9,7 @@ Part of: `docs/roadmaps/2026-03-20-naga/phase-ii.md`
 
 ## Current state (post Phase I)
 
-- `lps-naga` parses GLSL → `naga::Module` + `FunctionInfo` metadata
+- `lps-frontend` parses GLSL → `naga::Module` + `FunctionInfo` metadata
 - `lps-wasm` emits WASM from `naga::Module` for scalars only
 - **432/432** scalar filetests pass on `wasm.q32`
 
@@ -102,7 +102,7 @@ declarations).
 
 Approach:
 
-1. In `lps-naga`: prepend GLSL forward declarations for all LPFX
+1. In `lps-frontend`: prepend GLSL forward declarations for all LPFX
    functions before parsing. Use `#line 1` after prototypes to reset line
    numbers.
 2. In `lps-wasm`: detect LPFX calls by function name prefix (`lpfx_`)

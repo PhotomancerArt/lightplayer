@@ -208,9 +208,9 @@ fn lower_clamp_vregs(ctx: &mut LowerCtx<'_>, x: VReg, lo: VReg, hi: VReg, k: Sca
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
-cargo clippy -p lps-naga
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
+cargo clippy -p lps-frontend
 ```
 
 Vector math filetests (dot, cross, normalize, mix on vectors, etc.)

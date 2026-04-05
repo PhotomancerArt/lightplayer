@@ -1,8 +1,8 @@
 //! Host-side checks for LPFX builtins and scratch memory.
 
 use lps_filetests::test_run::wasm_link::{builtins_wasm_path, instantiate_wasm_module};
-use lps_naga::FloatMode;
-use lps_wasm::{glsl_wasm, WasmOptions};
+use lps_frontend::FloatMode;
+use lps_wasm::{WasmOptions, glsl_wasm};
 use wasmtime::{Engine, Instance, Memory, MemoryType, Module, Store, Val};
 
 #[test]

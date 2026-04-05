@@ -1,4 +1,4 @@
-# Phase I: Scaffold lps-naga + rewrite lps-wasm foundation
+# Phase I: Scaffold lps-frontend + rewrite lps-wasm foundation
 
 ## Goal
 
@@ -10,7 +10,7 @@ end-to-end through the new pipeline (scalars, basic binary ops, function calls).
 
 In scope:
 
-- New crate `lps-naga` that wraps `naga::front::glsl`
+- New crate `lps-frontend` that wraps `naga::front::glsl`
 - Rewrite `lps-wasm` to walk `naga::Module` instead of `TypedShader`
 - Scalar types (float/int), basic binary operators, function arguments/return
 - Wire up `wasm.q32` filetest target to use the new stack
@@ -27,14 +27,14 @@ Out of scope:
 
 ## Key decisions
 
-- `lps-naga` depends on `naga` from crates.io (v29, `glsl-in` feature)
-- `lps-wasm` switches dependency from `lps-frontend` to `lps-naga`
+- `lps-frontend` depends on `naga` from crates.io (v29, `glsl-in` feature)
+- `lps-wasm` switches dependency from `lps-frontend` to `lps-frontend`
 - Both crates are `#![no_std]` compatible
 - Stack-based emission (no extra locals for simple expressions)
 
 ## Deliverables
 
-- `lp-shader/lps-naga/` crate with `compile()` entry point
+- `lp-shader/lps-frontend/` crate with `compile()` entry point
 - Rewritten `lp-shader/lps-wasm/` consuming `naga::Module`
 - Filetests passing for scalar arithmetic on `wasm.q32` target
 

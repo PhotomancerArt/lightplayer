@@ -334,9 +334,9 @@ results. See phase 6 for full details, but the infrastructure change
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
-cargo clippy -p lps-naga
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
+cargo clippy -p lps-frontend
 ```
 
 All existing scalar tests must still pass. The expression cache type

@@ -22,6 +22,7 @@ let right_width = naga_type_width(right_inner);
 ```
 
 Cases:
+
 - Both width 1 → scalar path (existing)
 - Same width > 1 → component-wise, zip VRegs
 - One width 1, other width N → broadcast: reuse the scalar VReg for
@@ -173,9 +174,9 @@ delegate to `lower_matrix`. Otherwise, component-wise.
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
-cargo clippy -p lps-naga
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
+cargo clippy -p lps-frontend
 ```
 
 Vector arithmetic filetests (binary ops, unary ops, casts on vectors)

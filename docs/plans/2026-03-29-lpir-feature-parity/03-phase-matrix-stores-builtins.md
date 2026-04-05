@@ -35,7 +35,7 @@
 ## Validate
 
 ```bash
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-filetests
 ./scripts/glsl-filetests.sh matrix/
 ```

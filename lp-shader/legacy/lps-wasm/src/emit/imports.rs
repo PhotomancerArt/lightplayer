@@ -8,10 +8,10 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, Op};
 use lps_builtin_ids::{
-    glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id,
-    BuiltinId, GlslParamKind,
+    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    lpir_q32_builtin_id, vm_q32_builtin_id,
 };
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 
 /// After pruning: WASM import function index `i` corresponds to `filtered[i]`.
 pub(crate) struct FilteredImports {

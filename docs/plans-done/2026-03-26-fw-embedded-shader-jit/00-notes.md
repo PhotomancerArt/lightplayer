@@ -36,8 +36,8 @@ Related roadmap context:
 
 ## Current state of the codebase
 
-- **`pp-rs` / `lps-naga`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
-- **`lpir-cranelift`:** `glsl` feature enables **`lps-naga`**; **`jit()`** is *
+- **`pp-rs` / `lps-frontend`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
+- **`lpir-cranelift`:** `glsl` feature enables **`lps-frontend`**; **`jit()`** is *
   *`#[cfg(feature = "glsl")]`**, not `std`. Default features are **`std` + `glsl`** for host;
   embedded uses **`glsl`** without **`std`**. RISC-V32 uses **StructReturn** when a function returns
   more than two scalar words (Cranelift #9510).
@@ -91,7 +91,7 @@ ESP32 target with **`server`** + shader/JIT features enabled, in addition to **`
 
 ### Q3 — Cargo feature shape: extend `std` vs new flags?
 
-**Context:** Today **`std`** means "host + `lps-naga` + `cranelift-native`". Firmware must not
+**Context:** Today **`std`** means "host + `lps-frontend` + `cranelift-native`". Firmware must not
 enable **`libstd`**.
 
 **Suggested default (superseded by discussion):** Avoid treating GLSL+JIT as an **opt-in** "premium"
@@ -102,7 +102,7 @@ product path. Use **`cfg` / features** for **host vs embedded** (e.g. **`std`** 
 *`libstd` + `cranelift-native`** and other host conveniences), not for "compiler exists." Optional
 Cargo features should be **opt-out** (e.g. **`minimal`** / **`no-shader-compile`**) for stripped or
 test-only builds, not **`shader-jit`** as a separate enable. **`lpir-cranelift`** may still use a
-dependency feature for **`lps-naga`** where callers need **`jit_from_ir`** only without the
+dependency feature for **`lps-frontend`** where callers need **`jit_from_ir`** only without the
 front end; **`lp-engine` + `lp-server`** treat the full pipeline as **non-optional**.
 
 ## Anti-patterns — things that are NOT acceptable solutions

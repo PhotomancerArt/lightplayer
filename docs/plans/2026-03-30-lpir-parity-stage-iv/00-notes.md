@@ -100,12 +100,12 @@ arrays (small), the difference is negligible. Can optimize with `Memcpy` later i
 
 ## Files to Modify
 
-- `lp-shader/lps-naga/src/lower_ctx.rs` - Add array_map, slot allocation
-- `lp-shader/lps-naga/src/lower_expr.rs` - Add array Access/AccessIndex
-- `lp-shader/lps-naga/src/lower_stmt.rs` - Add array Store
-- `lp-shader/lps-naga/src/lower_array.rs` - NEW: Array lowering helpers
-- `lp-shader/lps-naga/src/naga_util.rs` - Add array type utilities
-- `lp-shader/lps-naga/src/lib.rs` - Export new module
+- `lp-shader/lps-frontend/src/lower_ctx.rs` - Add array_map, slot allocation
+- `lp-shader/lps-frontend/src/lower_expr.rs` - Add array Access/AccessIndex
+- `lp-shader/lps-frontend/src/lower_stmt.rs` - Add array Store
+- `lp-shader/lps-frontend/src/lower_array.rs` - NEW: Array lowering helpers
+- `lp-shader/lps-frontend/src/naga_util.rs` - Add array type utilities
+- `lp-shader/lps-frontend/src/lib.rs` - Export new module
 
 ## Validation
 

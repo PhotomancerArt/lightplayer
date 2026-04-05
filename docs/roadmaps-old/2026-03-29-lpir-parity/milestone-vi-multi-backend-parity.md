@@ -17,21 +17,21 @@ to make cross-target comparison easy and repeatable.
 
 - **Multi-target report mode** for `lps-filetests-app`: a `--report` (or similar) flag that
   runs all targets and produces a structured report with:
-  - Per-file, per-target status (pass / fail / unimplemented / broken / unsupported).
-  - **Cross-target discrepancies**: files that pass on one target but fail on another.
-  - Summary stats per target.
-  - Output as markdown (human-readable) and optionally machine-readable (JSON/CSV) for
-    diffing between runs.
+    - Per-file, per-target status (pass / fail / unimplemented / broken / unsupported).
+    - **Cross-target discrepancies**: files that pass on one target but fail on another.
+    - Summary stats per target.
+    - Output as markdown (human-readable) and optionally machine-readable (JSON/CSV) for
+      diffing between runs.
 - Integrate with `scripts/glsl-filetests.sh` or as a separate script.
 
 ### WASM / RV32 sweep
 
 - Run the full corpus on `wasm.q32` and `rv32.q32`.
 - Triage failures:
-  - **Shared LPIR bug** → fix in `lps-naga` / `lpir`.
-  - **Backend emit bug** → fix in `lps-wasm` or `lpir-cranelift`.
-  - **Intentional platform limit** → annotate `@unsupported(backend=…, reason="…")`.
-  - **Unimplemented on that backend** → annotate `@unimplemented(backend=…)`.
+    - **Shared LPIR bug** → fix in `lps-frontend` / `lpir`.
+    - **Backend emit bug** → fix in `lps-wasm` or `lpir-cranelift`.
+    - **Intentional platform limit** → annotate `@unsupported(backend=…, reason="…")`.
+    - **Unimplemented on that backend** → annotate `@unimplemented(backend=…)`.
 - Do **not** remove existing `@unimplemented(backend=wasm)` wholesale without verifying the test
   passes; triage incrementally.
 

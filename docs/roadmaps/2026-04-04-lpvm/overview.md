@@ -23,8 +23,8 @@ layer, parallel to how `lpir` and `lpvm` abbreviate their domains.
 **Dependency direction (allowed edges):**
 
 ```
-lps-naga ──► lpir          (lowers to LPIR)
-lps-naga ──► lps-shared     (logical shader types)
+lps-frontend ──► lpir          (lowers to LPIR)
+lps-frontend ──► lps-shared     (logical shader types)
 lpvm       ──► lpir        (IR module shape, codegen inputs)
 lpvm       ──► lps-shared   (signatures, metadata consumers see)
 lpvm-*     ──► lpvm, lpir  (backends)
@@ -40,12 +40,12 @@ IR type. Those types live in **`lps-shared`** (rename of `lps-core`), not in
 
 | Current / transitional | Target (`lps-*`)                                   |
 |------------------------|----------------------------------------------------|
-| `lps-core`         | `lps-shared`                                       |
-| `lps-naga`         | `lps-naga`                                         |
-| `lps-builtins`     | `lps-builtins`                                     |
-| `lps-builtin-ids`  | `lps-builtin-ids`                                  |
-| `lps-filetests`    | `lps-filetests`                                    |
-| `lps-diagnostics`  | `lps-diagnostics` (or keep name if shared tooling) |
+| `lps-core`             | `lps-shared`                                       |
+| `lps-frontend`         | `lps-frontend`                                     |
+| `lps-builtins`         | `lps-builtins`                                     |
+| `lps-builtin-ids`      | `lps-builtin-ids`                                  |
+| `lps-filetests`        | `lps-filetests`                                    |
+| `lps-diagnostics`      | `lps-diagnostics` (or keep name if shared tooling) |
 
 ABI/runtime types from `lpvm` and exec traits from `lps-exec` move
 into **`lpvm`**, not into `lps-shared`.
@@ -77,7 +77,7 @@ runtime. Long-term, the old `lps` directory name goes away.
   GLSL source
        │
        ▼
-  lps-naga ──► lpir (IrModule — scalarized)
+  lps-frontend ──► lpir (IrModule — scalarized)
        │            │
        │            ├──► lpvm-cranelift
        │            ├──► lpvm-rv32
@@ -93,7 +93,7 @@ runtime. Long-term, the old `lps` directory name goes away.
 ```
 lps/                          # shader layer (may start under lp-shader/ during migration)
 ├── lps-shared/
-├── lps-naga/
+├── lps-frontend/
 ├── lps-builtins/
 ├── lps-builtin-ids/
 ├── lps-filetests/
@@ -113,7 +113,7 @@ lpvm/
 
 Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 `LpsParamQualifier`. **Zero dependency on `lpir` and `lpvm`.** Shared by
-`lps-naga` (frontend) and `lpvm` (runtime metadata and call semantics).
+`lps-frontend` (frontend) and `lpvm` (runtime metadata and call semantics).
 
 ### `lpvm` (core)
 

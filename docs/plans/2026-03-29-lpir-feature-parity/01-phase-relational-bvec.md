@@ -34,14 +34,14 @@ Implement lowering for Naga `Expression::Relational` where today the compiler er
     - Run: `./scripts/glsl-filetests.sh vec/bvec2/fn-all.glsl` (and siblings),
       `vec/bvec2/op-equal.glsl`,
       `builtins/common-isnan.glsl`, `builtins/common-isinf.glsl`.
-    - `cargo test -p lps-naga`
+    - `cargo test -p lps-frontend`
 
 4. Do **not** change matrix or array handling in this phase.
 
 ## Validate
 
 ```bash
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-filetests
 ./scripts/glsl-filetests.sh vec/bvec2/fn-all.glsl vec/bvec2/op-equal.glsl builtins/common-isnan.glsl builtins/common-isinf.glsl
 ```

@@ -122,7 +122,7 @@ relooper.
 - `lp-shader/lpir-cli` — optional CLI. Reads LPIR text, validates, prints stats,
   maybe runs through a backend. Depends on `lpir` + `std`. Can be deferred.
 
-`lps-naga` depends on `lpir` for the lowering (Naga → LPIR).
+`lps-frontend` depends on `lpir` for the lowering (Naga → LPIR).
 `lps-wasm` depends on `lpir` for the emission (LPIR → WASM).
 `lps-cranelift` (future) depends on `lpir` for emission (LPIR → CLIF).
 

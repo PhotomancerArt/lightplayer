@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-Expand `lps-wasm` and `lps-naga` from scalar-only emission to full
+Expand `lps-wasm` and `lps-frontend` from scalar-only emission to full
 feature set. Definition of done: `rainbow.glsl` renders in the web demo and
 all existing wasm.q32 filetests pass (or are annotated as out-of-scope).
 
@@ -10,7 +10,7 @@ all existing wasm.q32 filetests pass (or are annotated as out-of-scope).
 
 ```
 lp-shader/
-├── lps-naga/
+├── lps-frontend/
 │   └── src/
 │       ├── lib.rs               # UPDATE: LPFX prototype injection in compile()
 │       └── builtins.rs          # NEW: LPFX prototype definitions, #line reset
@@ -37,7 +37,7 @@ lp-shader/
 GLSL source
     │
     ▼
-lps-naga::compile()
+lps-frontend::compile()
     ├── prepend LPFX prototypes
     ├── append #line 1
     ├── append dummy main() if needed
@@ -90,7 +90,7 @@ lps-wasm::emit_module()
 
 ## Main components
 
-### lps-naga builtins.rs
+### lps-frontend builtins.rs
 
 - `fn lpfx_prototypes() -> &'static str`: returns GLSL forward declarations
   for all known LPFX functions

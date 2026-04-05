@@ -1,8 +1,8 @@
 //! GLSL → Naga → LPIR → interpreter (integration).
 
-use lpir::{interpret, validate_module, ImportHandler, InterpError, Value};
-use lps_naga::std_math_handler::StdMathHandler;
-use lps_naga::{compile, lower};
+use lpir::{ImportHandler, InterpError, Value, interpret, validate_module};
+use lps_frontend::std_math_handler::StdMathHandler;
+use lps_frontend::{compile, lower};
 
 #[test]
 fn interp_float_add() {

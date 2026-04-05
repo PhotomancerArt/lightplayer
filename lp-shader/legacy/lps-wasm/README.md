@@ -13,7 +13,7 @@ pulling Cranelift into the browser build.
 
 ```
 GLSL source
-  → lps-naga (naga glsl-in → IrModule)
+  → lps-frontend (naga glsl-in → IrModule)
   → lps-wasm::emit (LPIR → WASM instructions)
   → wasm-encoder
   → WasmModule bytes

@@ -1,8 +1,8 @@
-# Phase 1: Create lps-naga crate
+# Phase 1: Create lps-frontend crate
 
 ## Scope
 
-Create `lp-shader/lps-naga/`, a `no_std`-compatible crate that wraps
+Create `lp-shader/lps-frontend/`, a `no_std`-compatible crate that wraps
 `naga::front::glsl::Frontend` and returns a `NagaModule` (the `naga::Module`
 plus per-function metadata as `FunctionInfo`).
 
@@ -24,7 +24,7 @@ crates (`lps-wasm`, `lps-filetests`) will use instead of the ones from
 
 ```toml
 [package]
-name = "lps-naga"
+name = "lps-frontend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -36,7 +36,7 @@ workspace = true
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 ```
 
-Add `"lp-shader/lps-naga"` to both `members` and `default-members` in the
+Add `"lp-shader/lps-frontend"` to both `members` and `default-members` in the
 workspace `Cargo.toml`.
 
 ### 2. src/lib.rs
@@ -192,8 +192,8 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lps-naga
-cargo check -p lps-naga
+cargo test -p lps-frontend
+cargo check -p lps-frontend
 ```
 
 Ensure no warnings.

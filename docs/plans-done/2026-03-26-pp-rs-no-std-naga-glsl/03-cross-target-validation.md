@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Prove **`pp-rs`** + **`lps-naga`** compile for **bare-metal RISC-V** and that **WASM** / host
+Prove **`pp-rs`** + **`lps-frontend`** compile for **bare-metal RISC-V** and that **WASM** / host
 paths are unchanged.
 
 ## Code Organization Reminders
@@ -19,7 +19,7 @@ paths are unchanged.
    *`path = "../pp-rs"`** (or after Phase 4, git):
    ```bash
    rustup target add riscv32imac-unknown-none-elf
-   cargo check -p lps-naga --target riscv32imac-unknown-none-elf
+   cargo check -p lps-frontend --target riscv32imac-unknown-none-elf
    ```
 2. WASM sanity (unchanged **`std`** on target):
    ```bash
@@ -27,12 +27,12 @@ paths are unchanged.
    ```
 3. Host:
    ```bash
-   cargo test -p lps-naga
+   cargo test -p lps-frontend
    ```
 
 ## Validate
 
-All three commands above succeed with **no new warnings** in **`pp-rs`** / **`lps-naga`** that
+All three commands above succeed with **no new warnings** in **`pp-rs`** / **`lps-frontend`** that
 violate **lp2025** lint policy (fix or allow with justification).
 
 ## Tests to write

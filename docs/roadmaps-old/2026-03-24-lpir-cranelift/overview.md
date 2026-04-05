@@ -43,7 +43,7 @@ Naga frontend (parse + type check)            ── existing, unchanged
   ▼
 naga::Module                                   ── existing, unchanged
   │
-  ▼  lps-naga  ── Naga → LPIR lowering    ── existing, shared with WASM
+  ▼  lps-frontend  ── Naga → LPIR lowering    ── existing, shared with WASM
   │   • scalarizes vectors
   │   • decomposes builtins (smoothstep → scalar math)
   │   • handles LPFX calls and out-pointer ABI
@@ -96,7 +96,7 @@ the design from the start.
 ```
 lp-shader/
 ├── lpir/                      # LPIR core (existing, unchanged)
-├── lps-naga/              # Naga → LPIR lowering (existing)
+├── lps-frontend/              # Naga → LPIR lowering (existing)
 │                              #   UPDATE: extract GlslMetadata during lowering
 ├── lps-wasm/              # LPIR → WASM (existing, unchanged)
 ├── lps-cranelift/         # OLD: AST → CLIF (abandoned, deleted at end)
@@ -260,7 +260,7 @@ both without benefiting either.
 
 - **LPIR coverage gaps**: The Naga→LPIR lowering may not cover all
   constructs the target shaders use. Gaps discovered during Cranelift
-  integration need fixes in `lps-naga`, not workarounds.
+  integration need fixes in `lps-frontend`, not workarounds.
 
 - **Performance validation ambiguity**: If LPIR-path binaries are larger
   or slower, attributing the cause (LPIR overhead? different CLIF shape?

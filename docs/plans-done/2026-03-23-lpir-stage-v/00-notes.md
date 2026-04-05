@@ -2,11 +2,12 @@
 
 ## Current state
 
-Stage IV is implemented: `lps-naga::lower()` produces an `IrModule`
+Stage IV is implemented: `lps-frontend::lower()` produces an `IrModule`
 from a `NagaModule`. The LPIR is flat, scalarized, and float-mode-unaware.
 
 The current WASM emitter (`lps-wasm/src/emit.rs`, ~1970 lines) walks
 Naga IR directly. It handles:
+
 - Float mode: native `f32.*` WASM instructions
 - Q32 mode: inline i32 fixed-point arithmetic via i64 widening/saturation
 - Limited math builtins: mix, smoothstep, step, round, abs, min, max
@@ -26,11 +27,12 @@ has no native sin/cos. The current WASM emitter doesn't support these
 either (errors on unsupported MathFunction variants).
 
 Options:
+
 - A) Map to WASM host imports (`env::sin`, etc.). Host must provide.
 - B) Map to `builtins` module imports (from lps-builtins-wasm).
 - C) Error for now (matches current emitter limitation).
 - D) Import from `builtins` module alongside LPFX — the builtins WASM
-     already contains Q32 math implementations.
+  already contains Q32 math implementations.
 
 **Answer:** D — Q32 mode maps `@std.math::sin` → `builtins::__lp_q32_sin`
 etc. The builtins WASM module already has full Q32 math coverage. Both
@@ -48,6 +50,7 @@ signature. Currently, `lps-wasm/src/lpfx.rs` resolves via
 
 For the new emitter, the LPIR import carries the *logical* signature
 (generic, float-mode-unaware). The emitter needs to:
+
 - Detect `@lpfx::*` imports by module name
 - Resolve the LPFX name + param types → BuiltinId
 - Get the Q32 WASM signature from the BuiltinId
@@ -57,6 +60,7 @@ Should the BuiltinId resolution happen in the emitter, or should LPIR
 carry a BuiltinId directly?
 
 Options:
+
 - A) Emitter resolves by name/signature (keeps LPIR backend-agnostic).
 - B) LPIR ImportDecl carries an optional BuiltinId hint.
 
@@ -69,8 +73,9 @@ LPIR functions may have slots (for LPFX out-pointers, arrays, etc.).
 These need WASM linear memory. The roadmap suggests a `$sp` global.
 
 Options:
+
 - A) Mutable WASM global `$sp`. Prologue: `$sp -= frame_size`. Epilogue:
-     `$sp += frame_size`. Only emitted for functions with slots.
+  `$sp += frame_size`. Only emitted for functions with slots.
 - B) Fixed scratch base (like current `LPFX_SCRATCH_BASE = 65536`).
 
 **Answer:** A — mutable `$sp` global. Prologue/epilogue only for
@@ -82,6 +87,7 @@ The current Naga-direct emitter works and all filetests pass against it.
 The new LPIR-based emitter replaces it.
 
 Options:
+
 - A) Delete old code immediately in this stage.
 - B) Keep old path behind a feature flag for comparison.
 - C) Delete old code in Stage VI after filetests are confirmed passing.
@@ -95,6 +101,7 @@ The current emitter is one large `emit.rs` (1970 lines). User preference
 is small, targeted modules in directory modules.
 
 Proposed structure:
+
 ```
 lps-wasm/src/
   emit/

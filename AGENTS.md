@@ -57,7 +57,7 @@ Do NOT disable the compiler. The compiler is the product.
 - **`std`** means "host-only conveniences": `libstd`, `cranelift-native` (host
   ISA autodetect), `anyhow`, etc.
 - **`std` does NOT mean "has a compiler."** The compiler works without `libstd`.
-- **`glsl`** (or equivalent) enables the GLSL front-end (`lps-naga`). This
+- **`glsl`** (or equivalent) enables the GLSL front-end (`lps-frontend`). This
   is independent of `std`.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
@@ -69,7 +69,7 @@ Do NOT disable the compiler. The compiler is the product.
 GLSL source (on-flash filesystem)
         │
         ▼
-lps-naga (no_std + alloc) ── parses GLSL via naga
+lps-frontend (no_std + alloc) ── parses GLSL via naga
         │
         ▼
 LPIR (LightPlayer IR)
@@ -89,14 +89,14 @@ runtime.
 
 ## Key Crates
 
-| Crate | Role | `no_std` |
-|-------|------|----------|
-| `lps-naga` | GLSL → LPIR (via naga) | yes |
-| `lpir-cranelift` | LPIR → Cranelift → machine code | yes |
-| `lp-engine` | Shader runtime, node graph | yes |
-| `lp-server` | Project management, client connections | yes |
-| `fw-esp32` | ESP32 firmware | yes (bare metal) |
-| `fw-emu` | RISC-V emulator firmware (CI) | yes (bare metal) |
+| Crate            | Role                                   | `no_std`         |
+|------------------|----------------------------------------|------------------|
+| `lps-frontend`   | GLSL → LPIR (via naga)                 | yes              |
+| `lpir-cranelift` | LPIR → Cranelift → machine code        | yes              |
+| `lp-engine`      | Shader runtime, node graph             | yes              |
+| `lp-server`      | Project management, client connections | yes              |
+| `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
 ## Validation Commands
 

@@ -3,7 +3,7 @@
 ## Scope
 
 Enable LPFX (`lpfx_*`) function calls by injecting GLSL prototypes into
-`lps-naga` and emitting them as WASM imports in `lps-wasm`. This
+`lps-frontend` and emitting them as WASM imports in `lps-wasm`. This
 unblocks the 13 `lpfx/` test files.
 
 ## Code Organization Reminders
@@ -16,7 +16,7 @@ unblocks the 13 `lpfx/` test files.
 
 ## Implementation Details
 
-### 1. Create lps-naga/src/builtins.rs
+### 1. Create lps-frontend/src/builtins.rs
 
 Define GLSL forward declarations for all known LPFX functions. These must
 match the signatures used by `lps-builtins-wasm`.
@@ -47,7 +47,7 @@ vec3 lpfx_hue2rgb(float hue);
 
 Also check the actual LPFX filetest source to see what signatures they use.
 
-### 2. Update lps-naga compile() for prototype injection
+### 2. Update lps-frontend compile() for prototype injection
 
 ```rust
 pub fn compile(source: &str) -> Result<NagaModule, CompileError> {
@@ -172,7 +172,7 @@ fn extract_functions(module: &Module) -> Result<Vec<(Handle<Function>, FunctionI
 scripts/glsl-filetests.sh --target wasm.q32 "lpfx/"
 scripts/glsl-filetests.sh --target wasm.q32
 cargo check -p lps-wasm
-cargo check -p lps-naga
+cargo check -p lps-frontend
 ```
 
 All LPFX filetests should pass (or have known tolerance differences annotated).

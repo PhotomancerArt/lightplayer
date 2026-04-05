@@ -41,7 +41,7 @@ Handle **`Statement::Store`** when the **pointer** is **`Expression::Access`** (
 ## Validate
 
 ```bash
-cargo test -p lps-naga
+cargo test -p lps-frontend
 bash scripts/glsl-filetests.sh --target jit.q32 vec/bvec2/assign-element.glsl
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```

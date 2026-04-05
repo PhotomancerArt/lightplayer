@@ -62,7 +62,7 @@ lpvm-rv32 = { path = "../../lpvm/lpvm-rv32" }
 lpvm-wasm = { path = "../../lpvm/lpvm-wasm", features = ["runtime"] }
 lpir = { path = "../lpir" }   # or top-level path after moves
 lps-shared = { path = "../lps-shared" }
-lps-naga = { path = "../lps-naga" }
+lps-frontend = { path = "../lps-frontend" }
 ```
 
 **Remove** (once fully migrated): `lps-exec`, direct `lpvm`, direct

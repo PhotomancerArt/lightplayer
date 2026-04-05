@@ -11,7 +11,7 @@ Target: All 5 tests from `3-initialization.glsl` should pass.
 
 ### 1. Detect Initializer in Local Variable Declaration
 
-In `lp-shader/lps-naga/src/lower_ctx.rs`, the local variable init handling already exists for
+In `lp-shader/lps-frontend/src/lower_ctx.rs`, the local variable init handling already exists for
 non-arrays:
 
 ```rust
@@ -37,7 +37,7 @@ for (lv_handle, var) in func.local_variables.iter() {
 
 ### 2. Add Array Initializer Lowering
 
-Add to `lp-shader/lps-naga/src/lower_array.rs`:
+Add to `lp-shader/lps-frontend/src/lower_array.rs`:
 
 ```rust
 /// Lower array initializer: {a, b, c} or unsized array inference

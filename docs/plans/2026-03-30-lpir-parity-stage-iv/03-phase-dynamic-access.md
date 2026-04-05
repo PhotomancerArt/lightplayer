@@ -11,7 +11,7 @@ Target: All 10 tests from `2-bounds-checking.glsl` should pass.
 
 ### 1. Add Bounds Clamping Helper
 
-Create `lp-shader/lps-naga/src/lower_array.rs`:
+Create `lp-shader/lps-frontend/src/lower_array.rs`:
 
 ```rust
 //! Array-specific lowering helpers
@@ -100,7 +100,7 @@ pub(crate) fn clamp_index(
 
 ### 2. Add Dynamic Array Access Lowering
 
-In `lp-shader/lps-naga/src/lower_expr.rs`, add to the `Expression::Access` handling:
+In `lp-shader/lps-frontend/src/lower_expr.rs`, add to the `Expression::Access` handling:
 
 ```rust
 Expression::Access { base, index } => {
@@ -188,7 +188,7 @@ fn lower_array_access(
 
 ### 3. Add Dynamic Array Store Support
 
-In `lp-shader/lps-naga/src/lower_stmt.rs`, handle `Access` in Store:
+In `lp-shader/lps-frontend/src/lower_stmt.rs`, handle `Access` in Store:
 
 ```rust
 Statement::Store { pointer, value } => {

@@ -4,7 +4,7 @@
 
 Fix **expected diagnostic** mismatches in `filetests/type_errors/` (e.g. `++` on `bool` should
 report `E0112` / post-increment rules, not a generic lowering error). Implement **early**
-validation in `lps-naga` (or diagnostics layer) so errors are attributed before opaque
+validation in `lps-frontend` (or diagnostics layer) so errors are attributed before opaque
 `unsupported expression` paths.
 
 ## Code organization reminders
@@ -31,7 +31,7 @@ validation in `lps-naga` (or diagnostics layer) so errors are attributed before 
 ## Validate
 
 ```bash
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-filetests
 ./scripts/glsl-filetests.sh type_errors/
 ```

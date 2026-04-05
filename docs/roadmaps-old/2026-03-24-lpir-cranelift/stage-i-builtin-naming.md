@@ -29,7 +29,7 @@ make BuiltinId self-describing.
 - Update Cranelift backend builtin declaration/mapping (old crate still
   needs to compile on main — or we accept breakage on branch)
 - Update LPIR import module names: `std.math` → `glsl`
-- Update `lps-naga` lowering: register imports as `glsl::sin` etc.
+- Update `lps-frontend` lowering: register imports as `glsl::sin` etc.
 - Update `StdMathHandler` and any test import handlers
 - Update `lps-filetests` if it references symbol names
 - All existing tests pass after rename

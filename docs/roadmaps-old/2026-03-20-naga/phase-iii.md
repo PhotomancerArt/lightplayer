@@ -9,6 +9,7 @@ replacing `lps-cranelift`'s dependency on `lps-frontend`. Update
 ## Scope
 
 In scope:
+
 - New Cranelift codegen walking `naga::Module` (replaces current TypedShader walk)
 - Update `lp-engine` to call new frontend
 - All cranelift.q32 filetests passing
@@ -16,6 +17,7 @@ In scope:
 - Host JIT and emulator execution modes
 
 Out of scope:
+
 - Old frontend removal (Phase IV)
 - Optimization work
 
@@ -27,7 +29,7 @@ Out of scope:
 ## Deliverables
 
 - Cranelift backend consuming `naga::Module`
-- `lp-engine` using `lps-naga` frontend
+- `lp-engine` using `lps-frontend` frontend
 - All filetests passing on both targets
 - ESP32 ROM size report
 

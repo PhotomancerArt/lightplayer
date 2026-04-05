@@ -24,8 +24,8 @@ Two test files:
 
 ```rust
 fn compile_and_lower(glsl: &str) -> lpir::module::IrModule {
-    let naga = lps_naga::compile(glsl).unwrap();
-    lps_naga::lower::lower(&naga).unwrap()
+    let naga = lps_frontend::compile(glsl).unwrap();
+    lps_frontend::lower::lower(&naga).unwrap()
 }
 
 fn run(glsl: &str, func: &str, args: &[Value]) -> Vec<Value> {
@@ -140,8 +140,8 @@ brittleness with VReg numbering).
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
 ```
 
 All tests pass. The full pipeline is exercised end-to-end.

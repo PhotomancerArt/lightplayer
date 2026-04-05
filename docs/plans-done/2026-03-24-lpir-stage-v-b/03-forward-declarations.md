@@ -68,7 +68,7 @@ a prototype has no body, but its definition (later in source) does.
 ## Validate
 
 ```bash
-cargo test -p lps-naga -q
+cargo test -p lps-frontend -q
 scripts/glsl-filetests.sh function/declare-prototype.glsl
 scripts/glsl-filetests.sh function/recursive-static-error.glsl
 ```

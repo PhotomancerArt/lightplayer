@@ -25,7 +25,7 @@ support.
 
 ```
 lp-shader/
-├── lps-naga/                # NEW: Naga-based frontend
+├── lps-frontend/                # NEW: Naga-based frontend
 │   └── src/
 │       ├── lib.rs               # compile() entry point, wraps naga::front::glsl
 │       └── builtins.rs          # LPFX prototype injection, #line reset
@@ -46,7 +46,7 @@ Data flow (new stack):
 GLSL source
     │
     ▼
-lps-naga: prepend lpfx prototypes + #line 1
+lps-frontend: prepend lpfx prototypes + #line 1
     │
     ▼
 naga::front::glsl::Frontend::parse()
@@ -98,7 +98,7 @@ lps-wasm: emit_module()
 ## Phases
 
 ```
-Phase I:   Scaffold lps-naga + rewrite lps-wasm foundation
+Phase I:   Scaffold lps-frontend + rewrite lps-wasm foundation
 Phase II:  Feature completeness — rainbow.glsl renders in web demo
 Phase III: Cranelift backend port + lp-engine integration
 Phase IV:  Cleanup, old frontend removal, validation

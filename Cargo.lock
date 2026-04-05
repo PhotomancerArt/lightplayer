@@ -3889,7 +3889,7 @@ dependencies = [
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
- "lps-naga",
+ "lps-frontend",
  "lps-shared",
  "lpvm",
  "target-lexicon",
@@ -3961,7 +3961,7 @@ dependencies = [
  "lpir-cranelift",
  "lps-diagnostics",
  "lps-exec",
- "lps-naga",
+ "lps-frontend",
  "lps-shared",
  "lps-wasm",
  "lpvm",
@@ -3993,7 +3993,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lps-naga"
+name = "lps-frontend"
 version = "40.0.0"
 dependencies = [
  "libm",
@@ -4016,7 +4016,7 @@ dependencies = [
  "log",
  "lpir",
  "lps-builtin-ids",
- "lps-naga",
+ "lps-frontend",
  "wasm-encoder 0.245.1",
  "wasmtime",
 ]

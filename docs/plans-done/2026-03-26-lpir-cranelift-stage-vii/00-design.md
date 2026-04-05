@@ -58,7 +58,7 @@ DELETED (old chain):
 
 REMAINS (new chain — no changes):
 
-  GLSL ──► naga (lps-naga) ──► LPIR ──► lpir-cranelift ──► machine code
+  GLSL ──► naga (lps-frontend) ──► LPIR ──► lpir-cranelift ──► machine code
                                                  │
                                          lps-builtins-emu-app (ELF for rv32 emu)
 
@@ -68,20 +68,20 @@ REMAINS (new chain — no changes):
 
 ## Main components
 
-| Component                  | Action                                                                                                                                                                                                                                |
-|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `lps-cranelift`        | Delete directory                                                                                                                                                                                                                      |
-| `lps-jit-util`         | Delete directory                                                                                                                                                                                                                      |
-| `lps-frontend`         | Delete directory (after migrating gen-app + filetests)                                                                                                                                                                                |
-| `esp32-glsl-jit`           | Delete directory                                                                                                                                                                                                                      |
-| `lps-q32-metrics-app`  | Delete directory                                                                                                                                                                                                                      |
+| Component              | Action                                                                                                                                                                                                                            |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lps-cranelift`        | Delete directory                                                                                                                                                                                                                  |
+| `lps-jit-util`         | Delete directory                                                                                                                                                                                                                  |
+| `lps-frontend`         | Delete directory (after migrating gen-app + filetests)                                                                                                                                                                            |
+| `esp32-glsl-jit`       | Delete directory                                                                                                                                                                                                                  |
+| `lps-q32-metrics-app`  | Delete directory                                                                                                                                                                                                                  |
 | `lps-builtins-gen-app` | Remove old-backend gen paths; inline `FunctionSignature`, `Type`, `ParamQualifier`, `Parameter`, `extract_function_signature` as local types; drop `lps-frontend` dep; stop generating `lpfx_fns.rs`, `registry.rs`, `mapping.rs` |
 | `lps-filetests`        | Replace `CompilationPipeline::parse()` with `TranslationUnit::parse()`; drop `lps-frontend` dep                                                                                                                                   |
-| Workspace `Cargo.toml`     | Remove deleted crates from `members`, `default-members`, profile entries                                                                                                                                                              |
-| `justfile`                 | Remove deleted crate references from `rv32_packages`, build/test/clippy                                                                                                                                                               |
-| Scripts / Docker           | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh`                                                                                                                                                                          |
-| Docs                       | Update `README.md`, `lp-shader/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                           |
-| Ignored tests              | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                             |
+| Workspace `Cargo.toml` | Remove deleted crates from `members`, `default-members`, profile entries                                                                                                                                                          |
+| `justfile`             | Remove deleted crate references from `rv32_packages`, build/test/clippy                                                                                                                                                           |
+| Scripts / Docker       | Delete `Dockerfile.rv32-jit`; clean up `scripts/lp-build.sh`                                                                                                                                                                      |
+| Docs                   | Update `README.md`, `lp-shader/README.md`, `AGENTS.md`, cursor rules; leave historical docs                                                                                                                                       |
+| Ignored tests          | Un-ignore `lpfx_builtins_memory`, re-ignore with updated comment if WASM ABI still broken                                                                                                                                         |
 
 ## Decisions (from notes)
 

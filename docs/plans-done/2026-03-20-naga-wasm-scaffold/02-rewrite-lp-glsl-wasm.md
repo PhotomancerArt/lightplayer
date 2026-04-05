@@ -34,7 +34,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-lps-naga = { path = "../lps-naga" }
+lps-frontend = { path = "../lps-frontend" }
 naga = { version = "29.0.0", default-features = false, features = ["glsl-in"] }
 wasm-encoder = "0.245"
 log = { workspace = true, default-features = false }
@@ -45,7 +45,7 @@ wasmtime = "42"
 ```
 
 Removed: `lps-frontend`, `lps-builtin-ids`, `glsl`, `hashbrown`.
-Added: `lps-naga`, `naga`.
+Added: `lps-frontend`, `naga`.
 
 ### 2. Delete old codegen tree
 
@@ -65,15 +65,15 @@ pub mod module;
 pub mod options;
 pub mod types;
 
-pub use lps_naga::{FloatMode, GlslType};
+pub use lps_frontend::{FloatMode, GlslType};
 pub use module::{WasmExport, WasmModule};
 pub use options::WasmOptions;
 
 use alloc::vec::Vec;
-use lps_naga::{CompileError, NagaModule};
+use lps_frontend::{CompileError, NagaModule};
 
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, CompileError> {
-    let naga_module = lps_naga::compile(source)?;
+    let naga_module = lps_frontend::compile(source)?;
     let wasm_bytes = emit::emit_module(&naga_module, &options)?;
     let exports = collect_exports(&naga_module, &options);
     Ok(WasmModule {
@@ -111,7 +111,7 @@ fn collect_exports(naga_module: &NagaModule, options: &WasmOptions) -> Vec<WasmE
 #![allow(unused)]
 
 use alloc::{string::String, vec::Vec};
-use lps_naga::GlslType;
+use lps_frontend::GlslType;
 pub use wasm_encoder::ValType as WasmValType;
 
 #[derive(Debug, Clone)]
@@ -137,7 +137,7 @@ and `param_types: Vec<GlslType>`. This removes the dependency on
 ### 5. src/options.rs
 
 ```rust
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 
 #[derive(Debug, Clone)]
 pub struct WasmOptions {
@@ -157,11 +157,11 @@ Removed `max_errors` (Naga handles its own error collection).
 
 ### 6. src/types.rs
 
-Same logic as before but uses `GlslType` from `lps-naga`:
+Same logic as before but uses `GlslType` from `lps-frontend`:
 
 ```rust
 use alloc::vec::Vec;
-use lps_naga::{FloatMode, GlslType};
+use lps_frontend::{FloatMode, GlslType};
 use wasm_encoder::ValType;
 
 pub fn glsl_type_to_wasm_components(ty: &GlslType, float_mode: FloatMode) -> Vec<ValType> {
@@ -265,7 +265,7 @@ Core of the rewrite. Walks `naga::Module` and emits WASM via `wasm_encoder`.
 use alloc::vec::Vec;
 use crate::locals::LocalAlloc;
 use crate::options::WasmOptions;
-use lps_naga::{CompileError, FloatMode, NagaModule};
+use lps_frontend::{CompileError, FloatMode, NagaModule};
 use naga::{BinaryOperator, Expression, Handle, Module, Function, Statement, TypeInner, ScalarKind, Literal};
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function as WasmFunction,

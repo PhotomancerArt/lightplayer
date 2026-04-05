@@ -10,15 +10,15 @@ Remove stray TODOs, run full formatting/lint for touched crates, add **`summary.
 - Grep **`pp-rs`** and **`lp2025`** diff for **`TODO`**, **`dbg!`**, **`println!`**, temporary *
   *`path`** patches left enabled by mistake.
 - Run **`cargo +nightly fmt`** on **`pp-rs`** and any **`lp2025`** files touched.
-- Run **`cargo clippy`** on **`lps-naga`** (and **`lps-wasm`** if touched) with *
+- Run **`cargo clippy`** on **`lps-frontend`** (and **`lps-wasm`** if touched) with *
   *`-D warnings`** per workspace rules.
 
 ```bash
 cd lp2025
-cargo check -p lps-naga
-cargo check -p lps-naga --target riscv32imac-unknown-none-elf
+cargo check -p lps-frontend
+cargo check -p lps-frontend --target riscv32imac-unknown-none-elf
 cargo check -p lps-wasm --target wasm32-unknown-unknown
-cargo test -p lps-naga
+cargo test -p lps-frontend
 ```
 
 ## Plan cleanup

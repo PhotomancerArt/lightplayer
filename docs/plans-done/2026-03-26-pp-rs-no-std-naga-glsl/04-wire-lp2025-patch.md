@@ -34,12 +34,12 @@ uses the fork.
 
 ```bash
 cd lp2025
-cargo check -p lps-naga
-cargo check -p lps-naga --target riscv32imac-unknown-none-elf
+cargo check -p lps-frontend
+cargo check -p lps-frontend --target riscv32imac-unknown-none-elf
 cargo check -p lps-wasm --target wasm32-unknown-unknown
 cargo test -p lps-filetests --no-run   # or a lighter subset if full run is heavy
 ```
 
 ## Tests to write
 
-- None beyond existing **`lps-naga`** / filetests if run.
+- None beyond existing **`lps-frontend`** / filetests if run.

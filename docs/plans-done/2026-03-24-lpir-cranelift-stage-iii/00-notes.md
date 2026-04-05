@@ -8,6 +8,7 @@ in Q32 mode (with hand-built LPIR — GLSL source compilation is Stage IV).
 
 Note: memory ops and local function calls are now in Stage II. Stage III is
 purely about:
+
 - Import resolution (LPIR `ImportDecl` → `BuiltinId` → Cranelift func ref)
 - Builtin declaration and JIT symbol lookup
 - Q32 float mode (type mapping, op remapping, constant encoding)
@@ -26,6 +27,7 @@ Self-describing enum in `lps-builtin-ids`. Variants like `LpGlslSinQ32`,
 ### Import resolution (existing, shared)
 
 `glsl_builtin_mapping.rs` in `lps-builtin-ids` provides:
+
 - `glsl_q32_math_builtin_id(name, arg_count) → Option<BuiltinId>` — glsl module
 - `lpir_q32_builtin_id(name, arg_count) → Option<BuiltinId>` — lpir module
 - `glsl_lpfx_q32_builtin_id(base, &[GlslParamKind]) → Option<BuiltinId>` — lpfx
@@ -36,6 +38,7 @@ and calls these. The Cranelift emitter needs the same logic.
 ### Q32 builtins that exist (6 ops)
 
 Only these LPIR float ops have `__lp_lpir_*_q32` builtins:
+
 - `fadd`, `fsub`, `fmul`, `fdiv` — saturating Q16.16 arithmetic
 - `fsqrt` — fixed-point square root
 - `fnearest` — fixed-point round-to-even
@@ -43,6 +46,7 @@ Only these LPIR float ops have `__lp_lpir_*_q32` builtins:
 ### Float ops without builtins (inlined in old crate)
 
 These are handled as inline Q32 integer ops:
+
 - `fneg` → `ineg` (negate the i32)
 - `fabs` → `select(icmp_imm(sge, v, 0), v, ineg(v))`
 - `fmin` → `select(icmp(sle, a, b), a, b)`
@@ -56,6 +60,7 @@ These are handled as inline Q32 integer ops:
 
 In Q32 mode, `IrType::F32` maps to Cranelift `I32` (not `F32`). The fixed-point
 value is stored as a signed Q16.16 integer. This affects:
+
 - Function signatures (params and returns)
 - VReg type declarations
 - Constant encoding (`Fconst 1.5` → `iconst 98304` which is `1.5 * 65536`)
@@ -95,6 +100,7 @@ plus sqrt and fnearest. There are no `__lp_lpir_*_q32` builtins for the
 inlined ops.
 
 Options:
+
 - (a) **Create new builtins** for all float ops (fneg, fabs, etc.) so the
   emitter calls builtins for everything. Simplest emitter, but creates new
   builtin functions that don't exist yet, and adds call overhead.
@@ -142,13 +148,14 @@ emission and Q32 emission. The old crate has one, but it's coupled to the old
 API.
 
 Options:
+
 - (a) Define `FloatMode` in `lpir-cranelift`. Keep it simple.
 - (b) Put it in `lpir` crate (shared with interpreter, WASM emitter).
 - (c) Put it in `lps-builtin-ids` (where `Mode` already exists).
 
 **Answer**: Move `FloatMode` into the `lpir` crate (`types.rs`), rename
 `Float` → `F32` for consistency. Re-export from `lpir::FloatMode`. Update
-`lps-naga` and `lps-wasm` to `use lpir::FloatMode`. The `lpir` crate
+`lps-frontend` and `lps-wasm` to `use lpir::FloatMode`. The `lpir` crate
 is the natural home — it describes how consumers interpret `IrType::F32`.
 
 ### Q5: Q32 comparisons — fcmp becomes icmp?
@@ -172,9 +179,10 @@ In Q32 mode, the "float" is already an I32 (Q16.16). What should these do?
   `src << 16` (shift left by 16).
 
 **Answer**: Follow the old crate's proven Q32Strategy implementations:
+
 - `emit_to_sint`: negative-biased round-toward-zero (not plain `sshr`);
   adds `(1 << 16) - 1` bias for negatives before `sshr 16`. ~6 instructions.
 - `emit_to_uint`: `emit_to_sint` then clamp negatives to 0.
 - `emit_from_sint`: clamp to [-32768, 32767] then `ishl 16`. ~5 instructions.
 - `emit_from_uint`: `ishl 16` with size-dependent extend/clamp.
-All inline, no builtins needed. Port the existing `Q32Strategy` methods.
+  All inline, no builtins needed. Port the existing `Q32Strategy` methods.

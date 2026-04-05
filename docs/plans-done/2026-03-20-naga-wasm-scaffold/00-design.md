@@ -4,7 +4,7 @@
 
 Create two crates and update one:
 
-1. **NEW** `lp-shader/lps-naga/` — Naga-based GLSL frontend
+1. **NEW** `lp-shader/lps-frontend/` — Naga-based GLSL frontend
 2. **REWRITE** `lp-shader/lps-wasm/` — WASM backend consuming naga::Module
 3. **UPDATE** `lp-shader/lps-filetests/` — wasm_runner uses new types
 
@@ -14,18 +14,18 @@ Scalar filetests (`scalar/float/op-add.glsl` etc.) pass on `wasm.q32` target.
 
 ```
 lp-shader/
-├── lps-naga/                    # NEW
+├── lps-frontend/                    # NEW
 │   ├── Cargo.toml                   # naga (glsl-in), no_std
 │   └── src/
 │       └── lib.rs                   # compile(), NagaModule, GlslType, FloatMode, FunctionInfo
 ├── lps-wasm/                    # REWRITE
-│   ├── Cargo.toml                   # dep: lps-naga (replaces lps-frontend)
+│   ├── Cargo.toml                   # dep: lps-frontend (replaces lps-frontend)
 │   └── src/
 │       ├── lib.rs                   # glsl_wasm() entry point
 │       ├── emit.rs                  # emit_module(), emit_function(), emit_expr(), emit_stmt()
 │       ├── locals.rs                # Local allocation from naga expression arena
 │       ├── module.rs                # WasmModule, WasmExport (updated, no FunctionSignature)
-│       ├── options.rs               # WasmOptions (uses lps_naga::FloatMode)
+│       ├── options.rs               # WasmOptions (uses lps_frontend::FloatMode)
 │       └── types.rs                 # Naga type → WasmValType mapping
 └── lps-filetests/               # UPDATE
     └── src/test_run/
@@ -36,7 +36,7 @@ lp-shader/
 ## Conceptual architecture
 
 ```
-                    lps-naga
+                    lps-frontend
                     ┌────────────────────────┐
   GLSL &str ──────▶│ naga::front::glsl      │
                     │                        │
@@ -70,7 +70,7 @@ lp-shader/
 
 ## Main components
 
-### lps-naga
+### lps-frontend
 
 - `FloatMode` enum: `Q32` / `Float` (owned by this crate, not re-exported)
 - `GlslType` enum: `Float`, `Int`, `UInt`, `Bool`, `Vec2`, `Vec3`, `Vec4`,
@@ -93,6 +93,6 @@ lp-shader/
 
 ### lps-filetests (updated)
 
-- `wasm_runner.rs`: uses `lps_wasm::GlslType` (from lps-naga,
+- `wasm_runner.rs`: uses `lps_wasm::GlslType` (from lps-frontend,
   re-exported) instead of `lps_frontend::semantic::types::Type`
 - `compile.rs`: same `glsl_wasm()` call signature, different types

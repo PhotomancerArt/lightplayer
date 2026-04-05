@@ -26,9 +26,9 @@ Out of scope until decided otherwise (see questions):
 
 ### New stack (Naga / LPIR)
 
-- **`lps-naga`**: GLSL-in → `naga::Module` → LPIR + `GlslModuleMeta`.
+- **`lps-frontend`**: GLSL-in → `naga::Module` → LPIR + `GlslModuleMeta`.
 - **`lpir-cranelift`**: LPIR → CLIF → host JIT (`jit()`), optional RV32 object / emu (`riscv32-emu`
-  feature). Uses `lps-naga` behind `std` for the full GLSL entry.
+  feature). Uses `lps-frontend` behind `std` for the full GLSL entry.
 - **`lps-wasm`**: Naga → LPIR → WASM (Stage V path).
 - **`lps-filetests`**: `compile_for_target` routes **Jit**, **Rv32**, and **Wasm** through the
   LPIR executables (`LpirJitExecutable`, `LpirRv32Executable`, `WasmExecutable`) — not

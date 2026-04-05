@@ -1,7 +1,7 @@
 //! wasmtime smoke tests for the LPIR → WASM pipeline.
 
-use lps_naga::FloatMode;
-use lps_wasm::{glsl_wasm, WasmOptions};
+use lps_frontend::FloatMode;
+use lps_wasm::{WasmOptions, glsl_wasm};
 
 fn run_f32(source: &str, func_name: &str, args: &[f32]) -> f32 {
     let opts = WasmOptions {

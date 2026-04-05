@@ -38,9 +38,9 @@ impl std::error::Error for CompileError {}
 pub enum CompilerError {
     /// GLSL parse / naga frontend (line-oriented message).
     Parse(String),
-    /// Naga → LPIR lowering (`glsl` feature / `lps-naga`).
+    /// Naga → LPIR lowering (`glsl` feature / `lps-frontend`).
     #[cfg(feature = "glsl")]
-    Lower(lps_naga::LowerError),
+    Lower(lps_frontend::LowerError),
     /// LPIR → machine code.
     Codegen(CompileError),
 }

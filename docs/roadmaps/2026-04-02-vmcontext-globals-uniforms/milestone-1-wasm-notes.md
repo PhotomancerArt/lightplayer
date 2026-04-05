@@ -168,7 +168,7 @@ In `build_wasm_args()` (replacing the dummy `0`):
 fn build_wasm_args(
     export_info: &WasmExport,
     args: &[GlslValue],
-    fm: lps_naga::FloatMode,
+    fm: lps_frontend::FloatMode,
     vmctx_offset: i32,  // NEW: actual offset from memory_layout
 ) -> Result<Vec<Val>, GlslError> {
     // ... validation ...

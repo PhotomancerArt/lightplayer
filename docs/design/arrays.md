@@ -235,7 +235,7 @@ For N-dimensional arrays:
 ### File Structure
 
 ```
-lp-shader/lps-naga/src/
+lp-shader/lps-frontend/src/
 ├── lower_ctx.rs          # Add array_map, fat pointer handling
 ├── lower_expr.rs         # Add Access/AccessIndex for arrays
 ├── lower_stmt.rs         # Add array Store handling

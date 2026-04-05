@@ -46,12 +46,12 @@ types in **`lps-shared`**.
 
 | Transitional crate | Target package | Public types (target names)                                                           |
 |--------------------|----------------|---------------------------------------------------------------------------------------|
-| `lps-core`     | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
+| `lps-core`         | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
 
 Use a consistent **`Lps*`** prefix for this crate’s public types so they never
 collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
 
-**Dependents** (update imports in this milestone as renames land): `lps-naga`,
+**Dependents** (update imports in this milestone as renames land): `lps-frontend`,
 `lps-filetests`, any crate that still depended on `lps-exec` for signatures
 (see below).
 
@@ -141,12 +141,12 @@ Add `lpvm/lpvm` and `lps-shared` (or transitional path) to members as they appea
 
 **Will eventually use `lpvm` instead of `lpvm`:**
 
-- `lp-engine`, `lps-builtins`, `lps-naga`, `lpir-cranelift`, `lps-filetests`,
+- `lp-engine`, `lps-builtins`, `lps-frontend`, `lpir-cranelift`, `lps-filetests`,
   `lps-exec` (until removed)
 
 **Use `lps-shared` for logical signatures:**
 
-- `lps-naga`, `lps-filetests`, `lps-exec` / future test harness,
+- `lps-frontend`, `lps-filetests`, `lps-exec` / future test harness,
   anything that describes user-visible function types
 
 ## Done When

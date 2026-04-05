@@ -49,7 +49,7 @@ All existing consumers must continue to work after the refactor.
 
 `LpirRv32Executable` in **`lps-filetests`** (path may still be `lps-filetests`):
 
-1. GLSL → **`lps-naga`** → `IrModule` + module metadata (e.g. `LpvmModuleMeta` /
+1. GLSL → **`lps-frontend`** → `IrModule` + module metadata (e.g. `LpvmModuleMeta` /
    transitional `GlslModuleMeta`)
 2. `object_bytes_from_ir(&ir, &options)` — compile LPIR to RV32 object file
    via Cranelift (targeting riscv32)

@@ -11,7 +11,7 @@ workspace = true
 lps-shared = { path = "../lps-shared" }
 lps-diagnostics = { path = "../lps-diagnostics", features = ["std"] }
 lps-exec = { path = "../legacy/lps-exec" }
-lps-naga = { path = "../lps-naga" }
+lps-frontend = { path = "../lps-frontend" }
 lpvm = { path = "../lpvm", features = ["std"] }
 lps-wasm = { path = "../legacy/lps-wasm" }
 lpir = { path = "../lpir" }

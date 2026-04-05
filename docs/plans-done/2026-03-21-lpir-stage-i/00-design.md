@@ -36,7 +36,7 @@ why not SSA, why Q32 is in the emitter, etc.) — absorbing content from
 ## Source language
 
 The input to the Naga → LPIR lowering is **GLSL 4.50 core** (`#version 450
-core`), as used by `lps-naga`. GLSL 4.50 allows recursion, user
+core`), as used by `lps-frontend`. GLSL 4.50 allows recursion, user
 functions, arrays, `out`/`inout` parameters, and the full set of builtins
 the pipeline supports. LPIR's feature scope (recursion, call conventions,
 memory model) is designed to cover GLSL 4.50 core semantics.
@@ -47,9 +47,9 @@ memory model) is designed to cover GLSL 4.50 core semantics.
 
 Two scalar types, width-aware:
 
-| Type  | Width   | Description                     |
-|-------|---------|---------------------------------|
-| `f32` | 4 bytes | IEEE 754 single-precision float |
+| Type  | Width   | Description                        |
+|-------|---------|------------------------------------|
+| `f32` | 4 bytes | IEEE 754 single-precision float    |
 | `i32` | 4 bytes | 32-bit integer (signedness per op) |
 
 **Boolean conditions** use `i32`: `0` is false, any nonzero value is true
@@ -220,6 +220,7 @@ a temp buffer or an explicit byte loop if a memmove is needed). Maps to WASM
 expand to a safe sequence).
 
 Use cases:
+
 - LPFX out-pointer ABI (scratch at known base)
 - Out/inout function parameters
 - Local arrays (slot + dynamic index)
@@ -255,6 +256,7 @@ exposes all symbols), not an IR-level annotation. `entry` marks semantic
 intent ("this is the shader"), not access control.
 
 Multi-return call syntax:
+
 ```
 v4:f32, v5:f32, v6:f32 = call @vec3_fn(v0)
 ```
@@ -398,35 +400,35 @@ func @array_example(v0:i32) -> f32 {
 
 ### GLSL → LPIR mapping (summary)
 
-| Naga construct | LPIR |
-|---|---|
-| `Expression::Binary { Add, .. }` (float) | `fadd` |
-| `Expression::Binary { Add, .. }` (int) | `iadd` |
-| `Expression::Binary { Less, .. }` (float) | `flt` |
-| `Expression::Binary { Less, .. }` (sint) | `ilt_s` |
-| `Expression::Unary { Negate }` (float) | `fneg` |
-| `Expression::Unary { LogicalNot }` (bool) | `ieq` with `iconst.i32 0` |
-| GLSL `bool(f)` | `fne` vs `fconst.f32 0.0` → i32 |
-| GLSL `float(b)` | `itof_s` on i32 0/1 |
-| `Expression::Literal(F32(v))` | `fconst.f32 v` |
-| `Expression::Literal(I32(v))` | `iconst.i32 v` |
-| `Expression::Literal(Bool(v))` | `iconst.i32 1` / `iconst.i32 0` |
-| `Expression::Select` | `select` |
-| `Expression::As` (float→int) | `ftoi_sat_s` / `ftoi_sat_u` |
-| `Expression::Math { Mix }` | `call @std.math::fmix(...)` |
-| `Expression::Math { SmoothStep }` | `call @std.math::fsmoothstep(...)` |
-| `Expression::Math { Min }` | `call @std.math::fmin(...)` / `call @std.math::imin_s(...)` |
-| `Expression::Math { Abs }` | `call @std.math::fabs(...)` / `call @std.math::iabs_s(...)` |
-| `Statement::If` | `if v { ... } else { ... }` |
-| `Statement::Switch` | `switch v { case N { ... } default { ... } }` |
-| `Statement::Loop` | `loop { ... }` |
-| `Statement::Break` | `break` |
-| `Statement::Continue` | `continue` |
-| `Statement::Return` | `return v` |
-| `Statement::Store` (local var) | VReg reassignment or `store` |
-| `Statement::Call` (user fn) | `call @name(...)` |
-| `Statement::Call` (LPFX) | `store` + `call @lpfx::name(...)` + `load` sequence |
-| Vector expression | N× scalar ops (scalarized in lowering) |
+| Naga construct                            | LPIR                                                        |
+|-------------------------------------------|-------------------------------------------------------------|
+| `Expression::Binary { Add, .. }` (float)  | `fadd`                                                      |
+| `Expression::Binary { Add, .. }` (int)    | `iadd`                                                      |
+| `Expression::Binary { Less, .. }` (float) | `flt`                                                       |
+| `Expression::Binary { Less, .. }` (sint)  | `ilt_s`                                                     |
+| `Expression::Unary { Negate }` (float)    | `fneg`                                                      |
+| `Expression::Unary { LogicalNot }` (bool) | `ieq` with `iconst.i32 0`                                   |
+| GLSL `bool(f)`                            | `fne` vs `fconst.f32 0.0` → i32                             |
+| GLSL `float(b)`                           | `itof_s` on i32 0/1                                         |
+| `Expression::Literal(F32(v))`             | `fconst.f32 v`                                              |
+| `Expression::Literal(I32(v))`             | `iconst.i32 v`                                              |
+| `Expression::Literal(Bool(v))`            | `iconst.i32 1` / `iconst.i32 0`                             |
+| `Expression::Select`                      | `select`                                                    |
+| `Expression::As` (float→int)              | `ftoi_sat_s` / `ftoi_sat_u`                                 |
+| `Expression::Math { Mix }`                | `call @std.math::fmix(...)`                                 |
+| `Expression::Math { SmoothStep }`         | `call @std.math::fsmoothstep(...)`                          |
+| `Expression::Math { Min }`                | `call @std.math::fmin(...)` / `call @std.math::imin_s(...)` |
+| `Expression::Math { Abs }`                | `call @std.math::fabs(...)` / `call @std.math::iabs_s(...)` |
+| `Statement::If`                           | `if v { ... } else { ... }`                                 |
+| `Statement::Switch`                       | `switch v { case N { ... } default { ... } }`               |
+| `Statement::Loop`                         | `loop { ... }`                                              |
+| `Statement::Break`                        | `break`                                                     |
+| `Statement::Continue`                     | `continue`                                                  |
+| `Statement::Return`                       | `return v`                                                  |
+| `Statement::Store` (local var)            | VReg reassignment or `store`                                |
+| `Statement::Call` (user fn)               | `call @name(...)`                                           |
+| `Statement::Call` (LPFX)                  | `store` + `call @lpfx::name(...)` + `load` sequence         |
+| Vector expression                         | N× scalar ops (scalarized in lowering)                      |
 
 ### Numeric semantics: GPU-aligned, non-trapping
 
@@ -441,16 +443,16 @@ or Cranelift defaults. The guiding principles:
 3. **Backend consistency**: Both backends must agree on observable results
    for the cases the spec defines (including integer div/rem by zero).
 
-| Edge case | LPIR behavior | Notes |
-|---|---|---|
-| Float arithmetic | IEEE 754 single-precision | Both backends agree |
-| Integer arithmetic | Wrapping (mod 2^32) | Both backends agree |
-| Integer `idiv_*` / `irem_*` by zero | **Result `0`** | Non-trapping. WASM emitter uses a zero-check + select `0` (or equivalent). Cranelift emitter must match `0` (not raw RISC-V `-1`/dividend). |
-| Float div by zero | IEEE 754 (±Inf, NaN) | Both backends + GPUs agree |
-| NaN in arithmetic | IEEE 754 (propagates) | Both backends + GPUs agree |
-| NaN in comparisons | `0` (false) | Unordered comparison semantics |
-| Shift by >= 32 bits | Shift amount masked to 5 bits | Both backends agree |
-| Float-to-int overflow/NaN | Saturating (`ftoi_sat_s/u`) | NaN → 0, overflow → clamp |
+| Edge case                           | LPIR behavior                 | Notes                                                                                                                                       |
+|-------------------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| Float arithmetic                    | IEEE 754 single-precision     | Both backends agree                                                                                                                         |
+| Integer arithmetic                  | Wrapping (mod 2^32)           | Both backends agree                                                                                                                         |
+| Integer `idiv_*` / `irem_*` by zero | **Result `0`**                | Non-trapping. WASM emitter uses a zero-check + select `0` (or equivalent). Cranelift emitter must match `0` (not raw RISC-V `-1`/dividend). |
+| Float div by zero                   | IEEE 754 (±Inf, NaN)          | Both backends + GPUs agree                                                                                                                  |
+| NaN in arithmetic                   | IEEE 754 (propagates)         | Both backends + GPUs agree                                                                                                                  |
+| NaN in comparisons                  | `0` (false)                   | Unordered comparison semantics                                                                                                              |
+| Shift by >= 32 bits                 | Shift amount masked to 5 bits | Both backends agree                                                                                                                         |
+| Float-to-int overflow/NaN           | Saturating (`ftoi_sat_s/u`)   | NaN → 0, overflow → clamp                                                                                                                   |
 
 **Interpreter**: Same rules; integer div/rem by zero → `0`.
 
@@ -501,6 +503,7 @@ this concept. The safe mode never changes results — it only reports.
 ### Well-formedness (modules and functions)
 
 **Module**:
+
 - Every `call` target is declared (`import` or `func` / `entry func`).
 - At most one `entry func` declaration (the runtime entry point).
 - Function names are unique across declarations. Import names use
@@ -511,6 +514,7 @@ this concept. The safe mode never changes results — it only reports.
   unbounded recursion is **implementation-defined termination**, not UB.
 
 **Function**:
+
 - Every VReg is defined before use (parameters count as defined at entry).
 - Each VReg has a single concrete type; reassignments keep the same type.
 - Every op's operand types match the op's rules; `select` branches match the

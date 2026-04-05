@@ -16,7 +16,7 @@ as raw integers.
 
 ## Implementation
 
-### `lp-shader/lps-naga/src/expr_scalar.rs`
+### `lp-shader/lps-frontend/src/expr_scalar.rs`
 
 The current `As` handling (in `lower_expr.rs` or `expr_scalar.rs`) rejects
 casts where the target type byte width != 4. Bool is 1 byte in Naga.
@@ -68,7 +68,7 @@ Filetests to validate:
 ## Validate
 
 ```bash
-cargo test -p lps-naga -q
+cargo test -p lps-frontend -q
 scripts/glsl-filetests.sh scalar/bool/
 scripts/glsl-filetests.sh control/ternary/type_conversions.glsl
 ```

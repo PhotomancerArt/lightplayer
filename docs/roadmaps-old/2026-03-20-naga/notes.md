@@ -52,19 +52,19 @@ lps-filetests → lps-cranelift (cranelift.q32 target)
 
 ### Q1: New frontend crate or modify existing?
 
-Should we create a new `lps-naga` crate that wraps Naga, or modify
+Should we create a new `lps-frontend` crate that wraps Naga, or modify
 `lps-frontend` in place?
 
 **Context**: Both backends currently depend on `lps-frontend`. During
 migration we need both paths working (old Cranelift backend on old frontend,
 new WASM backend on Naga). After migration, the old frontend can be deleted.
 
-**Suggestion**: New crate `lps-naga`. It wraps `naga::front::glsl` and
+**Suggestion**: New crate `lps-frontend`. It wraps `naga::front::glsl` and
 exposes a compilation result containing `naga::Module` plus LP-specific
 metadata (float mode, builtin mappings). Old frontend stays untouched until
 Cranelift is ported. Clean separation, no risk of breaking the working system.
 
-**Answer**: New crate `lps-naga`. Clean break from old frontend. Copy
+**Answer**: New crate `lps-frontend`. Clean break from old frontend. Copy
 useful code from old frontend as needed. Old frontend stays untouched until
 Cranelift is ported.
 
@@ -76,7 +76,7 @@ crate or rewrite in place.
 
 **Answer**: Rewrite `lps-wasm` in place. It's not in production use yet,
 has known bugs (scratch overflow, local.tee), and the whole point is to replace
-it. Switch dependency from `lps-frontend` to `lps-naga`.
+it. Switch dependency from `lps-frontend` to `lps-frontend`.
 
 ### Q3: Filetest strategy during migration?
 
@@ -96,6 +96,7 @@ during migration (extra compile time, not a correctness issue).
 are unknown to Naga.
 
 **Answer**: Two-part approach:
+
 - **Standard GLSL builtins**: Naga parses these into `MathFunction` variants.
   Backend maps `MathFunction` → inline WASM or `BuiltinId` import.
 - **LPFX builtins**: Prepend forward declarations (prototypes only, no bodies)

@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Add correct type inference for `Expression::Relational` in `lps-naga/src/expr_scalar.rs` so no
+Add correct type inference for `Expression::Relational` in `lps-frontend/src/expr_scalar.rs` so no
 valid GLSL relational hits `expr_type_inner unsupported …`.
 
 ## Code organization reminders
@@ -35,14 +35,14 @@ Add `Expression::Relational { fun, argument }`:
 
 ### Tests
 
-- `cargo test -p lps-naga` (existing module tests).
+- `cargo test -p lps-frontend` (existing module tests).
 - Optional: add a **small** unit test in `expr_scalar.rs` `mod tests` with a tiny `Function` + arena
   snippet if the crate already patterns that way; otherwise rely on filetests in phase 4.
 
 ## Validate
 
 ```bash
-cd lps && cargo test -p lps-naga && cargo check -p lps-naga
+cd lps && cargo test -p lps-frontend && cargo check -p lps-frontend
 ```
 
 ```bash

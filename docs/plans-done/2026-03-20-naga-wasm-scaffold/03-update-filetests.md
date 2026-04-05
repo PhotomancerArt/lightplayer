@@ -19,10 +19,10 @@ type conversions.
 
 ### 1. Update lps-filetests/Cargo.toml
 
-Add `lps-naga` as a dependency (needed for `GlslType`, `FloatMode`):
+Add `lps-frontend` as a dependency (needed for `GlslType`, `FloatMode`):
 
 ```toml
-lps-naga = { path = "../lps-naga" }
+lps-frontend = { path = "../lps-frontend" }
 ```
 
 ### 2. Update src/test_run/wasm_runner.rs
@@ -42,7 +42,7 @@ Changes:
 `WasmExport`:
 
 ```rust
-use lps_naga::GlslType;
+use lps_frontend::GlslType;
 use lps_wasm::{WasmExport, WasmOptions, glsl_wasm};
 use lps_wasm::types::glsl_type_to_wasm_components;
 ```
@@ -54,7 +54,7 @@ pub struct WasmExecutable {
     store: Store<()>,
     instance: Instance,
     exports: HashMap<String, WasmExport>,
-    float_mode: lps_naga::FloatMode,
+    float_mode: lps_frontend::FloatMode,
     wasm_bytes: Vec<u8>,
 }
 ```
@@ -157,13 +157,13 @@ Store the converted signatures alongside the WasmExport data in the
 ### 3. Update src/test_run/compile.rs
 
 The `to_wasm_float_mode()` function converts filetest `FloatMode` to
-`lps_wasm::FloatMode`. Update to use `lps_naga::FloatMode`:
+`lps_wasm::FloatMode`. Update to use `lps_frontend::FloatMode`:
 
 ```rust
-fn to_wasm_float_mode(fm: FloatMode) -> lps_naga::FloatMode {
+fn to_wasm_float_mode(fm: FloatMode) -> lps_frontend::FloatMode {
     match fm {
-        FloatMode::Q32 => lps_naga::FloatMode::Q32,
-        FloatMode::F32 => lps_naga::FloatMode::Float,
+        FloatMode::Q32 => lps_frontend::FloatMode::Q32,
+        FloatMode::F32 => lps_frontend::FloatMode::Float,
     }
 }
 ```

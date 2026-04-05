@@ -77,7 +77,7 @@ lp-shader/legacy/lpir-cranelift/
   src/builtins.rs
   src/lib.rs            tests: jit_test_vmctx full width on 64-bit host
 
-lp-shader/lps-naga/   vreg_types[0] and call lowering → ptr where required
+lp-shader/lps-frontend/   vreg_types[0] and call lowering → ptr where required
 
 lp-shader/lps-wasm/   lower LPIR ptr to wasm i32 (comments + mapping)
 ```
@@ -88,7 +88,7 @@ lp-shader/lps-wasm/   lower LPIR ptr to wasm i32 (comments + mapping)
 |-------|--------------------------------------------|-------------------------------------------------------------------------------------------|
 | 1     | `01-phase-lpir-ptr-vmctx.md`               | `IrType::Pointer`, `ptr` text, `v0`, validate/import injection, interp + tests            |
 | 2     | `02-phase-cranelift-jit-vmctx-invoke.md`   | Host JIT signatures, emit, invoke/call/direct_call, `lib.rs` tests                        |
-| 3     | `03-phase-slotaddr-and-downstream.md`      | SlotAddr (+ address chains) as `ptr` in LPIR; memory emit; `lps-naga`; wasm `ptr`→i32 |
+| 3     | `03-phase-slotaddr-and-downstream.md`      | SlotAddr (+ address chains) as `ptr` in LPIR; memory emit; `lps-frontend`; wasm `ptr`→i32 |
 | 4     | `04-phase-rv32-emu-boundary.md` (optional) | Object / `emu_run` guest vmctx, flags or dual path per rv32 notes                         |
 
 Phases 1–2 should land **together** or in **immediate succession** if a split would leave
@@ -109,7 +109,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 ```bash
 cargo test -p lpir
 cargo test -p lpir-cranelift
-cargo check -p lps-naga
+cargo check -p lps-frontend
 ```
 
 Host server smoke (when engine/server touched):

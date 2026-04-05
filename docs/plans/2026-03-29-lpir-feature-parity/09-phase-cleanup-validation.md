@@ -19,7 +19,7 @@ cargo +nightly fmt
 3. **Tests and checks**
 
 ```bash
-cargo test -p lps-naga -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm
+cargo test -p lps-frontend -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm
 ./scripts/glsl-filetests.sh
 just test-filetests
 ```
@@ -36,7 +36,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 5. **Clippy** (if the repo expects it for touched crates)
 
 ```bash
-cargo clippy -p lps-naga -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm -- -D warnings
+cargo clippy -p lps-frontend -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm -- -D warnings
 ```
 
 6. Fix **all** new warnings introduced by this plan’s work.
@@ -57,7 +57,7 @@ Example message (adjust body to match actual changes):
 ```
 feat(lps): LPIR filetest parity (matrix, relational, invoke)
 
-- Lower Relational (all/any/not, vector isnan/isinf) in lps-naga
+- Lower Relational (all/any/not, vector isnan/isinf) in lps-frontend
 - Matrix metadata, stores, builtins; Cranelift invoke sret for large returns
 - WASM parity checks; type_errors diagnostics; Q32 edge @unsupported
 - Filetest harness fixes; rename stats field unsupported

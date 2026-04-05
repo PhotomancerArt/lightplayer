@@ -12,7 +12,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::IrModule;
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemoryType, Module,

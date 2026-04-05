@@ -21,7 +21,7 @@ feature parity with the existing Cranelift backend.
 
 - **lpir crate**: Complete — Op enum, IrFunction, IrModule, builder,
   text printer, parser, interpreter, validator.
-- **Naga → LPIR lowering** (`lps-naga/src/lower.rs`): Handles scalar
+- **Naga → LPIR lowering** (`lps-frontend/src/lower.rs`): Handles scalar
   expressions, control flow, calls, LPFX, std.math. Enough to run the
   example shader.
 - **LPIR → WASM emission** (`lps-wasm`): Working, consumes LPIR modules.

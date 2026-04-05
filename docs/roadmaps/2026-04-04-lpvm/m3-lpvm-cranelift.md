@@ -27,7 +27,7 @@ validates the trait API against a backend we have full control over.
 
 **Compile entry points:**
 
-- `jit(source, options)` — GLSL → **`lps-naga`** → LPIR → JitModule (needs
+- `jit(source, options)` — GLSL → **`lps-frontend`** → LPIR → JitModule (needs
   frontend feature; name may still be `glsl` in code during migration)
 - `jit_from_ir(ir, options)` — LPIR → JitModule (no metadata, limited call())
 - `jit_from_ir_owned(ir, meta, options)` — LPIR + metadata → JitModule (full)

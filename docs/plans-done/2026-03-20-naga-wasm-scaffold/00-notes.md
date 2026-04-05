@@ -2,7 +2,7 @@
 
 ## Scope
 
-Create `lps-naga` frontend crate and rewrite `lps-wasm` to consume
+Create `lps-frontend` frontend crate and rewrite `lps-wasm` to consume
 `naga::Module`. Wire up filetests. Pass scalar arithmetic filetests end-to-end.
 
 Part of: `docs/roadmaps/2026-03-20-naga/`
@@ -20,9 +20,9 @@ Part of: `docs/roadmaps/2026-03-20-naga/`
 
 ## Key decisions
 
-- `lps-naga` defines its own `FloatMode`, `GlslType`, `FunctionInfo` types
+- `lps-frontend` defines its own `FloatMode`, `GlslType`, `FunctionInfo` types
   (no dependency on `lps-frontend`).
-- `lps-wasm` switches dependency from `lps-frontend` to `lps-naga`.
+- `lps-wasm` switches dependency from `lps-frontend` to `lps-frontend`.
 - `lps-filetests` wasm_runner updated to use new types from `lps-wasm`.
 - Phase I scope limited to scalars (float, int, uint, bool), basic binary ops,
   literals, local variables, assignment. No vectors, builtins, control flow.

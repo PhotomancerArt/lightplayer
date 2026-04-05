@@ -13,8 +13,8 @@ and the public API is complete.
 
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lps_naga::compile(source)?;
-    let ir_module = lps_naga::lower::lower(&naga_module)
+    let naga_module = lps_frontend::compile(source)?;
+    let ir_module = lps_frontend::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;

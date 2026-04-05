@@ -2,7 +2,7 @@
 
 ## Scope
 
-Implement the Naga → LPIR lowering pass in `lps-naga`. Covers scalar
+Implement the Naga → LPIR lowering pass in `lps-frontend`. Covers scalar
 expressions, control flow, user function calls, math builtin decomposition,
 LPFX call structure, and interpreter-based testing. The lowering is completely
 float-mode-unaware.
@@ -10,7 +10,7 @@ float-mode-unaware.
 ## File structure
 
 ```
-lp-shader/lps-naga/
+lp-shader/lps-frontend/
 ├── Cargo.toml                    # UPDATE: add lpir, lps-builtin-ids deps
 └── src/
     ├── lib.rs                    # UPDATE: pub mod lower + submodules
@@ -22,7 +22,7 @@ lp-shader/lps-naga/
     ├── lower_lpfx.rs             # NEW: LPFX detection, import creation, out-param ABI
     └── std_math_handler.rs       # NEW: StdMathHandler (ImportHandler for tests)
 
-lp-shader/lps-naga/tests/
+lp-shader/lps-frontend/tests/
     ├── lower_interp.rs           # NEW: GLSL → LPIR → interpret → verify results
     └── lower_print.rs            # NEW: GLSL → LPIR → print → verify text output
 
@@ -37,7 +37,7 @@ lp-shader/lpir/src/
 GLSL source
   │
   ▼
-compile(glsl) ──────────────────── lps-naga (existing)
+compile(glsl) ──────────────────── lps-frontend (existing)
   │
   ▼
 NagaModule { module, functions }

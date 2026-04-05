@@ -3,8 +3,8 @@
 ## Cleanup & validation
 
 - Grep diff for `TODO`, `dbg!`, `println!`, commented-out relational code; remove stray debug.
-- `cargo +nightly fmt` on touched crates (`lps-naga`, filetests if edited).
-- `cargo clippy -p lps-naga -D warnings` (fix or allow with narrow justification only if
+- `cargo +nightly fmt` on touched crates (`lps-frontend`, filetests if edited).
+- `cargo clippy -p lps-frontend -D warnings` (fix or allow with narrow justification only if
   required).
 
 ```bash
@@ -53,7 +53,8 @@ done
 ## Plan cleanup
 
 - Write [`summary.md`](./summary.md): bullets for shipped changes; **Tier B** file list; confirm
-  Tier A + Tier B passed **jit / wasm / rv32** (see [`expected-passing-tests.md`](./expected-passing-tests.md));
+  Tier A + Tier B passed **jit / wasm / rv32** (see [
+  `expected-passing-tests.md`](./expected-passing-tests.md));
   known deferrals (Milestone II+).
 - When the milestone is fully done and merged, move this directory to `docs/plans-done/` per team
   convention.

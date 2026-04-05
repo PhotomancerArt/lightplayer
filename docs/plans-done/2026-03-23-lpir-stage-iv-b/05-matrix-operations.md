@@ -150,11 +150,13 @@ pub(crate) fn lower_transpose(
 Scalar result. Inline cofactor expansion.
 
 **2×2**:
+
 ```
 det = a*d - b*c
 ```
 
 **3×3** (Sarrus' rule):
+
 ```
 det = a(ei-fh) - b(di-fg) + c(dh-eg)
 ```
@@ -181,6 +183,7 @@ Each `detN` function emits multiply and add/sub ops inline.
 ### `lower_matrix.rs` — inverse
 
 **2×2**:
+
 ```
 inv = (1/det) * [[d, -b], [-c, a]]
 ```
@@ -230,9 +233,9 @@ For `Math { fun: Transpose/Determinant/Inverse }`, dispatch to
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
-cargo clippy -p lps-naga
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
+cargo clippy -p lps-frontend
 ```
 
 Matrix filetests (mat*vec, mat*mat, transpose, determinant, inverse)

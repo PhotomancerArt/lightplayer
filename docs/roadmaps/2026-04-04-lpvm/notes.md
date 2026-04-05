@@ -40,7 +40,7 @@ vec3/mat4 as IR types).
 |-------------------------------|-------------------------------------------|-------------------------|
 | Cranelift JIT (host+embedded) | `lpir-cranelift`                          | cranelift-*             |
 | RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`)  | lp-riscv-*              |
-| WASM emission                 | `lps-wasm`                            | wasm-encoder            |
+| WASM emission                 | `lps-wasm`                                | wasm-encoder            |
 | WASM runner (desktop)         | `lps-filetests` (transitional names vary) | wasmtime                |
 | WASM runner (browser)         | `web-demo`                                | browser WebAssembly API |
 | LPIR interpreter              | `lpir::interp`                            | (none beyond lpir)      |
@@ -86,7 +86,7 @@ make reasonable concessions.
 
 **Answer**: `lpvm/` at the repo root, alongside `lp-riscv/`, `lp-core/`, etc.
 Long-term: eliminate **`lp-shader/`** as a directory name. Shader layer becomes
-**`lps-*`** (`lps-shared`, `lps-naga`, `lps-builtins`, `lps-filetests`, …).
+**`lps-*`** (`lps-shared`, `lps-frontend`, `lps-builtins`, `lps-filetests`, …).
 **`lpir`** may move to top-level. **`lpvm/`** holds VM crates. Repo may be
 mid-rename; [overview.md](overview.md) is canonical for target names.
 
@@ -170,7 +170,7 @@ IR type). The frontend lowers to LPIR but still emits **metadata** using logical
 types.
 
 **Answer**: **`lps-shared`** is the **shader-layer type vocabulary** — shared by
-**`lps-naga`** (and future frontends) and **`lpvm`** (signatures, calling
+**`lps-frontend`** (and future frontends) and **`lpvm`** (signatures, calling
 convention, metadata). **`lpir`** does **not** absorb these types. **`lpvm`**
 adds runtime values (`LpvmValue`), VMContext, layout, and traits; it **depends on**
 **`lps-shared`** where signatures matter. Naming: **`Lps*`** in `lps-shared`,

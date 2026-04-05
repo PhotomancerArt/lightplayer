@@ -3,7 +3,7 @@
 ## Scope of work
 
 Fix the ~40 failing GLSL filetests that surfaced after Stage IV-B / Stage V
-work. These span the Naga→LPIR lowering (`lps-naga`), the WASM emitter
+work. These span the Naga→LPIR lowering (`lps-frontend`), the WASM emitter
 (`lps-wasm`), LPFX import resolution, and test maintenance.
 
 ## Current state
@@ -203,12 +203,13 @@ they're trivial. P1 items (6–8) can be deferred or included if time permits.
 Naga represents `inout` as Pointer types. Two approaches:
 
 A) **Pure value-based extra returns:** callee returns final values of `inout`
-   params as additional results. Keeps LPIR pointer-free.
+params as additional results. Keeps LPIR pointer-free.
 B) **Slot-based (mirrors Cranelift):** caller allocates LPIR slots for `inout`
-   args, stores current values, passes `SlotAddr` as i32 to callee. Callee
-   does `Load`/`Store` through the address. Caller loads back after call.
+args, stores current values, passes `SlotAddr` as i32 to callee. Callee
+does `Load`/`Store` through the address. Caller loads back after call.
 
 **Answer:** (B) — slot-based, matching Cranelift. Reasons:
+
 - Matches Cranelift ABI (pointer to stack slot for out/inout).
 - Handles nested `inout` forwarding naturally.
 - Multi-return will use memory (StructReturn) anyway, so the slot-based
@@ -221,7 +222,7 @@ B) **Slot-based (mirrors Cranelift):** caller allocates LPIR slots for `inout`
 Two approaches:
 
 A) **Two-pass lowering:** first pass collects all function signatures, second
-   pass lowers bodies. Functions can reference any other function.
+pass lowers bodies. Functions can reference any other function.
 B) **Reorder functions:** topologically sort before lowering.
 
 **Answer:** (A) — pre-pass to register all function signatures before lowering
@@ -230,6 +231,7 @@ bodies. Naga already has all function metadata upfront.
 ### Q4: Bool cast approach
 
 Naga `As` with bool target means "compare to zero". In Q32:
+
 - `bool(float_val)` → `float_val != 0` → `i32.ne(v, 0)` (Q32 zero is `0i32`)
 - `bool(int_val)` → `int_val != 0`
 - `bool(bool_val)` → identity

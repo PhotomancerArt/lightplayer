@@ -1,6 +1,6 @@
 //! WASM compilation options.
 
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 
 /// Options for GLSL-to-WASM compilation.
 #[derive(Debug, Clone)]

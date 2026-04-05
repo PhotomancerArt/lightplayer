@@ -2,7 +2,7 @@
 
 ## What shipped
 
-- **`lpir-cranelift`:** Split **`glsl`** (front end / `lps-naga`) from **`std`** (host:
+- **`lpir-cranelift`:** Split **`glsl`** (front end / `lps-frontend`) from **`std`** (host:
   `cranelift-native`, etc.). **`jit()`** and **`CompilerError::Lower`** use **`glsl`**. Default
   features **`std` + `glsl`**. RISC-V32 lowers multi-return functions with **StructReturn** when *
   *`return_types.len() > 2`**; invoke path uses a hidden buffer pointer on **`riscv32`** only.

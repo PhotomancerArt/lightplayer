@@ -41,7 +41,7 @@ Remove any temporary TODOs added during this plan.
 
 ```
 cargo clippy -p lps-builtin-ids -p lps-builtins -p lps-builtins-gen-app \
-  -p lps-naga -p lps-wasm -p lpir -- --no-deps -D warnings
+  -p lps-frontend -p lps-wasm -p lpir -- --no-deps -D warnings
 ```
 
 Fix any warnings introduced by the rename (unused imports, dead code, etc.).
@@ -57,7 +57,7 @@ cargo +nightly fmt --all
 
 ```
 cargo test -p lps-builtin-ids -p lps-builtins -p lps-builtins-gen-app \
-  -p lps-naga -p lps-wasm -p lpir
+  -p lps-frontend -p lps-wasm -p lpir
 just test-glsl-filetests
 ```
 

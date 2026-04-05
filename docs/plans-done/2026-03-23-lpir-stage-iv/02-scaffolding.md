@@ -49,6 +49,7 @@ pub fn lower(naga_module: &NagaModule) -> Result<lpir::IrModule, LowerError>
 ```
 
 `LowerError`:
+
 ```rust
 #[derive(Debug)]
 pub enum LowerError {
@@ -62,13 +63,14 @@ pub enum LowerError {
 Implement `Display` and `Error` for `LowerError`.
 
 Initial implementation:
+
 1. Create `ModuleBuilder::new()`
 2. Build function index map: `Handle<Function>` → anticipated `CalleeRef`
    (imports come first, then functions in order)
 3. For each `(handle, function_info)` in `naga_module.functions`:
-   - Create `FunctionBuilder::new(name, return_types)`
-   - Set entry if applicable
-   - Call `finish()` and `mb.add_function()`
+    - Create `FunctionBuilder::new(name, return_types)`
+    - Set entry if applicable
+    - Call `finish()` and `mb.add_function()`
 4. Return `mb.finish()`
 
 The function body lowering is stubbed (empty body, just return).
@@ -90,6 +92,7 @@ pub(crate) struct LowerCtx<'a> {
 ```
 
 Implement `LowerCtx::new()`:
+
 1. Create `FunctionBuilder`
 2. Add params (mapping Naga `FunctionArgument` types to LPIR types)
 3. Detect parameter aliases (scan body for `Store(LocalVar, FuncArg)`)
@@ -97,6 +100,7 @@ Implement `LowerCtx::new()`:
 5. Initialize `expr_cache` with `None` for each expression in the arena
 
 Helper methods:
+
 - `naga_scalar_to_ir_type(ScalarKind) -> Result<IrType, LowerError>`:
   Float→F32, Sint/Uint/Bool→I32
 - `naga_type_to_ir_type(&TypeInner) -> Result<IrType, LowerError>`:
@@ -109,8 +113,10 @@ Helper methods:
 
 Create empty stub files so the crate compiles:
 
-- `lower_expr.rs`: `pub(crate) fn lower_expr(ctx: &mut LowerCtx, expr: Handle<Expression>) -> Result<VReg, LowerError> { todo!() }`
-- `lower_stmt.rs`: `pub(crate) fn lower_block(ctx: &mut LowerCtx, block: &Block) -> Result<(), LowerError> { todo!() }`
+- `lower_expr.rs`:
+  `pub(crate) fn lower_expr(ctx: &mut LowerCtx, expr: Handle<Expression>) -> Result<VReg, LowerError> { todo!() }`
+- `lower_stmt.rs`:
+  `pub(crate) fn lower_block(ctx: &mut LowerCtx, block: &Block) -> Result<(), LowerError> { todo!() }`
 - `lower_math.rs`: empty
 - `lower_lpfx.rs`: empty
 - `std_math_handler.rs`: empty struct implementing `ImportHandler` with `todo!()`
@@ -118,10 +124,10 @@ Create empty stub files so the crate compiles:
 ## Validate
 
 ```
-cargo check -p lps-naga
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
+cargo check -p lps-frontend
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
 ```
 
-Existing `lps-naga` tests must still pass. The `lower()` function
+Existing `lps-frontend` tests must still pass. The `lower()` function
 compiles but produces empty function bodies.

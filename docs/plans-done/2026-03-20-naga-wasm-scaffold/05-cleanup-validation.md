@@ -26,7 +26,7 @@ Search the git diff for:
 ### 2. Fix warnings
 
 ```bash
-cargo check -p lps-naga 2>&1 | grep warning
+cargo check -p lps-frontend 2>&1 | grep warning
 cargo check -p lps-wasm 2>&1 | grep warning
 cargo check -p lps-filetests 2>&1 | grep warning
 ```
@@ -88,9 +88,9 @@ Move plan files to `docs/plans-done/2026-03-20-naga-wasm-scaffold/`.
 ```
 feat(glsl-wasm): scaffold Naga-based WASM backend (Phase I)
 
-- Create lps-naga crate wrapping naga::front::glsl
+- Create lps-frontend crate wrapping naga::front::glsl
 - Rewrite lps-wasm to consume naga::Module instead of TypedShader
-- Define GlslType/FloatMode in lps-naga (no lps-frontend dep)
+- Define GlslType/FloatMode in lps-frontend (no lps-frontend dep)
 - Update lps-filetests wasm_runner for new types
 - Scalar arithmetic filetests passing on wasm.q32
 - Remove old 32-file codegen tree from lps-wasm
@@ -101,7 +101,7 @@ feat(glsl-wasm): scaffold Naga-based WASM backend (Phase I)
 ```bash
 cargo +nightly fmt
 cargo check
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-wasm
 cargo test -p lps-filetests -- scalar
 cargo test -p lps-filetests

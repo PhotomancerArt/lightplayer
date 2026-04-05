@@ -113,7 +113,7 @@ See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and
 GLSL source (#version 450 core)
   │
   ▼
-lps-naga           Naga glsl-in → IrModule
+lps-frontend           Naga glsl-in → IrModule
   │
   ▼
 LPIR                    flat, scalarized, mode-agnostic IR
@@ -123,7 +123,7 @@ LPIR                    flat, scalarized, mode-agnostic IR
   └──► lpir::interp       → in-process interpreter (testing)
 ```
 
-**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lps-naga`** walks Naga's
+**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lps-frontend`** walks Naga's
 expression arena and lowers to **LPIR** — a flat, scalarized IR with structured control flow and
 virtual registers. Lowering is mode-agnostic: Q32 vs float is a backend decision.
 
@@ -137,7 +137,7 @@ and stable compiler internals across Cranelift version bumps.
 
 - **`lpir-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
   primary target is RISC-V 32-bit (`riscv32imac`) for ESP32-C6. Host JIT uses `cranelift-native`
-  for development and testing. Optional `glsl` feature pulls in `lps-naga` for
+  for development and testing. Optional `glsl` feature pulls in `lps-frontend` for
   string-to-machine-code entry points.
 
 - **`lps-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct

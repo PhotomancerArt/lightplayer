@@ -40,14 +40,14 @@ and matrices (and extend **`Load`** peeling as needed).
 
 ### Tests
 
-- `cargo test -p lps-naga`
+- `cargo test -p lps-frontend`
 - `bash scripts/glsl-filetests.sh --target jit.q32 vec/bvec2/index-variable-valid.glsl` (partial
   pass acceptable if stores still fail — phase 2 completes).
 
 ## Validate
 
 ```bash
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```
 

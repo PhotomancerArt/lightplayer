@@ -16,7 +16,7 @@ is `no_std` + alloc.
 GLSL source (#version 450 core)
   │
   ▼
-lps-naga         Naga glsl-in → IrModule
+lps-frontend         Naga glsl-in → IrModule
   │
   ▼
 LPIR                  flat, scalarized, mode-agnostic IR
@@ -48,7 +48,7 @@ Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
 ### Frontend and IR
 
-- `lps-naga/` — GLSL parsing (Naga) and lowering to LPIR
+- `lps-frontend/` — GLSL parsing (Naga) and lowering to LPIR
 - `lpir/` — LightPlayer IR (types, ops, builder, parser, printer, interpreter, validator)
 - `lps-shared/`, `lps-diagnostics/`, `lpvm/` — shared types and errors for
   tests / exec helpers

@@ -38,7 +38,7 @@ since last session), but fails for hand-written LPIR that contains
 `Fsqrt` / `Fnearest` without a corresponding import.
 
 **Acceptable for now:** the only producer of `IrModule` is
-`lps-naga::lower`, which always registers these imports. Document
+`lps-frontend::lower`, which always registers these imports. Document
 this coupling; revisit if a second IR producer appears.
 
 ### `$sp` global index — hard-coded `0u32`
@@ -71,46 +71,51 @@ These are unlikely to appear in Naga-lowered GLSL (Naga always emits
 
 ### Tests present (14)
 
-| Test | Coverage |
-|------|----------|
-| `float_literal_return` | Float mode literal |
-| `float_add` | Float mode add |
-| `int_add_typed` | i32 add (Q32 default) |
-| `multiple_functions_exported` | Float mode multi-export |
-| `q32_add` | Q32 fadd with saturation |
-| `q32_mul` | Q32 fmul (i64 path) |
-| `q32_div` | Q32 fdiv |
-| `q32_abs` | Q32 fabs (inline branch) |
-| `q32_while_accumulates` | Loop + accumulator |
-| `int_switch_dispatch` | Switch with 3 cases |
-| `q32_floor_and_ceil` | Q32 ffloor / fceil |
-| `q32_chained_float_compare_and` | If + logical and |
-| `q32_chained_float_compare_or` | If + logical or |
-| `q32_triple_float_compare_and` | Nested logical chain |
+| Test                            | Coverage                 |
+|---------------------------------|--------------------------|
+| `float_literal_return`          | Float mode literal       |
+| `float_add`                     | Float mode add           |
+| `int_add_typed`                 | i32 add (Q32 default)    |
+| `multiple_functions_exported`   | Float mode multi-export  |
+| `q32_add`                       | Q32 fadd with saturation |
+| `q32_mul`                       | Q32 fmul (i64 path)      |
+| `q32_div`                       | Q32 fdiv                 |
+| `q32_abs`                       | Q32 fabs (inline branch) |
+| `q32_while_accumulates`         | Loop + accumulator       |
+| `int_switch_dispatch`           | Switch with 3 cases      |
+| `q32_floor_and_ceil`            | Q32 ffloor / fceil       |
+| `q32_chained_float_compare_and` | If + logical and         |
+| `q32_chained_float_compare_or`  | If + logical or          |
+| `q32_triple_float_compare_and`  | Nested logical chain     |
 
 ### Tests missing (from Phase 08 plan)
 
 **Arithmetic:**
+
 - `q32_subtract` — float subtraction
 - `q32_negate` — float negation
 - `q32_int_modulo` — integer `%`
 
 **Control flow:**
+
 - `q32_if_else` — conditional return (simple)
 - `q32_for_loop` — for-style loop
 - `q32_nested_loops` — nested loop with break
 
 **Math:**
+
 - `q32_min_max` — `min(a, b)`, `max(a, b)`
 - `q32_mix` — `mix(a, b, t)` (inline decomposition)
 - `q32_clamp` — `clamp(x, lo, hi)`
 - `q32_step` — `step(edge, x)`
 
 **Calls:**
+
 - `q32_call_user_func` — call between two exported funcs
 - `q32_call_chain` — A→B→C call chain
 
 **Casts:**
+
 - `q32_float_to_int` — `FtoiSatS`
 - `q32_int_to_float` — `ItofS`
 

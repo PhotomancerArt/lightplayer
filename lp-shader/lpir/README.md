@@ -24,7 +24,7 @@ Concretely, this gives us:
 
 - **Decoupled testing.** The interpreter runs any LPIR program without Cranelift. Filetests can
   verify scalarization, control flow, builtins, and GLSL semantics using the interpreter alone.
-- **Multiple backends from one lowering.** `lps-naga` lowers GLSL once; three consumers
+- **Multiple backends from one lowering.** `lps-frontend` lowers GLSL once; three consumers
   (Cranelift / WASM / interpreter) share the result.
 - **Stable compiler internals.** Cranelift version bumps, ABI changes, or ISA feature flags stay
   behind the `lpir-cranelift` boundary and do not ripple into the frontend or tests.
@@ -92,14 +92,14 @@ func @example(v0:f32) -> f32 {
 
 ## Design choices
 
-| Choice | Why |
-|--------|-----|
-| **Flat / ANF** | Every intermediate is a named VReg — no expression trees. Eliminates the scratch-local aliasing bugs that plagued the old single-pass WASM emitter. |
-| **Scalarized (v1)** | Vectors decompose to scalar VRegs during lowering. Keeps backend complexity low; SIMD extensions are a future direction. |
-| **Non-SSA** | VRegs can be reassigned. Lowering stays simple; backends that want SSA (Cranelift) rebuild it themselves. |
-| **Structured control flow** | `if`/`loop`/`switch`/`break`/`continue` — mirrors GLSL and maps directly to WASM. Cranelift lowers structured CF to its own CFG trivially. |
-| **Float-mode-agnostic** | `fadd` means "GLSL float add". Whether that becomes IEEE `f32` or Q16.16 fixed-point is a backend decision, not an IR property. |
-| **Open import modules** | `@std.math::fsin`, `@lp.q32::…`, `@lpfx::…` — adding builtins never changes the opcode set. |
+| Choice                      | Why                                                                                                                                                 |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Flat / ANF**              | Every intermediate is a named VReg — no expression trees. Eliminates the scratch-local aliasing bugs that plagued the old single-pass WASM emitter. |
+| **Scalarized (v1)**         | Vectors decompose to scalar VRegs during lowering. Keeps backend complexity low; SIMD extensions are a future direction.                            |
+| **Non-SSA**                 | VRegs can be reassigned. Lowering stays simple; backends that want SSA (Cranelift) rebuild it themselves.                                           |
+| **Structured control flow** | `if`/`loop`/`switch`/`break`/`continue` — mirrors GLSL and maps directly to WASM. Cranelift lowers structured CF to its own CFG trivially.          |
+| **Float-mode-agnostic**     | `fadd` means "GLSL float add". Whether that becomes IEEE `f32` or Q16.16 fixed-point is a backend decision, not an IR property.                     |
+| **Open import modules**     | `@std.math::fsin`, `@lp.q32::…`, `@lpfx::…` — adding builtins never changes the opcode set.                                                         |
 
 ## Pipeline
 
@@ -107,7 +107,7 @@ func @example(v0:f32) -> f32 {
 GLSL source
   │
   ▼
-lps-naga  (Naga glsl-in → IrModule)
+lps-frontend  (Naga glsl-in → IrModule)
   │
   ├──► lpir::interp       (in-process interpreter, testing)
   ├──► lpir-cranelift      (Cranelift → RISC-V / host JIT)
@@ -140,15 +140,15 @@ src/
 
 The full language spec lives in [`docs/lpir/`](../../docs/lpir/):
 
-| Doc | Contents |
-|-----|----------|
-| [00-overview](../../docs/lpir/00-overview.md) | Rationale, pipeline, IR classification, design decisions, numeric semantics |
-| [01-types-and-vregs](../../docs/lpir/01-types-and-vregs.md) | `f32` / `i32`, VReg naming and rules |
-| [02-core-ops](../../docs/lpir/02-core-ops.md) | Arithmetic, comparison, logic, constants, casts, select/copy |
-| [03-memory](../../docs/lpir/03-memory.md) | Slots, load/store, memcpy, pointer model |
-| [04-control-flow](../../docs/lpir/04-control-flow.md) | if/else, loop, switch, break/continue, br_if_not |
-| [05-calls](../../docs/lpir/05-calls.md) | Function declarations, call op, multi-return, recursion |
-| [06-import-modules](../../docs/lpir/06-import-modules.md) | `@std.math`, `@lp.q32`, `@lpfx` modules |
-| [07-text-format](../../docs/lpir/07-text-format.md) | Lexical rules, EBNF grammar, well-formedness |
-| [08-glsl-mapping](../../docs/lpir/08-glsl-mapping.md) | Naga expression/statement → LPIR lowering tables |
-| [09-future](../../docs/lpir/09-future.md) | Vector types, i64, optimizations, diagnostics |
+| Doc                                                         | Contents                                                                    |
+|-------------------------------------------------------------|-----------------------------------------------------------------------------|
+| [00-overview](../../docs/lpir/00-overview.md)               | Rationale, pipeline, IR classification, design decisions, numeric semantics |
+| [01-types-and-vregs](../../docs/lpir/01-types-and-vregs.md) | `f32` / `i32`, VReg naming and rules                                        |
+| [02-core-ops](../../docs/lpir/02-core-ops.md)               | Arithmetic, comparison, logic, constants, casts, select/copy                |
+| [03-memory](../../docs/lpir/03-memory.md)                   | Slots, load/store, memcpy, pointer model                                    |
+| [04-control-flow](../../docs/lpir/04-control-flow.md)       | if/else, loop, switch, break/continue, br_if_not                            |
+| [05-calls](../../docs/lpir/05-calls.md)                     | Function declarations, call op, multi-return, recursion                     |
+| [06-import-modules](../../docs/lpir/06-import-modules.md)   | `@std.math`, `@lp.q32`, `@lpfx` modules                                     |
+| [07-text-format](../../docs/lpir/07-text-format.md)         | Lexical rules, EBNF grammar, well-formedness                                |
+| [08-glsl-mapping](../../docs/lpir/08-glsl-mapping.md)       | Naga expression/statement → LPIR lowering tables                            |
+| [09-future](../../docs/lpir/09-future.md)                   | Vector types, i64, optimizations, diagnostics                               |

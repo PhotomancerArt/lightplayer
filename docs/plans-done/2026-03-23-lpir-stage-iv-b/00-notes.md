@@ -2,7 +2,7 @@
 
 ## Scope
 
-Extend the Naga → LPIR lowering (`lps-naga`) to scalarize vector
+Extend the Naga → LPIR lowering (`lps-frontend`) to scalarize vector
 and matrix operations. After this stage, GLSL programs using vec2/vec3/
 vec4, mat2/mat3/mat4, swizzles, component access, and vector math all
 lower to flat scalar LPIR ops. This is required for the web demo and the
@@ -34,40 +34,40 @@ that can hold multiple VRegs per expression handle.
 
 ### Naga Expression variants
 
-| Expression | Scalarization |
-|------------|---------------|
-| `Compose { ty, components }` | Collect component VRegs (recurse for vector components) |
-| `Splat { size, value }` | Replicate scalar VReg N times |
-| `Swizzle { size, vector, pattern }` | Pick VRegs from vector's components by pattern |
-| `AccessIndex { base, index }` | Pick one VReg from base's component list |
-| `Access { base, index }` | Dynamic index — select via runtime comparison chain |
-| `Binary` on vectors | Component-wise: N binary ops |
-| `Unary` on vectors | Component-wise: N unary ops |
-| `Select` on vectors | Component-wise: N select ops |
-| `As` on vectors | Component-wise: N cast ops |
-| `Math` on vectors | Component-wise: N math ops (with scalar broadcast for mix args) |
-| `ZeroValue` vector/matrix | N zero constants |
-| `FunctionArgument` vector | N consecutive param VRegs |
-| `Load(LocalVariable)` vector | N local VRegs |
-| `CallResult` vector | N result VRegs |
-| `Constant` vector | Lower each component from global expression arena |
+| Expression                          | Scalarization                                                   |
+|-------------------------------------|-----------------------------------------------------------------|
+| `Compose { ty, components }`        | Collect component VRegs (recurse for vector components)         |
+| `Splat { size, value }`             | Replicate scalar VReg N times                                   |
+| `Swizzle { size, vector, pattern }` | Pick VRegs from vector's components by pattern                  |
+| `AccessIndex { base, index }`       | Pick one VReg from base's component list                        |
+| `Access { base, index }`            | Dynamic index — select via runtime comparison chain             |
+| `Binary` on vectors                 | Component-wise: N binary ops                                    |
+| `Unary` on vectors                  | Component-wise: N unary ops                                     |
+| `Select` on vectors                 | Component-wise: N select ops                                    |
+| `As` on vectors                     | Component-wise: N cast ops                                      |
+| `Math` on vectors                   | Component-wise: N math ops (with scalar broadcast for mix args) |
+| `ZeroValue` vector/matrix           | N zero constants                                                |
+| `FunctionArgument` vector           | N consecutive param VRegs                                       |
+| `Load(LocalVariable)` vector        | N local VRegs                                                   |
+| `CallResult` vector                 | N result VRegs                                                  |
+| `Constant` vector                   | Lower each component from global expression arena               |
 
 ### Naga Statement changes
 
-| Statement | Change |
-|-----------|--------|
-| `Store { pointer, value }` | N Copy ops (one per component) |
-| `Call { result }` | Allocate N result VRegs for vector returns |
-| `Return { value }` | Push N VRegs |
+| Statement                  | Change                                     |
+|----------------------------|--------------------------------------------|
+| `Store { pointer, value }` | N Copy ops (one per component)             |
+| `Call { result }`          | Allocate N result VRegs for vector returns |
+| `Return { value }`         | Push N VRegs                               |
 
 ### Type boundaries
 
-| Boundary | Change |
-|----------|--------|
-| Function parameters | vec3 param → 3 F32 params in LPIR |
-| Function returns | vec3 return → 3 F32 returns in LPIR |
-| User function calls | Flatten args and results to scalars |
-| LPFX calls | Vector out-params → slot with N*4 bytes, N loads after call |
+| Boundary            | Change                                                      |
+|---------------------|-------------------------------------------------------------|
+| Function parameters | vec3 param → 3 F32 params in LPIR                           |
+| Function returns    | vec3 return → 3 F32 returns in LPIR                         |
+| User function calls | Flatten args and results to scalars                         |
+| LPFX calls          | Vector out-params → slot with N*4 bytes, N loads after call |
 
 ## Questions
 
@@ -77,11 +77,12 @@ The expression cache is currently `Vec<Option<VReg>>`. For vectors, one
 Naga expression produces N VRegs.
 
 Options:
+
 - A) Change to `Vec<Option<SmallVec<[VReg; 4]>>>` — each entry holds
-     1-16 VRegs (scalars have 1, vec4 has 4, mat4 has 16).
+  1-16 VRegs (scalars have 1, vec4 has 4, mat4 has 16).
 - B) Use a separate `Vec<Option<Vec<VReg>>>` (heap-allocated per entry).
 - C) Keep the cache scalar-only and introduce a separate
-     `vec_cache: Vec<Option<Vec<VReg>>>` for multi-component results.
+  `vec_cache: Vec<Option<Vec<VReg>>>` for multi-component results.
 
 Suggested: A. `SmallVec<[VReg; 4]>` avoids allocation for the common
 case (vec4 or smaller). Scalars are 1-element SmallVecs. Uniform API.
@@ -92,16 +93,18 @@ case (vec4 or smaller). Scalars are 1-element SmallVecs. Uniform API.
 
 Naga has matrices. The old emitter flattened them (mat4 → 16 f32 components).
 GLSL matrix ops include:
+
 - `mat * vec` → vector result (matrix-vector multiply)
 - `mat * mat` → matrix result (matrix multiply)
 - `mat * scalar` → matrix result (component-wise)
 - `transpose`, `determinant`, `inverse`
 
 Options:
+
 - A) Full matrix support: flatten to scalars, inline multiply loops,
-     support transpose/determinant/inverse as inline decomposition.
+  support transpose/determinant/inverse as inline decomposition.
 - B) Minimal matrix support: flatten to scalars, support component access
-     and construction, but error on matrix multiply and matrix math.
+  and construction, but error on matrix multiply and matrix math.
 - C) No matrix support in this stage. Vectors only.
 
 Web demo doesn't use matrices, but matrix filetests exist and the old
@@ -118,8 +121,9 @@ GLSL allows `vec3 * float` (scalar broadcast). Naga represents this as
 width mismatch and broadcast the scalar.
 
 Should the lowering:
+
 - A) Detect width mismatch and replicate the scalar VReg for each
-     component. No extra ops needed — just reuse the same VReg.
+  component. No extra ops needed — just reuse the same VReg.
 - B) Always require both operands to have the same width (error otherwise).
 
 Suggested: A. It's simple — reuse the scalar VReg as-is for each
@@ -140,6 +144,7 @@ else: result = v.z
 ```
 
 Options:
+
 - A) Implement via comparison + select chain.
 - B) Error for now (same as old emitter). Most GLSL uses constant indices.
 
@@ -154,8 +159,9 @@ Some LPFX functions return vectors via out-pointers (e.g. `lpfx_hsv2rgb`
 writes to a vec3 out-param). The current lowering errors on these.
 
 Options:
+
 - A) Implement fully: allocate slot of N*4 bytes, pass slot address,
-     load N components after call, map back to local VRegs.
+  load N components after call, map back to local VRegs.
 - B) Error for now. Focus on scalar-returning LPFX first.
 
 The web demo uses `lpfx_psrdnoise` which has an `out vec2 gradient`

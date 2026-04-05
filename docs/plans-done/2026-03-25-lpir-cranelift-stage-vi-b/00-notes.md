@@ -9,7 +9,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 
 ## Takeaways from Stage VI-A (keep in mind)
 
-- **`lpir-cranelift` default `std`:** `jit()` and `lps-naga` are enabled by the
+- **`lpir-cranelift` default `std`:** `jit()` and `lps-frontend` are enabled by the
   default **`std`** feature. **`fw-emu` / `lp-server` / `lp-engine`** should keep
   **`std`** (or equivalent default features) so on-device GLSL → JIT works.
   **`cargo check --no-default-features`** on `lpir-cranelift` is IR-only; not the
@@ -24,7 +24,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
   still **map** **`GlslOpts → lpir_cranelift::Q32Options`** and set
   **`max_errors`** for forward compatibility.
 - **Docs:** Comment that GLSL-in “requires **`std`**” means **feature wiring**, not
-  that **`lps-naga`** is **`std`**-only (it is **`#![no_std]`**).
+  that **`lps-frontend`** is **`std`**-only (it is **`#![no_std]`**).
 
 ---
 
@@ -33,7 +33,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 - Replace **`lps-cranelift`** with **`lpir-cranelift`** in **`lp-engine`** (and
   feature forwarding in **`lp-server`**).
 - Rework **`ShaderRuntime`** (`runtime.rs`): compile via **`lpir_cranelift::jit`** (or
-  orchestrated **`lps_naga` + `jit_from_ir_owned`** if we split for memory),
+  orchestrated **`lps_frontend` + `jit_from_ir_owned`** if we split for memory),
   store **`JitModule`** (or thin wrapper), implement **`lps_exec::GlslExecutable`**
   for the slow path (**`call_vec`** with **`lpvm::GlslValue`**).
 - Replace **`get_direct_call_info`** (not on **`lps_exec::GlslExecutable`**) with

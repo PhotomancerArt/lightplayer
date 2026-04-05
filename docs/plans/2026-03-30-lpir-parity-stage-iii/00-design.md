@@ -15,7 +15,7 @@ Implement **roadmap Milestone III**:
 
 ```
 lp-shader/
-├── lps-naga/src/
+├── lps-frontend/src/
 │   └── lower_expr.rs          # UPDATE: As/Compose for bvec casts; round builtin
 ├── lps-builtins/src/builtins/glsl/
 │   └── round_q32.rs           # EXISTS: __lps_round_q32 already correct

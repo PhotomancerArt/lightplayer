@@ -3,7 +3,7 @@
 ## Scope of work
 
 Close gaps between **Naga’s** `Expression::Access` / compound-update **store** shapes and *
-*`lps-naga`** lowering so Milestone II filetests pass on **`jit.q32`**, **`wasm.q32`**, and *
+*`lps-frontend`** lowering so Milestone II filetests pass on **`jit.q32`**, **`wasm.q32`**, and *
 *`rv32.q32`** (see [`expected-passing-tests.md`](./expected-passing-tests.md)). In scope:
 
 - **Loads** through **`Access`** on local vectors (and matching **Load** peel rules).
@@ -17,7 +17,7 @@ Out of scope: general **arrays** (Milestone IV), **structs**, matrix **invoke** 
 ## File structure
 
 ```
-lp-shader/lps-naga/src/
+lp-shader/lps-frontend/src/
 ├── lower_expr.rs              # UPDATE: Expression::Access, Load { pointer: Access… }
 ├── lower_stmt.rs              # UPDATE: Statement::Store through Access / matrix column
 ├── lower_access.rs            # NEW (optional): shared Access index → vreg helpers
@@ -46,7 +46,7 @@ If `lower_access.rs` would be tiny, keep helpers at the **bottom** of `lower_exp
 ## Conceptual architecture
 
 ```
-GLSL  →  Naga IR  →  lps-naga
+GLSL  →  Naga IR  →  lps-frontend
               │              │
               │    Expression::Access { base, index }
               │              │

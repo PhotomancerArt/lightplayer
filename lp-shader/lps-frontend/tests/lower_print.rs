@@ -1,7 +1,7 @@
 //! GLSL → Naga → LPIR text (integration).
 
 use lpir::{print_module, validate_module};
-use lps_naga::{compile, lower};
+use lps_frontend::{compile, lower};
 
 #[test]
 fn print_contains_func_and_fadd() {

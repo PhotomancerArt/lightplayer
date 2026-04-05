@@ -52,7 +52,7 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 ### Filetest status
 
 - `cranelift.q32` backend: **already gone** from filetests (removed in Stage V2).
-- `lps-filetests` depends on `lpir-cranelift` (new), `lps-naga`,
+- `lps-filetests` depends on `lpir-cranelift` (new), `lps-frontend`,
   `lps-frontend`, `lps-exec`, etc. — **no** dep on `lps-cranelift`.
 - `#[ignore]` on `lpfx_builtins_memory.rs` test: WASM ABI mismatch for vec3
   multi-return; roadmap says re-check in VII.
@@ -70,7 +70,7 @@ semantic analysis → LPIR bridge. It is used by:
 - `lps-filetests` (still active)
 - `lps-builtins-gen-app` (still active)
 
-Filetests already have `lps-naga` as the primary frontend. The question is
+Filetests already have `lps-frontend` as the primary frontend. The question is
 whether `lps-frontend` still serves a purpose in filetests (e.g. testing the
 old `glsl` parser path or providing types) or if it is only a leftover dep.
 

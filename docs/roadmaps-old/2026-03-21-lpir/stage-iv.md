@@ -14,7 +14,8 @@ and by printing LPIR text from real GLSL inputs.
 ## Scope
 
 **In scope:**
-- `lps-naga/src/lower.rs` — the Naga → LPIR lowering pass
+
+- `lps-frontend/src/lower.rs` — the Naga → LPIR lowering pass
 - Expression lowering: literals, arguments, locals (load/store), binary ops,
   unary ops, comparisons, casts, select, zero values, constants
 - Statement lowering: emit (no-op), block, if/else, loop, break, continue,
@@ -30,6 +31,7 @@ and by printing LPIR text from real GLSL inputs.
 - Tests: GLSL → Naga → LPIR → print text, verify output
 
 **Out of scope:**
+
 - Vector expressions (Phase II follow-on)
 - Vector builtins (Phase II follow-on)
 - WASM emission (Stage V)
@@ -53,7 +55,7 @@ and by printing LPIR text from real GLSL inputs.
 
 ## Deliverables
 
-- `lps-naga/src/lower.rs` — complete scalar lowering
+- `lps-frontend/src/lower.rs` — complete scalar lowering
 - Tests: known GLSL snippets → expected LPIR text output
 - Tests: known GLSL snippets → LPIR → interpret → verify results
 
@@ -62,7 +64,7 @@ and by printing LPIR text from real GLSL inputs.
 - Stage II (lpir crate with interpreter) must be complete.
 - Stage III (interpreter + validation hardening) should be complete so the
   interpreter is thoroughly tested before lowering builds on it.
-- Existing `lps-naga` crate (compile, LPFX injection) is the base.
+- Existing `lps-frontend` crate (compile, LPFX injection) is the base.
 
 ## Estimated scope
 

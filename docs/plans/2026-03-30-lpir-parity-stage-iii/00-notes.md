@@ -6,7 +6,7 @@ Implement **roadmap Milestone III** (
 `docs/roadmaps/2026-03-29-lpir-parity/milestone-iii-bvec-lowering-gaps.md`):
 
 - **Bvec -> numeric vector casts** (`vec2(bvec2(...))`, etc.): fix `As` / `Compose` lowering in
-  `lps-naga` so component counts match (today: `assignment component count 1 vs 2` style
+  `lps-frontend` so component counts match (today: `assignment component count 1 vs 2` style
   failures).
 - **Naga frontend limitations** (no fork): annotate tests with
   `@unimplemented(reason="Naga frontend limitation")` where applicable - `mix(vec, vec, bvec)`,
@@ -27,7 +27,7 @@ sweep (VI), structs.
   separately).
 - **Roadmap overview** (`docs/roadmaps/2026-03-29-lpir-parity/overview.md`) orders Milestone **III**
   immediately after II: bvec casts, `mix(bvec)` / parse limitations, stragglers.
-- **Lowering hot spots** for Milestone III: `lp-shader/lps-naga/src/lower_expr.rs` (`As`,
+- **Lowering hot spots** for Milestone III: `lp-shader/lps-frontend/src/lower_expr.rs` (`As`,
   `Compose`, conversions), plus filetest annotations under `lp-shader/lps-filetests/filetests/`.
 - **Inherited roadmap decisions** (from `docs/roadmaps/2026-03-29-lpir-parity/notes.md`): no Naga
   fork for parse/overload issues - rewrite tests where easy, else

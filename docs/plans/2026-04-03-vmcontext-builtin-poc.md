@@ -133,7 +133,7 @@ lp-shader/
 │   └── src/
 │       └── (update to detect vmcontext type)
 │
-├── lps-naga/
+├── lps-frontend/
 │   └── src/
 │       ├── lower_ctx.rs          # Copy needs_vmctx from builtin IDs
 │       └── lower_stmt.rs         # Conditionally add VMCTX_VREG
@@ -289,7 +289,7 @@ Copy `needs_vmctx` from builtin IDs to ImportDecl, conditionally add VMContext t
 
 ### Implementation Details
 
-**File: `lps-lps-naga/src/lower_ctx.rs`**
+**File: `lps-lps-frontend/src/lower_ctx.rs`**
 
 When building import map from builtin signatures, copy the flag:
 
@@ -297,7 +297,7 @@ When building import map from builtin signatures, copy the flag:
 import_decl.needs_vmctx = builtin_sig.needs_vmctx;
 ```
 
-**File: `lps-lps-naga/src/lower_stmt.rs`**
+**File: `lps-lps-frontend/src/lower_stmt.rs`**
 
 In `lower_user_call()`, check before adding VMContext:
 
@@ -325,8 +325,8 @@ arg_vs.push(VMCTX_VREG);
 ### Validate
 
 ```bash
-cargo check -p lps-naga
-cargo test -p lps-naga
+cargo check -p lps-frontend
+cargo test -p lps-frontend
 ```
 
 ---
@@ -469,8 +469,8 @@ Final cleanup, documentation, commit.
 ### Validate
 
 ```bash
-cargo test -p lpvm -p lps-naga -p lpir-cranelift -p lps-filetests
-cargo clippy -p lpvm -p lps-naga -p lpir-cranelift
+cargo test -p lpvm -p lps-frontend -p lpir-cranelift -p lps-filetests
+cargo clippy -p lpvm -p lps-frontend -p lpir-cranelift
 ```
 
 ---

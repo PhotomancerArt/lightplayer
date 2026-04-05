@@ -12,16 +12,16 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-pub use lps_naga::{CompileError, FloatMode, LpsType};
+pub use lps_frontend::{CompileError, FloatMode, LpsType};
 pub use module::{
-    glsl_type_to_wasm_components, WasmExport, WasmModule, SHADOW_STACK_GLOBAL_EXPORT,
+    SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmModule, glsl_type_to_wasm_components,
 };
 pub use options::WasmOptions;
 
 use lpir::IrModule;
-use lps_naga::NagaModule;
+use lps_frontend::NagaModule;
 
-/// Full pipeline error (parse/metadata from [`lps_naga`], lowering, or WASM emission).
+/// Full pipeline error (parse/metadata from [`lps_frontend`], lowering, or WASM emission).
 #[derive(Debug)]
 pub enum GlslWasmError {
     Frontend(CompileError),
@@ -47,9 +47,9 @@ impl From<CompileError> for GlslWasmError {
 
 /// Compile GLSL source to a WASM module (Naga → LPIR → WASM).
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lps_naga::compile(source)?;
-    let (ir_module, _) =
-        lps_naga::lower(&naga_module).map_err(|e| GlslWasmError::Codegen(alloc::format!("{e}")))?;
+    let naga_module = lps_frontend::compile(source)?;
+    let (ir_module, _) = lps_frontend::lower(&naga_module)
+        .map_err(|e| GlslWasmError::Codegen(alloc::format!("{e}")))?;
     let (wasm_bytes, shadow_stack_base) =
         emit::emit_module(&ir_module, &options).map_err(GlslWasmError::Codegen)?;
     let exports = collect_exports(&ir_module, &naga_module, &options);

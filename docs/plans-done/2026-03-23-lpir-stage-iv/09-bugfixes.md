@@ -19,7 +19,8 @@ before they are read.
 
 **Fix** (in `lower_ctx.rs`, end of `LowerCtx::new`): build the full
 `LowerCtx`, then iterate `func.local_variables` in arena order (skip
-`param_aliases`). For each `var.init: Some(h)`, `h` refers to the function's `expressions` arena, not
+`param_aliases`). For each `var.init: Some(h)`, `h` refers to the function's `expressions` arena,
+not
 `global_expressions`. Call
 `lower_expr::lower_expr(&mut ctx, h)` and emit `Op::Copy` into the local's
 vreg. Const inits (literals, `Constant`, const-folded ops) are covered;
@@ -43,12 +44,15 @@ Since LPIR only has 32-bit scalars, `Some(4)` is always valid.
 **Fix** (in `lower_expr.rs`, the `Expression::As` match arm):
 
 Change:
+
 ```rust
 if convert.is_some() {
     return Err(LowerError::UnsupportedExpression(...));
 }
 ```
+
 To:
+
 ```rust
 if convert.is_some_and(|w| w != 4) {
     return Err(LowerError::UnsupportedExpression(...));
@@ -66,6 +70,7 @@ After the two fixes, add the remaining tests from 07-tests.md that are
 now unblocked:
 
 ### `lower_interp.rs` additions
+
 - `interp_loop_sum` — remove `#[ignore]`, verify `sum(4) == 6`
 - `interp_float_to_int` — `int f(float x) { return int(x); }`
 - `interp_int_to_float` — `float f(int x) { return float(x); }`
@@ -86,14 +91,15 @@ now unblocked:
 - `interp_sin_cos` — `sin(0)≈0`, `cos(0)≈1`, `sin(π/2)≈1`
 
 ### `lower_print.rs` additions
+
 - `print_loop` — verify `loop {` structure appears
 
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo clippy -p lps-naga -- -D warnings
-cargo +nightly fmt -p lps-naga -- --check
+cargo test -p lps-frontend
+cargo clippy -p lps-frontend -- -D warnings
+cargo +nightly fmt -p lps-frontend -- --check
 ```
 
 All tests pass, including the previously-ignored loop test and the

@@ -27,7 +27,7 @@ The engine directly uses `lpir_cranelift` types. It does not use
 Instead of `JitModule` and `DirectCall`, it holds `M` (the module) and
 `M::Instance` (the instance, or a prepared call handle).
 
-The compile step becomes: GLSL → **`lps-naga`** → LPIR → backend compile →
+The compile step becomes: GLSL → **`lps-frontend`** → LPIR → backend compile →
 `LpvmModule` (exact constructor API depends on M3).
 The render step becomes: `instance.call(...)` or equivalent hot-path method.
 
@@ -66,6 +66,7 @@ marshals `LpvmValue`, the engine should NOT use that on the hot path. There
 must be a way to call with raw i32 args (Q32) without conversion overhead.
 
 Options (should be resolved by M3):
+
 1. Trait has an associated "call handle" type that backends can optimize
 2. Engine uses a backend-specific fast-path method in addition to the trait
 3. Trait has both `call` (ergonomic) and `call_raw` (fast) methods
@@ -132,7 +133,8 @@ cargo test -p lp-server --no-run
 - `fw-esp32` builds with `lpvm-cranelift` as the backend
 - `fw-emu` builds
 - `fw-tests` pass (`scene_render_emu`, `alloc_trace_emu`)
-- Embedded check passes: `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`
+- Embedded check passes:
+  `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`
 - Host checks pass: `cargo check -p lp-server`, `cargo test -p lp-server --no-run`
 - No performance regression on the render path (measured or at least verified
   by examining generated code)

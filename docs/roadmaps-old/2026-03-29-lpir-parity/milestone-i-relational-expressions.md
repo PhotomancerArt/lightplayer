@@ -12,15 +12,15 @@ All filetest files that fail due to `Relational` expression handling pass on `ji
 
 **In scope:**
 
-- Fix `expr_type_inner` (or equivalent) in `lps-naga/src/expr_scalar.rs` so it returns a
+- Fix `expr_type_inner` (or equivalent) in `lps-frontend/src/expr_scalar.rs` so it returns a
   valid type for `Expression::Relational { All, Any, Not, IsNan, IsInf }`. The phase-8 fix was
   partial — some callers still hit the unsupported path.
 - Ensure `lower_expr.rs` correctly decomposes `Relational` to scalarized ops:
-  - `All` on bvecN → `iand` chain on components
-  - `Any` on bvecN → `ior` chain on components
-  - `Not` on bvecN → per-component `ieq` with 0
-  - `IsNan` / `IsInf` — component-wise; Q32 per [`docs/design/q32.md`](../../design/q32.md) §6
-    (always false; div0 saturation values are not Inf)
+    - `All` on bvecN → `iand` chain on components
+    - `Any` on bvecN → `ior` chain on components
+    - `Not` on bvecN → per-component `ieq` with 0
+    - `IsNan` / `IsInf` — component-wise; Q32 per [`docs/design/q32.md`](../../design/q32.md) §6
+      (always false; div0 saturation values are not Inf)
 - Matrix `==` / `!=` desugars through `Relational::All` over component-wise comparison — unblocked
   once `All` works.
 - Rewrite `builtins/common-isnan.glsl` and `common-isinf.glsl` to avoid `1.0/0.0` literal that
@@ -41,10 +41,11 @@ All filetest files that fail due to `Relational` expression handling pass on `ji
 
 ## Deliverables
 
-- Updated `expr_scalar.rs`, `lower_expr.rs` in `lps-naga`.
+- Updated `expr_scalar.rs`, `lower_expr.rs` in `lps-frontend`.
 - Rewritten `common-isnan.glsl`, `common-isinf.glsl` (avoid unparseable literals).
 - **Explicit test corpus + three-target bar:** see
-  [`docs/plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md`](../../plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md)
+  [
+  `docs/plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md`](../../plans/2026-03-29-lpir-parity-stage-i/expected-passing-tests.md)
   (Tier A = 8 files; Tier B = relational-only `vec/bvec*` / related, listed in plan `summary.md`).
   Tier A must pass on **`jit.q32`**, **`wasm.q32`**, and **`rv32.q32`** with no blocking
   `@unimplemented(backend=…)` unless truly out of scope.

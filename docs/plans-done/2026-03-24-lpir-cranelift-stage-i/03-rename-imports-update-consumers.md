@@ -177,12 +177,13 @@ pub(crate) fn import_callee(ir: &IrModule, module: &str, func_name: &str)
 ```
 
 Update call sites in `ops.rs`:
+
 - `std_math_callee(ir, "sqrt")` → `import_callee(ir, "lpir", "sqrt")`
 - `std_math_callee(ir, "round")` → `import_callee(ir, "glsl", "round")`
 
 ### 3e. Rename `StdMathHandler`
 
-In `lps-naga/src/std_math_handler.rs`:
+In `lps-frontend/src/std_math_handler.rs`:
 
 Rename `StdMathHandler` → `BuiltinImportHandler` (or `GlslLpirHandler`).
 Update to dispatch on both `"glsl"` and `"lpir"` module names:
@@ -224,6 +225,7 @@ Update re-export in `lib.rs` if the type name changes. Update all uses
 ### 3f. Update LPIR test files
 
 **`lpir/src/tests.rs`** — hand-written LPIR text strings:
+
 - `@std.math::fsin` → `@glsl::fsin` (note: these use `fsin` not `sin`)
 - Check whether `fsin` should become `sin` to match the new convention.
   The Naga lowering uses `sin` as the func_name. If the hand-written tests
@@ -232,6 +234,7 @@ Update re-export in `lib.rs` if the type name changes. Update all uses
   to match the same names.
 
 **`lpir/src/tests/interp.rs`** — hand-written LPIR + mock handlers:
+
 - `@std.math::fabs` → `@glsl::fabs` (or `@glsl::abs` if normalizing)
 - `@std.math::fmax` → `@glsl::fmax` (or `@glsl::max`)
 - `@std.math::unknown` → `@glsl::unknown`
@@ -243,28 +246,32 @@ These are standalone test imports — the names don't need to match the real
 builtins exactly, they just need to be internally consistent within each test.
 Replace `std.math` with `glsl` in all of them.
 
-**`lps-naga/tests/lower_print.rs`**:
+**`lps-frontend/tests/lower_print.rs`**:
+
 - `assert!(s.contains("import @std.math::"), "{s}");` → update to check for
   `"import @glsl::"` or `"import @lpir::"`
 - `assert!(s.contains("call @std.math::"), "{s}");` → similar
 
-**`lps-naga/tests/lower_interp.rs`**:
+**`lps-frontend/tests/lower_interp.rs`**:
+
 - `CombinedImports` delegates to `StdMathHandler` — update to use renamed
   handler and match on `"glsl"` / `"lpir"` module names.
 
 ### 3g. Update generator comment
 
 In `lps-builtins-gen-app/src/main.rs` line ~301, there's a comment:
+
 ```
 // GLSL: `atan(y, x)`; Naga lowers two-arg atan as `std.math::atan2`.
 ```
+
 Update to `glsl::atan2`.
 
 ## Validate
 
 ```
-cargo check -p lps-naga
-cargo test -p lps-naga
+cargo check -p lps-frontend
+cargo test -p lps-frontend
 cargo check -p lps-wasm
 cargo test -p lps-wasm
 cargo check -p lpir
@@ -272,6 +279,7 @@ cargo test -p lpir
 ```
 
 Then run the full WASM-path filetests:
+
 ```
 just test-glsl-filetests
 ```

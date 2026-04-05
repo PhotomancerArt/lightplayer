@@ -23,7 +23,7 @@ The LPIR refactor is **structurally complete and validated on hardware**:
   `lps-frontend`, or `esp32-glsl-jit`. The old crates are out of the dependency graph.
 - **Firmware validated.** `fw-tests` pass (scene render, alloc trace, unwind). `fw-esp32` builds
   and runs on device (Stage VI-C checklist).
-- **Core crate tests pass.** `lpir` (168), `lpir-cranelift` (32), `lps-naga` (51),
+- **Core crate tests pass.** `lpir` (168), `lpir-cranelift` (32), `lps-frontend` (51),
   `lp-engine` (4), `lp-server` (4) — all green.
 - **Documentation refreshed.** Per the 2026-03-26 post-refactor audit, READMEs, `CRATES.md`,
   `AGENTS.md`, `docs/architecture.md`, `docs/lpir/` spec, and `scripts/build-builtins.sh` were
@@ -66,10 +66,10 @@ All 51 files under `matrix/mat2/`, `matrix/mat3/`, `matrix/mat4/` fail, plus
 `operators/incdec-matrix-{column,element}.glsl`, `builtins/matrix-{compmult,inverse}.glsl`,
 `function/return-matrix.glsl`, and several `const/` files whose failing test case returns `mat2`.
 
-**Root cause:** `naga_type_inner_to_glsl` in `lps-naga/src/lib.rs` and
+**Root cause:** `naga_type_inner_to_glsl` in `lps-frontend/src/lib.rs` and
 `naga_type_to_ir_types` in `lower_ctx.rs` reject `Matrix` at the module-metadata and type-lowering
 level. `GlslType` in `lpir/src/glsl_metadata.rs` has no matrix variant. Even though internal
-lowering of matrix locals to scalarized VRegs exists (and is exercised by some `lps-naga`
+lowering of matrix locals to scalarized VRegs exists (and is exercised by some `lps-frontend`
 unit tests), the `compile()` → `extract_functions()` path rejects functions whose signatures
 reference matrix types.
 
@@ -207,7 +207,7 @@ are important for parity but less urgent for the typical product use case.
 ### Phase 2: Matrix support (unblock ~55 files)
 
 2. **`GlslType` matrix variants** — add `Mat2`/`Mat3`/`Mat4` to `GlslType` in
-   `lpir/src/glsl_metadata.rs` and `naga_type_inner_to_glsl` in `lps-naga/src/lib.rs`.
+   `lpir/src/glsl_metadata.rs` and `naga_type_inner_to_glsl` in `lps-frontend/src/lib.rs`.
 3. **Matrix in `compile()` signatures** — allow `extract_functions` to produce matrix-typed
    parameters and returns, flattened to scalarized VRegs.
 4. **Host invoke for matrix returns** — extend `invoke_i32_args_returns` in
@@ -226,7 +226,7 @@ are important for parity but less urgent for the typical product use case.
 
 7. **Diagnostic codes** — ensure `++` on bool produces `E0112` before reaching lowering. Check
    that const-init and const-qualifier errors match expected codes. May need pre-lowering
-   validation in `lps-naga`.
+   validation in `lps-frontend`.
 8. **Const evaluation** — the Naga frontend handles most const folding; the remaining `const/`
    failures need case-by-case investigation (some may be matrix-related, resolved by Phase 2).
     - Effort: ~1 session.
@@ -261,7 +261,7 @@ are important for parity but less urgent for the typical product use case.
 | `fw-tests` (emu)                              | Pass (scene_render, unwind)              |
 | `lpir` unit tests                             | Pass (168)                               |
 | `lpir-cranelift` unit tests                   | Pass (32)                                |
-| `lps-naga` unit + integration             | Pass (51)                                |
+| `lps-frontend` unit + integration             | Pass (51)                                |
 | Legacy compiler references in Cargo.toml      | **None** — fully removed                 |
 | Documentation (READMEs, CRATES.md, lpir spec) | Up to date per 2026-03-26 audit          |
 | ESP32 binary size                             | 1,163,820 bytes (2026-03-26 measurement) |

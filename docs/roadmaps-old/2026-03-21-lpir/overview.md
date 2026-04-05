@@ -36,7 +36,7 @@ Naga frontend (parse + type check)            ── existing, unchanged
   ▼
 naga::Module (expression arena + statements)  ── existing, unchanged
   │
-  ▼  lps-naga  ─── mode-UNAWARE ─────────── middle-end (shared)
+  ▼  lps-frontend  ─── mode-UNAWARE ─────────── middle-end (shared)
   │   • walks Naga expression arena + statements
   │   • scalarizes vectors: vec3 add → 3× fadd
   │   • decomposes builtins: smoothstep → scalar math
@@ -71,7 +71,7 @@ lp-shader/
 │       ├── print.rs         #   IR → text format
 │       ├── parse.rs         #   text format → IR
 │       └── interp.rs        #   interpreter/emulator for testing
-├── lps-naga/            # UPDATE: add Naga → LPIR lowering
+├── lps-frontend/            # UPDATE: add Naga → LPIR lowering
 │   └── src/
 │       ├── lib.rs           #   existing: compile(), LPFX injection
 │       └── lower.rs         #   NEW: Naga Module → Vec<IrFunction>
@@ -327,8 +327,8 @@ use case.
 | Text printer                    | ~150       | lpir/src/print.rs                 |
 | Text parser                     | ~300       | lpir/src/parse.rs                 |
 | Interpreter                     | ~250       | lpir/src/interp.rs                |
-| Naga → LPIR lowering (scalar)   | ~800       | lps-naga/src/lower.rs         |
-| LPIR → WASM emission (incl Q32) | ~500       | lps-wasm/src/emit.rs          |
+| Naga → LPIR lowering (scalar)   | ~800       | lps-frontend/src/lower.rs         |
+| LPIR → WASM emission (incl Q32) | ~500       | lps-wasm/src/emit.rs              |
 | Tests                           | ~400       | across crates                     |
 | **Total new**                   | **~2600**  |                                   |
 | **Total deleted**               | **~3100**  | emit.rs + emit_vec.rs + locals.rs |

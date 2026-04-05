@@ -43,7 +43,7 @@ No new crates. Work is within existing crates:
 
 ```
 lp-shader/
-├── lps-naga/src/
+├── lps-frontend/src/
 │   ├── lower_expr.rs              # Relational, bvec casts, dynamic index
 │   ├── lower_stmt.rs              # Matrix/bvec element stores
 │   ├── expr_scalar.rs             # Type inference for Relational
@@ -80,11 +80,11 @@ lp-shader/
 
 | #      | Focus                                                                    | Files unblocked         | Primary crate          |
 |--------|--------------------------------------------------------------------------|-------------------------|------------------------|
-| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lps-filetests`    |
-| I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lps-naga`         |
-| II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lps-naga`         |
-| III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lps-naga`         |
-| IV     | Array type lowering                                                      | ~5+                     | `lps-naga`, `lpir` |
+| (prep) | Baseline `@unimplemented(backend=…)` on all current failures (see above) | suite green             | `lps-filetests`        |
+| I      | Relational expressions (`all`/`any`/`not`, matrix `==`, `isnan`/`isinf`) | ~21                     | `lps-frontend`         |
+| II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lps-frontend`         |
+| III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lps-frontend`         |
+| IV     | Array type lowering                                                      | ~5+                     | `lps-frontend`, `lpir` |
 | V      | Matrix invoke / sret (large returns)                                     | unlocks mat3/mat4 tests | `lpir-cranelift`       |
-| VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lps-filetests`    |
+| VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lps-filetests`        |
 | VII    | Annotations, polish, closure                                             | remaining edge cases    | all                    |

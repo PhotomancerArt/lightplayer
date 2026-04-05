@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lps_naga::{FloatMode, LpsType};
+use lps_frontend::{FloatMode, LpsType};
 
 pub use wasm_encoder::ValType as WasmValType;
 

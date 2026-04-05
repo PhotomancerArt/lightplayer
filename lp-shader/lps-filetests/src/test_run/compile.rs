@@ -13,10 +13,10 @@ use super::wasm_runner::WasmExecutable;
 pub(crate) const DEFAULT_MAX_INSTRUCTIONS: u64 = 1_000_000;
 
 /// Map filetest FloatMode to wasm FloatMode.
-fn to_wasm_float_mode(fm: FloatMode) -> lps_naga::FloatMode {
+fn to_wasm_float_mode(fm: FloatMode) -> lps_frontend::FloatMode {
     match fm {
-        FloatMode::Q32 => lps_naga::FloatMode::Q32,
-        FloatMode::F32 => lps_naga::FloatMode::F32,
+        FloatMode::Q32 => lps_frontend::FloatMode::Q32,
+        FloatMode::F32 => lps_frontend::FloatMode::F32,
     }
 }
 

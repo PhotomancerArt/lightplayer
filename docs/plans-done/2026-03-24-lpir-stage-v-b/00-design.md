@@ -11,7 +11,7 @@ Fix ~40 failing GLSL filetests: 5 correctness bugs (P0), test maintenance
 lp-shader/
 ├── lps-wasm/src/emit/
 │   └── control.rs                # FIX: continue depth calculation
-├── lps-naga/src/
+├── lps-frontend/src/
 │   ├── lower.rs                  # UPDATE: two-pass function registration
 │   ├── lower_ctx.rs              # UPDATE: handle Pointer-typed args (inout)
 │   ├── lower_stmt.rs             # UPDATE: inout call-site slot plumbing

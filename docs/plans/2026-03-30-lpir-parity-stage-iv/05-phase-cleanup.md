@@ -18,8 +18,8 @@ Search for and remove:
 ### Fix Warnings
 
 ```bash
-cargo check -p lps-naga
-cargo clippy -p lps-naga -- -D warnings
+cargo check -p lps-frontend
+cargo clippy -p lps-frontend -- -D warnings
 ```
 
 Common issues to fix:
@@ -32,7 +32,7 @@ Common issues to fix:
 ### Format Code
 
 ```bash
-cargo +nightly fmt -p lps-naga
+cargo +nightly fmt -p lps-frontend
 ```
 
 ## Validation
@@ -106,12 +106,12 @@ Implemented 1D scalar array support in LPIR for GLSL, covering Phases 1-3 of arr
 
 ## Files Modified
 
-- `lp-shader/lps-naga/src/lower_ctx.rs` - Array metadata tracking
-- `lp-shader/lps-naga/src/lower_expr.rs` - Array read access
-- `lp-shader/lps-naga/src/lower_stmt.rs` - Array store
-- `lp-shader/lps-naga/src/naga_util.rs` - Array type utilities  
-- `lp-shader/lps-naga/src/lower_array.rs` - NEW: Array helpers
-- `lp-shader/lps-naga/src/lib.rs` - Export new module
+- `lp-shader/lps-frontend/src/lower_ctx.rs` - Array metadata tracking
+- `lp-shader/lps-frontend/src/lower_expr.rs` - Array read access
+- `lp-shader/lps-frontend/src/lower_stmt.rs` - Array store
+- `lp-shader/lps-frontend/src/naga_util.rs` - Array type utilities  
+- `lp-shader/lps-frontend/src/lower_array.rs` - NEW: Array helpers
+- `lp-shader/lps-frontend/src/lib.rs` - Export new module
 - `lp-shader/lps-filetests/filetests/array/phase/2-bounds-checking.glsl` - Updated for clamping
 
 ## Test Results

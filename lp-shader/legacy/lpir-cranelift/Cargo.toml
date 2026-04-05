@@ -3,7 +3,7 @@ name = "lpir-cranelift"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LPIR → Cranelift codegen and JIT (RISC-V); optional GLSL via lps-naga"
+description = "LPIR → Cranelift codegen and JIT (RISC-V); optional GLSL via lps-frontend"
 build = "build.rs"
 
 [lints]
@@ -21,8 +21,8 @@ std = [
     "dep:cranelift-native",
     "lps-builtins/std",
 ]
-# GLSL string entry (`jit`) via `lps-naga`; independent of `std` for on-device builds.
-glsl = ["dep:lps-naga"]
+# GLSL string entry (`jit`) via `lps-frontend`; independent of `std` for on-device builds.
+glsl = ["dep:lps-frontend"]
 cranelift-optimizer = ["cranelift-codegen/optimizer"]
 cranelift-verifier = ["cranelift-codegen/verifier"]
 riscv32-emu = [
@@ -40,7 +40,7 @@ lpvm = { path = "../../lpvm", default-features = false }
 lps-shared = { path = "../../lps-shared" }
 lps-builtin-ids = { path = "../../lps-builtin-ids" }
 lps-builtins = { path = "../../lps-builtins", default-features = false }
-lps-naga = { path = "../../lps-naga", optional = true }
+lps-frontend = { path = "../../lps-frontend", optional = true }
 lpir = { path = "../../lpir" }
 cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }
 cranelift-frontend = { workspace = true, default-features = false, features = ["core"] }

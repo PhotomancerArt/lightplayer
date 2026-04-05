@@ -49,8 +49,8 @@ story so **VI-B** can swap the engine dependency without also inventing
 - **`compile_options`:** Only **`float_mode: FloatMode`**.
 - **`process_sync`:** **`std::sync::Mutex` + `OnceLock`** — global codegen lock for
   parallel filetests; **requires `std`**.
-- **`compile::jit`:** **`lps_naga::compile`** — needs **`naga`** / **`lps-naga`**
-  on the dependency graph. **`lps-naga`** already uses **`naga`** with
+- **`compile::jit`:** **`lps_frontend::compile`** — needs **`naga`** / **`lps-frontend`**
+  on the dependency graph. **`lps-frontend`** already uses **`naga`** with
   **`default-features = false`** (good sign for future `no_std`).
 
 ### Old crate reference (`lps-cranelift`)
@@ -91,7 +91,7 @@ this workspace.
   object helpers). Document that on-device GLSL compile requires **`std`** or a
   future task to verify Naga **`no_std`**.
 - **B)** Investigate and, if possible, keep **`jit()`** available under **`no_std`**
-  by fixing / enabling Naga + **`lps-naga`** for **`no_std`** in the same
+  by fixing / enabling Naga + **`lps-frontend`** for **`no_std`** in the same
   phase (larger scope).
 
 ### Q2 — `Q32Options` type location
@@ -181,7 +181,7 @@ reduce peak memory.
 **Answer: No gating needed.** `jit()` must work on embedded — that's the whole
 point (firmware compiles GLSL on-device). The dependency chain is already
 `no_std`-compatible: `naga` (crates.io 29.0.0, `default-features = false,
-features = ["glsl-in"]`), `lps-naga` (`#![no_std]`), `lpir` (`#![no_std]`).
+features = ["glsl-in"]`), `lps-frontend` (`#![no_std]`), `lpir` (`#![no_std]`).
 All entry points (`jit`, `jit_from_ir`, `jit_from_ir_owned`) remain available
 in both `std` and `no_std` builds.
 

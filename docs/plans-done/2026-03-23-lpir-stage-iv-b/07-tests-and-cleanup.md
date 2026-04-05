@@ -10,11 +10,12 @@ for edge cases, clean up dead code and warnings.
 ### Run filetests
 
 ```
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-filetests
 ```
 
 Triage failures:
+
 - **Expected**: dynamic vector access tests tagged
   `@unimplemented(backend=wasm)` — these should error gracefully.
 - **Regressions**: any previously-passing scalar test that now fails
@@ -27,10 +28,11 @@ Triage failures:
 Run GLSL → LPIR → interpret for key vector programs:
 
 ```
-cargo test -p lps-naga --test lower_interp
+cargo test -p lps-frontend --test lower_interp
 ```
 
 Add or verify tests for:
+
 - `vec2`/`vec3`/`vec4` construction and component access
 - Swizzle (`v.xzy`, `v.xx`)
 - Vector arithmetic (`+`, `-`, `*`, `/`)
@@ -54,6 +56,7 @@ Add or verify tests for:
 ### Documentation
 
 Update doc comments on changed functions to reflect vector support:
+
 - `lower_expr.rs` header: remove "(scalar subset)" from module doc.
 - `lower_stmt.rs` header: update if needed.
 - `lower_math.rs` header: update to mention vector math.
@@ -62,7 +65,7 @@ Update doc comments on changed functions to reflect vector support:
 ## Validate
 
 ```
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-filetests
 cargo +nightly fmt -- --check
 cargo clippy --workspace

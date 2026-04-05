@@ -14,46 +14,48 @@ complete compiler: GLSL in, callable module out.
 ## Scope
 
 **In scope:**
+
 - `compile.rs` — full pipeline orchestration:
-  - GLSL → Naga (via naga's GLSL frontend)
-  - Naga → LPIR (via `lps-naga::lower`)
-  - Drop Naga module after lowering
-  - Lower IrFunctions → CLIF one at a time, biggest first
-  - Drop each IrFunction after defining in Cranelift module
-  - Finalize → JitModule
+    - GLSL → Naga (via naga's GLSL frontend)
+    - Naga → LPIR (via `lps-frontend::lower`)
+    - Drop Naga module after lowering
+    - Lower IrFunctions → CLIF one at a time, biggest first
+    - Drop each IrFunction after defining in Cranelift module
+    - Finalize → JitModule
 - `GlslMetadata`:
-  - Extracted during Naga → LPIR lowering
-  - Per-function: name, GLSL-typed params with in/out/inout qualifiers,
-    GLSL return type
-  - Stored in JitModule alongside compiled code
-  - Update `lps-naga` lowering to produce this metadata
+    - Extracted during Naga → LPIR lowering
+    - Per-function: name, GLSL-typed params with in/out/inout qualifiers,
+      GLSL return type
+    - Stored in JitModule alongside compiled code
+    - Update `lps-frontend` lowering to produce this metadata
 - `values.rs` — typed value types:
-  - `GlslQ32` enum: `Float(f64)`, `Vec2(f64, f64)`, `Vec3(..)`, `Vec4(..)`,
-    `Int(i32)`, `IVec2(..)`, etc.
-  - `GlslF32` enum: same variants (for future f32 mode)
-  - `GlslReturn<V> { value: Option<V>, outs: Vec<V> }`
-  - `CallResult<V> = Result<GlslReturn<V>, CallError>`
+    - `GlslQ32` enum: `Float(f64)`, `Vec2(f64, f64)`, `Vec3(..)`, `Vec4(..)`,
+      `Int(i32)`, `IVec2(..)`, etc.
+    - `GlslF32` enum: same variants (for future f32 mode)
+    - `GlslReturn<V> { value: Option<V>, outs: Vec<V> }`
+    - `CallResult<V> = Result<GlslReturn<V>, CallError>`
 - Level 1 call interface:
-  - `module.call(name, &[GlslQ32]) -> CallResult<GlslQ32>`
-  - Uses GlslMetadata to:
-    - Scalarize vector args (Vec2 → 2 scalars)
-    - Encode Q32 (f64 → i32 fixed-point)
-    - Set up out-param memory (allocate slots, pass pointers)
-    - Call the compiled function
-    - Read back out/inout param values from memory
-    - Reassemble scalar results into GLSL-typed values
-    - Decode Q32 (i32 → f64)
+    - `module.call(name, &[GlslQ32]) -> CallResult<GlslQ32>`
+    - Uses GlslMetadata to:
+        - Scalarize vector args (Vec2 → 2 scalars)
+        - Encode Q32 (f64 → i32 fixed-point)
+        - Set up out-param memory (allocate slots, pass pointers)
+        - Call the compiled function
+        - Read back out/inout param values from memory
+        - Reassemble scalar results into GLSL-typed values
+        - Decode Q32 (i32 → f64)
 - Level 3 direct call interface:
-  - `module.direct_call(name) -> Option<DirectCall>`
-  - `DirectCall { call: fn(*const u32, *mut u32), param_count, return_count }`
-  - Abstracts calling convention (struct-return handled internally)
+    - `module.direct_call(name) -> Option<DirectCall>`
+    - `DirectCall { call: fn(*const u32, *mut u32), param_count, return_count }`
+    - Abstracts calling convention (struct-return handled internally)
 - `lib.rs` public API:
-  - `pub fn jit(source: &str, options: CompileOptions) -> Result<JitModule>`
-  - `pub fn jit_from_ir(ir: &IrModule, options: CompileOptions) -> Result<JitModule>`
-  - `pub struct CompileOptions { float_mode: FloatMode }`
+    - `pub fn jit(source: &str, options: CompileOptions) -> Result<JitModule>`
+    - `pub fn jit_from_ir(ir: &IrModule, options: CompileOptions) -> Result<JitModule>`
+    - `pub struct CompileOptions { float_mode: FloatMode }`
 - Tests: GLSL source → `jit()` → `call()` → verify results
 
 **Out of scope:**
+
 - Filetest integration (Stage V2)
 - Embedded readiness (Stage VI-A)
 - lp-engine migration / fw-emu (Stage VI-B)
@@ -66,7 +68,7 @@ complete compiler: GLSL in, callable module out.
   (biggest first), lowers each to CLIF individually, and drops the
   IrFunction after `define_function`. Peak memory = largest IrFunction +
   its CLIF.
-- GlslMetadata is extracted during `lps-naga::lower()`. This requires
+- GlslMetadata is extracted during `lps-frontend::lower()`. This requires
   a small update to the lowering API — either a new return type
   `(IrModule, GlslMetadata)` or metadata attached to IrModule.
 - The Level 3 `DirectCall` wraps the raw function pointer with a thin
@@ -79,7 +81,7 @@ complete compiler: GLSL in, callable module out.
 ## Open questions
 
 - **GlslMetadata location**: Should it live in the `lpir` crate (since
-  it's metadata about LPIR functions), in `lps-naga` (since that's
+  it's metadata about LPIR functions), in `lps-frontend` (since that's
   where it's extracted), or in the new `lpir-cranelift` crate (since
   that's the primary consumer)? It's also needed by the WASM emitter's
   test harness and potentially by filetests. Probably a shared location
@@ -98,7 +100,7 @@ complete compiler: GLSL in, callable module out.
   transparently if we set up the signature right. Need to investigate
   what Cranelift does automatically.
 - **Naga dependency**: The `jit()` function takes GLSL source, so the
-  crate depends on `naga` (for parsing) and `lps-naga` (for LPIR
+  crate depends on `naga` (for parsing) and `lps-frontend` (for LPIR
   lowering). These are `std`-only (naga requires `std`). On ESP32,
   `jit_from_ir()` would be used with pre-lowered LPIR — but currently
   the firmware compiles from GLSL source. How does Naga work on
@@ -114,7 +116,7 @@ complete compiler: GLSL in, callable module out.
 ## Deliverables
 
 - `jit()` and `jit_from_ir()` public API
-- GlslMetadata extraction in `lps-naga`
+- GlslMetadata extraction in `lps-frontend`
 - Level 1 typed call interface with `GlslQ32`
 - Level 3 direct call interface with `DirectCall`
 - Memory-conscious per-function compilation
@@ -128,5 +130,5 @@ complete compiler: GLSL in, callable module out.
 ## Estimated scope
 
 ~500–700 lines (compile orchestration, values, metadata, API) + ~200
-lines of tests. Plus ~100 lines of changes to `lps-naga` for
+lines of tests. Plus ~100 lines of changes to `lps-frontend` for
 metadata extraction.

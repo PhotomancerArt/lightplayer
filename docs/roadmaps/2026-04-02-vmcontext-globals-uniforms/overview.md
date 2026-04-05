@@ -92,7 +92,7 @@ lp-shader/
 ├── lpvm/
 │   └── src/
 │       └── vmcontext.rs        # VmContextHeader, constants, builder
-├── lps-naga/
+├── lps-frontend/
 │   └── src/
 │       └── lower.rs              # Collect uniforms/globals, build VMContext type
 ├── lpir/

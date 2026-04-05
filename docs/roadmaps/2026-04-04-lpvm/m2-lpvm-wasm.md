@@ -7,7 +7,7 @@ the strictest — wasmtime and browser APIs constrain the trait design.
 
 ## Naming / paths
 
-- **Shader layer** uses **`lps-*`** (e.g. `lps-naga` for GLSL → LPIR).
+- **Shader layer** uses **`lps-*`** (e.g. `lps-frontend` for GLSL → LPIR).
 - **Emission** today may still live under a transitional crate name
   (`lps-wasm`); **`lpvm-wasm`** is the target home for LPIR → `.wasm` +
   optional runtime.
@@ -30,7 +30,7 @@ with native vs `wasm32` target selection (see roadmap overview).
 
 ### Typical current API (names may differ on disk)
 
-- Top-level: GLSL → … → WASM bytes (may chain **`lps-naga`**).
+- Top-level: GLSL → … → WASM bytes (may chain **`lps-frontend`**).
 - **`WasmModule`**: bytes + exports + shadow stack global info.
 - **`WasmExport`**: WASM val types + **logical** param types (for harnesses) —
   those logical types should come from **`lps-shared`**, not from a “glsl” name.
@@ -75,7 +75,7 @@ lpvm-wasm/
 
 ### Emission (always available)
 
-Core entry: **`IrModule` → bytes**. The **shader frontend** (`lps-naga`) stays
+Core entry: **`IrModule` → bytes**. The **shader frontend** (`lps-frontend`) stays
 out of this crate’s required path; optional feature can glue “source string →
 WASM” for convenience.
 

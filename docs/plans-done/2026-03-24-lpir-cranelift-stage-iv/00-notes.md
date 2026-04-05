@@ -26,7 +26,7 @@ lp-engine (Stage VI).
   results.
 - No `GlslQ32` / `call()` / `DirectCall`.
 
-### `lps-naga`
+### `lps-frontend`
 
 - `compile(source) -> NagaModule` — Naga `Module` + `functions: Vec<(Handle, FunctionInfo)>`.
 - `FunctionInfo { name, params: Vec<(String, GlslType)>, return_type }` — **no
@@ -55,7 +55,7 @@ at the GLSL ABI level.
 
 **Answer:** **`lpir` crate** — main home for IR model and companion metadata.
 Add `glsl_metadata.rs` (or similar): `GlslParamQualifier`, `GlslParamMeta`,
-`GlslFunctionMeta`, `GlslModuleMeta`. `lps-naga` produces it during `lower`;
+`GlslFunctionMeta`, `GlslModuleMeta`. `lps-frontend` produces it during `lower`;
 `lpir-cranelift` consumes it for `call()`.
 
 ### Q2: How to expose the memory-conscious lowering path vs borrowed IR?
@@ -91,6 +91,7 @@ span redesign.
 for parse failures only.
 
 **Without IR changes:**
+
 - **Lowering:** `lower_function` already has the GLSL name. Wrap errors at that
   boundary (one place in `lower.rs`), e.g. prefix or `LowerError::InFunction {
   name, inner }`, so messages read `in function 'foo': …`.

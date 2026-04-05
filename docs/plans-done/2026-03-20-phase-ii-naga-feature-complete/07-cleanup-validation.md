@@ -48,7 +48,7 @@ scripts/glsl-filetests.sh --target wasm.q32 --fix
 ### 3. Fix warnings
 
 ```bash
-cargo check -p lps-naga 2>&1 | grep warning
+cargo check -p lps-frontend 2>&1 | grep warning
 cargo check -p lps-wasm 2>&1 | grep warning
 cargo check -p lps-filetests 2>&1 | grep warning
 ```

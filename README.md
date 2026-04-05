@@ -98,7 +98,7 @@ See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
 
 Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 
-- **`lps-naga`** GLSL → LPIR (via naga)
+- **`lps-frontend`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
 - **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
 - **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
@@ -139,7 +139,7 @@ LightPlayer would not be possible without the amazing work of these projects:
   backend ([forked](https://github.com/Yona-Appletree/lp-cranelift) to support 32-bit RISC-V and
   `no_std`)
 - **[Naga](https://github.com/gfx-rs/wgpu/tree/main/naga)** - Shader IR and **`glsl-in`** GLSL
-  frontend (used by `lps-naga`)
+  frontend (used by `lps-frontend`)
 - **[pp-rs](https://github.com/light-player/pp-rs)** - GLSL preprocessor fork, patched in
   **`[patch.crates-io]`** in the workspace `Cargo.toml` so naga `glsl-in` works on **`no_std`**
   targets

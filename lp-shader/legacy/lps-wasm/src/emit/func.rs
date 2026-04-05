@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{IrFunction, IrModule, IrType, Op};
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 use wasm_encoder::{Function, InstructionSink, ValType};
 
 use crate::emit::control::{self, CtrlEntry, WasmOpenDepth};

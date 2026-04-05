@@ -11,7 +11,7 @@ Final cleanup, remove any temporary code, ensure all tests pass, and prepare for
 ```bash
 # Search for TODOs, FIXMEs, debug prints
 cd /Users/yona/dev/photomancer/lp2025
-grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/lps-naga/src/ --include="*.rs" | grep -v "test"
+grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/lps-frontend/src/ --include="*.rs" | grep -v "test"
 grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/legacy/lpir-cranelift/src/ --include="*.rs" | grep -v "test"
 ```
 
@@ -21,8 +21,8 @@ Remove any temporary debug code added during development.
 
 ```bash
 # Check for warnings
-cargo +nightly fmt --check -p lps-naga
-cargo clippy -p lps-naga -- -D warnings
+cargo +nightly fmt --check -p lps-frontend
+cargo clippy -p lps-frontend -- -D warnings
 cargo clippy -p lpir-cranelift -- -D warnings
 ```
 
@@ -34,10 +34,10 @@ Run the complete validation suite:
 cd /Users/yona/dev/photomancer/lp2025
 
 # 1. Format check
-cargo +nightly fmt -p lps-naga -p lpir-cranelift
+cargo +nightly fmt -p lps-frontend -p lpir-cranelift
 
 # 2. Unit tests
-cargo test -p lps-naga --no-fail-fast
+cargo test -p lps-frontend --no-fail-fast
 cargo test -p lpir-cranelift --no-fail-fast
 
 # 3. Embedded target check
@@ -69,7 +69,7 @@ Create `docs/plans/2026-03-30-lpir-parity-stage-iii/summary.md`:
 
 ## Files changed
 
-- `lp-shader/lps-naga/src/lower_expr.rs`
+- `lp-shader/lps-frontend/src/lower_expr.rs`
 - `docs/design/q32.md`
 - `lp-shader/lps-filetests/filetests/const/builtin/extended.glsl`
 - (other test files as needed)
@@ -95,7 +95,7 @@ Once all validation passes:
 ```bash
 git add -A
 git commit -m "$(cat <<'EOF'
-feat(lps-naga): LPIR parity stage III - bvec casts, round, test triage
+feat(lps-frontend): LPIR parity stage III - bvec casts, round, test triage
 
 - Fix bvec to numeric vector cast lowering (As, Compose)
 - Promote Q32 round to implemented (half-away-from-zero semantics)

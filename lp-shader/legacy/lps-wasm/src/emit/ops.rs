@@ -5,17 +5,17 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{IrFunction, IrModule, IrType, Op};
-use lps_naga::FloatMode;
+use lps_frontend::FloatMode;
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
+use crate::emit::FuncEmitCtx;
 use crate::emit::control::{
-    innermost_loop_break_depth, innermost_loop_continue_depth, innermost_switch_selector, switch_merge_open_depth,
-    unwind_ctrl_after_return, CtrlEntry, WasmOpenDepth,
+    CtrlEntry, WasmOpenDepth, innermost_loop_break_depth, innermost_loop_continue_depth,
+    innermost_switch_selector, switch_merge_open_depth, unwind_ctrl_after_return,
 };
 use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::q32;
-use crate::emit::FuncEmitCtx;
 
 fn wasm_func_index(ctx: &FuncEmitCtx<'_>, callee: lpir::CalleeRef) -> Result<u32, String> {
     let m = ctx.module;

@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 lps-builtin-ids = { path = "../../lps-builtin-ids" }
-lps-naga = { path = "../../lps-naga" }
+lps-frontend = { path = "../../lps-frontend" }
 lpir = { path = "../../lpir" }
 wasm-encoder = "0.245"
 log = { workspace = true, default-features = false }

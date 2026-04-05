@@ -12,18 +12,20 @@ Verify the web-demo still renders.
 ## Scope
 
 **In scope:**
-- Wire `lps-naga::compile()` → LPIR lowering → WASM emission
+
+- Wire `lps-frontend::compile()` → LPIR lowering → WASM emission
   (Q32 inside the WASM emitter) in the public API
 - Pass all existing scalar filetests (wasm.q32 + wasm.float where applicable)
-  - `filetests/scalar/arithmetic/`
-  - `filetests/scalar/bool/`
-  - `filetests/scalar/builtins/`
-  - `filetests/scalar/lpfx/`
+    - `filetests/scalar/arithmetic/`
+    - `filetests/scalar/bool/`
+    - `filetests/scalar/builtins/`
+    - `filetests/scalar/lpfx/`
 - Verify web-demo (scalar rainbow.glsl) still renders
 - Debug and fix any discrepancies between interpreter results and WASM results
 - Remove or gate any dead code paths from the old emitter
 
 **Out of scope:**
+
 - Vector filetests (Phase II follow-on)
 - Cranelift integration (future)
 - Performance optimization

@@ -17,7 +17,7 @@ Target backends: RISC-V32 (embedded) and WebAssembly (browser/emu).
   calling shaders. Signatures are built from `IrFunction` param/return counts.
 - **lps-wasm**: WASM emission with shadow stack (`$sp` global). Functions exported directly; no
   context parameter currently.
-- **lps-naga**: Lowers GLSL to LPIR, but does not yet collect uniform/global metadata or emit
+- **lps-frontend**: Lowers GLSL to LPIR, but does not yet collect uniform/global metadata or emit
   context-aware code.
 
 ## Questions

@@ -2,12 +2,12 @@
 
 use crate::parse::{ErrorExpectation, TestFile};
 use crate::test_run::TestCaseStats;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use lpir_cranelift::{
-    jit_from_ir_owned, CompileOptions, CompilerError, FloatMode as LpirFloatMode,
+    CompileOptions, CompilerError, FloatMode as LpirFloatMode, jit_from_ir_owned,
 };
 use lps_diagnostics::{ErrorCode, GlFileId, GlSourceLoc, GlslError};
-use lps_naga::naga::{front::glsl::Error as NagaGlslError, ShaderStage};
+use lps_frontend::naga::{ShaderStage, front::glsl::Error as NagaGlslError};
 use std::path::Path;
 
 /// Run an error test: compile, expect failure, match diagnostics to expectations.
@@ -82,10 +82,10 @@ fn collect_glsl_error_test_diagnostics(
     user_source: &str,
     options: &CompileOptions,
 ) -> Result<(), Vec<GlslError>> {
-    let prep = lps_naga::prepared_glsl_for_compile(user_source);
-    let first_phys = lps_naga::user_snippet_first_physical_line();
-    let mut frontend = lps_naga::naga::front::glsl::Frontend::default();
-    let parse_opts = lps_naga::naga::front::glsl::Options::from(ShaderStage::Vertex);
+    let prep = lps_frontend::prepared_glsl_for_compile(user_source);
+    let first_phys = lps_frontend::user_snippet_first_physical_line();
+    let mut frontend = lps_frontend::naga::front::glsl::Frontend::default();
+    let parse_opts = lps_frontend::naga::front::glsl::Options::from(ShaderStage::Vertex);
     let module = match frontend.parse(&parse_opts, &prep) {
         Err(parse_errors) => {
             return Err(parse_errors
@@ -97,12 +97,12 @@ fn collect_glsl_error_test_diagnostics(
         Ok(m) => m,
     };
 
-    let naga_module = match lps_naga::naga_module_from_parsed(module) {
+    let naga_module = match lps_frontend::naga_module_from_parsed(module) {
         Ok(nm) => nm,
         Err(e) => return Err(vec![naga_compile_error_to_glsl(e)]),
     };
 
-    let (ir, meta) = match lps_naga::lower(&naga_module) {
+    let (ir, meta) = match lps_frontend::lower(&naga_module) {
         Ok(x) => x,
         Err(e) => return Err(vec![lower_error_to_glsl(e)]),
     };
@@ -213,7 +213,7 @@ fn assign_lhs_identifier(line: &str) -> Option<String> {
     lhs.split_whitespace().last().map(|s| s.to_string())
 }
 
-fn lower_error_to_glsl(le: lps_naga::LowerError) -> GlslError {
+fn lower_error_to_glsl(le: lps_frontend::LowerError) -> GlslError {
     let s = le.to_string();
     if s.contains("unsupported bool binary Add") {
         GlslError::new(ErrorCode::E0112, "post-increment requires numeric operand")
@@ -222,10 +222,10 @@ fn lower_error_to_glsl(le: lps_naga::LowerError) -> GlslError {
     }
 }
 
-fn naga_compile_error_to_glsl(e: lps_naga::CompileError) -> GlslError {
+fn naga_compile_error_to_glsl(e: lps_frontend::CompileError) -> GlslError {
     match e {
-        lps_naga::CompileError::Parse(msg) => GlslError::new(ErrorCode::E0001, msg),
-        lps_naga::CompileError::UnsupportedType(msg) => GlslError::new(ErrorCode::E0109, msg),
+        lps_frontend::CompileError::Parse(msg) => GlslError::new(ErrorCode::E0001, msg),
+        lps_frontend::CompileError::UnsupportedType(msg) => GlslError::new(ErrorCode::E0109, msg),
     }
 }
 

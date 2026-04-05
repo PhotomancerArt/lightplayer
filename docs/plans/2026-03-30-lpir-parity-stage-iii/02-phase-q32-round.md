@@ -31,7 +31,7 @@ Edit `docs/design/q32.md` §5 "Named Constants":
 Check if `round` is already wired in lowering:
 
 ```bash
-grep -n "round" lp-shader/lps-naga/src/lower*.rs
+grep -n "round" lp-shader/lps-frontend/src/lower*.rs
 ```
 
 If missing, add to `lower_math.rs` or appropriate location to map `MathFunction::Round` to

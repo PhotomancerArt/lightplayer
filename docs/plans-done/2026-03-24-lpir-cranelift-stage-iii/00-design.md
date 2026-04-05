@@ -15,7 +15,7 @@ the typed call interface are Stage IV.
 lp-shader/lpir/src/
 └── types.rs                        # UPDATE: add FloatMode { Q32, F32 }
 
-lp-shader/lps-naga/src/
+lp-shader/lps-frontend/src/
 └── lib.rs                          # UPDATE: remove FloatMode, re-export lpir::FloatMode
 
 lp-shader/lps-wasm/src/
@@ -184,5 +184,5 @@ Extends the existing Call handler. If `callee.0 < import_count`, index into
 
 ### `lpir/types.rs` — FloatMode migration
 
-Add `FloatMode { Q32, F32 }` to the `lpir` crate. Update `lps-naga` to
+Add `FloatMode { Q32, F32 }` to the `lpir` crate. Update `lps-frontend` to
 re-export or alias it. Update `lps-wasm` imports.

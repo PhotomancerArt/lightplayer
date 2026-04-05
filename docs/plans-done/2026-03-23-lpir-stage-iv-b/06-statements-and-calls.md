@@ -171,9 +171,9 @@ to allocate N return VRegs. Follow the same pattern as user calls.
 ## Validate
 
 ```
-cargo test -p lps-naga
-cargo +nightly fmt -p lps-naga -- --check
-cargo clippy -p lps-naga
+cargo test -p lps-frontend
+cargo +nightly fmt -p lps-frontend -- --check
+cargo clippy -p lps-frontend
 ```
 
 LPFX filetests with vector arguments and out-parameters (especially

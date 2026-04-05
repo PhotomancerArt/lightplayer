@@ -8,6 +8,7 @@ demo. This is the definition of "done" for the WASM path.
 ## Scope
 
 In scope:
+
 - Vectors (vec2/vec3/vec4): construction, scalarized operations, swizzles
 - Standard GLSL builtins via `MathFunction` → inline WASM or BuiltinId import
 - LPFX builtins via prototype injection + import dispatch
@@ -20,6 +21,7 @@ In scope:
 - All existing wasm.q32 filetests passing
 
 Out of scope:
+
 - Cranelift backend changes
 - lp-engine changes
 - ESP32 integration
@@ -33,7 +35,7 @@ Out of scope:
 ## Deliverables
 
 - Full `lps-wasm` backend supporting rainbow.glsl feature set
-- LPFX prototype injection in `lps-naga`
+- LPFX prototype injection in `lps-frontend`
 - Updated `web-demo` crate
 - All wasm.q32 filetests passing, cross-validated against cranelift.q32
 

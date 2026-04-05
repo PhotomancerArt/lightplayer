@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Change `lower_relational` in `lps-naga/src/lower_expr.rs` so **`isnan`** and **`isinf`** emit
+Change `lower_relational` in `lps-frontend/src/lower_expr.rs` so **`isnan`** and **`isinf`** emit
 **always false** per lane on the Q32 filetest path, matching
 [`docs/design/q32.md`](../../design/q32.md) §6 (no NaN/Inf encoding; div0 saturation values are *
 *not**
@@ -31,7 +31,7 @@ Change `lower_relational` in `lps-naga/src/lower_expr.rs` so **`isnan`** and **`
 ## Validate
 
 ```bash
-cd lps && cargo test -p lps-naga && cargo check -p lps-naga
+cd lps && cargo test -p lps-frontend && cargo check -p lps-frontend
 ```
 
 Spot-check LPIR or CLIF only if a filetest fails and you need to confirm no stray `Fne`

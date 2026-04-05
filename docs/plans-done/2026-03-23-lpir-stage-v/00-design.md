@@ -44,9 +44,9 @@ Add:
 
 Keep:
 
-- `lps-naga` (for `compile()`, `NagaModule`, `FloatMode`)
+- `lps-frontend` (for `compile()`, `NagaModule`, `FloatMode`)
 - `lps-builtin-ids` (for `BuiltinId`, name resolution)
-- `naga` (transitive via lps-naga, but direct dep can be removed if
+- `naga` (transitive via lps-frontend, but direct dep can be removed if
   not needed after old emitter deletion)
 - `wasm-encoder`
 
@@ -56,13 +56,13 @@ Keep:
 GLSL source
   │
   ▼
-compile(glsl) ──────────── lps-naga (existing)
+compile(glsl) ──────────── lps-frontend (existing)
   │
   ▼
 NagaModule
   │
   ▼
-lower(&NagaModule) ─────── lps-naga::lower (Stage IV)
+lower(&NagaModule) ─────── lps-frontend::lower (Stage IV)
   │
   ▼
 IrModule
@@ -232,8 +232,8 @@ one function has slots.
 
 ```rust
 pub fn glsl_wasm(source: &str, options: WasmOptions) -> Result<WasmModule, GlslWasmError> {
-    let naga_module = lps_naga::compile(source)?;
-    let ir_module = lps_naga::lower::lower(&naga_module)
+    let naga_module = lps_frontend::compile(source)?;
+    let ir_module = lps_frontend::lower::lower(&naga_module)
         .map_err(|e| GlslWasmError::Codegen(e.to_string()))?;
     let wasm_bytes = emit::emit_module(&ir_module, &options)
         .map_err(GlslWasmError::Codegen)?;

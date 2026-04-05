@@ -44,7 +44,7 @@ lp-shader/
 ├── lps-builtins-wasm/src/
 │   └── builtin_refs.rs                 # UPDATE: regenerated (new names)
 │
-├── lps-naga/src/
+├── lps-frontend/src/
 │   ├── lower.rs                        # UPDATE: split register_std_math_imports
 │   │                                   #   "glsl" for trig/exp/etc, "lpir" for sqrt
 │   ├── lower_ctx.rs                    # UPDATE: import_map keys "glsl::" / "lpir::"
@@ -62,7 +62,7 @@ lp-shader/
 │       ├── interp.rs
 │       └── ...
 │
-├── lps-naga/tests/
+├── lps-frontend/tests/
 │   ├── lower_print.rs                  # UPDATE: assertion strings
 │   └── lower_interp.rs                 # UPDATE: CombinedImports dispatch
 │
@@ -167,7 +167,7 @@ lp-shader/
 3. **`lps-builtin-ids`** — regenerated. New variant names, new methods,
    new `Module` and `Mode` enums.
 
-4. **`lps-naga` lowering** — `register_std_math_imports` splits into
+4. **`lps-frontend` lowering** — `register_std_math_imports` splits into
    `"glsl"` and `"lpir"` module names. Import map keys change accordingly.
 
 5. **`lps-wasm` import resolution** — `resolve_builtin_id` matches on

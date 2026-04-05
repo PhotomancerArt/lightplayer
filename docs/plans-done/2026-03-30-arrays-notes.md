@@ -249,10 +249,10 @@ access behavior.
 
 ## Related Files
 
-- `lp-shader/lps-naga/src/lower_ctx.rs` - context with local_map
-- `lp-shader/lps-naga/src/lower_expr.rs` - expression lowering
-- `lp-shader/lps-naga/src/lower_stmt.rs` - statement lowering
-- `lp-shader/lps-naga/src/naga_util.rs` - type mapping
+- `lp-shader/lps-frontend/src/lower_ctx.rs` - context with local_map
+- `lp-shader/lps-frontend/src/lower_expr.rs` - expression lowering
+- `lp-shader/lps-frontend/src/lower_stmt.rs` - statement lowering
+- `lp-shader/lps-frontend/src/naga_util.rs` - type mapping
 - `lp-shader/lpir/src/op.rs` - LPIR operations
 - `lp-shader/lpir/src/builder.rs` - slot allocation
 

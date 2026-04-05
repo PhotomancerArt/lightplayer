@@ -3,10 +3,10 @@
 use crate::test_run::compile::DEFAULT_MAX_INSTRUCTIONS;
 use lps_diagnostics::{ErrorCode, GlslDiagnostics, GlslError};
 use lps_exec::GlslExecutable;
-use lps_naga::LpsType;
+use lps_frontend::LpsType;
 use lps_shared::{FnParam, LpsFnSig, ParamQualifier};
 use lps_wasm::glsl_type_to_wasm_components;
-use lps_wasm::{glsl_wasm, GlslWasmError, WasmExport, WasmOptions, SHADOW_STACK_GLOBAL_EXPORT};
+use lps_wasm::{GlslWasmError, SHADOW_STACK_GLOBAL_EXPORT, WasmExport, WasmOptions, glsl_wasm};
 use lpvm::LpsValue;
 use std::collections::HashMap;
 use wasm_encoder::ValType as WasmValType;
@@ -23,7 +23,7 @@ pub struct WasmExecutable {
     instance: Instance,
     exports: HashMap<String, WasmExport>,
     signatures: HashMap<String, LpsFnSig>,
-    float_mode: lps_naga::FloatMode,
+    float_mode: lps_frontend::FloatMode,
     wasm_bytes: Vec<u8>,
     shadow_stack_base: Option<i32>,
 }
@@ -146,17 +146,17 @@ fn wasm_export_to_signature(export: &WasmExport) -> LpsFnSig {
     }
 }
 
-fn encode_f32_wasm(f: f32, fm: lps_naga::FloatMode) -> Val {
+fn encode_f32_wasm(f: f32, fm: lps_frontend::FloatMode) -> Val {
     match fm {
-        lps_naga::FloatMode::Q32 => Val::I32((f * Q16_16_SCALE) as i32),
-        lps_naga::FloatMode::F32 => Val::F32(f.to_bits()),
+        lps_frontend::FloatMode::Q32 => Val::I32((f * Q16_16_SCALE) as i32),
+        lps_frontend::FloatMode::F32 => Val::F32(f.to_bits()),
     }
 }
 
-fn wasm_val_to_f32(v: &Val, fm: lps_naga::FloatMode) -> Result<f32, GlslError> {
+fn wasm_val_to_f32(v: &Val, fm: lps_frontend::FloatMode) -> Result<f32, GlslError> {
     match (v, fm) {
-        (Val::I32(i), lps_naga::FloatMode::Q32) => Ok(*i as f32 / Q16_16_SCALE),
-        (Val::F32(bits), lps_naga::FloatMode::F32) => Ok(f32::from_bits(*bits)),
+        (Val::I32(i), lps_frontend::FloatMode::Q32) => Ok(*i as f32 / Q16_16_SCALE),
+        (Val::F32(bits), lps_frontend::FloatMode::F32) => Ok(f32::from_bits(*bits)),
         _ => Err(GlslError::new(
             ErrorCode::E0400,
             format!("WASM: unexpected value for float (float_mode={fm:?})"),
@@ -168,7 +168,7 @@ fn wasm_val_to_f32(v: &Val, fm: lps_naga::FloatMode) -> Result<f32, GlslError> {
 fn glsl_value_to_wasm_flat(
     ty: &LpsType,
     v: &LpsValue,
-    fm: lps_naga::FloatMode,
+    fm: lps_frontend::FloatMode,
 ) -> Result<Vec<Val>, GlslError> {
     use LpsType::*;
     Ok(match (ty, v) {
@@ -293,7 +293,7 @@ fn glsl_value_to_wasm_flat(
 fn build_wasm_args(
     export_info: &WasmExport,
     args: &[LpsValue],
-    fm: lps_naga::FloatMode,
+    fm: lps_frontend::FloatMode,
 ) -> Result<Vec<Val>, GlslError> {
     if args.len() != export_info.param_types.len() {
         return Err(GlslError::new(
@@ -329,7 +329,7 @@ fn build_wasm_args(
 fn wasm_vals_to_glsl_value(
     ty: &LpsType,
     vals: &[Val],
-    fm: lps_naga::FloatMode,
+    fm: lps_frontend::FloatMode,
 ) -> Result<(LpsValue, usize), GlslError> {
     use LpsType::*;
     match ty {
@@ -736,8 +736,12 @@ impl GlslExecutable for WasmExecutable {
         results
             .into_iter()
             .map(|r| match (r, fm) {
-                (wasmtime::Val::I32(i), lps_naga::FloatMode::Q32) => Ok(i as f32 / Q16_16_SCALE),
-                (wasmtime::Val::F32(bits), lps_naga::FloatMode::F32) => Ok(f32::from_bits(bits)),
+                (wasmtime::Val::I32(i), lps_frontend::FloatMode::Q32) => {
+                    Ok(i as f32 / Q16_16_SCALE)
+                }
+                (wasmtime::Val::F32(bits), lps_frontend::FloatMode::F32) => {
+                    Ok(f32::from_bits(bits))
+                }
                 _ => Err(GlslError::new(
                     ErrorCode::E0400,
                     format!("WASM: unexpected result type in vec call (float_mode={fm:?})"),
@@ -774,8 +778,12 @@ impl GlslExecutable for WasmExecutable {
         results
             .into_iter()
             .map(|r| match (r, fm) {
-                (wasmtime::Val::I32(i), lps_naga::FloatMode::Q32) => Ok(i as f32 / Q16_16_SCALE),
-                (wasmtime::Val::F32(bits), lps_naga::FloatMode::F32) => Ok(f32::from_bits(bits)),
+                (wasmtime::Val::I32(i), lps_frontend::FloatMode::Q32) => {
+                    Ok(i as f32 / Q16_16_SCALE)
+                }
+                (wasmtime::Val::F32(bits), lps_frontend::FloatMode::F32) => {
+                    Ok(f32::from_bits(bits))
+                }
                 _ => Err(GlslError::new(
                     ErrorCode::E0400,
                     format!("WASM: unexpected result type in mat call (float_mode={fm:?})"),

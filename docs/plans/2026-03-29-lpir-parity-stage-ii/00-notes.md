@@ -129,7 +129,7 @@ helpers** (e.g. `lower_access_*`) so matrix `Access` (column / element) can reus
   which requires a **compile-time constant** (`IntConst`, etc.). So **`v[i] = …` with runtime `i`**
   was **not** supported on the **assignment** path in that compiler — only **constant** `v[0] = …`
   style for matrix/vector LValues.
-- **Stage II in `lps-naga`:** we **do** need to support whatever **Naga emits** (including
+- **Stage II in `lps-frontend`:** we **do** need to support whatever **Naga emits** (including
   `Expression::Access` for `a[0] =` and compound updates), which goes **beyond** the old compiler’s
   constant-only LValue indexing.
 

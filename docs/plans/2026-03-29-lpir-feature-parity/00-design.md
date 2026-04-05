@@ -8,7 +8,7 @@ to a follow-up plan.
 
 **In scope**
 
-- `Expression::Relational` (`all`, `any`, `not`, vector `isnan` / `isinf`) in `lps-naga`.
+- `Expression::Relational` (`all`, `any`, `not`, vector `isnan` / `isinf`) in `lps-frontend`.
 - Matrix types in metadata and lowering (`GlslType`, `naga_type_inner_to_glsl`, signatures),
   matrix element stores, matrix builtins wired end-to-end.
 - Host JIT **invoke** glue for multi-word / sret returns (`mat3` / `mat4`).
@@ -24,7 +24,7 @@ to a follow-up plan.
 
 ```
 lp-shader/
-├── lps-naga/src/
+├── lps-frontend/src/
 │   ├── lower_expr.rs              # UPDATE: Relational
 │   ├── lower_stmt.rs              # UPDATE: matrix element stores
 │   ├── lib.rs                     # UPDATE: matrix in module metadata / extract_functions
@@ -47,7 +47,7 @@ lp-shader/
 GLSL (#version 450) ──► Naga Module
                             │
                             ▼
-                    lps-naga (lower_expr / lower_stmt / …)
+                    lps-frontend (lower_expr / lower_stmt / …)
                             │
                             ▼
                     LPIR IrModule (scalarized vregs, multi-return)
@@ -68,8 +68,8 @@ each lower that to their ABI; **invoke.rs** is only the Rust-side caller for hos
 
 | Component             | Role                                                                                                |
 |-----------------------|-----------------------------------------------------------------------------------------------------|
-| `lps-naga`        | Maps Naga expressions/statements to LPIR; must accept matrix signatures and relational ops on bvec. |
+| `lps-frontend`        | Maps Naga expressions/statements to LPIR; must accept matrix signatures and relational ops on bvec. |
 | `lpir::glsl_metadata` | Describes exported function types for callers; must include matrix shapes for invoke/decode.        |
 | `lpir-cranelift`      | Emits CLIF; host tests need invoke glue that matches Cranelift’s multi-return / sret ABI.           |
-| `lps-wasm`        | Emits WASM; must remain consistent with LPIR multi-return for the same shaders.                     |
-| `lps-filetests`   | Corpus + runner; annotations (`@unimplemented`, `@broken`, `@unsupported`).                         |
+| `lps-wasm`            | Emits WASM; must remain consistent with LPIR multi-return for the same shaders.                     |
+| `lps-filetests`       | Corpus + runner; annotations (`@unimplemented`, `@broken`, `@unsupported`).                         |

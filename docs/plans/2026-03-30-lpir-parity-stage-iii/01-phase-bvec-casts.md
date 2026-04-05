@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Fix `As` and `Compose` lowering in `lps-naga/src/lower_expr.rs` to correctly handle bvec to
+Fix `As` and `Compose` lowering in `lps-frontend/src/lower_expr.rs` to correctly handle bvec to
 numeric vector casts (`vec2(bvec2(...))`). Current failure: "assignment component count 1 vs 2".
 
 ## Code organization reminders
@@ -81,6 +81,6 @@ cd /Users/yona/dev/photomancer/lp2025
 ./scripts/glsl-filetests.sh --target jit.q32 "vec/bvec2/"
 
 # Check compilation
-cargo check -p lps-naga
+cargo check -p lps-frontend
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```

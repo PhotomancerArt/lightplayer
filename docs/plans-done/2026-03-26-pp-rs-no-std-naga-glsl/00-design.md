@@ -2,7 +2,8 @@
 
 ## Scope of work
 
-Same as [00-notes.md](./00-notes.md): fork **`pp-rs`**, make it **`no_std` + `alloc`**, patch **`lp2025`** so **`lps-naga`** checks for **`riscv32imac-unknown-none-elf`**.
+Same as [00-notes.md](./00-notes.md): fork **`pp-rs`**, make it **`no_std` + `alloc`**, patch *
+*`lp2025`** so **`lps-frontend`** checks for **`riscv32imac-unknown-none-elf`**.
 
 ## File structure
 
@@ -31,7 +32,7 @@ photomancer/                    # parent of lp2025 (example)
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  lps-naga  (#![no_std])                                  │
+│  lps-frontend  (#![no_std])                                  │
 │    └── naga (glsl-in) ──► pp-rs  ◄── MUST be no_std+alloc   │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -48,14 +49,16 @@ lp2025 Cargo.toml
 
 ## Main components
 
-| Piece | Role |
-|--------|------|
-| **`light-player/pp-rs`** | Drop-in replacement for **`pp-rs` 0.2.1** with **`#![no_std]`** and **`hashbrown`** for maps/sets. |
-| **`lp2025` `[patch.crates-io]`** | Forces all workspace uses of **`pp-rs`** (via **naga**) to the fork. |
-| **Validation** | **`cargo check -p lps-naga --target riscv32imac-unknown-none-elf`** plus existing host tests (**`cargo test -p lps-naga`**, **`web-demo`** / **`wasm32`** check) to ensure no regression. |
-| **Upstream** | **Optional:** PR to canonical **`pp-rs`** / **wgpu** later — not part of the initial milestone. |
+| Piece                            | Role                                                                                                                                                                                              |
+|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **`light-player/pp-rs`**         | Drop-in replacement for **`pp-rs` 0.2.1** with **`#![no_std]`** and **`hashbrown`** for maps/sets.                                                                                                |
+| **`lp2025` `[patch.crates-io]`** | Forces all workspace uses of **`pp-rs`** (via **naga**) to the fork.                                                                                                                              |
+| **Validation**                   | **`cargo check -p lps-frontend --target riscv32imac-unknown-none-elf`** plus existing host tests (**`cargo test -p lps-frontend`**, **`web-demo`** / **`wasm32`** check) to ensure no regression. |
+| **Upstream**                     | **Optional:** PR to canonical **`pp-rs`** / **wgpu** later — not part of the initial milestone.                                                                                                   |
 
 ## Decisions (from notes)
 
 - Fork on **light-player** org; local clone sibling **`../pp-rs`**.
-- **`lp2025` consumption:** **`[patch.crates-io]`** with **git** to **`light-player/pp-rs`** **`main`** by default; **commented `path = "../pp-rs"`** for local dev (same idea as **lp-cranelift** blocks).
+- **`lp2025` consumption:** **`[patch.crates-io]`** with **git** to **`light-player/pp-rs`** *
+  *`main`** by default; **commented `path = "../pp-rs"`** for local dev (same idea as **lp-cranelift
+  ** blocks).

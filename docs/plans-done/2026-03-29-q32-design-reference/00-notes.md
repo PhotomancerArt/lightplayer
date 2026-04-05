@@ -84,7 +84,7 @@ Files: `lp-shader/lps-builtins/src/builtins/lpir/{fadd,fsub,fmul,fdiv,fsqrt,fnea
 
 ### Compiler / runtime paths (for cross-references in the doc)
 
-- Naga → LPIR lowering (`lps-naga`): relational `isnan`/`isinf` behavior has been **mixed** (
+- Naga → LPIR lowering (`lps-frontend`): relational `isnan`/`isinf` behavior has been **mixed** (
   IEEE-style vs sentinel-style) relative to written docs — to be aligned after the normative Q32
   section exists.
 - `lower_expr.rs` has `Q32_DIV0_POS`/`Q32_DIV0_NEG` sentinel constants used for `isinf` lowering —

@@ -46,7 +46,7 @@ Fix all warnings.
 ```
 cargo test -p lpir-cranelift
 cargo test -p lpir
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-wasm
 ```
 
@@ -86,6 +86,6 @@ cargo clippy -p lpir-cranelift -- -D warnings
 cargo clippy -p lpir -- -D warnings
 cargo test -p lpir-cranelift
 cargo test -p lpir
-cargo test -p lps-naga
+cargo test -p lps-frontend
 cargo test -p lps-wasm
 ```
