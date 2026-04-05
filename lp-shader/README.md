@@ -1,11 +1,14 @@
 # Light Player Shader
 
-`lp-shader` is the shader compiler for **LightPlayer** — a system that JIT-compiles shader code to
-native code on resource-constrained devices at runtime.
+`lp-shader` is the shader compiler and runtime for **LightPlayer** — a system that JIT-compiles
+shader code to native code on resource-constrained devices at runtime.
 
 The primary target is **RISC-V 32-bit** (`riscv32imac`, ESP32-C6), but the compiler supports any
 ISA that Cranelift supports. A separate **WebAssembly** backend produces `.wasm` modules for
 browser-based preview without pulling in Cranelift.
+
+Floating point math is replaced with `Q16.16` (Q32) fixed-point math for performance on non-float
+systems.
 
 All compilation happens **on device** — there is no host cross-compilation step. The entire stack
 is `no_std` + alloc.
