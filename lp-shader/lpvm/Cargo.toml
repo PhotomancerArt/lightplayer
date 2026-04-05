@@ -3,7 +3,7 @@ name = "lpvm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "GLSL ABI - types, values, layout, and paths"
+description = "LPVM runtime - traits, VM context, and execution abstractions"
 
 [lints]
 workspace = true
@@ -15,3 +15,4 @@ std = []
 
 [dependencies]
 lps-shared = { path = "../lps-shared" }
+lpir = { path = "../lpir" }

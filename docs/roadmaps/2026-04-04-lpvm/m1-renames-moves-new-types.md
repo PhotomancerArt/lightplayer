@@ -2,160 +2,172 @@
 
 ## Repository state
 
-Renames may already be in progress (RustRover, find/replace). **This document
-describes the target layout.** If paths on disk still say `lps-*`, map them
-mentally to the `lps-*` names in [overview.md](overview.md).
+**COMPLETED.** The renames are done. Key differences from the original plan:
+
+- `lpvm` crate stayed in `lp-shader/lpvm/` instead of moving to repo root
+- `GlslValue`/`GlslType` moved to `lps-shared` as `LpsValue`/`LpsType` (not `LpvmValue`/`LpvmType`)
+- `lpvm` crate contains `LpvmData`, `VmContext`, and re-exports from `lps-shared`
 
 ## Goal
 
 Establish the **three-layer naming** and crate boundaries:
 
-1. **`lps-shared`** — logical shader types (rename/evolution of `lps-core`).
-2. **`lpvm`** — VM/runtime types, traits, values, layout, VMContext.
-3. **`lpir`** — unchanged role: **scalarized IR only** (no absorption of
-   `Type` / `FunctionSignature` from the shader layer).
+1. **`lps-shared`** — logical shader types (`LpsType`, `LpsValue`, `LpsFnSig`).
+2. **`lpvm`** — VM/runtime data buffers and VMContext.
+3. **`lpir`** — unchanged role: **scalarized IR only**.
 
-No new backends in this milestone. Old crates may remain as shims until later
-milestones.
-
-## Context for Agents
-
-Mechanical moves and renames: human often uses RustRover; agent fixes imports,
-`Cargo.toml`, and compile errors.
-
-**Do not** delete `lps-shared` or old ABI crates in this milestone unless the
-human explicitly finishes the shim strategy.
+No new backends in this milestone. Old crates remain as shims until later milestones.
 
 ## Layer model (critical)
 
 - **`lpir`** is **scalarized**. It uses `IrType` (F32, I32, Pointer), not logical
   vec3/mat4 as an IR-level type system.
-- **`lps-shared`** holds **`LpsType`**, **`LpsFunctionSignature`**, **`LpsParameter`**,
-  **`LpsParamQualifier`** — what the **frontend** produces and what **callers**
-  use for GLSL-style semantics. Same types apply to future WGSL, etc.
-- **`lpvm`** holds runtime values (`LpvmValue`), layout, VMContext, and **LPVM
-  traits**. It **depends on** `lps-shared` for metadata/signatures and on `lpir`
-  for `IrModule` / codegen-facing IR.
-
-Wrong: moving `LpsType` into `lpir` “because both are types.” Right: keep logical
-types in **`lps-shared`**.
+- **`lps-shared`** holds **`LpsType`**, **`LpsFnSig`**, **`FnParam`**,
+  **`ParamQualifier`** — what the **frontend** produces and what **callers**
+  use for GLSL-style semantics.
+- **`lpvm`** holds runtime data buffers (`LpvmData`), VMContext, and re-exports
+  `LpsValue`/`LpsType` from `lps-shared` for convenience.
 
 ## What Moves Where
 
-### `lps-shared` (shader layer — rename from `lps-core`)
+### `lps-shared` (shader layer — new crate)
 
-| Transitional crate | Target package | Public types (target names)                                                           |
-|--------------------|----------------|---------------------------------------------------------------------------------------|
-| `lps-core`         | `lps-shared`   | `LpsType`, `LpsStructId`, `LpsFunctionSignature`, `LpsParameter`, `LpsParamQualifier` |
+| Source | Target package | Public types (actual names) |
+|--------|----------------|----------------------------|
+| `lpvm` types | `lps-shared` | `LpsType`, `LpsValue`, `StructMember`, `LayoutRules` |
+| `lpvm` signatures | `lps-shared` | `LpsFnSig`, `FnParam`, `ParamQualifier`, `LpsModuleSig` |
+| `lpvm` path utils | `lps-shared` | `path`, `path_resolve`, `value_path` modules |
 
-Use a consistent **`Lps*`** prefix for this crate’s public types so they never
-collide with `lpir::IrType`, `lpvm::LpvmValue`, or Cranelift’s `Type`.
+**Note:** Original plan suggested `GlslValue` → `LpvmValue`, but we moved these
+logical types to `lps-shared` with `Lps*` prefix instead. `LpsValue` is a logical
+shader value (vec3, mat4), not a VM runtime concept.
 
-**Dependents** (update imports in this milestone as renames land): `lps-frontend`,
-`lps-filetests`, any crate that still depended on `lps-exec` for signatures
-(see below).
+**Dependents:** `lps-frontend`, `lps-filetests`, `lpvm`, `lps-exec`
 
-### `lpvm` (new crate — absorbs `lpvm` + replaces `lps-exec` traits)
+### `lpvm` (refactored — stayed in `lp-shader/`)
 
-Create `lpvm/lpvm/` at repo root. `#![no_std]` with `extern crate alloc`.
+**Actual location:** `lp-shader/lpvm/` (not at repo root as originally planned).
 
 **Dependencies:**
 
 ```toml
 [dependencies]
-lpir = { path = "...", default-features = false }
-lps-shared = { path = "...", default-features = false }
+lps-shared = { path = "../lps-shared" }
 ```
 
-Paths: use whatever directory layout exists after renames (`lp-shader/lpir`,
-`lps/lps-shared`, etc.).
+**Types in `lpvm`:**
 
-**From `lpvm` (rename map):**
+| Name | Role |
+|------|------|
+| `LpvmData` | Byte buffer with layout/path access (runtime shader data) |
+| `DataError` | Error type for data operations |
+| `VmContext` | Fixed-layout header for VM contexts |
+| `VmContextHeader` | Type alias for `VmContext` |
 
-| Old name                       | New name                                        | Notes                                                                                                                                 |
-|--------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `GlslValue`                    | `LpvmValue`                                     | Runtime value enum                                                                                                                    |
-| `GlslType` (metadata / layout) | `LpvmType` or align with `lps-shared`           | If duplicate with `LpsType`, **deduplicate or split**: layout-only vs logical type — decide in implementation; document in crate docs |
-| `GlslData`                     | `LpvmData`                                      |                                                                                                                                       |
-| `GlslModuleMeta`               | `LpvmModuleMeta`                                | Likely references `lps-shared` for function signatures                                                                                |
-| `GlslFunctionMeta`             | `LpvmFunctionMeta`                              |                                                                                                                                       |
-| `GlslParamMeta`                | `LpvmParamMeta`                                 |                                                                                                                                       |
-| `GlslParamQualifier` (ABI)     | `LpvmParamQualifier`                            | **Not** the same as `LpsParamQualifier` unless you intentionally unify                                                                |
-| `LayoutRules`, `StructMember`  | `LpvmLayoutRules`, `LpvmStructMember`           |                                                                                                                                       |
-| `VmContext`                    | `LpvmVmContext`                                 |                                                                                                                                       |
-| Paths, layout fns, constants   | `lpvm::path`, `lpvm::layout`, `lpvm::vmcontext` |                                                                                                                                       |
+**Re-exports from `lps-shared`:**
+- `LpsValue`, `LpsType`, `StructMember`, `LayoutRules`
+- `LpsFnSig`, `FnParam`, `ParamQualifier`
+- Path modules: `parse_path`, `LpsPathSeg`, `PathParseError`
+- Layout functions: `type_size`, `type_alignment`, `array_stride`, `round_up`
 
-**From `lps-exec`:**
+### Legacy crates (in `lp-shader/legacy/`)
 
-Replace **`GlslExecutable`** with new traits (design in this milestone;
-implementations in M2–M4):
+| Crate | Status |
+|-------|--------|
+| `lps-exec` | Still has `GlslExecutable` trait (used by filetests) |
+| `lpir-cranelift` | Still contains JIT compiler |
+| `lps-wasm` | Still contains WASM backend |
 
-| Trait          | Role                               |
-|----------------|------------------------------------|
-| `LpvmModule`   | Compiled artifact; can instantiate |
-| `LpvmInstance` | Execution + calls + VMContext      |
-| `LpvmMemory`   | Linear memory for an instance      |
-
-### Diagnostics / errors
-
-Prefer **`LpvmError`** inside `lpvm` rather than depending on a “glsl”-named
-diagnostics crate long-term. During migration, temporary bridges to
-`lps-diagnostics` / old `lps-diagnostics` are OK.
-
-## Crate layout (`lpvm` core)
+## Crate layout (actual)
 
 ```
-lpvm/
-└── lpvm/
-    ├── Cargo.toml
-    └── src/
-        ├── lib.rs
-        ├── value.rs
-        ├── data.rs
-        ├── metadata.rs      # may use lps-shared heavily
-        ├── layout.rs
-        ├── vmcontext.rs
-        ├── path.rs
-        ├── path_resolve.rs
-        ├── value_path.rs
-        ├── error.rs
-        ├── module.rs        # LpvmModule
-        ├── instance.rs      # LpvmInstance
-        └── memory.rs        # LpvmMemory
+lp-shader/
+├── lps-shared/
+│   └── src/
+│       ├── lib.rs          # LpsType, LpsValue, re-exports
+│       ├── types.rs          # LpsType, StructMember, LayoutRules
+│       ├── lps_value.rs     # LpsValue enum
+│       ├── sig.rs            # LpsFnSig, FnParam, ParamQualifier, LpsModuleSig
+│       ├── layout.rs         # std430 layout functions
+│       ├── path.rs           # Path parsing (LpsPathSeg)
+│       ├── path_resolve.rs   # Type path resolution
+│       └── value_path.rs     # Value path projection
+├── lpvm/
+│   └── src/
+│       ├── lib.rs            # Re-exports + LpvmData, VmContext
+│       ├── data.rs           # LpvmData implementation
+│       ├── data_error.rs     # DataError
+│       └── vmcontext.rs      # VmContext, VmContextHeader, constants
+├── lpir/
+│   └── src/                  # Unchanged (IrType, IrModule, etc.)
+└── legacy/
+    ├── lps-exec/             # GlslExecutable trait
+    ├── lpir-cranelift/       # JIT compiler
+    └── lps-wasm/             # WASM backend
 ```
 
 ## Workspace `Cargo.toml`
 
-Add `lpvm/lpvm` and `lps-shared` (or transitional path) to members as they appear.
+Already updated:
+- `lp-shader/lps-shared` in members
+- `lp-shader/lpvm` in members
+- All `lps-*` crates using new naming
 
-## What NOT To Do
+## What Was NOT Done (Deferred to Later Milestones)
 
-- Do NOT move **`LpsType` / `LpsFunctionSignature`** into **`lpir`**.
-- Do NOT implement LPVM backends in this milestone (only traits + types).
-- Do NOT migrate **`lps-filetests`** or **`lp-engine`** to call new backends yet
-  (M5–M6).
-- Do NOT change **`lpir-cranelift`** / **`lpvm-wasm`** predecessor / **`lp-riscv-emu`**
-  for backend behavior yet (M2–M4).
+- **No** `LpvmModule` / `LpvmInstance` / `LpvmMemory` traits yet — these come in M2-M4
+- **No** `LpvmModuleMeta` / `LpvmFunctionMeta` / `LpvmParamMeta` — metadata design deferred
+- **No** move of `lpvm` to repo root — stayed in `lp-shader/lpvm/`
+- **No** `LpvmError` type — still using `DataError` and `lps-diagnostics`
+- `lps-exec` still exists with `GlslExecutable` (M5/M6 migration)
+
+## Types Summary
+
+| Old Name | Location | New Name | Notes |
+|----------|----------|----------|-------|
+| `GlslValue` | `lpvm` | `LpsValue` | Moved to `lps-shared` |
+| `GlslType` | `lpvm` | `LpsType` | Moved to `lps-shared` |
+| `GlslData` | `lpvm` | `LpvmData` | Stayed in `lpvm` |
+| `StructMember` | `lpvm` | `StructMember` | Moved to `lps-shared` |
+| `LayoutRules` | `lpvm` | `LayoutRules` | Moved to `lps-shared` |
+| `VmContext` | `lpvm` | `VmContext` | Kept name, in `lpvm` |
+| `GlslFunctionSignature` | `lpvm` | `LpsFnSig` | Moved to `lps-shared` |
+| `GlslParameter` | `lpvm` | `FnParam` | Moved to `lps-shared` |
 
 ## Dependents to keep in mind
 
-**Will eventually use `lpvm` instead of `lpvm`:**
+**Currently use `lps-shared`:**
+- `lps-frontend` — for logical types when lowering
+- `lps-filetests` — for test value types
+- `lpvm` — re-exports and runtime data
+- `lps-exec` — depends on `lps-shared` and `lpvm`
 
-- `lp-engine`, `lps-builtins`, `lps-frontend`, `lpir-cranelift`, `lps-filetests`,
-  `lps-exec` (until removed)
-
-**Use `lps-shared` for logical signatures:**
-
-- `lps-frontend`, `lps-filetests`, `lps-exec` / future test harness,
-  anything that describes user-visible function types
+**Will eventually use new LPVM traits (M5-M6):**
+- `lp-engine`, `lps-filetests`, `lps-exec` (replacement)
 
 ## Done When
 
-- `lps-shared` exists (or transitional name with documented alias) with **`Lps*`**
-  logical types; **no** dependency on `lpir` or `lpvm`
-- `lpvm` exists, **`no_std` + `alloc`**, depends on **`lpir` + `lps-shared`**
-- `LpvmModule` / `LpvmInstance` / `LpvmMemory` defined (signatures may still be
-  refined in M2)
-- `LpvmValue`, `LpvmData`, VMContext, layout helpers present
-- Workspace and embedded checks pass (see overview / AGENTS.md for fw-esp32
-  command)
+- [x] `lps-shared` exists with `Lps*` logical types
+- [x] `lpvm` exists, `no_std + alloc`, depends on `lps-shared`
+- [x] `LpvmData`, `VmContext`, layout helpers present
+- [x] Workspace and embedded checks pass
+- [x] `lps-frontend`, `lps-filetests` updated to use `lps-shared`
+
+## Post-M1 Notes
+
+The naming differs from the original plan in these ways:
+
+1. **Logical value types use `Lps*` prefix** — `LpsValue`, `LpsType` live in
+   `lps-shared` because they're shader/language concepts, not VM runtime concepts.
+
+2. **Runtime data uses `Lpvm*` prefix** — `LpvmData` is a byte buffer for VM
+   memory; it's distinct from the logical `LpsValue`.
+
+3. **VMContext kept short name** — `VmContext` (not `LpvmVmContext`) since
+   it's already clearly a VM concept and the constant is widely used.
+
+4. **Crate stayed in `lp-shader/`** — moving to repo root was deferred; the
+   important part is the clean dependency graph, not the directory path.
+
+The deferred items (`LpvmModule` traits, metadata structs, `LpvmError`) will be
+addressed in M2-M4 as the WASM and Cranelift backends are built.
