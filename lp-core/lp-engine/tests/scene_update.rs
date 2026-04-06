@@ -125,7 +125,7 @@ fn test_main_glsl_modification() {
         .write_file_mut(
             "/src/shader-1.shader/main.glsl".as_path(),
             r#"
-                vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+                vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
                     return vec4(0.0, mod(time, 1.0), 0.0, 1.0);  // Green instead of red
                 }
             "#

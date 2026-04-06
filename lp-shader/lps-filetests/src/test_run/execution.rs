@@ -1,4 +1,4 @@
-//! Shared execution logic for filetests (`execute_function` / `execute_main`).
+//! Shared execution logic for filetests (`execute_function` / `execute_render`).
 
 use anyhow::Result;
 
@@ -126,7 +126,7 @@ pub fn execute_function(
     }
 }
 
-/// Execute `main()` and return the result as a [`LpsValue`].
-pub fn execute_main(executable: &mut dyn GlslExecutable) -> Result<LpsValue> {
-    execute_function(executable, "main", &[])
+/// Execute `render()` and return the result as a [`LpsValue`].
+pub fn execute_render(executable: &mut dyn GlslExecutable) -> Result<LpsValue> {
+    execute_function(executable, "render", &[])
 }

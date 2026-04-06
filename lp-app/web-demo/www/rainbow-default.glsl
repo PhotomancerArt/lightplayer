@@ -48,7 +48,7 @@ vec3 applyPalette(float t, float palette) {
     return paletteWarm(t);
 }
 
-// Naga GLSL-in resolves calls in source order; define helpers before main.
+// Naga GLSL-in resolves calls in source order; define helpers before render().
 vec2 worley_demo(vec2 scaledCoord, float time) {
     float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
     float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
@@ -78,7 +78,7 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
     return vec2(t, v);
 }
 
-vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 virtCoord = fragCoord * REF_SIZE / outputSize;

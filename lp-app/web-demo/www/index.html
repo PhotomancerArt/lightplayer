@@ -465,7 +465,7 @@
       if (res.ok) return await res.text();
     } catch (_) { /* ignore */
     }
-    return 'vec4 main(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(1.0, 0.0, 1.0, 1.0);\n}\n';
+    return 'vec4 render(vec2 fragCoord, vec2 outputSize, float time) {\n    return vec4(1.0, 0.0, 1.0, 1.0);\n}\n';
   }
 
   let defaultSource = null;

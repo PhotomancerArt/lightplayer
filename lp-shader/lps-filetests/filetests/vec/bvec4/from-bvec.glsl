@@ -48,7 +48,7 @@ bvec4 test_bvec4_from_bvec4_in_assignment() {
 
 // run: test_bvec4_from_bvec4_in_assignment() == bvec4(true, false, true, false)
 
-bvec4 main() {
+bvec4 render() {
     return test_bvec4_from_bvec4_in_assignment();
 }
 

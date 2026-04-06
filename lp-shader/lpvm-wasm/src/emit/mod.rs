@@ -72,9 +72,9 @@ pub(crate) fn emit_module(
         next_type += 1;
     }
 
-    // Detect `vec4 main(vec2, vec2, float)` → 5 params, 4 results in Q32.
-    let main_entry = find_main_entry(ir, options.float_mode);
-    let render_frame_type_idx = if main_entry.is_some() {
+    // Detect `vec4 render(vec2, vec2, float)` → 5 params, 4 results in Q32.
+    let render_entry = find_render_entry(ir, options.float_mode);
+    let render_frame_type_idx = if render_entry.is_some() {
         types
             .ty()
             .function([ValType::I32; 4], core::iter::empty::<ValType>());
@@ -92,7 +92,7 @@ pub(crate) fn emit_module(
     let mut import_section = ImportSection::new();
     let needs_memory = !filtered.decls.is_empty()
         || ir.functions.iter().any(|f| f.uses_memory())
-        || main_entry.is_some();
+        || render_entry.is_some();
     let env_memory = if needs_memory {
         let min = 1u64;
         let spec = EnvMemorySpec {
@@ -139,7 +139,7 @@ pub(crate) fn emit_module(
         let wasm_fn_index = filtered_fn_count + i as u32;
         exports.export(f.name.as_str(), ExportKind::Func, wasm_fn_index);
     }
-    if main_entry.is_some() {
+    if render_entry.is_some() {
         let render_fn_index = filtered_fn_count + ir.functions.len() as u32;
         exports.export("render_frame", ExportKind::Func, render_fn_index);
     }
@@ -183,9 +183,9 @@ pub(crate) fn emit_module(
         let wasm_fn = func::encode_ir_function(ir, f, &ctx, func_ctx)?;
         code.function(&wasm_fn);
     }
-    if let Some((main_idx, _)) = main_entry {
-        let main_wasm_idx = filtered_fn_count + main_idx as u32;
-        let rf = emit_render_frame(main_wasm_idx, sp_global);
+    if let Some((render_idx, _)) = render_entry {
+        let render_wasm_idx = filtered_fn_count + render_idx as u32;
+        let rf = emit_render_frame(render_wasm_idx, sp_global);
         code.function(&rf);
     }
 
@@ -213,14 +213,14 @@ pub(crate) fn emit_module(
 // render_frame: pixel loop emitted as raw WASM
 // ---------------------------------------------------------------------------
 
-/// Match `vec4 main(vec2, vec2, float)` — 5 i32 params, 4 i32 results in Q32.
-fn find_main_entry(ir: &IrModule, mode: FloatMode) -> Option<(usize, u32)> {
+/// Match `vec4 render(vec2, vec2, float)` — WASM `(vmctx, 5×i32) -> 4×i32` in Q32.
+fn find_render_entry(ir: &IrModule, mode: FloatMode) -> Option<(usize, u32)> {
     for (i, f) in ir.functions.iter().enumerate() {
-        if f.name != "main" {
+        if f.name != "render" {
             continue;
         }
         let (params, results) = func::wasm_function_signature(f, mode);
-        if params.len() == 5 && results.len() == 4 {
+        if params.len() == 6 && results.len() == 4 {
             return Some((i, f.param_count as u32));
         }
     }
@@ -228,7 +228,7 @@ fn find_main_entry(ir: &IrModule, mode: FloatMode) -> Option<(usize, u32)> {
 }
 
 /// Emit `render_frame(width, height, time, out_ptr)` — loops over every pixel,
-/// calls `main`, converts Q16.16 vec4 → RGBA8, stores to linear memory.
+/// calls `render`, converts Q16.16 vec4 → RGBA8, stores to linear memory.
 ///
 /// One WASM call per frame instead of W×H JS→WASM transitions.
 fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>) -> Function {
@@ -260,7 +260,8 @@ fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>) -> Function {
         {
             s.local_get(5).local_get(0).i32_ge_u().br_if(1);
 
-            // main(x<<16, y<<16, w<<16, h<<16, time)
+            // render(vmctx, x<<16, y<<16, w<<16, h<<16, time)
+            s.i32_const(0);
             s.local_get(5).i32_const(16).i32_shl();
             s.local_get(4).i32_const(16).i32_shl();
             s.local_get(0).i32_const(16).i32_shl();

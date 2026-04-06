@@ -394,7 +394,7 @@ impl ShaderRuntime {
 
         match compile_result {
             Ok(module) => {
-                let dc = module.direct_call("main");
+                let dc = module.direct_call("render");
                 self.direct_call = dc;
                 self.jit_module = Some(module);
                 self.compilation_error = None;

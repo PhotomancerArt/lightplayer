@@ -61,8 +61,7 @@ fn extract_functions(
         if name.starts_with("__lp_") {
             continue;
         }
-        // Skip the synthesized `void main() {}` entry point but keep user functions
-        // named "main" that have parameters (e.g. `vec4 main(vec2, vec2, float)`).
+        // Skip Naga’s synthesized `void main() {}` vertex entry; user shaders use `render(...)`.
         if name == "main" && function.arguments.is_empty() {
             continue;
         }

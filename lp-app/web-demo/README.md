@@ -1,7 +1,8 @@
 # GLSL → WASM web demo
 
-In-browser GLSL compiler (`lps-frontend` + `lps-wasm`) and rainbow-style shader linked against
-`lps_builtins_wasm.wasm`, same pattern as wasmtime filetests.
+In-browser pipeline: **GLSL** → `lps-frontend` (Naga) → LPIR → **`lpvm-wasm`** → WASM. Builtin implementations are **Rust from `lps-builtins`**, linked into the same `web_demo.wasm` as the compiler (no separate `builtins.wasm`).
+
+The page calls `lpvm_init_exports` / `init_engine`, then `compile_shader` / `render_frame` / `get_shader_memory` from the wasm-bindgen bundle (`www/pkg/`).
 
 ## Prerequisites
 
@@ -24,10 +25,8 @@ From the workspace root:
 just web-demo-build
 ```
 
-This builds:
-
-- `lps-builtins-wasm` → `www/builtins.wasm`
-- `web-demo` for wasm32 → `wasm-bindgen` → `www/pkg/`
+This builds `web-demo` for wasm32 (release), runs `wasm-bindgen` into `www/pkg/`, and refreshes
+`www/rainbow-default.glsl` from `examples/basic/src/rainbow.shader/main.glsl`.
 
 ## Run
 
@@ -35,22 +34,17 @@ This builds:
 just web-demo
 ```
 
-Open the URL printed by miniserve (default `http://127.0.0.1:2812`, a WS2812-friendly port number).
-The page loads the compiler WASM, fetches builtins, compiles the textarea source, and runs `main`
-per pixel on a 64×64 canvas.
+Open the URL printed by miniserve (default `http://127.0.0.1:2812`). The editor compiles on idle;
+`render_frame` drives the texture (shader entry point is **`vec4 render(vec2 fragCoord, vec2 outputSize, float time)`**).
 
-## Shared linear memory
+## Linear memory
 
-`www/index.html` creates `WebAssembly.Memory` with **`initial: 17` pages** so it satisfies
-`lps_builtins_wasm.wasm`’s `env.memory` import (Rust/LLVM currently asks for 17 pages minimum). The
-shader module only needs 1 page; the larger requirement comes from the builtins artifact. If linking
-fails with “smaller than the declared initial of N”, raise `initial` to at least `N` or re-check the
-builtins module with `wasm-tools print builtins.wasm | grep memory`.
+Shader memory comes from the compiled module’s `env.memory` import. The demo grows it as needed for
+the pixel buffer (see `ensureWasmMemoryForPixelBuffer` in `www/index.html`).
 
 ## Layout
 
-- `src/lib.rs` — `compile_glsl` wasm-bindgen export
-- `www/index.html` — UI, linking, render loop
-- `www/rainbow-default.glsl` — default shader (overwritten from `examples/basic/.../main.glsl` by
-  `web-demo-build` to stay in sync)
+- `src/lib.rs` — wasm-bindgen exports (`lpvm_init_exports`, `compile_shader`, `render_frame`, …)
+- `www/index.html` — UI and render loop
+- `www/rainbow-default.glsl` — default shader (synced by `web-demo-build`)
 - `www/pkg/` — generated; gitignored

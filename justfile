@@ -32,7 +32,7 @@ install-rv32-target:
 generate-builtins:
     cargo run --bin lps-builtins-gen-app -p lps-builtins-gen-app
 
-# Ensure wasm32-unknown-unknown target is installed (web-demo, builtins wasm)
+# Ensure wasm32-unknown-unknown target is installed (web-demo, lps-builtins-wasm for filetests, etc.)
 
 wasm32_target := "wasm32-unknown-unknown"
 
@@ -48,7 +48,7 @@ install-wasm32-target:
 # Web demo (GLSL compiler in browser)
 # ============================================================================
 
-# Build web-demo WASM (lpvm-wasm + lps-builtins linked in) and wasm-bindgen glue into www/
+# Build web-demo WASM (single `web_demo.wasm`: lpvm-wasm + `lps-builtins` linked in) and wasm-bindgen glue into www/
 web-demo-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail

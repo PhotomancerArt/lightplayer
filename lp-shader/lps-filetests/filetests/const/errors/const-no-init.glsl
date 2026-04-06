@@ -5,6 +5,6 @@
 
 const float BAD;  // expected-error {{const `BAD` must be initialized}}
 
-float main() {
+float render() {
     return 1.0;
 }

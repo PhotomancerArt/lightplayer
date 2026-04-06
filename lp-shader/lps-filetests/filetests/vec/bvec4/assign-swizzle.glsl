@@ -71,7 +71,7 @@ bvec4 test_bvec4_assign_swizzle_xyz() {
 
 // run: test_bvec4_assign_swizzle_xyz() == bvec4(true, false, true, true)
 
-bvec4 main() {
+bvec4 render() {
     return test_bvec4_assign_swizzle_xyz();
 }
 

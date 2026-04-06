@@ -44,7 +44,7 @@ vec3 applyPalette(float t, float palette) {
     return paletteWarm(t);
 }
 
-// Naga GLSL-in resolves calls in source order; define helpers before main.
+// Naga GLSL-in resolves calls in source order; define helpers before render().
 vec2 worley_demo(vec2 scaledCoord, float time) {
     float noiseValue = lpfx_worley(scaledCoord * 2, 0u) / 2 + 0.5;
     float t = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
@@ -74,7 +74,7 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
     return vec2(t, v);
 }
 
-vec4 main(vec2 fragCoord, vec2 outputSize, float time) {
+vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
     // Palette cycle: 5s per palette, 1s smooth transition to next
     float cyclePhase = mod(time, 5.0);
     float palette = floor(mod(time * 0.2, 5.0));
