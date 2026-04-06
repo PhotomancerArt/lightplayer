@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "GLSL → WASM browser demo (compiler runs in-browser)"
+description = "GLSL → WASM browser demo using lpvm-wasm"
 
 [lints]
 workspace = true
@@ -15,5 +15,8 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-lps-wasm = { path = "../../lp-shader/legacy/lps-wasm" }
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
+lps-frontend = { path = "../../lp-shader/lps-frontend" }
+lpvm = { path = "../../lp-shader/lpvm" }
 wasm-bindgen = "0.2"
+js-sys = "0.3"

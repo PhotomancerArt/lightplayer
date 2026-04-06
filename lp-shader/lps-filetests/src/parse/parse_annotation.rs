@@ -1,7 +1,7 @@
 //! Parse `@unimplemented(target)` and `@unsupported(target)` comment lines.
 
 use crate::targets::{Annotation, AnnotationKind, Target};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Try to parse an annotation from a comment line.
 /// Returns None if the line is not an annotation.

@@ -4,7 +4,7 @@ use alloc::borrow::Cow;
 use alloc::string::String;
 
 use crate::lps_value::LpsValue;
-use crate::path::{parse_path, LpsPathSeg, PathParseError};
+use crate::path::{LpsPathSeg, PathParseError, parse_path};
 
 /// Failure resolving a path on a [`LpsValue`].
 #[derive(Debug)]

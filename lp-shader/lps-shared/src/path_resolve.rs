@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::layout::{array_stride, round_up, type_alignment, type_size};
-use crate::path::{parse_path, LpsPathSeg, PathParseError};
+use crate::path::{LpsPathSeg, PathParseError, parse_path};
 use crate::{LayoutRules, LpsType, StructMember};
 
 /// Path-based offset and type projection for [`LpsType`].

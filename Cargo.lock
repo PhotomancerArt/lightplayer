@@ -4033,12 +4033,15 @@ dependencies = [
 name = "lpvm-wasm"
 version = "40.0.0"
 dependencies = [
+ "js-sys",
  "log",
  "lpir",
  "lps-builtin-ids",
+ "lps-builtins",
  "lps-frontend",
  "lps-shared",
  "lpvm",
+ "wasm-bindgen",
  "wasm-encoder 0.245.1",
  "wasmtime",
 ]
@@ -7089,7 +7092,10 @@ dependencies = [
 name = "web-demo"
 version = "40.0.0"
 dependencies = [
- "lps-wasm",
+ "js-sys",
+ "lps-frontend",
+ "lpvm",
+ "lpvm-wasm",
  "wasm-bindgen",
 ]
 

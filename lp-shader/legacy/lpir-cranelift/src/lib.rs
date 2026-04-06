@@ -96,8 +96,8 @@ mod tests {
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        jit_from_ir, CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32,
-        MemoryStrategy,
+        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, MemoryStrategy,
+        jit_from_ir,
     };
 
     fn jit_test_vmctx() -> *const u8 {

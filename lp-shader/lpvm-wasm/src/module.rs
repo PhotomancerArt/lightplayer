@@ -61,6 +61,13 @@ fn component_vt(ty: &LpsType, fm: FloatMode) -> WasmValType {
     }
 }
 
+/// `env.memory` import limits (matches [`emit::emit_module`](crate::emit::emit_module)).
+#[derive(Debug, Clone, Copy)]
+pub struct EnvMemorySpec {
+    pub initial_pages: u32,
+    pub max_pages: Option<u32>,
+}
+
 /// A compiled WASM module ready for instantiation.
 #[derive(Debug, Clone)]
 pub struct WasmModule {
@@ -68,6 +75,8 @@ pub struct WasmModule {
     pub exports: Vec<WasmExport>,
     /// When set, WASM global index 0 is the shadow stack pointer; reset before each exported call.
     pub shadow_stack_base: Option<i32>,
+    /// When set, the module imports `env.memory`; browsers/wasmtime must supply matching limits.
+    pub env_memory: Option<EnvMemorySpec>,
 }
 
 /// Metadata for an exported WASM function.

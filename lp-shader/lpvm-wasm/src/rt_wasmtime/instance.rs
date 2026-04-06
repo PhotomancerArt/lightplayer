@@ -8,10 +8,10 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{DEFAULT_VMCTX_FUEL, LpsValue, LpvmInstance};
 use wasmtime::{Instance, Store, Val};
 
+use super::link;
+use super::marshal::{build_wasm_args, wasm_vals_to_lps_value, zero_results_for_type};
 use crate::error::WasmError;
 use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
-use crate::runtime::link;
-use crate::runtime::marshal::{build_wasm_args, wasm_vals_to_lps_value, zero_results_for_type};
 
 use super::WasmLpvmModule;
 
@@ -28,12 +28,8 @@ pub struct WasmLpvmInstance {
 impl WasmLpvmInstance {
     pub(crate) fn new(module: &WasmLpvmModule) -> Result<Self, WasmError> {
         let mut store = Store::new(&module.engine, ());
-        let (instance, _) = link::instantiate_wasm_module(
-            &module.engine,
-            &mut store,
-            &module.wasm_bytes,
-            &module.builtins_wasm,
-        )?;
+        let (instance, _) =
+            link::instantiate_wasm_module(&module.engine, &mut store, &module.wasm_bytes)?;
         Ok(Self {
             store,
             instance,

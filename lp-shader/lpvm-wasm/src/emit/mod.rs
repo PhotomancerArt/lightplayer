@@ -13,6 +13,8 @@ use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lpir::IrModule;
+
+use crate::module::EnvMemorySpec;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemArg, MemoryType, Module,
@@ -47,7 +49,7 @@ pub(crate) struct FuncEmitCtx<'a> {
 pub(crate) fn emit_module(
     ir: &IrModule,
     options: &crate::options::WasmOptions,
-) -> Result<(Vec<u8>, Option<i32>), String> {
+) -> Result<(Vec<u8>, Option<i32>, Option<EnvMemorySpec>), String> {
     let filtered = imports::build_filtered_imports(ir)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
@@ -91,19 +93,27 @@ pub(crate) fn emit_module(
     let needs_memory = !filtered.decls.is_empty()
         || ir.functions.iter().any(|f| f.uses_memory())
         || main_entry.is_some();
-    if needs_memory {
+    let env_memory = if needs_memory {
+        let min = 1u64;
+        let spec = EnvMemorySpec {
+            initial_pages: min as u32,
+            max_pages: None,
+        };
         import_section.import(
             "env",
             "memory",
             MemoryType {
-                minimum: 1,
+                minimum: min,
                 maximum: None,
                 memory64: false,
                 shared: false,
                 page_size_log2: None,
             },
         );
-    }
+        Some(spec)
+    } else {
+        None
+    };
     for (decl, &ty_idx) in filtered.decls.iter().zip(import_fn_types.iter()) {
         let wasm_name = imports::builtins_wasm_name(decl)?;
         import_section.import("builtins", wasm_name, EntityType::Function(ty_idx));
@@ -196,7 +206,7 @@ pub(crate) fn emit_module(
     } else {
         None
     };
-    Ok((module.finish(), shadow_stack_base))
+    Ok((module.finish(), shadow_stack_base, env_memory))
 }
 
 // ---------------------------------------------------------------------------

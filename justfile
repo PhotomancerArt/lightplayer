@@ -48,13 +48,11 @@ install-wasm32-target:
 # Web demo (GLSL compiler in browser)
 # ============================================================================
 
-# Build compiler WASM (wasm-bindgen), builtins WASM, copy artifacts into www/
+# Build web-demo WASM (lpvm-wasm + lps-builtins linked in) and wasm-bindgen glue into www/
 web-demo-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building builtins WASM..."
-    cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release
-    echo "Building web-demo (compiler) for wasm32..."
+    echo "Building web-demo for wasm32..."
     cargo build -p web-demo --target wasm32-unknown-unknown --release
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
         echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
@@ -64,9 +62,8 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp target/wasm32-unknown-unknown/release/lps_builtins_wasm.wasm lp-app/web-demo/www/builtins.wasm
     cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
-    echo "Artifacts: lp-app/web-demo/www/ (index.html, builtins.wasm, pkg/)"
+    echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
 
 # Build and serve the web demo (installs miniserve via cargo if missing)
 web-demo: web-demo-build
@@ -91,7 +88,6 @@ web-demo-deploy: web-demo-build
     # Copy built artifacts to temp dir
     cp "$www/index.html" "$tmp_dir/"
     cp "$www/rainbow-default.glsl" "$tmp_dir/"
-    cp "$www/builtins.wasm" "$tmp_dir/"
     cp -r "$www/pkg" "$tmp_dir/pkg"
 
     # Create/update gh-pages as orphan branch
@@ -104,7 +100,6 @@ web-demo-deploy: web-demo-build
     # Sync files into worktree
     cp "$tmp_dir/index.html" "$tmp_dir/wt/"
     cp "$tmp_dir/rainbow-default.glsl" "$tmp_dir/wt/"
-    cp "$tmp_dir/builtins.wasm" "$tmp_dir/wt/"
     rm -rf "$tmp_dir/wt/pkg"
     cp -r "$tmp_dir/pkg" "$tmp_dir/wt/pkg"
 

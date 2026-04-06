@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::format;
 
 use lpir::IrModule;
+use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
 use lpvm::LpvmEngine;
 use wasmtime::{Engine, Module};
@@ -13,48 +14,31 @@ use crate::error::WasmError;
 use crate::options::WasmOptions;
 
 use super::instance::WasmLpvmInstance;
-use super::link;
 
-/// wasmtime engine plus builtins WASM bytes; compiles LPIR with fixed [`WasmOptions`].
+/// wasmtime engine; compiles LPIR with fixed [`WasmOptions`].
 pub struct WasmLpvmEngine {
     engine: Engine,
-    builtins_wasm: Vec<u8>,
     compile_options: WasmOptions,
 }
 
 impl WasmLpvmEngine {
-    /// New engine with explicit builtins WASM bytes (e.g. from `std::fs::read`).
-    pub fn new(builtins_wasm: Vec<u8>, compile_options: WasmOptions) -> Result<Self, WasmError> {
+    /// New engine (builtins are linked natively from `lps-builtins`).
+    pub fn new(compile_options: WasmOptions) -> Result<Self, WasmError> {
+        ensure_builtins_referenced();
         let mut config = wasmtime::Config::new();
         config.consume_fuel(true);
         let engine = Engine::new(&config)
             .map_err(|e| WasmError::runtime(format!("failed to create WASM engine: {e}")))?;
         Ok(Self {
             engine,
-            builtins_wasm,
             compile_options,
         })
-    }
-
-    /// Load builtins from [`link::builtins_wasm_path`] (same resolution as `lps-filetests`).
-    pub fn try_default_builtins(compile_options: WasmOptions) -> Result<Self, WasmError> {
-        let path = link::builtins_wasm_path();
-        let bytes = std::fs::read(&path).map_err(|e| {
-            WasmError::runtime(format!(
-                "read `{}`: {e}\n\
-                 build: cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release\n\
-                 or set lps_BUILTINS_WASM",
-                path.display()
-            ))
-        })?;
-        Self::new(bytes, compile_options)
     }
 }
 
 /// Linked shader module: WASM bytes + metadata, ready to [`LpvmModule::instantiate`].
 pub struct WasmLpvmModule {
     pub(crate) engine: Engine,
-    pub(crate) builtins_wasm: Vec<u8>,
     pub(crate) wasm_bytes: Vec<u8>,
     pub(crate) signatures: LpsModuleSig,
     pub(crate) exports: HashMap<String, crate::module::WasmExport>,
@@ -87,7 +71,6 @@ impl LpvmEngine for WasmLpvmEngine {
             .collect();
         Ok(WasmLpvmModule {
             engine: self.engine.clone(),
-            builtins_wasm: self.builtins_wasm.clone(),
             wasm_bytes: bytes,
             signatures: artifact.signatures().clone(),
             exports,

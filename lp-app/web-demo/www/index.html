@@ -209,11 +209,9 @@
                 <button id="btn-copy-link">Copy link</button>
             </div>
             <p>
-                GLSL is compiled to WASM via a
-                <a href="https://github.com/gfx-rs/naga">Naga</a> fork.
-                All math uses Q16.16 fixed-point arithmetic -- no floats.
-                The compiler also targets riscv32imac (ESP32-C3/C6),
-                producing native binaries that run without an FPU.
+                GLSL is lowered through <a href="https://github.com/gfx-rs/naga">Naga</a> to LPIR,
+                then <code>lpvm-wasm</code> emits shader WASM. Builtins are native Rust from
+                <code>lps-builtins</code> (same module as the demo). All math uses Q16.16 fixed-point.
             </p>
         </div>
     </div>
@@ -222,7 +220,14 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.5/ace.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.5/ext-language_tools.min.js"></script>
 <script type="module">
-  import init, {compile_glsl} from './pkg/web_demo.js';
+  import init, {
+    lpvm_init_exports,
+    init_engine,
+    compile_shader,
+    render_frame,
+    get_shader_memory,
+    shader_ready,
+  } from './pkg/web_demo.js';
 
   // ── Ace editor setup ──────────────────────────────────────────────
   const editor = ace.edit('source');
@@ -427,6 +432,7 @@
   }
 
   function ensureWasmMemoryForPixelBuffer() {
+    if (!sharedMemory) return;
     const needBytes = PIXEL_BUF_OFFSET + pixelBufSize();
     const needPages = Math.ceil(needBytes / 65536);
     const curPages = sharedMemory.buffer.byteLength / 65536;
@@ -448,8 +454,6 @@
     resetFrameSamples();
   }
 
-  let builtinsInstance = null;
-  let shaderInstance = null;
   let compileTimeout = null;
   let lastError = '';
 
@@ -521,14 +525,13 @@
 
   function compileShader(source) {
     try {
-      const wasmBytes = compile_glsl(source);
-      const module = new WebAssembly.Module(wasmBytes);
-      const instance = new WebAssembly.Instance(module, {
-        builtins: builtinsInstance.exports,
-        env: {memory: sharedMemory},
-      });
-      
-      shaderInstance = instance;
+      compile_shader(source);
+      sharedMemory = get_shader_memory();
+      if (!sharedMemory) {
+        setError('Shader has no linear memory export');
+        return false;
+      }
+      ensureWasmMemoryForPixelBuffer();
       resetFrameSamples();
       setError('');
       return true;
@@ -599,16 +602,14 @@
   function render(timestamp) {
     requestAnimationFrame(render);
 
-    if (!shaderInstance) return;
-    const renderFrameFn = shaderInstance.exports.render_frame;
-    if (typeof renderFrameFn !== 'function') return;
+    if (!shader_ready() || !sharedMemory) return;
 
     const timeSec = timestamp / 1000;
     const q32Time = Math.round(timeSec * 65536);
 
     const t0 = performance.now();
     try {
-      renderFrameFn(texSize, texSize, q32Time, PIXEL_BUF_OFFSET);
+      render_frame(texSize, texSize, q32Time, PIXEL_BUF_OFFSET);
     } catch (e) {
       setError('Runtime: ' + e);
       return;
@@ -649,22 +650,9 @@
   }
 
   async function main() {
-    await init();
-
-    const builtinsRes = await fetch('builtins.wasm');
-    if (!builtinsRes.ok) {
-      setError('Failed to fetch builtins.wasm. Run: just web-demo-build');
-      return;
-    }
-    const builtinsBytes = await builtinsRes.arrayBuffer();
-
-    // Must be >= builtins `env.memory` import minimum (currently 17 pages from
-    // `lps_builtins_wasm.wasm`; wasmtime tests use max(shader, builtins)).
-    sharedMemory = new WebAssembly.Memory({initial: 17, maximum: 256});
-    const builtinsMod = await WebAssembly.instantiate(builtinsBytes, {
-      env: {memory: sharedMemory},
-    });
-    builtinsInstance = builtinsMod.instance;
+    const exports = await init();
+    lpvm_init_exports(exports);
+    init_engine();
 
     await loadInitialSource();
     editor.resize();

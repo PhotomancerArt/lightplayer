@@ -42,7 +42,7 @@ pub fn compile_lpir(
     options: &WasmOptions,
 ) -> Result<WasmArtifact, WasmError> {
     validate_metadata(ir, meta)?;
-    let (wasm_bytes, shadow_stack_base) =
+    let (wasm_bytes, shadow_stack_base, env_memory) =
         emit::emit_module(ir, options).map_err(WasmError::emit)?;
     let exports = collect_exports(ir, meta, options);
     Ok(WasmArtifact {
@@ -50,6 +50,7 @@ pub fn compile_lpir(
             bytes: wasm_bytes,
             exports,
             shadow_stack_base,
+            env_memory,
         },
         signatures: meta.clone(),
     })

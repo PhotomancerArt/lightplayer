@@ -1,6 +1,6 @@
 //! Target name formatting and CLI parsing.
 
-use super::{Backend, FloatMode, Target, ALL_TARGETS};
+use super::{ALL_TARGETS, Backend, FloatMode, Target};
 use std::collections::BTreeSet;
 use std::fmt;
 

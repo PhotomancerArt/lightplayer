@@ -1,11 +1,7 @@
-//! LPIR → WebAssembly emission for LPVM, with a wasmtime runtime enabled by default.
+//! LPIR → WebAssembly emission for LPVM, plus host runtimes.
 //!
-//! Primary entry point: [`compile_lpir`]. [`runtime::WasmLpvmEngine`] implements [`lpvm::LpvmEngine`].
-//!
-//! **Emit-only (no wasmtime):** depend on this crate with `default-features = false` (keeps
-//! `#![no_std]`). The `runtime` feature can be enabled explicitly when needed.
-
-#![cfg_attr(not(feature = "runtime"), no_std)]
+//! Primary entry point: [`compile_lpir`]. On native targets, [`rt_wasmtime::WasmLpvmEngine`]
+//! implements [`lpvm::LpvmEngine`] using wasmtime.
 
 extern crate alloc;
 
@@ -15,8 +11,10 @@ pub mod error;
 pub mod module;
 pub mod options;
 
-#[cfg(feature = "runtime")]
-pub mod runtime;
+#[cfg(target_arch = "wasm32")]
+pub mod rt_browser;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rt_wasmtime;
 
 pub use compile::{WasmArtifact, compile_lpir};
 pub use error::WasmError;

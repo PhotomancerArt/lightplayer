@@ -3,7 +3,7 @@
 use crate::cli::Args;
 use crate::expand;
 use crate::types::{Dimension, VecType};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 
 /// Parsed test file specification.

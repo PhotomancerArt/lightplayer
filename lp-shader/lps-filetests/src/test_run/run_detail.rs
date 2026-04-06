@@ -2,7 +2,7 @@
 
 use crate::output_mode::OutputMode;
 use crate::parse::{RunDirective, TestFile};
-use crate::targets::{directive_disposition, AnnotationKind, Disposition, Target};
+use crate::targets::{AnnotationKind, Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
 use lps_exec::GlslExecutable;
 

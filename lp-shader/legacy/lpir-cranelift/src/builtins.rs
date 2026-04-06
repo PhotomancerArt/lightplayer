@@ -9,14 +9,14 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use cranelift_codegen::ir::{types, Signature};
+use cranelift_codegen::ir::{Signature, types};
 use cranelift_codegen::isa::CallConv;
 use cranelift_module::{FuncId, Linkage, Module};
-use lpir::module::{ImportDecl, IrModule};
 use lpir::FloatMode;
+use lpir::module::{ImportDecl, IrModule};
 use lps_builtin_ids::{
-    glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id, lpir_q32_builtin_id, vm_q32_builtin_id,
-    BuiltinId, GlslParamKind,
+    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    lpir_q32_builtin_id, vm_q32_builtin_id,
 };
 
 use crate::error::CompileError;

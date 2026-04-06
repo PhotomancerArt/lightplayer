@@ -826,7 +826,7 @@ fn parse_matrix_constructor(args: &[Expr], dim: usize) -> Result<[[f32; 4]; 4], 
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_lps_value_literal, LpsValue};
+    use super::{LpsValue, parse_lps_value_literal};
 
     #[test]
     fn test_parse_mat2_from_column_vectors() {

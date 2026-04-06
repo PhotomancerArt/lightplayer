@@ -12,7 +12,7 @@
 //! Changing an `extern "C"` builtin in `lps-builtins` without re-running codegen will desync
 //! this file and fail `cargo check` until you regenerate.
 
-use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_codegen::ir::{AbiParam, Signature, types};
 use cranelift_codegen::isa::CallConv;
 use lps_builtin_ids::BuiltinId;
 
@@ -320,8 +320,8 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
 pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
     use lps_builtins::builtins::{
         glsl::{
-            acos_q32, acosh_q32, asin_q32, asinh_q32, atan2_q32, atan_q32, atanh_q32, cos_q32,
-            cosh_q32, exp2_q32, exp_q32, fma_q32, inversesqrt_q32, ldexp_q32, log2_q32, log_q32,
+            acos_q32, acosh_q32, asin_q32, asinh_q32, atan_q32, atan2_q32, atanh_q32, cos_q32,
+            cosh_q32, exp_q32, exp2_q32, fma_q32, inversesqrt_q32, ldexp_q32, log_q32, log2_q32,
             mod_q32, pow_q32, round_q32, sin_q32, sinh_q32, tan_q32, tanh_q32,
         },
         lpfx::color,

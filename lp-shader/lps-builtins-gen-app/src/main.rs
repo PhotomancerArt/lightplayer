@@ -1,21 +1,22 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use syn::{parse_file, Item, ItemFn};
+use syn::{Item, ItemFn, parse_file};
 use walkdir::WalkDir;
 
 mod discovery;
 mod lpfx;
+mod native_dispatch_codegen;
 
 use discovery::discover_lpfx_functions;
 use lpfx::errors::Variant;
 use lpfx::grouping::{group_by_signature, group_functions_by_name};
 use lpfx::process::process_lpfx_functions;
 use lpfx::types::Type;
-use lpfx::validate::{validate_lpfx_functions, ParsedLpfxFunction};
+use lpfx::validate::{ParsedLpfxFunction, validate_lpfx_functions};
 
 #[derive(Debug, Clone)]
-struct BuiltinInfo {
+pub(crate) struct BuiltinInfo {
     enum_variant: String,
     symbol_name: String,
     function_name: String,
@@ -73,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     generate_builtin_ids(&builtin_ids_path, &builtins);
 
     let lpir_builtin_abi_path = workspace_root
+        .join("legacy")
         .join("lpir-cranelift")
         .join("src")
         .join("generated_builtin_abi.rs");
@@ -83,14 +85,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("lps-builtins-emu-app")
         .join("src")
         .join("builtin_refs.rs");
-    generate_builtin_refs(&builtin_refs_path, &builtins);
+    generate_builtin_refs(&builtin_refs_path, &builtins, "lps_builtins");
 
-    // Generate builtin_refs.rs (wasm32 cdylib — same refs, different consumer)
-    let builtin_refs_wasm_path = workspace_root
-        .join("lps-builtins-wasm")
+    // Generate builtin_refs.rs (inside lps-builtins for `crate::` paths / DCE)
+    let builtin_refs_lps_path = workspace_root
+        .join("lps-builtins")
         .join("src")
         .join("builtin_refs.rs");
-    generate_builtin_refs(&builtin_refs_wasm_path, &builtins);
+    generate_builtin_refs(&builtin_refs_lps_path, &builtins, "crate");
 
     // Generate glsl/mod.rs and lpir/mod.rs (submodule lists only; lpfx keeps hand-written mod tree)
     let glsl_builtins: Vec<BuiltinInfo> = builtins
@@ -144,11 +146,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let wasm_import_types_path = workspace_root
-        .join("lps-wasm")
+        .join("lpvm-wasm")
         .join("src")
         .join("emit")
         .join("builtin_wasm_import_types.rs");
     generate_wasm_import_types(&wasm_import_types_path, &builtins);
+
+    let wasm_import_types_legacy_path = workspace_root
+        .join("legacy")
+        .join("lps-wasm")
+        .join("src")
+        .join("emit")
+        .join("builtin_wasm_import_types.rs");
+    generate_wasm_import_types(&wasm_import_types_legacy_path, &builtins);
+
+    let native_dispatch_path = workspace_root
+        .join("lpvm-wasm")
+        .join("src")
+        .join("rt_wasmtime")
+        .join("native_builtin_dispatch.rs");
+    native_dispatch_codegen::generate_native_wasmtime_dispatch(&native_dispatch_path, &builtins);
 
     // Format generated files using cargo fmt
     // Need actual workspace root for cargo fmt, not lps directory
@@ -161,12 +178,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &builtin_ids_path,
             &lpir_builtin_abi_path,
             &builtin_refs_path,
-            &builtin_refs_wasm_path,
+            &builtin_refs_lps_path,
             &glsl_mod_rs_path,
             &lpir_mod_rs_path,
             &vm_mod_rs_path,
             &glsl_map_path,
             &wasm_import_types_path,
+            &wasm_import_types_legacy_path,
+            &native_dispatch_path,
         ],
     );
 
@@ -424,35 +443,21 @@ fn lpfx_q32_builtin_variant(funcs: &[&ParsedLpfxFunction]) -> Option<String> {
 }
 
 fn find_workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    // Find the actual workspace root (where Cargo.toml with [workspace] is)
+    // Directory that contains `lps-builtins/` (lp-shader/), or repo root + lp-shader/
     let mut current = std::env::current_dir()?;
     loop {
-        let cargo_toml = current.join("Cargo.toml");
-        if cargo_toml.exists() {
-            let content = std::fs::read_to_string(&cargo_toml)?;
-            if content.contains("[workspace]") {
-                // Return lps directory within the workspace
-                let lps_dir = current.join("../..");
-                if lps_dir.exists() && lps_dir.is_dir() {
-                    return Ok(lps_dir);
-                }
-                // Fallback: if we're already in lps or a subdirectory, use current directory
-                let mut check = std::env::current_dir()?;
-                loop {
-                    if check.join("lps-builtins").exists() || check.join("lpir-cranelift").exists()
-                    {
-                        return Ok(check);
-                    }
-                    if !check.pop() {
-                        break;
-                    }
-                }
-            }
+        if current.join("lps-builtins").join("Cargo.toml").exists() {
+            return Ok(current);
+        }
+        let lp_sh = current.join("lp-shader");
+        if lp_sh.join("lps-builtins").join("Cargo.toml").exists() {
+            return Ok(lp_sh);
         }
         if !current.pop() {
-            return Err("Could not find workspace root".into());
+            break;
         }
     }
+    Err("Could not find lp-shader root (missing lps-builtins/Cargo.toml). Run from lp-shader/ or repo root.".into())
 }
 
 fn discover_builtins(
@@ -539,20 +544,21 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
 
     let func_name = func.sig.ident.to_string();
 
-    // `__lp_<module>_<fn>_<mode>` or `__lp_<module>_<fn>` (no float mode)
-    if !func_name.starts_with("__lp_") {
-        return None;
-    }
-
-    let after_lp = func_name.strip_prefix("__lp_")?;
-    let (builtin_module, rest) = if let Some(r) = after_lp.strip_prefix("lpir_") {
-        ("lpir", r)
-    } else if let Some(r) = after_lp.strip_prefix("glsl_") {
+    // `__lps_*` — GLSL imports; `__lp_lpir_*` / `__lp_lpfx_*` / `__lp_vm_*`
+    let (builtin_module, rest) = if let Some(r) = func_name.strip_prefix("__lps_") {
         ("glsl", r)
-    } else if let Some(r) = after_lp.strip_prefix("vm_") {
-        ("vm", r)
-    } else if let Some(r) = after_lp.strip_prefix("lpfx_") {
-        ("lpfx", r)
+    } else if let Some(after_lp) = func_name.strip_prefix("__lp_") {
+        if let Some(r) = after_lp.strip_prefix("lpir_") {
+            ("lpir", r)
+        } else if let Some(r) = after_lp.strip_prefix("glsl_") {
+            ("glsl", r)
+        } else if let Some(r) = after_lp.strip_prefix("vm_") {
+            ("vm", r)
+        } else if let Some(r) = after_lp.strip_prefix("lpfx_") {
+            ("lpfx", r)
+        } else {
+            return None;
+        }
     } else {
         return None;
     };
@@ -569,19 +575,27 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
 
     let symbol_name = func_name.clone();
 
-    // Derive enum variant: strip `__`, split on `_`, PascalCase each segment.
-    // e.g. `__lps_sin_q32` -> LpGlslSinQ32; `__lp_lpfx_hash_1` -> LpLpfxHash1
-    let name_without_prefix = func_name.strip_prefix("__").unwrap();
-    let enum_variant = name_without_prefix
-        .split('_')
-        .map(|s| {
-            let mut chars = s.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
-        .collect::<String>();
+    // Match `lps-builtin-ids` naming: LpGlslSinQ32, LpLpirFaddQ32, LpLpfxHash1, …
+    let enum_variant = {
+        let pascal: String = rest
+            .split('_')
+            .map(|s| {
+                let mut chars = s.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect::<String>();
+        let prefix = match builtin_module.as_str() {
+            "glsl" => "LpGlsl",
+            "lpir" => "LpLpir",
+            "vm" => "LpVm",
+            "lpfx" => "LpLpfx",
+            _ => return None,
+        };
+        format!("{prefix}{pascal}")
+    };
 
     let param_count = func.sig.inputs.len();
     let rust_signature = format_rust_function_signature(func);
@@ -944,7 +958,7 @@ fn split_top_level_commas(s: &str) -> Vec<String> {
     out
 }
 
-fn parse_rust_extern_sig(rust_sig: &str) -> (Vec<String>, String) {
+pub(crate) fn parse_rust_extern_sig(rust_sig: &str) -> (Vec<String>, String) {
     let rest = rust_sig
         .split("fn(")
         .nth(1)
@@ -1156,7 +1170,7 @@ fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     fs::write(path, output).expect("Failed to write generated_builtin_abi.rs");
 }
 
-fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo]) {
+fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo], import_root: &str) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
 //!
 //! To regenerate this file, run:
@@ -1192,15 +1206,15 @@ fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo]) {
             let components: Vec<&str> = module_path.split("::").collect();
 
             let (import_path, function_prefix) = if components.len() == 1 {
-                (format!("lps_builtins::builtins::{}", components[0]), None)
+                (format!("{import_root}::builtins::{}", components[0]), None)
             } else if components[0] == "glsl" || components[0] == "lpir" {
                 // One Rust module per file: import symbols from the leaf module.
-                (format!("lps_builtins::builtins::{}", module_path), None)
+                (format!("{import_root}::builtins::{}", module_path), None)
             } else {
                 // lpfx::...::file — import parent path, qualify with last component
                 let import_components = &components[..components.len() - 1];
                 let import_path_str = import_components.join("::");
-                let import_path = format!("lps_builtins::builtins::{}", import_path_str);
+                let import_path = format!("{import_root}::builtins::{}", import_path_str);
                 let function_prefix = Some(components.last().unwrap());
                 (import_path, function_prefix)
             };

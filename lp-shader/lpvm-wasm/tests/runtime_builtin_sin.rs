@@ -1,30 +1,11 @@
-//! Runtime test: shader calls `sin` via linked `lps_builtins_wasm.wasm`.
-//!
-//! This target is only built with the `runtime` feature (enabled by default).
-//!
-//! Requires the builtins artifact (same as `lps-filetests`):
-//! `cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release`
-//! or set `lps_BUILTINS_WASM` to the `.wasm` path.
+//! Runtime test: shader calls `sin` via natively linked `lps-builtins`.
 
 use std::f32::consts::FRAC_PI_2;
 
 use lps_frontend::{compile, lower};
 use lpvm::{LpsValue, LpvmEngine, LpvmInstance, LpvmModule};
-use lpvm_wasm::runtime::{WasmLpvmEngine, link};
+use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
-
-fn builtins_engine(opts: WasmOptions) -> WasmLpvmEngine {
-    let path = link::builtins_wasm_path();
-    WasmLpvmEngine::try_default_builtins(opts).unwrap_or_else(|e| {
-        panic!(
-            "{e}\n\
-             Build builtins: cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release\n\
-             Expected file: {}\n\
-             Or set lps_BUILTINS_WASM to the wasm path.",
-            path.display()
-        )
-    })
-}
 
 #[test]
 fn call_sin_q32_linked_builtins() {
@@ -34,7 +15,7 @@ fn call_sin_q32_linked_builtins() {
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
     };
-    let engine = builtins_engine(opts);
+    let engine = WasmLpvmEngine::new(opts).expect("engine");
     let module = engine.compile(&ir, &meta).expect("compile");
     let mut inst = module.instantiate().expect("instantiate");
 

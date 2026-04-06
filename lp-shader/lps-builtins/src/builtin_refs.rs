@@ -6,109 +6,109 @@
 //! Or use the build script:
 //!     scripts/build-builtins.sh
 
-use lps_builtins::builtins::glsl::acos_q32::__lps_acos_q32;
-use lps_builtins::builtins::glsl::acosh_q32::__lps_acosh_q32;
-use lps_builtins::builtins::glsl::asin_q32::__lps_asin_q32;
-use lps_builtins::builtins::glsl::asinh_q32::__lps_asinh_q32;
-use lps_builtins::builtins::glsl::atan2_q32::__lps_atan2_q32;
-use lps_builtins::builtins::glsl::atan_q32::__lps_atan_q32;
-use lps_builtins::builtins::glsl::atanh_q32::__lps_atanh_q32;
-use lps_builtins::builtins::glsl::cos_q32::__lps_cos_q32;
-use lps_builtins::builtins::glsl::cosh_q32::__lps_cosh_q32;
-use lps_builtins::builtins::glsl::exp2_q32::__lps_exp2_q32;
-use lps_builtins::builtins::glsl::exp_q32::__lps_exp_q32;
-use lps_builtins::builtins::glsl::fma_q32::__lps_fma_q32;
-use lps_builtins::builtins::glsl::inversesqrt_q32::__lps_inversesqrt_q32;
-use lps_builtins::builtins::glsl::ldexp_q32::__lps_ldexp_q32;
-use lps_builtins::builtins::glsl::log2_q32::__lps_log2_q32;
-use lps_builtins::builtins::glsl::log_q32::__lps_log_q32;
-use lps_builtins::builtins::glsl::mod_q32::__lps_mod_q32;
-use lps_builtins::builtins::glsl::pow_q32::__lps_pow_q32;
-use lps_builtins::builtins::glsl::round_q32::__lps_round_q32;
-use lps_builtins::builtins::glsl::sin_q32::__lps_sin_q32;
-use lps_builtins::builtins::glsl::sinh_q32::__lps_sinh_q32;
-use lps_builtins::builtins::glsl::tan_q32::__lps_tan_q32;
-use lps_builtins::builtins::glsl::tanh_q32::__lps_tanh_q32;
-use lps_builtins::builtins::lpfx::color::space::hue2rgb_f32::__lp_lpfx_hue2rgb_f32;
-use lps_builtins::builtins::lpfx::color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32;
-use lps_builtins::builtins::lpfx::color::space::{
+use crate::builtins::glsl::acos_q32::__lps_acos_q32;
+use crate::builtins::glsl::acosh_q32::__lps_acosh_q32;
+use crate::builtins::glsl::asin_q32::__lps_asin_q32;
+use crate::builtins::glsl::asinh_q32::__lps_asinh_q32;
+use crate::builtins::glsl::atan_q32::__lps_atan_q32;
+use crate::builtins::glsl::atan2_q32::__lps_atan2_q32;
+use crate::builtins::glsl::atanh_q32::__lps_atanh_q32;
+use crate::builtins::glsl::cos_q32::__lps_cos_q32;
+use crate::builtins::glsl::cosh_q32::__lps_cosh_q32;
+use crate::builtins::glsl::exp_q32::__lps_exp_q32;
+use crate::builtins::glsl::exp2_q32::__lps_exp2_q32;
+use crate::builtins::glsl::fma_q32::__lps_fma_q32;
+use crate::builtins::glsl::inversesqrt_q32::__lps_inversesqrt_q32;
+use crate::builtins::glsl::ldexp_q32::__lps_ldexp_q32;
+use crate::builtins::glsl::log_q32::__lps_log_q32;
+use crate::builtins::glsl::log2_q32::__lps_log2_q32;
+use crate::builtins::glsl::mod_q32::__lps_mod_q32;
+use crate::builtins::glsl::pow_q32::__lps_pow_q32;
+use crate::builtins::glsl::round_q32::__lps_round_q32;
+use crate::builtins::glsl::sin_q32::__lps_sin_q32;
+use crate::builtins::glsl::sinh_q32::__lps_sinh_q32;
+use crate::builtins::glsl::tan_q32::__lps_tan_q32;
+use crate::builtins::glsl::tanh_q32::__lps_tanh_q32;
+use crate::builtins::lpfx::color::space::hue2rgb_f32::__lp_lpfx_hue2rgb_f32;
+use crate::builtins::lpfx::color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32;
+use crate::builtins::lpfx::color::space::{
     hsv2rgb_f32::__lp_lpfx_hsv2rgb_f32, hsv2rgb_f32::__lp_lpfx_hsv2rgb_vec4_f32,
 };
-use lps_builtins::builtins::lpfx::color::space::{
+use crate::builtins::lpfx::color::space::{
     hsv2rgb_q32::__lp_lpfx_hsv2rgb_q32, hsv2rgb_q32::__lp_lpfx_hsv2rgb_vec4_q32,
 };
-use lps_builtins::builtins::lpfx::color::space::{
+use crate::builtins::lpfx::color::space::{
     rgb2hsv_f32::__lp_lpfx_rgb2hsv_f32, rgb2hsv_f32::__lp_lpfx_rgb2hsv_vec4_f32,
 };
-use lps_builtins::builtins::lpfx::color::space::{
+use crate::builtins::lpfx::color::space::{
     rgb2hsv_q32::__lp_lpfx_rgb2hsv_q32, rgb2hsv_q32::__lp_lpfx_rgb2hsv_vec4_q32,
 };
-use lps_builtins::builtins::lpfx::generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32;
-use lps_builtins::builtins::lpfx::generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32;
-use lps_builtins::builtins::lpfx::generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32;
-use lps_builtins::builtins::lpfx::generative::fbm::fbm3_q32::__lp_lpfx_fbm3_q32;
-use lps_builtins::builtins::lpfx::generative::fbm::fbm3_tile_f32::__lp_lpfx_fbm3_tile_f32;
-use lps_builtins::builtins::lpfx::generative::fbm::fbm3_tile_q32::__lp_lpfx_fbm3_tile_q32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise1_f32::__lp_lpfx_gnoise1_f32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise1_q32::__lp_lpfx_gnoise1_q32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise2_f32::__lp_lpfx_gnoise2_f32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise2_q32::__lp_lpfx_gnoise2_q32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_f32::__lp_lpfx_gnoise3_f32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_q32::__lp_lpfx_gnoise3_q32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_tile_f32::__lp_lpfx_gnoise3_tile_f32;
-use lps_builtins::builtins::lpfx::generative::gnoise::gnoise3_tile_q32::__lp_lpfx_gnoise3_tile_q32;
-use lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise2_f32::__lp_lpfx_psrdnoise2_f32;
-use lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise2_q32::__lp_lpfx_psrdnoise2_q32;
-use lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise3_f32::__lp_lpfx_psrdnoise3_f32;
-use lps_builtins::builtins::lpfx::generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32;
-use lps_builtins::builtins::lpfx::generative::random::random1_f32::__lp_lpfx_random1_f32;
-use lps_builtins::builtins::lpfx::generative::random::random1_q32::__lp_lpfx_random1_q32;
-use lps_builtins::builtins::lpfx::generative::random::random2_f32::__lp_lpfx_random2_f32;
-use lps_builtins::builtins::lpfx::generative::random::random2_q32::__lp_lpfx_random2_q32;
-use lps_builtins::builtins::lpfx::generative::random::random3_f32::__lp_lpfx_random3_f32;
-use lps_builtins::builtins::lpfx::generative::random::random3_q32::__lp_lpfx_random3_q32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise1_f32::__lp_lpfx_snoise1_f32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise1_q32::__lp_lpfx_snoise1_q32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise2_f32::__lp_lpfx_snoise2_f32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise2_q32::__lp_lpfx_snoise2_q32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise3_f32::__lp_lpfx_snoise3_f32;
-use lps_builtins::builtins::lpfx::generative::snoise::snoise3_q32::__lp_lpfx_snoise3_q32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom1_f32::__lp_lpfx_srandom1_f32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom1_q32::__lp_lpfx_srandom1_q32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom2_f32::__lp_lpfx_srandom2_f32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom2_q32::__lp_lpfx_srandom2_q32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_f32::__lp_lpfx_srandom3_f32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_q32::__lp_lpfx_srandom3_q32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_tile_f32::__lp_lpfx_srandom3_tile_f32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_tile_q32::__lp_lpfx_srandom3_tile_q32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_vec_f32::__lp_lpfx_srandom3_vec_f32;
-use lps_builtins::builtins::lpfx::generative::srandom::srandom3_vec_q32::__lp_lpfx_srandom3_vec_q32;
-use lps_builtins::builtins::lpfx::generative::worley::worley2_f32::__lp_lpfx_worley2_f32;
-use lps_builtins::builtins::lpfx::generative::worley::worley2_q32::__lp_lpfx_worley2_q32;
-use lps_builtins::builtins::lpfx::generative::worley::worley2_value_f32::__lp_lpfx_worley2_value_f32;
-use lps_builtins::builtins::lpfx::generative::worley::worley2_value_q32::__lp_lpfx_worley2_value_q32;
-use lps_builtins::builtins::lpfx::generative::worley::worley3_f32::__lp_lpfx_worley3_f32;
-use lps_builtins::builtins::lpfx::generative::worley::worley3_q32::__lp_lpfx_worley3_q32;
-use lps_builtins::builtins::lpfx::generative::worley::worley3_value_f32::__lp_lpfx_worley3_value_f32;
-use lps_builtins::builtins::lpfx::generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32;
-use lps_builtins::builtins::lpfx::math::{
+use crate::builtins::lpfx::generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32;
+use crate::builtins::lpfx::generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32;
+use crate::builtins::lpfx::generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32;
+use crate::builtins::lpfx::generative::fbm::fbm3_q32::__lp_lpfx_fbm3_q32;
+use crate::builtins::lpfx::generative::fbm::fbm3_tile_f32::__lp_lpfx_fbm3_tile_f32;
+use crate::builtins::lpfx::generative::fbm::fbm3_tile_q32::__lp_lpfx_fbm3_tile_q32;
+use crate::builtins::lpfx::generative::gnoise::gnoise1_f32::__lp_lpfx_gnoise1_f32;
+use crate::builtins::lpfx::generative::gnoise::gnoise1_q32::__lp_lpfx_gnoise1_q32;
+use crate::builtins::lpfx::generative::gnoise::gnoise2_f32::__lp_lpfx_gnoise2_f32;
+use crate::builtins::lpfx::generative::gnoise::gnoise2_q32::__lp_lpfx_gnoise2_q32;
+use crate::builtins::lpfx::generative::gnoise::gnoise3_f32::__lp_lpfx_gnoise3_f32;
+use crate::builtins::lpfx::generative::gnoise::gnoise3_q32::__lp_lpfx_gnoise3_q32;
+use crate::builtins::lpfx::generative::gnoise::gnoise3_tile_f32::__lp_lpfx_gnoise3_tile_f32;
+use crate::builtins::lpfx::generative::gnoise::gnoise3_tile_q32::__lp_lpfx_gnoise3_tile_q32;
+use crate::builtins::lpfx::generative::psrdnoise::psrdnoise2_f32::__lp_lpfx_psrdnoise2_f32;
+use crate::builtins::lpfx::generative::psrdnoise::psrdnoise2_q32::__lp_lpfx_psrdnoise2_q32;
+use crate::builtins::lpfx::generative::psrdnoise::psrdnoise3_f32::__lp_lpfx_psrdnoise3_f32;
+use crate::builtins::lpfx::generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32;
+use crate::builtins::lpfx::generative::random::random1_f32::__lp_lpfx_random1_f32;
+use crate::builtins::lpfx::generative::random::random1_q32::__lp_lpfx_random1_q32;
+use crate::builtins::lpfx::generative::random::random2_f32::__lp_lpfx_random2_f32;
+use crate::builtins::lpfx::generative::random::random2_q32::__lp_lpfx_random2_q32;
+use crate::builtins::lpfx::generative::random::random3_f32::__lp_lpfx_random3_f32;
+use crate::builtins::lpfx::generative::random::random3_q32::__lp_lpfx_random3_q32;
+use crate::builtins::lpfx::generative::snoise::snoise1_f32::__lp_lpfx_snoise1_f32;
+use crate::builtins::lpfx::generative::snoise::snoise1_q32::__lp_lpfx_snoise1_q32;
+use crate::builtins::lpfx::generative::snoise::snoise2_f32::__lp_lpfx_snoise2_f32;
+use crate::builtins::lpfx::generative::snoise::snoise2_q32::__lp_lpfx_snoise2_q32;
+use crate::builtins::lpfx::generative::snoise::snoise3_f32::__lp_lpfx_snoise3_f32;
+use crate::builtins::lpfx::generative::snoise::snoise3_q32::__lp_lpfx_snoise3_q32;
+use crate::builtins::lpfx::generative::srandom::srandom1_f32::__lp_lpfx_srandom1_f32;
+use crate::builtins::lpfx::generative::srandom::srandom1_q32::__lp_lpfx_srandom1_q32;
+use crate::builtins::lpfx::generative::srandom::srandom2_f32::__lp_lpfx_srandom2_f32;
+use crate::builtins::lpfx::generative::srandom::srandom2_q32::__lp_lpfx_srandom2_q32;
+use crate::builtins::lpfx::generative::srandom::srandom3_f32::__lp_lpfx_srandom3_f32;
+use crate::builtins::lpfx::generative::srandom::srandom3_q32::__lp_lpfx_srandom3_q32;
+use crate::builtins::lpfx::generative::srandom::srandom3_tile_f32::__lp_lpfx_srandom3_tile_f32;
+use crate::builtins::lpfx::generative::srandom::srandom3_tile_q32::__lp_lpfx_srandom3_tile_q32;
+use crate::builtins::lpfx::generative::srandom::srandom3_vec_f32::__lp_lpfx_srandom3_vec_f32;
+use crate::builtins::lpfx::generative::srandom::srandom3_vec_q32::__lp_lpfx_srandom3_vec_q32;
+use crate::builtins::lpfx::generative::worley::worley2_f32::__lp_lpfx_worley2_f32;
+use crate::builtins::lpfx::generative::worley::worley2_q32::__lp_lpfx_worley2_q32;
+use crate::builtins::lpfx::generative::worley::worley2_value_f32::__lp_lpfx_worley2_value_f32;
+use crate::builtins::lpfx::generative::worley::worley2_value_q32::__lp_lpfx_worley2_value_q32;
+use crate::builtins::lpfx::generative::worley::worley3_f32::__lp_lpfx_worley3_f32;
+use crate::builtins::lpfx::generative::worley::worley3_q32::__lp_lpfx_worley3_q32;
+use crate::builtins::lpfx::generative::worley::worley3_value_f32::__lp_lpfx_worley3_value_f32;
+use crate::builtins::lpfx::generative::worley::worley3_value_q32::__lp_lpfx_worley3_value_q32;
+use crate::builtins::lpfx::math::{
     saturate_f32::__lp_lpfx_saturate_f32, saturate_f32::__lp_lpfx_saturate_vec3_f32,
     saturate_f32::__lp_lpfx_saturate_vec4_f32,
 };
-use lps_builtins::builtins::lpfx::math::{
+use crate::builtins::lpfx::math::{
     saturate_q32::__lp_lpfx_saturate_q32, saturate_q32::__lp_lpfx_saturate_vec3_q32,
     saturate_q32::__lp_lpfx_saturate_vec4_q32,
 };
-use lps_builtins::builtins::lpfx::{
+use crate::builtins::lpfx::{
     hash::__lp_lpfx_hash_1, hash::__lp_lpfx_hash_2, hash::__lp_lpfx_hash_3,
 };
-use lps_builtins::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32;
-use lps_builtins::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
-use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
-use lps_builtins::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32;
-use lps_builtins::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
-use lps_builtins::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
-use lps_builtins::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
+use crate::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32;
+use crate::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use crate::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
+use crate::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32;
+use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
+use crate::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
+use crate::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
 
 /// Reference all builtin functions to prevent dead code elimination.
 ///
@@ -116,29 +116,29 @@ use lps_builtins::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
 /// by creating function pointers and reading them with volatile operations.
 pub fn ensure_builtins_referenced() {
     unsafe {
-        let _glsl_acos_q32_fn: extern "C" fn(i32) -> i32 = __lps_acos_q32;
-        let _glsl_acosh_q32_fn: extern "C" fn(i32) -> i32 = __lps_acosh_q32;
-        let _glsl_asin_q32_fn: extern "C" fn(i32) -> i32 = __lps_asin_q32;
-        let _glsl_asinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_asinh_q32;
-        let _glsl_atan2_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_atan2_q32;
-        let _glsl_atan_q32_fn: extern "C" fn(i32) -> i32 = __lps_atan_q32;
-        let _glsl_atanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_atanh_q32;
-        let _glsl_cos_q32_fn: extern "C" fn(i32) -> i32 = __lps_cos_q32;
-        let _glsl_cosh_q32_fn: extern "C" fn(i32) -> i32 = __lps_cosh_q32;
-        let _glsl_exp2_q32_fn: extern "C" fn(i32) -> i32 = __lps_exp2_q32;
-        let _glsl_exp_q32_fn: extern "C" fn(i32) -> i32 = __lps_exp_q32;
-        let _glsl_fma_q32_fn: extern "C" fn(i32, i32, i32) -> i32 = __lps_fma_q32;
-        let _glsl_inversesqrt_q32_fn: extern "C" fn(i32) -> i32 = __lps_inversesqrt_q32;
-        let _glsl_ldexp_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_ldexp_q32;
-        let _glsl_log2_q32_fn: extern "C" fn(i32) -> i32 = __lps_log2_q32;
-        let _glsl_log_q32_fn: extern "C" fn(i32) -> i32 = __lps_log_q32;
-        let _glsl_mod_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_mod_q32;
-        let _glsl_pow_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_pow_q32;
-        let _glsl_round_q32_fn: extern "C" fn(i32) -> i32 = __lps_round_q32;
-        let _glsl_sin_q32_fn: extern "C" fn(i32) -> i32 = __lps_sin_q32;
-        let _glsl_sinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_sinh_q32;
-        let _glsl_tan_q32_fn: extern "C" fn(i32) -> i32 = __lps_tan_q32;
-        let _glsl_tanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_tanh_q32;
+        let __lps_acos_q32_fn: extern "C" fn(i32) -> i32 = __lps_acos_q32;
+        let __lps_acosh_q32_fn: extern "C" fn(i32) -> i32 = __lps_acosh_q32;
+        let __lps_asin_q32_fn: extern "C" fn(i32) -> i32 = __lps_asin_q32;
+        let __lps_asinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_asinh_q32;
+        let __lps_atan2_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_atan2_q32;
+        let __lps_atan_q32_fn: extern "C" fn(i32) -> i32 = __lps_atan_q32;
+        let __lps_atanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_atanh_q32;
+        let __lps_cos_q32_fn: extern "C" fn(i32) -> i32 = __lps_cos_q32;
+        let __lps_cosh_q32_fn: extern "C" fn(i32) -> i32 = __lps_cosh_q32;
+        let __lps_exp2_q32_fn: extern "C" fn(i32) -> i32 = __lps_exp2_q32;
+        let __lps_exp_q32_fn: extern "C" fn(i32) -> i32 = __lps_exp_q32;
+        let __lps_fma_q32_fn: extern "C" fn(i32, i32, i32) -> i32 = __lps_fma_q32;
+        let __lps_inversesqrt_q32_fn: extern "C" fn(i32) -> i32 = __lps_inversesqrt_q32;
+        let __lps_ldexp_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_ldexp_q32;
+        let __lps_log2_q32_fn: extern "C" fn(i32) -> i32 = __lps_log2_q32;
+        let __lps_log_q32_fn: extern "C" fn(i32) -> i32 = __lps_log_q32;
+        let __lps_mod_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_mod_q32;
+        let __lps_pow_q32_fn: extern "C" fn(i32, i32) -> i32 = __lps_pow_q32;
+        let __lps_round_q32_fn: extern "C" fn(i32) -> i32 = __lps_round_q32;
+        let __lps_sin_q32_fn: extern "C" fn(i32) -> i32 = __lps_sin_q32;
+        let __lps_sinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_sinh_q32;
+        let __lps_tan_q32_fn: extern "C" fn(i32) -> i32 = __lps_tan_q32;
+        let __lps_tanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_tanh_q32;
         let _lpir_fadd_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fadd_q32;
         let _lpir_fdiv_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fdiv_q32;
         let _lpir_fmul_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmul_q32;
@@ -264,29 +264,29 @@ pub fn ensure_builtins_referenced() {
 
         // Force these to be included by using them in a way that can't be optimized away
         // We'll use volatile reads to prevent optimization
-        let _ = core::ptr::read_volatile(&_glsl_acos_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_acosh_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_asin_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_asinh_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_atan2_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_atan_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_atanh_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_cos_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_cosh_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_exp2_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_exp_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_fma_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_inversesqrt_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_ldexp_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_log2_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_log_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_mod_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_pow_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_round_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_sin_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_sinh_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_tan_q32_fn as *const _);
-        let _ = core::ptr::read_volatile(&_glsl_tanh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_acos_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_acosh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_asin_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_asinh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_atan2_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_atan_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_atanh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_cos_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_cosh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_exp2_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_exp_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_fma_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_inversesqrt_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_ldexp_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_log2_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_log_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_mod_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_pow_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_round_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_sin_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_sinh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_tan_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&__lps_tanh_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fadd_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fdiv_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fmul_q32_fn as *const _);
