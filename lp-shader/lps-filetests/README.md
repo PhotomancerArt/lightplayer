@@ -119,7 +119,7 @@ runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
 1. **Discovery** — `.glsl` files under `filetests/` (app and `walkdir` harness).
 2. **Parsing** — directives and `// run:` lines (`src/filetest.rs`, `src/parse/`).
 3. **Bootstrap** — generated `main()` calling each expression under test.
-4. **Compilation** — GLSL → LPIR → backend (`lps-exec`, `lpir-cranelift`, wasm path, etc.).
+4. **Compilation** — GLSL → LPIR → backend (`lps-exec`, `lpvm-cranelift`, wasm path, etc.).
 5. **Execution** — **jit** (in-process), **wasm** (interpreter), or **rv32** (emulator + linked
    builtins), depending on target.
 6. **Comparison** — expected vs actual; BLESS can rewrite expectations.

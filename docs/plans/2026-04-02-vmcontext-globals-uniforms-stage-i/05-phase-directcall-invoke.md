@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Update `DirectCall::call_i32()` and related APIs in `lpir-cranelift` to accept VMContext as a separate parameter. Update the `invoke` module to prepend VMContext to args.
+Update `DirectCall::call_i32()` and related APIs in `lpvm-cranelift` to accept VMContext as a
+separate parameter. Update the `invoke` module to prepend VMContext to args.
 
 ## Code Organization Reminders
 
@@ -12,7 +13,7 @@ Update `DirectCall::call_i32()` and related APIs in `lpir-cranelift` to accept V
 
 ## Implementation Details
 
-### 1. Update `lpir-cranelift/src/lib.rs`
+### 1. Update `lpvm-cranelift/src/lib.rs`
 
 Modify `DirectCall::call_i32()`:
 
@@ -66,9 +67,10 @@ impl DirectCall {
 }
 ```
 
-### 2. Update `lpir-cranelift/src/invoke.rs`
+### 2. Update `lpvm-cranelift/src/invoke.rs`
 
-The invoke functions already receive args as a slice, so they don't need changes to their signatures. They just need to handle the fact that args[0] is now VMContext.
+The invoke functions already receive args as a slice, so they don't need changes to their
+signatures. They just need to handle the fact that args[0] is now VMContext.
 
 However, we should document this:
 
@@ -91,7 +93,7 @@ pub unsafe fn invoke_i32_args_returns(
 }
 ```
 
-### 3. Update tests in `lpir-cranelift/src/lib.rs`
+### 3. Update tests in `lpvm-cranelift/src/lib.rs`
 
 Update existing tests to pass VMContext:
 
@@ -132,8 +134,8 @@ fn invoke_receives_vmctx_in_args() {
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo check -p lpir-cranelift --target riscv32imac-unknown-none-elf
+cargo test -p lpvm-cranelift
+cargo check -p lpvm-cranelift --target riscv32imac-unknown-none-elf
 ```
 
 ## Notes

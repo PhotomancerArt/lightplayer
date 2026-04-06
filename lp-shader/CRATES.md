@@ -6,7 +6,7 @@ Overview of this directory lives in [`README.md`](README.md). Paths are relative
 |---------------------------------------------------|-----------------------------------------------------------------------------|
 | [`lpir`](lpir/)                                   | LightPlayer IR: types, ops, `IrModule` (`no_std` + alloc).                  |
 | [`lps-frontend`](lps-frontend/)                   | GLSL source → LPIR via **naga** `glsl-in`.                                  |
-| [`lpir-cranelift`](lpir-cranelift/)               | LPIR → Cranelift → JIT / object (RISC-V); optional `glsl` → `lps-frontend`. |
+| [`lpvm-cranelift`](lpvm-cranelift/)               | LPIR → Cranelift → JIT / object (RISC-V); optional `glsl` → `lps-frontend`. |
 | [`lps-wasm`](lps-wasm/)                           | LPIR → WASM (`wasm-encoder`) for browser / `wasm.q32` filetests.            |
 | [`lps-builtin-ids`](lps-builtin-ids/)             | `BuiltinId` enum and mappings (**generated**; do not hand-edit).            |
 | [`lps-builtins`](lps-builtins/)                   | `extern "C"` builtin implementations (Q32/f32, LPFX).                       |
@@ -22,7 +22,7 @@ Overview of this directory lives in [`README.md`](README.md). Paths are relative
 | [`lps-filetests-app`](lps-filetests-app/)         | CLI to run filetests.                                                       |
 | [`lps-filetests-gen-app`](lps-filetests-gen-app/) | Generates repetitive `.glsl` tests under `filetests/`.                      |
 
-**Dependency spine (firmware):** `lps-frontend` → `lpir` ← `lpir-cranelift` ← `lp-engine`;
+**Dependency spine (firmware):** `lps-frontend` → `lpir` ← `lpvm-cranelift` ← `lp-engine`;
 `lps-builtins` + `lps-builtin-ids` alongside codegen.
 
 **Test-only / host helpers:** `lps-exec`, `lpvm`, `lps-shared`, `lps-diagnostics`,

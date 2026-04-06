@@ -21,21 +21,21 @@ the project.
    ```bash
    cargo test -p lp-engine
    cargo test -p lp-server
-   cargo test -p lpir-cranelift
+   cargo test -p lpvm-cranelift
    ```
 
-2. **`lpir-cranelift` embedded profile** (matches VI-A / device-relevant flags):
+2. **`lpvm-cranelift` embedded profile** (matches VI-A / device-relevant flags):
 
    ```bash
-   cargo test -p lpir-cranelift --no-default-features
-   cargo test -p lpir-cranelift --features riscv32-emu
+   cargo test -p lpvm-cranelift --no-default-features
+   cargo test -p lpvm-cranelift --features riscv32-emu
    ```
 
 3. **Clippy** — follow workspace conventions; `justfile` excludes some firmware
    crates from workspace clippy. At minimum:
 
    ```bash
-   cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
+   cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
    ```
 
 4. Fix **warnings** that are not deferred to a later roadmap stage (per project
@@ -48,9 +48,9 @@ the project.
 ```bash
 cargo test -p lp-engine
 cargo test -p lp-server
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --no-default-features
-cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --no-default-features
+cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
 ```
 
 Re-run Phase 1 commands if any dependency graph change touched `fw-emu`.

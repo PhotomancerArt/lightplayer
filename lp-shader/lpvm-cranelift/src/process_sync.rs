@@ -7,11 +7,11 @@
 mod imp {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    static LPIR_CRANELIFT_CODEGEN: OnceLock<Mutex<()>> = OnceLock::new();
+    static lpvm_cranelift_CODEGEN: OnceLock<Mutex<()>> = OnceLock::new();
 
     /// Acquire the codegen serialization lock, recovering from poison if a previous holder panicked.
     pub(crate) fn codegen_guard() -> MutexGuard<'static, ()> {
-        let mutex = LPIR_CRANELIFT_CODEGEN.get_or_init(|| Mutex::new(()));
+        let mutex = lpvm_cranelift_CODEGEN.get_or_init(|| Mutex::new(()));
         mutex.lock().unwrap_or_else(|poisoned| {
             mutex.clear_poison();
             poisoned.into_inner()

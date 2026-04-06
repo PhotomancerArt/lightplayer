@@ -21,7 +21,7 @@ Run the following validation commands:
 
 ```bash
 # Core crate tests
-cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-frontend
+cargo test -p lpvm -p lpir -p lpvm-cranelift -p lps-frontend
 
 # WASM emission tests
 cargo test -p lps-wasm
@@ -40,7 +40,7 @@ cargo +nightly fmt -- --check
 ### Documentation
 
 - [ ] Verify `docs/design/uniforms-globals.md` exists and is complete
-- [ ] Update crate READMEs if needed (lpvm, lpir-cranelift)
+- [ ] Update crate READMEs if needed (lpvm, lpvm-cranelift)
 - [ ] Check that new public APIs have doc comments
 
 ## Commit Message
@@ -94,9 +94,9 @@ After committing:
 - lpvm/src/vmcontext.rs (NEW)
 - lpvm/src/lib.rs
 - lpir/src/module.rs
-- lpir-cranelift/src/emit/mod.rs
-- lpir-cranelift/src/lib.rs
-- lpir-cranelift/src/invoke.rs
+- lpvm-cranelift/src/emit/mod.rs
+- lpvm-cranelift/src/lib.rs
+- lpvm-cranelift/src/invoke.rs
 - lps-wasm/src/emit/mod.rs
 - lps-wasm/src/emit/func.rs
 - lps-filetests/src/test_run/q32_exec_common.rs
@@ -107,7 +107,7 @@ After committing:
 
 All tests pass:
 
-- cargo test -p lpvm -p lpir -p lpir-cranelift -p lps-frontend
+- cargo test -p lpvm -p lpir -p lpvm-cranelift -p lps-frontend
 - cargo test -p lps-wasm
 - cargo test -p lps-filetests
 - cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

@@ -26,7 +26,7 @@ Entry point: `glsl_wasm()` in `lib.rs` (`GlslWasmError` wraps frontend vs codege
 Cranelift’s IR is unstructured CFG-first; WASM wants structured control flow. Bridging that
 (relooping / stackification) is a large effort for a non-hot preview path. **LPIR** already reflects
 structured GLSL control flow, so lowering LPIR → WASM directly stays aligned with the language and
-with the IR shared with `lpir-cranelift`.
+with the IR shared with `lpvm-cranelift`.
 
 ### Why not SPIR-V?
 

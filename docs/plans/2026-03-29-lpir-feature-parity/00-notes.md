@@ -57,7 +57,7 @@ and WASM. WASM-specific `@unimplemented` annotations for pre-existing gaps are a
 - `lp-shader/lps-frontend/src/lower_math.rs` — math builtin decomposition
 - `lp-shader/lps-frontend/src/lib.rs` — `naga_type_inner_to_glsl`, `extract_functions`
 - `lp-shader/lpir/src/glsl_metadata.rs` — `GlslType` enum
-- `lp-shader/legacy/lpir-cranelift/src/invoke.rs` — host JIT calling, return decode
+- `lp-shader/legacy/lpvm-cranelift/src/invoke.rs` — host JIT calling, return decode
 - `lp-shader/lps-filetests/` — test harness and `.glsl` corpus
 
 ## Questions
@@ -86,7 +86,7 @@ and cover realistic product shader needs.
   accept matrices and flatten them to scalarized VRegs. The IR, interpreter, and WASM backend
   should handle multi-value returns naturally once the lowering is correct.
 
-- **Host invoke layer:** `invoke_i32_args_returns` in `lpir-cranelift/src/invoke.rs` caps at 4
+- **Host invoke layer:** `invoke_i32_args_returns` in `lpvm-cranelift/src/invoke.rs` caps at 4
   return words today. For `mat3` (9 words) and `mat4` (16 words), the host glue needs to use
   Cranelift's `enable_multi_ret_implicit_sret` (caller-allocated return area). This is a
   Cranelift-specific concern, not an LPIR concern.

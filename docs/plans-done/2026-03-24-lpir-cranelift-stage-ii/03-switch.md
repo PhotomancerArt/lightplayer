@@ -130,6 +130,7 @@ fn find_innermost_switch(ctrl_stack: &[CtrlFrame]) -> Result<(Value, Block), Com
 ### 4. Tests
 
 **`test_switch_basic`** — three cases + default:
+
 ```
 func @classify(v0:i32) -> i32 {
   v1:i32 = iconst 0
@@ -147,9 +148,11 @@ func @classify(v0:i32) -> i32 {
   return v1
 }
 ```
+
 Verify: `classify(1) == 10`, `classify(2) == 20`, `classify(99) == -1`.
 
 **`test_switch_no_default`** — cases only:
+
 ```
 func @map_value(v0:i32) -> i32 {
   v1:i32 = iconst 0
@@ -164,11 +167,12 @@ func @map_value(v0:i32) -> i32 {
   return v1
 }
 ```
+
 Verify: `map_value(0) == 100`, `map_value(1) == 200`, `map_value(5) == 0`.
 
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

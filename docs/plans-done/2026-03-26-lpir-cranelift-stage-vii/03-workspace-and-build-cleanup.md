@@ -95,8 +95,8 @@ rg 'lps-cranelift|lps-jit-util|esp32-glsl-jit|lps-q32-metrics|lps-frontend' --ty
 
 Update or remove stale comments. Key files from earlier analysis:
 
-- `lpir-cranelift/src/builtins.rs` — comment mentioning "shared with lps-cranelift registry"
-- `lpir-cranelift/src/object_module.rs` — comment "Same triple as lps-cranelift"
+- `lpvm-cranelift/src/builtins.rs` — comment mentioning "shared with lps-cranelift registry"
+- `lpvm-cranelift/src/object_module.rs` — comment "Same triple as lps-cranelift"
 - `lps-exec/src/lib.rs` — mentions legacy lps-cranelift / lps-jit-util
 - `lps-exec/src/executable.rs` — "copied from lps-cranelift"
 - `lps-builtins/src/host/mod.rs`, `macros.rs` — JIT delegate comments

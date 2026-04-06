@@ -3,7 +3,7 @@
 ## Scope of phase
 
 Remove **orphan** optional dependencies that pointed at the old compiler stack.
-The live path is `lp-server` → `lp-engine` → `lpir-cranelift` (no direct
+The live path is `lp-server` → `lp-engine` → `lpvm-cranelift` (no direct
 `fw-esp32` → compiler edge).
 
 ## Code Organization Reminders

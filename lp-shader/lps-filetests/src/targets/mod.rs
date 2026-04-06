@@ -7,7 +7,7 @@ pub use display::parse_target_filters;
 /// Compilation/execution backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Backend {
-    /// Host LPIR JIT (`lpir-cranelift`).
+    /// Host LPIR JIT (`lpvm-cranelift`).
     Jit,
     /// LPIR → RV32 object + linked builtins + emulator.
     Rv32,

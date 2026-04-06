@@ -3,15 +3,19 @@
 ## Goal
 
 Build the Cranelift JIT backend for LPVM. This should be mostly thin wrappers
-around existing `lpir-cranelift` machinery, implementing the `LpvmModule`,
-`LpvmInstance`, and `LpvmMemory` traits. Building this second (after WASM)
+around existing `lpvm-cranelift` machinery, implementing the `LpvmEngine`,
+`LpvmModule`, and `LpvmInstance` traits. Building this second (after WASM)
 validates the trait API against a backend we have full control over.
+
+**Note**: `LpvmMemory` was not created as a separate trait — each backend
+manages memory internally (wasmtime Store for WASM, JIT memory for Cranelift,
+emulator RAM for RV32).
 
 ## Context for Agents
 
-### Current `lpir-cranelift` architecture
+### Current `lpvm-cranelift` architecture
 
-`lpir-cranelift` is `#![no_std]` and works on both host (native ISA via
+`lpvm-cranelift` is `#![no_std]` and works on both host (native ISA via
 `cranelift-native`) and embedded (RISC-V, hardcoded triple).
 
 **Key types:**
@@ -53,16 +57,16 @@ argument.
 
 ```
 compile_shader:
-  lpir_cranelift::jit(source, options) → JitModule
+  lpvm_cranelift::jit(source, options) → JitModule
   module.direct_call("main") → DirectCall
 
 render (per pixel):
   direct_call.call_i32_buf(&vmctx, &args, &mut ret_buf)
 ```
 
-### RV32 emulator code in `lpir-cranelift`
+### RV32 emulator code in `lpvm-cranelift`
 
-Behind `riscv32-emu` feature, `lpir-cranelift` also contains:
+Behind `riscv32-emu` feature, `lpvm-cranelift` also contains:
 
 - `object_bytes_from_ir` — compile to RV32 object file
 - `link_object_with_builtins` — link with builtins → ELF
@@ -76,7 +80,8 @@ This code does NOT move to `lpvm-cranelift`. It belongs in `lpvm-rv32` (M4).
 
 ### Crate location
 
-`lpvm/lpvm-cranelift/`
+`lpvm/lpvm-cranelift/` (actual location may be `lp-shader/lpvm-cranelift/` during migration, like
+`lpvm-wasm`)
 
 ### Cargo.toml structure
 
@@ -94,7 +99,7 @@ cranelift-frontend = { ..., default-features = false }
 cranelift-jit = { ..., default-features = false }
 cranelift-module = { ..., default-features = false }
 lps-builtins = { ..., default-features = false }
-# ... same cranelift deps as lpir-cranelift, minus riscv32-emu deps
+# ... same cranelift deps as lpvm-cranelift, minus riscv32-emu deps
 
 [features]
 default = ["std"]
@@ -114,11 +119,11 @@ lpvm-cranelift/
 ├── Cargo.toml
 └── src/
     ├── lib.rs           # Re-exports
-    ├── module.rs        # CraneliftModule: LpvmModule implementation
-    ├── instance.rs      # CraneliftInstance: LpvmInstance implementation
-    ├── memory.rs        # CraneliftMemory: LpvmMemory implementation
+    ├── engine.rs        # CraneliftLpvmEngine: LpvmEngine implementation
+    ├── module.rs        # CraneliftLpvmModule: LpvmModule implementation
+    ├── instance.rs      # CraneliftLpvmInstance: LpvmInstance implementation
     ├── compile.rs       # LPIR → Cranelift IR → machine code
-    ├── lower.rs         # LPIR lowering to Cranelift IR (from lpir-cranelift)
+    ├── lower.rs         # LPIR lowering to Cranelift IR (from lpvm-cranelift)
     ├── call.rs          # Function call mechanics
     ├── direct_call.rs   # DirectCall for hot-path access
     ├── options.rs       # CompileOptions
@@ -127,11 +132,11 @@ lpvm-cranelift/
 
 ### Trait implementation mapping
 
-| LPVM trait     | Cranelift implementation                        | Notes                                                                               |
-|----------------|-------------------------------------------------|-------------------------------------------------------------------------------------|
-| `LpvmModule`   | Wraps finalized Cranelift JIT code              | Immutable after compilation. Contains code pointers, metadata, function signatures. |
-| `LpvmInstance` | VMContext + memory + call interface             | Owns or borrows LpvmMemory. Provides function calls with VMContext.                 |
-| `LpvmMemory`   | Backing memory for VMContext + globals/uniforms | For JIT, this is the buffer that VMContext points into.                             |
+| LPVM trait     | Cranelift implementation           | Notes                                                                               |
+|----------------|------------------------------------|-------------------------------------------------------------------------------------|
+| `LpvmEngine`   | Configured Cranelift JIT builder   | Creates `JITModule`, holds compile options.                                         |
+| `LpvmModule`   | Wraps finalized Cranelift JIT code | Immutable after compilation. Contains code pointers, metadata, function signatures. |
+| `LpvmInstance` | VMContext pointer + call interface | Provides function calls with VMContext. Memory is internal to the JIT.              |
 
 ### The DirectCall question
 
@@ -153,7 +158,7 @@ Options:
 The design chosen in M1 should address this. If it doesn't, this milestone will
 surface the issue.
 
-### What to extract from `lpir-cranelift`
+### What to extract from `lpvm-cranelift`
 
 Most of the compilation logic moves to `lpvm-cranelift`:
 
@@ -162,12 +167,12 @@ Most of the compilation logic moves to `lpvm-cranelift`:
 - Function call mechanics (invoke, arg marshaling)
 - CompileOptions, error types
 
-What stays in `lpir-cranelift` (or moves to `lpvm-rv32`):
+What stays in `lpvm-cranelift` (or moves to `lpvm-rv32`):
 
 - `riscv32-emu` feature code: object compilation, ELF linking, emulated calls
 - These are RV32 emulator concerns, not JIT concerns
 
-What stays in `lpir-cranelift` temporarily:
+What stays in `lpvm-cranelift` temporarily:
 
 - Anything that other crates still depend on, until they're migrated
 
@@ -193,7 +198,7 @@ What stays in `lpir-cranelift` temporarily:
 - Do NOT move the `riscv32-emu` feature code into this crate. That's `lpvm-rv32`.
 - Do NOT require `std` for the core compilation path. Embedded JIT is the
   product — see AGENTS.md.
-- Do NOT delete `lpir-cranelift` yet. It coexists until consumers are migrated.
+- Do NOT delete `lpvm-cranelift` yet. It coexists until consumers are migrated.
 - Do NOT update `lp-engine` to use this yet. That's M6.
 - Builtin crate path may still read `lps-builtins` on disk until rename
   completes; use workspace reality.
@@ -214,8 +219,8 @@ cargo test -p lpvm-cranelift
 
 ## Done When
 
-- `lpvm-cranelift` crate exists at `lpvm/lpvm-cranelift/`
-- `LpvmModule`/`LpvmInstance`/`LpvmMemory` implemented
+- `lpvm-cranelift` crate exists (actual location TBD — may be `lp-shader/` during migration)
+- `LpvmEngine`/`LpvmModule`/`LpvmInstance` implemented
 - LPIR → machine code compilation works
 - Unit tests pass
 - Compiles for `riscv32imac-unknown-none-elf` without `std`

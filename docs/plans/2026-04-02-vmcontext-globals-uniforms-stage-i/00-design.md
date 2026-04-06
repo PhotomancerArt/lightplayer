@@ -25,7 +25,7 @@ lp-shader/
 ├── lpir/
 │   └── src/
 │       └── module.rs                 # UPDATE: Add vmctx_vreg field
-├── lpir-cranelift/
+├── lpvm-cranelift/
 │   ├── src/
 │   │   ├── emit/mod.rs               # UPDATE: VMContext as first param
 │   │   ├── lib.rs                    # UPDATE: DirectCall takes vmctx param
@@ -168,7 +168,7 @@ pub struct IrFunction {
 }
 ```
 
-### 3. Cranelift Signature (`lpir-cranelift`)
+### 3. Cranelift Signature (`lpvm-cranelift`)
 
 ```rust
 // emit/mod.rs
@@ -213,7 +213,7 @@ let vmctx = ctx.vmctx_local.expect("vmctx always present");
 builder.local_get(vmctx);
 ```
 
-### 5. DirectCall API (`lpir-cranelift`)
+### 5. DirectCall API (`lpvm-cranelift`)
 
 ```rust
 // lib.rs

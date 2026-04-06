@@ -36,7 +36,7 @@ are the mismatched piece.
            ┌────────────────────────┼────────────────────────┐
            ▼                        ▼                        ▼
    ┌───────────────┐       ┌───────────────┐       ┌─────────────────┐
-   │  lpir interp  │       │ lpir-cranelift│       │  lps-wasm   │
+   │  lpir interp  │       │ lpvm-cranelift│       │  lps-wasm   │
    │  ptr as i32   │       │ JIT: ptr →    │       │  ptr → i32      │
    │  (slot_mem    │       │ pointer_type  │       │  (wasm32)       │
    │   offsets)    │       │ invoke native │       │                 │
@@ -64,7 +64,7 @@ lp-shader/lpir/
   src/op.rs             (only if op payloads need type-aware docs)
   src/tests/*.rs        roundtrip + validate + interp
 
-lp-shader/legacy/lpir-cranelift/
+lp-shader/legacy/lpvm-cranelift/
   src/emit/mod.rs       signature_for_ir_func: vmctx = pointer_type (JIT host);
                         cranelift_ty_for_vreg for Pointer
   src/emit/call.rs      import / local calls, result pointers
@@ -108,7 +108,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 
 ```bash
 cargo test -p lpir
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 cargo check -p lps-frontend
 ```
 

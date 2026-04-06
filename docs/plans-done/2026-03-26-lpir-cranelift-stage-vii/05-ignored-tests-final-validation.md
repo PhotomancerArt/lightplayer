@@ -67,9 +67,9 @@ cargo +nightly fmt
 cargo check --workspace --exclude fw-esp32 --exclude fw-emu --exclude lps-builtins-emu-app --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 cargo test -p lp-engine
 cargo test -p lp-server
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 cargo test -p lps-filetests -- test_glsl
-cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
+cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
 
 # Builtins generation still works
 cargo run -p lps-builtins-gen-app
@@ -84,7 +84,7 @@ cargo test -p fw-tests
 
 ### 6. Plan summary
 
-Write `docs/plans/2026-03-26-lpir-cranelift-stage-vii/summary.md`:
+Write `docs/plans/2026-03-26-lpvm-cranelift-stage-vii/summary.md`:
 
 - What was deleted (crates, line counts)
 - What was migrated (gen-app types, filetests parse call)
@@ -94,7 +94,7 @@ Write `docs/plans/2026-03-26-lpir-cranelift-stage-vii/summary.md`:
 ### 7. Move plan to `plans-done`
 
 ```bash
-mv docs/plans/2026-03-26-lpir-cranelift-stage-vii docs/plans-done/
+mv docs/plans/2026-03-26-lpvm-cranelift-stage-vii docs/plans-done/
 ```
 
 ### 8. Commit

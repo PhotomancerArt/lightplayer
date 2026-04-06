@@ -22,8 +22,8 @@ still be `lps-filetests`; use **`cargo test -p <actual-package-name>`**.
 
 Typical wiring:
 
-- **Jit** → `LpirJitExecutable` + **`lpir_cranelift::JitModule`**
-- **Rv32** → object + link + emulate (`lpir-cranelift` `riscv32-emu` path today)
+- **Jit** → `LpirJitExecutable` + **`lpvm_cranelift::JitModule`**
+- **Rv32** → object + link + emulate (`lpvm-cranelift` `riscv32-emu` path today)
 - **Wasm** → emission + wasmtime (runner may live in filetests until **`lpvm-wasm`**
   `runtime` is ready)
 
@@ -36,7 +36,7 @@ optional std debug hooks (`format_clif_ir`, etc.). Logical signatures use
 ### Target shape
 
 1. Compile / load → **`LpvmModule`** (per backend crate).
-2. **`LpvmInstance`** + **`LpvmMemory`** as designed in M1–M4.
+2. **`LpvmInstance`** for execution state (memory managed internally by each backend).
 3. Calls through LPVM API; keep **ergonomic test helpers** (wrapper module or
    extension traits) so tests stay readable.
 
@@ -57,16 +57,16 @@ filetests import explicitly.
 ```toml
 [dependencies]
 lpvm = { path = "../../lpvm/lpvm" }
-lpvm-cranelift = { path = "../../lpvm/lpvm-cranelift" }
-lpvm-rv32 = { path = "../../lpvm/lpvm-rv32" }
-lpvm-wasm = { path = "../../lpvm/lpvm-wasm", features = ["runtime"] }
+lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift" }  # or lpvm/lpvm-cranelift
+lpvm-rv32 = { path = "../../lp-riscv/lpvm-rv32" }  # or lpvm/lpvm-rv32
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }  # actual location
 lpir = { path = "../lpir" }   # or top-level path after moves
 lps-shared = { path = "../lps-shared" }
 lps-frontend = { path = "../lps-frontend" }
 ```
 
 **Remove** (once fully migrated): `lps-exec`, direct `lpvm`, direct
-`lpir-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
+`lpvm-cranelift` (replaced by `lpvm-cranelift` / `lpvm-rv32`), direct `wasmtime`
 if folded into `lpvm-wasm` runtime.
 
 ## What NOT To Do

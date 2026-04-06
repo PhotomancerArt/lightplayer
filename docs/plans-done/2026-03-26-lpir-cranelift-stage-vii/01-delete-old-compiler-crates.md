@@ -67,7 +67,7 @@ resolve because `lps-frontend` has no path dep on `lps-cranelift`.
 cargo metadata --format-version=1 > /dev/null
 cargo check -p lp-server
 cargo check -p lp-engine
-cargo check -p lpir-cranelift
+cargo check -p lpvm-cranelift
 ```
 
 The `lps-builtins-gen-app` and `lps-filetests` may have warnings or

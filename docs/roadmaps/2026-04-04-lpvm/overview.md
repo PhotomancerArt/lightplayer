@@ -120,7 +120,7 @@ Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
 **`lpir`** (IR module, lowering inputs) and **`lps-shared`** (what callers think
 functions look like). Replaces **`lpvm`** and **`lps-exec`** (trait
-concepts → `LpvmModule` / `LpvmInstance` / `LpvmMemory`).
+concepts → `LpvmModule` / `LpvmInstance`).
 
 Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,
 `LpvmModuleMeta`-style metadata (may reference `lps-shared` for field types).

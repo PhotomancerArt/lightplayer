@@ -2,7 +2,8 @@
 
 ## Scope of phase
 
-Lock **acceptance criteria**, update **roadmap** / **plan notes**, and give **`fw-esp32`** builders a **single** command reference.
+Lock **acceptance criteria**, update **roadmap** / **plan notes**, and give **`fw-esp32`** builders
+a **single** command reference.
 
 ## Code Organization Reminders
 
@@ -15,12 +16,14 @@ Lock **acceptance criteria**, update **roadmap** / **plan notes**, and give **`f
 ## Implementation Details
 
 1. **`docs/plans/2026-03-26-fw-embedded-shader-jit/00-notes.md`**
-   - Add **Acceptance checklist** section with copy-paste commands.
+    - Add **Acceptance checklist** section with copy-paste commands.
 
-2. **Roadmap** (`docs/roadmaps/2026-03-24-lpir-cranelift/stage-vi-a-embedded-readiness.md` or VI-B/C)
-   - Short cross-link: **embedded JIT** validated by **`fw-tests`** + **`fw-esp32 check`**.
+2. **Roadmap** (`docs/roadmaps/2026-03-24-lpvm-cranelift/stage-vi-a-embedded-readiness.md` or
+   VI-B/C)
+    - Short cross-link: **embedded JIT** validated by **`fw-tests`** + **`fw-esp32 check`**.
 
-3. **Optional:** `README` or `justfile` comment — **how to verify** compiler-in-firmware (if maintainers expect it).
+3. **Optional:** `README` or `justfile` comment — **how to verify** compiler-in-firmware (if
+   maintainers expect it).
 
 ## Tests to write
 

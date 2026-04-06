@@ -28,7 +28,7 @@ vec3/mat4 as IR types).
 - `lpvm` → **`lpvm`** — values, layout, runtime metadata, VmContext.
 - `lps-exec` → **`lpvm`** traits — `GlslExecutable` replaced by LPVM traits.
 - `lps-core` → **`lps-shared`** — logical `LpsType`, `LpsFunctionSignature`, etc.
-- `lpir-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
+- `lpvm-cranelift` — splits into **`lpvm-cranelift`** + **`lpvm-rv32`** (object/emu).
 - `lpir` — scalarized IR + interpreter only.
 - `lps-wasm` → **`lpvm-wasm`**.
 - `lp-riscv-emu` — refactor for module/memory/instance; still general-purpose.
@@ -38,8 +38,8 @@ vec3/mat4 as IR types).
 
 | Backend                       | Location                                  | Heavy deps              |
 |-------------------------------|-------------------------------------------|-------------------------|
-| Cranelift JIT (host+embedded) | `lpir-cranelift`                          | cranelift-*             |
-| RV32 emulator                 | `lpir-cranelift` (feature `riscv32-emu`)  | lp-riscv-*              |
+| Cranelift JIT (host+embedded) | `lpvm-cranelift`                          | cranelift-*             |
+| RV32 emulator                 | `lpvm-cranelift` (feature `riscv32-emu`)  | lp-riscv-*              |
 | WASM emission                 | `lps-wasm`                                | wasm-encoder            |
 | WASM runner (desktop)         | `lps-filetests` (transitional names vary) | wasmtime                |
 | WASM runner (browser)         | `web-demo`                                | browser WebAssembly API |
@@ -201,7 +201,7 @@ level, then `lpvm-rv32` wraps it with the LPVM trait interface.
 
 Does lp-engine depend on specific backends or just the core traits?
 
-**Context**: Today lp-engine directly uses `lpir_cranelift::jit()`,
+**Context**: Today lp-engine directly uses `lpvm_cranelift::jit()`,
 `JitModule`, and `DirectCall`. It doesn't go through `GlslExecutable`.
 
 **Suggested answer**: lp-engine depends on `lpvm` (core traits) + `lpvm-cranelift`
@@ -216,7 +216,7 @@ in-browser as a development simulation target. In-browser, shaders run via
 backend-agnostic. Generics (monomorphization) over `M: lpvm::Module` give
 zero-cost abstraction: each firmware crate selects its backend at the top
 level (`fw-esp32` → `lpvm-cranelift`, `fw-wasm` → `lpvm-wasm`). Traits are
-`LpvmModule` / `LpvmInstance` / `LpvmMemory` (names per M1).
+`LpvmEngine` / `LpvmModule` / `LpvmInstance` (names per M2).
 
 ### Q8: Naming conventions
 
@@ -229,8 +229,8 @@ common names that will collide.
 
 **Suggested answer**: TBD — need to weigh ergonomics vs collision risk.
 
-**Answer**: Use `Lpvm` prefix on externally-facing types: `LpvmModule`,
-`LpvmInstance`, `LpvmMemory`, `LpvmValue`, `LpvmData`, etc. Given the number
+**Answer**: Use `Lpvm` prefix on externally-facing types: `LpvmEngine`,
+`LpvmModule`, `LpvmInstance`, `LpvmData`, etc. Given the number
 of ecosystems wired together (Naga, Cranelift, WASM, LPIR), collisions are
 inevitable without prefixes. "Lpvm" means "runtime thing" and provides clear
 disambiguation — especially inside backend crates like `lpvm-cranelift` where

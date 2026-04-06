@@ -51,7 +51,7 @@ embedded builds remain functional.
 
 ```bash
 # Core tests
-cargo test -p lpvm -p lpir-cranelift -p lps-frontend
+cargo test -p lpvm -p lpvm-cranelift -p lps-frontend
 
 # Filetests
 cargo test -p lps-filetests

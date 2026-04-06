@@ -1,4 +1,4 @@
-# Stage VI-A summary — lpir-cranelift embedded readiness
+# Stage VI-A summary — lpvm-cranelift embedded readiness
 
 ## Done
 
@@ -26,12 +26,13 @@
 
 ## Validation run
 
-- `cargo test -p lpir-cranelift`
-- `cargo test -p lpir-cranelift --features riscv32-emu`
-- `cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features`
-- `cargo clippy -p lpir-cranelift --all-features -- -D warnings`
+- `cargo test -p lpvm-cranelift`
+- `cargo test -p lpvm-cranelift --features riscv32-emu`
+- `cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features`
+- `cargo clippy -p lpvm-cranelift --all-features -- -D warnings`
 -
-`cargo clippy --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features -- -D warnings`
+
+`cargo clippy --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features -- -D warnings`
 
 ## Notes
 

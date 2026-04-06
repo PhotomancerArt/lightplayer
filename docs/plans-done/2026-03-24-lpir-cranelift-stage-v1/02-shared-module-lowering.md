@@ -44,13 +44,13 @@ object mapping is order-sensitive).
 
 ## Tests
 
-- Run **all existing** `lpir-cranelift` unit tests unchanged — behavior must be
+- Run **all existing** `lpvm-cranelift` unit tests unchanged — behavior must be
   identical for JIT.
 
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpvm-cranelift
 ```
 
 `cargo +nightly fmt`.

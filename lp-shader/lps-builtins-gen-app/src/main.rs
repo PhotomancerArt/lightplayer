@@ -75,10 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let lpir_builtin_abi_path = workspace_root
         .join("legacy")
-        .join("lpir-cranelift")
+        .join("lpvm-cranelift")
         .join("src")
         .join("generated_builtin_abi.rs");
-    generate_lpir_cranelift_builtin_abi(&lpir_builtin_abi_path, &builtins);
+    generate_lpvm_cranelift_builtin_abi(&lpir_builtin_abi_path, &builtins);
 
     // Generate builtin_refs.rs (RISC-V emu app)
     let builtin_refs_path = workspace_root
@@ -1121,7 +1121,7 @@ fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInf
 }
 
 /// Cranelift signatures derived from each builtin's `rust_signature` strings in `lps-builtins`.
-fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
+fn generate_lpvm_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
 //!
 //! To regenerate this file, run:
@@ -1165,7 +1165,7 @@ fn generate_lpir_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     output.push_str("}\n");
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("create lpir-cranelift generated parent dir");
+        fs::create_dir_all(parent).expect("create lpvm-cranelift generated parent dir");
     }
     fs::write(path, output).expect("Failed to write generated_builtin_abi.rs");
 }

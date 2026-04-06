@@ -4,7 +4,7 @@
 
 Remove the **`#[cfg(not(feature = "std"))]`** **`compile_shader`** stub as the **default** for
 embedded **`lp-server`** consumers. **`ShaderRuntime`** must use the real GLSL → *
-*`lpir_cranelift::jit`** path when **`lpir-cranelift`** provides **`jit`** ( **`glsl`** enabled on
+*`lpvm_cranelift::jit`** path when **`lpvm-cranelift`** provides **`jit`** ( **`glsl`** enabled on
 the dependency). Optional **opt-out** (e.g. **`minimal`** / **`no-shader-compile`**) only if a
 concrete consumer needs a smaller **`lp-engine`**; document who uses it.
 
@@ -19,7 +19,7 @@ concrete consumer needs a smaller **`lp-engine`**; document who uses it.
 ## Implementation Details
 
 1. **`Cargo.toml`**
-    - On the **`lpir-cranelift`** dependency, enable **`glsl`** (and existing optimizer/verifier
+    - On the **`lpvm-cranelift`** dependency, enable **`glsl`** (and existing optimizer/verifier
       flags) **independent of `std`**.
     - **`default`** features: keep **`std`** for host **default** workspace builds; embedded uses *
       *`default-features = false`** but must still pull **`glsl`** via explicit dependency
@@ -28,7 +28,7 @@ concrete consumer needs a smaller **`lp-engine`**; document who uses it.
 2. **`src/nodes/shader/runtime.rs`**
     - Replace **`#[cfg(feature = "std")]` / `#[cfg(not(feature = "std"))]`** split on *
       *`compile_shader`** with:
-        - **Real** implementation whenever **`lpir_cranelift::jit`** exists for this build (
+        - **Real** implementation whenever **`lpvm_cranelift::jit`** exists for this build (
           typically **`#[cfg(feature = "glsl")]`** on **`lp-engine`** *if* Phase 1 adds a forwarded
           **`glsl`** feature here, or **unconditional** if **`lps-frontend`** becomes a required dep
           of **`lp-engine`**). Align **`cfg`** names with Phase 1’s **`Cargo.toml`**.

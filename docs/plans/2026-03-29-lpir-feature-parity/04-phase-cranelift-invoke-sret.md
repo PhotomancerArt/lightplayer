@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Extend **`lpir-cranelift`** host **invoke** (`invoke.rs` and related) so JIT’d functions with
+Extend **`lpvm-cranelift`** host **invoke** (`invoke.rs` and related) so JIT’d functions with
 **more than four** 32-bit return words (e.g. `mat3` → 9, `mat4` → 16) match Cranelift’s ABI
 (`enable_multi_ret_implicit_sret` or equivalent). This is **Rust caller glue only** — LPIR and
 CLIF already express multi-return.
@@ -25,9 +25,9 @@ CLIF already express multi-return.
    types.
 
 4. **Tests**
-   - `cargo test -p lpir-cranelift`
-   - Filetests: `./scripts/glsl-filetests.sh function/return-matrix.glsl` and representative
-     `matrix/mat3/` / `matrix/mat4/` cases.
+    - `cargo test -p lpvm-cranelift`
+    - Filetests: `./scripts/glsl-filetests.sh function/return-matrix.glsl` and representative
+      `matrix/mat3/` / `matrix/mat4/` cases.
 
 5. **ESP32 / RV32 object path** — sanity-check that embedded compilation still builds; invoke.rs
    is host-oriented but must not break `no_std` object emission.
@@ -35,8 +35,8 @@ CLIF already express multi-return.
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
 ./scripts/glsl-filetests.sh matrix/ function/return-matrix.glsl
 ```
 

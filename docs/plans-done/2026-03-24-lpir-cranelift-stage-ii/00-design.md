@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-Complete the `lpir-cranelift` crate's core translation: structured control flow
+Complete the `lpvm-cranelift` crate's core translation: structured control flow
 (if/else, loops, switch), integer comparisons, local function calls, memory ops
 (stack slots, load/store, memcpy), and multi-return. All using native f32 — no
 Q32 mode, no import resolution, no builtins. Testable with `jit_from_ir` on
@@ -11,7 +11,7 @@ hand-built LPIR.
 ## File structure
 
 ```
-lp-shader/legacy/lpir-cranelift/
+lp-shader/legacy/lpvm-cranelift/
 └── src/
     ├── lib.rs                  # UPDATE: re-exports, expanded tests
     ├── jit_module.rs           # UPDATE: EmitCtx setup, FuncRef wiring, remove guards

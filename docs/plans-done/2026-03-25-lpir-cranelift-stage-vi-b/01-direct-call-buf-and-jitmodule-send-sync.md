@@ -83,7 +83,7 @@ unsafe impl Sync for JitModule {}
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo clippy -p lpir-cranelift --all-features -- -D warnings
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo clippy -p lpvm-cranelift --all-features -- -D warnings
 ```

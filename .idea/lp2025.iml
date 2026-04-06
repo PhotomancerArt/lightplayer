@@ -45,7 +45,6 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpir/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lpir-cranelift/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-exec/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-wasm/tests" isTestSource="true" />
@@ -62,6 +61,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-frontend/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-frontend/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/legacy/lps-builtins-wasm/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-cranelift/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-wasm/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-wasm/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

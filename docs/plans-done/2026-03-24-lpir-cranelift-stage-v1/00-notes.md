@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-- Add an **RV32 `ObjectModule`** path in `lpir-cranelift` that reuses the existing
+- Add an **RV32 `ObjectModule`** path in `lpvm-cranelift` that reuses the existing
   LPIR → CLIF emitter (`emit/`) with a RISC-V 32-bit ISA instead of host JIT.
 - **Emit relocatable object** bytes (ELF) for the shader module.
 - **Link** shader object into the pre-built **builtins emulator ELF** (same
@@ -11,14 +11,14 @@
 - **Run** linked code in **`lp-riscv-emu`** and validate with **in-crate tests**
   (hand-written or parsed LPIR, and optionally a thin GLSL → LPIR wrapper reusing
   `compile::jit`’s frontend half).
-- **Feature-gate** RV32/object/emulator deps so default `lpir-cranelift` stays
+- **Feature-gate** RV32/object/emulator deps so default `lpvm-cranelift` stays
   host-JIT-oriented unless the feature is enabled.
 
 **Out of scope:** `lps-filetests` targets `jit.q32` / `rv32.q32` (Stage V2).
 
 ## Current state of the codebase
 
-### `lpir-cranelift`
+### `lpvm-cranelift`
 
 - Host-only: `cranelift-codegen` with `host-arch`, `JITModule`, `jit_from_ir`,
   `jit`, `JitModule`, `build_jit_module` in `jit_module.rs`.
@@ -46,10 +46,10 @@
 ### Q1: How much should we share with `lps-cranelift` vs duplicate?
 
 **Context:** Linking and emulator orchestration already exist in the old crate;
-`lpir-cranelift` should stay the LPIR consumer and avoid pulling AST types.
+`lpvm-cranelift` should stay the LPIR consumer and avoid pulling AST types.
 
 **Suggested answer:** **Duplicate the small glue** (`link_and_verify_builtins`-style
-logic, emulator options) inside `lpir-cranelift` behind the feature flag, or
+logic, emulator options) inside `lpvm-cranelift` behind the feature flag, or
 extract a tiny `lp-riscv-shader-link` crate later if duplication hurts. For V1,
 prefer **local modules** (`object_link.rs`, `emu_run.rs`) that call
 `lp-riscv-elf` / `lp-riscv-emu` directly, mirroring the old code paths.
@@ -71,7 +71,7 @@ JIT, `finalize_definitions` + `JitModule` wrapper. Object-specific: RV32 ISA,
 compile time.
 
 **Suggested answer:** **Reuse the same mechanism:** `build.rs` in
-`lpir-cranelift` (feature-gated) that includes paths from env or known relative
+`lpvm-cranelift` (feature-gated) that includes paths from env or known relative
 path, documented in phase “Builtins linking”; same `scripts/build-builtins.sh`
 workflow as today.
 

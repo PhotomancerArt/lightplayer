@@ -2,7 +2,8 @@
 
 ## Scope of Phase
 
-Update `signature_for_ir_func` and related code in `lpir-cranelift` to include VMContext as the first parameter in all function signatures.
+Update `signature_for_ir_func` and related code in `lpvm-cranelift` to include VMContext as the
+first parameter in all function signatures.
 
 ## Code Organization Reminders
 
@@ -12,7 +13,7 @@ Update `signature_for_ir_func` and related code in `lpir-cranelift` to include V
 
 ## Implementation Details
 
-### 1. Update `lpir-cranelift/src/emit/mod.rs`
+### 1. Update `lpvm-cranelift/src/emit/mod.rs`
 
 Modify `signature_for_ir_func`:
 
@@ -90,7 +91,7 @@ pub fn translate_function(
 
 ### 2. Update call emission
 
-In `lpir-cranelift/src/emit/call.rs`, update to pass VMContext:
+In `lpvm-cranelift/src/emit/call.rs`, update to pass VMContext:
 
 ```rust
 // When emitting a call, include VMContext as first arg
@@ -123,8 +124,8 @@ fn signature_has_vmctx_first() {
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo check -p lpir-cranelift --target riscv32imac-unknown-none-elf
+cargo test -p lpvm-cranelift
+cargo check -p lpvm-cranelift --target riscv32imac-unknown-none-elf
 ```
 
 ## Notes

@@ -2,7 +2,7 @@
 
 ## Plan phases (execution order)
 
-1. [`01-lpir-cranelift-glsl-without-std.md`](01-lpir-cranelift-glsl-without-std.md) — `glsl` vs
+1. [`01-lpvm-cranelift-glsl-without-std.md`](01-lpvm-cranelift-glsl-without-std.md) — `glsl` vs
    `std`; `jit()` without `libstd`
 2. [`02-lp-engine-shader-compile-embedded.md`](02-lp-engine-shader-compile-embedded.md) — real
    `compile_shader` for embedded
@@ -30,18 +30,18 @@
     - `tests/alloc_trace_emu.rs` — same shader gate + alloc trace assertions.
 
 Related roadmap context:
-`docs/roadmaps/2026-03-24-lpir-cranelift/stage-vi-a-embedded-readiness.md` (embedded
-`lpir-cranelift`), plus engine / firmware wiring (VI-B/C style), but this plan is **outcome-driven
+`docs/roadmaps/2026-03-24-lpvm-cranelift/stage-vi-a-embedded-readiness.md` (embedded
+`lpvm-cranelift`), plus engine / firmware wiring (VI-B/C style), but this plan is **outcome-driven
 ** (fw-tests green), not stage-letter-complete.
 
 ## Current state of the codebase
 
 - **`pp-rs` / `lps-frontend`:** `no_std` path exists; prerequisite for on-device GLSL parse/lower.
-- **`lpir-cranelift`:** `glsl` feature enables **`lps-frontend`**; **`jit()`** is *
+- **`lpvm-cranelift`:** `glsl` feature enables **`lps-frontend`**; **`jit()`** is *
   *`#[cfg(feature = "glsl")]`**, not `std`. Default features are **`std` + `glsl`** for host;
   embedded uses **`glsl`** without **`std`**. RISC-V32 uses **StructReturn** when a function returns
   more than two scalar words (Cranelift #9510).
-- **`lp-engine`:** **`lpir-cranelift`** dependency includes **`features = ["glsl"]`**; *
+- **`lp-engine`:** **`lpvm-cranelift`** dependency includes **`features = ["glsl"]`**; *
   *`ShaderRuntime`** compiles shaders without **`std`**.
 - **`fw-emu` / `fw-esp32`:** **`lp-server`** with **`default-features = false`** still pulls the
   full GLSL JIT via **`lp-engine`**’s **`glsl`** dependency feature.
@@ -53,14 +53,14 @@ cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
 cargo check -p lp-server
-cargo check -p lpir-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
+cargo check -p lpvm-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
 ```
 
 ## Questions (to resolve one at a time)
 
 ### Q1 — Codegen delivery: JIT vs object+link on device?
 
-**Context:** Host uses **`cranelift-jit`**. `lpir-cranelift` also has **`riscv32-emu`** / object
+**Context:** Host uses **`cranelift-jit`**. `lpvm-cranelift` also has **`riscv32-emu`** / object
 emission for emulator workflows. ESP32 may impose **ICache sync / executable memory / W^X**
 constraints.
 
@@ -101,7 +101,7 @@ feature on **`lp-engine` / `lp-server`** — that misrepresents the product.
 product path. Use **`cfg` / features** for **host vs embedded** (e.g. **`std`** only for *
 *`libstd` + `cranelift-native`** and other host conveniences), not for "compiler exists." Optional
 Cargo features should be **opt-out** (e.g. **`minimal`** / **`no-shader-compile`**) for stripped or
-test-only builds, not **`shader-jit`** as a separate enable. **`lpir-cranelift`** may still use a
+test-only builds, not **`shader-jit`** as a separate enable. **`lpvm-cranelift`** may still use a
 dependency feature for **`lps-frontend`** where callers need **`jit_from_ir`** only without the
 front end; **`lp-engine` + `lp-server`** treat the full pipeline as **non-optional**.
 
@@ -132,7 +132,7 @@ These have happened in the past and must not happen again:
   reference target**; `fw-emu` proves the same pipeline in CI.
 - **Cargo philosophy for this plan:** compiler is **baseline**; flags carve out **embedded vs host**
   and **size-saving opt-out**, not "enable the compiler."
-- **Crate disambiguation:** `lpir-cranelift` (in `lp-shader/legacy/lpir-cranelift/`) is used by
+- **Crate disambiguation:** `lpvm-cranelift` (in `lp-shader/legacy/lpvm-cranelift/`) is used by
   `lp-engine`
   and is the crate this plan modifies. `lps-cranelift` (in `lp-shader/lps-cranelift/`) is a
   separate frontend path not used by firmware. Do not confuse them.

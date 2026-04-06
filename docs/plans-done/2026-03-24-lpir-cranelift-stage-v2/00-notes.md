@@ -2,8 +2,8 @@
 
 ## Scope of work
 
-- Extend **`lps-filetests`** for **`lpir-cranelift`**:
-    - **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations via
+- Extend **`lps-filetests`** for **`lpvm-cranelift`**:
+    - **`jit.q32`:** GLSL → `lpvm_cranelift::jit` → `JitModule` → expectations via
       **`GlslExecutable`** adapter.
     - **`rv32.q32`:** GLSL → LPIR → **Stage V1** object + link + emulator → same
       trait boundary.
@@ -50,7 +50,7 @@
 - **V2 target:** **`WasmExecutable`** implements **`lps_exec::GlslExecutable`**;
   **`compile_for_target`** dispatches Wasm / Jit / Rv32 (no Cranelift).
 
-### `lpir-cranelift`
+### `lpvm-cranelift`
 
 - **`jit`**, **`JitModule`**, **`call`**, **`CompileOptions`** — Stage IV.
 - Stage V1: object + link + emulator for **`rv32.q32`**.

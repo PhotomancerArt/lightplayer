@@ -8,7 +8,7 @@
   *`riscv32imac-unknown-none-elf`** (and other `*-none-*` targets with `alloc`).
 - Wire **`lp2025`** to use the fork via **`[patch.crates-io]`** (same pattern as **`esp-println`**
   fork in-tree, **`lp-cranelift`** git deps).
-- **Out of scope for this plan (follow-up):** re-plumbing **`lp-engine` / `lpir-cranelift`**
+- **Out of scope for this plan (follow-up):** re-plumbing **`lp-engine` / `lpvm-cranelift`**
   embedded GLSL→JIT on **`fw-esp32`** once **`lps-frontend`** builds for the firmware target. This
   plan stops at **“`cargo check -p lps-frontend --target riscv32imac-unknown-none-elf` succeeds.”**
 

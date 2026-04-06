@@ -8,7 +8,7 @@ in Q32 mode.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-iii`
+`lpvm-cranelift-stage-iii`
 
 ## Scope
 

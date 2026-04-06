@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create the new `lpir-cranelift` crate with the core LPIR → Cranelift
+Create the new `lpvm-cranelift` crate with the core LPIR → Cranelift
 translation: scalar ops, structured control flow → CFG, VReg → Variable
 mapping. No builtins, no Q32 mode, no imports — just the structural
 translation layer. Testable with `jit_from_ir` on hand-built LPIR using
@@ -10,13 +10,13 @@ native f32.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-ii`
+`lpvm-cranelift-stage-ii`
 
 ## Scope
 
 **In scope:**
 
-- New crate `lp-shader/legacy/lpir-cranelift/` with Cargo.toml, `no_std` + `alloc`
+- New crate `lp-shader/legacy/lpvm-cranelift/` with Cargo.toml, `no_std` + `alloc`
   support, cranelift dependencies (cranelift-codegen, cranelift-frontend,
   cranelift-module, cranelift-jit)
 - `emit.rs` — the core translation:
@@ -87,7 +87,7 @@ native f32.
 
 ## Deliverables
 
-- `lp-shader/legacy/lpir-cranelift/` crate
+- `lp-shader/legacy/lpvm-cranelift/` crate
 - Core emitter handling all scalar LPIR ops and structured CF
 - Basic JitModule with function calling
 - Tests proving arithmetic, conditionals, loops, multi-return work

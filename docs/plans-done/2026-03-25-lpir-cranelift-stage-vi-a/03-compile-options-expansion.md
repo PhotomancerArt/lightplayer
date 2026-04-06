@@ -123,7 +123,8 @@ CompileOptions {
 Or just `CompileOptions::default()` where Q32 + Default strategy is wanted.
 
 Search for `CompileOptions {` across:
-- `lpir-cranelift/src/lib.rs` (tests)
+
+- `lpvm-cranelift/src/lib.rs` (tests)
 - `lps-filetests/` (compile dispatch)
 - Any other callers
 
@@ -157,9 +158,9 @@ fn q32_options_default_is_saturating() {
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 
 # Filetests (may construct CompileOptions)
 just glsl-filetests

@@ -12,7 +12,7 @@ Final cleanup, remove any temporary code, ensure all tests pass, and prepare for
 # Search for TODOs, FIXMEs, debug prints
 cd /Users/yona/dev/photomancer/lp2025
 grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/lps-frontend/src/ --include="*.rs" | grep -v "test"
-grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/legacy/lpir-cranelift/src/ --include="*.rs" | grep -v "test"
+grep -r "TODO\|FIXME\|println!\|dbg!" lp-shader/legacy/lpvm-cranelift/src/ --include="*.rs" | grep -v "test"
 ```
 
 Remove any temporary debug code added during development.
@@ -23,7 +23,7 @@ Remove any temporary debug code added during development.
 # Check for warnings
 cargo +nightly fmt --check -p lps-frontend
 cargo clippy -p lps-frontend -- -D warnings
-cargo clippy -p lpir-cranelift -- -D warnings
+cargo clippy -p lpvm-cranelift -- -D warnings
 ```
 
 ### Final validation
@@ -34,11 +34,11 @@ Run the complete validation suite:
 cd /Users/yona/dev/photomancer/lp2025
 
 # 1. Format check
-cargo +nightly fmt -p lps-frontend -p lpir-cranelift
+cargo +nightly fmt -p lps-frontend -p lpvm-cranelift
 
 # 2. Unit tests
 cargo test -p lps-frontend --no-fail-fast
-cargo test -p lpir-cranelift --no-fail-fast
+cargo test -p lpvm-cranelift --no-fail-fast
 
 # 3. Embedded target check
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server

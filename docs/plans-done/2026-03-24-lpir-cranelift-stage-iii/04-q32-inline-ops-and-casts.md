@@ -184,6 +184,7 @@ Op::Feq { dst, lhs, rhs } => {
 ```
 
 For Q32 float comparisons, the mapping is:
+
 - `Feq` → `IntCC::Equal`
 - `Fne` → `IntCC::NotEqual`
 - `Flt` → `IntCC::SignedLessThan`
@@ -211,24 +212,29 @@ Same for `FtoiSatU`, `ItofS`, `ItofU`.
 ### 4. Tests
 
 **`test_q32_fneg`**:
+
 ```
 func @neg(v0:f32) -> f32 {
   v1:f32 = fneg v0
   return v1
 }
 ```
+
 Call with Q32-encoded 1.0 (65536), verify result is -65536.
 
 **`test_q32_fabs`**:
+
 ```
 func @abs(v0:f32) -> f32 {
   v1:f32 = fabs v0
   return v1
 }
 ```
+
 Call with Q32 -1.0 (-65536), verify result is 65536.
 
 **`test_q32_fmin_fmax`**:
+
 ```
 func @minmax(v0:f32, v1:f32) -> f32, f32 {
   v2:f32 = fmin v0, v1
@@ -236,19 +242,23 @@ func @minmax(v0:f32, v1:f32) -> f32, f32 {
   return v2, v3
 }
 ```
+
 Call with Q32 3.0 and 1.0, verify min=1.0 and max=3.0.
 
 **`test_q32_floor_ceil_trunc`**:
+
 ```
 func @floor_it(v0:f32) -> f32 {
   v1:f32 = ffloor v0
   return v1
 }
 ```
+
 Call with Q32 1.75 (`1.75 * 65536 = 114688`), verify result is Q32 1.0 (65536).
 Call with Q32 -1.75, verify result is Q32 -2.0 (-131072).
 
 **`test_q32_comparison`**:
+
 ```
 func @is_positive(v0:f32) -> i32 {
   v1:f32 = fconst 0.0
@@ -256,9 +266,11 @@ func @is_positive(v0:f32) -> i32 {
   return v2
 }
 ```
+
 Call with Q32 1.0, verify returns 1. Call with Q32 -1.0, verify returns 0.
 
 **`test_q32_ftoi_itof`**:
+
 ```
 func @roundtrip(v0:f32) -> f32 {
   v1:i32 = ftoi_sat_s v0
@@ -266,11 +278,12 @@ func @roundtrip(v0:f32) -> f32 {
   return v2
 }
 ```
+
 Call with Q32 2.75, verify returns Q32 2.0 (fractional truncated).
 
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

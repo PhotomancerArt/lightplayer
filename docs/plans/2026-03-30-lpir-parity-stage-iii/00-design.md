@@ -19,7 +19,7 @@ lp-shader/
 │   └── lower_expr.rs          # UPDATE: As/Compose for bvec casts; round builtin
 ├── lps-builtins/src/builtins/glsl/
 │   └── round_q32.rs           # EXISTS: __lps_round_q32 already correct
-├── lpir-cranelift/src/
+├── lpvm-cranelift/src/
 │   └── emit/                  # MAY NEED: round emit if not already wired
 ├── lps-filetests/filetests/
 │   ├── const/builtin/extended.glsl      # UPDATE: remove @unimplemented

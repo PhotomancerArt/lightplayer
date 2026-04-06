@@ -2,7 +2,7 @@
 
 ## The Problem
 
-In `lpir-cranelift/src/call.rs:48-51`:
+In `lpvm-cranelift/src/call.rs:48-51`:
 
 ```rust
 let header = lpvm::VmContextHeader::default();
@@ -19,7 +19,7 @@ memory.
 LPIR was designed with a 32-bit assumption for VMContext:
 
 ```rust
-// In lpir-cranelift/src/emit/mod.rs:110-113
+// In lpvm-cranelift/src/emit/mod.rs:110-113
 // NOTE: Use I32 for vmctx (not pointer_type) to avoid it being treated as special by
 // RISC-V backend with enable_multi_ret_implicit_sret. The vmctx is semantically a pointer
 // but we pass it as I32 to prevent ABI confusion.
@@ -165,7 +165,7 @@ pub struct IrFunction {
 **Lowering Changes:**
 
 ```rust
-// In lpir-cranelift/src/emit/mod.rs
+// In lpvm-cranelift/src/emit/mod.rs
 fn ir_type_for_mode(t: IrType, mode: FloatMode, pointer_type: types::Type) -> types::Type {
     match (t, mode) {
         (IrType::I32, _) => types::I32,
@@ -390,7 +390,7 @@ host path.
 **Implementation sketch for Option A (unchanged idea):**
 
 ```rust
-// New module: lpir-cranelift/src/jit_heap.rs
+// New module: lpvm-cranelift/src/jit_heap.rs
 
 /// 32-bit-addressable heap for JIT on 64-bit hosts.
 pub struct JitHeap32 {

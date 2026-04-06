@@ -17,7 +17,7 @@ removing workspace members.
 |-----------------------------------------|-------------------------------|------------------------------|
 | `lpvm`                                  | `lpvm`                        | Runtime ABI + values         |
 | `lps-exec`                              | `lpvm` traits                 | `GlslExecutable` → LPVM      |
-| `lpir-cranelift` (bulk)                 | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
+| `lpvm-cranelift` (bulk)                 | `lpvm-cranelift`, `lpvm-rv32` | Split JIT vs emu object path |
 | `lps-wasm` (or transitional WASM crate) | `lpvm-wasm`                   | Emission + runtime           |
 
 **Keep `lps-shared`** (and the whole **`lps-*` shader layer**). Do **not** delete

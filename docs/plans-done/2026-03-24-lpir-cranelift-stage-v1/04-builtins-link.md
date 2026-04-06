@@ -2,7 +2,7 @@
 
 Port **`link_and_verify_builtins`** semantics from
 `lps-cranelift/src/backend/codegen/builtins_linker.rs` into
-`lpir-cranelift` as **`object_link.rs`** (or similar), behind the same feature
+`lpvm-cranelift` as **`object_link.rs`** (or similar), behind the same feature
 flag.
 
 Inputs: **shader object bytes** + **builtins executable bytes** (embedded at
@@ -43,7 +43,7 @@ Output: **`ElfLoadInfo`** (or equivalent) from `lp_riscv_elf::load_elf` +
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpvm-cranelift --features riscv32-emu
 ```
 
 If full link tests are ignored, still require `cargo check` with feature on.

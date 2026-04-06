@@ -2,7 +2,7 @@
 
 ## Scope
 
-Swap compiler dependency to `lpir-cranelift`, remove unused Cranelift / JIT util
+Swap compiler dependency to `lpvm-cranelift`, remove unused Cranelift / JIT util
 deps, and forward features through `lp-server`.
 
 ## Code Organization Reminders
@@ -26,27 +26,27 @@ deps, and forward features through `lp-server`.
 **Add:**
 
 ```toml
-lpir-cranelift = { path = "../../lp-shader/legacy/lpir-cranelift", default-features = false }
+lpvm-cranelift = { path = "../../lp-shader/legacy/lpvm-cranelift", default-features = false }
 ```
 
-**Features** (mirror `lpir-cranelift`):
+**Features** (mirror `lpvm-cranelift`):
 
 ```toml
 [features]
 default = ["std", "cranelift-optimizer", "cranelift-verifier"]
 panic-recovery = ["dep:unwinding"]
-cranelift-optimizer = ["lpir-cranelift/cranelift-optimizer"]
-cranelift-verifier = ["lpir-cranelift/cranelift-verifier"]
+cranelift-optimizer = ["lpvm-cranelift/cranelift-optimizer"]
+cranelift-verifier = ["lpvm-cranelift/cranelift-verifier"]
 std = [
     "lp-shared/std",
-    "lpir-cranelift/std",
+    "lpvm-cranelift/std",
 ]
 ```
 
 ### 2. `lp-server/Cargo.toml`
 
 Replace any `lp-engine/...` feature edges that still name `lps-cranelift`
-with `lpir-cranelift` equivalents (optimizer / verifier / `std`).
+with `lpvm-cranelift` equivalents (optimizer / verifier / `std`).
 
 ### 3. Workspace / other crates
 

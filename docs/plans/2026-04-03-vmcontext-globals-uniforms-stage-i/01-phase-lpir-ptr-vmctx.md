@@ -31,5 +31,5 @@ a single `Value` representation — no `usize`).
 
 ## Dependency note
 
-If Phase 1 lands alone, **`lpir-cranelift` and `lps-frontend` may fail** until they map `Pointer` →
+If Phase 1 lands alone, **`lpvm-cranelift` and `lps-frontend` may fail** until they map `Pointer` →
 Cranelift type. Prefer **Phase 2 in the same merge train** or feature branch that includes both.

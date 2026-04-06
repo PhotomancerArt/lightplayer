@@ -28,11 +28,12 @@ intentional follow-up markers.
 ### 2. Fix warnings
 
 ```bash
-cargo check -p lpir-cranelift 2>&1 | grep warning
-cargo check -p lpir-cranelift --no-default-features --target riscv32imac-unknown-none-elf 2>&1 | grep warning
+cargo check -p lpvm-cranelift 2>&1 | grep warning
+cargo check -p lpvm-cranelift --no-default-features --target riscv32imac-unknown-none-elf 2>&1 | grep warning
 ```
 
 Fix all warnings. Pay attention to:
+
 - Unused imports behind cfg gates
 - Dead code warnings from new types not yet fully wired (Q32Options modes)
   — suppress with `#[allow(dead_code)]` only if intentional (document why)
@@ -47,13 +48,13 @@ cargo +nightly fmt
 
 ```bash
 # Host with default features (std)
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 
 # Host with riscv32-emu
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift --features riscv32-emu
 
 # Cross-compile check (no std)
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 
 # Filetests
 just glsl-filetests
@@ -69,7 +70,7 @@ ensure it's captured in `00-notes.md` or `00-design.md`.
 
 ### Summary
 
-Add a summary to `docs/plans/2026-03-25-lpir-cranelift-stage-vi-a/summary.md`:
+Add a summary to `docs/plans/2026-03-25-lpvm-cranelift-stage-vi-a/summary.md`:
 
 - What was done
 - Feature layout
@@ -78,13 +79,13 @@ Add a summary to `docs/plans/2026-03-25-lpir-cranelift-stage-vi-a/summary.md`:
 ### Move to plans-done
 
 ```bash
-mv docs/plans/2026-03-25-lpir-cranelift-stage-vi-a docs/plans-done/
+mv docs/plans/2026-03-25-lpvm-cranelift-stage-vi-a docs/plans-done/
 ```
 
 ## Commit
 
 ```
-feat(lpir-cranelift): no_std support and CompileOptions expansion (Stage VI-A)
+feat(lpvm-cranelift): no_std support and CompileOptions expansion (Stage VI-A)
 
 - Add default `std` Cargo feature; `--no-default-features` builds for `no_std` + `alloc`
 - Add `cranelift-optimizer` and `cranelift-verifier` as opt-in features
@@ -102,9 +103,9 @@ feat(lpir-cranelift): no_std support and CompileOptions expansion (Stage VI-A)
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 just glsl-filetests
 cargo +nightly fmt -- --check
 ```

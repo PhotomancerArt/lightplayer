@@ -29,7 +29,7 @@ to make cross-target comparison easy and repeatable.
 - Run the full corpus on `wasm.q32` and `rv32.q32`.
 - Triage failures:
     - **Shared LPIR bug** → fix in `lps-frontend` / `lpir`.
-    - **Backend emit bug** → fix in `lps-wasm` or `lpir-cranelift`.
+    - **Backend emit bug** → fix in `lps-wasm` or `lpvm-cranelift`.
     - **Intentional platform limit** → annotate `@unsupported(backend=…, reason="…")`.
     - **Unimplemented on that backend** → annotate `@unimplemented(backend=…)`.
 - Do **not** remove existing `@unimplemented(backend=wasm)` wholesale without verifying the test

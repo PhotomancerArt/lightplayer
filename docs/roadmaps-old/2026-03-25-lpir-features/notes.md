@@ -10,7 +10,7 @@ In scope:
 
 - Closing GLSL/language gaps surfaced by filetests (especially `jit.q32` vs what already passes on
   `rv32.q32` / `wasm.q32` where the issue is lowering/metadata, not ABI).
-- Wiring remaining **callers** that still depend on `lps-cranelift` onto `lpir-cranelift` (or an
+- Wiring remaining **callers** that still depend on `lps-cranelift` onto `lpvm-cranelift` (or an
   agreed subset).
 - Host metadata / `JitModule::call` / invoke paths for aggregates (matrices, eventually
   arrays/structs) as needed for parity.
@@ -27,13 +27,13 @@ Out of scope until decided otherwise (see questions):
 ### New stack (Naga / LPIR)
 
 - **`lps-frontend`**: GLSL-in → `naga::Module` → LPIR + `GlslModuleMeta`.
-- **`lpir-cranelift`**: LPIR → CLIF → host JIT (`jit()`), optional RV32 object / emu (`riscv32-emu`
+- **`lpvm-cranelift`**: LPIR → CLIF → host JIT (`jit()`), optional RV32 object / emu (`riscv32-emu`
   feature). Uses `lps-frontend` behind `std` for the full GLSL entry.
 - **`lps-wasm`**: Naga → LPIR → WASM (Stage V path).
 - **`lps-filetests`**: `compile_for_target` routes **Jit**, **Rv32**, and **Wasm** through the
   LPIR executables (`LpirJitExecutable`, `LpirRv32Executable`, `WasmExecutable`) — not
   `lps-cranelift`.
-- **`lp-engine`** (`ShaderRuntime`, `std`): compiles shaders via `lpir_cranelift::jit` and
+- **`lp-engine`** (`ShaderRuntime`, `std`): compiles shaders via `lpvm_cranelift::jit` and
   `CompileOptions` / `DirectCall` (in progress per stage VI plans).
 
 ### Legacy stack (still in tree)
@@ -55,7 +55,7 @@ inc/dec semantics; possible filetest harness concurrency issue.
 ### Related roadmaps
 
 - [`2026-03-20-naga`](../2026-03-20-naga/overview.md) — motivation for Naga + WASM rewrite.
-- [`2026-03-24-lpir-cranelift`](../2026-03-24-lpir-cranelift/overview.md) — LPIR→Cranelift backend,
+- [`2026-03-24-lpvm-cranelift`](../2026-03-24-lpvm-cranelift/overview.md) — LPIR→Cranelift backend,
   `jit.q32` goal.
 
 ## Questions
@@ -82,7 +82,7 @@ metrics app still use `lps-cranelift`.
 
 **Suggested answer:** Prioritize **language + metadata + invoke** gaps that block filetests (matches
 `todo.md` order: postfix fix → matrices + ABI → vector builtins → arrays → structs), then **migrate
-embedded callers** to `lpir-cranelift` object/JIT API, then delete legacy crates.
+embedded callers** to `lpvm-cranelift` object/JIT API, then delete legacy crates.
 
 **Answer:** _(pending)_
 
@@ -105,7 +105,7 @@ old stack if regression comparison is needed.
 
 **Context:** The app imports `GlslCompiler` / `GlModule` from the legacy crate.
 
-**Suggested answer:** Either **rewrite** the app on `lpir-cranelift` + LPIR introspection for
+**Suggested answer:** Either **rewrite** the app on `lpvm-cranelift` + LPIR introspection for
 metrics, or **archive** the tool until needed; avoid indefinite dual maintenance.
 
 **Answer:** _(pending)_

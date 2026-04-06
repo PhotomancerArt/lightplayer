@@ -2,7 +2,7 @@
 
 ## Scope
 
-Restructure `lpir-cranelift` Cargo features so `std` is the default, add
+Restructure `lpvm-cranelift` Cargo features so `std` is the default, add
 `#![no_std]` to `lib.rs`, gate `std`-dependent code, and verify cross-compile.
 
 ## Code Organization Reminders
@@ -105,10 +105,10 @@ Replace the current `process_sync.rs` with cfg-split:
 mod imp {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    static LPIR_CRANELIFT_CODEGEN: OnceLock<Mutex<()>> = OnceLock::new();
+    static lpvm_cranelift_CODEGEN: OnceLock<Mutex<()>> = OnceLock::new();
 
     pub(crate) fn codegen_guard() -> MutexGuard<'static, ()> {
-        LPIR_CRANELIFT_CODEGEN
+        lpvm_cranelift_CODEGEN
             .get_or_init(|| Mutex::new(()))
             .lock()
             .expect("LPIR Cranelift codegen mutex poisoned")
@@ -142,18 +142,18 @@ If not, add one or remove the forwarding from our `std` feature list.
 
 ## Tests
 
-- Existing `cargo test -p lpir-cranelift` passes (default features = std).
-- Existing `cargo test -p lpir-cranelift --features riscv32-emu` passes.
+- Existing `cargo test -p lpvm-cranelift` passes (default features = std).
+- Existing `cargo test -p lpvm-cranelift --features riscv32-emu` passes.
 
 ## Validate
 
 ```bash
 # Cross-compile check — this is the key new validation
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 
 # Host tests unchanged
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
 ```
 
 The cross-compile will likely fail initially due to `cranelift-native` not being

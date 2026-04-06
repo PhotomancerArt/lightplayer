@@ -31,7 +31,7 @@ lp-shader/
 │   └── …
 ├── lpir/src/
 │   └── glsl_metadata.rs         # UPDATE: GlslType mat2/3/4
-├── lpir-cranelift/src/
+├── lpvm-cranelift/src/
 │   ├── invoke.rs                  # UPDATE: sret / large returns
 │   └── emit/                      # VERIFY: call ABI as needed
 ├── lps-wasm/                  # VERIFY / FIX: multi-return emission
@@ -54,7 +54,7 @@ GLSL (#version 450) ──► Naga Module
                             │
             ┌───────────────┼───────────────┐
             ▼               ▼               ▼
-      lpir::interp    lps-wasm     lpir-cranelift
+      lpir::interp    lps-wasm     lpvm-cranelift
       (reference)     (wasm-encoder)   (CLIF → machine)
                                             │
                                             ▼
@@ -70,6 +70,6 @@ each lower that to their ABI; **invoke.rs** is only the Rust-side caller for hos
 |-----------------------|-----------------------------------------------------------------------------------------------------|
 | `lps-frontend`        | Maps Naga expressions/statements to LPIR; must accept matrix signatures and relational ops on bvec. |
 | `lpir::glsl_metadata` | Describes exported function types for callers; must include matrix shapes for invoke/decode.        |
-| `lpir-cranelift`      | Emits CLIF; host tests need invoke glue that matches Cranelift’s multi-return / sret ABI.           |
+| `lpvm-cranelift`      | Emits CLIF; host tests need invoke glue that matches Cranelift’s multi-return / sret ABI.           |
 | `lps-wasm`            | Emits WASM; must remain consistent with LPIR multi-return for the same shaders.                     |
 | `lps-filetests`       | Corpus + runner; annotations (`@unimplemented`, `@broken`, `@unsupported`).                         |

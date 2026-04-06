@@ -7,56 +7,99 @@ the strictest — wasmtime and browser APIs constrain the trait design.
 
 ## Naming / paths
 
-- **Shader layer** uses **`lps-*`** (e.g. `lps-frontend` for GLSL → LPIR).
-- **Emission** today may still live under a transitional crate name
-  (`lps-wasm`); **`lpvm-wasm`** is the target home for LPIR → `.wasm` +
-  optional runtime.
+- **Shader layer** uses **`lps-*`** (e.g., `lps-frontend` for GLSL → LPIR).
+- **LPVM backends** use **`lpvm-*`** (e.g., `lpvm-wasm` for LPIR → WASM).
 
-If the repo already renamed WASM-related crates, align `Cargo.toml` paths with
-reality; this doc uses **logical** crate names.
+**Actual location:** `lp-shader/lpvm-wasm/` (not `lpvm/lpvm-wasm/` as originally
+planned — the `lpvm/` directory structure was kept flat).
 
 ## Context for Agents
 
-The current WASM stack typically:
+### What was built
 
-- Emits `.wasm` from LPIR via **`wasm-encoder`** (`no_std` + alloc).
-- Runs on desktop with **wasmtime** (often wired from **filetests**, not from
-  the emission crate).
-- **Browser**: `web-demo` (or similar) may call emission from WASM and hand
-  bytes to JS.
+The WASM backend now exists and has two runtime implementations:
 
-`lpvm-wasm` adds **LPVM trait implementations** behind a **`runtime`** feature,
-with native vs `wasm32` target selection (see roadmap overview).
+1. **Emission** (always, `no_std` + alloc): LPIR → WASM bytes via `wasm-encoder`
+2. **Runtime** (target-selected): 
+   - **Native** (`!wasm32`): `rt_wasmtime/` — wasmtime implementation of LPVM traits
+   - **Browser** (`wasm32`): `rt_browser/` — `js_sys::WebAssembly` implementation
 
-### Typical current API (names may differ on disk)
+### Current API
 
-- Top-level: GLSL → … → WASM bytes (may chain **`lps-frontend`**).
-- **`WasmModule`**: bytes + exports + shadow stack global info.
-- **`WasmExport`**: WASM val types + **logical** param types (for harnesses) —
-  those logical types should come from **`lps-shared`**, not from a “glsl” name.
+**Entry point (emission only):**
+```rust
+pub fn compile_lpir(ir: &IrModule, sig: &LpsModuleSig, opts: &WasmOptions) -> Result<WasmArtifact, WasmError>
+```
 
-### How wasmtime runner works (today: often in `lps-filetests`)
+**Runtime types (native):**
+```rust
+pub struct WasmLpvmEngine { /* wasmtime Engine + options */ }
+pub struct WasmLpvmModule { /* bytes + metadata + parsed Module */ }
+pub struct WasmLpvmInstance { /* Store + Instance + memory */ }
 
-See `wasm_runner.rs` / `wasm_link.rs` (paths may be under `lps-filetests`
-until renamed):
+impl LpvmEngine for WasmLpvmEngine { type Module = WasmLpvmModule; ... }
+impl LpvmModule for WasmLpvmModule { type Instance = WasmLpvmInstance; ... }
+impl LpvmInstance for WasmLpvmInstance { ... }
+```
 
-1. Obtain `WasmModule` (bytes + exports).
-2. wasmtime `Engine` / `Store`, fuel.
-3. Instantiate with builtins linked.
-4. Per call: reset shadow stack global, set fuel, pass **`I32` VMContext** as
-   first arg, flatten args, read results.
+**Runtime types (browser/wasm32):**
+```rust
+pub struct BrowserLpvmEngine { /* builtins exports */ }
+pub struct BrowserLpvmModule { /* js_sys::WebAssembly::Module */ }
+pub struct BrowserLpvmInstance { /* Instance + exports */ }
 
-## What To Build
+impl LpvmEngine for BrowserLpvmEngine { type Module = BrowserLpvmModule; ... }
+impl LpvmModule for BrowserLpvmModule { type Instance = BrowserLpvmInstance; ... }
+impl LpvmInstance for BrowserLpvmInstance { ... }
+```
+
+### Builtins linking
+
+`lps-builtins` is a direct Rust dependency. **No separate `.wasm` file.**
+
+- **Native**: Uses `wasmtime::Func::new()` with native builtin function pointers
+- **Browser**: Builtin exports from the main WASM binary passed via `lpvm_init_exports()`
+
+### WASM constraints vs traits
+
+The trait design accommodates:
+- VMContext passed as first I32 parameter to all shader functions
+- Shadow stack global reset before each call
+- Fuel limits via wasmtime fuel consumption
+- Builtins linked by name from `lps-builtin-ids` registry
+
+## What Was Built
 
 ### Crate location
 
-`lpvm/lpvm-wasm/`
+`lp-shader/lpvm-wasm/`
 
-### `Cargo.toml` (sketch)
+### `Cargo.toml` structure
 
-Depend on **`lpvm`**, **`lpir`**, **`lps-shared`** (if export metadata needs
-logical types), **`lps-builtin-ids`** (or transitional path), `wasm-encoder`,
-optional `wasmtime` / `wasm-bindgen` / `web-sys` per target + `runtime` feature.
+```toml
+[package]
+name = "lpvm-wasm"
+
+[features]
+default = []
+# No "runtime" feature — runtime always included, target-selected
+
+[dependencies]
+# Core dependencies (always, no_std + alloc)
+lpir = { path = "../lpir" }
+lps-shared = { path = "../lps-shared" }
+lpvm = { path = "../lpvm" }
+wasm-encoder = "0.245"
+lps-builtin-ids = { path = "../lps-builtin-ids" }
+
+# Runtime: wasmtime (native targets only)
+wasmtime = { version = "42", optional = false }  # Actually compiled via target cfgs
+
+# Runtime: js_sys (wasm32 targets only)
+wasm-bindgen = { version = "0.2", optional = false }  # Actually compiled via target cfgs
+js-sys = { version = "0.3", optional = false }
+web-sys = { version = "0.3", features = ["console"], optional = false }
+```
 
 ### Module structure
 
@@ -64,46 +107,76 @@ optional `wasmtime` / `wasm-bindgen` / `web-sys` per target + `runtime` feature.
 lpvm-wasm/
 ├── Cargo.toml
 └── src/
-    ├── lib.rs
-    ├── emit.rs             # LPIR → WASM bytes
+    ├── lib.rs              # Target-gated exports (rt_wasmtime / rt_browser)
+    ├── compile.rs          # LPIR → WASM bytes (emit_lpir)
+    ├── emit/               # Emission submodules
+    │   ├── mod.rs          # Module emission orchestration
+    │   ├── control.rs      # Control flow
+    │   ├── func.rs         # Function encoding
+    │   ├── imports.rs      # Import filtering
+    │   ├── memory.rs       # Shadow stack
+    │   ├── ops.rs          # LPIR → WASM instructions
+    │   └── q32.rs          # Q32 operations
     ├── module.rs           # WasmModule, WasmExport
-    ├── options.rs
-    ├── error.rs
-    ├── runtime_wasmtime.rs
-    └── runtime_browser.rs  # optional / later
+    ├── options.rs          # WasmOptions
+    ├── error.rs            # WasmError
+    ├── rt_wasmtime/        # Native runtime (#[cfg(not(target_arch = "wasm32"))])
+    │   ├── mod.rs
+    │   ├── engine.rs       # WasmLpvmEngine
+    │   ├── instance.rs     # WasmLpvmInstance
+    │   ├── link.rs         # Native builtin linking
+    │   └── marshal.rs      # Value marshaling
+    └── rt_browser/         # Browser runtime (#[cfg(target_arch = "wasm32")])
+        ├── mod.rs
+        ├── engine.rs       # BrowserLpvmEngine
+        ├── instance.rs     # BrowserLpvmInstance
+        ├── link.rs         # JS builtin linking
+        └── marshal.rs      # LpsValue ↔ JsValue
 ```
 
-### Emission (always available)
+### Emission
 
-Core entry: **`IrModule` → bytes**. The **shader frontend** (`lps-frontend`) stays
-out of this crate’s required path; optional feature can glue “source string →
-WASM” for convenience.
+Core entry: **`compile_lpir(ir, sig, opts) -> WasmArtifact`**.
 
-### Runtime (`runtime` feature)
+`WasmArtifact` contains:
+- `wasm_module(): &WasmModule` — bytes, exports, shadow_stack_base
+- `signatures(): &LpsModuleSig` — metadata
 
-- **Native**: wasmtime — port logic from current filetests runner.
-- **`wasm32`**: browser WebAssembly API — can trail wasmtime if needed.
+### Runtime (target-selected, no feature flag)
+
+**Native (`!wasm32`):**
+- `WasmLpvmEngine::new(opts)` creates engine with native builtins linked
+- `compile()` produces `WasmLpvmModule` (implements `LpvmModule`)
+- `instantiate()` produces `WasmLpvmInstance` (implements `LpvmInstance`)
+
+**Browser (`wasm32`):**
+- `BrowserLpvmEngine::new(builtin_exports)` stores builtin function exports
+- Same trait interface, different implementation using `js_sys::WebAssembly`
 
 ### Unit tests
 
-Emit minimal LPIR → instantiate (wasmtime) → call → assert. VMContext + shadow
-stack behavior covered.
+Tests in `lpvm-wasm/tests/`:
+- `compile_roundtrip.rs` — LPIR → WASM bytes validation
+- `runtime_lpvm_call.rs` — wasmtime instantiation and trait-based calling
+- `runtime_builtin_sin.rs` — builtin linking validation
 
-## WASM constraints vs traits
+## What To Do (Deferred or Future)
 
-(Same as before — VMContext as i32 param, shadow stack, fuel, linear memory,
-exports by name.) If traits from M1 cannot express these, **revise traits** in
-M2 before M3.
+- `lpvm-wasm` is **done** — both native and browser runtimes work
+- `web-demo` integration was part of Stage II (separate plan)
+- Filetest migration is M5 (separate milestone)
 
 ## What NOT To Do
 
-- Do NOT make GLSL source the **only** entry point; LPIR → WASM is the backend
-  contract.
-- Do NOT migrate **`lps-filetests`** yet (M5).
-- Do NOT delete the old WASM emission crate until M7.
+- Do NOT add a `runtime` feature flag — use target-based cfg instead
+- Do NOT expect `LpvmMemory` trait — it was not needed; memory is internal to each backend
+- Do NOT use old paths like `lpvm/lpvm-wasm/` — actual path is `lp-shader/lpvm-wasm/`
 
 ## Done When
 
-- `lpvm-wasm` builds; emission + wasmtime runtime tests pass
-- Traits validated against WASM; any M1 API gaps fixed
-- Workspace builds
+- [x] `lpvm-wasm` emission builds and produces valid WASM
+- [x] `rt_wasmtime` implements LPVM traits with wasmtime
+- [x] `rt_browser` implements LPVM traits for wasm32 target
+- [x] Tests pass: emission roundtrip, runtime calls, builtin linking
+- [x] Target-based gating works (`!wasm32` vs `wasm32`)
+- [x] `lps-builtins` linked directly (no separate `.wasm` file)

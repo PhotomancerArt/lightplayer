@@ -26,17 +26,17 @@ Remove from the crate table:
 - `esp32-glsl-jit` entry (if listed)
 
 Update any prose that mentions "two compiler backends" or similar to reflect
-that `lpir-cranelift` is now the single compiler path.
+that `lpvm-cranelift` is now the single compiler path.
 
 ### 2. `lp-shader/README.md`
 
 Remove directory listing entries for deleted crates. Update the architecture
-description to reflect the naga → LPIR → lpir-cranelift chain as the only
+description to reflect the naga → LPIR → lpvm-cranelift chain as the only
 compiler path.
 
 ### 3. `AGENTS.md`
 
-- Remove the "Do NOT confuse `lpir-cranelift` with `lps-cranelift`" note
+- Remove the "Do NOT confuse `lpvm-cranelift` with `lps-cranelift`" note
   (the old crate no longer exists).
 - Remove `lps-cranelift` from the "Key Crates" table if present.
 - Update any architecture diagrams or prose that references the old crate.
@@ -44,7 +44,7 @@ compiler path.
 ### 4. `.cursor/rules/no-std-compile-path.mdc`
 
 Remove the "Crate confusion warning" section that explains the difference
-between `lpir-cranelift` and `lps-cranelift`. The old crate is gone;
+between `lpvm-cranelift` and `lps-cranelift`. The old crate is gone;
 the warning is unnecessary.
 
 ### 5. `.cursorrules`
@@ -53,7 +53,7 @@ Check for any references to old crates. Update if needed.
 
 ### 6. Any active roadmap files
 
-Check `docs/roadmaps/2026-03-24-lpir-cranelift/` for files that still
+Check `docs/roadmaps/2026-03-24-lpvm-cranelift/` for files that still
 reference old crates in a forward-looking way (e.g. stage-vii-cleanup.md
 itself can stay — it describes what was done). If any other active roadmap
 stage references old crates as if they exist, update.

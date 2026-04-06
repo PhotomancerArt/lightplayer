@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-Wire **`lps-filetests`** to **`lpir-cranelift`** for **`jit.q32`** and
+Wire **`lps-filetests`** to **`lpvm-cranelift`** for **`jit.q32`** and
 **`rv32.q32`**, keep **`wasm.q32`**, **remove legacy `cranelift.q32`**, depend on
 the **new shared crates** for **`GlslExecutable`** / **`GlslValue`** (see below),
 and set **default targets + CI matrix** per `00-notes.md`.
@@ -25,7 +25,7 @@ lp-shader/lps-wasm/
 └── src/                       # UPDATE: impl GlslExecutable from lps-exec; GlslValue from lpvm
 
 lp-shader/lps-filetests/
-├── Cargo.toml                 # UPDATE: lpir-cranelift + lps-exec (+ values/diagnostics); REMOVE lps-cranelift
+├── Cargo.toml                 # UPDATE: lpvm-cranelift + lps-exec (+ values/diagnostics); REMOVE lps-cranelift
 ├── README.md                  # UPDATE: defaults, CI matrix, --target wasm.q32 | rv32.q32
 └── src/
     ├── target/mod.rs          # UPDATE: no Cranelift; DEFAULT_TARGETS = [jit]; ALL_TARGETS
@@ -66,8 +66,8 @@ lp-shader/lps-filetests/
 | `Target::name()` | Backend | isa + exec         | Compiler path        |
 |------------------|---------|--------------------|----------------------|
 | `wasm.q32`       | `Wasm`  | Wasm32 + Emulator  | `lps-wasm`           |
-| `jit.q32`        | `Jit`   | Native + Jit       | `lpir-cranelift` JIT |
-| `rv32.q32`       | `Rv32`  | Riscv32 + Emulator | `lpir-cranelift` V1  |
+| `jit.q32`        | `Jit`   | Native + Jit       | `lpvm-cranelift` JIT |
+| `rv32.q32`       | `Rv32`  | Riscv32 + Emulator | `lpvm-cranelift` V1  |
 
 **`ALL_TARGETS`:** all three (for `from_name` and CI). **`DEFAULT_TARGETS`:**
 **`[jit.q32]`** only.

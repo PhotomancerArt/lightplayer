@@ -24,7 +24,7 @@ lps-frontend         Naga glsl-in → IrModule
   ▼
 LPIR                  flat, scalarized, mode-agnostic IR
   │
-  ├──► lpir-cranelift   → native machine code (RISC-V / host JIT)
+  ├──► lpvm-cranelift   → native machine code (RISC-V / host JIT)
   ├──► lps-wasm     → .wasm (browser preview, wasm.q32 filetests)
   └──► lpir::interp     → in-process interpreter (testing)
 ```
@@ -58,7 +58,7 @@ Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
 ### Codegen
 
-- `lpir-cranelift/` — LPIR → Cranelift → machine code (RISC-V on device, host JIT with `std`)
+- `lpvm-cranelift/` — LPIR → Cranelift → machine code (RISC-V on device, host JIT with `std`)
 - `lps-wasm/` — LPIR → WASM (browser preview, `wasm.q32` filetests)
 
 ### Builtins

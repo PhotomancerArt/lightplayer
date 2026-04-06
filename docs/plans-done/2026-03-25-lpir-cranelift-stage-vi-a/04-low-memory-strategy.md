@@ -115,7 +115,7 @@ func @small(v0:f32) -> f32 {
 ## Validate
 
 ```bash
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 ```

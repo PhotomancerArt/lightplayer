@@ -37,7 +37,7 @@ or lower-level pieces so tests compose.
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpvm-cranelift --features riscv32-emu
 ```
 
 `cargo +nightly fmt`.

@@ -1,6 +1,6 @@
-# Plan notes: lpir-cranelift Stage VI-C (ESP32 hardware validation)
+# Plan notes: lpvm-cranelift Stage VI-C (ESP32 hardware validation)
 
-Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)
+Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpvm-cranelift/stage-vi-c-esp32.md)
 
 ## Scope of work
 
@@ -8,7 +8,7 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
   direct Cranelift optional deps (or replace only if something in-tree still
   needs them — currently none appear wired to features).
 - Build and flash ESP32-C6 firmware with `lp-server` + `lp-engine` (already
-  `lpir-cranelift`, `default-features = false` on the embedded path).
+  `lpvm-cranelift`, `default-features = false` on the embedded path).
 - On-device validation: shaders compile, render, no OOM; optional light heap
   checks only (not the primary memory A/B).
 - A/B vs old compiler: document in `docs/reports/`; **primary** memory profile and
@@ -17,7 +17,7 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
 
 ## Current state (codebase)
 
-- **`lp-engine`:** Depends on `lpir-cranelift` with feature forwarding for
+- **`lp-engine`:** Depends on `lpvm-cranelift` with feature forwarding for
   optimizer/verifier/std; old `lps-cranelift` / `cranelift-codegen` /
   `lps-jit-util` removed from this crate.
 - **`lp-server`:** `default-features = false` on `fw-esp32` with
@@ -28,7 +28,7 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
   `cranelift-module`, `cranelift-control`, `target-lexicon`. No `[features]`
   entry enables these dependencies, so they are **orphan optional deps** (likely
   pre–VI-B leftovers). Shader compilation path is **transitive**:
-  `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
+  `fw-esp32` → `lp-server` → `lp-engine` → `lpvm-cranelift`.
 - **Rust sources under `fw-esp32/src`:** No imports of `lps_cranelift`; JIT
   host helpers (`jit_fns.rs`, log bridges) remain relevant for generated code.
 
@@ -37,11 +37,11 @@ Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stag
 ### Q1 — `fw-esp32` manifest cleanup
 
 **Context:** Optional compiler crates are unused by any feature; the active path
-is `lp-engine` → `lpir-cranelift`.
+is `lp-engine` → `lpvm-cranelift`.
 
 **Suggested answer:** Delete the orphan optional dependency block from
 `fw-esp32/Cargo.toml` (and `lps-builtins` if nothing enables it). Do **not**
-add a duplicate `lpir-cranelift` edge unless a future `fw-esp32` binary needs
+add a duplicate `lpvm-cranelift` edge unless a future `fw-esp32` binary needs
 to call the compiler API directly (it should not for VI-C).
 
 **Answer:** Yes — delete all orphan deps now; keep migrating toward fully
@@ -53,12 +53,12 @@ hardware (VI-C).
 **Context:** Roadmap asks for binary size, memory, compile time, execution
 speed, plus known issues.
 
-**Suggested answer:** Add `docs/reports/2026-03-25-lpir-cranelift-vi-c-ab.md` (or
+**Suggested answer:** Add `docs/reports/2026-03-25-lpvm-cranelift-vi-c-ab.md` (or
 date the file when measurements are taken) with a small table per metric,
 measurement method, old vs new, and a “Known issues / follow-ups” section. Link it
 from `summary.md` when the plan completes.
 
-**Answer:** Yes — use `docs/reports/<YYYY-MM-DD>-lpir-cranelift-vi-c-ab.md` (date
+**Answer:** Yes — use `docs/reports/<YYYY-MM-DD>-lpvm-cranelift-vi-c-ab.md` (date
 when measured), tables + methodology + known issues, link from plan `summary.md`.
 The **most important A/B signal is memory profiling**, captured from **fw-emu**
 (not as the primary metric on ESP32). Compile time and similar deltas are also

@@ -43,7 +43,7 @@ pub fn object_bytes_from_ir(
 ## Validate
 
 ```bash
-cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpir-cranelift --features riscv32-emu
+cd /Users/yona/dev/photomancer/lp2025/lps && cargo test -p lpvm-cranelift --features riscv32-emu
 ```
 
 Fix any new warnings in touched files. `cargo +nightly fmt`.

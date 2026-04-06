@@ -2,7 +2,7 @@
 
 ## Scope
 
-Create `builtins.rs` in `lpir-cranelift`. Implement import resolution
+Create `builtins.rs` in `lpvm-cranelift`. Implement import resolution
 (`ImportDecl` → `BuiltinId`), builtin declaration in the JIT module, and
 the symbol lookup function. Update `Cargo.toml` with new dependencies.
 Update `jit_module.rs` to accept `FloatMode` and wire up builtins. No Q32
@@ -285,6 +285,6 @@ compiles and the F32 path still works.
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

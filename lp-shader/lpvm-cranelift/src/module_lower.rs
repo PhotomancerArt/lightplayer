@@ -53,7 +53,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     let mode = options.float_mode;
     if mode == FloatMode::F32 && !ir.imports.is_empty() {
         return Err(CompilerError::Codegen(CompileError::unsupported(
-            "LPIR imports require FloatMode::Q32 in lpir-cranelift",
+            "LPIR imports require FloatMode::Q32 in lpvm-cranelift",
         )));
     }
 

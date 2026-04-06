@@ -20,30 +20,30 @@ use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
-use lpir_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
 use lpvm::VmContextHeader;
+use lpvm_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
 
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-fn map_add_sub(m: AddSubMode) -> lpir_cranelift::AddSubMode {
+fn map_add_sub(m: AddSubMode) -> lpvm_cranelift::AddSubMode {
     match m {
-        AddSubMode::Saturating => lpir_cranelift::AddSubMode::Saturating,
-        AddSubMode::Wrapping => lpir_cranelift::AddSubMode::Wrapping,
+        AddSubMode::Saturating => lpvm_cranelift::AddSubMode::Saturating,
+        AddSubMode::Wrapping => lpvm_cranelift::AddSubMode::Wrapping,
     }
 }
 
-fn map_mul(m: MulMode) -> lpir_cranelift::MulMode {
+fn map_mul(m: MulMode) -> lpvm_cranelift::MulMode {
     match m {
-        MulMode::Saturating => lpir_cranelift::MulMode::Saturating,
-        MulMode::Wrapping => lpir_cranelift::MulMode::Wrapping,
+        MulMode::Saturating => lpvm_cranelift::MulMode::Saturating,
+        MulMode::Wrapping => lpvm_cranelift::MulMode::Wrapping,
     }
 }
 
-fn map_div(m: DivMode) -> lpir_cranelift::DivMode {
+fn map_div(m: DivMode) -> lpvm_cranelift::DivMode {
     match m {
-        DivMode::Saturating => lpir_cranelift::DivMode::Saturating,
-        DivMode::Reciprocal => lpir_cranelift::DivMode::Reciprocal,
+        DivMode::Saturating => lpvm_cranelift::DivMode::Saturating,
+        DivMode::Reciprocal => lpvm_cranelift::DivMode::Reciprocal,
     }
 }
 
@@ -51,7 +51,7 @@ fn map_div(m: DivMode) -> lpir_cranelift::DivMode {
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
     jit_module: Option<JitModule>,
-    direct_call: Option<lpir_cranelift::DirectCall>,
+    direct_call: Option<lpvm_cranelift::DirectCall>,
     texture_handle: Option<TextureHandle>,
     compilation_error: Option<String>,
     pub state: ShaderState,
@@ -250,7 +250,7 @@ impl NodeRuntime for ShaderRuntime {
 
 impl ShaderRuntime {
     fn render_direct_call(
-        dc: &lpir_cranelift::DirectCall,
+        dc: &lpvm_cranelift::DirectCall,
         width: u32,
         height: u32,
         time: f32,

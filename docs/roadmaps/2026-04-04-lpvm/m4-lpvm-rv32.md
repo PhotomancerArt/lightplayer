@@ -2,9 +2,9 @@
 
 ## Goal
 
-Refactor `lp-riscv-emu` to support the Module/Memory/Instance separation, then
-build the `lpvm-rv32` backend wrapper. This is the hardest backend milestone
-because the emulator's internal architecture must change.
+Refactor `lp-riscv-emu` to support the Module/Instance separation (with memory
+managed per-instance), then build the `lpvm-rv32` backend wrapper. This is the
+hardest backend milestone because the emulator's internal architecture must change.
 
 ## Context for Agents
 
@@ -41,7 +41,7 @@ The emulator is used beyond LPVM:
 - `lp-riscv-emu-guest-test-app` — guest test binary
 - `lp-cli` — memory profiling
 - `lp-client` — emulator transports
-- `lpir-cranelift` (riscv32-emu feature) — `glsl_q32_call_emulated`
+- `lpvm-cranelift` (riscv32-emu feature) — `glsl_q32_call_emulated`
 
 All existing consumers must continue to work after the refactor.
 
@@ -114,7 +114,8 @@ it creates a code image + RAM and wires them together.
 
 ### Crate location
 
-`lpvm/lpvm-rv32/`
+`lpvm/lpvm-rv32/` (actual location may be `lp-shader/lpvm-rv32/` or `lp-riscv/lpvm-rv32/` during
+migration)
 
 ### Dependencies
 
@@ -138,9 +139,9 @@ use of Cranelift than `lpvm-cranelift`.
 
 | LPVM trait     | RV32 implementation                            | Notes                                                  |
 |----------------|------------------------------------------------|--------------------------------------------------------|
+| `LpvmEngine`   | Cranelift object compiler + linker             | Compiles LPIR → RV32 object, links with builtins       |
 | `LpvmModule`   | Compiled RV32 object (ELF) + linked code image | LPIR → Cranelift → RV32 object → ELF link → code image |
-| `LpvmInstance` | Emulator execution state + RAM                 | Wraps the refactored `Riscv32Emulator`                 |
-| `LpvmMemory`   | Emulator RAM                                   | The mutable portion of the emulator's memory           |
+| `LpvmInstance` | Emulator execution state + RAM                 | Wraps the refactored `Riscv32Emulator` with its RAM    |
 
 ### Compilation flow
 
@@ -149,7 +150,7 @@ use of Cranelift than `lpvm-cranelift`.
 3. Link with builtins → ELF
 4. Extract code image from ELF → `LpvmModule`
 
-This logic currently lives in `lpir-cranelift` behind the `riscv32-emu` feature
+This logic currently lives in `lpvm-cranelift` behind the `riscv32-emu` feature
 (`object_bytes_from_ir`, `link_object_with_builtins`). Move it to `lpvm-rv32`.
 
 ## Unit Tests
@@ -175,7 +176,8 @@ This logic currently lives in `lpir-cranelift` behind the `riscv32-emu` feature
 - `lp-riscv-emu` refactored: code image separate from mutable RAM and
   execution state
 - Existing emulator consumers still work (fw-tests, ELF loading, etc.)
-- `lpvm-rv32` crate exists at `lpvm/lpvm-rv32/`
-- `LpvmModule`/`LpvmInstance`/`LpvmMemory` implemented
+- `lpvm-rv32` crate exists at `lpvm/lpvm-rv32/` (actual location may be `lp-shader/lpvm-rv32/` or
+  `lp-riscv/lpvm-rv32/` during migration) (actual location TBD)
+- `LpvmEngine`/`LpvmModule`/`LpvmInstance` implemented
 - Unit tests pass
 - Workspace builds pass, including `fw-tests`

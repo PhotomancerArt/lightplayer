@@ -3,7 +3,7 @@
 ## Scope
 
 Confirm `fw-emu` builds and runs with the new compiler path through
-`lp-server` → `lp-engine` → `lpir-cranelift`.
+`lp-server` → `lp-engine` → `lpvm-cranelift`.
 
 ## Code Organization Reminders
 
@@ -17,9 +17,9 @@ Confirm `fw-emu` builds and runs with the new compiler path through
 
 ### 1. Dependency graph
 
-`fw-emu` → `lp-server` → `lp-engine` → `lpir-cranelift`. No direct `fw-emu` edit
+`fw-emu` → `lp-server` → `lp-engine` → `lpvm-cranelift`. No direct `fw-emu` edit
 may be required if features propagate. Verify `fw-emu` / `lp-server` default
-features enable `lp-engine/std` (and thus `lpir-cranelift/std` for `jit()`).
+features enable `lp-engine/std` (and thus `lpvm-cranelift/std` for `jit()`).
 
 ### 2. Build
 

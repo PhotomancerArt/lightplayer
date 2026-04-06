@@ -30,6 +30,7 @@ Delete `src/emit.rs`, create:
 ### 2. `emit/mod.rs` — entry point, types, dispatch
 
 Public items:
+
 - `signature_for_ir_func` (moved from old emit.rs, unchanged)
 - `translate_function` (refactored — see below)
 
@@ -171,8 +172,8 @@ needed if re-exports stay the same.
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```
 
 The existing `jit_linear_fadd_f32` test must still pass. No new tests in this

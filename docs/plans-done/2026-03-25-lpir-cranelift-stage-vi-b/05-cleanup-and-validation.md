@@ -26,8 +26,8 @@ Remove stray references. Ensure no `lp-engine` path still imports the old crate.
 ### 2. Warnings
 
 ```bash
-cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
-cargo check -p lpir-cranelift --no-default-features --target riscv32imac-unknown-none-elf
+cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
+cargo check -p lpvm-cranelift --no-default-features --target riscv32imac-unknown-none-elf
 ```
 
 ### 3. Format
@@ -40,14 +40,14 @@ cargo +nightly fmt
 
 ```bash
 cargo test -p lp-engine
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
 just glsl-filetests   # if available; ensures no accidental regressions
 ```
 
 ### 5. Plan summary
 
-Write `docs/plans/2026-03-25-lpir-cranelift-stage-vi-b/summary.md` with:
+Write `docs/plans/2026-03-25-lpvm-cranelift-stage-vi-b/summary.md` with:
 
 - What shipped (DirectCall buf API, engine swap, deps removed)
 - Known follow-ups (Q32 mode wiring in emitter, `max_errors` enforcement)
@@ -55,7 +55,7 @@ Write `docs/plans/2026-03-25-lpir-cranelift-stage-vi-b/summary.md` with:
 ### 6. Move plan to `plans-done`
 
 ```bash
-mv docs/plans/2026-03-25-lpir-cranelift-stage-vi-b docs/plans-done/
+mv docs/plans/2026-03-25-lpvm-cranelift-stage-vi-b docs/plans-done/
 ```
 
 ## Commit
@@ -63,12 +63,12 @@ mv docs/plans/2026-03-25-lpir-cranelift-stage-vi-b docs/plans-done/
 Conventional commit, e.g.:
 
 ```
-feat(lp-engine): use lpir-cranelift for shader JIT (Stage VI-B)
+feat(lp-engine): use lpvm-cranelift for shader JIT (Stage VI-B)
 
-- Replace lps-cranelift with lpir-cranelift; drop cranelift-codegen and lps-jit-util
+- Replace lps-cranelift with lpvm-cranelift; drop cranelift-codegen and lps-jit-util
 - ShaderRuntime stores JitModule + DirectCall; render uses call_i32_buf
 - Forward optimizer/verifier features via lp-server
-- Add DirectCall::call_i32_buf and invoke buffer path in lpir-cranelift
+- Add DirectCall::call_i32_buf and invoke buffer path in lpvm-cranelift
 - unsafe impl Send + Sync for JitModule
 ```
 

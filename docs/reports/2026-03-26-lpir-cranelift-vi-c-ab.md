@@ -1,25 +1,25 @@
 # LPIR / Cranelift Stage VI-C — A/B and validation report
 
-**Plan:** [Stage VI-C design](../plans-done/2026-03-25-lpir-cranelift-stage-vi-c/00-design.md) (
+**Plan:** [Stage VI-C design](../plans-done/2026-03-25-lpvm-cranelift-stage-vi-c/00-design.md) (
 moved to `plans-done` when the stage completed).  
-**Roadmap:** [stage-vi-c-esp32.md](../roadmaps-old/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)
+**Roadmap:** [stage-vi-c-esp32.md](../roadmaps-old/2026-03-24-lpvm-cranelift/stage-vi-c-esp32.md)
 
 ## Purpose
 
-Document automated validation for the **lp-server → lp-engine → lpir-cranelift** path on **fw-emu**
+Document automated validation for the **lp-server → lp-engine → lpvm-cranelift** path on **fw-emu**
 and **fw-esp32**, and reserve space for **old-vs-new compiler** comparisons when two worktrees are
 available. Primary quantitative story is **memory / allocation behavior on fw-emu**; ESP32 is for
 correctness, size, and integration.
 
 ## Environments (this run)
 
-| Field          | Value                                                                                                                      |
-|----------------|----------------------------------------------------------------------------------------------------------------------------|
-| Date           | 2026-03-26                                                                                                                 |
-| Host           | macOS (darwin), local dev machine                                                                                          |
-| `rustc`        | 1.96.0-nightly (2026-03-12)                                                                                                |
-| Branch / SHA   | `feature/lpir-cranelift` — record `git rev-parse --short HEAD` when reproducing                                            |
-| “New” compiler | `lpir-cranelift` (transitive from `lp-engine`)                                                                             |
+| Field          | Value                                                                                                                  |
+|----------------|------------------------------------------------------------------------------------------------------------------------|
+| Date           | 2026-03-26                                                                                                             |
+| Host           | macOS (darwin), local dev machine                                                                                      |
+| `rustc`        | 1.96.0-nightly (2026-03-12)                                                                                            |
+| Branch / SHA   | `feature/lpvm-cranelift` — record `git rev-parse --short HEAD` when reproducing                                        |
+| “New” compiler | `lpvm-cranelift` (transitive from `lp-engine`)                                                                         |
 | “Old” compiler | Not re-measured in this session — compare when a checkout with `lps-cranelift` on the firmware path is still available |
 
 ## fw-emu gate (automated)
@@ -73,10 +73,10 @@ Compare with an old worktree after `just build-fw-esp32` with the same profile/f
 ```bash
 cargo test -p lp-engine
 cargo test -p lp-server
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --no-default-features   # options + q32 encode only; host JIT tests require `std`
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo clippy -p lp-engine -p lp-server -p lpir-cranelift -p lp-client --all-features -- -D warnings
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --no-default-features   # options + q32 encode only; host JIT tests require `std`
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift -p lp-client --all-features -- -D warnings
 just build-fw-esp32
 ```
 
@@ -91,7 +91,7 @@ just build-fw-esp32
 
 ## Known issues / follow-ups
 
-- **Host JIT vs `--no-default-features`:** Without `std`, `lpir-cranelift` JIT targets RISC-V;
+- **Host JIT vs `--no-default-features`:** Without `std`, `lpvm-cranelift` JIT targets RISC-V;
   executing that code on the host is invalid. Host JIT integration tests are gated behind
   `feature = "std"`; `tests_options` runs under `--no-default-features`.
 - **fw-emu / `lp-engine` no-std:** `render` reports JIT unavailable without `std` (expected on

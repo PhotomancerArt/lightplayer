@@ -15,7 +15,7 @@ run in `lp-riscv-emu`, validate in-crate. No `lps-filetests` wiring (V2).
 ## File structure
 
 ```
-lp-shader/legacy/lpir-cranelift/
+lp-shader/legacy/lpvm-cranelift/
 ├── build.rs                         # NEW (feature riscv32-emu): embed builtins ELF path
 ├── Cargo.toml                       # UPDATE: optional riscv32 / object / riscv deps
 └── src/
@@ -75,7 +75,7 @@ lp-shader/legacy/lpir-cranelift/
 
 ## Dependencies
 
-- Stages I–IV of `lpir-cranelift` (emitter, builtins resolution, Q32, public
+- Stages I–IV of `lpvm-cranelift` (emitter, builtins resolution, Q32, public
   compile options) are assumed available.
 - External: `cranelift-object`, `object`, `lp-riscv-elf`, `lp-riscv-emu`,
   `lp-riscv-inst` (as needed), `cranelift-codegen` feature `riscv32`.

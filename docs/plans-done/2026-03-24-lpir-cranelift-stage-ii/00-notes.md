@@ -2,7 +2,7 @@
 
 ## Scope of work
 
-Complete the `lpir-cranelift` crate's core LPIR → Cranelift translation:
+Complete the `lpvm-cranelift` crate's core LPIR → Cranelift translation:
 structured control flow via block stack, integer comparisons, local function
 calls, and multi-return. No builtins, no Q32 mode, no imports — just the
 structural translation layer, testable with `jit_from_ir` on hand-built LPIR
@@ -10,32 +10,32 @@ using native f32.
 
 ## Current state
 
-### What already exists in `lpir-cranelift`
+### What already exists in `lpvm-cranelift`
 
 The crate was scaffolded during Stage I work:
 
 - **`Cargo.toml`** — dependencies on `lpir`, `cranelift-codegen`, `cranelift-frontend`,
   `cranelift-module`, `cranelift-jit`, `cranelift-native`, `target-lexicon`.
 - **`emit.rs`** — translates a linear function body (no control flow):
-  - All scalar float ops: `Fadd`, `Fsub`, `Fmul`, `Fdiv`, `Fneg`, `Fabs`,
-    `Fsqrt`, `Fmin`, `Fmax`, `Ffloor`, `Fceil`, `Ftrunc`, `Fnearest`
-  - All scalar integer arithmetic: `Iadd`, `Isub`, `Imul`, `IdivS`, `IdivU`,
-    `IremS`, `IremU`, `Ineg`, `Iand`, `Ior`, `Ixor`, `Ibnot`, `Ishl`,
-    `IshrS`, `IshrU`
-  - Immediate ops: `IaddImm`, `IsubImm`, `ImulImm`, `IshlImm`, `IshrSImm`,
-    `IshrUImm`, `IeqImm`
-  - Constants: `FconstF32`, `IconstI32`
-  - Float comparisons: `Feq`, `Fne`, `Flt`, `Fle`, `Fgt`, `Fge`
-  - Casts: `FtoiSatS`, `FtoiSatU`, `ItofS`, `ItofU`
-  - `Select`, `Copy`, `Return`
-  - VReg → Cranelift Variable mapping, `def_var`/`use_var`
-  - `signature_for_ir_func` helper
-  - Catch-all `_ =>` returns `CompileError::Unsupported`
+    - All scalar float ops: `Fadd`, `Fsub`, `Fmul`, `Fdiv`, `Fneg`, `Fabs`,
+      `Fsqrt`, `Fmin`, `Fmax`, `Ffloor`, `Fceil`, `Ftrunc`, `Fnearest`
+    - All scalar integer arithmetic: `Iadd`, `Isub`, `Imul`, `IdivS`, `IdivU`,
+      `IremS`, `IremU`, `Ineg`, `Iand`, `Ior`, `Ixor`, `Ibnot`, `Ishl`,
+      `IshrS`, `IshrU`
+    - Immediate ops: `IaddImm`, `IsubImm`, `ImulImm`, `IshlImm`, `IshrSImm`,
+      `IshrUImm`, `IeqImm`
+    - Constants: `FconstF32`, `IconstI32`
+    - Float comparisons: `Feq`, `Fne`, `Flt`, `Fle`, `Fgt`, `Fge`
+    - Casts: `FtoiSatS`, `FtoiSatU`, `ItofS`, `ItofU`
+    - `Select`, `Copy`, `Return`
+    - VReg → Cranelift Variable mapping, `def_var`/`use_var`
+    - `signature_for_ir_func` helper
+    - Catch-all `_ =>` returns `CompileError::Unsupported`
 - **`jit_module.rs`** — `jit_from_ir(ir: &IrModule) -> Result<(JITModule, Vec<FuncId>)>`:
-  - Rejects modules with imports
-  - Creates host ISA via `cranelift_native::builder()`
-  - Declares all functions, defines them, finalizes
-  - Seals entry block immediately (no control flow)
+    - Rejects modules with imports
+    - Creates host ISA via `cranelift_native::builder()`
+    - Declares all functions, defines them, finalizes
+    - Seals entry block immediately (no control flow)
 - **`error.rs`** — `CompileError` with `Unsupported` and `Cranelift` variants
 - **`lib.rs`** — exports + one test (`jit_linear_fadd_f32`)
 - **Tests**: single test proving linear `fadd` compiles and runs
@@ -43,24 +43,24 @@ The crate was scaffolded during Stage I work:
 ### What's missing for Stage II
 
 1. **Structured control flow** — the main work:
-   - `IfStart { cond, else_offset, end_offset }` → branch to then/else blocks,
-     merge block
-   - `Else` → switch from then-arm to else-arm
-   - `End` → close current control structure, jump to merge/header
-   - `LoopStart { continuing_offset, end_offset }` → header/exit blocks
-   - `Break` → jump to loop exit
-   - `Continue` → jump to loop header
-   - `BrIfNot { cond }` → conditional branch to loop exit
-   - Block stack to track nesting
+    - `IfStart { cond, else_offset, end_offset }` → branch to then/else blocks,
+      merge block
+    - `Else` → switch from then-arm to else-arm
+    - `End` → close current control structure, jump to merge/header
+    - `LoopStart { continuing_offset, end_offset }` → header/exit blocks
+    - `Break` → jump to loop exit
+    - `Continue` → jump to loop header
+    - `BrIfNot { cond }` → conditional branch to loop exit
+    - Block stack to track nesting
 
 2. **Integer comparisons** — small gap:
-   - `Ieq`, `Ine`, `IltS`, `IleS`, `IgtS`, `IgeS` (signed)
-   - `IltU`, `IleU`, `IgtU`, `IgeU` (unsigned)
+    - `Ieq`, `Ine`, `IltS`, `IleS`, `IgtS`, `IgeS` (signed)
+    - `IltU`, `IleU`, `IgtU`, `IgeU` (unsigned)
 
 3. **Local function calls** — `Op::Call` where `callee.0 >= import_count`:
-   - Declare callee as Cranelift `FuncRef` in prologue
-   - Emit `call` instruction with args from pool slice
-   - Store results into destination VRegs
+    - Declare callee as Cranelift `FuncRef` in prologue
+    - Emit `call` instruction with args from pool slice
+    - Store results into destination VRegs
 
 4. **Block sealing strategy** — current code seals entry block immediately.
    With control flow, blocks must be sealed after all predecessors are known

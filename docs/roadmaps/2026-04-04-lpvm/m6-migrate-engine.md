@@ -12,13 +12,13 @@ Ensure firmware builds and end-to-end tests pass.
 `ShaderRuntime` in `lp-core/lp-engine/src/nodes/shader/runtime.rs`:
 
 - **Fields**: `jit_module: Option<JitModule>`, `direct_call: Option<DirectCall>`
-- **Compile**: `lpir_cranelift::jit(source, options)` → `JitModule`, then
+- **Compile**: `lpvm_cranelift::jit(source, options)` → `JitModule`, then
   `module.direct_call("main")` → `DirectCall`
 - **Render** (per pixel): `direct_call.call_i32_buf(&vmctx, &args, &mut ret_buf)`
   with Q32 args (frag_coord, output_size, time) → Q32 RGBA output
 - **Other**: `shed_optional_buffers` clears module and call handle
 
-The engine directly uses `lpir_cranelift` types. It does not use
+The engine directly uses `lpvm_cranelift` types. It does not use
 `GlslExecutable`.
 
 ### What changes
@@ -83,12 +83,12 @@ is acceptable — project-level operations are not per-pixel).
 
 ### Firmware integration
 
-`fw-esp32` currently depends on `lp-engine` and `lpir-cranelift`. After
+`fw-esp32` currently depends on `lp-engine` and `lpvm-cranelift`. After
 migration:
 
 - `fw-esp32` depends on `lp-engine` (generic) and `lpvm-cranelift` (concrete)
 - It monomorphizes the engine with the Cranelift backend
-- `lpir-cranelift` dependency may be removed (replaced by `lpvm-cranelift`)
+- `lpvm-cranelift` dependency may be removed (replaced by `lpvm-cranelift`)
 
 `fw-emu` follows the same pattern.
 

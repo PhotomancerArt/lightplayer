@@ -104,7 +104,7 @@ are not surfaced through `isinf`.
 ### Q2 — Scope of "reference implementation"
 
 **Context:** Q32 appears in `lps-builtins`, Q32 builtins under `glsl/q32/fns/`, LPIR interpreter
-tests, and `lp-shader/legacy/lpir-cranelift`.
+tests, and `lp-shader/legacy/lpvm-cranelift`.
 
 **Answer:** Primary reference = `Q32` struct + `fns/` + JIT `extern "C"` builtins + filetests. All
 must agree. Design doc is the single source of truth; filetests are the executable proof.

@@ -202,19 +202,22 @@ cargo check -p lps-filetests
 
 ### Backend shapes to abstract over
 
-**Cranelift JIT** (`lpir-cranelift`):
+**Cranelift JIT** (`lpvm-cranelift`):
+
 - Engine: `CompileOptions` (float mode, Q32 options, memory strategy)
 - Module: `JitModule` (finalized code pointers, metadata, signatures)
 - Instance: `DirectCall` (func ptr + arity) — essentially stateless
 - Builtins: function pointers, statically linked at JIT time
 
 **WASM** (`lps-wasm` / `lps-filetests::wasm_runner`):
+
 - Engine: `wasmtime::Engine` + cached builtins `wasmtime::Module`
 - Module: `WasmModule` (bytes + exports + shadow stack info)
 - Instance: `wasmtime::Store` + `wasmtime::Instance` + shared `Memory`
 - Builtins: `lps-builtins-wasm.wasm` loaded and instantiated, exports linked
 
-**RV32 emulator** (`lpir-cranelift::emu_run`):
+**RV32 emulator** (`lpvm-cranelift::emu_run`):
+
 - Engine: compile options + builtins ELF binary path/bytes
 - Module: ELF object bytes (compiled via Cranelift object mode)
 - Instance: `Riscv32Emulator` with loaded ELF + memory

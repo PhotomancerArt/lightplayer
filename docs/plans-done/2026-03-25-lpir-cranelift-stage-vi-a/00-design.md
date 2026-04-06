@@ -1,8 +1,8 @@
-# Stage VI-A: lpir-cranelift embedded readiness — design
+# Stage VI-A: lpvm-cranelift embedded readiness — design
 
 ## Scope
 
-Make `lpir-cranelift` compile and run correctly without `std` (targeting
+Make `lpvm-cranelift` compile and run correctly without `std` (targeting
 `riscv32imac-unknown-none-elf`) and expand `CompileOptions` with Q32 arithmetic
 modes, memory strategy, and error bounds. Validation: `cargo check` cross-compile.
 Functional validation deferred to VI-B (`fw-emu`).
@@ -10,7 +10,7 @@ Functional validation deferred to VI-B (`fw-emu`).
 ## File structure
 
 ```
-lpir-cranelift/
+lpvm-cranelift/
 ├── Cargo.toml                    # UPDATE: std (default), cranelift-optimizer, cranelift-verifier features
 ├── build.rs                      # UNCHANGED (build scripts are host-only)
 └── src/
@@ -183,6 +183,7 @@ module-level clear) exists and frees more internal state than `ctx.clear()`.
 ## std::error::Error gating
 
 Gate `impl std::error::Error` behind `#[cfg(feature = "std")]` in:
+
 - `error.rs`: `CompileError`, `CompilerError`
 - `values.rs`: `CallError`
 
@@ -190,10 +191,10 @@ Gate `impl std::error::Error` behind `#[cfg(feature = "std")]` in:
 
 ```bash
 # Cross-compile check (no std leaks)
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 
 # Host tests still pass (std + riscv32-emu)
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift --features riscv32-emu
 
 # Filetests still pass
 just glsl-filetests

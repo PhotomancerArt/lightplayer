@@ -2,7 +2,7 @@
 
 ## Scope of phase
 
-Create **`docs/reports/<YYYY-MM-DD>-lpir-cranelift-vi-c-ab.md`** (use the date you
+Create **`docs/reports/<YYYY-MM-DD>-lpvm-cranelift-vi-c-ab.md`** (use the date you
 run measurements). Capture **methodology** and **results** with emphasis on
 **memory** comparison on **fw-emu**; compile time and execution deltas also on
 **fw-emu** (relative old-vs-new treated as indicative for ESP32).

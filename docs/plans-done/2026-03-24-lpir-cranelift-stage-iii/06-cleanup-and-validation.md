@@ -28,14 +28,14 @@ Final review, remove temporary code, fix warnings, verify all tests pass.
 ### 2. Formatting
 
 ```
-cargo +nightly fmt -p lpir-cranelift
+cargo +nightly fmt -p lpvm-cranelift
 cargo +nightly fmt -p lpir
 ```
 
 ### 3. Warnings
 
 ```
-cargo clippy -p lpir-cranelift -- -D warnings
+cargo clippy -p lpvm-cranelift -- -D warnings
 cargo clippy -p lpir -- -D warnings
 ```
 
@@ -44,7 +44,7 @@ Fix all warnings.
 ### 4. Full test run
 
 ```
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 cargo test -p lpir
 cargo test -p lps-frontend
 cargo test -p lps-wasm
@@ -55,14 +55,14 @@ All tests pass.
 ### 5. Plan cleanup
 
 Add a summary of the completed work to
-`docs/plans/2026-03-24-lpir-cranelift-stage-iii/summary.md`.
+`docs/plans/2026-03-24-lpvm-cranelift-stage-iii/summary.md`.
 
 Move the plan directory to `docs/plans-done/`.
 
 ### 6. Commit
 
 ```
-feat(lpir-cranelift): Q32 emission, builtins, and import resolution
+feat(lpvm-cranelift): Q32 emission, builtins, and import resolution
 
 - Moved FloatMode to lpir crate, renamed Float → F32
 - Import resolution: ImportDecl → BuiltinId → Cranelift FuncRef
@@ -80,11 +80,11 @@ feat(lpir-cranelift): Q32 emission, builtins, and import resolution
 ## Validate
 
 ```
-cargo +nightly fmt -p lpir-cranelift
+cargo +nightly fmt -p lpvm-cranelift
 cargo +nightly fmt -p lpir
-cargo clippy -p lpir-cranelift -- -D warnings
+cargo clippy -p lpvm-cranelift -- -D warnings
 cargo clippy -p lpir -- -D warnings
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 cargo test -p lpir
 cargo test -p lps-frontend
 cargo test -p lps-wasm

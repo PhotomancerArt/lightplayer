@@ -2,7 +2,8 @@
 
 ## Summary
 
-Running multiple GLSL filetests with the JIT backend causes a segmentation fault. The crash occurs after all test results are printed, during process shutdown.
+Running multiple GLSL filetests with the JIT backend causes a segmentation fault. The crash occurs
+after all test results are printed, during process shutdown.
 
 ## Affected Command
 
@@ -20,6 +21,7 @@ scripts/glsl-filetests.sh 'array/*.glsl' --fix
 ## Reproduction
 
 ### Fails (multiple files with JIT)
+
 ```bash
 scripts/glsl-filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Output shows all test results, then:
@@ -27,18 +29,21 @@ scripts/glsl-filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-i
 ```
 
 ### Works (single file with JIT)
+
 ```bash
 scripts/glsl-filetests.sh 'array/constructor-explicit.glsl'
 # Completes cleanly, exit code 0 or 1
 ```
 
 ### Works (multiple files with WASM)
+
 ```bash
 scripts/glsl-filetests.sh --target wasm.q32 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Completes cleanly
 ```
 
 ### Fails (multiple files even with single thread)
+
 ```bash
 LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh 'array/constructor-explicit.glsl' 'array/constructor-inferred.glsl'
 # Still segfaults
@@ -55,27 +60,37 @@ LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh 'array/constructor-explicit.gls
 ## Hypotheses (Unverified)
 
 ### Hypothesis 1: JIT Module Drop (Most Likely)
-Each test file creates a `Box<dyn GlslExecutable>` containing a `JitModule`. When the worker thread scope ends, these are dropped. The crash may occur in:
+
+Each test file creates a `Box<dyn GlslExecutable>` containing a `JitModule`. When the worker thread
+scope ends, these are dropped. The crash may occur in:
+
 - `JITModule::drop()` (cranelift-jit internal cleanup)
 - `AllocJitMemoryProvider::free_memory()` (custom memory provider)
 - Cranelift's internal global state cleanup
 
 Evidence:
+
 - WASM works (no JIT modules involved)
 - Crash is after test execution (when resources are freed)
 - Prior art: `process_sync.rs` comment mentions "cranelift_jit finalization crashes"
 
 ### Hypothesis 2: Thread Cleanup
+
 The crash may occur during worker thread exit, specifically:
+
 - Thread-local storage destruction
 - Stack unwinding with JIT code pointers in registers
 - Channel sender/receiver cleanup race
 
 Evidence against:
+
 - Single-threaded mode still crashes
 
 ### Hypothesis 3: Global Static State
-Cranelift JIT may maintain global state that gets corrupted after multiple module finalizations. The crash occurs when:
+
+Cranelift JIT may maintain global state that gets corrupted after multiple module finalizations. The
+crash occurs when:
+
 - Second JIT module is created (but output suggests tests ran)
 - Process exit handlers run
 - Global allocator state is corrupted
@@ -83,6 +98,7 @@ Cranelift JIT may maintain global state that gets corrupted after multiple modul
 ## Technical Context
 
 ### Execution Flow
+
 ```
 main thread                    worker thread
      |                               |
@@ -105,18 +121,22 @@ CRASH HAPPENS HERE
 ```
 
 ### Relevant Code
-- `lpir-cranelift/src/jit_module.rs` - `JitModule` struct and `build_jit_module()`
-- `lpir-cranelift/src/jit_memory.rs` - `AllocJitMemoryProvider`
+
+- `lpvm-cranelift/src/jit_module.rs` - `JitModule` struct and `build_jit_module()`
+- `lpvm-cranelift/src/jit_memory.rs` - `AllocJitMemoryProvider`
 - `lps-filetests/src/runner/concurrent.rs` - Worker thread lifecycle
-- `lpir-cranelift/src/process_sync.rs` - Codegen serialization (existing lock)
+- `lpvm-cranelift/src/process_sync.rs` - Codegen serialization (existing lock)
 
 ## Decision
 
-**WASM and RV32 are the primary targets for bulk testing.** The JIT backend is primarily for debugging and single-file tests. The default thread count has been restored to `num_cpus::get()` for parallel execution of WASM/RV32 tests.
+**WASM and RV32 are the primary targets for bulk testing.** The JIT backend is primarily for
+debugging and single-file tests. The default thread count has been restored to `num_cpus::get()` for
+parallel execution of WASM/RV32 tests.
 
 ## Workarounds
 
 ### Option 1: Use WASM or RV32 Backend (Recommended for bulk operations)
+
 ```bash
 # WASM (default includes wasm.q32)
 scripts/glsl-filetests.sh 'array/*.glsl' --fix
@@ -129,12 +149,14 @@ scripts/glsl-filetests.sh --target wasm.q32,rv32.q32 'array/*.glsl' --fix
 ```
 
 ### Option 2: Single-threaded for JIT
+
 ```bash
 # Use LP_FILETESTS_THREADS=1 when testing JIT specifically
 LP_FILETESTS_THREADS=1 scripts/glsl-filetests.sh --target jit.q32 'array/*.glsl'
 ```
 
 ### Option 3: Iterate Single Files for JIT
+
 ```bash
 for f in array/*.glsl; do
     scripts/glsl-filetests.sh --target jit.q32 "$f" || true
@@ -152,32 +174,36 @@ To pinpoint the crash location:
    ```
 
 2. **Add instrumentation** in `jit_module.rs`:
-   - Print in `JitModule` drop
-   - Print in `AllocJitMemoryProvider::free_memory()`
+    - Print in `JitModule` drop
+    - Print in `AllocJitMemoryProvider::free_memory()`
 
 3. **Test with process-per-file**:
    Modify runner to spawn a new process per test file instead of threads
 
 4. **Check cranelift-jit fork**:
-   Review any custom changes in `https://github.com/light-player/lp-cranelift` that might affect JIT memory management
+   Review any custom changes in `https://github.com/light-player/lp-cranelift` that might affect JIT
+   memory management
 
 ## Impact
 
 - **Severity**: Low (workarounds exist, JIT not primary target for bulk tests)
 - **Affected**: JIT backend with multiple files when using >1 thread
-- **Not Affected**: 
-  - WASM/RV32 backends (primary for bulk testing)
-  - CI (uses WASM)
-  - Single-file JIT testing
-  - Embedded targets (no JIT)
+- **Not Affected**:
+    - WASM/RV32 backends (primary for bulk testing)
+    - CI (uses WASM)
+    - Single-file JIT testing
+    - Embedded targets (no JIT)
 
 ## Notes
 
-- Default thread count was temporarily set to 1 to avoid this issue, but has been restored to `num_cpus::get()` since WASM/RV32 are the primary bulk-test targets
-- The `LP_FILETESTS_THREADS` env var can be used to force single-threaded mode when JIT testing is needed
+- Default thread count was temporarily set to 1 to avoid this issue, but has been restored to
+  `num_cpus::get()` since WASM/RV32 are the primary bulk-test targets
+- The `LP_FILETESTS_THREADS` env var can be used to force single-threaded mode when JIT testing is
+  needed
 
 ## References
 
 - Cranelift JIT fork: `https://github.com/light-player/lp-cranelift` (branch: main, version 0.127.0)
-- Related comment in `lpir-cranelift/src/process_sync.rs`:
-  > "Concurrent `cranelift_jit` finalization and/or object emission has produced process crashes (SIGSEGV)"
+- Related comment in `lpvm-cranelift/src/process_sync.rs`:
+  > "Concurrent `cranelift_jit` finalization and/or object emission has produced process crashes (
+  SIGSEGV)"

@@ -74,9 +74,9 @@ Quick manual check that the demo compiles and renders.
 ## Plan cleanup
 
 Add a summary of completed work to
-`docs/plans/2026-03-24-lpir-cranelift-stage-i/summary.md`.
+`docs/plans/2026-03-24-lpvm-cranelift-stage-i/summary.md`.
 
-Move plan files to `docs/plans-done/2026-03-24-lpir-cranelift-stage-i/`.
+Move plan files to `docs/plans-done/2026-03-24-lpvm-cranelift-stage-i/`.
 
 ## Commit
 

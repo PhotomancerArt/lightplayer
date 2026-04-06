@@ -29,7 +29,7 @@
 ## Docs
 
 - **`README.md`**, **`lp-shader/README.md`**, **`AGENTS.md`**, *
-  *`.cursor/rules/no-std-compile-path.mdc`:** Describe only the naga → LPIR → `lpir-cranelift` path.
+  *`.cursor/rules/no-std-compile-path.mdc`:** Describe only the naga → LPIR → `lpvm-cranelift` path.
 
 ## Tests
 

@@ -32,11 +32,11 @@ No new backends in this milestone. Old crates remain as shims until later milest
 
 ### `lps-shared` (shader layer — new crate)
 
-| Source | Target package | Public types (actual names) |
-|--------|----------------|----------------------------|
-| `lpvm` types | `lps-shared` | `LpsType`, `LpsValue`, `StructMember`, `LayoutRules` |
-| `lpvm` signatures | `lps-shared` | `LpsFnSig`, `FnParam`, `ParamQualifier`, `LpsModuleSig` |
-| `lpvm` path utils | `lps-shared` | `path`, `path_resolve`, `value_path` modules |
+| Source            | Target package | Public types (actual names)                             |
+|-------------------|----------------|---------------------------------------------------------|
+| `lpvm` types      | `lps-shared`   | `LpsType`, `LpsValue`, `StructMember`, `LayoutRules`    |
+| `lpvm` signatures | `lps-shared`   | `LpsFnSig`, `FnParam`, `ParamQualifier`, `LpsModuleSig` |
+| `lpvm` path utils | `lps-shared`   | `path`, `path_resolve`, `value_path` modules            |
 
 **Note:** Original plan suggested `GlslValue` → `LpvmValue`, but we moved these
 logical types to `lps-shared` with `Lps*` prefix instead. `LpsValue` is a logical
@@ -57,14 +57,15 @@ lps-shared = { path = "../lps-shared" }
 
 **Types in `lpvm`:**
 
-| Name | Role |
-|------|------|
-| `LpvmData` | Byte buffer with layout/path access (runtime shader data) |
-| `DataError` | Error type for data operations |
-| `VmContext` | Fixed-layout header for VM contexts |
-| `VmContextHeader` | Type alias for `VmContext` |
+| Name              | Role                                                      |
+|-------------------|-----------------------------------------------------------|
+| `LpvmData`        | Byte buffer with layout/path access (runtime shader data) |
+| `DataError`       | Error type for data operations                            |
+| `VmContext`       | Fixed-layout header for VM contexts                       |
+| `VmContextHeader` | Type alias for `VmContext`                                |
 
 **Re-exports from `lps-shared`:**
+
 - `LpsValue`, `LpsType`, `StructMember`, `LayoutRules`
 - `LpsFnSig`, `FnParam`, `ParamQualifier`
 - Path modules: `parse_path`, `LpsPathSeg`, `PathParseError`
@@ -72,11 +73,11 @@ lps-shared = { path = "../lps-shared" }
 
 ### Legacy crates (in `lp-shader/legacy/`)
 
-| Crate | Status |
-|-------|--------|
-| `lps-exec` | Still has `GlslExecutable` trait (used by filetests) |
-| `lpir-cranelift` | Still contains JIT compiler |
-| `lps-wasm` | Still contains WASM backend |
+| Crate            | Status                                               |
+|------------------|------------------------------------------------------|
+| `lps-exec`       | Still has `GlslExecutable` trait (used by filetests) |
+| `lpvm-cranelift` | Still contains JIT compiler                          |
+| `lps-wasm`       | Still contains WASM backend                          |
 
 ## Crate layout (actual)
 
@@ -102,13 +103,14 @@ lp-shader/
 │   └── src/                  # Unchanged (IrType, IrModule, etc.)
 └── legacy/
     ├── lps-exec/             # GlslExecutable trait
-    ├── lpir-cranelift/       # JIT compiler
+    ├── lpvm-cranelift/       # JIT compiler
     └── lps-wasm/             # WASM backend
 ```
 
 ## Workspace `Cargo.toml`
 
 Already updated:
+
 - `lp-shader/lps-shared` in members
 - `lp-shader/lpvm` in members
 - All `lps-*` crates using new naming
@@ -123,26 +125,28 @@ Already updated:
 
 ## Types Summary
 
-| Old Name | Location | New Name | Notes |
-|----------|----------|----------|-------|
-| `GlslValue` | `lpvm` | `LpsValue` | Moved to `lps-shared` |
-| `GlslType` | `lpvm` | `LpsType` | Moved to `lps-shared` |
-| `GlslData` | `lpvm` | `LpvmData` | Stayed in `lpvm` |
-| `StructMember` | `lpvm` | `StructMember` | Moved to `lps-shared` |
-| `LayoutRules` | `lpvm` | `LayoutRules` | Moved to `lps-shared` |
-| `VmContext` | `lpvm` | `VmContext` | Kept name, in `lpvm` |
-| `GlslFunctionSignature` | `lpvm` | `LpsFnSig` | Moved to `lps-shared` |
-| `GlslParameter` | `lpvm` | `FnParam` | Moved to `lps-shared` |
+| Old Name                | Location | New Name       | Notes                 |
+|-------------------------|----------|----------------|-----------------------|
+| `GlslValue`             | `lpvm`   | `LpsValue`     | Moved to `lps-shared` |
+| `GlslType`              | `lpvm`   | `LpsType`      | Moved to `lps-shared` |
+| `GlslData`              | `lpvm`   | `LpvmData`     | Stayed in `lpvm`      |
+| `StructMember`          | `lpvm`   | `StructMember` | Moved to `lps-shared` |
+| `LayoutRules`           | `lpvm`   | `LayoutRules`  | Moved to `lps-shared` |
+| `VmContext`             | `lpvm`   | `VmContext`    | Kept name, in `lpvm`  |
+| `GlslFunctionSignature` | `lpvm`   | `LpsFnSig`     | Moved to `lps-shared` |
+| `GlslParameter`         | `lpvm`   | `FnParam`      | Moved to `lps-shared` |
 
 ## Dependents to keep in mind
 
 **Currently use `lps-shared`:**
+
 - `lps-frontend` — for logical types when lowering
 - `lps-filetests` — for test value types
 - `lpvm` — re-exports and runtime data
 - `lps-exec` — depends on `lps-shared` and `lpvm`
 
 **Will eventually use new LPVM traits (M5-M6):**
+
 - `lp-engine`, `lps-filetests`, `lps-exec` (replacement)
 
 ## Done When

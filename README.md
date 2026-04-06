@@ -100,7 +100,7 @@ Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 
 - **`lps-frontend`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
-- **`lpir-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
+- **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
 - **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
 - **`lps-diagnostics`** Error codes, spans, `GlslError`
 - **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)

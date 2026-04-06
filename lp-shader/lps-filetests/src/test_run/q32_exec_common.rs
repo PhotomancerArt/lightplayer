@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use lpir_cranelift::{CallError, GlslQ32, GlslReturn};
 use lps_diagnostics::{ErrorCode, GlslError};
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
+use lpvm_cranelift::{CallError, GlslQ32, GlslReturn};
 
 pub(crate) fn signatures_from_meta(meta: &LpsModuleSig) -> BTreeMap<String, LpsFnSig> {
     let mut m = BTreeMap::new();
@@ -206,7 +206,7 @@ pub(crate) fn map_call_err(e: CallError) -> GlslError {
     GlslError::new(ErrorCode::E0400, e.to_string())
 }
 
-/// Run a `call_q32` then map return using the same shape as [`lpir_cranelift::JitModule::call`].
+/// Run a `call_q32` then map return using the same shape as [`lpvm_cranelift::JitModule::call`].
 pub(crate) trait Q32ShaderExecutable {
     fn call_q32_ret(
         &mut self,

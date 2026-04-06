@@ -3738,9 +3738,9 @@ dependencies = [
  "lp-engine-client",
  "lp-model",
  "lp-shared",
- "lpir-cranelift",
  "lps-builtins",
  "lpvm",
+ "lpvm-cranelift",
  "serde",
  "unwinding",
 ]
@@ -3874,28 +3874,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpir-cranelift"
-version = "40.0.0"
-dependencies = [
- "cranelift-codegen 0.127.0",
- "cranelift-frontend 0.127.0",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native 0.127.0",
- "cranelift-object",
- "libm",
- "lp-riscv-elf",
- "lp-riscv-emu",
- "lpir",
- "lps-builtin-ids",
- "lps-builtins",
- "lps-frontend",
- "lps-shared",
- "lpvm",
- "target-lexicon",
-]
-
-[[package]]
 name = "lps-builtin-ids"
 version = "40.0.0"
 
@@ -3958,13 +3936,13 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lpir",
- "lpir-cranelift",
  "lps-diagnostics",
  "lps-exec",
  "lps-frontend",
  "lps-shared",
  "lps-wasm",
  "lpvm",
+ "lpvm-cranelift",
  "num_cpus",
  "regex",
  "walkdir",
@@ -4027,6 +4005,28 @@ version = "40.0.0"
 dependencies = [
  "lpir",
  "lps-shared",
+]
+
+[[package]]
+name = "lpvm-cranelift"
+version = "40.0.0"
+dependencies = [
+ "cranelift-codegen 0.127.0",
+ "cranelift-frontend 0.127.0",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native 0.127.0",
+ "cranelift-object",
+ "libm",
+ "lp-riscv-elf",
+ "lp-riscv-emu",
+ "lpir",
+ "lps-builtin-ids",
+ "lps-builtins",
+ "lps-frontend",
+ "lps-shared",
+ "lpvm",
+ "target-lexicon",
 ]
 
 [[package]]

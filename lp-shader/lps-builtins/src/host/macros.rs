@@ -14,7 +14,7 @@
 /// The underlying function is linked differently depending on context:
 /// - Emulator: Implemented in `lps-builtins-emu-app` (syscall-based)
 /// - Tests: Implemented in `lps-builtins` with `std` (gated by feature flag)
-/// - JIT: Implemented in `lpir-cranelift` (delegates to log crate)
+/// - JIT: Implemented in `lpvm-cranelift` (delegates to log crate)
 #[macro_export]
 macro_rules! host_debug {
     ($($arg:tt)*) => {

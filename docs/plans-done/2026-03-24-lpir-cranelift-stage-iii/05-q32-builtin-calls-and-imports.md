@@ -157,35 +157,42 @@ Op::Call { callee, args, results } => {
 ### 3. Tests
 
 **`test_q32_fadd_builtin`** — basic Q32 addition:
+
 ```
 func @add(v0:f32, v1:f32) -> f32 {
   v2:f32 = fadd v0, v1
   return v2
 }
 ```
+
 Call with Q32 1.0 (65536) and Q32 2.0 (131072). Verify result is Q32 3.0
 (196608). This exercises the `__lp_lpir_fadd_q32` builtin through the JIT
 symbol lookup.
 
 **`test_q32_fmul_builtin`** — Q32 multiplication:
+
 ```
 func @mul(v0:f32, v1:f32) -> f32 {
   v2:f32 = fmul v0, v1
   return v2
 }
 ```
+
 Call with Q32 2.0 and Q32 3.0, verify Q32 6.0 (393216).
 
 **`test_q32_fdiv_builtin`** — Q32 division:
+
 ```
 func @div(v0:f32, v1:f32) -> f32 {
   v2:f32 = fdiv v0, v1
   return v2
 }
 ```
+
 Call with Q32 6.0 and Q32 2.0, verify Q32 3.0 (196608).
 
 **`test_q32_import_call_sin`** — calling a glsl builtin through import:
+
 ```
 import @glsl::sin(f32) -> f32
 
@@ -194,11 +201,13 @@ func @apply_sin(v0:f32) -> f32 {
   return v1
 }
 ```
+
 Call with Q32-encoded 0.0, verify result is Q32 ~0.0 (sin(0) = 0).
 Call with Q32-encoded π/2, verify result is approximately Q32 1.0.
 Use a tolerance since Q32 sin is approximate.
 
 **`test_q32_combined`** — expression using multiple ops:
+
 ```
 func @quadratic(v0:f32) -> f32 {
   v1:f32 = fmul v0, v0
@@ -210,6 +219,7 @@ func @quadratic(v0:f32) -> f32 {
   return v6
 }
 ```
+
 Compute x^2 + 2x + 1 at x = Q32(3.0). Expected: 16.0 = Q32(1048576).
 Verify with some tolerance for Q32 arithmetic.
 
@@ -238,6 +248,6 @@ fn assert_q32_approx(actual: i32, expected_f64: f64, tolerance: f64) {
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

@@ -50,7 +50,7 @@ lp-shader/
 │   └── lib.rs                     # extract_functions, metadata
 ├── lpir/src/
 │   └── glsl_metadata.rs           # GlslType (matrix variants from WIP)
-├── lpir-cranelift/src/
+├── lpvm-cranelift/src/
 │   └── invoke.rs                  # sret for large returns
 ├── lps-wasm/                  # Verify multi-return emit
 ├── lps-filetests/
@@ -85,6 +85,6 @@ lp-shader/
 | II     | Pointer stores/loads (matrix element, bvec dynamic index)                | ~15                     | `lps-frontend`         |
 | III    | Bvec lowering gaps (casts, `mix`, misc)                                  | ~6                      | `lps-frontend`         |
 | IV     | Array type lowering                                                      | ~5+                     | `lps-frontend`, `lpir` |
-| V      | Matrix invoke / sret (large returns)                                     | unlocks mat3/mat4 tests | `lpir-cranelift`       |
+| V      | Matrix invoke / sret (large returns)                                     | unlocks mat3/mat4 tests | `lpvm-cranelift`       |
 | VI     | Multi-backend parity (WASM/RV32 sweep + comparison tooling)              | cross-target            | `lps-filetests`        |
 | VII    | Annotations, polish, closure                                             | remaining edge cases    | all                    |

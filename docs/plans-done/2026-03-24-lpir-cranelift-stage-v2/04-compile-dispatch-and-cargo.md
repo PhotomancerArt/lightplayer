@@ -22,16 +22,16 @@
 **`DirectCallInfo`** / **`get_direct_call_info`**); legacy JIT utilities keep those
 until the old crate goes away.
 
-**Cycles:** **`lps-exec`** must not depend on wasm, **`lpir-cranelift`**, or
+**Cycles:** **`lps-exec`** must not depend on wasm, **`lpvm-cranelift`**, or
 filetests. Impls live in **`lps-wasm`**, filetests adapters, etc.
 
 ### 2. Filetests `Cargo.toml`
 
-- Add **`lpir-cranelift`** with needed features for **`jit`** / **`rv32`**.
+- Add **`lpvm-cranelift`** with needed features for **`jit`** / **`rv32`**.
 - Add **`lps-exec`**, **`lpvm`**, **`lps-diagnostics`** (and
   **`lps-shared`** if needed).
 - **Remove `lps-cranelift`** once filetests no longer imports it (error tests
-  included — switch to **`lpir_cranelift::jit`** or shared parse errors as
+  included — switch to **`lpvm_cranelift::jit`** or shared parse errors as
   appropriate).
 
 ### 3. `compile_for_target`
@@ -50,7 +50,7 @@ filetests. Impls live in **`lps-wasm`**, filetests adapters, etc.
 ## Implementation details
 
 - **`test_error`:** replace **`glsl_emu_riscv32_with_metadata`** with
-  **`lpir_cranelift::jit`** (or stricter parse-only tests) so error expectations
+  **`lpvm_cranelift::jit`** (or stricter parse-only tests) so error expectations
   stay meaningful.
 - **Features:** optional **`lpir-filetests`** flag if binary size matters.
 

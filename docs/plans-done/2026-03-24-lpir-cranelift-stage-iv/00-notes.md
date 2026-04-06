@@ -18,7 +18,7 @@ lp-engine (Stage VI).
 
 ## Current state
 
-### `lpir-cranelift`
+### `lpvm-cranelift`
 
 - `jit_from_ir(ir: &IrModule, mode: FloatMode) -> Result<(JITModule, Vec<FuncId>)>`
   — low-level; callers transmute raw pointers.
@@ -49,14 +49,14 @@ lp-engine (Stage VI).
 
 ### Q1: Where should `GlslMetadata` (and related types) live?
 
-**Context:** Needed by `lpir-cranelift` for `call()`, possibly filetests (Stage
+**Context:** Needed by `lpvm-cranelift` for `call()`, possibly filetests (Stage
 V2), and conceptually describes how to interpret an `IrModule` / `IrFunction`
 at the GLSL ABI level.
 
 **Answer:** **`lpir` crate** — main home for IR model and companion metadata.
 Add `glsl_metadata.rs` (or similar): `GlslParamQualifier`, `GlslParamMeta`,
 `GlslFunctionMeta`, `GlslModuleMeta`. `lps-frontend` produces it during `lower`;
-`lpir-cranelift` consumes it for `call()`.
+`lpvm-cranelift` consumes it for `call()`.
 
 ### Q2: How to expose the memory-conscious lowering path vs borrowed IR?
 

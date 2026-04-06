@@ -1,6 +1,6 @@
-# Plan notes: lpir-cranelift Stage VII — Delete Old Compiler
+# Plan notes: lpvm-cranelift Stage VII — Delete Old Compiler
 
-Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
+Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpvm-cranelift/stage-vii-cleanup.md)
 
 ## Scope of work
 
@@ -23,14 +23,14 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 
 | Crate                  | Issue                                                                                                                                                                                  |
 |------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `lps-builtins-gen-app` | Generates into both `lps-cranelift` (registry.rs, mapping.rs) **and** `lpir-cranelift` (generated_builtin_abi.rs). Old paths must be removed; `lps-frontend` dep may become droppable. |
+| `lps-builtins-gen-app` | Generates into both `lps-cranelift` (registry.rs, mapping.rs) **and** `lpvm-cranelift` (generated_builtin_abi.rs). Old paths must be removed; `lps-frontend` dep may become droppable. |
 | `lps-frontend`         | Used by old compiler, filetests, and builtins-gen-app. Filetests + gen-app still depend on it — **not** deletable yet unless those deps are also unwound.                              |
 
 ### Crates kept (new chain / shared)
 
 | Crate                  | Why kept                                                 |
 |------------------------|----------------------------------------------------------|
-| `lps-builtins-emu-app` | `lpir-cranelift` build.rs embeds its ELF for riscv32-emu |
+| `lps-builtins-emu-app` | `lpvm-cranelift` build.rs embeds its ELF for riscv32-emu |
 | `lps-exec`             | Filetest runner trait (`GlslExecutable`)                 |
 | `lpvm`                 | Used by exec + filetests                                 |
 | `lps-diagnostics`      | Used by values, exec, filetests                          |
@@ -52,7 +52,7 @@ IDE config, scripts, and generated code paths. Re-check ignored tests.
 ### Filetest status
 
 - `cranelift.q32` backend: **already gone** from filetests (removed in Stage V2).
-- `lps-filetests` depends on `lpir-cranelift` (new), `lps-frontend`,
+- `lps-filetests` depends on `lpvm-cranelift` (new), `lps-frontend`,
   `lps-frontend`, `lps-exec`, etc. — **no** dep on `lps-cranelift`.
 - `#[ignore]` on `lpfx_builtins_memory.rs` test: WASM ABI mismatch for vec3
   multi-return; roadmap says re-check in VII.
@@ -95,7 +95,7 @@ analysis for `lps-builtins-gen-app` — it uses `lps_frontend::semantic::types::
 precision metrics. Useful diagnostic tool but entirely wired to the old compiler.
 
 **Suggested answer:** Delete now; if you need a metrics tool later, rewrite
-against `lpir-cranelift` (the API surface is much simpler). The old code can be
+against `lpvm-cranelift` (the API surface is much simpler). The old code can be
 recovered from git history if needed.
 
 **Answer:** Delete.
@@ -103,11 +103,11 @@ recovered from git history if needed.
 ### Q3 — `lps-builtins-gen-app` cleanup scope
 
 **Context:** Generates files for **both** old (`lps-cranelift/src/backend/builtins/registry.rs`,
-`mapping.rs`) **and** new (`lpir-cranelift/…/generated_builtin_abi.rs`). Also uses
+`mapping.rs`) **and** new (`lpvm-cranelift/…/generated_builtin_abi.rs`). Also uses
 `lps-frontend` for type information.
 
 **Suggested answer:** Remove the generation paths that write into `lps-cranelift/`.
-Keep paths that write into `lpir-cranelift`, `lps-builtins`, `lps-builtins-wasm`,
+Keep paths that write into `lpvm-cranelift`, `lps-builtins`, `lps-builtins-wasm`,
 `lps-builtins-emu-app`, `lps-builtin-ids`. If the `lps-frontend`
 dep becomes unused after removing old generation, drop it. If not, keep it.
 

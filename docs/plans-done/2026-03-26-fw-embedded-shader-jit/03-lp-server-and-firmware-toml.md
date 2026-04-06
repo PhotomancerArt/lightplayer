@@ -2,7 +2,10 @@
 
 ## Scope of phase
 
-Ensure **no `libstd`** firmware builds pull in the **full compiler stack** through normal dependency features — **without** a separate “enable shader” feature on **`lp-server`** unless forwarding is strictly necessary. **`fw-emu`** and **`fw-esp32`** default **`server`** images include **`lp-engine`** with **`glsl`/JIT**.
+Ensure **no `libstd`** firmware builds pull in the **full compiler stack** through normal dependency
+features — **without** a separate “enable shader” feature on **`lp-server`** unless forwarding is
+strictly necessary. **`fw-emu`** and **`fw-esp32`** default **`server`** images include *
+*`lp-engine`** with **`glsl`/JIT**.
 
 ## Code Organization Reminders
 
@@ -15,19 +18,22 @@ Ensure **no `libstd`** firmware builds pull in the **full compiler stack** throu
 ## Implementation Details
 
 1. **`lp-server/Cargo.toml`**
-   - Verify **`lp-engine`** dependency enables whatever **`lpir-cranelift`** features Phase 1–2 require when **`default-features = false`**.
-   - Add **forwarding** features only if **`fw-*`** cannot set **`lp-engine`** features transitively (Cargo limitation); prefer **single source of truth** on **`lp-engine`**.
+    - Verify **`lp-engine`** dependency enables whatever **`lpvm-cranelift`** features Phase 1–2
+      require when **`default-features = false`**.
+    - Add **forwarding** features only if **`fw-*`** cannot set **`lp-engine`** features
+      transitively (Cargo limitation); prefer **single source of truth** on **`lp-engine`**.
 
 2. **`fw-emu/Cargo.toml`**
-   - Adjust **`lp-server`** line so **`panic-recovery`** (and any required **`lp-engine`/`lpir-cranelift`** features) match Phase 2.
-   - No “compiler on” knob unless required by Cargo.
+    - Adjust **`lp-server`** line so **`panic-recovery`** (and any required *
+      *`lp-engine`/`lpvm-cranelift`** features) match Phase 2.
+    - No “compiler on” knob unless required by Cargo.
 
 3. **`fw-esp32/Cargo.toml`**
-   - Same as **`fw-emu`** for optional **`lp-server`** / **`server`** feature set.
-   - Default **`server`** build must type-check with **GLSL + JIT** in the graph.
+    - Same as **`fw-emu`** for optional **`lp-server`** / **`server`** feature set.
+    - Default **`server`** build must type-check with **GLSL + JIT** in the graph.
 
 4. **`fw-core`**
-   - Only touch if it re-exports or constrains **`lp-server`** features.
+    - Only touch if it re-exports or constrains **`lp-server`** features.
 
 ## Tests to write
 
@@ -41,4 +47,5 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```
 
-Use **`release-esp32`** / **`release-emu`** profiles as in `justfile` if they affect features. Fix new warnings.
+Use **`release-esp32`** / **`release-emu`** profiles as in `justfile` if they affect features. Fix
+new warnings.

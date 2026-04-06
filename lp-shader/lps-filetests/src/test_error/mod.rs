@@ -3,11 +3,11 @@
 use crate::parse::{ErrorExpectation, TestFile};
 use crate::test_run::TestCaseStats;
 use anyhow::{Result, anyhow};
-use lpir_cranelift::{
-    CompileOptions, CompilerError, FloatMode as LpirFloatMode, jit_from_ir_owned,
-};
 use lps_diagnostics::{ErrorCode, GlFileId, GlSourceLoc, GlslError};
 use lps_frontend::naga::{ShaderStage, front::glsl::Error as NagaGlslError};
+use lpvm_cranelift::{
+    CompileOptions, CompilerError, FloatMode as LpirFloatMode, jit_from_ir_owned,
+};
 use std::path::Path;
 
 /// Run an error test: compile, expect failure, match diagnostics to expectations.

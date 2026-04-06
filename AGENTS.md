@@ -75,7 +75,7 @@ lps-frontend (no_std + alloc) ── parses GLSL via naga
 LPIR (LightPlayer IR)
         │
         ▼
-lpir-cranelift (no_std + alloc) ── Cranelift codegen → RISC-V machine code
+lpvm-cranelift (no_std + alloc) ── Cranelift codegen → RISC-V machine code
         │
         ▼
 JIT buffer in RAM ── direct function call
@@ -92,7 +92,7 @@ runtime.
 | Crate            | Role                                   | `no_std`         |
 |------------------|----------------------------------------|------------------|
 | `lps-frontend`   | GLSL → LPIR (via naga)                 | yes              |
-| `lpir-cranelift` | LPIR → Cranelift → machine code        | yes              |
+| `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lp-server`      | Project management, client connections | yes              |
 | `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |

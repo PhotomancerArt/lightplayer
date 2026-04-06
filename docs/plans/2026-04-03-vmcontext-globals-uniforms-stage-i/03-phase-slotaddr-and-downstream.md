@@ -26,7 +26,7 @@ redundant “always widen from i32” hacks where the IR is already `ptr`. **`lp
 
 ## Exit criteria
 
-- `cargo test -p lpir` and `cargo test -p lpir-cranelift` pass.
+- `cargo test -p lpir` and `cargo test -p lpvm-cranelift` pass.
 - `cargo check -p lps-frontend` passes.
 - WASM pipeline still targets wasm32 i32 at the module boundary.
 
@@ -34,7 +34,7 @@ redundant “always widen from i32” hacks where the IR is already `ptr`. **`lp
 
 ```bash
 cargo test -p lpir
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 cargo check -p lps-frontend
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 ```

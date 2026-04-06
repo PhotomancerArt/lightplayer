@@ -13,7 +13,7 @@ return correct values. All remaining matrix filetest files pass on `jit.q32`.
 
 **In scope:**
 
-- **Host invoke glue** (`lpir-cranelift/src/invoke.rs`): extend beyond the current 4-word return
+- **Host invoke glue** (`lpvm-cranelift/src/invoke.rs`): extend beyond the current 4-word return
   cap. Use Cranelift's `enable_multi_ret_implicit_sret` or equivalent caller-allocated return
   area for functions returning >4 scalar words.
 - **Return decode**: flatten sret buffer back into `GlslValue::Mat3` / `Mat4` for filetest
@@ -40,7 +40,7 @@ return correct values. All remaining matrix filetest files pass on `jit.q32`.
 
 ## Deliverables
 
-- Updated `invoke.rs` and `values.rs` in `lpir-cranelift`.
+- Updated `invoke.rs` and `values.rs` in `lpvm-cranelift`.
 - Remaining `matrix/mat3/*` and `matrix/mat4/*` files passing on `jit.q32`.
 - `builtins/matrix-compmult.glsl`: if `matrixCompMult` is a Naga limitation, annotate
   `@unimplemented`; if an alternative name works, wire it.

@@ -1,7 +1,7 @@
-# Stage VI-A: lpir-cranelift embedded readiness — notes
+# Stage VI-A: lpvm-cranelift embedded readiness — notes
 
-Plan name: **`lpir-cranelift-stage-vi-a`**. Roadmap:
-`docs/roadmaps/2026-03-24-lpir-cranelift/stage-vi-a-embedded-readiness.md`.
+Plan name: **`lpvm-cranelift-stage-vi-a`**. Roadmap:
+`docs/roadmaps/2026-03-24-lpvm-cranelift/stage-vi-a-embedded-readiness.md`.
 
 **Process:** Resolve questions below (one at a time) → **`00-design.md`** → phase list →
 `01-…md` … → implement.
@@ -10,7 +10,7 @@ Plan name: **`lpir-cranelift-stage-vi-a`**. Roadmap:
 
 ## Scope of work
 
-Bring **`lpir-cranelift`** to parity with the old **`lps-cranelift`** embedded
+Bring **`lpvm-cranelift`** to parity with the old **`lps-cranelift`** embedded
 story so **VI-B** can swap the engine dependency without also inventing
 `no_std` / ISA / memory / Q32-option plumbing:
 
@@ -32,7 +32,7 @@ story so **VI-B** can swap the engine dependency without also inventing
 
 ## Current codebase state
 
-### `lpir-cranelift` (`lp-shader/legacy/lpir-cranelift/`)
+### `lpvm-cranelift` (`lp-shader/legacy/lpvm-cranelift/`)
 
 - **`lib.rs`:** Uses `extern crate alloc` but **no** `#![no_std]` — still pulls
   `std` transitively via dependencies.
@@ -69,9 +69,9 @@ story so **VI-B** can swap the engine dependency without also inventing
 
 ### Filetests today
 
-- **`jit.q32`** / **`rv32.q32`** use **`lpir-cranelift`** with default workspace
+- **`jit.q32`** / **`rv32.q32`** use **`lpvm-cranelift`** with default workspace
   features (std + host JIT + **`riscv32-emu`** for rv32). They do **not** today
-  build **`lpir-cranelift`** with **`--no-default-features`** for the runner.
+  build **`lpvm-cranelift`** with **`--no-default-features`** for the runner.
 
 ---
 
@@ -101,10 +101,10 @@ semantics for add/mul/div modes.
 
 **Suggested answers:**
 
-- **A)** Add **`lp-model`** as a dependency of **`lpir-cranelift`** and embed
+- **A)** Add **`lp-model`** as a dependency of **`lpvm-cranelift`** and embed
   **`GlslOpts`** (or a field **`glsl_opts: GlslOpts`**) in **`CompileOptions`** —
   single source of truth.
-- **B)** Define **`Q32Options`** in **`lpir-cranelift`** mirroring **`lp-model`** enums
+- **B)** Define **`Q32Options`** in **`lpvm-cranelift`** mirroring **`lp-model`** enums
   (duplicate types); engine maps **`GlslOpts` → Q32Options** at the call site —
   avoids **`lps` → `lp-core`** dependency if you want to keep layers strict.
 
@@ -131,23 +131,23 @@ tests and **`rv32.q32`** filetests run on the host.
   (**`no_std`-friendly** where possible); optional **`riscv32-emu-tests`** or
   **`std`** sub-feature enables **`lp-riscv-emu/std`** and **`run_lpir_function_i32`**.
 - **B)** Keep one feature; **`lp-riscv-emu`** stays **`std`** for simplicity —
-  **`no_std`** cross-compile of **`lpir-cranelift`** omits **`riscv32-emu`** or uses
+  **`no_std`** cross-compile of **`lpvm-cranelift`** omits **`riscv32-emu`** or uses
   **`object` path only** without in-crate emu helpers.
 
 ### Q5 — Validation target for “embedded profile”
 
 **Context:** Roadmap deliverable: **`rv32.q32` filetests pass with the embedded
-feature profile** — ambiguous vs **`cargo check -p lpir-cranelift --target
+feature profile** — ambiguous vs **`cargo check -p lpvm-cranelift --target
 riscv32imac-unknown-none-elf --no-default-features`**.
 
 **Suggested answers:**
 
 - **A)** **CI / `just`:** add **`cargo check`** (and optional **`cargo test`** for
-  host-only tests) for **`lpir-cranelift`** **`--no-default-features`** +
+  host-only tests) for **`lpvm-cranelift`** **`--no-default-features`** +
   **`riscv32-emu`** on **`riscv32imac-unknown-none-elf`**. **`rv32.q32`** filetests
   remain on **default `std`** matrix (they already validate correctness).
 - **B)** Run a subset of filetests with **`--no-default-features`** build of
-  **`lpir-cranelift`** (harder: filetest harness may assume **`jit`** / **`std`**).
+  **`lpvm-cranelift`** (harder: filetest harness may assume **`jit`** / **`std`**).
 
 ### Q6 — Per-function `finalize_definitions`
 
@@ -187,10 +187,10 @@ in both `std` and `no_std` builds.
 
 ### Q2 — `Q32Options` type location
 
-**Answer: Own types in `lpir-cranelift`; `lp-engine` maps.** `lps` is upstream
+**Answer: Own types in `lpvm-cranelift`; `lp-engine` maps.** `lps` is upstream
 of `lp-core` — adding `lp-model` as a dep would invert the layering. Define
 `Q32Options` (with `AddSubMode`, `MulMode`, `DivMode` equivalents) inside
-`lpir-cranelift` as compiler-internal types. They serve a different purpose than
+`lpvm-cranelift` as compiler-internal types. They serve a different purpose than
 `lp-model::GlslOpts` (user-facing config) and could diverge. `lp-engine` depends
 on both crates and owns the `GlslOpts → Q32Options` mapping.
 
@@ -211,7 +211,7 @@ the feature separate from `std` avoids pulling `cranelift-object` /
 ### Q5 — Validation target for "embedded profile"
 
 **Answer: `cargo check` cross-compile only.** The VI-A deliverable is:
-`cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features`
+`cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features`
 compiles clean (no `std` leaks). Add to CI / `just`. Functional validation
 of the embedded profile happens in **VI-B** via `fw-emu`.
 
@@ -233,7 +233,7 @@ of the embedded profile happens in **VI-B** via `fw-emu`.
   natural pattern. Topological sort (finalize leaves first) is theoretically
   possible but complex and marginal benefit.
 - **Conclusion:** The real memory win is per-function IR/CLIF drop after
-  `define_function` (which `lpir-cranelift` already does for `IrFunction`; VI-A
+  `define_function` (which `lpvm-cranelift` already does for `IrFunction`; VI-A
   adds CLIF metadata stripping). Per-function finalize adds complexity for
   little gain given cross-function call patterns. **No per-function finalize —
   document the finding, keep batch finalize.**
@@ -251,5 +251,5 @@ recompilation. Keeps the Cargo feature matrix simpler.
 ## Notes
 
 - Nomenclature for Cargo vs profiles: see
-  `docs/plans/2026-03-25-lpir-cranelift-stage-vi/00-notes.md` (Q1): **`std`** feature,
+  `docs/plans/2026-03-25-lpvm-cranelift-stage-vi/00-notes.md` (Q1): **`std`** feature,
   **`CompileOptions`** fields, “desktop / embedded profile” as docs shorthand.

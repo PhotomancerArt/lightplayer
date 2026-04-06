@@ -2,7 +2,7 @@
 
 Low-level builtin library for **LightPlayer JIT shaders**: fixed-point and float math, memory
 helpers, and host hooks. Symbols are exported as `#[no_mangle] pub extern "C"` so
-`lpir-cranelift` can link them into generated RISC-V code (and the RISC-V / WASM test harnesses
+`lpvm-cranelift` can link them into generated RISC-V code (and the RISC-V / WASM test harnesses
 can resolve the same names).
 
 ## Layout
@@ -22,7 +22,7 @@ Builtin **IDs** and Cranelift **ABI tables** are not edited by hand. Run
 writes:
 
 - `lps-builtin-ids` (`lib.rs`, `glsl_builtin_mapping.rs`)
-- `lpir-cranelift/src/generated_builtin_abi.rs`
+- `lpvm-cranelift/src/generated_builtin_abi.rs`
 - `lps-builtins-emu-app` / `lps-builtins-wasm` `builtin_refs.rs`
 - `lps-builtins/src/builtins/glsl/mod.rs` and `lpir/mod.rs` (module lists)
 - `lps-wasm/src/emit/builtin_wasm_import_types.rs`

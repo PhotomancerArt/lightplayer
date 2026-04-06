@@ -40,7 +40,7 @@ plumbing.
 
 - `lpvm/src/vmcontext.rs` with header and builder
 - `docs/design/uniforms-globals.md` (design doc for entire feature)
-- Updated `lpir-cranelift` signatures
+- Updated `lpvm-cranelift` signatures
 - Updated `lps-wasm` signatures
 - Filetests passing with empty VMContext
 

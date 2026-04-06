@@ -3,7 +3,7 @@
 ## Scope of work
 
 Add import resolution, builtin declaration, Q32 float mode, and LPFX support
-to `lpir-cranelift`. After this stage, the emitter can compile real shaders
+to `lpvm-cranelift`. After this stage, the emitter can compile real shaders
 in Q32 mode (with hand-built LPIR — GLSL source compilation is Stage IV).
 
 Note: memory ops and local function calls are now in Stage II. Stage III is
@@ -124,15 +124,15 @@ lives in a different crate. Options:
 
 - (a) Depend on `lps-builtins` for `Q32::from_f32`. Heavy dependency
   for one function.
-- (b) Add a small `q32_encode(f32) -> i32` function directly in `lpir-cranelift`.
+- (b) Add a small `q32_encode(f32) -> i32` function directly in `lpvm-cranelift`.
   Self-contained.
 - (c) Add it to `lp-model` or a shared util crate.
 
-**Answer**: (b) — small inline function in `lpir-cranelift`. It's
+**Answer**: (b) — small inline function in `lpvm-cranelift`. It's
 `((value as f64) * 65536.0).round() as i32` with saturation. Extract later
 if needed.
 
-### Q3: Should `lpir-cranelift` depend on `lps-builtin-ids` directly?
+### Q3: Should `lpvm-cranelift` depend on `lps-builtin-ids` directly?
 
 **Context**: The crate needs to resolve LPIR imports to BuiltinId, then
 declare them as Cranelift imports and set up symbol lookup. The WASM emitter
@@ -149,7 +149,7 @@ API.
 
 Options:
 
-- (a) Define `FloatMode` in `lpir-cranelift`. Keep it simple.
+- (a) Define `FloatMode` in `lpvm-cranelift`. Keep it simple.
 - (b) Put it in `lpir` crate (shared with interpreter, WASM emitter).
 - (c) Put it in `lps-builtin-ids` (where `Mode` already exists).
 

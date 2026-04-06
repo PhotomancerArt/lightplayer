@@ -118,7 +118,7 @@ lps-frontend           Naga glsl-in → IrModule
   ▼
 LPIR                    flat, scalarized, mode-agnostic IR
   │
-  ├──► lpir-cranelift     → native machine code (RISC-V / host JIT)
+  ├──► lpvm-cranelift     → native machine code (RISC-V / host JIT)
   ├──► lps-wasm       → .wasm (browser preview, wasm.q32 filetests)
   └──► lpir::interp       → in-process interpreter (testing)
 ```
@@ -129,13 +129,13 @@ virtual registers. Lowering is mode-agnostic: Q32 vs float is a backend decision
 
 **LPIR** is LightPlayer's own intermediate representation. It acts as an anti-corruption layer so
 the compiler core is written entirely in LightPlayer's terms, independent of Cranelift. Cranelift
-only appears in **`lpir-cranelift`**, the backend adapter. This gives decoupled testing (the
+only appears in **`lpvm-cranelift`**, the backend adapter. This gives decoupled testing (the
 in-crate interpreter runs any LPIR program without Cranelift), multiple backends from one lowering,
 and stable compiler internals across Cranelift version bumps.
 
 ### Backends
 
-- **`lpir-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
+- **`lpvm-cranelift`** — LPIR → Cranelift → machine code. Supports any ISA Cranelift supports;
   primary target is RISC-V 32-bit (`riscv32imac`) for ESP32-C6. Host JIT uses `cranelift-native`
   for development and testing. Optional `glsl` feature pulls in `lps-frontend` for
   string-to-machine-code entry points.
@@ -154,7 +154,7 @@ Both Q32 (fixed-point) and f32 (float) implementations exist. The generator app
 (**`lps-builtins-gen-app`**) scans builtin sources and emits:
 
 - `BuiltinId` enum and mappings (`lps-builtin-ids`)
-- Cranelift ABI glue (`lpir-cranelift/src/generated_builtin_abi.rs`)
+- Cranelift ABI glue (`lpvm-cranelift/src/generated_builtin_abi.rs`)
 - WASM import types (`lps-wasm/src/emit/builtin_wasm_import_types.rs`)
 - Dead-code-prevention refs for the RV32 emu app and WASM cdylib
 
@@ -163,9 +163,9 @@ Both Q32 (fixed-point) and f32 (float) implementations exist. The generator app
 Cranelift-style file-based tests under `lps-filetests/filetests/`. Each `.glsl` file declares
 expected results; the harness compiles and executes on three backends:
 
-- **jit.q32** — Host JIT via `lpir-cranelift` (default, fast local iteration)
+- **jit.q32** — Host JIT via `lpvm-cranelift` (default, fast local iteration)
 - **wasm.q32** — WASM via `lps-wasm` + Wasmtime
-- **rv32.q32** — RV32 via `lpir-cranelift` object mode + `lp-riscv-emu`
+- **rv32.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
 
 Run with `./scripts/glsl-filetests.sh` or `just test-filetests`.
 

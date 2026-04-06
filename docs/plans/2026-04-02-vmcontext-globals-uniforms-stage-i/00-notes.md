@@ -19,7 +19,7 @@ VMContext (no uniforms or globals yet) through the entire system:
   types and compute byte offsets. No VMContext-specific code yet.
 - **lpir**: Pure IR without GLSL metadata. `IrFunction` has `param_count` and `vreg_types`. First
   vreg is currently the first user param.
-- **lpir-cranelift**: `signature_for_ir_func` builds signatures from `IrFunction` param/return
+- **lpvm-cranelift**: `signature_for_ir_func` builds signatures from `IrFunction` param/return
   counts. `DirectCall` and `invoke` assume user params only.
 - **lps-wasm**: Emits functions with user params only. `local.get 0` is first user param.
 - **lps-filetests**: Test harness creates and calls shaders without any context pointer.

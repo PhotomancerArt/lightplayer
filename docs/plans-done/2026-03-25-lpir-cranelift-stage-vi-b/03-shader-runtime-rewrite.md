@@ -2,7 +2,7 @@
 
 ## Scope
 
-Replace old compiler types with `lpir_cranelift::JitModule`, `DirectCall`, and
+Replace old compiler types with `lpvm_cranelift::JitModule`, `DirectCall`, and
 `jit()` + `CompileOptions`. Remove `dyn GlslExecutable` and the slow `call_vec`
 path.
 
@@ -25,9 +25,9 @@ Replace:
 
 With:
 
-- `jit_module: Option<lpir_cranelift::JitModule>` (name as you prefer; avoid
+- `jit_module: Option<lpvm_cranelift::JitModule>` (name as you prefer; avoid
   shadowing `module` keyword)
-- `direct_call: Option<lpir_cranelift::DirectCall>`
+- `direct_call: Option<lpvm_cranelift::DirectCall>`
 
 Remove `FunctionPtr` wrapper if no longer needed.
 
@@ -37,11 +37,11 @@ recompile, etc.).
 ### 2. `compile_shader`
 
 - Build `CompileOptions`:
-    - `float_mode: lpir::FloatMode::Q32` (re-exported as `lpir_cranelift::FloatMode`
+    - `float_mode: lpir::FloatMode::Q32` (re-exported as `lpvm_cranelift::FloatMode`
       if needed)
     - `q32_options`: map from `self.config.as_ref().map(|c| c.glsl_opts)` using
       small helpers (`AddSubMode`, `MulMode`, `DivMode` in `lp-model` →
-      `lpir_cranelift` enums)
+      `lpvm_cranelift` enums)
     - `memory_strategy`: `LowMemory` on embedded-style builds if you have a cfg;
       otherwise match old `GlslOptions::default_memory_optimized()` behavior
     - `max_errors`: port `DEFAULT_MAX_ERRORS` constant into `lp-engine` or use a
@@ -49,7 +49,7 @@ recompile, etc.).
 
 - Drop old executable before compile (keep OOM-avoidance comment).
 
-- Call `lpir_cranelift::jit(glsl_source, &options)` → `Result<JitModule,
+- Call `lpvm_cranelift::jit(glsl_source, &options)` → `Result<JitModule,
   CompilerError>`.
 
 - On success: `self.direct_call = jit_module.direct_call("main")` (handle
@@ -81,7 +81,7 @@ recompile, etc.).
 
 Remove: `lps_cranelift`, `lps_jit_util`, `cranelift_codegen`.
 
-Add: `lpir_cranelift` types as needed.
+Add: `lpvm_cranelift` types as needed.
 
 ### 5. Tests
 

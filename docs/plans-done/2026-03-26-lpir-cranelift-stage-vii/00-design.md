@@ -1,6 +1,6 @@
-# Design: lpir-cranelift Stage VII — Delete Old Compiler
+# Design: lpvm-cranelift Stage VII — Delete Old Compiler
 
-Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vii-cleanup.md)
+Roadmap: [stage-vii-cleanup.md](../../roadmaps-old/2026-03-24-lpvm-cranelift/stage-vii-cleanup.md)
 Notes: [00-notes.md](./00-notes.md)
 
 ## Scope
@@ -58,11 +58,11 @@ DELETED (old chain):
 
 REMAINS (new chain — no changes):
 
-  GLSL ──► naga (lps-frontend) ──► LPIR ──► lpir-cranelift ──► machine code
+  GLSL ──► naga (lps-frontend) ──► LPIR ──► lpvm-cranelift ──► machine code
                                                  │
                                          lps-builtins-emu-app (ELF for rv32 emu)
 
-  lps-builtins-gen-app: generates into lpir-cranelift, builtins, wasm, emu-app, builtin-ids
+  lps-builtins-gen-app: generates into lpvm-cranelift, builtins, wasm, emu-app, builtin-ids
     (old-backend generation paths removed; lps-frontend types inlined as local structs)
 ```
 

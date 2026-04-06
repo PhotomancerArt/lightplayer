@@ -27,13 +27,13 @@ Final review, remove temporary code, fix warnings, verify all tests pass.
 ### 2. Formatting
 
 ```
-cargo +nightly fmt -p lpir-cranelift
+cargo +nightly fmt -p lpvm-cranelift
 ```
 
 ### 3. Warnings
 
 ```
-cargo clippy -p lpir-cranelift -- -D warnings
+cargo clippy -p lpvm-cranelift -- -D warnings
 ```
 
 Fix all warnings.
@@ -41,7 +41,7 @@ Fix all warnings.
 ### 4. Full test run
 
 ```
-cargo test -p lpir-cranelift
+cargo test -p lpvm-cranelift
 ```
 
 All tests pass.
@@ -58,14 +58,14 @@ cargo test -p lpir
 ### 6. Plan cleanup
 
 Add a summary of the completed work to
-`docs/plans/2026-03-24-lpir-cranelift-stage-ii/summary.md`.
+`docs/plans/2026-03-24-lpvm-cranelift-stage-ii/summary.md`.
 
 Move the plan directory to `docs/plans-done/`.
 
 ### 7. Commit
 
 ```
-feat(lpir-cranelift): LPIR → CLIF emitter core
+feat(lpvm-cranelift): LPIR → CLIF emitter core
 
 - Restructured emit.rs into emit/ module (scalar, control, memory, call)
 - Structured control flow: if/else, loops, break/continue/brifnot, switch
@@ -79,9 +79,9 @@ feat(lpir-cranelift): LPIR → CLIF emitter core
 ## Validate
 
 ```
-cargo +nightly fmt -p lpir-cranelift
-cargo clippy -p lpir-cranelift -- -D warnings
-cargo test -p lpir-cranelift
+cargo +nightly fmt -p lpvm-cranelift
+cargo clippy -p lpvm-cranelift -- -D warnings
+cargo test -p lpvm-cranelift
 cargo check -p lpir
 cargo test -p lpir
 ```

@@ -1,9 +1,9 @@
 # LPIR Feature Parity Audit
 
 **Date:** 2026-03-29
-**Branch:** `feature/lpir-cranelift`
+**Branch:** `feature/lpvm-cranelift`
 **Prior reports:
-** [post-refactor audit](2026-03-26-lps-post-refactor-audit.md), [Stage VI-C validation](2026-03-26-lpir-cranelift-vi-c-ab.md)
+** [post-refactor audit](2026-03-26-lps-post-refactor-audit.md), [Stage VI-C validation](2026-03-26-lpvm-cranelift-vi-c-ab.md)
 **Prior gap analysis:** [
 `docs/roadmaps/2026-03-25-lpir-features/todo.md`](../roadmaps-old/2026-03-25-lpir-features/todo.md)
 
@@ -17,13 +17,13 @@ parity plan.
 
 The LPIR refactor is **structurally complete and validated on hardware**:
 
-- **Pipeline wired end-to-end.** `lp-engine` → `lpir-cranelift` → JIT on host and ESP32-C6.
+- **Pipeline wired end-to-end.** `lp-engine` → `lpvm-cranelift` → JIT on host and ESP32-C6.
   `lps-wasm` → WASM for browser preview. `lpir::interp` for IR-level testing.
 - **Legacy compiler removed.** No `Cargo.toml` in the workspace references `lps-cranelift`,
   `lps-frontend`, or `esp32-glsl-jit`. The old crates are out of the dependency graph.
 - **Firmware validated.** `fw-tests` pass (scene render, alloc trace, unwind). `fw-esp32` builds
   and runs on device (Stage VI-C checklist).
-- **Core crate tests pass.** `lpir` (168), `lpir-cranelift` (32), `lps-frontend` (51),
+- **Core crate tests pass.** `lpir` (168), `lpvm-cranelift` (32), `lps-frontend` (51),
   `lp-engine` (4), `lp-server` (4) — all green.
 - **Documentation refreshed.** Per the 2026-03-26 post-refactor audit, READMEs, `CRATES.md`,
   `AGENTS.md`, `docs/architecture.md`, `docs/lpir/` spec, and `scripts/build-builtins.sh` were
@@ -211,7 +211,7 @@ are important for parity but less urgent for the typical product use case.
 3. **Matrix in `compile()` signatures** — allow `extract_functions` to produce matrix-typed
    parameters and returns, flattened to scalarized VRegs.
 4. **Host invoke for matrix returns** — extend `invoke_i32_args_returns` in
-   `lpir-cranelift/src/invoke.rs` beyond 4-word cap. `mat2` = 4 words (fits today's limit),
+   `lpvm-cranelift/src/invoke.rs` beyond 4-word cap. `mat2` = 4 words (fits today's limit),
    `mat3` = 9, `mat4` = 16 — needs stack return area or extended GPR decode.
 5. **Matrix element stores** — lift the explicit rejection in `lower_stmt.rs` for
    `Store(AccessIndex(AccessIndex(…)))` on matrix locals.
@@ -260,7 +260,7 @@ are important for parity but less urgent for the typical product use case.
 | `lp-server` tests                             | Pass (4/4)                               |
 | `fw-tests` (emu)                              | Pass (scene_render, unwind)              |
 | `lpir` unit tests                             | Pass (168)                               |
-| `lpir-cranelift` unit tests                   | Pass (32)                                |
+| `lpvm-cranelift` unit tests                   | Pass (32)                                |
 | `lps-frontend` unit + integration             | Pass (51)                                |
 | Legacy compiler references in Cargo.toml      | **None** — fully removed                 |
 | Documentation (READMEs, CRATES.md, lpir spec) | Up to date per 2026-03-26 audit          |

@@ -121,9 +121,9 @@ No new test for the `no_std` ISA path in this phase (it's validated by
 
 ```bash
 # Cross-compile should now pass (Phase 1 + Phase 2 together)
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 
 # Host tests unchanged
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
 ```

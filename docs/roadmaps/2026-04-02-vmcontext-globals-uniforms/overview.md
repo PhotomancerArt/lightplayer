@@ -98,7 +98,7 @@ lp-shader/
 ├── lpir/
 │   └── src/
 │       └── module.rs             # No changes—VMContext is implicit first param
-├── lpir-cranelift/
+├── lpvm-cranelift/
 │   ├── src/
 │   │   ├── emit/mod.rs           # Thread VMContext through signatures
 │   │   └── jit_module.rs         # Store memcpy metadata (globals offset, defaults offset, size)

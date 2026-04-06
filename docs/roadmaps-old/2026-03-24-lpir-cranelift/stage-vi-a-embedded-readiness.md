@@ -1,15 +1,15 @@
-# Stage VI-A: lpir-cranelift Embedded Readiness
+# Stage VI-A: lpvm-cranelift Embedded Readiness
 
 ## Goal
 
-Make `lpir-cranelift` compile and run correctly in an **embedded** profile
+Make `lpvm-cranelift` compile and run correctly in an **embedded** profile
 (`no_std` + `alloc`, explicit ISA, aggressive memory strategy) so that the
 engine migration (VI-B, VI-C) is a clean dependency swap — not also a "make
 the compiler work on constrained hardware" effort.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-vi-a`
+`lpvm-cranelift-stage-vi-a`
 
 ## Scope
 
@@ -30,13 +30,13 @@ the compiler work on constrained hardware" effort.
   CLIF metadata after define (match old crate's `memory_optimized` behaviour).
   Ensure `IrFunction` + CLIF are both dropped before the next function.
 - **`CompileOptions` expansion:**
-  - `Q32Options` (add_sub mode, mul mode, div mode) — equivalent to old
-    `GlslOptions` Q32 fields. Needed so the engine can pass per-shader
-    arithmetic preferences.
-  - `max_errors: Option<usize>` — bound diagnostic count, critical for
-    embedded where large error vectors can OOM.
-  - `memory_strategy: MemoryStrategy` (enum: `Default`, `LowMemory`) —
-    runtime knob so the same binary can choose based on environment.
+    - `Q32Options` (add_sub mode, mul mode, div mode) — equivalent to old
+      `GlslOptions` Q32 fields. Needed so the engine can pass per-shader
+      arithmetic preferences.
+    - `max_errors: Option<usize>` — bound diagnostic count, critical for
+      embedded where large error vectors can OOM.
+    - `memory_strategy: MemoryStrategy` (enum: `Default`, `LowMemory`) —
+      runtime knob so the same binary can choose based on environment.
 - **Optimizer / verifier gating:** Expose `cranelift-optimizer` and
   `cranelift-verifier` as opt-in Cargo features (binary size savings when
   omitted — already done in `fw-esp32` for the old crate).
@@ -55,7 +55,7 @@ the compiler work on constrained hardware" effort.
 
 ## Deliverables
 
-- `lpir-cranelift` compiles with `--no-default-features` (i.e. without
+- `lpvm-cranelift` compiles with `--no-default-features` (i.e. without
   `std`) targeting `riscv32imac`
 - `rv32.q32` filetests pass with the embedded feature profile
 - `CompileOptions` has `Q32Options`, `max_errors`, memory strategy
@@ -64,7 +64,7 @@ the compiler work on constrained hardware" effort.
 ## Dependencies
 
 - Stage V2 (filetests on `jit.q32` and `rv32.q32`) — correctness baseline
-- Stage V1 (object + emulator in `lpir-cranelift`)
+- Stage V1 (object + emulator in `lpvm-cranelift`)
 
 ## Estimated scope
 
@@ -75,4 +75,5 @@ strategy work. Plus Cranelift dependency flag plumbing.
 
 On-device GLSL → JIT is exercised by `fw-tests` (`scene_render_emu`, `alloc_trace_emu`) and by
 `cargo check -p fw-esp32` on `riscv32imac-unknown-none-elf` with `server`. See
-`docs/plans-done/2026-03-26-fw-embedded-shader-jit/00-notes.md` for the copy-paste acceptance commands.
+`docs/plans-done/2026-03-26-fw-embedded-shader-jit/00-notes.md` for the copy-paste acceptance
+commands.

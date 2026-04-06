@@ -92,6 +92,7 @@ Op::Return { values } => {
 ### 3. Tests
 
 **`test_local_call`** — call a helper function:
+
 ```
 func @double(v0:f32) -> f32 {
   v1:f32 = fadd v0, v0
@@ -104,12 +105,14 @@ func @quad(v0:f32) -> f32 {
   return v2
 }
 ```
+
 JIT both functions. Call `quad(3.0)`, verify result is `12.0`.
 
 Note: `jit_from_ir` declares all functions before defining any, so forward
 references work. The test calls the second function by its `FuncId`.
 
 **`test_multi_return_call`** — function returning multiple values:
+
 ```
 func @swap(v0:f32, v1:f32) -> f32, f32 {
   return v1, v0
@@ -121,9 +124,11 @@ func @double_swap(v0:f32, v1:f32) -> f32, f32 {
   return v4, v5
 }
 ```
+
 Call `double_swap(1.0, 2.0)`, verify result is `(1.0, 2.0)` (swapped twice).
 
 **`test_recursive_call`** — recursive factorial:
+
 ```
 func @factorial(v0:i32) -> i32 {
   v1:i32 = iconst 1
@@ -137,9 +142,11 @@ func @factorial(v0:i32) -> i32 {
   return v5
 }
 ```
+
 Call `factorial(5)`, verify result is `120`.
 
 **`test_call_with_control_flow`** — call inside a loop:
+
 ```
 func @add1(v0:i32) -> i32 {
   v1:i32 = iadd_imm v0, 1
@@ -157,6 +164,7 @@ func @count_up(v0:i32, v1:i32) -> i32 {
   return v0
 }
 ```
+
 Call `count_up(0, 5)`, verify result is `5`.
 
 ### 4. Test helper for multi-return
@@ -183,6 +191,6 @@ within register-return limits. 2x f32 should be fine on all platforms.
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

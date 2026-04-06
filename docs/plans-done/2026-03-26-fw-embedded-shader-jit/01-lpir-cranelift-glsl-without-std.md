@@ -1,4 +1,4 @@
-# Phase 1: `lpir-cranelift` — GLSL front end without `std`
+# Phase 1: `lpvm-cranelift` — GLSL front end without `std`
 
 ## Scope of phase
 
@@ -39,9 +39,9 @@ compile under **`#![no_std]` + `alloc`** when **`glsl`** (or equivalent) is enab
 
 5. **Tests**
     - Add or adjust a test that *
-      *`cargo check -p lpir-cranelift --no-default-features --features glsl`** succeeds on **host**.
+      *`cargo check -p lpvm-cranelift --no-default-features --features glsl`** succeeds on **host**.
     - **
-      `cargo check -p lpir-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf`
+      `cargo check -p lpvm-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf`
       ** (no **`std`**).
 
 ## Tests to write
@@ -52,13 +52,13 @@ compile under **`#![no_std]` + `alloc`** when **`glsl`** (or equivalent) is enab
 ## Validate
 
 ```bash
-cargo +nightly fmt -p lpir-cranelift
-cargo check -p lpir-cranelift
-cargo check -p lpir-cranelift --no-default-features --features glsl
-cargo check -p lpir-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
+cargo +nightly fmt -p lpvm-cranelift
+cargo check -p lpvm-cranelift
+cargo check -p lpvm-cranelift --no-default-features --features glsl
+cargo check -p lpvm-cranelift --no-default-features --features glsl --target riscv32imac-unknown-none-elf
 # Host std build still works (default features)
-cargo check -p lpir-cranelift --features std,glsl
-cargo test -p lpir-cranelift --features std,glsl   # existing tests that need std + jit(glsl)
+cargo check -p lpvm-cranelift --features std,glsl
+cargo test -p lpvm-cranelift --features std,glsl   # existing tests that need std + jit(glsl)
 ```
 
 Fix new warnings introduced in this phase.

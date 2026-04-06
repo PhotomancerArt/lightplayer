@@ -6,11 +6,11 @@ stubs so the compiler and tests stay in sync.
 
 ## Generated outputs
 
-| Output                                               | Purpose                                                          |
-|------------------------------------------------------|------------------------------------------------------------------|
+| Output                                           | Purpose                                                          |
+|--------------------------------------------------|------------------------------------------------------------------|
 | `lps-builtin-ids/src/glsl_builtin_mapping.rs`    | GLSL / LPIR / LPFX name → `BuiltinId` (WASM Q32 overloads, etc.) |
 | `lps-builtin-ids/src/lib.rs`                     | `BuiltinId` enum and helpers                                     |
-| `lpir-cranelift/src/generated_builtin_abi.rs`        | Cranelift lowering: symbol names and signatures                  |
+| `lpvm-cranelift/src/generated_builtin_abi.rs`    | Cranelift lowering: symbol names and signatures                  |
 | `lps-builtins-emu-app/src/builtin_refs.rs`       | Force-link all builtins for RV32 emu                             |
 | `lps-builtins-wasm/src/builtin_refs.rs`          | Same for `wasm32` cdylib                                         |
 | `lps-builtins/src/builtins/glsl/mod.rs`          | `mod` list for GLSL builtins                                     |

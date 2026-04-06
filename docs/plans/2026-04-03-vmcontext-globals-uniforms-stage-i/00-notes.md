@@ -32,10 +32,10 @@ and locals); only light doc or assert updates if LPIR text gains `ptr`.
 | Area               | Crates / files (non-exhaustive)                                                                                              |
 |--------------------|------------------------------------------------------------------------------------------------------------------------------|
 | LPIR IR            | `lpir`: `types`, `module`, `builder`, `parse`, `print`, `validate`, `interp`, tests                                          |
-| Cranelift emit     | `lpir-cranelift`: `emit/mod.rs` (vmctx param + `cranelift_ty_for_vreg`), `emit/call.rs`, `emit/memory.rs`, `module_lower.rs` |
-| Builtins ABI       | `lpir-cranelift`: `generated_builtin_abi.rs`, `builtins.rs` (already uses `pointer_type` in places — reconcile with LPIR)    |
-| JIT call           | `lpir-cranelift`: `call.rs`, `direct_call.rs`, `invoke.rs`, `lib.rs` tests using `jit_test_vmctx`                            |
-| Emulator glue      | `lpir-cranelift`: `emu_run.rs` (guest vmctx + DataValue width)                                                               |
+| Cranelift emit     | `lpvm-cranelift`: `emit/mod.rs` (vmctx param + `cranelift_ty_for_vreg`), `emit/call.rs`, `emit/memory.rs`, `module_lower.rs` |
+| Builtins ABI       | `lpvm-cranelift`: `generated_builtin_abi.rs`, `builtins.rs` (already uses `pointer_type` in places — reconcile with LPIR)    |
+| JIT call           | `lpvm-cranelift`: `call.rs`, `direct_call.rs`, `invoke.rs`, `lib.rs` tests using `jit_test_vmctx`                            |
+| Emulator glue      | `lpvm-cranelift`: `emu_run.rs` (guest vmctx + DataValue width)                                                               |
 | Frontend           | `lps-frontend`: lowering that sets `vreg_types` and call operands                                                            |
 | WASM               | `lps-wasm`: **minimal** — types stay i32; comments / mapping if LPIR uses `ptr` (emit still lowers ptr → i32 for wasm32)     |
 | Filetests / engine | Any harness that assumes vmctx is always one i32 word on host                                                                |
@@ -51,13 +51,13 @@ and locals); only light doc or assert updates if LPIR text gains `ptr`.
   matching (`validate.rs` ~347).
 - `parse.rs` / `print.rs`: only `i32` / `f32` type tokens.
 - `interp.rs`: call setup assumes vmctx + user args; value storage is per `IrType` (F32/I32).
-- `emit` in `lpir-cranelift` (outside this crate) forces Cranelift vmctx param to **`types::I32`**
+- `emit` in `lpvm-cranelift` (outside this crate) forces Cranelift vmctx param to **`types::I32`**
   intentionally for RISC-V `enable_multi_ret_implicit_sret` (`emit/mod.rs` comment in milestone
   doc).
 
 ### Downstream coupling
 
-- `lps-frontend`, `lpir-cranelift`, filetests, and JIT `call.rs` assume vmctx is a single **i32**
+- `lps-frontend`, `lpvm-cranelift`, filetests, and JIT `call.rs` assume vmctx is a single **i32**
   word at the **host** invoke boundary today (`call.rs`, `direct_call.rs` push `as i32`).
 - Cranelift already uses **`pointer_type`** for StructReturn, result-pointer stack bases, and
   `stack_addr`; LPIR still types **vmctx** and **SlotAddr** as **I32** and forces vmctx to I32 in
@@ -85,7 +85,7 @@ shims. LPIR-only change alone can break `cargo check` if lowering still assumes 
 everywhere.
 
 **Suggested answer:** Single plan with **phases**: (1) LPIR + interp + validate + tests, (2) minimal
-`lpir-cranelift` wiring so `signature_for_ir_func` uses `pointer_type` for vmctx when lowering for *
+`lpvm-cranelift` wiring so `signature_for_ir_func` uses `pointer_type` for vmctx when lowering for *
 *host JIT ISA**, (3) optional: keep **emulator object** path on `I32` vmctx via flag or dual path
 until unified — *or* one phase that updates both LPIR and cranelift together to avoid a broken
 intermediate state.

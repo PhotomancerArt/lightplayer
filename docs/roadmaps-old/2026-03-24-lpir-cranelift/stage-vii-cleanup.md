@@ -8,7 +8,7 @@ everything still builds and passes.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-vii`
+`lpvm-cranelift-stage-vii`
 
 ## Scope
 

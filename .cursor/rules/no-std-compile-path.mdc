@@ -17,8 +17,8 @@ alwaysApply: false
 ## What MUST work without `std`
 
 - `lps-frontend` — GLSL parsing via naga (`#![no_std]` + alloc)
-- `lpir-cranelift` — LPIR → Cranelift → RISC-V machine code
-- `lpir-cranelift::jit(source, options)` — full GLSL string entry point
+- `lpvm-cranelift` — LPIR → Cranelift → RISC-V machine code
+- `lpvm-cranelift::jit(source, options)` — full GLSL string entry point
 - `lp-engine` `ShaderRuntime::compile_shader` — real compilation, not a stub
 - `lp-server` — project/client management on bare metal
 
@@ -26,5 +26,5 @@ alwaysApply: false
 
 - `#[cfg(feature = "std")] fn compile_shader(...)` with a stub `#[cfg(not(...))]`
 - `#[cfg(feature = "std")] pub use compile::jit;` (jit must be available without std)
-- Making `lps-frontend` a `std`-only dependency of `lpir-cranelift`
+- Making `lps-frontend` a `std`-only dependency of `lpvm-cranelift`
 - Suggesting "precompile shaders on host" as an alternative to on-device JIT

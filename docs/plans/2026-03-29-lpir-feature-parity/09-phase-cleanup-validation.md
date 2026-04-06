@@ -19,7 +19,7 @@ cargo +nightly fmt
 3. **Tests and checks**
 
 ```bash
-cargo test -p lps-frontend -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm
+cargo test -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-wasm
 ./scripts/glsl-filetests.sh
 just test-filetests
 ```
@@ -36,7 +36,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 5. **Clippy** (if the repo expects it for touched crates)
 
 ```bash
-cargo clippy -p lps-frontend -p lpir -p lpir-cranelift -p lps-filetests -p lps-wasm -- -D warnings
+cargo clippy -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-wasm -- -D warnings
 ```
 
 6. Fix **all** new warnings introduced by this plan’s work.

@@ -38,8 +38,8 @@ just build-fw-emu
 just build-fw-esp32
 cargo test -p fw-tests
 cargo test -p lp-engine
-cargo test -p lpir-cranelift --no-default-features
-cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D warnings
+cargo test -p lpvm-cranelift --no-default-features
+cargo clippy -p lp-engine -p lp-server -p lpvm-cranelift --all-features -- -D warnings
 ```
 
 ### 4. Plan `summary.md`
@@ -47,13 +47,13 @@ cargo clippy -p lp-engine -p lp-server -p lpir-cranelift --all-features -- -D wa
 In this directory, add `summary.md` with:
 
 - What changed (`fw-esp32` manifest, any fixes).
-- Link to `docs/reports/<date>-lpir-cranelift-vi-c-ab.md`.
+- Link to `docs/reports/<date>-lpvm-cranelift-vi-c-ab.md`.
 - **Handoff:** manual ESP32 steps left to the owner; fw-emu gate commands to re-run.
 
 ### 5. Move plan to `plans-done`
 
 ```bash
-mv docs/plans/2026-03-25-lpir-cranelift-stage-vi-c docs/plans-done/
+mv docs/plans/2026-03-25-lpvm-cranelift-stage-vi-c docs/plans-done/
 ```
 
 ### 6. Commit (when code + docs ready)
@@ -61,7 +61,7 @@ mv docs/plans/2026-03-25-lpir-cranelift-stage-vi-c docs/plans-done/
 Conventional Commits example:
 
 ```
-docs(plan): complete lpir-cranelift Stage VI-C plan
+docs(plan): complete lpvm-cranelift Stage VI-C plan
 
 - Add design, phases, and notes for fw-esp32 cleanup and fw-emu-first validation
 ```
@@ -71,7 +71,7 @@ Separate implementation commit if manifest edits land in the same PR:
 ```
 chore(fw-esp32): drop orphan old-compiler optional dependencies
 
-- Remove unused lps-cranelift / cranelift-* / target-lexicon edges; compiler path is lp-server → lp-engine → lpir-cranelift
+- Remove unused lps-cranelift / cranelift-* / target-lexicon edges; compiler path is lp-server → lp-engine → lpvm-cranelift
 ```
 
 ## Validate

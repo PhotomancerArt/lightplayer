@@ -16,7 +16,7 @@
 ```
 lp-shader/
 ├── lps-frontend/                 # UPDATE: already no_std; remains front end
-├── lpir-cranelift/
+├── lpvm-cranelift/
 │   ├── Cargo.toml                # UPDATE: split `std` vs `glsl`; `lps-frontend` not std-only
 │   └── src/
 │       ├── lib.rs                # UPDATE: export `jit()` under `glsl`, not `std`
@@ -25,7 +25,7 @@ lp-shader/
 │       └── jit_memory.rs         # embedded allocator path (extend if needed)
 lp-core/
 ├── lp-engine/
-│   ├── Cargo.toml                # UPDATE: always enable `glsl` (+ JIT) on `lpir-cranelift` for this crate
+│   ├── Cargo.toml                # UPDATE: always enable `glsl` (+ JIT) on `lpvm-cranelift` for this crate
 │   └── src/nodes/shader/
 │       └── runtime.rs            # UPDATE: real `compile_shader` without `std`; stub only for explicit opt-out
 └── lp-server/
@@ -59,7 +59,7 @@ lp-fw/fw-tests/
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  lpir-cranelift                                              │
+│  lpvm-cranelift                                              │
 │  jit(glsl):  lps-frontend → LPIR → build_jit_module          │
 │  `std` branch: cranelift-native, host ISA autodetect         │
 │  `!std` branch: explicit RISC-V32 ISA + jit_memory alloc     │
@@ -73,14 +73,14 @@ lp-fw/fw-tests/
 
 ## Main components and interactions
 
-1. **`lpir-cranelift`:** Owns **GLSL → IR → machine code**. **`glsl`** (or default dep) pulls *
+1. **`lpvm-cranelift`:** Owns **GLSL → IR → machine code**. **`glsl`** (or default dep) pulls *
    *`lps-frontend`**; **`jit()`** runs under **`glsl` + alloc**, without **`std`**. **`std`** adds *
    *host** codegen discovery (`cranelift-native`) and any **`std`-only helpers**.
-2. **`lp-engine`:** **`ShaderRuntime`** calls **`lpir_cranelift::jit`** (or thin wrapper). **No**
+2. **`lp-engine`:** **`ShaderRuntime`** calls **`lpvm_cranelift::jit`** (or thin wrapper). **No**
    “enable compiler” feature for normal builds; **optional** **`minimal`** / **`no-shader-compile`**
    only if we need a smaller `lp-engine` for tests/tools.
 3. **`lp-server` / firmware:** Depend on **`lp-engine`** with **`default-features = false`** but *
-   *dependency feature list must still include `lpir-cranelift`’s `glsl`** (and optimizer/verifier
+   *dependency feature list must still include `lpvm-cranelift`’s `glsl`** (and optimizer/verifier
    flags as today). No extra “turn compiler on” knob at **`fw-emu`** unless we’re fixing a missing
    passthrough.
 4. **Platform:** ESP32-C6 build uses **`riscv32imac-unknown-none-elf`** (see `justfile`). **`fw-emu`
@@ -91,4 +91,4 @@ lp-fw/fw-tests/
 
 - **`pp-rs` / `lps-frontend` no_std** (prior plan) — prerequisite.
 - Roadmap **Stage VI-A** (`stage-vi-a-embedded-readiness.md`) — overlapping goals for *
-  *`lpir-cranelift`** embedded profile; this plan closes the loop through **engine + fw-tests**.
+  *`lpvm-cranelift`** embedded profile; this plan closes the loop through **engine + fw-tests**.

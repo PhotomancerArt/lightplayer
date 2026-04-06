@@ -2,7 +2,7 @@
 
 ## Goal
 
-Wire **`lps-filetests`** to **`lpir-cranelift`** for **`jit.q32`** (host CPU)
+Wire **`lps-filetests`** to **`lpvm-cranelift`** for **`jit.q32`** (host CPU)
 and **`rv32.q32`** (emulator), using the RV32 object + link + emulator path built
 in **Stage V1**. **Remove** the legacy **`cranelift.q32`** target and **`lps-cranelift`**
 from the filetest runner. Shared boundary: **`lps-exec`** (**`GlslExecutable`**),
@@ -12,16 +12,16 @@ a later deprecation pass.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-v2`
+`lpvm-cranelift-stage-v2`
 
-**Implementation plan:** `docs/plans-done/2026-03-24-lpir-cranelift-stage-v2/` (see `summary.md`
+**Implementation plan:** `docs/plans-done/2026-03-24-lpvm-cranelift-stage-v2/` (see `summary.md`
 there)
 
 ## Scope
 
 **In scope:**
 
-- **`jit.q32`:** GLSL → `lpir_cranelift::jit` → `JitModule` → expectations
+- **`jit.q32`:** GLSL → `lpvm_cranelift::jit` → `JitModule` → expectations
 - **`rv32.q32`:** LPIR → Stage V1 object + link + emulator
 - **`wasm.q32`:** unchanged backend; **`impl GlslExecutable`** uses **`lps-exec`**
 - **Wire** filetests + wasm to **`lps-exec`** / **`lpvm`** (etc.);
@@ -44,7 +44,7 @@ there)
 ## Key decisions
 
 - **V2 after V1:** Emulator path for **`rv32.q32`** depends on Stage V1 in
-  **`lpir-cranelift`**.
+  **`lpvm-cranelift`**.
 - **Default = speed:** local **`jit.q32` only**; **CI** carries **wasm** + **rv32**.
 - **Legacy target gone:** **`cranelift.q32`** is not kept alongside LPIR targets.
 
@@ -64,7 +64,7 @@ there)
 
 ## Dependencies
 
-- **Stage V1** — RV32 object, link, emulator in `lpir-cranelift`
+- **Stage V1** — RV32 object, link, emulator in `lpvm-cranelift`
 - **Stage IV** — `jit()`, `JitModule`, `call()` / marshalling
 
 ## Estimated scope

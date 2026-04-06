@@ -3,7 +3,7 @@
 ## Scope of work
 
 Add import resolution, builtin declaration, Q32 float mode, and inline Q32
-ops to `lpir-cranelift`. After this stage, the emitter can compile hand-built
+ops to `lpvm-cranelift`. After this stage, the emitter can compile hand-built
 LPIR in Q32 mode — float ops become builtin calls or inline integer ops,
 imports resolve to `BuiltinId` → Cranelift func refs, and JIT symbol lookup
 provides `lps-builtins` function pointers. GLSL source compilation and
@@ -22,7 +22,7 @@ lp-shader/lps-wasm/src/
 ├── emit/imports.rs                 # UPDATE: use lpir::FloatMode
 └── options.rs                      # UPDATE: use lpir::FloatMode
 
-lp-shader/legacy/lpir-cranelift/
+lp-shader/legacy/lpvm-cranelift/
 ├── Cargo.toml                      # UPDATE: add lps-builtin-ids, lps-builtins deps
 └── src/
     ├── lib.rs                      # UPDATE: re-exports, FloatMode in public API

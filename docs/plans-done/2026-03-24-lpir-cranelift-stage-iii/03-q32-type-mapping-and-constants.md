@@ -134,12 +134,14 @@ let sig = emit::signature_for_ir_func(f, call_conv, mode);
 ### 5. Test
 
 **`test_q32_constant_roundtrip`** — encode and return a Q32 constant:
+
 ```
 func @const_half() -> f32 {
   v0:f32 = fconst 0.5
   return v0
 }
 ```
+
 In Q32 mode, this should compile. Call the function, verify the returned i32
 equals `q32_encode(0.5)` which is `32768`.
 
@@ -155,11 +157,13 @@ fn jit_q32_constant() {
 ```
 
 **`test_q32_identity`** — pass a Q32 value through and get it back:
+
 ```
 func @identity(v0:f32) -> f32 {
   return v0
 }
 ```
+
 ```rust
 #[test]
 fn jit_q32_identity() {
@@ -174,6 +178,6 @@ fn jit_q32_identity() {
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

@@ -84,6 +84,7 @@ But Cranelift `stack_addr` produces `pointer_type` which is `I64` on x86-64.
 We need to handle this mismatch.
 
 Options:
+
 - (a) Truncate the Cranelift pointer to I32 with `ireduce`. Loses high bits
   but LPIR only uses addresses for Load/Store which we control.
 - (b) Declare the VReg as the native pointer type instead of I32. Requires
@@ -177,6 +178,7 @@ Add `pointer_type: types::Type` field. Set it in `jit_module.rs` from
 ### 5. Tests
 
 **`test_slot_load_store`** — round-trip through a stack slot:
+
 ```
 func @roundtrip(v0:f32) -> f32 {
   slot ss0, 4
@@ -186,9 +188,11 @@ func @roundtrip(v0:f32) -> f32 {
   return v2
 }
 ```
+
 Verify `roundtrip(42.0) == 42.0`.
 
 **`test_slot_multiple_values`** — store two values, load them back:
+
 ```
 func @swap(v0:f32, v1:f32) -> f32, f32 {
   slot ss0, 8
@@ -200,9 +204,11 @@ func @swap(v0:f32, v1:f32) -> f32, f32 {
   return v3, v4
 }
 ```
+
 Verify `swap(1.0, 2.0) == (2.0, 1.0)`.
 
 **`test_memcpy`** — copy slot contents:
+
 ```
 func @copy_slot(v0:f32, v1:f32) -> f32, f32 {
   slot ss0, 8
@@ -217,11 +223,12 @@ func @copy_slot(v0:f32, v1:f32) -> f32, f32 {
   return v4, v5
 }
 ```
+
 Verify `copy_slot(3.0, 7.0) == (3.0, 7.0)`.
 
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

@@ -9,7 +9,7 @@ causing crashes when the guest tries to dereference them.
 ### Key Deliverables
 
 1. **Guest-side allocator exports** (`__lp_guest_alloc`, `__lp_guest_free`) in `lp-riscv-emu-guest`
-2. **Host-side `GuestAllocator`** in `lpir-cranelift` that calls guest allocator via emulator
+2. **Host-side `GuestAllocator`** in `lpvm-cranelift` that calls guest allocator via emulator
 3. **Fix `emu_run.rs`** to allocate VMContext in guest RAM instead of host stack
 4. **Validation**: `vmcontext/fuel-read.glsl` test passes on `rv32.q32` target
 
@@ -17,7 +17,7 @@ causing crashes when the guest tries to dereference them.
 
 ### The Bug
 
-In `lp-shader/legacy/lpir-cranelift/src/emu_run.rs` (lines 87-88 and 221-222):
+In `lp-shader/legacy/lpvm-cranelift/src/emu_run.rs` (lines 87-88 and 221-222):
 
 ```rust
 // WRONG: Host stack pointer passed to guest
@@ -44,7 +44,7 @@ receives a host pointer (e.g., `0x7fff_xxxx`) which is invalid in the guest addr
 **Context**: The `GuestAllocator` needs access to both `ElfLoadInfo` (for the RAM vector and symbol
 map) and `Riscv32Emulator` (for `call_function`).
 
-**Suggested approach**: Create a new module `lpir-cranelift/src/guest_alloc.rs` with the
+**Suggested approach**: Create a new module `lpvm-cranelift/src/guest_alloc.rs` with the
 `GuestAllocator` struct. This keeps the allocator logic separate from the run logic and allows reuse
 for other shared memory needs (textures, uniforms).
 

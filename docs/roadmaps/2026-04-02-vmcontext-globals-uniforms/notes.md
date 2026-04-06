@@ -13,7 +13,7 @@ Target backends: RISC-V32 (embedded) and WebAssembly (browser/emu).
 - **lpvm**: Recently created with `GlslType`, layout computation (`std430`), and path resolution.
   Can describe struct types and compute byte offsets.
 - **lpir**: Pure IR without GLSL metadata. Functions have explicit parameters only.
-- **lpir-cranelift**: JIT compilation for RISC-V32 and host ISAs. Uses `DirectCall` and `invoke` for
+- **lpvm-cranelift**: JIT compilation for RISC-V32 and host ISAs. Uses `DirectCall` and `invoke` for
   calling shaders. Signatures are built from `IrFunction` param/return counts.
 - **lps-wasm**: WASM emission with shadow stack (`$sp` global). Functions exported directly; no
   context parameter currently.

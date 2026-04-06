@@ -1,4 +1,4 @@
-# Stage V2 summary (lpir-cranelift / filetests)
+# Stage V2 summary (lpvm-cranelift / filetests)
 
 ## Completed
 
@@ -10,7 +10,7 @@
   `lps-shared`, `lpvm`, `lps-diagnostics`); legacy `lps-cranelift` is not a
   filetests dependency.
 - **Adapters:** `LpirJitExecutable`, `LpirRv32Executable`, wasm path wired per plan.
-- **Parallel JIT / object codegen:** process-wide serialization in `lpir-cranelift` (`process_sync`)
+- **Parallel JIT / object codegen:** process-wide serialization in `lpvm-cranelift` (`process_sync`)
   to avoid crashes when multiple workers codegen; panic hook installed with `Once` in the concurrent
   runner.
 - **CI parity:** `just test-filetests` (and `just test` / `test-glsl-filetests`) runs the script for

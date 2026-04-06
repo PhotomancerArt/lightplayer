@@ -2,8 +2,8 @@
 
 ## Scope
 
-Replace `lps-cranelift` with `lpir-cranelift` in `lp-engine`. Rewrite
-`ShaderRuntime` to compile via `lpir_cranelift::jit()`, store `JitModule`
+Replace `lps-cranelift` with `lpvm-cranelift` in `lp-engine`. Rewrite
+`ShaderRuntime` to compile via `lpvm_cranelift::jit()`, store `JitModule`
 directly (no trait object), and render via `DirectCall::call_i32_buf`
 (zero-alloc per pixel). Drop `cranelift-codegen` and `lps-jit-util` from
 `lp-engine`. Validate via `fw-emu` and desktop tests.
@@ -11,20 +11,20 @@ directly (no trait object), and render via `DirectCall::call_i32_buf`
 ## File structure
 
 ```
-lp-shader/legacy/lpir-cranelift/src/
+lp-shader/legacy/lpvm-cranelift/src/
 ├── direct_call.rs                # UPDATE: add call_i32_buf (non-allocating)
 ├── invoke.rs                     # UPDATE: add invoke_i32_buf variant
 ├── jit_module.rs                 # UPDATE: unsafe impl Send + Sync for JitModule
 └── ...                           # rest unchanged
 
 lp-core/lp-engine/
-├── Cargo.toml                    # UPDATE: replace lps-cranelift → lpir-cranelift;
+├── Cargo.toml                    # UPDATE: replace lps-cranelift → lpvm-cranelift;
 │                                 #   drop cranelift-codegen, lps-jit-util
 └── src/nodes/shader/
     └── runtime.rs                # UPDATE: rewrite compile + render paths
 
 lp-core/lp-server/
-└── Cargo.toml                    # UPDATE: forward lpir-cranelift features
+└── Cargo.toml                    # UPDATE: forward lpvm-cranelift features
 
 lp-fw/fw-emu/
 └── Cargo.toml                    # CHECK: transitive deps, may need no changes
@@ -38,7 +38,7 @@ ShaderRuntime
   ├── direct_call: Option<DirectCall>     (replaces func_ptr + CallConv + Type)
   │
   ├── compile_shader(source)
-  │     └── lpir_cranelift::jit(source, &CompileOptions)
+  │     └── lpvm_cranelift::jit(source, &CompileOptions)
   │           ├── float_mode: Q32
   │           ├── q32_options: mapped from config.glsl_opts
   │           ├── memory_strategy: LowMemory or Default
@@ -96,7 +96,7 @@ unsafe impl Sync for JitModule {}
 **`compile_shader`:**
 
 ```rust
-use lpir_cranelift::{jit, CompileOptions, MemoryStrategy, Q32Options, FloatMode};
+use lpvm_cranelift::{jit, CompileOptions, MemoryStrategy, Q32Options, FloatMode};
 
 let q32_options = Q32Options {
 add_sub: map_add_sub(config.glsl_opts.add_sub),
@@ -132,9 +132,9 @@ unsafe { dc.call_i32_buf( & args, & mut result) ?; }
 Small helper functions in `runtime.rs` (or a private module):
 
 ```rust
-fn map_add_sub(m: lp_model::glsl_opts::AddSubMode) -> lpir_cranelift::AddSubMode { ... }
-fn map_mul(m: lp_model::glsl_opts::MulMode) -> lpir_cranelift::MulMode { ... }
-fn map_div(m: lp_model::glsl_opts::DivMode) -> lpir_cranelift::DivMode { ... }
+fn map_add_sub(m: lp_model::glsl_opts::AddSubMode) -> lpvm_cranelift::AddSubMode { ... }
+fn map_mul(m: lp_model::glsl_opts::MulMode) -> lpvm_cranelift::MulMode { ... }
+fn map_div(m: lp_model::glsl_opts::DivMode) -> lpvm_cranelift::DivMode { ... }
 ```
 
 ### Cargo dependency changes
@@ -148,7 +148,7 @@ cranelift-codegen = { ... }
 lps-jit-util = { ... }
 
 # Add:
-lpir-cranelift = { path = "../../lp-shader/legacy/lpir-cranelift", default-features = false }
+lpvm-cranelift = { path = "../../lp-shader/legacy/lpvm-cranelift", default-features = false }
 ```
 
 Features:
@@ -156,9 +156,9 @@ Features:
 ```toml
 [features]
 default = ["std", "cranelift-optimizer", "cranelift-verifier"]
-std = ["lp-shared/std", "lpir-cranelift/std"]
-cranelift-optimizer = ["lpir-cranelift/cranelift-optimizer"]
-cranelift-verifier = ["lpir-cranelift/cranelift-verifier"]
+std = ["lp-shared/std", "lpvm-cranelift/std"]
+cranelift-optimizer = ["lpvm-cranelift/cranelift-optimizer"]
+cranelift-verifier = ["lpvm-cranelift/cranelift-verifier"]
 ```
 
 **`lp-server/Cargo.toml`:** Same forwarding pattern, replacing
@@ -173,8 +173,8 @@ today. `panic-recovery` wrapping preserved around `jit()` call.
 
 ```bash
 cargo test -p lp-engine
-cargo test -p lpir-cranelift
-cargo test -p lpir-cranelift --features riscv32-emu
-cargo check --target riscv32imac-unknown-none-elf -p lpir-cranelift --no-default-features
+cargo test -p lpvm-cranelift
+cargo test -p lpvm-cranelift --features riscv32-emu
+cargo check --target riscv32imac-unknown-none-elf -p lpvm-cranelift --no-default-features
 # fw-emu build + run (scripts/build-fw-emu.sh or equivalent)
 ```

@@ -1,7 +1,7 @@
 # Stage VI-B: fw-emu + lp-engine migration — notes
 
-Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
-`docs/roadmaps/2026-03-24-lpir-cranelift/stage-vi-b-fw-emu.md`.
+Plan name: **`lpvm-cranelift-stage-vi-b`**. Roadmap:
+`docs/roadmaps/2026-03-24-lpvm-cranelift/stage-vi-b-fw-emu.md`.
 
 **Process:** Resolve questions (one at a time) → **`00-design.md`** → phases → implement.
 
@@ -9,10 +9,10 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 
 ## Takeaways from Stage VI-A (keep in mind)
 
-- **`lpir-cranelift` default `std`:** `jit()` and `lps-frontend` are enabled by the
+- **`lpvm-cranelift` default `std`:** `jit()` and `lps-frontend` are enabled by the
   default **`std`** feature. **`fw-emu` / `lp-server` / `lp-engine`** should keep
   **`std`** (or equivalent default features) so on-device GLSL → JIT works.
-  **`cargo check --no-default-features`** on `lpir-cranelift` is IR-only; not the
+  **`cargo check --no-default-features`** on `lpvm-cranelift` is IR-only; not the
   firmware path.
 - **`LowMemory` vs emit order:** In **`module_lower`**, **`MemoryStrategy::LowMemory`**
   currently overrides **`LpirFuncEmitOrder::Name`** (object path). Engine JIT uses
@@ -21,7 +21,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
   or documented.
 - **`Q32Options` / `max_errors`:** Types exist on **`CompileOptions`**; emitter may
   not yet branch on Q32 modes; **`max_errors`** may not be enforced. Engine should
-  still **map** **`GlslOpts → lpir_cranelift::Q32Options`** and set
+  still **map** **`GlslOpts → lpvm_cranelift::Q32Options`** and set
   **`max_errors`** for forward compatibility.
 - **Docs:** Comment that GLSL-in “requires **`std`**” means **feature wiring**, not
   that **`lps-frontend`** is **`std`**-only (it is **`#![no_std]`**).
@@ -30,9 +30,9 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 
 ## Scope of work
 
-- Replace **`lps-cranelift`** with **`lpir-cranelift`** in **`lp-engine`** (and
+- Replace **`lps-cranelift`** with **`lpvm-cranelift`** in **`lp-engine`** (and
   feature forwarding in **`lp-server`**).
-- Rework **`ShaderRuntime`** (`runtime.rs`): compile via **`lpir_cranelift::jit`** (or
+- Rework **`ShaderRuntime`** (`runtime.rs`): compile via **`lpvm_cranelift::jit`** (or
   orchestrated **`lps_frontend` + `jit_from_ir_owned`** if we split for memory),
   store **`JitModule`** (or thin wrapper), implement **`lps_exec::GlslExecutable`**
   for the slow path (**`call_vec`** with **`lpvm::GlslValue`**).
@@ -71,7 +71,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 - **`LpirJitExecutable`**: wraps **`JitModule`**, implements **`lps_exec::GlslExecutable`**
   via **`Q32ShaderExecutable`** helpers — pattern to reuse or extract.
 
-### `lpir-cranelift`
+### `lpvm-cranelift`
 
 - **`jit(source, &CompileOptions) -> JitModule`**
 - **`JitModule::direct_call`** → **`DirectCall`** with **`call_i32`** (**`invoke`**).
@@ -81,7 +81,7 @@ Plan name: **`lpir-cranelift-stage-vi-b`**. Roadmap:
 
 - **`lp-server`** forwards **`std`**, **`cranelift-optimizer`**, **`cranelift-verifier`**
   to **`lp-engine`** today via **`lps-cranelift`** paths — must switch to
-  **`lpir-cranelift`** feature names.
+  **`lpvm-cranelift`** feature names.
 
 ---
 
@@ -99,12 +99,12 @@ should not depend on filetests.
   **`GlslExecutable`**, shared by **`lp-engine`** and optionally filetests later.
 - **B)** **Private module inside `lp-engine`** (e.g. **`lpir_executable.rs`**) — copy
   or slim the filetest adapter; no new crate.
-- **C)** **Optional feature on `lps-exec`** pulling **`lpir-cranelift`** — keeps
+- **C)** **Optional feature on `lps-exec`** pulling **`lpvm-cranelift`** — keeps
   one trait home; heavier coupling of exec crate to backend.
 
 ### Q2 — `glsl_jit_streaming` vs single-shot `jit()`
 
-**Context:** Old path compiles AST per function (streaming). **`lpir-cranelift`**
+**Context:** Old path compiles AST per function (streaming). **`lpvm-cranelift`**
 **`jit()`** parses/lowers the whole shader then builds one **`JitModule`**. Peak
 memory may differ; VI-A concluded batch **`finalize_definitions`** is fine.
 
@@ -148,7 +148,7 @@ types. **`DirectCall::call_i32`** should match the same struct-return layout as
 JIT-compiles — there's no polymorphism across backends. `JitModule` provides
 `direct_call("main")` for the fast path and `call("main", &[GlslQ32])` for any
 fallback. Drop `dyn GlslExecutable` and the `lps-exec` dependency from
-`lp-engine`. Add `unsafe impl Send + Sync for JitModule` in `lpir-cranelift`
+`lp-engine`. Add `unsafe impl Send + Sync for JitModule` in `lpvm-cranelift`
 (finalized code pointers are stable and immutable after compilation;
 `NodeRuntime: Send + Sync` requires it).
 

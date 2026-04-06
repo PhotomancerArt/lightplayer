@@ -7,7 +7,7 @@ as a backlog when extending the Naga → LPIR → Cranelift path.
 
 - **JIT** uses host native calling conventions; **rv32** / **wasm** use their own ABIs. A bug can
   show up only on `jit.q32` (e.g. Apple AArch64 multi-scalar returns vs Rust `extern "C"` struct
-  returns — addressed via inline asm + register read in `lpir-cranelift` `invoke.rs`).
+  returns — addressed via inline asm + register read in `lpvm-cranelift` `invoke.rs`).
 - Many failures are **unsupported in lowering**, not wrong codegen: the compiler errors with
   explicit messages (`unsupported type`, `unsupported expression`, etc.).
 
@@ -39,7 +39,7 @@ through different pipelines.
 - **Work**: extend `lower_expr` / math lowering so vector relational builtins decompose
   component-wise (or call `__lp_*` vector helpers), aligned with wasm/rv32 behavior.
 
-### 3. `lpir-cranelift` host `call()` / metadata limits
+### 3. `lpvm-cranelift` host `call()` / metadata limits
 
 - **`GlslType`** in `lpir` metadata today has no matrix (or array) variants — Level-1
   `JitModule::call` / `decode_q32_return` are built for scalars and vectors only.
@@ -103,7 +103,7 @@ Rough mapping (many files per dir):
 
 - `lp-shader/lps-frontend/src/lower_stmt.rs` — statements, `Store`, calls.
 - `lp-shader/lps-frontend/src/lower_expr.rs` — expressions, `AccessIndex`, loads.
-- `lp-shader/legacy/lpir-cranelift/src/invoke.rs` — host JIT calling; `call.rs` / `values.rs` —
+- `lp-shader/legacy/lpvm-cranelift/src/invoke.rs` — host JIT calling; `call.rs` / `values.rs` —
   flatten/decode.
 - `lp-shader/lpir/src/glsl_metadata.rs` — `GlslType` / function metadata for host calls.
 - Cranelift ABI / flags: `enable_multi_ret_implicit_sret`, return-area pointer (`x8` on AArch64)

@@ -143,7 +143,7 @@ lp-shader/
 │       └── vmcontext/
 │           └── fuel-read.glsl    # PoC test
 │
-└── lpir-cranelift/
+└── lpvm-cranelift/
     └── src/
         └── emit/
             └── mod.rs            # Include vmctx in import signatures
@@ -339,7 +339,7 @@ Include VMContext in import signatures when `needs_vmctx` is true.
 
 ### Implementation Details
 
-**File: `lps-lpir-cranelift/src/emit/mod.rs`**
+**File: `lps-lpvm-cranelift/src/emit/mod.rs`**
 
 In `signature_for_ir_func()`, check if callee is an import with `needs_vmctx`:
 
@@ -369,8 +369,8 @@ check `ImportDecl.needs_vmctx` when generating the import's signature in the mod
 ### Validate
 
 ```bash
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```
 
 ---
@@ -469,8 +469,8 @@ Final cleanup, documentation, commit.
 ### Validate
 
 ```bash
-cargo test -p lpvm -p lps-frontend -p lpir-cranelift -p lps-filetests
-cargo clippy -p lpvm -p lps-frontend -p lpir-cranelift
+cargo test -p lpvm -p lps-frontend -p lpvm-cranelift -p lps-filetests
+cargo clippy -p lpvm -p lps-frontend -p lpvm-cranelift
 ```
 
 ---

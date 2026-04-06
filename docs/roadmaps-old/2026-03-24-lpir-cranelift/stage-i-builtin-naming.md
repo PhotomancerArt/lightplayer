@@ -8,7 +8,7 @@ make BuiltinId self-describing.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-i`
+`lpvm-cranelift-stage-i`
 
 ## Scope
 

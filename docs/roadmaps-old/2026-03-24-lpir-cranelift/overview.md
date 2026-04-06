@@ -58,7 +58,7 @@ IrModule + GlslMetadata                        ── LPIR (float-agnostic)
   ┌──────────┴──────────┐
   ▼                     ▼
 WASM emitter            NEW: LPIR → CLIF emitter
-(lps-wasm)          (lpir-cranelift)
+(lps-wasm)          (lpvm-cranelift)
   │ Q32: inline i64       │ Q32: builtin calls (__lp_lpir_*_q32)
   │ glsl/lpfx: WASM       │ glsl/lpfx: Cranelift func refs
   │   imports              │   via BuiltinId
@@ -100,7 +100,7 @@ lp-shader/
 │                              #   UPDATE: extract GlslMetadata during lowering
 ├── lps-wasm/              # LPIR → WASM (existing, unchanged)
 ├── lps-cranelift/         # OLD: AST → CLIF (abandoned, deleted at end)
-├── lpir-cranelift/            # NEW: LPIR → CLIF → JIT/object
+├── lpvm-cranelift/            # NEW: LPIR → CLIF → JIT/object
 │   └── src/
 │       ├── lib.rs             #   Public API: jit(), jit_from_ir(), CompileOptions
 │       ├── compile.rs         #   GLSL → Naga → LPIR → CLIF orchestration
@@ -217,13 +217,13 @@ Future (not this roadmap): `lpir.q32` (LPIR interpreter), `clif.q32`
 ### Migration path
 
 1. **Stage V1:** RV32 object + builtins link + emulator **inside
-   `lpir-cranelift`** (in-crate tests)
+   `lpvm-cranelift`** (in-crate tests)
 2. **Stage V2:** Filetests — `jit.q32` (host) and `rv32.q32` (emulator) both use
-   `lpir-cranelift`
-3. **Stage VI-A:** Make `lpir-cranelift` embedded-ready (`no_std`, explicit
+   `lpvm-cranelift`
+3. **Stage VI-A:** Make `lpvm-cranelift` embedded-ready (`no_std`, explicit
    ISA, memory strategy, `CompileOptions` expansion)
 4. **Stage VI-B:** Migrate `lp-engine` from `lps-cranelift` to
-   `lpir-cranelift` (clean swap). Validate via `fw-emu` (RV32 emulator on
+   `lpvm-cranelift` (clean swap). Validate via `fw-emu` (RV32 emulator on
    desktop — no hardware required)
 5. **Stage VI-C:** Build and run `fw-esp32` on real hardware. A/B compare
    against old compiler on main via git worktree

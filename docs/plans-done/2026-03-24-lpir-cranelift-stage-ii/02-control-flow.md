@@ -195,6 +195,7 @@ fn find_innermost_loop_header(ctrl_stack: &[CtrlFrame]) -> Result<Block, Compile
 All tests use `parse_module` → `jit_from_ir` → transmute → call → assert.
 
 **`test_if_else`** — simple conditional:
+
 ```
 func @max(v0:f32, v1:f32) -> f32 {
   v2:i32 = fgt v0, v1
@@ -205,9 +206,11 @@ func @max(v0:f32, v1:f32) -> f32 {
   end
 }
 ```
+
 Verify `max(3.0, 1.0) == 3.0` and `max(1.0, 5.0) == 5.0`.
 
 **`test_if_no_else`** — if without else:
+
 ```
 func @clamp_positive(v0:f32) -> f32 {
   v1:f32 = fconst 0.0
@@ -218,9 +221,11 @@ func @clamp_positive(v0:f32) -> f32 {
   return v0
 }
 ```
+
 Verify `clamp_positive(-3.0) == 0.0` and `clamp_positive(5.0) == 5.0`.
 
 **`test_loop_countdown`** — simple loop with break:
+
 ```
 func @countdown(v0:i32) -> i32 {
   v1:i32 = iconst 0
@@ -252,9 +257,11 @@ func @sum_to_n(v0:i32) -> i32 {
   return v1
 }
 ```
+
 Verify `sum_to_n(5) == 15` (5+4+3+2+1).
 
 **`test_loop_break`** — explicit break:
+
 ```
 func @first_below(v0:f32, v1:f32) -> f32 {
   v2:f32 = fconst 1.0
@@ -268,9 +275,11 @@ func @first_below(v0:f32, v1:f32) -> f32 {
   return v0
 }
 ```
+
 Verify `first_below(10.0, 3.0) == 2.0`.
 
 **`test_nested_if_in_loop`** — nesting:
+
 ```
 func @abs_sum(v0:i32, v1:i32) -> i32 {
   v2:i32 = iconst 0
@@ -298,6 +307,6 @@ nesting scenarios can be added later.
 ## Validate
 
 ```
-cargo check -p lpir-cranelift
-cargo test -p lpir-cranelift
+cargo check -p lpvm-cranelift
+cargo test -p lpvm-cranelift
 ```

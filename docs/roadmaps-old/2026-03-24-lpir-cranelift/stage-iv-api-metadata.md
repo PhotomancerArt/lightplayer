@@ -9,7 +9,7 @@ complete compiler: GLSL in, callable module out.
 
 ## Suggested plan name
 
-`lpir-cranelift-stage-iv`
+`lpvm-cranelift-stage-iv`
 
 ## Scope
 
@@ -82,7 +82,7 @@ complete compiler: GLSL in, callable module out.
 
 - **GlslMetadata location**: Should it live in the `lpir` crate (since
   it's metadata about LPIR functions), in `lps-frontend` (since that's
-  where it's extracted), or in the new `lpir-cranelift` crate (since
+  where it's extracted), or in the new `lpvm-cranelift` crate (since
   that's the primary consumer)? It's also needed by the WASM emitter's
   test harness and potentially by filetests. Probably a shared location
   like `lpir` or a small new crate.

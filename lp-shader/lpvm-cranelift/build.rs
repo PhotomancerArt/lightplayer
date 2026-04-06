@@ -16,12 +16,12 @@ fn main() {
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
 
     let exe_path_release = workspace_root
-        .join("target")
+        .join("../../target")
         .join(target)
         .join("release")
         .join("lps-builtins-emu-app");
     let exe_path_profile = workspace_root
-        .join("target")
+        .join("../../target")
         .join(target)
         .join(&profile)
         .join("lps-builtins-emu-app");
@@ -62,7 +62,7 @@ fn main() {
 fn find_workspace_root(start: &str) -> Option<std::path::PathBuf> {
     let mut dir = std::path::Path::new(start);
     loop {
-        let cargo_toml = dir.join("Cargo.toml");
+        let cargo_toml = dir.join("../../Cargo.toml");
         if cargo_toml.exists() {
             if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
                 if contents.contains("[workspace]") {

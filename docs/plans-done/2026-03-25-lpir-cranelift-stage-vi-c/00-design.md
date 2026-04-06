@@ -1,13 +1,13 @@
-# Design: lpir-cranelift Stage VI-C (ESP32 + fw-emu validation)
+# Design: lpvm-cranelift Stage VI-C (ESP32 + fw-emu validation)
 
-Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpir-cranelift/stage-vi-c-esp32.md)  
+Roadmap: [stage-vi-c-esp32.md](../../roadmaps-old/2026-03-24-lpvm-cranelift/stage-vi-c-esp32.md)  
 Notes: [00-notes.md](./00-notes.md)
 
 ## Scope
 
 - Remove **orphan** optional compiler dependencies from `fw-esp32` (old
   `lps-cranelift` stack); shader compilation remains **transitive**:
-  `fw-esp32` → `lp-server` → `lp-engine` → `lpir-cranelift`.
+  `fw-esp32` → `lp-server` → `lp-engine` → `lpvm-cranelift`.
 - **Gate:** `fw-emu` builds and automated smoke/integration tests pass on the
   branch before treating hardware validation as the next step.
 - **Primary quantitative A/B** (especially **memory profiling**): **fw-emu**
@@ -26,16 +26,16 @@ lp-fw/
 │   └── src/...
 docs/
 ├── reports/
-│   └── <YYYY-MM-DD>-lpir-cranelift-vi-c-ab.md   # NEW: methodology, fw-emu A/B,
+│   └── <YYYY-MM-DD>-lpvm-cranelift-vi-c-ab.md   # NEW: methodology, fw-emu A/B,
 │                                                 #         ESP32 manual checklist
-└── plans/2026-03-25-lpir-cranelift-stage-vi-c/
+└── plans/2026-03-25-lpvm-cranelift-stage-vi-c/
     ├── 00-notes.md
     ├── 00-design.md
     ├── 01-… 02-… …                   # phase files
     └── summary.md                    # final phase
 ```
 
-No planned changes to `lp-engine` / `lp-server` / `lpir-cranelift` unless an
+No planned changes to `lp-engine` / `lp-server` / `lpvm-cranelift` unless an
 ESP32 or `fw-emu` build surfaces a defect.
 
 ## Conceptual architecture
@@ -48,7 +48,7 @@ ESP32 or `fw-emu` build surfaces a defect.
                                │ same server/engine/compiler stack as device
                                ▼
 ┌──────────┐    ┌──────────────┐    ┌───────────┐    ┌─────────────────┐
-│ fw-esp32 │───►│ lp-server    │───►│ lp-engine │───►│ lpir-cranelift  │
+│ fw-esp32 │───►│ lp-server    │───►│ lp-engine │───►│ lpvm-cranelift  │
 │ manual   │    │ default-feats│    │ no std    │    │ embedded path   │
 └──────────┘    │ false +      │    └───────────┘    └─────────────────┘
                 │ panic-recovery
