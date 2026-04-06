@@ -1,5 +1,9 @@
 //! LPIR → Cranelift: host JIT (`std` + native ISA) or embedded JIT (`glsl` without `std`, RV32 ISA).
 //! Optional `riscv32-emu` links with `lps-builtins-emu-app` and `lp-riscv-emu` helpers.
+//!
+//! **Dual API:** [`CraneliftEngine`], [`CraneliftModule`], [`CraneliftInstance`] implement
+//! [`lpvm::LpvmEngine`] / [`lpvm::LpvmModule`] / [`lpvm::LpvmInstance`]. The existing
+//! [`JitModule`] and [`jit_from_ir`] entry points remain for current engine code.
 
 #![no_std]
 
@@ -20,6 +24,9 @@ mod invoke;
 #[cfg(not(feature = "std"))]
 mod jit_memory;
 mod jit_module;
+mod lpvm_engine;
+mod lpvm_instance;
+mod lpvm_module;
 mod module_lower;
 mod process_sync;
 mod q32;
@@ -50,6 +57,9 @@ pub use lps_shared::path_resolve::PathError;
 pub use lps_shared::{
     FnParam, LayoutRules, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, StructMember,
 };
+pub use lpvm_engine::CraneliftEngine;
+pub use lpvm_instance::{CraneliftInstance, InstanceError};
+pub use lpvm_module::CraneliftModule;
 
 /// Back-compat alias; prefer [`ParamQualifier`].
 pub type GlslParamQualifier = ParamQualifier;
@@ -89,21 +99,70 @@ mod tests_options {
 /// and executing it on the host is undefined — those cases are covered by `riscv32-emu` / fw-emu.
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use alloc::string::String;
     use core::mem;
 
     use lpir::parse_module;
+    use lps_shared::lps_value::LpsValue;
+    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+    use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        CompileError, CompileOptions, CompilerError, FloatMode, GlslQ32, MemoryStrategy,
-        jit_from_ir,
+        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, GlslQ32,
+        MemoryStrategy, jit_from_ir,
     };
 
     fn jit_test_vmctx() -> *const u8 {
         // Use properly aligned storage for VmContext (needs 8-byte alignment for u64 fuel field).
         static VMCTX: core::mem::MaybeUninit<lpvm::VmContext> = core::mem::MaybeUninit::zeroed();
         VMCTX.as_ptr() as *const u8
+    }
+
+    #[test]
+    fn lpvm_trait_engine_q32_fadd() {
+        let ir = parse_module(
+            r"func @add(v1:f32, v2:f32) -> f32 {
+  v3:f32 = fadd v1, v2
+  return v3
+}
+",
+        )
+        .expect("parse");
+
+        let meta = LpsModuleSig {
+            functions: alloc::vec![LpsFnSig {
+                name: String::from("add"),
+                return_type: LpsType::Float,
+                parameters: alloc::vec![
+                    FnParam {
+                        name: String::from("a"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("b"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+            }],
+        };
+
+        let engine = CraneliftEngine::new(CompileOptions {
+            float_mode: FloatMode::Q32,
+            ..Default::default()
+        });
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let out = inst
+            .call("add", &[LpsValue::F32(1.0), LpsValue::F32(2.0)])
+            .expect("call");
+        match out {
+            LpsValue::F32(x) => assert!((x - 3.0).abs() < 1e-3),
+            other => panic!("expected F32, got {other:?}"),
+        }
     }
 
     #[test]

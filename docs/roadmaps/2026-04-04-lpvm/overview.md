@@ -176,10 +176,10 @@ Backends implementing the LPVM traits. See milestone docs.
   coexist until consumers are migrated.
 - WASM first — it has the strictest model (we don't control the WASM runtime)
   and the least flexibility. Let it drive the API design.
-- Cranelift second — validates the API with a backend we control. Should be
-  mostly thin wrappers. Surfaces any kinks or missing pieces in the traits.
-- RV32 third — requires the emulator refactor, which is the hardest backend
-  work. By this point the API is stable.
+- Cranelift second — validates the API with a backend we control.
+  Add trait impls alongside existing API. Surfaces any kinks.
+- RV32 emu third — emulation feature in same crate. Object compilation,
+  ELF linking, emulator. By this point the API is stable.
 - Migrate consumers last — filetests first (they validate everything), then
   engine (production path).
 - Delete old code only after everything is migrated and passing.
@@ -200,10 +200,11 @@ wasmtime runtime. Unit tests.
 Build the Cranelift JIT backend. Validates the API with a second backend.
 Must work on `riscv32imac-unknown-none-elf` without `std`.
 
-### [M4: `lpvm-rv32`](m4-lpvm-rv32.md)
+### [M4: `lpvm-cranelift` RV32 emu](m4-lpvm-rv32emu.md)
 
-Refactor `lp-riscv-emu` for Module/Memory/Instance separation, then build the
-LPVM wrapper. Hardest backend milestone.
+Enable the RV32 emulation feature in `lpvm-cranelift`. Object compilation,
+ELF linking, and emulator execution for CI/testing. Same crate, `riscv32-emu`
+feature.
 
 ### [M5: Migrate filetests](m5-migrate-filetests.md)
 

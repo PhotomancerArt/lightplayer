@@ -1,11 +1,15 @@
-# M3: `lpvm-cranelift`
+# M3: `lpvm-cranelift` JIT
 
 ## Goal
 
-Build the Cranelift JIT backend for LPVM. This should be mostly thin wrappers
-around existing `lpvm-cranelift` machinery, implementing the `LpvmEngine`,
-`LpvmModule`, and `LpvmInstance` traits. Building this second (after WASM)
-validates the trait API against a backend we have full control over.
+Add LPVM trait implementations to the existing Cranelift crate. This validates
+the trait API against a backend we have full control over and can optimize for.
+
+**Key change from original plan:** We are NOT creating a new crate. We are:
+1. Renaming `lpir-cranelift` → `lpvm-cranelift`
+2. Adding trait implementations (`CraneliftEngine`, `CraneliftModule`, `CraneliftInstance`)
+   alongside the existing API
+3. Old API stays in place until M7 (when `lp-engine` migrates)
 
 **Note**: `LpvmMemory` was not created as a separate trait — each backend
 manages memory internally (wasmtime Store for WASM, JIT memory for Cranelift,
@@ -13,9 +17,9 @@ emulator RAM for RV32).
 
 ## Context for Agents
 
-### Current `lpvm-cranelift` architecture
+### Current `lpir-cranelift` architecture
 
-`lpvm-cranelift` is `#![no_std]` and works on both host (native ISA via
+`lpir-cranelift` is `#![no_std]` and works on both host (native ISA via
 `cranelift-native`) and embedded (RISC-V, hardcoded triple).
 
 **Key types:**
@@ -64,53 +68,37 @@ render (per pixel):
   direct_call.call_i32_buf(&vmctx, &args, &mut ret_buf)
 ```
 
-### RV32 emulator code in `lpvm-cranelift`
+**RV32 emulator code in `lpir-cranelift`:**
 
-Behind `riscv32-emu` feature, `lpvm-cranelift` also contains:
+Behind `riscv32-emu` feature, `lpir-cranelift` also contains:
 
 - `object_bytes_from_ir` — compile to RV32 object file
 - `link_object_with_builtins` — link with builtins → ELF
 - `glsl_q32_call_emulated` — run in emulator
 - `run_lpir_function_i32` — convenience wrapper
 
-This code does NOT move to `lpvm-cranelift`. It belongs in `lpvm-rv32` (M4).
-`lpvm-cranelift` is only the JIT backend.
+This code stays in `lpvm-cranelift` but behind the `riscv32-emu` feature (M4).
 
 ## What To Build
 
 ### Crate location
 
-`lpvm/lpvm-cranelift/` (actual location may be `lp-shader/lpvm-cranelift/` during migration, like
-`lpvm-wasm`)
+`lp-shader/lpvm-cranelift/` (renamed from `lp-shader/legacy/lpir-cranelift/`)
 
-### Cargo.toml structure
+### Dual API architecture
 
-```toml
-[package]
-name = "lpvm-cranelift"
-version = "0.1.0"
-edition = "2024"
+Both APIs coexist in the same crate:
 
-[dependencies]
-lpvm = { path = "../lpvm", default-features = false }
-lpir = { path = "../../lp-shader/lpir", default-features = false }
-cranelift-codegen = { ..., default-features = false }
-cranelift-frontend = { ..., default-features = false }
-cranelift-jit = { ..., default-features = false }
-cranelift-module = { ..., default-features = false }
-lps-builtins = { ..., default-features = false }
-# ... same cranelift deps as lpvm-cranelift, minus riscv32-emu deps
+**Old API (stays until M7):**
+- `JitModule` — the existing monolithic type
+- `DirectCall` — raw function pointer wrapper
+- `GlslQ32`, `CallResult` — value marshaling
+- `jit()`, `jit_from_ir()` — existing entry points
 
-[features]
-default = ["std"]
-std = ["cranelift-codegen/std", "cranelift-jit/std", "cranelift-native", ...]
-cranelift-optimizer = ["cranelift-codegen/cranelift-optimizer"]
-cranelift-verifier = ["cranelift-codegen/cranelift-verifier"]
-```
-
-**Critical**: this crate MUST work without `std` on `riscv32imac-unknown-none-elf`.
-The `std` feature gates host-only things like `cranelift-native` (host ISA
-autodetection). Without `std`, the target is hardcoded to RISC-V.
+**New trait API (M3 adds this):**
+- `CraneliftEngine` — implements `LpvmEngine`
+- `CraneliftModule` — implements `LpvmModule`
+- `CraneliftInstance` — implements `LpvmInstance`
 
 ### Module structure
 
@@ -118,16 +106,17 @@ autodetection). Without `std`, the target is hardcoded to RISC-V.
 lpvm-cranelift/
 ├── Cargo.toml
 └── src/
-    ├── lib.rs           # Re-exports
-    ├── engine.rs        # CraneliftLpvmEngine: LpvmEngine implementation
-    ├── module.rs        # CraneliftLpvmModule: LpvmModule implementation
-    ├── instance.rs      # CraneliftLpvmInstance: LpvmInstance implementation
-    ├── compile.rs       # LPIR → Cranelift IR → machine code
-    ├── lower.rs         # LPIR lowering to Cranelift IR (from lpvm-cranelift)
-    ├── call.rs          # Function call mechanics
-    ├── direct_call.rs   # DirectCall for hot-path access
-    ├── options.rs       # CompileOptions
-    └── error.rs         # Error types
+    ├── lib.rs           # Re-exports both APIs
+    ├── engine.rs        # CraneliftEngine: LpvmEngine implementation
+    ├── module.rs        # CraneliftModule: LpvmModule implementation
+    ├── instance.rs      # CraneliftInstance: LpvmInstance implementation
+    ├── direct_call.rs   # DirectCall for hot-path access (existing)
+    ├── call.rs          # Existing call infrastructure
+    ├── values.rs        # GlslQ32, CallResult (existing)
+    ├── compile.rs       # Existing JIT compilation
+    ├── lower.rs         # Existing LPIR lowering
+    ├── options.rs       # Existing CompileOptions
+    └── error.rs         # Existing error types
 ```
 
 ### Trait implementation mapping
@@ -143,47 +132,30 @@ lpvm-cranelift/
 The engine's hot path uses `DirectCall::call_i32_buf` — a raw function pointer
 call. This is critical for performance.
 
-The `LpvmInstance::call()` trait method (which takes `&str` name and `LpvmValue`
+The `LpvmInstance::call()` trait method (which takes `&str` name and `LpsValue`
 args) adds overhead: name lookup, value marshaling. This is fine for filetests
 but not for the render loop.
 
-Options:
+**Answer:** `DirectCall` stays as a separate method on `CraneliftModule` (beyond
+the trait interface). The engine can choose which to use. No trait change needed.
 
-1. `LpvmInstance` has both `call(name, args)` (ergonomic) and a way to get a
-   "prepared call" handle that avoids per-call overhead.
-2. `lpvm-cranelift` exposes `DirectCall` as an additional type beyond the trait
-   interface, and the engine uses it directly.
-3. The trait has an associated type for "call handle" that backends can optimize.
+### What to reuse from existing `lpir-cranelift`
 
-The design chosen in M1 should address this. If it doesn't, this milestone will
-surface the issue.
-
-### What to extract from `lpvm-cranelift`
-
-Most of the compilation logic moves to `lpvm-cranelift`:
+All existing code stays in place. New trait implementations reuse:
 
 - LPIR → Cranelift IR lowering
 - JIT module building (ISA config, JITBuilder, finalize)
-- Function call mechanics (invoke, arg marshaling)
-- CompileOptions, error types
-
-What stays in `lpvm-cranelift` (or moves to `lpvm-rv32`):
-
-- `riscv32-emu` feature code: object compilation, ELF linking, emulated calls
-- These are RV32 emulator concerns, not JIT concerns
-
-What stays in `lpvm-cranelift` temporarily:
-
-- Anything that other crates still depend on, until they're migrated
+- Error types
+- VMContext structure
 
 ## Unit Tests
 
-- Compile a simple LPIR module via Cranelift
+- Compile a simple LPIR module via trait API
 - Instantiate with memory
-- Call a function via the trait interface
+- Call a function via `LpvmInstance::call()`
 - Verify return values
 - Test VMContext passing (fuel, globals stub)
-- Test the hot-path call mechanism (DirectCall or equivalent)
+- Test the hot-path call mechanism (DirectCall) still works
 
 ## Performance Considerations
 
@@ -195,13 +167,10 @@ What stays in `lpvm-cranelift` temporarily:
 
 ## What NOT To Do
 
-- Do NOT move the `riscv32-emu` feature code into this crate. That's `lpvm-rv32`.
+- Do NOT remove the old API yet. It stays until M7.
 - Do NOT require `std` for the core compilation path. Embedded JIT is the
   product — see AGENTS.md.
-- Do NOT delete `lpvm-cranelift` yet. It coexists until consumers are migrated.
 - Do NOT update `lp-engine` to use this yet. That's M6.
-- Builtin crate path may still read `lps-builtins` on disk until rename
-  completes; use workspace reality.
 - Do NOT add `#[cfg(feature = "std")]` to any compile/execute path.
 
 ## Validation
@@ -219,11 +188,11 @@ cargo test -p lpvm-cranelift
 
 ## Done When
 
-- `lpvm-cranelift` crate exists (actual location TBD — may be `lp-shader/` during migration)
+- Crate renamed to `lpvm-cranelift`
 - `LpvmEngine`/`LpvmModule`/`LpvmInstance` implemented
-- LPIR → machine code compilation works
+- LPIR → machine code compilation works via trait API
 - Unit tests pass
 - Compiles for `riscv32imac-unknown-none-elf` without `std`
-- Hot-path call mechanism is available and zero-overhead
-- Trait API validated by two backends (WASM + Cranelift) — any issues resolved
+- Hot-path call mechanism (`DirectCall`) is available and zero-overhead
+- Trait API validated by two backends (WASM + Cranelift)
 - Workspace builds pass
