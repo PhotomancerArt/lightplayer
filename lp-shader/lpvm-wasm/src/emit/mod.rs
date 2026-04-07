@@ -94,11 +94,8 @@ pub(crate) fn emit_module(
         || ir.functions.iter().any(|f| f.uses_memory())
         || render_entry.is_some();
     let env_memory = if needs_memory {
-        let min = 1u64;
-        let spec = EnvMemorySpec {
-            initial_pages: min as u32,
-            max_pages: None,
-        };
+        let spec = EnvMemorySpec::shader_import_limits();
+        let min = spec.initial_pages as u64;
         import_section.import(
             "env",
             "memory",

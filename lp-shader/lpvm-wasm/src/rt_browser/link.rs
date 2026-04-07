@@ -4,7 +4,6 @@ use js_sys::{Object, Reflect, Uint8Array, WebAssembly};
 use wasm_bindgen::JsValue;
 
 use crate::error::WasmError;
-use crate::module::EnvMemorySpec;
 
 use super::BrowserLpvmModule;
 use super::engine::host_exports;
@@ -74,26 +73,10 @@ fn build_builtins_import(
     Ok(builtins.into())
 }
 
-fn memory_descriptor(spec: &EnvMemorySpec) -> Result<Object, WasmError> {
-    let mem_desc = Object::new();
-    Reflect::set(
-        &mem_desc,
-        &JsValue::from_str("initial"),
-        &JsValue::from_f64(spec.initial_pages as f64),
-    )
-    .map_err(|e| WasmError::runtime(format!("memory initial: {e:?}")))?;
-    if let Some(max) = spec.max_pages {
-        Reflect::set(
-            &mem_desc,
-            &JsValue::from_str("maximum"),
-            &JsValue::from_f64(max as f64),
-        )
-        .map_err(|e| WasmError::runtime(format!("memory maximum: {e:?}")))?;
-    }
-    Ok(mem_desc)
-}
-
-pub(crate) fn instantiate_shader(module: &BrowserLpvmModule) -> Result<BrowserInstance, WasmError> {
+pub(crate) fn instantiate_shader(
+    module: &BrowserLpvmModule,
+    shared_memory: &WebAssembly::Memory,
+) -> Result<BrowserInstance, WasmError> {
     let wasm_bytes = &module.wasm_bytes;
     let u8 = Uint8Array::new_with_length(wasm_bytes.len() as u32);
     u8.copy_from(wasm_bytes);
@@ -112,17 +95,21 @@ pub(crate) fn instantiate_shader(module: &BrowserLpvmModule) -> Result<BrowserIn
         let spec = module.env_memory.ok_or_else(|| {
             WasmError::runtime("shader imports env.memory but compiler produced no limits")
         })?;
-        let mem_desc = memory_descriptor(&spec)?;
-        let memory = WebAssembly::Memory::new(&mem_desc)
-            .map_err(|e| WasmError::runtime(format!("WebAssembly.Memory: {e:?}")))?;
+        let engine_spec = crate::module::EnvMemorySpec::engine_initial_for_host();
+        if spec.initial_pages > engine_spec.initial_pages {
+            return Err(WasmError::runtime(format!(
+                "shader env.memory import requires minimum {} pages; engine has {}",
+                spec.initial_pages, engine_spec.initial_pages
+            )));
+        }
 
         let env = Object::new();
-        Reflect::set(&env, &JsValue::from_str("memory"), &memory)
+        Reflect::set(&env, &JsValue::from_str("memory"), shared_memory)
             .map_err(|e| WasmError::runtime(format!("set env.memory: {e:?}")))?;
         Reflect::set(&import_object, &JsValue::from_str("env"), &env)
             .map_err(|e| WasmError::runtime(format!("set env: {e:?}")))?;
 
-        Some(memory)
+        Some(shared_memory.clone())
     } else {
         None
     };

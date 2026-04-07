@@ -1,28 +1,23 @@
 //! Link shader WASM with native `builtins` imports and shared `env.memory`.
 
-use wasmtime::{Engine, ExternType, Func, Instance, Linker, Memory, MemoryType, Module, Store};
+use wasmtime::{Engine, ExternType, Func, Instance, Linker, Module, Store};
 
 use lps_builtin_ids::BuiltinId;
 
 use crate::error::WasmError;
 
+use super::WasmLpvmSharedRuntime;
 use super::native_builtin_dispatch::dispatch_native_builtin;
 
-fn shader_env_memory_type(shader: &Module) -> Result<MemoryType, WasmError> {
-    for imp in shader.imports() {
+pub(crate) fn shader_env_memory_minimum_pages(shader: &Module) -> Option<u64> {
+    shader.imports().find_map(|imp| {
         if imp.module() == "env" && imp.name() == "memory" {
-            let ExternType::Memory(mt) = imp.ty() else {
-                return Err(WasmError::runtime("env.memory import is not a memory type"));
-            };
-            if mt.is_64() || mt.is_shared() {
-                return Err(WasmError::runtime(
-                    "env.memory must be 32-bit non-shared for this linker path",
-                ));
+            if let ExternType::Memory(mt) = imp.ty() {
+                return Some(mt.minimum());
             }
-            return Ok(mt);
         }
-    }
-    Err(WasmError::runtime("shader missing env.memory import"))
+        None
+    })
 }
 
 pub(crate) fn module_needs_builtins_link(shader: &Module) -> bool {
@@ -64,34 +59,35 @@ fn link_builtins(
     Ok(())
 }
 
-/// Instantiate a compiled shader module, linking native builtins + `env.memory` when imports require it.
+/// Instantiate a compiled shader module, linking native builtins + shared `env.memory` when imports require it.
+///
+/// Uses the [`Memory`] already created in `runtime` (same store for every instance).
 pub(crate) fn instantiate_wasm_module(
     engine: &Engine,
-    store: &mut Store<()>,
+    runtime: &WasmLpvmSharedRuntime,
     wasm_bytes: &[u8],
-) -> Result<(Instance, Option<Memory>), WasmError> {
+) -> Result<Instance, WasmError> {
     let shader_mod = Module::new(engine, wasm_bytes)
         .map_err(|e| WasmError::runtime(format!("WASM parse: {e:#}")))?;
+
+    let mut guard = runtime.lock();
+    let memory = guard.memory;
+    let store = &mut guard.store;
 
     if !module_needs_builtins_link(&shader_mod) {
         let instance = Instance::new(&mut *store, &shader_mod, &[])
             .map_err(|e| WasmError::runtime(format!("WASM instantiate: {e}")))?;
-        return Ok((instance, None));
+        return Ok(instance);
     }
 
     let mut linker = Linker::new(engine);
-
-    let memory_ty = shader_env_memory_type(&shader_mod)?;
-    let memory = Memory::new(&mut *store, memory_ty)
-        .map_err(|e| WasmError::runtime(format!("Memory::new: {e}")))?;
     linker
         .define(&mut *store, "env", "memory", memory)
         .map_err(|e| WasmError::runtime(format!("linker env.memory: {e}")))?;
 
     link_builtins(&mut linker, &mut *store, &shader_mod)?;
 
-    let instance = linker
+    linker
         .instantiate(&mut *store, &shader_mod)
-        .map_err(|e| WasmError::runtime(format!("shader instantiate: {e}")))?;
-    Ok((instance, Some(memory)))
+        .map_err(|e| WasmError::runtime(format!("shader instantiate: {e}")))
 }

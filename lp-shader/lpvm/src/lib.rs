@@ -14,15 +14,16 @@
 
 extern crate alloc;
 
+mod buffer;
 mod data;
 mod data_error;
 mod engine;
 mod instance;
 mod memory;
 mod module;
-mod shader_ptr;
 mod vmcontext;
 
+pub use buffer::{LpvmBuffer, LpvmPtr};
 pub use data::LpvmData;
 pub use data_error::DataError;
 pub use engine::LpvmEngine;
@@ -35,7 +36,6 @@ pub use lps_shared::value_path::{LpsValuePathError, LpsValuePathExt};
 pub use lps_shared::{LayoutRules, LpsType, StructMember};
 pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};
 pub use module::LpvmModule;
-pub use shader_ptr::ShaderPtr;
 pub use vmcontext::{
     DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
     VMCTX_OFFSET_TRAP_HANDLER, VmContext, VmContextHeader, minimal_vmcontext,

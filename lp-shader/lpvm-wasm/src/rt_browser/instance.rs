@@ -28,7 +28,7 @@ pub struct BrowserLpvmInstance {
 
 impl BrowserLpvmInstance {
     pub(crate) fn new(module: &BrowserLpvmModule) -> Result<Self, WasmError> {
-        let linked = link::instantiate_shader(module)?;
+        let linked = link::instantiate_shader(module, &module.runtime.memory)?;
         let inst_js: JsValue = linked.instance.clone().into();
         let exports_obj = Reflect::get(&inst_js, &JsValue::from_str("exports"))
             .map_err(|e| WasmError::runtime(format!("instance.exports: {e:?}")))?;

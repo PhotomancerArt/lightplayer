@@ -26,7 +26,9 @@ pub fn init_engine() {
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
     };
-    ENGINE.with(|e| *e.borrow_mut() = Some(BrowserLpvmEngine::new(opts)));
+    ENGINE.with(|e| {
+        *e.borrow_mut() = Some(BrowserLpvmEngine::new(opts).expect("BrowserLpvmEngine::new"));
+    });
 }
 
 #[wasm_bindgen]

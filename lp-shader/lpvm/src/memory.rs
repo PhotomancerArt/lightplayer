@@ -3,10 +3,7 @@
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::ShaderPtr;
-
-/// Fixed alignment for bump allocations (reasonable for texture rows, structs).
-const BUMP_ALIGN: usize = 16;
+use crate::buffer::LpvmBuffer;
 
 fn round_up(value: usize, align: usize) -> usize {
     debug_assert!(align.is_power_of_two());
@@ -43,11 +40,11 @@ impl core::error::Error for AllocError {}
 /// Object-safe shared memory API (`dyn LpvmMemory`).
 ///
 /// Implementations use interior mutability. Hosts access bytes through
-/// [`ShaderPtr::native_ptr`]; guests use [`ShaderPtr::guest_value`].
+/// [`LpvmBuffer::native_ptr`]; guests use [`LpvmBuffer::guest_base`].
 pub trait LpvmMemory {
-    fn alloc(&self, size: usize) -> Result<ShaderPtr, AllocError>;
-    fn free(&self, ptr: ShaderPtr);
-    fn realloc(&self, ptr: ShaderPtr, new_size: usize) -> Result<ShaderPtr, AllocError>;
+    fn alloc(&self, size: usize, align: usize) -> Result<LpvmBuffer, AllocError>;
+    fn free(&self, buffer: LpvmBuffer);
+    fn realloc(&self, buffer: LpvmBuffer, new_size: usize) -> Result<LpvmBuffer, AllocError>;
 }
 
 /// Bump allocator over a fixed host buffer; [`Sync`] for `&dyn LpvmMemory`.
@@ -79,13 +76,16 @@ impl BumpLpvmMemory {
 }
 
 impl LpvmMemory for BumpLpvmMemory {
-    fn alloc(&self, size: usize) -> Result<ShaderPtr, AllocError> {
+    fn alloc(&self, size: usize, align: usize) -> Result<LpvmBuffer, AllocError> {
         if size == 0 {
+            return Err(AllocError::InvalidSize);
+        }
+        if !align.is_power_of_two() {
             return Err(AllocError::InvalidSize);
         }
         loop {
             let pos = self.next.load(Ordering::Relaxed);
-            let aligned = round_up(pos, BUMP_ALIGN);
+            let aligned = round_up(pos, align);
             let end = aligned.checked_add(size).ok_or(AllocError::InvalidSize)?;
             if end > self.len() {
                 return Err(AllocError::OutOfMemory);
@@ -97,19 +97,22 @@ impl LpvmMemory for BumpLpvmMemory {
                 Ok(_) => {
                     let native = unsafe { self.base().add(aligned) };
                     let guest = native as usize as u64;
-                    return Ok(ShaderPtr::new(native, guest));
+                    return Ok(LpvmBuffer::new(native, guest, size, align));
                 }
                 Err(_) => continue,
             }
         }
     }
 
-    fn free(&self, _ptr: ShaderPtr) {
+    fn free(&self, _buffer: LpvmBuffer) {
         // Bump allocator: leak semantics until a real free list exists.
     }
 
-    fn realloc(&self, _ptr: ShaderPtr, _new_size: usize) -> Result<ShaderPtr, AllocError> {
-        // BumpLpvmMemory does not record allocation sizes; use `alloc` + copy for resize.
+    fn realloc(&self, buffer: LpvmBuffer, new_size: usize) -> Result<LpvmBuffer, AllocError> {
+        // BumpLpvmMemory only supports realloc for the most recent allocation
+        // at the end of the bump. For simplicity, we always fail here.
+        // Users should alloc + copy + free old.
+        let _ = (buffer, new_size);
         Err(AllocError::InvalidPointer)
     }
 }
@@ -132,15 +135,28 @@ mod tests {
     #[test]
     fn bump_alloc_sequence() {
         let mem = BumpLpvmMemory::new(256);
-        let a = mem.alloc(8).expect("alloc a");
-        let b = mem.alloc(8).expect("alloc b");
+        let a = mem.alloc(8, 8).expect("alloc a");
+        let b = mem.alloc(8, 8).expect("alloc b");
         assert_ne!(a.native_ptr(), b.native_ptr());
-        assert_eq!(unsafe { b.native_ptr().offset_from(a.native_ptr()) }, 16);
+        // With 8-byte alignment, 8-byte allocations are contiguous: 8 + 8 = 16
+        assert_eq!(unsafe { b.native_ptr().offset_from(a.native_ptr()) }, 8);
     }
 
     #[test]
     fn bump_out_of_memory() {
         let mem = BumpLpvmMemory::new(16);
-        assert!(mem.alloc(32).is_err());
+        assert!(mem.alloc(32, 8).is_err());
+    }
+
+    #[test]
+    fn bump_zero_size_fails() {
+        let mem = BumpLpvmMemory::new(256);
+        assert!(matches!(mem.alloc(0, 8), Err(AllocError::InvalidSize)));
+    }
+
+    #[test]
+    fn bump_invalid_align_fails() {
+        let mem = BumpLpvmMemory::new(256);
+        assert!(matches!(mem.alloc(16, 3), Err(AllocError::InvalidSize)));
     }
 }

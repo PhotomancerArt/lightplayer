@@ -2,11 +2,12 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use lpir::IrModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
-use lpvm::{BumpLpvmMemory, LpvmEngine, LpvmMemory};
+use lpvm::{LpvmEngine, LpvmMemory};
 use wasm_bindgen::JsValue;
 
 use crate::compile::compile_lpir;
@@ -15,14 +16,13 @@ use crate::module::{EnvMemorySpec, WasmExport};
 use crate::options::WasmOptions;
 
 use super::instance::BrowserLpvmInstance;
-
-const DEFAULT_LPVM_SHARED_MEMORY_BYTES: usize = 256 * 1024;
+use super::shared_runtime::{BrowserLpvmMemory, BrowserLpvmSharedRuntime};
 
 thread_local! {
     static HOST_EXPORTS: RefCell<Option<JsValue>> = RefCell::new(None);
 }
 
-/// Call once after wasm-bindgen init, passing the embedding module’s `instance.exports`
+/// Call once after wasm-bindgen init, passing the embedding module's `instance.exports`
 /// (so `builtins.*` imports resolve to `lps-builtins` symbols linked into the same wasm).
 pub fn init_host_exports(exports: JsValue) {
     HOST_EXPORTS.with(|e| *e.borrow_mut() = Some(exports));
@@ -39,21 +39,26 @@ pub(crate) fn host_exports() -> Result<JsValue, WasmError> {
 
 pub struct BrowserLpvmEngine {
     compile_options: WasmOptions,
-    shared_memory: BumpLpvmMemory,
+    runtime: Arc<BrowserLpvmSharedRuntime>,
+    memory: BrowserLpvmMemory,
 }
 
 impl BrowserLpvmEngine {
-    pub fn new(compile_options: WasmOptions) -> Self {
-        Self {
+    pub fn new(compile_options: WasmOptions) -> Result<Self, WasmError> {
+        let runtime = BrowserLpvmSharedRuntime::new()?;
+        let memory = BrowserLpvmMemory::new();
+        Ok(Self {
             compile_options,
-            shared_memory: BumpLpvmMemory::new(DEFAULT_LPVM_SHARED_MEMORY_BYTES),
-        }
+            runtime,
+            memory,
+        })
     }
 }
 
 pub struct BrowserLpvmModule {
     pub(crate) wasm_bytes: Vec<u8>,
     pub(crate) env_memory: Option<EnvMemorySpec>,
+    pub(crate) runtime: Arc<BrowserLpvmSharedRuntime>,
     pub(crate) signatures: LpsModuleSig,
     pub(crate) exports: HashMap<String, WasmExport>,
     pub(crate) shadow_stack_base: Option<i32>,
@@ -67,6 +72,15 @@ impl LpvmEngine for BrowserLpvmEngine {
     fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let artifact = compile_lpir(ir, meta, &self.compile_options)?;
         let wm = artifact.wasm_module();
+        if let Some(spec) = &wm.env_memory {
+            let engine_spec = EnvMemorySpec::engine_initial_for_host();
+            if spec.initial_pages > engine_spec.initial_pages {
+                return Err(WasmError::runtime(format!(
+                    "shader env.memory import requires minimum {} pages; engine has {}",
+                    spec.initial_pages, engine_spec.initial_pages
+                )));
+            }
+        }
         let exports: HashMap<_, _> = wm
             .exports
             .iter()
@@ -75,6 +89,7 @@ impl LpvmEngine for BrowserLpvmEngine {
         Ok(BrowserLpvmModule {
             wasm_bytes: wm.bytes.clone(),
             env_memory: wm.env_memory,
+            runtime: Arc::clone(&self.runtime),
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: wm.shadow_stack_base,
@@ -83,7 +98,7 @@ impl LpvmEngine for BrowserLpvmEngine {
     }
 
     fn memory(&self) -> &dyn LpvmMemory {
-        &self.shared_memory
+        &self.memory
     }
 }
 

@@ -2,12 +2,14 @@
 
 use std::collections::HashMap;
 use std::format;
+use std::sync::Arc;
 
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{DEFAULT_VMCTX_FUEL, LpsValue, LpvmInstance};
-use wasmtime::{Instance, Store, Val};
+use wasmtime::{Instance, Val};
 
+use super::WasmLpvmSharedRuntime;
 use super::link;
 use super::marshal::{build_wasm_args, wasm_vals_to_lps_value, zero_results_for_type};
 use crate::error::WasmError;
@@ -17,7 +19,7 @@ use super::WasmLpvmModule;
 
 /// Runnable WASM instance (fuel, shadow stack, linked memory).
 pub struct WasmLpvmInstance {
-    store: Store<()>,
+    runtime: Arc<WasmLpvmSharedRuntime>,
     instance: Instance,
     exports: HashMap<String, WasmExport>,
     signatures: LpsModuleSig,
@@ -27,11 +29,13 @@ pub struct WasmLpvmInstance {
 
 impl WasmLpvmInstance {
     pub(crate) fn new(module: &WasmLpvmModule) -> Result<Self, WasmError> {
-        let mut store = Store::new(&module.engine, ());
-        let (instance, _) =
-            link::instantiate_wasm_module(&module.engine, &mut store, &module.wasm_bytes)?;
+        let instance = link::instantiate_wasm_module(
+            &module.engine,
+            module.runtime.as_ref(),
+            &module.wasm_bytes,
+        )?;
         Ok(Self {
-            store,
+            runtime: Arc::clone(&module.runtime),
             instance,
             exports: module.exports.clone(),
             signatures: module.signatures.clone(),
@@ -40,17 +44,17 @@ impl WasmLpvmInstance {
         })
     }
 
-    fn prepare_call(&mut self) -> Result<(), WasmError> {
+    fn prepare_call(&self, store: &mut wasmtime::Store<()>) -> Result<(), WasmError> {
         if let Some(base) = self.shadow_stack_base {
             let g = self
                 .instance
-                .get_global(&mut self.store, SHADOW_STACK_GLOBAL_EXPORT)
+                .get_global(&mut *store, SHADOW_STACK_GLOBAL_EXPORT)
                 .ok_or_else(|| WasmError::runtime("missing shadow stack global export"))?;
-            g.set(&mut self.store, Val::I32(base)).map_err(|e| {
+            g.set(&mut *store, Val::I32(base)).map_err(|e| {
                 WasmError::runtime(format!("failed to reset shadow stack pointer: {e}"))
             })?;
         }
-        self.store
+        (*store)
             .set_fuel(DEFAULT_VMCTX_FUEL)
             .map_err(|e| WasmError::runtime(format!("failed to set fuel: {e}")))
     }
@@ -95,13 +99,15 @@ impl LpvmInstance for WasmLpvmInstance {
 
         let mut results = zero_results_for_type(&return_ty, self.float_mode);
 
+        let mut guard = self.runtime.lock();
+        let store = &mut guard.store;
         let func = self
             .instance
-            .get_func(&mut self.store, name)
+            .get_func(&mut *store, name)
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
 
-        self.prepare_call()?;
-        func.call(&mut self.store, &wasm_args, &mut results)
+        self.prepare_call(store)?;
+        func.call(&mut *store, &wasm_args, &mut results)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
 
         let (val, consumed) = wasm_vals_to_lps_value(&return_ty, &results, self.float_mode)?;

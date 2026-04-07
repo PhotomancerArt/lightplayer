@@ -68,6 +68,36 @@ pub struct EnvMemorySpec {
     pub max_pages: Option<u32>,
 }
 
+impl EnvMemorySpec {
+    /// WebAssembly page size in bytes (64 KiB). Keep aligned with emit and JS descriptors.
+    pub const WASM_PAGE_SIZE: u32 = 64 * 1024;
+
+    /// Guest-reserved bytes at the start of linear memory (one page). Host [`LpvmMemory::alloc`]
+    /// bumps above this so low addresses stay available for shadow stack / guest data.
+    pub const fn guest_reserve_bytes() -> u32 {
+        Self::WASM_PAGE_SIZE
+    }
+
+    /// Limits recorded on emitted modules when they import `env.memory` (minimum 1 page, no max).
+    #[inline]
+    pub const fn shader_import_limits() -> Self {
+        Self {
+            initial_pages: 1,
+            max_pages: None,
+        }
+    }
+
+    /// Engine-owned linear memory at startup: satisfies shader import minimum and reserves the
+    /// first page for guest use before the host bump region.
+    #[inline]
+    pub const fn engine_initial_for_host() -> Self {
+        Self {
+            initial_pages: 2,
+            max_pages: None,
+        }
+    }
+}
+
 /// A compiled WASM module ready for instantiation.
 #[derive(Debug, Clone)]
 pub struct WasmModule {
