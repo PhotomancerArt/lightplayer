@@ -4,7 +4,7 @@ use cranelift_codegen::ir::{ArgumentPurpose, Type};
 use cranelift_codegen::isa::CallConv;
 
 use crate::jit_module::JitModule;
-use lps_shared::q32::q32_value::CallError;
+use lps_shared::lps_value_f64::CallError;
 
 /// Raw JIT function pointer plus arity for [`DirectCall::call_i32`].
 #[derive(Clone, Copy, Debug)]

@@ -8,7 +8,7 @@ use lps_exec::GlslExecutable;
 use lps_shared::{LpsFnSig, LpsType};
 use lpvm::LpsValue;
 use lpvm_cranelift::{jit, CompileOptions, CompilerError, JitModule};
-use lpvm_cranelift::{GlslReturn, Q32ShaderValue};
+use lpvm_cranelift::{GlslReturn, LpsValueF64};
 
 use super::q32_exec_common::{
     args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
@@ -55,7 +55,7 @@ impl Q32ShaderExecutable for LpirJitExecutable {
         &mut self,
         name: &str,
         args: &[LpsValue],
-    ) -> Result<GlslReturn<Q32ShaderValue>, GlslError> {
+    ) -> Result<GlslReturn<LpsValueF64>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
                 lps_diagnostics::ErrorCode::E0101,

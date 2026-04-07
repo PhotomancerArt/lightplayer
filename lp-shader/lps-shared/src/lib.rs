@@ -11,9 +11,10 @@ extern crate alloc;
 
 pub mod layout;
 pub mod lps_value;
+pub mod lps_value_f64;
+pub mod lps_value_f64_convert;
 pub mod path;
 pub mod path_resolve;
-pub mod q32;
 mod sig;
 mod types;
 pub mod value_path;

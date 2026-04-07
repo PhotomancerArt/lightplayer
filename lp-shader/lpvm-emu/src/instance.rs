@@ -9,7 +9,7 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
 use lp_riscv_emu::{LogLevel, Memory, Riscv32Emulator, DEFAULT_SHARED_START};
 use lpir::FloatMode;
-use lps_shared::q32::q32_marshal::{glsl_q32_to_lps_value, lps_value_to_glsl_q32};
+use lps_shared::lps_value_f64_convert::{glsl_f64_to_lps_value, lps_value_to_f64};
 use lps_shared::{LpsType, ParamQualifier};
 use lpvm::{AllocError, LpsValue, LpvmInstance, LpvmMemory};
 use lpvm_cranelift::{decode_q32_return, flatten_q32_arg, signature_for_ir_func, CallError};
@@ -130,7 +130,7 @@ impl LpvmInstance for EmuInstance {
 
         let mut flat: Vec<i32> = Vec::new();
         for (p, a) in gfn.parameters.iter().zip(args.iter()) {
-            let q = lps_value_to_glsl_q32(&p.ty, a)?;
+            let q = lps_value_to_f64(&p.ty, a)?;
             flat.extend(flatten_q32_arg(p, &q)?);
         }
         if flat.len() != param_count {
@@ -210,6 +210,6 @@ impl LpvmInstance for EmuInstance {
         words.truncate(n_ret);
 
         let gq = decode_q32_return(&gfn.return_type, &words)?;
-        glsl_q32_to_lps_value(&gfn.return_type, gq).map_err(|e| InstanceError::Call(e))
+        glsl_f64_to_lps_value(&gfn.return_type, gq).map_err(|e| InstanceError::Call(e))
     }
 }

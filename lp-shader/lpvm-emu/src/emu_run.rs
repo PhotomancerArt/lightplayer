@@ -19,7 +19,7 @@ use lpvm_cranelift::error::CompileError;
 use lpvm_cranelift::{
     decode_q32_return, flatten_q32_arg, signature_for_ir_func, CompileOptions, CompilerError,
 };
-use lpvm_cranelift::{CallError, GlslReturn, Q32ShaderValue};
+use lpvm_cranelift::{CallError, GlslReturn, LpsValueF64};
 use target_lexicon::Triple;
 
 use crate::memory::DEFAULT_SHARED_CAPACITY;
@@ -78,8 +78,8 @@ pub fn glsl_q32_call_emulated(
     glsl_meta: &LpsModuleSig,
     options: &CompileOptions,
     name: &str,
-    args: &[Q32ShaderValue],
-) -> Result<GlslReturn<Q32ShaderValue>, CallError> {
+    args: &[LpsValueF64],
+) -> Result<GlslReturn<LpsValueF64>, CallError> {
     if options.float_mode != FloatMode::Q32 {
         return Err(CallError::Unsupported(
             "emulated Q32 call requires FloatMode::Q32".into(),

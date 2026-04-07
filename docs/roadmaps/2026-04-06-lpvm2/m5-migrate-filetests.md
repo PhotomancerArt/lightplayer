@@ -16,9 +16,9 @@ LPVM interface.
 
 - Replace `GlslExecutable` usage in `lps-filetests` with LPVM traits
 - Update test execution to use `LpvmEngine::compile()` →
-  `LpvmModule::instantiate()` → `LpvmInstance::call()`
+`LpvmModule::instantiate()` → `LpvmInstance::call()`
 - Update the filetest runner to be generic over `LpvmEngine` or use a
-  dispatch mechanism for backend selection
+dispatch mechanism for backend selection
 - Migrate `LpirRv32Executable` to use `lpvm-emu`'s `EmuEngine`
 - Migrate `LpirJitExecutable` to use `lpvm-cranelift`'s `CraneliftEngine`
 - Migrate WASM executables to use `lpvm-wasm`'s engines
@@ -34,15 +34,13 @@ LPVM interface.
 ## Key Decisions
 
 1. **Backend selection**: Filetests select backends via directive (e.g.,
-   `// backend: rv32`, `// backend: jit`, `// backend: wasm`). The runner
+  `// backend: rv32`, `// backend: jit`, `// backend: wasm`). The runner
    creates the appropriate `LpvmEngine` and runs through the trait interface.
-
 2. **Shared engine per test suite**: One engine instance per backend per test
-   run. Modules and instances are created per-test. This exercises the
+  run. Modules and instances are created per-test. This exercises the
    multi-module-per-engine pattern.
-
 3. **Value marshaling unchanged**: `LpvmInstance::call()` already handles
-   `LpsValue` marshaling. Filetests continue to use `LpsValue` for expected
+  `LpsValue` marshaling. Filetests continue to use `LpsValue` for expected
    values.
 
 ## Deliverables

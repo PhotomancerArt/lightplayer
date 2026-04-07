@@ -9,7 +9,7 @@ use lps_q32::q32_encode::{q32_encode_f64, q32_to_f64};
 
 /// Q32 host-side value (floats as `f64` before fixed-point encode).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Q32ShaderValue {
+pub enum LpsValueF64 {
     Float(f64),
     Int(i32),
     UInt(u32),
@@ -31,9 +31,9 @@ pub enum Q32ShaderValue {
     Mat3([f64; 9]),
     Mat4([f64; 16]),
     /// Fixed-size array; ABI matches flattened element scalars in order.
-    Array(Vec<Q32ShaderValue>),
+    Array(Vec<LpsValueF64>),
     /// Struct; members in declaration order (flattened ABI not used until JIT supports structs).
-    Struct(Vec<Q32ShaderValue>),
+    Struct(Vec<LpsValueF64>),
 }
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).
@@ -87,71 +87,65 @@ pub fn glsl_component_count(ty: &LpsType) -> usize {
     }
 }
 
-pub fn flatten_q32_arg(param: &FnParam, arg: &Q32ShaderValue) -> Result<Vec<i32>, CallError> {
+pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueF64) -> Result<Vec<i32>, CallError> {
     if param.qualifier != ParamQualifier::In {
         return Err(CallError::Unsupported(String::from(
             "out/inout parameters are not supported by Level-1 call() yet",
         )));
     }
     match (&param.ty, arg) {
-        (LpsType::Float, Q32ShaderValue::Float(x)) => Ok(alloc::vec![q32_encode_f64(*x)]),
-        (LpsType::Int, Q32ShaderValue::Int(x)) => Ok(alloc::vec![*x]),
-        (LpsType::UInt, Q32ShaderValue::UInt(x)) => Ok(alloc::vec![*x as i32]),
-        (LpsType::Bool, Q32ShaderValue::Bool(b)) => Ok(alloc::vec![if *b { 1 } else { 0 }]),
+        (LpsType::Float, LpsValueF64::Float(x)) => Ok(alloc::vec![q32_encode_f64(*x)]),
+        (LpsType::Int, LpsValueF64::Int(x)) => Ok(alloc::vec![*x]),
+        (LpsType::UInt, LpsValueF64::UInt(x)) => Ok(alloc::vec![*x as i32]),
+        (LpsType::Bool, LpsValueF64::Bool(b)) => Ok(alloc::vec![if *b { 1 } else { 0 }]),
 
-        (LpsType::Vec2, Q32ShaderValue::Vec2(a, b)) => {
+        (LpsType::Vec2, LpsValueF64::Vec2(a, b)) => {
             Ok(alloc::vec![q32_encode_f64(*a), q32_encode_f64(*b),])
         }
-        (LpsType::Vec3, Q32ShaderValue::Vec3(a, b, c)) => Ok(alloc::vec![
+        (LpsType::Vec3, LpsValueF64::Vec3(a, b, c)) => Ok(alloc::vec![
             q32_encode_f64(*a),
             q32_encode_f64(*b),
             q32_encode_f64(*c),
         ]),
-        (LpsType::Vec4, Q32ShaderValue::Vec4(a, b, c, d)) => Ok(alloc::vec![
+        (LpsType::Vec4, LpsValueF64::Vec4(a, b, c, d)) => Ok(alloc::vec![
             q32_encode_f64(*a),
             q32_encode_f64(*b),
             q32_encode_f64(*c),
             q32_encode_f64(*d),
         ]),
 
-        (LpsType::IVec2, Q32ShaderValue::IVec2(a, b)) => Ok(alloc::vec![*a, *b]),
-        (LpsType::IVec3, Q32ShaderValue::IVec3(a, b, c)) => Ok(alloc::vec![*a, *b, *c]),
-        (LpsType::IVec4, Q32ShaderValue::IVec4(a, b, c, d)) => Ok(alloc::vec![*a, *b, *c, *d]),
+        (LpsType::IVec2, LpsValueF64::IVec2(a, b)) => Ok(alloc::vec![*a, *b]),
+        (LpsType::IVec3, LpsValueF64::IVec3(a, b, c)) => Ok(alloc::vec![*a, *b, *c]),
+        (LpsType::IVec4, LpsValueF64::IVec4(a, b, c, d)) => Ok(alloc::vec![*a, *b, *c, *d]),
 
-        (LpsType::UVec2, Q32ShaderValue::UVec2(a, b)) => Ok(alloc::vec![*a as i32, *b as i32]),
-        (LpsType::UVec3, Q32ShaderValue::UVec3(a, b, c)) => {
+        (LpsType::UVec2, LpsValueF64::UVec2(a, b)) => Ok(alloc::vec![*a as i32, *b as i32]),
+        (LpsType::UVec3, LpsValueF64::UVec3(a, b, c)) => {
             Ok(alloc::vec![*a as i32, *b as i32, *c as i32])
         }
-        (LpsType::UVec4, Q32ShaderValue::UVec4(a, b, c, d)) => {
+        (LpsType::UVec4, LpsValueF64::UVec4(a, b, c, d)) => {
             Ok(alloc::vec![*a as i32, *b as i32, *c as i32, *d as i32,])
         }
 
-        (LpsType::BVec2, Q32ShaderValue::BVec2(a, b)) => {
+        (LpsType::BVec2, LpsValueF64::BVec2(a, b)) => {
             Ok(alloc::vec![if *a { 1 } else { 0 }, if *b { 1 } else { 0 },])
         }
-        (LpsType::BVec3, Q32ShaderValue::BVec3(a, b, c)) => Ok(alloc::vec![
+        (LpsType::BVec3, LpsValueF64::BVec3(a, b, c)) => Ok(alloc::vec![
             if *a { 1 } else { 0 },
             if *b { 1 } else { 0 },
             if *c { 1 } else { 0 },
         ]),
-        (LpsType::BVec4, Q32ShaderValue::BVec4(a, b, c, d)) => Ok(alloc::vec![
+        (LpsType::BVec4, LpsValueF64::BVec4(a, b, c, d)) => Ok(alloc::vec![
             if *a { 1 } else { 0 },
             if *b { 1 } else { 0 },
             if *c { 1 } else { 0 },
             if *d { 1 } else { 0 },
         ]),
 
-        (LpsType::Mat2, Q32ShaderValue::Mat2(a)) => {
-            Ok(a.iter().map(|x| q32_encode_f64(*x)).collect())
-        }
-        (LpsType::Mat3, Q32ShaderValue::Mat3(a)) => {
-            Ok(a.iter().map(|x| q32_encode_f64(*x)).collect())
-        }
-        (LpsType::Mat4, Q32ShaderValue::Mat4(a)) => {
-            Ok(a.iter().map(|x| q32_encode_f64(*x)).collect())
-        }
+        (LpsType::Mat2, LpsValueF64::Mat2(a)) => Ok(a.iter().map(|x| q32_encode_f64(*x)).collect()),
+        (LpsType::Mat3, LpsValueF64::Mat3(a)) => Ok(a.iter().map(|x| q32_encode_f64(*x)).collect()),
+        (LpsType::Mat4, LpsValueF64::Mat4(a)) => Ok(a.iter().map(|x| q32_encode_f64(*x)).collect()),
 
-        (LpsType::Array { element, len }, Q32ShaderValue::Array(items)) => {
+        (LpsType::Array { element, len }, LpsValueF64::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(CallError::TypeMismatch(format!(
                     "array argument length mismatch: expected {}, got {}",
@@ -171,11 +165,9 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &Q32ShaderValue) -> Result<Vec<i32>
             Ok(out)
         }
 
-        (LpsType::Struct { .. }, _) | (_, Q32ShaderValue::Struct(_)) => {
-            Err(CallError::Unsupported(String::from(
-                "struct parameters are not supported by Level-1 call() yet",
-            )))
-        }
+        (LpsType::Struct { .. }, _) | (_, LpsValueF64::Struct(_)) => Err(CallError::Unsupported(
+            String::from("struct parameters are not supported by Level-1 call() yet"),
+        )),
 
         (expected, got) => Err(CallError::TypeMismatch(format!(
             "argument type mismatch: expected {:?}, got {:?}",
@@ -185,33 +177,33 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &Q32ShaderValue) -> Result<Vec<i32>
     }
 }
 
-fn got_ty_name(v: &Q32ShaderValue) -> &'static str {
+fn got_ty_name(v: &LpsValueF64) -> &'static str {
     match v {
-        Q32ShaderValue::Float(_) => "Float",
-        Q32ShaderValue::Int(_) => "Int",
-        Q32ShaderValue::UInt(_) => "UInt",
-        Q32ShaderValue::Bool(_) => "Bool",
-        Q32ShaderValue::Vec2(..) => "Vec2",
-        Q32ShaderValue::Vec3(..) => "Vec3",
-        Q32ShaderValue::Vec4(..) => "Vec4",
-        Q32ShaderValue::IVec2(..) => "IVec2",
-        Q32ShaderValue::IVec3(..) => "IVec3",
-        Q32ShaderValue::IVec4(..) => "IVec4",
-        Q32ShaderValue::UVec2(..) => "UVec2",
-        Q32ShaderValue::UVec3(..) => "UVec3",
-        Q32ShaderValue::UVec4(..) => "UVec4",
-        Q32ShaderValue::BVec2(..) => "BVec2",
-        Q32ShaderValue::BVec3(..) => "BVec3",
-        Q32ShaderValue::BVec4(..) => "BVec4",
-        Q32ShaderValue::Mat2(_) => "Mat2",
-        Q32ShaderValue::Mat3(_) => "Mat3",
-        Q32ShaderValue::Mat4(_) => "Mat4",
-        Q32ShaderValue::Array(_) => "Array",
-        Q32ShaderValue::Struct(_) => "Struct",
+        LpsValueF64::Float(_) => "Float",
+        LpsValueF64::Int(_) => "Int",
+        LpsValueF64::UInt(_) => "UInt",
+        LpsValueF64::Bool(_) => "Bool",
+        LpsValueF64::Vec2(..) => "Vec2",
+        LpsValueF64::Vec3(..) => "Vec3",
+        LpsValueF64::Vec4(..) => "Vec4",
+        LpsValueF64::IVec2(..) => "IVec2",
+        LpsValueF64::IVec3(..) => "IVec3",
+        LpsValueF64::IVec4(..) => "IVec4",
+        LpsValueF64::UVec2(..) => "UVec2",
+        LpsValueF64::UVec3(..) => "UVec3",
+        LpsValueF64::UVec4(..) => "UVec4",
+        LpsValueF64::BVec2(..) => "BVec2",
+        LpsValueF64::BVec3(..) => "BVec3",
+        LpsValueF64::BVec4(..) => "BVec4",
+        LpsValueF64::Mat2(_) => "Mat2",
+        LpsValueF64::Mat3(_) => "Mat3",
+        LpsValueF64::Mat4(_) => "Mat4",
+        LpsValueF64::Array(_) => "Array",
+        LpsValueF64::Struct(_) => "Struct",
     }
 }
 
-pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<Q32ShaderValue, CallError> {
+pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<LpsValueF64, CallError> {
     let n = glsl_component_count(ty);
     if words.len() < n {
         return Err(CallError::Unsupported(format!(
@@ -230,45 +222,45 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<Q32ShaderValue, 
                 "decode_q32_return called for void",
             )));
         }
-        LpsType::Float => Q32ShaderValue::Float(q32_to_f64(words[0])),
-        LpsType::Int => Q32ShaderValue::Int(words[0]),
-        LpsType::UInt => Q32ShaderValue::UInt(words[0] as u32),
-        LpsType::Bool => Q32ShaderValue::Bool(words[0] != 0),
-        LpsType::Vec2 => Q32ShaderValue::Vec2(q32_to_f64(words[0]), q32_to_f64(words[1])),
-        LpsType::Vec3 => Q32ShaderValue::Vec3(
+        LpsType::Float => LpsValueF64::Float(q32_to_f64(words[0])),
+        LpsType::Int => LpsValueF64::Int(words[0]),
+        LpsType::UInt => LpsValueF64::UInt(words[0] as u32),
+        LpsType::Bool => LpsValueF64::Bool(words[0] != 0),
+        LpsType::Vec2 => LpsValueF64::Vec2(q32_to_f64(words[0]), q32_to_f64(words[1])),
+        LpsType::Vec3 => LpsValueF64::Vec3(
             q32_to_f64(words[0]),
             q32_to_f64(words[1]),
             q32_to_f64(words[2]),
         ),
-        LpsType::Vec4 => Q32ShaderValue::Vec4(
+        LpsType::Vec4 => LpsValueF64::Vec4(
             q32_to_f64(words[0]),
             q32_to_f64(words[1]),
             q32_to_f64(words[2]),
             q32_to_f64(words[3]),
         ),
-        LpsType::IVec2 => Q32ShaderValue::IVec2(words[0], words[1]),
-        LpsType::IVec3 => Q32ShaderValue::IVec3(words[0], words[1], words[2]),
-        LpsType::IVec4 => Q32ShaderValue::IVec4(words[0], words[1], words[2], words[3]),
-        LpsType::UVec2 => Q32ShaderValue::UVec2(words[0] as u32, words[1] as u32),
-        LpsType::UVec3 => Q32ShaderValue::UVec3(words[0] as u32, words[1] as u32, words[2] as u32),
-        LpsType::UVec4 => Q32ShaderValue::UVec4(
+        LpsType::IVec2 => LpsValueF64::IVec2(words[0], words[1]),
+        LpsType::IVec3 => LpsValueF64::IVec3(words[0], words[1], words[2]),
+        LpsType::IVec4 => LpsValueF64::IVec4(words[0], words[1], words[2], words[3]),
+        LpsType::UVec2 => LpsValueF64::UVec2(words[0] as u32, words[1] as u32),
+        LpsType::UVec3 => LpsValueF64::UVec3(words[0] as u32, words[1] as u32, words[2] as u32),
+        LpsType::UVec4 => LpsValueF64::UVec4(
             words[0] as u32,
             words[1] as u32,
             words[2] as u32,
             words[3] as u32,
         ),
-        LpsType::BVec2 => Q32ShaderValue::BVec2(words[0] != 0, words[1] != 0),
-        LpsType::BVec3 => Q32ShaderValue::BVec3(words[0] != 0, words[1] != 0, words[2] != 0),
+        LpsType::BVec2 => LpsValueF64::BVec2(words[0] != 0, words[1] != 0),
+        LpsType::BVec3 => LpsValueF64::BVec3(words[0] != 0, words[1] != 0, words[2] != 0),
         LpsType::BVec4 => {
-            Q32ShaderValue::BVec4(words[0] != 0, words[1] != 0, words[2] != 0, words[3] != 0)
+            LpsValueF64::BVec4(words[0] != 0, words[1] != 0, words[2] != 0, words[3] != 0)
         }
-        LpsType::Mat2 => Q32ShaderValue::Mat2([
+        LpsType::Mat2 => LpsValueF64::Mat2([
             q32_to_f64(words[0]),
             q32_to_f64(words[1]),
             q32_to_f64(words[2]),
             q32_to_f64(words[3]),
         ]),
-        LpsType::Mat3 => Q32ShaderValue::Mat3([
+        LpsType::Mat3 => LpsValueF64::Mat3([
             q32_to_f64(words[0]),
             q32_to_f64(words[1]),
             q32_to_f64(words[2]),
@@ -279,7 +271,7 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<Q32ShaderValue, 
             q32_to_f64(words[7]),
             q32_to_f64(words[8]),
         ]),
-        LpsType::Mat4 => Q32ShaderValue::Mat4([
+        LpsType::Mat4 => LpsValueF64::Mat4([
             q32_to_f64(words[0]),
             q32_to_f64(words[1]),
             q32_to_f64(words[2]),
@@ -305,7 +297,7 @@ pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<Q32ShaderValue, 
                 let end = start + per;
                 elems.push(decode_q32_return(element, &words[start..end])?);
             }
-            Q32ShaderValue::Array(elems)
+            LpsValueF64::Array(elems)
         }
     })
 }

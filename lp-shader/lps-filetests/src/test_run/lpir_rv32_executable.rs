@@ -11,7 +11,7 @@ use lpvm::LpsValue;
 use lpvm_cranelift::{
     link_object_with_builtins, object_bytes_from_ir, CompileOptions, CompilerError,
 };
-use lpvm_cranelift::{GlslReturn, Q32ShaderValue};
+use lpvm_cranelift::{GlslReturn, LpsValueF64};
 use lpvm_emu::glsl_q32_call_emulated;
 
 use super::q32_exec_common::{
@@ -68,7 +68,7 @@ impl Q32ShaderExecutable for LpirRv32Executable {
         &mut self,
         name: &str,
         args: &[LpsValue],
-    ) -> Result<GlslReturn<Q32ShaderValue>, GlslError> {
+    ) -> Result<GlslReturn<LpsValueF64>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
                 lps_diagnostics::ErrorCode::E0101,

@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::mem::transmute;
 
-use lps_shared::q32::q32_value::CallError;
+use lps_shared::lps_value_f64::CallError;
 
 /// VMContext as a full machine word for `extern "C"` JIT entrypoints.
 type VmCtxWord = usize;
