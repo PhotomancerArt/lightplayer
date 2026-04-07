@@ -24,8 +24,8 @@
 //! Euclidean squared distance to nearest feature point, approximately in range [-1, 1] (float)
 
 use crate::builtins::lpfx::hash::lpfx_hash3;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// Fixed-point constants
 const HALF: Q32 = Q32(0x00008000); // 0.5 in Q16.16

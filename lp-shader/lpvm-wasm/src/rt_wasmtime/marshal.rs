@@ -1,10 +1,10 @@
-//! Marshal [`LpsValue`] ↔ wasmtime [`Val`] using the same layout as `lps-filetests` WASM runner.
+//! Marshal [`LpsValueF32`] ↔ wasmtime [`Val`] using the same layout as `lps-filetests` WASM runner.
 
 use std::format;
 
 use lpir::FloatMode;
 use lps_shared::LpsType;
-use lpvm::LpsValue;
+use lpvm::LpsValueF32;
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::Val;
 
@@ -32,69 +32,69 @@ pub(crate) fn wasm_val_to_f32(v: &Val, fm: FloatMode) -> Result<f32, WasmError> 
 
 fn glsl_value_to_wasm_flat(
     ty: &LpsType,
-    v: &LpsValue,
+    v: &LpsValueF32,
     fm: FloatMode,
 ) -> Result<Vec<Val>, WasmError> {
     use LpsType::*;
     Ok(match (ty, v) {
-        (Float, LpsValue::F32(f)) => vec![encode_f32_wasm(*f, fm)],
-        (Int, LpsValue::I32(i)) => vec![Val::I32(*i)],
-        (UInt, LpsValue::U32(u)) => vec![Val::I32(*u as i32)],
-        (Bool, LpsValue::Bool(b)) => vec![Val::I32(if *b { 1 } else { 0 })],
-        (Vec2, LpsValue::Vec2(a)) => vec![encode_f32_wasm(a[0], fm), encode_f32_wasm(a[1], fm)],
-        (Vec3, LpsValue::Vec3(a)) => vec![
+        (Float, LpsValueF32::F32(f)) => vec![encode_f32_wasm(*f, fm)],
+        (Int, LpsValueF32::I32(i)) => vec![Val::I32(*i)],
+        (UInt, LpsValueF32::U32(u)) => vec![Val::I32(*u as i32)],
+        (Bool, LpsValueF32::Bool(b)) => vec![Val::I32(if *b { 1 } else { 0 })],
+        (Vec2, LpsValueF32::Vec2(a)) => vec![encode_f32_wasm(a[0], fm), encode_f32_wasm(a[1], fm)],
+        (Vec3, LpsValueF32::Vec3(a)) => vec![
             encode_f32_wasm(a[0], fm),
             encode_f32_wasm(a[1], fm),
             encode_f32_wasm(a[2], fm),
         ],
-        (Vec4, LpsValue::Vec4(a)) => vec![
+        (Vec4, LpsValueF32::Vec4(a)) => vec![
             encode_f32_wasm(a[0], fm),
             encode_f32_wasm(a[1], fm),
             encode_f32_wasm(a[2], fm),
             encode_f32_wasm(a[3], fm),
         ],
-        (IVec2, LpsValue::IVec2(a)) => vec![Val::I32(a[0]), Val::I32(a[1])],
-        (IVec3, LpsValue::IVec3(a)) => vec![Val::I32(a[0]), Val::I32(a[1]), Val::I32(a[2])],
-        (IVec4, LpsValue::IVec4(a)) => vec![
+        (IVec2, LpsValueF32::IVec2(a)) => vec![Val::I32(a[0]), Val::I32(a[1])],
+        (IVec3, LpsValueF32::IVec3(a)) => vec![Val::I32(a[0]), Val::I32(a[1]), Val::I32(a[2])],
+        (IVec4, LpsValueF32::IVec4(a)) => vec![
             Val::I32(a[0]),
             Val::I32(a[1]),
             Val::I32(a[2]),
             Val::I32(a[3]),
         ],
-        (UVec2, LpsValue::UVec2(a)) => vec![Val::I32(a[0] as i32), Val::I32(a[1] as i32)],
-        (UVec3, LpsValue::UVec3(a)) => vec![
+        (UVec2, LpsValueF32::UVec2(a)) => vec![Val::I32(a[0] as i32), Val::I32(a[1] as i32)],
+        (UVec3, LpsValueF32::UVec3(a)) => vec![
             Val::I32(a[0] as i32),
             Val::I32(a[1] as i32),
             Val::I32(a[2] as i32),
         ],
-        (UVec4, LpsValue::UVec4(a)) => vec![
+        (UVec4, LpsValueF32::UVec4(a)) => vec![
             Val::I32(a[0] as i32),
             Val::I32(a[1] as i32),
             Val::I32(a[2] as i32),
             Val::I32(a[3] as i32),
         ],
-        (BVec2, LpsValue::BVec2(a)) => vec![
+        (BVec2, LpsValueF32::BVec2(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
         ],
-        (BVec3, LpsValue::BVec3(a)) => vec![
+        (BVec3, LpsValueF32::BVec3(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
             Val::I32(if a[2] { 1 } else { 0 }),
         ],
-        (BVec4, LpsValue::BVec4(a)) => vec![
+        (BVec4, LpsValueF32::BVec4(a)) => vec![
             Val::I32(if a[0] { 1 } else { 0 }),
             Val::I32(if a[1] { 1 } else { 0 }),
             Val::I32(if a[2] { 1 } else { 0 }),
             Val::I32(if a[3] { 1 } else { 0 }),
         ],
-        (Mat2, LpsValue::Mat2x2(m)) => vec![
+        (Mat2, LpsValueF32::Mat2x2(m)) => vec![
             encode_f32_wasm(m[0][0], fm),
             encode_f32_wasm(m[0][1], fm),
             encode_f32_wasm(m[1][0], fm),
             encode_f32_wasm(m[1][1], fm),
         ],
-        (Mat3, LpsValue::Mat3x3(m)) => {
+        (Mat3, LpsValueF32::Mat3x3(m)) => {
             let mut v = Vec::with_capacity(9);
             for col in m.iter() {
                 for x in col.iter() {
@@ -103,7 +103,7 @@ fn glsl_value_to_wasm_flat(
             }
             v
         }
-        (Mat4, LpsValue::Mat4x4(m)) => {
+        (Mat4, LpsValueF32::Mat4x4(m)) => {
             let mut v = Vec::with_capacity(16);
             for col in m.iter() {
                 for x in col.iter() {
@@ -112,7 +112,7 @@ fn glsl_value_to_wasm_flat(
             }
             v
         }
-        (Array { element, len }, LpsValue::Array(items)) => {
+        (Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(WasmError::runtime(format!(
                     "array value length {} does not match type length {}",
@@ -126,7 +126,7 @@ fn glsl_value_to_wasm_flat(
             }
             out
         }
-        (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
+        (Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(WasmError::runtime(format!(
                     "struct field count {} does not match type field count {}",
@@ -151,7 +151,7 @@ fn glsl_value_to_wasm_flat(
 pub(crate) fn build_wasm_args(
     param_types: &[LpsType],
     export_param_slots: usize,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     fm: FloatMode,
 ) -> Result<Vec<Val>, WasmError> {
     if args.len() != param_types.len() {
@@ -180,88 +180,88 @@ pub(crate) fn wasm_vals_to_lps_value(
     ty: &LpsType,
     vals: &[Val],
     fm: FloatMode,
-) -> Result<(LpsValue, usize), WasmError> {
+) -> Result<(LpsValueF32, usize), WasmError> {
     use LpsType::*;
     match ty {
         Void => Err(WasmError::runtime("void type in wasm_vals_to_lps_value")),
         Float => {
             let f = wasm_val_to_f32(&vals[0], fm)?;
-            Ok((LpsValue::F32(f), 1))
+            Ok((LpsValueF32::F32(f), 1))
         }
         Int => match vals.first() {
-            Some(Val::I32(i)) => Ok((LpsValue::I32(*i), 1)),
+            Some(Val::I32(i)) => Ok((LpsValueF32::I32(*i), 1)),
             _ => Err(WasmError::runtime("expected i32 for int return")),
         },
         UInt => match vals.first() {
-            Some(Val::I32(i)) => Ok((LpsValue::U32(*i as u32), 1)),
+            Some(Val::I32(i)) => Ok((LpsValueF32::U32(*i as u32), 1)),
             _ => Err(WasmError::runtime("expected i32 for uint return")),
         },
         Bool => match vals.first() {
-            Some(Val::I32(i)) => Ok((LpsValue::Bool(*i != 0), 1)),
+            Some(Val::I32(i)) => Ok((LpsValueF32::Bool(*i != 0), 1)),
             _ => Err(WasmError::runtime("expected i32 for bool return")),
         },
         Vec2 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
-            Ok((LpsValue::Vec2([a, b]), 2))
+            Ok((LpsValueF32::Vec2([a, b]), 2))
         }
         Vec3 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
             let c = wasm_val_to_f32(&vals[2], fm)?;
-            Ok((LpsValue::Vec3([a, b, c]), 3))
+            Ok((LpsValueF32::Vec3([a, b, c]), 3))
         }
         Vec4 => {
             let a = wasm_val_to_f32(&vals[0], fm)?;
             let b = wasm_val_to_f32(&vals[1], fm)?;
             let c = wasm_val_to_f32(&vals[2], fm)?;
             let d = wasm_val_to_f32(&vals[3], fm)?;
-            Ok((LpsValue::Vec4([a, b, c, d]), 4))
+            Ok((LpsValueF32::Vec4([a, b, c, d]), 4))
         }
         IVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::IVec2([*a, *b]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValueF32::IVec2([*a, *b]), 2)),
             _ => Err(WasmError::runtime("expected i32 pair for ivec2")),
         },
         IVec3 => match (&vals[0], &vals[1], &vals[2]) {
-            (Val::I32(a), Val::I32(b), Val::I32(c)) => Ok((LpsValue::IVec3([*a, *b, *c]), 3)),
+            (Val::I32(a), Val::I32(b), Val::I32(c)) => Ok((LpsValueF32::IVec3([*a, *b, *c]), 3)),
             _ => Err(WasmError::runtime("expected i32 triple for ivec3")),
         },
         IVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
-                Ok((LpsValue::IVec4([*a, *b, *c, *d]), 4))
+                Ok((LpsValueF32::IVec4([*a, *b, *c, *d]), 4))
             }
             _ => Err(WasmError::runtime("expected four i32 for ivec4")),
         },
         UVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::UVec2([*a as u32, *b as u32]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValueF32::UVec2([*a as u32, *b as u32]), 2)),
             _ => Err(WasmError::runtime("expected i32 pair for uvec2")),
         },
         UVec3 => match (&vals[0], &vals[1], &vals[2]) {
             (Val::I32(a), Val::I32(b), Val::I32(c)) => {
-                Ok((LpsValue::UVec3([*a as u32, *b as u32, *c as u32]), 3))
+                Ok((LpsValueF32::UVec3([*a as u32, *b as u32, *c as u32]), 3))
             }
             _ => Err(WasmError::runtime("expected i32 triple for uvec3")),
         },
         UVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => Ok((
-                LpsValue::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
+                LpsValueF32::UVec4([*a as u32, *b as u32, *c as u32, *d as u32]),
                 4,
             )),
             _ => Err(WasmError::runtime("expected four i32 for uvec4")),
         },
         BVec2 => match (&vals[0], &vals[1]) {
-            (Val::I32(a), Val::I32(b)) => Ok((LpsValue::BVec2([*a != 0, *b != 0]), 2)),
+            (Val::I32(a), Val::I32(b)) => Ok((LpsValueF32::BVec2([*a != 0, *b != 0]), 2)),
             _ => Err(WasmError::runtime("expected i32 pair for bvec2")),
         },
         BVec3 => match (&vals[0], &vals[1], &vals[2]) {
             (Val::I32(a), Val::I32(b), Val::I32(c)) => {
-                Ok((LpsValue::BVec3([*a != 0, *b != 0, *c != 0]), 3))
+                Ok((LpsValueF32::BVec3([*a != 0, *b != 0, *c != 0]), 3))
             }
             _ => Err(WasmError::runtime("expected i32 triple for bvec3")),
         },
         BVec4 => match (&vals[0], &vals[1], &vals[2], &vals[3]) {
             (Val::I32(a), Val::I32(b), Val::I32(c), Val::I32(d)) => {
-                Ok((LpsValue::BVec4([*a != 0, *b != 0, *c != 0, *d != 0]), 4))
+                Ok((LpsValueF32::BVec4([*a != 0, *b != 0, *c != 0, *d != 0]), 4))
             }
             _ => Err(WasmError::runtime("expected four i32 for bvec4")),
         },
@@ -272,7 +272,7 @@ pub(crate) fn wasm_vals_to_lps_value(
             col0[1] = wasm_val_to_f32(&vals[1], fm)?;
             col1[0] = wasm_val_to_f32(&vals[2], fm)?;
             col1[1] = wasm_val_to_f32(&vals[3], fm)?;
-            Ok((LpsValue::Mat2x2([col0, col1]), 4))
+            Ok((LpsValueF32::Mat2x2([col0, col1]), 4))
         }
         Mat3 => {
             let mut m = [[0f32; 3]; 3];
@@ -281,7 +281,7 @@ pub(crate) fn wasm_vals_to_lps_value(
                     m[col][row] = wasm_val_to_f32(&vals[col * 3 + row], fm)?;
                 }
             }
-            Ok((LpsValue::Mat3x3(m), 9))
+            Ok((LpsValueF32::Mat3x3(m), 9))
         }
         Mat4 => {
             let mut m = [[0f32; 4]; 4];
@@ -290,7 +290,7 @@ pub(crate) fn wasm_vals_to_lps_value(
                     m[col][row] = wasm_val_to_f32(&vals[col * 4 + row], fm)?;
                 }
             }
-            Ok((LpsValue::Mat4x4(m), 16))
+            Ok((LpsValueF32::Mat4x4(m), 16))
         }
         Array { element, len } => {
             let mut off = 0;
@@ -300,7 +300,7 @@ pub(crate) fn wasm_vals_to_lps_value(
                 off += n;
                 elems.push(v);
             }
-            Ok((LpsValue::Array(elems.into_boxed_slice()), off))
+            Ok((LpsValueF32::Array(elems.into_boxed_slice()), off))
         }
         Struct { name, members } => {
             let mut off = 0;
@@ -315,7 +315,7 @@ pub(crate) fn wasm_vals_to_lps_value(
                 fields.push((key, v));
             }
             Ok((
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: name.clone(),
                     fields,
                 },

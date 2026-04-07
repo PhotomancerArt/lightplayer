@@ -9,10 +9,10 @@ use core::fmt;
 use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
-use lpvm::{LpsValue, LpvmInstance, LpvmModule, VmContext, VMCTX_HEADER_SIZE};
+use lpvm::{LpsValueF32, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext};
 
 use crate::lpvm_module::CraneliftModule;
-use lps_shared::lps_value_f64::{decode_q32_return, flatten_q32_arg, CallError};
+use lps_shared::lps_value_f64::{CallError, decode_q32_return, flatten_q32_arg};
 
 /// Execution error for [`CraneliftInstance`].
 #[derive(Debug)]
@@ -77,7 +77,7 @@ impl LpvmModule for CraneliftModule {
 impl LpvmInstance for CraneliftInstance {
     type Error = InstanceError;
 
-    fn call(&mut self, name: &str, args: &[LpsValue]) -> Result<LpsValue, Self::Error> {
+    fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         if self.module.float_mode() != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "CraneliftInstance::call requires FloatMode::Q32; use direct_call for F32 JIT",

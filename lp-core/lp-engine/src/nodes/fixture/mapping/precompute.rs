@@ -2,9 +2,9 @@
 
 use alloc::vec::Vec;
 use libm;
-use lp_model::FrameId;
 use lp_model::nodes::fixture::mapping::MappingConfig;
-use lps_q32::types::q32::Q32;
+use lp_model::FrameId;
+use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;
 use super::overlap::circle::circle_pixel_overlap;
@@ -103,7 +103,7 @@ pub fn compute_mapping(
                         // Add entries (last one has has_more = false)
                         for (idx, (channel, weight)) in normalized.iter().enumerate() {
                             let has_more = idx < normalized.len() - 1;
-                            let contribution_q32 = Q32::from_f32(*weight);
+                            let contribution_q32 = Q32::from_f32_wrapping(*weight);
 
                             mapping.entries.push(PixelMappingEntry::new(
                                 *channel,

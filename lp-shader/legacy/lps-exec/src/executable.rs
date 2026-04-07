@@ -4,61 +4,61 @@ use alloc::{string::String, vec::Vec};
 
 use lps_diagnostics::GlslError;
 use lps_shared::{LpsFnSig, LpsType};
-use lpvm::LpsValue;
+use lpvm::LpsValueF32;
 
 pub trait GlslExecutable {
-    fn call_void(&mut self, name: &str, args: &[LpsValue]) -> Result<(), GlslError>;
+    fn call_void(&mut self, name: &str, args: &[LpsValueF32]) -> Result<(), GlslError>;
 
-    fn call_i32(&mut self, name: &str, args: &[LpsValue]) -> Result<i32, GlslError>;
+    fn call_i32(&mut self, name: &str, args: &[LpsValueF32]) -> Result<i32, GlslError>;
 
-    fn call_f32(&mut self, name: &str, args: &[LpsValue]) -> Result<f32, GlslError>;
+    fn call_f32(&mut self, name: &str, args: &[LpsValueF32]) -> Result<f32, GlslError>;
 
-    fn call_bool(&mut self, name: &str, args: &[LpsValue]) -> Result<bool, GlslError>;
+    fn call_bool(&mut self, name: &str, args: &[LpsValueF32]) -> Result<bool, GlslError>;
 
     fn call_bvec(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         dim: usize,
     ) -> Result<Vec<bool>, GlslError>;
 
     fn call_ivec(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         dim: usize,
     ) -> Result<Vec<i32>, GlslError>;
 
     fn call_uvec(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         dim: usize,
     ) -> Result<Vec<u32>, GlslError>;
 
     fn call_vec(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         dim: usize,
     ) -> Result<Vec<f32>, GlslError>;
 
     fn call_mat(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         rows: usize,
         cols: usize,
     ) -> Result<Vec<f32>, GlslError>;
 
-    /// Call a function that returns a fixed-size array; one [`LpsValue`] per array element.
+    /// Call a function that returns a fixed-size array; one [`LpsValueF32`] per array element.
     fn call_array(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
         elem_ty: &LpsType,
         len: usize,
-    ) -> Result<Vec<LpsValue>, GlslError>;
+    ) -> Result<Vec<LpsValueF32>, GlslError>;
 
     fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig>;
 

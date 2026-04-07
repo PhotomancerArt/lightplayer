@@ -5,7 +5,7 @@ use std::format;
 use js_sys::Array;
 use lpir::FloatMode;
 use lps_shared::LpsType;
-use lpvm::LpsValue;
+use lpvm::LpsValueF32;
 use wasm_bindgen::JsValue;
 
 use wasm_bindgen::JsCast;
@@ -40,79 +40,79 @@ fn js_slot_as_f32(v: &JsValue, fm: FloatMode) -> Result<f32, WasmError> {
 
 fn glsl_value_to_js_flat(
     ty: &LpsType,
-    v: &LpsValue,
+    v: &LpsValueF32,
     fm: FloatMode,
 ) -> Result<Vec<JsValue>, WasmError> {
     use LpsType::*;
     Ok(match (ty, v) {
-        (Float, LpsValue::F32(f)) => vec![encode_f32_js(*f, fm)],
-        (Int, LpsValue::I32(i)) => vec![JsValue::from_f64(*i as f64)],
-        (UInt, LpsValue::U32(u)) => vec![JsValue::from_f64(*u as f64)],
-        (Bool, LpsValue::Bool(b)) => vec![JsValue::from_f64(if *b { 1.0 } else { 0.0 })],
-        (Vec2, LpsValue::Vec2(a)) => vec![encode_f32_js(a[0], fm), encode_f32_js(a[1], fm)],
-        (Vec3, LpsValue::Vec3(a)) => vec![
+        (Float, LpsValueF32::F32(f)) => vec![encode_f32_js(*f, fm)],
+        (Int, LpsValueF32::I32(i)) => vec![JsValue::from_f64(*i as f64)],
+        (UInt, LpsValueF32::U32(u)) => vec![JsValue::from_f64(*u as f64)],
+        (Bool, LpsValueF32::Bool(b)) => vec![JsValue::from_f64(if *b { 1.0 } else { 0.0 })],
+        (Vec2, LpsValueF32::Vec2(a)) => vec![encode_f32_js(a[0], fm), encode_f32_js(a[1], fm)],
+        (Vec3, LpsValueF32::Vec3(a)) => vec![
             encode_f32_js(a[0], fm),
             encode_f32_js(a[1], fm),
             encode_f32_js(a[2], fm),
         ],
-        (Vec4, LpsValue::Vec4(a)) => vec![
+        (Vec4, LpsValueF32::Vec4(a)) => vec![
             encode_f32_js(a[0], fm),
             encode_f32_js(a[1], fm),
             encode_f32_js(a[2], fm),
             encode_f32_js(a[3], fm),
         ],
-        (IVec2, LpsValue::IVec2(a)) => vec![
+        (IVec2, LpsValueF32::IVec2(a)) => vec![
             JsValue::from_f64(a[0] as f64),
             JsValue::from_f64(a[1] as f64),
         ],
-        (IVec3, LpsValue::IVec3(a)) => vec![
-            JsValue::from_f64(a[0] as f64),
-            JsValue::from_f64(a[1] as f64),
-            JsValue::from_f64(a[2] as f64),
-        ],
-        (IVec4, LpsValue::IVec4(a)) => vec![
-            JsValue::from_f64(a[0] as f64),
-            JsValue::from_f64(a[1] as f64),
-            JsValue::from_f64(a[2] as f64),
-            JsValue::from_f64(a[3] as f64),
-        ],
-        (UVec2, LpsValue::UVec2(a)) => vec![
-            JsValue::from_f64(a[0] as f64),
-            JsValue::from_f64(a[1] as f64),
-        ],
-        (UVec3, LpsValue::UVec3(a)) => vec![
+        (IVec3, LpsValueF32::IVec3(a)) => vec![
             JsValue::from_f64(a[0] as f64),
             JsValue::from_f64(a[1] as f64),
             JsValue::from_f64(a[2] as f64),
         ],
-        (UVec4, LpsValue::UVec4(a)) => vec![
+        (IVec4, LpsValueF32::IVec4(a)) => vec![
             JsValue::from_f64(a[0] as f64),
             JsValue::from_f64(a[1] as f64),
             JsValue::from_f64(a[2] as f64),
             JsValue::from_f64(a[3] as f64),
         ],
-        (BVec2, LpsValue::BVec2(a)) => vec![
+        (UVec2, LpsValueF32::UVec2(a)) => vec![
+            JsValue::from_f64(a[0] as f64),
+            JsValue::from_f64(a[1] as f64),
+        ],
+        (UVec3, LpsValueF32::UVec3(a)) => vec![
+            JsValue::from_f64(a[0] as f64),
+            JsValue::from_f64(a[1] as f64),
+            JsValue::from_f64(a[2] as f64),
+        ],
+        (UVec4, LpsValueF32::UVec4(a)) => vec![
+            JsValue::from_f64(a[0] as f64),
+            JsValue::from_f64(a[1] as f64),
+            JsValue::from_f64(a[2] as f64),
+            JsValue::from_f64(a[3] as f64),
+        ],
+        (BVec2, LpsValueF32::BVec2(a)) => vec![
             JsValue::from_f64(if a[0] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[1] { 1.0 } else { 0.0 }),
         ],
-        (BVec3, LpsValue::BVec3(a)) => vec![
+        (BVec3, LpsValueF32::BVec3(a)) => vec![
             JsValue::from_f64(if a[0] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[1] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[2] { 1.0 } else { 0.0 }),
         ],
-        (BVec4, LpsValue::BVec4(a)) => vec![
+        (BVec4, LpsValueF32::BVec4(a)) => vec![
             JsValue::from_f64(if a[0] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[1] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[2] { 1.0 } else { 0.0 }),
             JsValue::from_f64(if a[3] { 1.0 } else { 0.0 }),
         ],
-        (Mat2, LpsValue::Mat2x2(m)) => vec![
+        (Mat2, LpsValueF32::Mat2x2(m)) => vec![
             encode_f32_js(m[0][0], fm),
             encode_f32_js(m[0][1], fm),
             encode_f32_js(m[1][0], fm),
             encode_f32_js(m[1][1], fm),
         ],
-        (Mat3, LpsValue::Mat3x3(m)) => {
+        (Mat3, LpsValueF32::Mat3x3(m)) => {
             let mut out = Vec::with_capacity(9);
             for col in m.iter() {
                 for x in col.iter() {
@@ -121,7 +121,7 @@ fn glsl_value_to_js_flat(
             }
             out
         }
-        (Mat4, LpsValue::Mat4x4(m)) => {
+        (Mat4, LpsValueF32::Mat4x4(m)) => {
             let mut out = Vec::with_capacity(16);
             for col in m.iter() {
                 for x in col.iter() {
@@ -130,7 +130,7 @@ fn glsl_value_to_js_flat(
             }
             out
         }
-        (Array { element, len }, LpsValue::Array(items)) => {
+        (Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(WasmError::runtime(format!(
                     "array value length {} does not match type length {}",
@@ -144,7 +144,7 @@ fn glsl_value_to_js_flat(
             }
             out
         }
-        (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
+        (Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(WasmError::runtime(format!(
                     "struct field count {} does not match type field count {}",
@@ -169,7 +169,7 @@ fn glsl_value_to_js_flat(
 pub(crate) fn build_js_args(
     param_types: &[LpsType],
     export_param_slots: usize,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     fm: FloatMode,
 ) -> Result<Array, WasmError> {
     if args.len() != param_types.len() {
@@ -220,7 +220,7 @@ pub(crate) fn js_result_to_lps_value(
     ty: &LpsType,
     result: &JsValue,
     fm: FloatMode,
-) -> Result<LpsValue, WasmError> {
+) -> Result<LpsValueF32, WasmError> {
     let n = glsl_type_to_wasm_components(ty, fm).len();
     let slots = js_result_slots(result, n)?;
     decode_lps_from_js_slots(ty, &slots, fm, 0).map(|(v, _)| v)
@@ -231,23 +231,23 @@ fn decode_lps_from_js_slots(
     slots: &[JsValue],
     fm: FloatMode,
     off: usize,
-) -> Result<(LpsValue, usize), WasmError> {
+) -> Result<(LpsValueF32, usize), WasmError> {
     use LpsType::*;
     match ty {
         Void => Err(WasmError::runtime("void type in js_result")),
-        Float => Ok((LpsValue::F32(js_slot_as_f32(&slots[off], fm)?), 1)),
-        Int => Ok((LpsValue::I32(js_num_as_i32(&slots[off])?), 1)),
-        UInt => Ok((LpsValue::U32(js_num_as_i32(&slots[off])? as u32), 1)),
-        Bool => Ok((LpsValue::Bool(js_num_as_i32(&slots[off])? != 0), 1)),
+        Float => Ok((LpsValueF32::F32(js_slot_as_f32(&slots[off], fm)?), 1)),
+        Int => Ok((LpsValueF32::I32(js_num_as_i32(&slots[off])?), 1)),
+        UInt => Ok((LpsValueF32::U32(js_num_as_i32(&slots[off])? as u32), 1)),
+        Bool => Ok((LpsValueF32::Bool(js_num_as_i32(&slots[off])? != 0), 1)),
         Vec2 => Ok((
-            LpsValue::Vec2([
+            LpsValueF32::Vec2([
                 js_slot_as_f32(&slots[off], fm)?,
                 js_slot_as_f32(&slots[off + 1], fm)?,
             ]),
             2,
         )),
         Vec3 => Ok((
-            LpsValue::Vec3([
+            LpsValueF32::Vec3([
                 js_slot_as_f32(&slots[off], fm)?,
                 js_slot_as_f32(&slots[off + 1], fm)?,
                 js_slot_as_f32(&slots[off + 2], fm)?,
@@ -255,7 +255,7 @@ fn decode_lps_from_js_slots(
             3,
         )),
         Vec4 => Ok((
-            LpsValue::Vec4([
+            LpsValueF32::Vec4([
                 js_slot_as_f32(&slots[off], fm)?,
                 js_slot_as_f32(&slots[off + 1], fm)?,
                 js_slot_as_f32(&slots[off + 2], fm)?,
@@ -264,11 +264,11 @@ fn decode_lps_from_js_slots(
             4,
         )),
         IVec2 => Ok((
-            LpsValue::IVec2([js_num_as_i32(&slots[off])?, js_num_as_i32(&slots[off + 1])?]),
+            LpsValueF32::IVec2([js_num_as_i32(&slots[off])?, js_num_as_i32(&slots[off + 1])?]),
             2,
         )),
         IVec3 => Ok((
-            LpsValue::IVec3([
+            LpsValueF32::IVec3([
                 js_num_as_i32(&slots[off])?,
                 js_num_as_i32(&slots[off + 1])?,
                 js_num_as_i32(&slots[off + 2])?,
@@ -276,7 +276,7 @@ fn decode_lps_from_js_slots(
             3,
         )),
         IVec4 => Ok((
-            LpsValue::IVec4([
+            LpsValueF32::IVec4([
                 js_num_as_i32(&slots[off])?,
                 js_num_as_i32(&slots[off + 1])?,
                 js_num_as_i32(&slots[off + 2])?,
@@ -285,14 +285,14 @@ fn decode_lps_from_js_slots(
             4,
         )),
         UVec2 => Ok((
-            LpsValue::UVec2([
+            LpsValueF32::UVec2([
                 js_num_as_i32(&slots[off])? as u32,
                 js_num_as_i32(&slots[off + 1])? as u32,
             ]),
             2,
         )),
         UVec3 => Ok((
-            LpsValue::UVec3([
+            LpsValueF32::UVec3([
                 js_num_as_i32(&slots[off])? as u32,
                 js_num_as_i32(&slots[off + 1])? as u32,
                 js_num_as_i32(&slots[off + 2])? as u32,
@@ -300,7 +300,7 @@ fn decode_lps_from_js_slots(
             3,
         )),
         UVec4 => Ok((
-            LpsValue::UVec4([
+            LpsValueF32::UVec4([
                 js_num_as_i32(&slots[off])? as u32,
                 js_num_as_i32(&slots[off + 1])? as u32,
                 js_num_as_i32(&slots[off + 2])? as u32,
@@ -309,14 +309,14 @@ fn decode_lps_from_js_slots(
             4,
         )),
         BVec2 => Ok((
-            LpsValue::BVec2([
+            LpsValueF32::BVec2([
                 js_num_as_i32(&slots[off])? != 0,
                 js_num_as_i32(&slots[off + 1])? != 0,
             ]),
             2,
         )),
         BVec3 => Ok((
-            LpsValue::BVec3([
+            LpsValueF32::BVec3([
                 js_num_as_i32(&slots[off])? != 0,
                 js_num_as_i32(&slots[off + 1])? != 0,
                 js_num_as_i32(&slots[off + 2])? != 0,
@@ -324,7 +324,7 @@ fn decode_lps_from_js_slots(
             3,
         )),
         BVec4 => Ok((
-            LpsValue::BVec4([
+            LpsValueF32::BVec4([
                 js_num_as_i32(&slots[off])? != 0,
                 js_num_as_i32(&slots[off + 1])? != 0,
                 js_num_as_i32(&slots[off + 2])? != 0,
@@ -339,7 +339,7 @@ fn decode_lps_from_js_slots(
             col0[1] = js_slot_as_f32(&slots[off + 1], fm)?;
             col1[0] = js_slot_as_f32(&slots[off + 2], fm)?;
             col1[1] = js_slot_as_f32(&slots[off + 3], fm)?;
-            Ok((LpsValue::Mat2x2([col0, col1]), 4))
+            Ok((LpsValueF32::Mat2x2([col0, col1]), 4))
         }
         Mat3 => {
             let mut m = [[0f32; 3]; 3];
@@ -348,7 +348,7 @@ fn decode_lps_from_js_slots(
                     m[col][row] = js_slot_as_f32(&slots[off + col * 3 + row], fm)?;
                 }
             }
-            Ok((LpsValue::Mat3x3(m), 9))
+            Ok((LpsValueF32::Mat3x3(m), 9))
         }
         Mat4 => {
             let mut m = [[0f32; 4]; 4];
@@ -357,7 +357,7 @@ fn decode_lps_from_js_slots(
                     m[col][row] = js_slot_as_f32(&slots[off + col * 4 + row], fm)?;
                 }
             }
-            Ok((LpsValue::Mat4x4(m), 16))
+            Ok((LpsValueF32::Mat4x4(m), 16))
         }
         Array { element, len } => {
             let mut elems = Vec::with_capacity(*len as usize);
@@ -367,7 +367,7 @@ fn decode_lps_from_js_slots(
                 o += n;
                 elems.push(v);
             }
-            Ok((LpsValue::Array(elems.into_boxed_slice()), o - off))
+            Ok((LpsValueF32::Array(elems.into_boxed_slice()), o - off))
         }
         Struct { name, members } => {
             let mut o = off;
@@ -382,7 +382,7 @@ fn decode_lps_from_js_slots(
                 fields.push((key, v));
             }
             Ok((
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: name.clone(),
                     fields,
                 },

@@ -8,9 +8,9 @@
 //! standard mathematical procedure documented in graphics literature. The formula is not
 //! subject to copyright. This Rust/Q32 port implements the standard algorithm.
 
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
-use lps_q32::types::vec4_q32::Vec4Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
+use lps_q32::vec4_q32::Vec4Q32;
 
 /// Epsilon constant to avoid division by zero.
 /// Using minimum representable Q32 value (1 in Q16.16 format = 1/65536 ≈ 0.000015).
@@ -187,7 +187,7 @@ mod tests {
     fn test_rgb2hsv_grayscale() {
         // Grayscale colors should have saturation = 0
         for i in 1..10 {
-            let gray = Q32::from_f32(i as f32 / 10.0);
+            let gray = Q32::from_f32_wrapping(i as f32 / 10.0);
             let rgb = Vec3Q32::new(gray, gray, gray);
             let hsv = lpfx_rgb2hsv_q32(rgb);
             let s = fixed_to_float(hsv.y.to_fixed());
@@ -296,11 +296,11 @@ mod tests {
     fn test_rgb2hsv_range_validation() {
         // All HSV components should be in [0, 1]
         for i in 0..50 {
-            let r = Q32::from_f32(i as f32 / 50.0);
+            let r = Q32::from_f32_wrapping(i as f32 / 50.0);
             for j in 0..50 {
-                let g = Q32::from_f32(j as f32 / 50.0);
+                let g = Q32::from_f32_wrapping(j as f32 / 50.0);
                 for k in 0..50 {
-                    let b = Q32::from_f32(k as f32 / 50.0);
+                    let b = Q32::from_f32_wrapping(k as f32 / 50.0);
                     let rgb = Vec3Q32::new(r, g, b);
                     let hsv = lpfx_rgb2hsv_q32(rgb);
 
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_rgb2hsv_vec4_preserves_alpha() {
-        let rgb = Vec4Q32::new(Q32::ONE, Q32::ZERO, Q32::ZERO, Q32::from_f32(0.7));
+        let rgb = Vec4Q32::new(Q32::ONE, Q32::ZERO, Q32::ZERO, Q32::from_f32_wrapping(0.7));
         let hsv = lpfx_rgb2hsv_vec4_q32(rgb);
         let alpha = fixed_to_float(hsv.w.to_fixed());
         assert!((alpha - 0.7).abs() < 0.01, "Alpha should be preserved");

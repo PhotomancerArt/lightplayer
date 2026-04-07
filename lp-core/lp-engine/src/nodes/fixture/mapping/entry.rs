@@ -1,6 +1,6 @@
 //! Pixel mapping entry encoding and decoding
 
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// Sentinel value for channel index indicating no mapping (SKIP)
 pub const CHANNEL_SKIP: u32 = 0x7FFF; // Max value for 15-bit channel index
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_new_entry() {
-        let entry = PixelMappingEntry::new(5, Q32::from_f32(0.5), false);
+        let entry = PixelMappingEntry::new(5, Q32::from_f32_wrapping(0.5), false);
         assert_eq!(entry.channel(), 5);
         assert!((entry.contribution().to_f32() - 0.5).abs() < 0.001);
         assert!(!entry.has_more());
@@ -118,23 +118,23 @@ mod tests {
     #[test]
     fn test_full_contribution() {
         // 0 stored = 100% contribution
-        let entry = PixelMappingEntry::new(0, Q32::from_f32(1.0), false);
+        let entry = PixelMappingEntry::new(0, Q32::from_f32_wrapping(1.0), false);
         assert_eq!(entry.channel(), 0);
         assert!((entry.contribution().to_f32() - 1.0).abs() < 0.01);
     }
 
     #[test]
     fn test_zero_contribution() {
-        let entry = PixelMappingEntry::new(0, Q32::from_f32(0.0), false);
+        let entry = PixelMappingEntry::new(0, Q32::from_f32_wrapping(0.0), false);
         assert_eq!(entry.channel(), CHANNEL_SKIP);
     }
 
     #[test]
     fn test_has_more_flag() {
-        let entry_more = PixelMappingEntry::new(1, Q32::from_f32(0.5), true);
+        let entry_more = PixelMappingEntry::new(1, Q32::from_f32_wrapping(0.5), true);
         assert!(entry_more.has_more());
 
-        let entry_last = PixelMappingEntry::new(1, Q32::from_f32(0.5), false);
+        let entry_last = PixelMappingEntry::new(1, Q32::from_f32_wrapping(0.5), false);
         assert!(!entry_last.has_more());
     }
 
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        let original = PixelMappingEntry::new(42, Q32::from_f32(0.75), true);
+        let original = PixelMappingEntry::new(42, Q32::from_f32_wrapping(0.75), true);
         let raw = original.to_raw();
         let reconstructed = PixelMappingEntry::from_raw(raw);
 
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_max_channel() {
-        let entry = PixelMappingEntry::new(CHANNEL_SKIP - 1, Q32::from_f32(0.5), false);
+        let entry = PixelMappingEntry::new(CHANNEL_SKIP - 1, Q32::from_f32_wrapping(0.5), false);
         assert_eq!(entry.channel(), CHANNEL_SKIP - 1);
     }
 }

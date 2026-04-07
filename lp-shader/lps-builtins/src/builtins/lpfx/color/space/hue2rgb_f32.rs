@@ -4,7 +4,7 @@
 //! For now, it calls the q32 version with conversion.
 
 use crate::builtins::lpfx::color::space::hue2rgb_q32::__lp_lpfx_hue2rgb_q32;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// Convert hue value to RGB color (extern C wrapper for compiler).
 ///
@@ -19,7 +19,7 @@ pub extern "C" fn __lp_lpfx_hue2rgb_f32(result_ptr: *mut f32, hue: f32) {
     // Convert raw pointer to safe array reference at boundary
     let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
     // Stub: convert to q32, call q32 version, convert back
-    let hue_q32 = Q32::from_f32(hue);
+    let hue_q32 = Q32::from_f32_wrapping(hue);
     let mut result_q32 = [0i32; 3];
     __lp_lpfx_hue2rgb_q32(result_q32.as_mut_ptr(), hue_q32.to_fixed());
     result[0] = Q32::from_fixed(result_q32[0]).to_f32();

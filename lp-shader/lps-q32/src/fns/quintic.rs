@@ -1,7 +1,7 @@
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// Quintic polynomial smoothing for Q32
 /// Returns v * v * v * (v * (v * 6.0 - 15.0) + 10.0)
@@ -9,9 +9,9 @@ use crate::types::vec4_q32::Vec4Q32;
 pub fn quintic_q32(v: Q32) -> Q32 {
     let v2 = v * v;
     let v3 = v2 * v;
-    let six = Q32::from_f32(6.0);
-    let fifteen = Q32::from_f32(15.0);
-    let ten = Q32::from_f32(10.0);
+    let six = Q32::from_f32_wrapping(6.0);
+    let fifteen = Q32::from_f32_wrapping(15.0);
+    let ten = Q32::from_f32_wrapping(10.0);
     v3 * (v * (v * six - fifteen) + ten)
 }
 
@@ -46,9 +46,9 @@ mod tests {
 
     #[test]
     fn test_quintic_q32() {
-        let v0 = Q32::from_f32(0.0);
-        let v1 = Q32::from_f32(1.0);
-        let v05 = Q32::from_f32(0.5);
+        let v0 = Q32::from_f32_wrapping(0.0);
+        let v1 = Q32::from_f32_wrapping(1.0);
+        let v05 = Q32::from_f32_wrapping(0.5);
 
         assert!((quintic_q32(v0).to_f32() - 0.0).abs() < 0.01);
         assert!((quintic_q32(v1).to_f32() - 1.0).abs() < 0.01);

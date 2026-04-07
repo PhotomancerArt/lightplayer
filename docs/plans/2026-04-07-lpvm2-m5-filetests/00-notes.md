@@ -120,53 +120,93 @@ trait LpvmInstance {
 
 This is a **trait addition in `lpvm`** crate as part of this milestone.
 
-### Q3: Should we keep the `q32_exec_common` module or fold it into the new structure?
+### Q3: ✅ ANSWERED: Add `call_q32()` to `LpvmInstance` for exact Q32 testing
 
-**Context:** `q32_exec_common.rs` has shared Q32 marshaling logic used by JIT and RV32 executables:
-- `args_to_q32()` — convert `LpsValue` args to Q32 raw `i32`s
-- `call_*_from_q32()` — convert Q32 results back to `LpsValue`
-- `Q32ShaderExecutable` trait (bridges `GlslExecutable` to Q32 calling)
+**Context:** `LpsValue::F32(f32)` loses Q32 precision. Filetests testing Q32 builtins need exact `i32` Q16.16 values in/out.
 
-With `LpvmInstance::call()` returning `LpsValue` directly, some of this may be redundant.
+**Problem:** `call()` returns `LpsValue` — Q32 values go through `f32` conversion, which doesn't represent all Q16.16 values exactly.
 
-**Options:**
-1. Keep `q32_exec_common` but adapt for `LpvmInstance` marshaling
-2. Inline the marshaling logic into new executable wrappers
-3. Remove entirely — `LpvmInstance` handles marshaling internally
+**Answer:** Add `call_q32()` to `LpvmInstance`:
 
-**Suggested:** Option 3 — the new `LpvmInstance::call()` already works with `LpsValue`. The common Q32 conversion logic may not be needed. However, we should verify that the new engines handle Q32 values correctly for filetest expectations.
+```rust
+trait LpvmInstance {
+    fn call(&mut self, name: &str, args: &[LpsValue]) -> Result<LpsValue, LpsError>;
+    
+    /// Call with exact Q16.16 i32 values, bypassing f32 conversion.
+    /// Default impl converts through LpsValue (may lose precision).
+    fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, LpsError> {
+        // Default: convert args i32 -> Q32 LpsValue variants
+        // Call self.call()
+        // Convert results back to i32
+    }
+}
+```
+
+**Implementations:**
+- `CraneliftModule::Instance` (Q32 mode): exact Q32 calling via generated code
+- `EmuInstance` (Q32 mode): exact via emulator raw i32 calling
+- WASM instances: default implementation (filetests don't rely on WASM for exact Q32)
+
+**Delete `q32_exec_common`** — its logic moves into the `call_q32()` implementations.
+
+This is a **breaking change in `lpvm`** crate, requiring updates to all `LpvmInstance` impls.
 
 ### Q4: How do we handle the `// backend: xxx` directive dispatch?
 
-**Context:** Filetests have backend directives like `// backend: rv32`, `// backend: jit`, `// backend: wasm`. The current runner matches these to create appropriate executables.
+**Context:** Filetests have backend directives like `// backend: rv32`, `// backend: jit`, `// backend: wasm`. Current runner matches to create executables.
 
-**Current flow:**
-1. Parse test file → extract directives
-2. For each test case, check if backend is supported
-3. Create executable for that backend
-4. Run and compare
+**Answer:** Use **engine-per-file, instance-per-case** pattern:
 
-**Options:**
-1. Keep string matching, map to engine factory: `match backend { "rv32" => EmuEngine::new(), ... }`
-2. Create a `FiletestEngine` enum wrapping all three: `enum FiletestEngine { Cranelift(CraneliftEngine), Emu(EmuEngine), Wasm(WasmLpvmEngine) }`
-3. Generic runner: `fn run_with_engine<E: LpvmEngine>(engine: &E, test: &TestCase)`
+```rust
+struct TestFileContext {
+    engine: FiletestEngine,  // created once per file
+    module: Box<dyn LpvmModule>, // compiled once per file
+}
 
-**Suggested:** Option 2 — an enum wrapper keeps the dispatch explicit and avoids generics complexity. Each variant holds the engine + any backend-specific config (compile options, float mode).
+enum FiletestEngine {
+    Cranelift { engine: CraneliftEngine, options: CompileOptions },
+    Emu { engine: EmuEngine, options: CompileOptions },
+    Wasm { engine: WasmLpvmEngine, options: WasmOptions },
+}
 
-### Q5: What about the WASM browser backend? Is it needed for filetests?
+impl FiletestEngine {
+    fn compile(&self, ir: &IrModule) -> Box<dyn LpvmModule> { ... }
+}
+```
 
-**Context:** `lpvm-wasm` has two engines:
-- `WasmLpvmEngine` (wasmtime) — for host tests
-- `BrowserLpvmEngine` (browser WebAssembly) — for web demo
+Runner matches backend string → creates `TestFileContext` → per test case calls `module.instantiate()` → `instance.call()` or `call_q32()`.
 
-Filetests run on host, not browser.
+### Q5: ✅ ANSWERED: Only migrate `WasmLpvmEngine` (wasmtime)
 
-**Options:**
-1. Only migrate `WasmLpvmEngine` (wasmtime) for filetests
-2. Migrate both, even though browser isn't used in tests
-3. Keep WASM browser separate entirely
+**Context:** `lpvm-wasm` has two engines: `WasmLpvmEngine` (wasmtime, host) and `BrowserLpvmEngine` (browser, web demo). Filetests run on host.
 
-**Suggested:** Option 1 — only migrate `WasmLpvmEngine` for filetests. `BrowserLpvmEngine` is for the web demo (`lp-app/web-demo`), not CI/filetests.
+**Answer:** Only migrate `WasmLpvmEngine` for filetests. `BrowserLpvmEngine` is for `lp-app/web-demo`, not CI. Add default `call_q32()` implementation to `WasmLpvmInstance`.
+
+## Summary of Required Changes
+
+### `lpvm` crate (trait additions)
+- `LpvmInstance::debug_state() -> Option<String>` — default `None`
+- `LpvmInstance::call_q32(args: &[i32]) -> Result<Vec<i32>, LpsError>` — default via `LpsValue`
+
+### `lpvm-cranelift` crate
+- Implement `call_q32()` for Q32 mode: direct Q32 raw calling
+- Implement `debug_state()`: return `None` (or stack trace if available)
+
+### `lpvm-emu` crate
+- Implement `call_q32()`: raw i32 calling through emulator
+- Implement `debug_state()`: emulator registers/PC/state
+
+### `lpvm-wasm` crate
+- `WasmLpvmInstance`: default `call_q32()` via `LpsValue`
+- `debug_state()`: return `None`
+
+### `lps-filetests` crate
+- Delete `q32_exec_common.rs`, `lpir_jit_executable.rs`, `lpir_rv32_executable.rs`
+- Delete `wasm_link.rs`, `wasm_runner.rs` (or heavily simplify)
+- Create new `engine.rs` with `FiletestEngine` enum
+- Update `execution.rs` to use `LpvmInstance::call()` / `call_q32()`
+- Update `run_detail.rs` for engine-per-file pattern
+- All filetests pass on `jit.q32`, `jit.f32`, `rv32.q32`, `rv32.f32`, `wasm.q32`, `wasm.f32`
 
 ## Notes
 

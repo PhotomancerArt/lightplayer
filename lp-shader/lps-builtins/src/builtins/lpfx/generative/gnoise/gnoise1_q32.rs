@@ -4,7 +4,7 @@
 
 use crate::builtins::lpfx::generative::random::random1_q32::lpfx_random1;
 use lps_q32::fns::{cubic_q32, mix_q32};
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// 1D Gradient Noise function
 ///
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_gnoise1_range() {
-        let result = __lp_lpfx_gnoise1_q32(Q32::from_f32(42.5).to_fixed(), 123);
+        let result = __lp_lpfx_gnoise1_q32(Q32::from_f32_wrapping(42.5).to_fixed(), 123);
         let val = Q32::from_fixed(result).to_f32();
         assert!(val >= 0.0 && val <= 1.0, "Gnoise should be in [0, 1] range");
     }

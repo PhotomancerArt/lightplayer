@@ -1,6 +1,6 @@
 //! `LpvmInstance` trait - execution state and function calling.
 
-use lps_shared::lps_value::LpsValue;
+use lps_shared::lps_value_f32::LpsValueF32;
 
 /// An execution instance with mutable state.
 ///
@@ -28,5 +28,5 @@ pub trait LpvmInstance {
     ///
     /// Arguments are marshaled from `LpsValue` to the backend's native
     /// representation. Results are unmarshaled back to `LpsValue`.
-    fn call(&mut self, name: &str, args: &[LpsValue]) -> Result<LpsValue, Self::Error>;
+    fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error>;
 }

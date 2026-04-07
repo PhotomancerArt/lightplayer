@@ -1,10 +1,10 @@
-//! Errors for [`crate::LpvmData`] and related buffer/value conversion.
+//! Errors for [`crate::LpvmDataQ32`] and related buffer/value conversion.
 
 use alloc::string::String;
 
 use lps_shared::path_resolve::PathError;
 
-/// Failure reading/writing [`crate::LpvmData`] or converting to/from [`crate::LpsValue`].
+/// Failure reading/writing [`crate::LpvmDataQ32`] or converting to/from [`crate::LpsValueF32`].
 #[derive(Debug)]
 pub enum DataError {
     Path(PathError),

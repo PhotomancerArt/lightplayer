@@ -1,17 +1,17 @@
 use crate::error::Error;
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
-    MappingPoint, PrecomputedMapping, accumulate_from_mapping, compute_mapping,
-    generate_mapping_points,
+    accumulate_from_mapping, compute_mapping, generate_mapping_points, MappingPoint,
+    PrecomputedMapping,
 };
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, OutputHandle, RenderContext, TextureHandle};
 use alloc::{boxed::Box, string::String, vec::Vec};
-use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
+use lp_model::FrameId;
 use lp_shared::fs::fs_event::FsChange;
-use lps_q32::types::q32::ToQ32;
+use lps_q32::q32::ToQ32;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
@@ -301,18 +301,18 @@ impl NodeRuntime for FixtureRuntime {
             let g_q = ch_values_g[channel] * brightness;
             let b_q = ch_values_b[channel] * brightness;
 
-            let mut r = r_q.to_u16_clamped();
-            let mut g = g_q.to_u16_clamped();
-            let mut b = b_q.to_u16_clamped();
+            let mut r = r_q.to_u16_saturating();
+            let mut g = g_q.to_u16_saturating();
+            let mut b = b_q.to_u16_saturating();
 
             lamp_colors[channel * 3] = (r >> 8) as u8;
             lamp_colors[channel * 3 + 1] = (g >> 8) as u8;
             lamp_colors[channel * 3 + 2] = (b >> 8) as u8;
 
             if self.gamma_correction {
-                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_clamped();
-                g = apply_gamma((g >> 8) as u8).to_q32().to_u16_clamped();
-                b = apply_gamma((b >> 8) as u8).to_q32().to_u16_clamped();
+                r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
+                g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
+                b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
             }
 
             let start_ch = channel_offset + (channel as u32) * 3;
@@ -441,21 +441,25 @@ mod tests {
         // Simulate: pixel 0 has 2 entries (channels 0 and 1), pixel 1 has 1 entry (channel 0)
         use crate::nodes::fixture::mapping::{PixelMappingEntry, PrecomputedMapping};
         use lp_model::FrameId;
-        use lps_q32::types::q32::Q32;
+        use lps_q32::q32::Q32;
 
         let mut mapping = PrecomputedMapping::new(2, 1, FrameId::new(1));
         // Pixel 0: channel 0 (has_more = true)
         mapping
             .entries
-            .push(PixelMappingEntry::new(0, Q32::from_f32(0.5), true));
+            .push(PixelMappingEntry::new(0, Q32::from_f32_wrapping(0.5), true));
         // Pixel 0: channel 1 (has_more = false) - last entry for pixel 0
-        mapping
-            .entries
-            .push(PixelMappingEntry::new(1, Q32::from_f32(0.5), false));
+        mapping.entries.push(PixelMappingEntry::new(
+            1,
+            Q32::from_f32_wrapping(0.5),
+            false,
+        ));
         // Pixel 1: channel 0 (has_more = false) - only entry for pixel 1
-        mapping
-            .entries
-            .push(PixelMappingEntry::new(0, Q32::from_f32(1.0), false));
+        mapping.entries.push(PixelMappingEntry::new(
+            0,
+            Q32::from_f32_wrapping(1.0),
+            false,
+        ));
 
         let mut pixel_index = 0u32;
         let texture_width = 2u32;

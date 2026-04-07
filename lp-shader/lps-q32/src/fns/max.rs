@@ -1,6 +1,6 @@
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// Component-wise maximum for Vec2Q32
 /// Returns the maximum of each component pair

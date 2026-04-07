@@ -1,15 +1,15 @@
 //! 3D Signed Random function returning Vec3Q32 (float implementation - stub).
 
 use crate::builtins::lpfx::generative::srandom::srandom3_vec_q32::__lp_lpfx_srandom3_vec_q32;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 #[lpfx_impl_macro::lpfx_impl(f32, "vec3 lpfx_srandom3_vec(vec3 p, uint seed)")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfx_srandom3_vec_f32(out: *mut f32, x: f32, y: f32, z: f32, seed: u32) {
-    let x_q32 = Q32::from_f32(x);
-    let y_q32 = Q32::from_f32(y);
-    let z_q32 = Q32::from_f32(z);
+    let x_q32 = Q32::from_f32_wrapping(x);
+    let y_q32 = Q32::from_f32_wrapping(y);
+    let z_q32 = Q32::from_f32_wrapping(z);
 
     let mut result_q32 = [0i32; 3];
     __lp_lpfx_srandom3_vec_q32(

@@ -8,9 +8,9 @@
 //! fact, not copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::color::space::hue2rgb_q32::lpfx_hue2rgb_q32;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
-use lps_q32::types::vec4_q32::Vec4Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
+use lps_q32::vec4_q32::Vec4Q32;
 
 /// Convert HSV color to RGB color.
 ///
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_hsv2rgb_vec4_preserves_alpha() {
-        let hsv = Vec4Q32::new(Q32::ZERO, Q32::ONE, Q32::ONE, Q32::from_f32(0.5));
+        let hsv = Vec4Q32::new(Q32::ZERO, Q32::ONE, Q32::ONE, Q32::from_f32_wrapping(0.5));
         let rgb = lpfx_hsv2rgb_vec4_q32(hsv);
         let alpha = fixed_to_float(rgb.w.to_fixed());
         assert!((alpha - 0.5).abs() < 0.01, "Alpha should be preserved");

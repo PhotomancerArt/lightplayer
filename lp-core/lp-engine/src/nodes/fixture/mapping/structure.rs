@@ -51,7 +51,7 @@ impl PrecomputedMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lps_q32::types::q32::Q32;
+    use lps_q32::q32::Q32;
 
     #[test]
     fn test_new_empty() {
@@ -67,9 +67,11 @@ mod tests {
     #[test]
     fn test_with_entries() {
         let mut mapping = PrecomputedMapping::new(10, 10, FrameId::new(1));
-        mapping
-            .entries
-            .push(PixelMappingEntry::new(0, Q32::from_f32(1.0), false));
+        mapping.entries.push(PixelMappingEntry::new(
+            0,
+            Q32::from_f32_wrapping(1.0),
+            false,
+        ));
         mapping.entries.push(PixelMappingEntry::skip());
 
         assert!(!mapping.is_empty());

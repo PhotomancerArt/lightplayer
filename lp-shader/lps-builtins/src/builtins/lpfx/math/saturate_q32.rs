@@ -7,9 +7,9 @@
 //! procedure with no licensing concerns. While we may have referenced existing
 //! implementations, the operation itself is trivial and not copyrightable.
 
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
-use lps_q32::types::vec4_q32::Vec4Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
+use lps_q32::vec4_q32::Vec4Q32;
 
 /// Saturate a single Q32 value (clamp to [0, 1]).
 ///
@@ -133,19 +133,19 @@ mod tests {
 
     #[test]
     fn test_saturate_q32_below_zero() {
-        let result = lpfx_saturate_q32(Q32::from_f32(-0.5));
+        let result = lpfx_saturate_q32(Q32::from_f32_wrapping(-0.5));
         assert_eq!(result, Q32::ZERO, "Negative values should clamp to 0");
     }
 
     #[test]
     fn test_saturate_q32_above_one() {
-        let result = lpfx_saturate_q32(Q32::from_f32(1.5));
+        let result = lpfx_saturate_q32(Q32::from_f32_wrapping(1.5));
         assert_eq!(result, Q32::ONE, "Values above 1 should clamp to 1");
     }
 
     #[test]
     fn test_saturate_q32_in_range() {
-        let result = lpfx_saturate_q32(Q32::from_f32(0.5));
+        let result = lpfx_saturate_q32(Q32::from_f32_wrapping(0.5));
         let result_float = fixed_to_float(result.to_fixed());
         assert!(
             (result_float - 0.5).abs() < 0.0001,

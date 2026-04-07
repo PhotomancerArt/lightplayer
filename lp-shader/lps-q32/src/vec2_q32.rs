@@ -2,7 +2,7 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::fns;
 use crate::lpir;
-use crate::types::q32::Q32;
+use crate::q32::Q32;
 
 /// 2D vector for Q32 fixed-point arithmetic
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -20,8 +20,8 @@ impl Vec2Q32 {
     #[inline(always)]
     pub fn from_f32(x: f32, y: f32) -> Self {
         Vec2Q32 {
-            x: Q32::from_f32(x),
-            y: Q32::from_f32(y),
+            x: Q32::from_f32_wrapping(x),
+            y: Q32::from_f32_wrapping(y),
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn test_mul_scalar() {
         let v = Vec2Q32::from_f32(1.0, 2.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = v * s;
         assert_eq!(result.x.to_f32(), 2.0);
         assert_eq!(result.y.to_f32(), 4.0);
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn test_div_scalar() {
         let v = Vec2Q32::from_f32(4.0, 6.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = v / s;
         assert_eq!(result.x.to_f32(), 2.0);
         assert_eq!(result.y.to_f32(), 3.0);

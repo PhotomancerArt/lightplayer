@@ -2,9 +2,9 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::fns;
 use crate::lpir;
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
 
 /// 4D vector for Q32 fixed-point arithmetic (useful for RGBA colors and homogeneous coordinates)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -24,10 +24,10 @@ impl Vec4Q32 {
     #[inline(always)]
     pub fn from_f32(x: f32, y: f32, z: f32, w: f32) -> Self {
         Vec4Q32 {
-            x: Q32::from_f32(x),
-            y: Q32::from_f32(y),
-            z: Q32::from_f32(z),
-            w: Q32::from_f32(w),
+            x: Q32::from_f32_wrapping(x),
+            y: Q32::from_f32_wrapping(y),
+            z: Q32::from_f32_wrapping(z),
+            w: Q32::from_f32_wrapping(w),
         }
     }
 
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn test_mul_scalar() {
         let v = Vec4Q32::from_f32(1.0, 2.0, 3.0, 4.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = v * s;
         assert_eq!(result.x.to_f32(), 2.0);
         assert_eq!(result.y.to_f32(), 4.0);
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn test_div_scalar() {
         let v = Vec4Q32::from_f32(4.0, 6.0, 8.0, 10.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = v / s;
         assert_eq!(result.x.to_f32(), 2.0);
         assert_eq!(result.y.to_f32(), 3.0);
@@ -543,8 +543,8 @@ mod tests {
     #[test]
     fn test_clamp() {
         let v = Vec4Q32::from_f32(-1.0, 0.5, 1.5, 2.0);
-        let min = Q32::from_f32(0.0);
-        let max = Q32::from_f32(1.0);
+        let min = Q32::from_f32_wrapping(0.0);
+        let max = Q32::from_f32_wrapping(1.0);
         let clamped = v.clamp(min, max);
         assert_eq!(clamped.x.to_f32(), 0.0);
         assert_eq!(clamped.y.to_f32(), 0.5);

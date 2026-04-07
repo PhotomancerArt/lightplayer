@@ -4,20 +4,20 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::LpsValue;
 use crate::data_error::DataError;
+use crate::LpsValueF32;
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::path_resolve::LpsTypePathExt;
 use lps_shared::{LayoutRules, LpsType, StructMember};
 
 /// Shader data as represented in LPVM memory
-pub struct LpvmData {
+pub struct LpvmDataQ32 {
     ty: LpsType,
     rules: LayoutRules,
     data: Vec<u8>,
 }
 
-impl LpvmData {
+impl LpvmDataQ32 {
     pub fn new(ty: LpsType) -> Self {
         Self::with_rules(ty, LayoutRules::Std430).expect("std430 is implemented")
     }
@@ -34,7 +34,7 @@ impl LpvmData {
         })
     }
 
-    pub fn from_value(ty: LpsType, value: &LpsValue) -> Result<Self, DataError> {
+    pub fn from_value(ty: LpsType, value: &LpsValueF32) -> Result<Self, DataError> {
         let mut s = Self::new(ty.clone());
         value_matches_type(&ty, value)?;
         write_value(&ty, s.rules, &mut s.data, value)?;
@@ -44,7 +44,7 @@ impl LpvmData {
     pub fn from_value_with_rules(
         ty: LpsType,
         rules: LayoutRules,
-        value: &LpsValue,
+        value: &LpsValueF32,
     ) -> Result<Self, DataError> {
         if !rules.is_implemented() {
             return Err(DataError::LayoutNotImplemented);
@@ -84,7 +84,7 @@ impl LpvmData {
         self.data.as_mut_ptr()
     }
 
-    pub fn to_value(&self) -> Result<LpsValue, DataError> {
+    pub fn to_value(&self) -> Result<LpsValueF32, DataError> {
         let need = type_size(&self.ty, self.rules);
         if self.data.len() < need {
             return Err(DataError::BufferTooShort {
@@ -99,7 +99,7 @@ impl LpvmData {
         Ok(self.ty.offset_for_path(path, self.rules, 0)?)
     }
 
-    pub fn get(&self, path: &str) -> Result<LpsValue, DataError> {
+    pub fn get(&self, path: &str) -> Result<LpsValueF32, DataError> {
         let off = self.ty.offset_for_path(path, self.rules, 0)?;
         let leaf = self.ty.type_at_path(path)?;
         let need = type_size(&leaf, self.rules);
@@ -115,7 +115,7 @@ impl LpvmData {
         read_value(&leaf, self.rules, &self.data[off..end])
     }
 
-    pub fn set(&mut self, path: &str, value: LpsValue) -> Result<(), DataError> {
+    pub fn set(&mut self, path: &str, value: LpsValueF32) -> Result<(), DataError> {
         let off = self.ty.offset_for_path(path, self.rules, 0)?;
         let leaf = self.ty.type_at_path(path)?;
         value_matches_type(&leaf, &value)?;
@@ -140,13 +140,13 @@ impl LpvmData {
             });
         }
         match self.get(path)? {
-            LpsValue::F32(x) => Ok(x),
+            LpsValueF32::F32(x) => Ok(x),
             _ => Err(DataError::type_mismatch("float", "internal decode error")),
         }
     }
 
     pub fn set_f32(&mut self, path: &str, val: f32) -> Result<(), DataError> {
-        self.set(path, LpsValue::F32(val))
+        self.set(path, LpsValueF32::F32(val))
     }
 
     pub fn get_i32(&self, path: &str) -> Result<i32, DataError> {
@@ -157,13 +157,13 @@ impl LpvmData {
             });
         }
         match self.get(path)? {
-            LpsValue::I32(x) => Ok(x),
+            LpsValueF32::I32(x) => Ok(x),
             _ => Err(DataError::type_mismatch("int", "internal decode error")),
         }
     }
 
     pub fn set_i32(&mut self, path: &str, val: i32) -> Result<(), DataError> {
-        self.set(path, LpsValue::I32(val))
+        self.set(path, LpsValueF32::I32(val))
     }
 }
 
@@ -171,28 +171,28 @@ fn member_key(m: &StructMember, idx: usize) -> String {
     m.name.clone().unwrap_or_else(|| format!("_{idx}"))
 }
 
-fn value_matches_type(ty: &LpsType, v: &LpsValue) -> Result<(), DataError> {
+fn value_matches_type(ty: &LpsType, v: &LpsValueF32) -> Result<(), DataError> {
     match (ty, v) {
-        (LpsType::Float, LpsValue::F32(_)) => Ok(()),
-        (LpsType::Int, LpsValue::I32(_)) => Ok(()),
-        (LpsType::UInt, LpsValue::U32(_)) => Ok(()),
-        (LpsType::Bool, LpsValue::Bool(_)) => Ok(()),
-        (LpsType::Vec2, LpsValue::Vec2(_)) => Ok(()),
-        (LpsType::Vec3, LpsValue::Vec3(_)) => Ok(()),
-        (LpsType::Vec4, LpsValue::Vec4(_)) => Ok(()),
-        (LpsType::IVec2, LpsValue::IVec2(_)) => Ok(()),
-        (LpsType::IVec3, LpsValue::IVec3(_)) => Ok(()),
-        (LpsType::IVec4, LpsValue::IVec4(_)) => Ok(()),
-        (LpsType::UVec2, LpsValue::UVec2(_)) => Ok(()),
-        (LpsType::UVec3, LpsValue::UVec3(_)) => Ok(()),
-        (LpsType::UVec4, LpsValue::UVec4(_)) => Ok(()),
-        (LpsType::BVec2, LpsValue::BVec2(_)) => Ok(()),
-        (LpsType::BVec3, LpsValue::BVec3(_)) => Ok(()),
-        (LpsType::BVec4, LpsValue::BVec4(_)) => Ok(()),
-        (LpsType::Mat2, LpsValue::Mat2x2(_)) => Ok(()),
-        (LpsType::Mat3, LpsValue::Mat3x3(_)) => Ok(()),
-        (LpsType::Mat4, LpsValue::Mat4x4(_)) => Ok(()),
-        (LpsType::Array { element, len }, LpsValue::Array(items)) => {
+        (LpsType::Float, LpsValueF32::F32(_)) => Ok(()),
+        (LpsType::Int, LpsValueF32::I32(_)) => Ok(()),
+        (LpsType::UInt, LpsValueF32::U32(_)) => Ok(()),
+        (LpsType::Bool, LpsValueF32::Bool(_)) => Ok(()),
+        (LpsType::Vec2, LpsValueF32::Vec2(_)) => Ok(()),
+        (LpsType::Vec3, LpsValueF32::Vec3(_)) => Ok(()),
+        (LpsType::Vec4, LpsValueF32::Vec4(_)) => Ok(()),
+        (LpsType::IVec2, LpsValueF32::IVec2(_)) => Ok(()),
+        (LpsType::IVec3, LpsValueF32::IVec3(_)) => Ok(()),
+        (LpsType::IVec4, LpsValueF32::IVec4(_)) => Ok(()),
+        (LpsType::UVec2, LpsValueF32::UVec2(_)) => Ok(()),
+        (LpsType::UVec3, LpsValueF32::UVec3(_)) => Ok(()),
+        (LpsType::UVec4, LpsValueF32::UVec4(_)) => Ok(()),
+        (LpsType::BVec2, LpsValueF32::BVec2(_)) => Ok(()),
+        (LpsType::BVec3, LpsValueF32::BVec3(_)) => Ok(()),
+        (LpsType::BVec4, LpsValueF32::BVec4(_)) => Ok(()),
+        (LpsType::Mat2, LpsValueF32::Mat2x2(_)) => Ok(()),
+        (LpsType::Mat3, LpsValueF32::Mat3x3(_)) => Ok(()),
+        (LpsType::Mat4, LpsValueF32::Mat4x4(_)) => Ok(()),
+        (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(DataError::type_mismatch(
                     format!("array[{len}]"),
@@ -204,7 +204,7 @@ fn value_matches_type(ty: &LpsType, v: &LpsValue) -> Result<(), DataError> {
             }
             Ok(())
         }
-        (LpsType::Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
+        (LpsType::Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(DataError::type_mismatch(
                     format!("struct with {} fields", members.len()),
@@ -231,7 +231,7 @@ fn value_matches_type(ty: &LpsType, v: &LpsValue) -> Result<(), DataError> {
     }
 }
 
-fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue, DataError> {
+fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValueF32, DataError> {
     let need = type_size(ty, rules);
     if data.len() < need {
         return Err(DataError::BufferTooShort {
@@ -244,60 +244,62 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
         LpsType::Void => {
             return Err(DataError::type_mismatch("void", "cannot load void value"));
         }
-        LpsType::Float => LpsValue::F32(f32_from_bytes(data)),
-        LpsType::Int => LpsValue::I32(i32_from_bytes(data)),
-        LpsType::UInt => LpsValue::U32(u32_from_bytes(data)),
-        LpsType::Bool => LpsValue::Bool(i32_from_bytes(data) != 0),
-        LpsType::Vec2 => LpsValue::Vec2([f32_from_bytes(&data[0..4]), f32_from_bytes(&data[4..8])]),
-        LpsType::Vec3 => LpsValue::Vec3([
+        LpsType::Float => LpsValueF32::F32(f32_from_bytes(data)),
+        LpsType::Int => LpsValueF32::I32(i32_from_bytes(data)),
+        LpsType::UInt => LpsValueF32::U32(u32_from_bytes(data)),
+        LpsType::Bool => LpsValueF32::Bool(i32_from_bytes(data) != 0),
+        LpsType::Vec2 => {
+            LpsValueF32::Vec2([f32_from_bytes(&data[0..4]), f32_from_bytes(&data[4..8])])
+        }
+        LpsType::Vec3 => LpsValueF32::Vec3([
             f32_from_bytes(&data[0..4]),
             f32_from_bytes(&data[4..8]),
             f32_from_bytes(&data[8..12]),
         ]),
-        LpsType::Vec4 => LpsValue::Vec4([
+        LpsType::Vec4 => LpsValueF32::Vec4([
             f32_from_bytes(&data[0..4]),
             f32_from_bytes(&data[4..8]),
             f32_from_bytes(&data[8..12]),
             f32_from_bytes(&data[12..16]),
         ]),
         LpsType::IVec2 => {
-            LpsValue::IVec2([i32_from_bytes(&data[0..4]), i32_from_bytes(&data[4..8])])
+            LpsValueF32::IVec2([i32_from_bytes(&data[0..4]), i32_from_bytes(&data[4..8])])
         }
-        LpsType::IVec3 => LpsValue::IVec3([
+        LpsType::IVec3 => LpsValueF32::IVec3([
             i32_from_bytes(&data[0..4]),
             i32_from_bytes(&data[4..8]),
             i32_from_bytes(&data[8..12]),
         ]),
-        LpsType::IVec4 => LpsValue::IVec4([
+        LpsType::IVec4 => LpsValueF32::IVec4([
             i32_from_bytes(&data[0..4]),
             i32_from_bytes(&data[4..8]),
             i32_from_bytes(&data[8..12]),
             i32_from_bytes(&data[12..16]),
         ]),
         LpsType::UVec2 => {
-            LpsValue::UVec2([u32_from_bytes(&data[0..4]), u32_from_bytes(&data[4..8])])
+            LpsValueF32::UVec2([u32_from_bytes(&data[0..4]), u32_from_bytes(&data[4..8])])
         }
-        LpsType::UVec3 => LpsValue::UVec3([
+        LpsType::UVec3 => LpsValueF32::UVec3([
             u32_from_bytes(&data[0..4]),
             u32_from_bytes(&data[4..8]),
             u32_from_bytes(&data[8..12]),
         ]),
-        LpsType::UVec4 => LpsValue::UVec4([
+        LpsType::UVec4 => LpsValueF32::UVec4([
             u32_from_bytes(&data[0..4]),
             u32_from_bytes(&data[4..8]),
             u32_from_bytes(&data[8..12]),
             u32_from_bytes(&data[12..16]),
         ]),
-        LpsType::BVec2 => LpsValue::BVec2([
+        LpsType::BVec2 => LpsValueF32::BVec2([
             i32_from_bytes(&data[0..4]) != 0,
             i32_from_bytes(&data[4..8]) != 0,
         ]),
-        LpsType::BVec3 => LpsValue::BVec3([
+        LpsType::BVec3 => LpsValueF32::BVec3([
             i32_from_bytes(&data[0..4]) != 0,
             i32_from_bytes(&data[4..8]) != 0,
             i32_from_bytes(&data[8..12]) != 0,
         ]),
-        LpsType::BVec4 => LpsValue::BVec4([
+        LpsType::BVec4 => LpsValueF32::BVec4([
             i32_from_bytes(&data[0..4]) != 0,
             i32_from_bytes(&data[4..8]) != 0,
             i32_from_bytes(&data[8..12]) != 0,
@@ -306,7 +308,7 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
         LpsType::Mat2 => {
             let c0 = [f32_from_bytes(&data[0..4]), f32_from_bytes(&data[4..8])];
             let c1 = [f32_from_bytes(&data[8..12]), f32_from_bytes(&data[12..16])];
-            LpsValue::Mat2x2([c0, c1])
+            LpsValueF32::Mat2x2([c0, c1])
         }
         LpsType::Mat3 => {
             let mut m = [[0f32; 3]; 3];
@@ -318,7 +320,7 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
                     f32_from_bytes(&data[base + 8..base + 12]),
                 ];
             }
-            LpsValue::Mat3x3(m)
+            LpsValueF32::Mat3x3(m)
         }
         LpsType::Mat4 => {
             let mut m = [[0f32; 4]; 4];
@@ -331,7 +333,7 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
                     f32_from_bytes(&data[base + 12..base + 16]),
                 ];
             }
-            LpsValue::Mat4x4(m)
+            LpsValueF32::Mat4x4(m)
         }
         LpsType::Array { element, len } => {
             let stride = array_stride(element, rules);
@@ -341,7 +343,7 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
                 let base = i * stride;
                 elems.push(read_value(element, rules, &data[base..base + esz])?);
             }
-            LpsValue::Array(elems.into_boxed_slice())
+            LpsValueF32::Array(elems.into_boxed_slice())
         }
         LpsType::Struct { name, members } => {
             let mut cursor = 0usize;
@@ -354,7 +356,7 @@ fn read_value(ty: &LpsType, rules: LayoutRules, data: &[u8]) -> Result<LpsValue,
                 fields.push((member_key(m, i), v));
                 cursor += msz;
             }
-            LpsValue::Struct {
+            LpsValueF32::Struct {
                 name: name.clone(),
                 fields,
             }
@@ -366,7 +368,7 @@ fn write_value(
     ty: &LpsType,
     rules: LayoutRules,
     data: &mut [u8],
-    value: &LpsValue,
+    value: &LpsValueF32,
 ) -> Result<(), DataError> {
     let need = type_size(ty, rules);
     if data.len() < need {
@@ -377,77 +379,77 @@ fn write_value(
     }
     let data = &mut data[..need];
     match (ty, value) {
-        (LpsType::Float, LpsValue::F32(x)) => write_f32(data, *x),
-        (LpsType::Int, LpsValue::I32(x)) => write_i32(data, *x),
-        (LpsType::UInt, LpsValue::U32(x)) => write_u32(data, *x),
-        (LpsType::Bool, LpsValue::Bool(b)) => write_i32(data, if *b { 1 } else { 0 }),
-        (LpsType::Vec2, LpsValue::Vec2(a)) => {
+        (LpsType::Float, LpsValueF32::F32(x)) => write_f32(data, *x),
+        (LpsType::Int, LpsValueF32::I32(x)) => write_i32(data, *x),
+        (LpsType::UInt, LpsValueF32::U32(x)) => write_u32(data, *x),
+        (LpsType::Bool, LpsValueF32::Bool(b)) => write_i32(data, if *b { 1 } else { 0 }),
+        (LpsType::Vec2, LpsValueF32::Vec2(a)) => {
             write_f32(&mut data[0..4], a[0]);
             write_f32(&mut data[4..8], a[1]);
         }
-        (LpsType::Vec3, LpsValue::Vec3(a)) => {
+        (LpsType::Vec3, LpsValueF32::Vec3(a)) => {
             write_f32(&mut data[0..4], a[0]);
             write_f32(&mut data[4..8], a[1]);
             write_f32(&mut data[8..12], a[2]);
         }
-        (LpsType::Vec4, LpsValue::Vec4(a)) => {
+        (LpsType::Vec4, LpsValueF32::Vec4(a)) => {
             write_f32(&mut data[0..4], a[0]);
             write_f32(&mut data[4..8], a[1]);
             write_f32(&mut data[8..12], a[2]);
             write_f32(&mut data[12..16], a[3]);
         }
-        (LpsType::IVec2, LpsValue::IVec2(a)) => {
+        (LpsType::IVec2, LpsValueF32::IVec2(a)) => {
             write_i32(&mut data[0..4], a[0]);
             write_i32(&mut data[4..8], a[1]);
         }
-        (LpsType::IVec3, LpsValue::IVec3(a)) => {
+        (LpsType::IVec3, LpsValueF32::IVec3(a)) => {
             write_i32(&mut data[0..4], a[0]);
             write_i32(&mut data[4..8], a[1]);
             write_i32(&mut data[8..12], a[2]);
         }
-        (LpsType::IVec4, LpsValue::IVec4(a)) => {
+        (LpsType::IVec4, LpsValueF32::IVec4(a)) => {
             write_i32(&mut data[0..4], a[0]);
             write_i32(&mut data[4..8], a[1]);
             write_i32(&mut data[8..12], a[2]);
             write_i32(&mut data[12..16], a[3]);
         }
-        (LpsType::UVec2, LpsValue::UVec2(a)) => {
+        (LpsType::UVec2, LpsValueF32::UVec2(a)) => {
             write_u32(&mut data[0..4], a[0]);
             write_u32(&mut data[4..8], a[1]);
         }
-        (LpsType::UVec3, LpsValue::UVec3(a)) => {
+        (LpsType::UVec3, LpsValueF32::UVec3(a)) => {
             write_u32(&mut data[0..4], a[0]);
             write_u32(&mut data[4..8], a[1]);
             write_u32(&mut data[8..12], a[2]);
         }
-        (LpsType::UVec4, LpsValue::UVec4(a)) => {
+        (LpsType::UVec4, LpsValueF32::UVec4(a)) => {
             write_u32(&mut data[0..4], a[0]);
             write_u32(&mut data[4..8], a[1]);
             write_u32(&mut data[8..12], a[2]);
             write_u32(&mut data[12..16], a[3]);
         }
-        (LpsType::BVec2, LpsValue::BVec2(a)) => {
+        (LpsType::BVec2, LpsValueF32::BVec2(a)) => {
             write_i32(&mut data[0..4], if a[0] { 1 } else { 0 });
             write_i32(&mut data[4..8], if a[1] { 1 } else { 0 });
         }
-        (LpsType::BVec3, LpsValue::BVec3(a)) => {
+        (LpsType::BVec3, LpsValueF32::BVec3(a)) => {
             write_i32(&mut data[0..4], if a[0] { 1 } else { 0 });
             write_i32(&mut data[4..8], if a[1] { 1 } else { 0 });
             write_i32(&mut data[8..12], if a[2] { 1 } else { 0 });
         }
-        (LpsType::BVec4, LpsValue::BVec4(a)) => {
+        (LpsType::BVec4, LpsValueF32::BVec4(a)) => {
             write_i32(&mut data[0..4], if a[0] { 1 } else { 0 });
             write_i32(&mut data[4..8], if a[1] { 1 } else { 0 });
             write_i32(&mut data[8..12], if a[2] { 1 } else { 0 });
             write_i32(&mut data[12..16], if a[3] { 1 } else { 0 });
         }
-        (LpsType::Mat2, LpsValue::Mat2x2(m)) => {
+        (LpsType::Mat2, LpsValueF32::Mat2x2(m)) => {
             write_f32(&mut data[0..4], m[0][0]);
             write_f32(&mut data[4..8], m[0][1]);
             write_f32(&mut data[8..12], m[1][0]);
             write_f32(&mut data[12..16], m[1][1]);
         }
-        (LpsType::Mat3, LpsValue::Mat3x3(m)) => {
+        (LpsType::Mat3, LpsValueF32::Mat3x3(m)) => {
             for col in 0..3 {
                 let base = col * 12;
                 write_f32(&mut data[base..base + 4], m[col][0]);
@@ -455,7 +457,7 @@ fn write_value(
                 write_f32(&mut data[base + 8..base + 12], m[col][2]);
             }
         }
-        (LpsType::Mat4, LpsValue::Mat4x4(m)) => {
+        (LpsType::Mat4, LpsValueF32::Mat4x4(m)) => {
             for col in 0..4 {
                 let base = col * 16;
                 write_f32(&mut data[base..base + 4], m[col][0]);
@@ -464,7 +466,7 @@ fn write_value(
                 write_f32(&mut data[base + 12..base + 16], m[col][3]);
             }
         }
-        (LpsType::Array { element, len }, LpsValue::Array(items)) => {
+        (LpsType::Array { element, len }, LpsValueF32::Array(items)) => {
             debug_assert_eq!(items.len(), *len as usize);
             let stride = array_stride(element, rules);
             let esz = type_size(element, rules);
@@ -473,7 +475,7 @@ fn write_value(
                 write_value(element, rules, &mut data[base..base + esz], it)?;
             }
         }
-        (LpsType::Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
+        (LpsType::Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             debug_assert_eq!(members.len(), fields.len());
             let mut cursor = 0usize;
             for (i, m) in members.iter().enumerate() {
@@ -540,18 +542,18 @@ mod tests {
                 },
             ],
         };
-        let v = LpsValue::Struct {
+        let v = LpsValueF32::Struct {
             name: Some(String::from("S")),
             fields: vec![
-                (String::from("v"), LpsValue::Vec3([1.0, 2.0, 3.0])),
-                (String::from("s"), LpsValue::F32(4.0)),
+                (String::from("v"), LpsValueF32::Vec3([1.0, 2.0, 3.0])),
+                (String::from("s"), LpsValueF32::F32(4.0)),
             ],
         };
-        let d = LpvmData::from_value(ty, &v).unwrap();
+        let d = LpvmDataQ32::from_value(ty, &v).unwrap();
         assert_eq!(d.len(), 16);
         assert!((d.get_f32("s").unwrap() - 4.0).abs() < 1e-6);
         let got = d.get("v").unwrap();
-        assert!(got.approx_eq_default(&LpsValue::Vec3([1.0, 2.0, 3.0])));
+        assert!(got.approx_eq_default(&LpsValueF32::Vec3([1.0, 2.0, 3.0])));
         assert!(d.to_value().unwrap().approx_eq_default(&v));
     }
 
@@ -561,7 +563,7 @@ mod tests {
             element: Box::new(LpsType::Float),
             len: 3,
         };
-        let mut d = LpvmData::new(ty);
+        let mut d = LpvmDataQ32::new(ty);
         d.set_f32("[1]", 9.0).unwrap();
         assert!((d.get_f32("[1]").unwrap() - 9.0).abs() < 1e-6);
     }

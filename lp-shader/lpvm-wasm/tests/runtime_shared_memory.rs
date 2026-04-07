@@ -1,7 +1,7 @@
 //! One engine, shared linear memory: multiple instances and host bump allocations.
 
 use lps_frontend::{compile, lower};
-use lpvm::{AllocError, LpsValue, LpvmEngine, LpvmInstance, LpvmModule};
+use lpvm::{AllocError, LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
 
@@ -20,16 +20,16 @@ fn two_instances_same_engine_share_memory() {
     let mut b = module.instantiate().expect("instantiate b");
 
     let ra = a
-        .call("add", &[LpsValue::F32(1.0), LpsValue::F32(2.0)])
+        .call("add", &[LpsValueF32::F32(1.0), LpsValueF32::F32(2.0)])
         .expect("call a");
     let rb = b
-        .call("add", &[LpsValue::F32(10.0), LpsValue::F32(20.0)])
+        .call("add", &[LpsValueF32::F32(10.0), LpsValueF32::F32(20.0)])
         .expect("call b");
 
-    let LpsValue::F32(x) = ra else {
+    let LpsValueF32::F32(x) = ra else {
         panic!("expected F32");
     };
-    let LpsValue::F32(y) = rb else {
+    let LpsValueF32::F32(y) = rb else {
         panic!("expected F32");
     };
     assert!((x - 3.0).abs() < 0.02);

@@ -7,12 +7,12 @@ use core::fmt;
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::ArgumentPurpose;
 use cranelift_codegen::isa::CallConv;
-use lp_riscv_emu::{LogLevel, Memory, Riscv32Emulator, DEFAULT_SHARED_START};
+use lp_riscv_emu::{DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
 use lps_shared::lps_value_f64_convert::{glsl_f64_to_lps_value, lps_value_to_f64};
 use lps_shared::{LpsType, ParamQualifier};
-use lpvm::{AllocError, LpsValue, LpvmInstance, LpvmMemory};
-use lpvm_cranelift::{decode_q32_return, flatten_q32_arg, signature_for_ir_func, CallError};
+use lpvm::{AllocError, LpsValueF32, LpvmInstance, LpvmMemory};
+use lpvm_cranelift::{CallError, decode_q32_return, flatten_q32_arg, signature_for_ir_func};
 
 use crate::emu_run::{self, GUEST_VMCTX_BYTES};
 use crate::module::EmuModule;
@@ -80,7 +80,7 @@ impl EmuInstance {
 impl LpvmInstance for EmuInstance {
     type Error = InstanceError;
 
-    fn call(&mut self, name: &str, args: &[LpsValue]) -> Result<LpsValue, Self::Error> {
+    fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call requires FloatMode::Q32",

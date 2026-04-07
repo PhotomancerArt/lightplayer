@@ -26,7 +26,7 @@ mod tests {
     use std::string::String;
 
     use lpir::parse_module;
-    use lps_shared::lps_value::LpsValue;
+    use lps_shared::lps_value_f32::LpsValueF32;
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
     use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 
@@ -77,10 +77,10 @@ mod tests {
             .expect("compile (needs builtins ELF)");
         let mut inst = module.instantiate().expect("instantiate");
         let v = inst
-            .call("add", &[LpsValue::F32(1.0), LpsValue::F32(2.0)])
+            .call("add", &[LpsValueF32::F32(1.0), LpsValueF32::F32(2.0)])
             .expect("call");
         match v {
-            LpsValue::F32(x) => assert!((x - 3.0).abs() < 1e-3),
+            LpsValueF32::F32(x) => assert!((x - 3.0).abs() < 1e-3),
             _ => panic!("expected f32"),
         }
     }

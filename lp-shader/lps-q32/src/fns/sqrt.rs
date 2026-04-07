@@ -1,8 +1,8 @@
 use crate::lpir;
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// Component-wise square root for Vec2Q32
 /// Returns sqrt(x) for each component

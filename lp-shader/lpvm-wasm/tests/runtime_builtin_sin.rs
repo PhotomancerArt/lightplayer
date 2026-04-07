@@ -3,7 +3,7 @@
 use std::f32::consts::FRAC_PI_2;
 
 use lps_frontend::{compile, lower};
-use lpvm::{LpsValue, LpvmEngine, LpvmInstance, LpvmModule};
+use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
 
@@ -19,13 +19,13 @@ fn call_sin_q32_linked_builtins() {
     let module = engine.compile(&ir, &meta).expect("compile");
     let mut inst = module.instantiate().expect("instantiate");
 
-    let LpsValue::F32(z) = inst.call("f", &[LpsValue::F32(0.0)]).expect("sin(0)") else {
+    let LpsValueF32::F32(z) = inst.call("f", &[LpsValueF32::F32(0.0)]).expect("sin(0)") else {
         panic!("expected F32");
     };
     assert!(z.abs() < 0.02, "sin(0) ≈ 0, got {z}");
 
-    let LpsValue::F32(one) = inst
-        .call("f", &[LpsValue::F32(FRAC_PI_2)])
+    let LpsValueF32::F32(one) = inst
+        .call("f", &[LpsValueF32::F32(FRAC_PI_2)])
         .expect("sin(pi/2)")
     else {
         panic!("expected F32");

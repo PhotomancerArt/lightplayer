@@ -1,7 +1,7 @@
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// Linear interpolation for Q32
 /// Returns a + t * (b - a)
@@ -48,9 +48,9 @@ mod tests {
 
     #[test]
     fn test_mix_q32() {
-        let a = Q32::from_f32(0.0);
-        let b = Q32::from_f32(1.0);
-        let t = Q32::from_f32(0.5);
+        let a = Q32::from_f32_wrapping(0.0);
+        let b = Q32::from_f32_wrapping(1.0);
+        let t = Q32::from_f32_wrapping(0.5);
         let result = mix_q32(a, b, t);
         assert!((result.to_f32() - 0.5).abs() < 0.01);
     }

@@ -22,7 +22,7 @@ use alloc::boxed::Box;
 /// To access column `col`, use `m[col][row]` for `row` in 0..rows.
 /// To access row `row`, use `m[col][row]` for `col` in 0..cols.
 #[derive(Debug, Clone)]
-pub enum LpsValue {
+pub enum LpsValueF32 {
     I32(i32),
     U32(u32),
     F32(f32),
@@ -43,49 +43,49 @@ pub enum LpsValue {
     Mat3x3([[f32; 3]; 3]), // [[col0_row0, col0_row1, col0_row2], [col1_row0, ...], ...]
     Mat4x4([[f32; 4]; 4]), // [[col0_row0, col0_row1, col0_row2, col0_row3], [col1_row0, ...], ...]
     /// Fixed-size array; elements use the same recursive shape (scalars, vectors, matrices, nested arrays).
-    Array(Box<[LpsValue]>),
+    Array(Box<[LpsValueF32]>),
     /// Struct instance; `fields` are in declaration order (names match [`StructMember::name`] when present).
     Struct {
         name: Option<alloc::string::String>,
-        fields: alloc::vec::Vec<(alloc::string::String, LpsValue)>,
+        fields: alloc::vec::Vec<(alloc::string::String, LpsValueF32)>,
     },
 }
 
-impl LpsValue {
+impl LpsValueF32 {
     /// Exact equality comparison (==)
     /// For integers and booleans: exact match required
     /// For floats: exact match required (use `approx_eq` for tolerance-based comparison)
     /// For vectors/matrices: exact match for all components
     pub fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (LpsValue::I32(a), LpsValue::I32(b)) => a == b,
-            (LpsValue::U32(a), LpsValue::U32(b)) => a == b,
-            (LpsValue::F32(a), LpsValue::F32(b)) => a == b, // Exact equality
-            (LpsValue::Bool(a), LpsValue::Bool(b)) => a == b,
-            (LpsValue::Vec2(a), LpsValue::Vec2(b)) => a == b,
-            (LpsValue::Vec3(a), LpsValue::Vec3(b)) => a == b,
-            (LpsValue::Vec4(a), LpsValue::Vec4(b)) => a == b,
-            (LpsValue::IVec2(a), LpsValue::IVec2(b)) => a == b,
-            (LpsValue::IVec3(a), LpsValue::IVec3(b)) => a == b,
-            (LpsValue::IVec4(a), LpsValue::IVec4(b)) => a == b,
-            (LpsValue::UVec2(a), LpsValue::UVec2(b)) => a == b,
-            (LpsValue::UVec3(a), LpsValue::UVec3(b)) => a == b,
-            (LpsValue::UVec4(a), LpsValue::UVec4(b)) => a == b,
-            (LpsValue::BVec2(a), LpsValue::BVec2(b)) => a == b,
-            (LpsValue::BVec3(a), LpsValue::BVec3(b)) => a == b,
-            (LpsValue::BVec4(a), LpsValue::BVec4(b)) => a == b,
-            (LpsValue::Mat2x2(a), LpsValue::Mat2x2(b)) => a == b,
-            (LpsValue::Mat3x3(a), LpsValue::Mat3x3(b)) => a == b,
-            (LpsValue::Mat4x4(a), LpsValue::Mat4x4(b)) => a == b,
-            (LpsValue::Array(a), LpsValue::Array(b)) => {
+            (LpsValueF32::I32(a), LpsValueF32::I32(b)) => a == b,
+            (LpsValueF32::U32(a), LpsValueF32::U32(b)) => a == b,
+            (LpsValueF32::F32(a), LpsValueF32::F32(b)) => a == b, // Exact equality
+            (LpsValueF32::Bool(a), LpsValueF32::Bool(b)) => a == b,
+            (LpsValueF32::Vec2(a), LpsValueF32::Vec2(b)) => a == b,
+            (LpsValueF32::Vec3(a), LpsValueF32::Vec3(b)) => a == b,
+            (LpsValueF32::Vec4(a), LpsValueF32::Vec4(b)) => a == b,
+            (LpsValueF32::IVec2(a), LpsValueF32::IVec2(b)) => a == b,
+            (LpsValueF32::IVec3(a), LpsValueF32::IVec3(b)) => a == b,
+            (LpsValueF32::IVec4(a), LpsValueF32::IVec4(b)) => a == b,
+            (LpsValueF32::UVec2(a), LpsValueF32::UVec2(b)) => a == b,
+            (LpsValueF32::UVec3(a), LpsValueF32::UVec3(b)) => a == b,
+            (LpsValueF32::UVec4(a), LpsValueF32::UVec4(b)) => a == b,
+            (LpsValueF32::BVec2(a), LpsValueF32::BVec2(b)) => a == b,
+            (LpsValueF32::BVec3(a), LpsValueF32::BVec3(b)) => a == b,
+            (LpsValueF32::BVec4(a), LpsValueF32::BVec4(b)) => a == b,
+            (LpsValueF32::Mat2x2(a), LpsValueF32::Mat2x2(b)) => a == b,
+            (LpsValueF32::Mat3x3(a), LpsValueF32::Mat3x3(b)) => a == b,
+            (LpsValueF32::Mat4x4(a), LpsValueF32::Mat4x4(b)) => a == b,
+            (LpsValueF32::Array(a), LpsValueF32::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.eq(y))
             }
             (
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: na,
                     fields: fa,
                 },
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: nb,
                     fields: fb,
                 },
@@ -107,58 +107,58 @@ impl LpsValue {
     /// For vectors/matrices: checks each component within tolerance
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
         match (self, other) {
-            (LpsValue::I32(a), LpsValue::I32(b)) => a == b, // Exact for ints
-            (LpsValue::U32(a), LpsValue::U32(b)) => a == b, // Exact for uints
-            (LpsValue::F32(a), LpsValue::F32(b)) => (a - b).abs() <= tolerance,
-            (LpsValue::Bool(a), LpsValue::Bool(b)) => a == b, // Exact for bools
-            (LpsValue::Vec2(a), LpsValue::Vec2(b)) => a
+            (LpsValueF32::I32(a), LpsValueF32::I32(b)) => a == b, // Exact for ints
+            (LpsValueF32::U32(a), LpsValueF32::U32(b)) => a == b, // Exact for uints
+            (LpsValueF32::F32(a), LpsValueF32::F32(b)) => (a - b).abs() <= tolerance,
+            (LpsValueF32::Bool(a), LpsValueF32::Bool(b)) => a == b, // Exact for bools
+            (LpsValueF32::Vec2(a), LpsValueF32::Vec2(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::Vec3(a), LpsValue::Vec3(b)) => a
+            (LpsValueF32::Vec3(a), LpsValueF32::Vec3(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::Vec4(a), LpsValue::Vec4(b)) => a
+            (LpsValueF32::Vec4(a), LpsValueF32::Vec4(b)) => a
                 .iter()
                 .zip(b.iter())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::IVec2(a), LpsValue::IVec2(b)) => a == b, // Exact for ints
-            (LpsValue::IVec3(a), LpsValue::IVec3(b)) => a == b, // Exact for ints
-            (LpsValue::IVec4(a), LpsValue::IVec4(b)) => a == b, // Exact for ints
-            (LpsValue::UVec2(a), LpsValue::UVec2(b)) => a == b, // Exact for uints
-            (LpsValue::UVec3(a), LpsValue::UVec3(b)) => a == b, // Exact for uints
-            (LpsValue::UVec4(a), LpsValue::UVec4(b)) => a == b, // Exact for uints
-            (LpsValue::BVec2(a), LpsValue::BVec2(b)) => a == b, // Exact for bools
-            (LpsValue::BVec3(a), LpsValue::BVec3(b)) => a == b, // Exact for bools
-            (LpsValue::BVec4(a), LpsValue::BVec4(b)) => a == b, // Exact for bools
-            (LpsValue::Mat2x2(a), LpsValue::Mat2x2(b)) => a
+            (LpsValueF32::IVec2(a), LpsValueF32::IVec2(b)) => a == b, // Exact for ints
+            (LpsValueF32::IVec3(a), LpsValueF32::IVec3(b)) => a == b, // Exact for ints
+            (LpsValueF32::IVec4(a), LpsValueF32::IVec4(b)) => a == b, // Exact for ints
+            (LpsValueF32::UVec2(a), LpsValueF32::UVec2(b)) => a == b, // Exact for uints
+            (LpsValueF32::UVec3(a), LpsValueF32::UVec3(b)) => a == b, // Exact for uints
+            (LpsValueF32::UVec4(a), LpsValueF32::UVec4(b)) => a == b, // Exact for uints
+            (LpsValueF32::BVec2(a), LpsValueF32::BVec2(b)) => a == b, // Exact for bools
+            (LpsValueF32::BVec3(a), LpsValueF32::BVec3(b)) => a == b, // Exact for bools
+            (LpsValueF32::BVec4(a), LpsValueF32::BVec4(b)) => a == b, // Exact for bools
+            (LpsValueF32::Mat2x2(a), LpsValueF32::Mat2x2(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::Mat3x3(a), LpsValue::Mat3x3(b)) => a
+            (LpsValueF32::Mat3x3(a), LpsValueF32::Mat3x3(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::Mat4x4(a), LpsValue::Mat4x4(b)) => a
+            (LpsValueF32::Mat4x4(a), LpsValueF32::Mat4x4(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
                 .all(|(x, y)| (x - y).abs() <= tolerance),
-            (LpsValue::Array(a), LpsValue::Array(b)) => {
+            (LpsValueF32::Array(a), LpsValueF32::Array(b)) => {
                 a.len() == b.len()
                     && a.iter()
                         .zip(b.iter())
                         .all(|(x, y)| x.approx_eq(y, tolerance))
             }
             (
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: na,
                     fields: fa,
                 },
-                LpsValue::Struct {
+                LpsValueF32::Struct {
                     name: nb,
                     fields: fb,
                 },
@@ -187,7 +187,7 @@ impl LpsValue {
 mod tests {
     use alloc::vec;
 
-    use super::LpsValue;
+    use super::LpsValueF32;
 
     #[test]
     fn test_flat_array_to_mat2x2_conversion() {
@@ -200,7 +200,7 @@ mod tests {
         let flat_array = vec![1.0, 2.0, 3.0, 4.0];
 
         // Simulate the conversion from test_utils.rs
-        let mat = LpsValue::Mat2x2([
+        let mat = LpsValueF32::Mat2x2([
             [flat_array[0], flat_array[1]], // [1.0, 2.0] - col 0
             [flat_array[2], flat_array[3]], // [3.0, 4.0] - col 1
         ]);
@@ -208,7 +208,7 @@ mod tests {
         // Verify the matrix represents the correct values
         // Column 0 should be [1.0, 2.0], Column 1 should be [3.0, 4.0]
         match mat {
-            LpsValue::Mat2x2(m) => {
+            LpsValueF32::Mat2x2(m) => {
                 // m[col][row] format
                 // Column 0: [m[0][0], m[0][1]] = [1.0, 2.0] ✓
                 assert_eq!(m[0][0], 1.0); // col0_row0
@@ -232,7 +232,7 @@ mod tests {
         let flat_array = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
         // Simulate the conversion from test_utils.rs
-        let mat = LpsValue::Mat3x3([
+        let mat = LpsValueF32::Mat3x3([
             [flat_array[0], flat_array[1], flat_array[2]], // col 0
             [flat_array[3], flat_array[4], flat_array[5]], // col 1
             [flat_array[6], flat_array[7], flat_array[8]], // col 2
@@ -240,7 +240,7 @@ mod tests {
 
         // Verify columns are correct
         match mat {
-            LpsValue::Mat3x3(m) => {
+            LpsValueF32::Mat3x3(m) => {
                 // Column 0: [1.0, 2.0, 3.0]
                 assert_eq!(m[0][0], 1.0);
                 assert_eq!(m[0][1], 2.0);
@@ -273,7 +273,7 @@ mod tests {
         ];
 
         // Simulate the conversion from test_utils.rs
-        let mat = LpsValue::Mat4x4([
+        let mat = LpsValueF32::Mat4x4([
             [flat_array[0], flat_array[1], flat_array[2], flat_array[3]], // col 0
             [flat_array[4], flat_array[5], flat_array[6], flat_array[7]], // col 1
             [flat_array[8], flat_array[9], flat_array[10], flat_array[11]], // col 2
@@ -287,7 +287,7 @@ mod tests {
 
         // Verify columns are correct
         match mat {
-            LpsValue::Mat4x4(m) => {
+            LpsValueF32::Mat4x4(m) => {
                 // Column 0: [1.0, 0.0, 0.0, 0.0]
                 assert_eq!(m[0][0], 1.0);
                 assert_eq!(m[0][1], 0.0);

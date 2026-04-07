@@ -3,7 +3,7 @@
 //! Returns values in [-1, 1] range using -1.0 + 2.0 * random(x, seed)
 
 use crate::builtins::lpfx::generative::random::random1_q32::lpfx_random1;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// 1D Signed Random function
 ///
@@ -17,7 +17,7 @@ use lps_q32::types::q32::Q32;
 pub fn lpfx_srandom1(x: Q32, seed: u32) -> Q32 {
     let random_val = lpfx_random1(x, seed);
     // -1.0 + 2.0 * random_val
-    Q32::from_f32(-1.0) + Q32::from_f32(2.0) * random_val
+    Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * random_val
 }
 
 /// 1D Signed Random function (extern C wrapper for compiler).
@@ -42,7 +42,7 @@ mod tests {
 
     #[test]
     fn test_srandom1_range() {
-        let result = __lp_lpfx_srandom1_q32(Q32::from_f32(42.0).to_fixed(), 123);
+        let result = __lp_lpfx_srandom1_q32(Q32::from_f32_wrapping(42.0).to_fixed(), 123);
         let val = Q32::from_fixed(result).to_f32();
         assert!(
             val >= -1.0 && val <= 1.0,

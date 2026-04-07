@@ -8,8 +8,8 @@
 //! basic arithmetic. The underlying random function is MIT-licensed (David Hoskins).
 
 use crate::builtins::lpfx::generative::random::random2_q32::lpfx_random2;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec2_q32::Vec2Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec2_q32::Vec2Q32;
 
 /// 2D Signed Random function
 ///
@@ -23,7 +23,7 @@ use lps_q32::types::vec2_q32::Vec2Q32;
 pub fn lpfx_srandom2(p: Vec2Q32, seed: u32) -> Q32 {
     let random_val = lpfx_random2(p, seed);
     // -1.0 + 2.0 * random_val
-    Q32::from_f32(-1.0) + Q32::from_f32(2.0) * random_val
+    Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * random_val
 }
 
 /// 2D Signed Random function (extern C wrapper for compiler).
@@ -50,8 +50,8 @@ mod tests {
     #[test]
     fn test_srandom2_range() {
         let result = __lp_lpfx_srandom2_q32(
-            Q32::from_f32(42.0).to_fixed(),
-            Q32::from_f32(10.0).to_fixed(),
+            Q32::from_f32_wrapping(42.0).to_fixed(),
+            Q32::from_f32_wrapping(10.0).to_fixed(),
             123,
         );
         let val = Q32::from_fixed(result).to_f32();

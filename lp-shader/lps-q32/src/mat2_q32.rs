@@ -1,7 +1,7 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
 
 /// 2x2 matrix for Q32 fixed-point arithmetic (GLSL-compatible, column-major storage)
 ///
@@ -31,10 +31,10 @@ impl Mat2Q32 {
     #[inline(always)]
     pub fn from_f32(m00: f32, m10: f32, m01: f32, m11: f32) -> Self {
         Mat2Q32::new(
-            Q32::from_f32(m00),
-            Q32::from_f32(m10),
-            Q32::from_f32(m01),
-            Q32::from_f32(m11),
+            Q32::from_f32_wrapping(m00),
+            Q32::from_f32_wrapping(m10),
+            Q32::from_f32_wrapping(m01),
+            Q32::from_f32_wrapping(m11),
         )
     }
 
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_get_set() {
         let mut m = Mat2Q32::zero();
-        m.set(0, 0, Q32::from_f32(5.0));
+        m.set(0, 0, Q32::from_f32_wrapping(5.0));
         assert_eq!(m.get(0, 0).to_f32(), 5.0);
     }
 
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn test_mul_scalar() {
         let m = Mat2Q32::from_f32(1.0, 2.0, 3.0, 4.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = m * s;
         assert_eq!(result.get(0, 0).to_f32(), 2.0);
         assert_eq!(result.get(1, 1).to_f32(), 8.0);
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn test_div_scalar() {
         let m = Mat2Q32::from_f32(4.0, 6.0, 8.0, 10.0);
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = m / s;
         assert_eq!(result.get(0, 0).to_f32(), 2.0);
         assert_eq!(result.get(1, 1).to_f32(), 5.0);

@@ -4,6 +4,7 @@
 use core::cmp::Ord;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+
 use crate::lpir;
 
 /// Fixed-point constants
@@ -67,15 +68,15 @@ impl Q32 {
     /// ```
     /// use lps_q32::Q32;
     ///
-    /// let q = Q32::from_f32(1.5);
+    /// let q = Q32::from_f32_wrapping(1.5);
     /// assert_eq!(q.to_f32(), 1.5);
     ///
     /// // Truncation (not rounding): 0.6 * 65536 = 39321.6 → 39321
-    /// let q2 = Q32::from_f32(0.6);
+    /// let q2 = Q32::from_f32_wrapping(0.6);
     /// assert_eq!(q2.to_fixed(), 39321);  // not 39322
     /// ```
     #[inline(always)]
-    pub fn from_f32(f: f32) -> Self {
+    pub fn from_f32_wrapping(f: f32) -> Self {
         Q32((f * ONE as f32) as i32)
     }
 
@@ -146,13 +147,13 @@ impl Q32 {
     /// - Sign bit trick to clamp negative to 0: `value & !(value >> 31)`
     /// - Comparison trick to clamp > 255 to 255: `value & !((255 - value) >> 31) | 255 & ((255 - value) >> 31)`
     #[inline]
-    pub fn to_u8_clamped(self) -> u8 {
+    pub fn to_u8_saturating(self) -> u8 {
         self.to_i32().clamp(0, 255) as u8
     }
 
     /// Get value as u16 clamped to [0, 65535]
     #[inline]
-    pub fn to_u16_clamped(self) -> u16 {
+    pub fn to_u16_saturating(self) -> u16 {
         let scaled = (self.0 as i64 * 65535) / 65536;
         scaled.clamp(0, 65535) as u16
     }
@@ -316,18 +317,18 @@ impl ToQ32 for u8 {
     }
 }
 
-/// Extension trait for clamped conversions to Q32
-pub trait ToQ32Clamped {
+/// Extension trait for saturating conversions to Q32
+pub trait ToQ32Saturating {
     /// Convert to Q32 with saturating arithmetic (clamps to maximum representable integer if value exceeds Q32 range)
     ///
     /// The maximum representable integer in Q32 format is `i32::MAX >> 16` (32767),
     /// since `from_i32` shifts left by 16 bits and must not overflow.
-    fn to_q32_clamped(self) -> Q32;
+    fn to_q32_saturating(self) -> Q32;
 }
 
-impl ToQ32Clamped for u32 {
+impl ToQ32Saturating for u32 {
     #[inline(always)]
-    fn to_q32_clamped(self) -> Q32 {
+    fn to_q32_saturating(self) -> Q32 {
         const MAX_REPRESENTABLE: u32 = (i32::MAX >> Q32::SHIFT) as u32;
         if self <= MAX_REPRESENTABLE {
             Q32::from_i32(self as i32)
@@ -357,10 +358,10 @@ mod tests {
 
     #[test]
     fn test_from_f32() {
-        let f = Q32::from_f32(1.5);
+        let f = Q32::from_f32_wrapping(1.5);
         assert!((f.to_f32() - 1.5).abs() < 0.001);
 
-        let f2 = Q32::from_f32(-2.75);
+        let f2 = Q32::from_f32_wrapping(-2.75);
         assert!((f2.to_f32() - (-2.75)).abs() < 0.001);
     }
 
@@ -384,8 +385,8 @@ mod tests {
         let b = Q32::from_i32(3);
         assert_eq!((a * b).to_f32(), 6.0);
 
-        let c = Q32::from_f32(1.5);
-        let d = Q32::from_f32(2.0);
+        let c = Q32::from_f32_wrapping(1.5);
+        let d = Q32::from_f32_wrapping(2.0);
         assert!((c * d).to_f32() - 3.0 < 0.01);
     }
 
@@ -455,19 +456,19 @@ mod tests {
         const MAX_REPRESENTABLE: u32 = (i32::MAX >> Q32::SHIFT) as u32;
         const MAX_REPRESENTABLE_F32: f32 = MAX_REPRESENTABLE as f32;
 
-        assert_eq!(5u32.to_q32_clamped().to_f32(), 5.0);
-        assert_eq!(0u32.to_q32_clamped().to_f32(), 0.0);
+        assert_eq!(5u32.to_q32_saturating().to_f32(), 5.0);
+        assert_eq!(0u32.to_q32_saturating().to_f32(), 0.0);
         // Test that values at the maximum are preserved
         assert_eq!(
-            MAX_REPRESENTABLE.to_q32_clamped().to_f32(),
+            MAX_REPRESENTABLE.to_q32_saturating().to_f32(),
             MAX_REPRESENTABLE_F32
         );
         // Test that values exceeding the maximum are clamped
         assert_eq!(
-            (MAX_REPRESENTABLE + 1).to_q32_clamped().to_f32(),
+            (MAX_REPRESENTABLE + 1).to_q32_saturating().to_f32(),
             MAX_REPRESENTABLE_F32
         );
-        assert_eq!(u32::MAX.to_q32_clamped().to_f32(), MAX_REPRESENTABLE_F32);
+        assert_eq!(u32::MAX.to_q32_saturating().to_f32(), MAX_REPRESENTABLE_F32);
     }
 
     #[test]
@@ -485,26 +486,26 @@ mod tests {
     #[test]
     fn test_to_u8_clamping() {
         // Test values in range [0, 255]
-        assert_eq!(Q32::from_i32(0).to_u8_clamped(), 0);
-        assert_eq!(Q32::from_i32(100).to_u8_clamped(), 100);
-        assert_eq!(Q32::from_i32(255).to_u8_clamped(), 255);
-        assert_eq!(Q32::from_f32(128.5).to_u8_clamped(), 128);
+        assert_eq!(Q32::from_i32(0).to_u8_saturating(), 0);
+        assert_eq!(Q32::from_i32(100).to_u8_saturating(), 100);
+        assert_eq!(Q32::from_i32(255).to_u8_saturating(), 255);
+        assert_eq!(Q32::from_f32_wrapping(128.5).to_u8_saturating(), 128);
 
         // Test values > 255 (should clamp to 255)
-        assert_eq!(Q32::from_i32(256).to_u8_clamped(), 255);
-        assert_eq!(Q32::from_i32(300).to_u8_clamped(), 255);
-        assert_eq!(Q32::from_i32(1000).to_u8_clamped(), 255);
-        assert_eq!(Q32::from_f32(300.7).to_u8_clamped(), 255);
+        assert_eq!(Q32::from_i32(256).to_u8_saturating(), 255);
+        assert_eq!(Q32::from_i32(300).to_u8_saturating(), 255);
+        assert_eq!(Q32::from_i32(1000).to_u8_saturating(), 255);
+        assert_eq!(Q32::from_f32_wrapping(300.7).to_u8_saturating(), 255);
 
         // Test negative values (should clamp to 0)
-        assert_eq!(Q32::from_i32(-1).to_u8_clamped(), 0);
-        assert_eq!(Q32::from_i32(-100).to_u8_clamped(), 0);
-        assert_eq!(Q32::from_f32(-5.5).to_u8_clamped(), 0);
+        assert_eq!(Q32::from_i32(-1).to_u8_saturating(), 0);
+        assert_eq!(Q32::from_i32(-100).to_u8_saturating(), 0);
+        assert_eq!(Q32::from_f32_wrapping(-5.5).to_u8_saturating(), 0);
 
         // Test fractional values
-        assert_eq!(Q32::from_f32(0.5).to_u8_clamped(), 0);
-        assert_eq!(Q32::from_f32(0.9).to_u8_clamped(), 0);
-        assert_eq!(Q32::from_f32(254.9).to_u8_clamped(), 254);
+        assert_eq!(Q32::from_f32_wrapping(0.5).to_u8_saturating(), 0);
+        assert_eq!(Q32::from_f32_wrapping(0.9).to_u8_saturating(), 0);
+        assert_eq!(Q32::from_f32_wrapping(254.9).to_u8_saturating(), 254);
     }
 
     #[test]
@@ -513,8 +514,8 @@ mod tests {
         a += Q32::from_i32(3);
         assert_eq!(a.to_f32(), 8.0);
 
-        let mut b = Q32::from_f32(1.5);
-        b += Q32::from_f32(2.5);
+        let mut b = Q32::from_f32_wrapping(1.5);
+        b += Q32::from_f32_wrapping(2.5);
         assert!((b.to_f32() - 4.0).abs() < 0.01);
     }
 
@@ -524,8 +525,8 @@ mod tests {
         a -= Q32::from_i32(3);
         assert_eq!(a.to_f32(), 2.0);
 
-        let mut b = Q32::from_f32(5.5);
-        b -= Q32::from_f32(2.5);
+        let mut b = Q32::from_f32_wrapping(5.5);
+        b -= Q32::from_f32_wrapping(2.5);
         assert!((b.to_f32() - 3.0).abs() < 0.01);
     }
 
@@ -535,8 +536,8 @@ mod tests {
         a *= Q32::from_i32(3);
         assert_eq!(a.to_f32(), 15.0);
 
-        let mut b = Q32::from_f32(2.0);
-        b *= Q32::from_f32(1.5);
+        let mut b = Q32::from_f32_wrapping(2.0);
+        b *= Q32::from_f32_wrapping(1.5);
         assert!((b.to_f32() - 3.0).abs() < 0.01);
     }
 
@@ -546,8 +547,8 @@ mod tests {
         a /= Q32::from_i32(3);
         assert_eq!(a.to_f32(), 5.0);
 
-        let mut b = Q32::from_f32(6.0);
-        b /= Q32::from_f32(2.0);
+        let mut b = Q32::from_f32_wrapping(6.0);
+        b /= Q32::from_f32_wrapping(2.0);
         assert!((b.to_f32() - 3.0).abs() < 0.01);
     }
 
@@ -560,45 +561,45 @@ mod tests {
 
     #[test]
     fn test_to_i32_floor() {
-        assert_eq!(Q32::from_f32(1.9).to_i32(), 1);
-        assert_eq!(Q32::from_f32(-1.9).to_i32(), -2);
-        assert_eq!(Q32::from_f32(0.5).to_i32(), 0);
-        assert_eq!(Q32::from_f32(-0.5).to_i32(), -1);
+        assert_eq!(Q32::from_f32_wrapping(1.9).to_i32(), 1);
+        assert_eq!(Q32::from_f32_wrapping(-1.9).to_i32(), -2);
+        assert_eq!(Q32::from_f32_wrapping(0.5).to_i32(), 0);
+        assert_eq!(Q32::from_f32_wrapping(-0.5).to_i32(), -1);
     }
 
     #[test]
     fn test_add_saturates_positive() {
-        let big = Q32::from_f32(30000.0);
+        let big = Q32::from_f32_wrapping(30000.0);
         let result = big + big;
         assert_eq!(result.0, Q32_MAX_RAW);
     }
 
     #[test]
     fn test_add_saturates_negative() {
-        let big_neg = Q32::from_f32(-30000.0);
+        let big_neg = Q32::from_f32_wrapping(-30000.0);
         let result = big_neg + big_neg;
         assert_eq!(result.0, i32::MIN);
     }
 
     #[test]
     fn test_sub_saturates() {
-        let big = Q32::from_f32(30000.0);
-        let big_neg = Q32::from_f32(-30000.0);
+        let big = Q32::from_f32_wrapping(30000.0);
+        let big_neg = Q32::from_f32_wrapping(-30000.0);
         let result = big - big_neg;
         assert_eq!(result.0, Q32_MAX_RAW);
     }
 
     #[test]
     fn test_mul_saturates_positive() {
-        let big = Q32::from_f32(1000.0);
+        let big = Q32::from_f32_wrapping(1000.0);
         let result = big * big;
         assert_eq!(result.0, Q32_MAX_RAW);
     }
 
     #[test]
     fn test_mul_saturates_negative() {
-        let big = Q32::from_f32(1000.0);
-        let big_neg = Q32::from_f32(-1000.0);
+        let big = Q32::from_f32_wrapping(1000.0);
+        let big_neg = Q32::from_f32_wrapping(-1000.0);
         let result = big * big_neg;
         assert_eq!(result.0, i32::MIN);
     }
@@ -620,8 +621,8 @@ mod tests {
 
     #[test]
     fn test_div_saturates_overflow() {
-        let big = Q32::from_f32(30000.0);
-        let small = Q32::from_f32(0.001);
+        let big = Q32::from_f32_wrapping(30000.0);
+        let small = Q32::from_f32_wrapping(0.001);
         let result = big / small;
         assert_eq!(result.0, Q32_MAX_RAW);
     }
@@ -633,14 +634,14 @@ mod tests {
 
     #[test]
     fn test_rem_basic() {
-        let result = Q32::from_f32(7.0) % Q32::from_f32(3.0);
+        let result = Q32::from_f32_wrapping(7.0) % Q32::from_f32_wrapping(3.0);
         assert!((result.to_f32() - 1.0).abs() < 0.02);
     }
 
     #[test]
     fn test_abs() {
-        assert_eq!(Q32::from_f32(5.0).abs().to_f32(), 5.0);
-        assert_eq!(Q32::from_f32(-5.0).abs().to_f32(), 5.0);
+        assert_eq!(Q32::from_f32_wrapping(5.0).abs().to_f32(), 5.0);
+        assert_eq!(Q32::from_f32_wrapping(-5.0).abs().to_f32(), 5.0);
         assert_eq!(Q32::ZERO.abs().to_f32(), 0.0);
     }
 
@@ -652,21 +653,21 @@ mod tests {
 
     #[test]
     fn test_frac() {
-        assert!((Q32::from_f32(1.75).frac().to_f32() - 0.75).abs() < 0.02);
-        assert_eq!(Q32::from_f32(2.0).frac().to_f32(), 0.0);
+        assert!((Q32::from_f32_wrapping(1.75).frac().to_f32() - 0.75).abs() < 0.02);
+        assert_eq!(Q32::from_f32_wrapping(2.0).frac().to_f32(), 0.0);
     }
 
     #[test]
     fn test_to_u16_clamped() {
-        assert_eq!(Q32::from_f32(0.0).to_u16_clamped(), 0);
-        assert_eq!(Q32::from_f32(1.0).to_u16_clamped(), 65535);
-        assert!((Q32::from_f32(0.5).to_u16_clamped() as i32 - 32767).abs() <= 1);
-        assert_eq!(Q32::from_f32(-1.0).to_u16_clamped(), 0);
+        assert_eq!(Q32::from_f32_wrapping(0.0).to_u16_saturating(), 0);
+        assert_eq!(Q32::from_f32_wrapping(1.0).to_u16_saturating(), 65535);
+        assert!((Q32::from_f32_wrapping(0.5).to_u16_saturating() as i32 - 32767).abs() <= 1);
+        assert_eq!(Q32::from_f32_wrapping(-1.0).to_u16_saturating(), 0);
     }
 
     #[test]
     fn test_mul_int_saturates() {
-        let big = Q32::from_f32(20000.0);
+        let big = Q32::from_f32_wrapping(20000.0);
         let result = big.mul_int(4);
         assert_eq!(result.0, Q32_MAX_RAW);
     }

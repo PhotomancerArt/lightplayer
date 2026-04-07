@@ -3,8 +3,8 @@
 //! Returns values in [-1, 1] range using -1.0 + 2.0 * random(p, seed)
 
 use crate::builtins::lpfx::generative::random::random3_q32::lpfx_random3;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// 3D Signed Random function
 ///
@@ -18,7 +18,7 @@ use lps_q32::types::vec3_q32::Vec3Q32;
 pub fn lpfx_srandom3(p: Vec3Q32, seed: u32) -> Q32 {
     let random_val = lpfx_random3(p, seed);
     // -1.0 + 2.0 * random_val
-    Q32::from_f32(-1.0) + Q32::from_f32(2.0) * random_val
+    Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * random_val
 }
 
 /// 3D Signed Random function (extern C wrapper for compiler).
@@ -50,9 +50,9 @@ mod tests {
     #[test]
     fn test_srandom3_range() {
         let result = __lp_lpfx_srandom3_q32(
-            Q32::from_f32(42.0).to_fixed(),
-            Q32::from_f32(10.0).to_fixed(),
-            Q32::from_f32(5.0).to_fixed(),
+            Q32::from_f32_wrapping(42.0).to_fixed(),
+            Q32::from_f32_wrapping(10.0).to_fixed(),
+            Q32::from_f32_wrapping(5.0).to_fixed(),
             123,
         );
         let val = Q32::from_fixed(result).to_f32();

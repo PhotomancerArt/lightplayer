@@ -2,7 +2,7 @@
 //!
 //! These functions are designed for the codegen path (e.g., `lpvm-cranelift`) to encode
 //! `f32` shader constants as Q16.16 `i32` values embedded in generated code. They differ
-//! from [`Q32::from_f32`](crate::types::q32::Q32::from_f32) in two important ways:
+//! from [`Q32::from_f32`](crate::q32::Q32::from_f32_wrapping) in two important ways:
 //!
 //! | Aspect | `q32_encode` (this module) | `Q32::from_f32` |
 //! |--------|---------------------------|-----------------|
@@ -27,7 +27,7 @@ pub const Q32_FRAC: i32 = (1 << Q32_SHIFT) - 1;
 /// Encode an `f32` constant as Q16.16 for **compiler emission**.
 ///
 /// Uses `libm::round` (not truncation) and **saturates** to the Q16.16 representable
-/// range (`[i32::MIN, 0x7FFF_FFFF]`). For runtime conversions, use [`Q32::from_f32`](crate::types::q32::Q32::from_f32)
+/// range (`[i32::MIN, 0x7FFF_FFFF]`). For runtime conversions, use [`Q32::from_f32`](crate::q32::Q32::from_f32_wrapping)
 /// which truncates and wraps instead.
 ///
 /// # Example
@@ -59,7 +59,7 @@ pub fn q32_encode_f64(value: f64) -> i32 {
 
 /// Decode Q16.16 fixed-point to `f64`.
 ///
-/// For the reverse operation (encoding), see [`q32_encode`] or [`Q32::to_f32`](crate::types::q32::Q32::to_f32).
+/// For the reverse operation (encoding), see [`q32_encode`] or [`Q32::to_f32`](crate::q32::Q32::to_f32).
 pub fn q32_to_f64(raw: i32) -> f64 {
     f64::from(raw) / Q32_SCALE
 }

@@ -9,8 +9,8 @@
 //! of this standard algorithm.
 
 use crate::builtins::lpfx::generative::snoise::snoise2_q32::lpfx_snoise2;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec2_q32::Vec2Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec2_q32::Vec2Q32;
 
 /// FBM constants matching GLSL defaults
 const VALUE_INITIAL: Q32 = Q32::ZERO;
@@ -73,8 +73,8 @@ mod tests {
     #[test]
     fn test_fbm2_basic() {
         let result = __lp_lpfx_fbm2_q32(
-            Q32::from_f32(42.5).to_fixed(),
-            Q32::from_f32(10.3).to_fixed(),
+            Q32::from_f32_wrapping(42.5).to_fixed(),
+            Q32::from_f32_wrapping(10.3).to_fixed(),
             4,
             123,
         );

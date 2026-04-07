@@ -7,7 +7,7 @@
 //! procedure with no licensing concerns. The operation itself is trivial.
 
 use crate::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_q32;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// Saturate function for Q32 (extern C wrapper for compiler).
 ///
@@ -20,7 +20,7 @@ use lps_q32::types::q32::Q32;
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfx_saturate_f32(value: f32) -> f32 {
     // Stub: convert to q32, call q32 version, convert back
-    let value_q32 = Q32::from_f32(value);
+    let value_q32 = Q32::from_f32_wrapping(value);
     let result_fixed = __lp_lpfx_saturate_q32(value_q32.to_fixed());
     Q32::from_fixed(result_fixed).to_f32()
 }
@@ -41,9 +41,9 @@ pub extern "C" fn __lp_lpfx_saturate_vec3_f32(result_ptr: *mut f32, x: f32, y: f
     let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
     use crate::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_vec3_q32;
     // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32(x);
-    let y_q32 = Q32::from_f32(y);
-    let z_q32 = Q32::from_f32(z);
+    let x_q32 = Q32::from_f32_wrapping(x);
+    let y_q32 = Q32::from_f32_wrapping(y);
+    let z_q32 = Q32::from_f32_wrapping(z);
     let mut result_q32 = [0i32; 3];
     __lp_lpfx_saturate_vec3_q32(
         result_q32.as_mut_ptr(),
@@ -79,10 +79,10 @@ pub extern "C" fn __lp_lpfx_saturate_vec4_f32(
     let result = unsafe { &mut *result_ptr.cast::<[f32; 4]>() };
     use crate::builtins::lpfx::math::saturate_q32::__lp_lpfx_saturate_vec4_q32;
     // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32(x);
-    let y_q32 = Q32::from_f32(y);
-    let z_q32 = Q32::from_f32(z);
-    let w_q32 = Q32::from_f32(w);
+    let x_q32 = Q32::from_f32_wrapping(x);
+    let y_q32 = Q32::from_f32_wrapping(y);
+    let z_q32 = Q32::from_f32_wrapping(z);
+    let w_q32 = Q32::from_f32_wrapping(w);
     let mut result_q32 = [0i32; 4];
     __lp_lpfx_saturate_vec4_q32(
         result_q32.as_mut_ptr(),

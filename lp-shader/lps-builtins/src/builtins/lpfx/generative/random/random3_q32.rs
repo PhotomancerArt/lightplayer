@@ -3,8 +3,8 @@
 //! Returns values in [0, 1] range using fract(sin(dot(p, vec3(70.9898, 78.233, 32.4355)) + seed) * 43758.5453123)
 
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// Random constant multiplier
 /// In Q16.16: 43758.5453123 * 65536 ≈ 2867801088
@@ -71,21 +71,21 @@ mod tests {
     #[test]
     fn test_random3_basic() {
         let result1 = __lp_lpfx_random3_q32(
-            Q32::from_f32(0.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
             0,
         );
         let result2 = __lp_lpfx_random3_q32(
-            Q32::from_f32(1.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
+            Q32::from_f32_wrapping(1.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
             0,
         );
         let result3 = __lp_lpfx_random3_q32(
-            Q32::from_f32(0.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
-            Q32::from_f32(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
+            Q32::from_f32_wrapping(0.0).to_fixed(),
             1,
         );
 
@@ -107,15 +107,15 @@ mod tests {
     #[test]
     fn test_random3_deterministic() {
         let result1 = __lp_lpfx_random3_q32(
-            Q32::from_f32(42.0).to_fixed(),
-            Q32::from_f32(10.0).to_fixed(),
-            Q32::from_f32(5.0).to_fixed(),
+            Q32::from_f32_wrapping(42.0).to_fixed(),
+            Q32::from_f32_wrapping(10.0).to_fixed(),
+            Q32::from_f32_wrapping(5.0).to_fixed(),
             123,
         );
         let result2 = __lp_lpfx_random3_q32(
-            Q32::from_f32(42.0).to_fixed(),
-            Q32::from_f32(10.0).to_fixed(),
-            Q32::from_f32(5.0).to_fixed(),
+            Q32::from_f32_wrapping(42.0).to_fixed(),
+            Q32::from_f32_wrapping(10.0).to_fixed(),
+            Q32::from_f32_wrapping(5.0).to_fixed(),
             123,
         );
 

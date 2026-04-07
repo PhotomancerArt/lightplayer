@@ -9,8 +9,8 @@
 //! copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::math::saturate_q32::lpfx_saturate_vec3_q32;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// Fixed-point constants for hue2rgb calculation
 const TWO: Q32 = Q32(0x00020000); // 2.0 in Q16.16
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn test_hue2rgb_green() {
         // Hue ~0.333 should produce green (0, 1, 0)
-        let hue = Q32::from_f32(0.333);
+        let hue = Q32::from_f32_wrapping(0.333);
         let result = lpfx_hue2rgb_q32(hue);
         let r = fixed_to_float(result.x.to_fixed());
         let g = fixed_to_float(result.y.to_fixed());
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_hue2rgb_blue() {
         // Hue ~0.666 should produce blue (0, 0, 1)
-        let hue = Q32::from_f32(0.666);
+        let hue = Q32::from_f32_wrapping(0.666);
         let result = lpfx_hue2rgb_q32(hue);
         let r = fixed_to_float(result.x.to_fixed());
         let g = fixed_to_float(result.y.to_fixed());
@@ -122,7 +122,7 @@ mod tests {
     fn test_hue2rgb_range() {
         // All components should be in [0, 1] range
         for i in 0..100 {
-            let hue = Q32::from_f32(i as f32 / 100.0);
+            let hue = Q32::from_f32_wrapping(i as f32 / 100.0);
             let result = lpfx_hue2rgb_q32(hue);
             assert!(
                 result.x >= Q32::ZERO && result.x <= Q32::ONE,

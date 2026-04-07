@@ -63,7 +63,7 @@ pub type GlslParamQualifier = ParamQualifier;
 pub type LpsSig = FnParam;
 pub use lps_q32::q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
 pub use lps_shared::lps_value_f64::{
-    decode_q32_return, flatten_q32_arg, CallError, CallResult, GlslReturn, LpsValueF64,
+    CallError, CallResult, GlslReturn, LpsValueF64, decode_q32_return, flatten_q32_arg,
 };
 #[cfg(feature = "riscv32-object")]
 pub use object_link::link_object_with_builtins;
@@ -101,15 +101,15 @@ mod tests {
     use core::mem;
 
     use lpir::parse_module;
-    use lps_shared::lps_value::LpsValue;
+    use lps_shared::lps_value_f32::LpsValueF32;
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
     use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        jit_from_ir, CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode,
-        LpsValueF64, MemoryStrategy,
+        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, LpsValueF64,
+        MemoryStrategy, jit_from_ir,
     };
 
     fn jit_test_vmctx() -> *const u8 {
@@ -182,10 +182,10 @@ mod tests {
         let module = engine.compile(&ir, &meta).expect("compile");
         let mut inst = module.instantiate().expect("instantiate");
         let out = inst
-            .call("add", &[LpsValue::F32(1.0), LpsValue::F32(2.0)])
+            .call("add", &[LpsValueF32::F32(1.0), LpsValueF32::F32(2.0)])
             .expect("call");
         match out {
-            LpsValue::F32(x) => assert!((x - 3.0).abs() < 1e-3),
+            LpsValueF32::F32(x) => assert!((x - 3.0).abs() < 1e-3),
             other => panic!("expected F32, got {other:?}"),
         }
     }

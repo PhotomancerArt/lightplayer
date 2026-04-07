@@ -4,8 +4,8 @@
 
 use crate::builtins::lpfx::generative::random::random3_q32::lpfx_random3;
 use lps_q32::fns::{mix_q32, quintic_vec3};
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// 3D Gradient Noise function
 ///
@@ -46,7 +46,7 @@ pub fn lpfx_gnoise3(p: Vec3Q32, seed: u32) -> Q32 {
     let result = mix_q32(y0, y1, u.z);
 
     // Convert from [0, 1] to [-1, 1]
-    Q32::from_f32(-1.0) + Q32::from_f32(2.0) * result
+    Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * result
 }
 
 /// 3D Gradient Noise function (extern C wrapper for compiler).
@@ -78,9 +78,9 @@ mod tests {
     #[test]
     fn test_gnoise3_range() {
         let result = __lp_lpfx_gnoise3_q32(
-            Q32::from_f32(42.5).to_fixed(),
-            Q32::from_f32(10.3).to_fixed(),
-            Q32::from_f32(5.7).to_fixed(),
+            Q32::from_f32_wrapping(42.5).to_fixed(),
+            Q32::from_f32_wrapping(10.3).to_fixed(),
+            Q32::from_f32_wrapping(5.7).to_fixed(),
             123,
         );
         let val = Q32::from_fixed(result).to_f32();

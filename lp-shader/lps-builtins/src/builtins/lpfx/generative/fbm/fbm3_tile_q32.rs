@@ -3,8 +3,8 @@
 //! Combines multiple octaves of tilable 3D gradient noise to create fractal patterns.
 
 use crate::builtins::lpfx::generative::gnoise::gnoise3_tile_q32::lpfx_gnoise3_tile;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// FBM constants for tilable variant
 const PERSISTENCE: Q32 = Q32::HALF; // 0.5
@@ -84,10 +84,10 @@ mod tests {
     #[test]
     fn test_fbm3_tile_range() {
         let result = __lp_lpfx_fbm3_tile_q32(
-            Q32::from_f32(42.5).to_fixed(),
-            Q32::from_f32(10.3).to_fixed(),
-            Q32::from_f32(5.7).to_fixed(),
-            Q32::from_f32(10.0).to_fixed(),
+            Q32::from_f32_wrapping(42.5).to_fixed(),
+            Q32::from_f32_wrapping(10.3).to_fixed(),
+            Q32::from_f32_wrapping(5.7).to_fixed(),
+            Q32::from_f32_wrapping(10.0).to_fixed(),
             4,
             123,
         );

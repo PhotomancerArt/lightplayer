@@ -34,8 +34,8 @@
 //! by the compiler (vec3 becomes three i32 parameters).
 
 use crate::builtins::lpfx::hash::lpfx_hash3;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// Fixed-point constants
 const TWO: Q32 = Q32(0x00020000); // 2.0 in Q16.16

@@ -1,8 +1,8 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::types::mat3_q32::Mat3Q32;
-use crate::types::q32::Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::mat3_q32::Mat3Q32;
+use crate::q32::Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// 4x4 matrix for Q32 fixed-point arithmetic (GLSL-compatible, column-major storage)
 ///
@@ -70,22 +70,22 @@ impl Mat4Q32 {
         m33: f32,
     ) -> Self {
         Mat4Q32::new(
-            Q32::from_f32(m00),
-            Q32::from_f32(m10),
-            Q32::from_f32(m20),
-            Q32::from_f32(m30),
-            Q32::from_f32(m01),
-            Q32::from_f32(m11),
-            Q32::from_f32(m21),
-            Q32::from_f32(m31),
-            Q32::from_f32(m02),
-            Q32::from_f32(m12),
-            Q32::from_f32(m22),
-            Q32::from_f32(m32),
-            Q32::from_f32(m03),
-            Q32::from_f32(m13),
-            Q32::from_f32(m23),
-            Q32::from_f32(m33),
+            Q32::from_f32_wrapping(m00),
+            Q32::from_f32_wrapping(m10),
+            Q32::from_f32_wrapping(m20),
+            Q32::from_f32_wrapping(m30),
+            Q32::from_f32_wrapping(m01),
+            Q32::from_f32_wrapping(m11),
+            Q32::from_f32_wrapping(m21),
+            Q32::from_f32_wrapping(m31),
+            Q32::from_f32_wrapping(m02),
+            Q32::from_f32_wrapping(m12),
+            Q32::from_f32_wrapping(m22),
+            Q32::from_f32_wrapping(m32),
+            Q32::from_f32_wrapping(m03),
+            Q32::from_f32_wrapping(m13),
+            Q32::from_f32_wrapping(m23),
+            Q32::from_f32_wrapping(m33),
         )
     }
 
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn test_get_set() {
         let mut m = Mat4Q32::zero();
-        m.set(0, 0, Q32::from_f32(5.0));
+        m.set(0, 0, Q32::from_f32_wrapping(5.0));
         assert_eq!(m.get(0, 0).to_f32(), 5.0);
     }
 
@@ -612,7 +612,7 @@ mod tests {
         let m = Mat4Q32::from_f32(
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
         );
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = m * s;
         assert_eq!(result.get(0, 0).to_f32(), 2.0);
         assert_eq!(result.get(3, 3).to_f32(), 32.0);
@@ -624,7 +624,7 @@ mod tests {
             4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0,
             34.0,
         );
-        let s = Q32::from_f32(2.0);
+        let s = Q32::from_f32_wrapping(2.0);
         let result = m / s;
         assert_eq!(result.get(0, 0).to_f32(), 2.0);
         assert_eq!(result.get(3, 3).to_f32(), 17.0);

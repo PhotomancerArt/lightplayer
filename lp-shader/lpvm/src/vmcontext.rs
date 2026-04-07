@@ -13,7 +13,7 @@
 
 use alloc::boxed::Box;
 
-use crate::LpsValue;
+use crate::LpsValueF32;
 use lps_shared::LpsType;
 
 /// Default instruction fuel for new [`VmContext`] values (tests and host JIT calls).
@@ -74,17 +74,17 @@ impl VmContext {
     }
 
     /// Placeholder: read global by index.
-    pub fn get_global(&self, _index: usize) -> LpsValue {
+    pub fn get_global(&self, _index: usize) -> LpsValueF32 {
         unimplemented!("globals access in Milestone 2")
     }
 
     /// Placeholder: write global by index.
-    pub fn set_global(&mut self, _index: usize, _value: LpsValue) {
+    pub fn set_global(&mut self, _index: usize, _value: LpsValueF32) {
         unimplemented!("globals access in Milestone 2")
     }
 
     /// Placeholder: read uniform by index.
-    pub fn get_uniform(&self, _index: usize) -> LpsValue {
+    pub fn get_uniform(&self, _index: usize) -> LpsValueF32 {
         unimplemented!("uniforms access in Milestone 2")
     }
 }

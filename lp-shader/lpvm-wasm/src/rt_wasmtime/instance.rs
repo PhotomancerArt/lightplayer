@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
-use lpvm::{DEFAULT_VMCTX_FUEL, LpsValue, LpvmInstance};
+use lpvm::{DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmInstance};
 use wasmtime::{Instance, Val};
 
 use super::WasmLpvmSharedRuntime;
@@ -63,7 +63,7 @@ impl WasmLpvmInstance {
 impl LpvmInstance for WasmLpvmInstance {
     type Error = WasmError;
 
-    fn call(&mut self, name: &str, args: &[LpsValue]) -> Result<LpsValue, Self::Error> {
+    fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         let fn_sig = self
             .signatures
             .functions

@@ -1,15 +1,15 @@
-use crate::types::q32::Q32;
-use crate::types::vec2_q32::Vec2Q32;
-use crate::types::vec3_q32::Vec3Q32;
-use crate::types::vec4_q32::Vec4Q32;
+use crate::q32::Q32;
+use crate::vec2_q32::Vec2Q32;
+use crate::vec3_q32::Vec3Q32;
+use crate::vec4_q32::Vec4Q32;
 
 /// Cubic polynomial smoothing for Q32
 /// Returns v * v * (3.0 - 2.0 * v)
 #[inline(always)]
 pub fn cubic_q32(v: Q32) -> Q32 {
     let v2 = v * v;
-    let three = Q32::from_f32(3.0);
-    let two = Q32::from_f32(2.0);
+    let three = Q32::from_f32_wrapping(3.0);
+    let two = Q32::from_f32_wrapping(2.0);
     v2 * (three - two * v)
 }
 
@@ -44,9 +44,9 @@ mod tests {
 
     #[test]
     fn test_cubic_q32() {
-        let v0 = Q32::from_f32(0.0);
-        let v1 = Q32::from_f32(1.0);
-        let v05 = Q32::from_f32(0.5);
+        let v0 = Q32::from_f32_wrapping(0.0);
+        let v1 = Q32::from_f32_wrapping(1.0);
+        let v05 = Q32::from_f32_wrapping(0.5);
 
         assert!((cubic_q32(v0).to_f32() - 0.0).abs() < 0.01);
         assert!((cubic_q32(v1).to_f32() - 1.0).abs() < 0.01);

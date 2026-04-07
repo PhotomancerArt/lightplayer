@@ -21,7 +21,7 @@
 //! Also published under the terms of the MIT license.
 
 use crate::builtins::lpfx::generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// 3D Periodic Simplex Rotational Domain noise function (float version).
 ///
@@ -56,13 +56,13 @@ pub extern "C" fn __lp_lpfx_psrdnoise3_f32(
     seed: u32,
 ) -> f32 {
     // Convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32(x);
-    let y_q32 = Q32::from_f32(y);
-    let z_q32 = Q32::from_f32(z);
-    let period_x_q32 = Q32::from_f32(period_x);
-    let period_y_q32 = Q32::from_f32(period_y);
-    let period_z_q32 = Q32::from_f32(period_z);
-    let alpha_q32 = Q32::from_f32(alpha);
+    let x_q32 = Q32::from_f32_wrapping(x);
+    let y_q32 = Q32::from_f32_wrapping(y);
+    let z_q32 = Q32::from_f32_wrapping(z);
+    let period_x_q32 = Q32::from_f32_wrapping(period_x);
+    let period_y_q32 = Q32::from_f32_wrapping(period_y);
+    let period_z_q32 = Q32::from_f32_wrapping(period_z);
+    let alpha_q32 = Q32::from_f32_wrapping(alpha);
 
     let mut gradient_q32 = [0i32; 3];
     let result_fixed = __lp_lpfx_psrdnoise3_q32(

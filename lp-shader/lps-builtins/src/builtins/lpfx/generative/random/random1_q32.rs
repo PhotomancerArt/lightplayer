@@ -3,7 +3,7 @@
 //! Returns values in [0, 1] range using fract(sin(x + seed) * 43758.5453)
 
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
-use lps_q32::types::q32::Q32;
+use lps_q32::q32::Q32;
 
 /// Random constant multiplier
 /// In Q16.16: 43758.5453 * 65536 ≈ 2867801088
@@ -52,9 +52,9 @@ mod tests {
 
     #[test]
     fn test_random1_basic() {
-        let result1 = __lp_lpfx_random1_q32(Q32::from_f32(0.0).to_fixed(), 0);
-        let result2 = __lp_lpfx_random1_q32(Q32::from_f32(1.0).to_fixed(), 0);
-        let result3 = __lp_lpfx_random1_q32(Q32::from_f32(0.0).to_fixed(), 1);
+        let result1 = __lp_lpfx_random1_q32(Q32::from_f32_wrapping(0.0).to_fixed(), 0);
+        let result2 = __lp_lpfx_random1_q32(Q32::from_f32_wrapping(1.0).to_fixed(), 0);
+        let result3 = __lp_lpfx_random1_q32(Q32::from_f32_wrapping(0.0).to_fixed(), 1);
 
         // Different inputs should produce different outputs
         assert_ne!(
@@ -73,8 +73,8 @@ mod tests {
 
     #[test]
     fn test_random1_deterministic() {
-        let result1 = __lp_lpfx_random1_q32(Q32::from_f32(42.0).to_fixed(), 123);
-        let result2 = __lp_lpfx_random1_q32(Q32::from_f32(42.0).to_fixed(), 123);
+        let result1 = __lp_lpfx_random1_q32(Q32::from_f32_wrapping(42.0).to_fixed(), 123);
+        let result2 = __lp_lpfx_random1_q32(Q32::from_f32_wrapping(42.0).to_fixed(), 123);
 
         // Same input and seed should produce same output
         assert_eq!(result1, result2, "Random should be deterministic");

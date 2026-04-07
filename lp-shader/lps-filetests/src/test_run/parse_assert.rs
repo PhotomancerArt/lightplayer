@@ -3,7 +3,7 @@
 use crate::parse::test_type::ComparisonOp;
 use crate::util::parse_lps_value_literal;
 use anyhow::Result;
-use lpvm::LpsValue;
+use lpvm::LpsValueF32;
 
 /// Bases for `type[size](...)` array constructors (longer names first).
 const TYPED_ARRAY_BASES: &[&str] = &[
@@ -84,34 +84,34 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
     parts
 }
 
-fn array_element_matches_base(base: &str, v: &LpsValue) -> bool {
+fn array_element_matches_base(base: &str, v: &LpsValueF32) -> bool {
     match base {
-        "float" => matches!(v, LpsValue::F32(_)),
-        "int" => matches!(v, LpsValue::I32(_)),
-        "uint" => matches!(v, LpsValue::U32(_)),
-        "bool" => matches!(v, LpsValue::Bool(_)),
-        "vec2" => matches!(v, LpsValue::Vec2(_)),
-        "vec3" => matches!(v, LpsValue::Vec3(_)),
-        "vec4" => matches!(v, LpsValue::Vec4(_)),
-        "ivec2" => matches!(v, LpsValue::IVec2(_)),
-        "ivec3" => matches!(v, LpsValue::IVec3(_)),
-        "ivec4" => matches!(v, LpsValue::IVec4(_)),
-        "uvec2" => matches!(v, LpsValue::UVec2(_)),
-        "uvec3" => matches!(v, LpsValue::UVec3(_)),
-        "uvec4" => matches!(v, LpsValue::UVec4(_)),
-        "bvec2" => matches!(v, LpsValue::BVec2(_)),
-        "bvec3" => matches!(v, LpsValue::BVec3(_)),
-        "bvec4" => matches!(v, LpsValue::BVec4(_)),
-        "mat2" => matches!(v, LpsValue::Mat2x2(_)),
-        "mat3" => matches!(v, LpsValue::Mat3x3(_)),
-        "mat4" => matches!(v, LpsValue::Mat4x4(_)),
+        "float" => matches!(v, LpsValueF32::F32(_)),
+        "int" => matches!(v, LpsValueF32::I32(_)),
+        "uint" => matches!(v, LpsValueF32::U32(_)),
+        "bool" => matches!(v, LpsValueF32::Bool(_)),
+        "vec2" => matches!(v, LpsValueF32::Vec2(_)),
+        "vec3" => matches!(v, LpsValueF32::Vec3(_)),
+        "vec4" => matches!(v, LpsValueF32::Vec4(_)),
+        "ivec2" => matches!(v, LpsValueF32::IVec2(_)),
+        "ivec3" => matches!(v, LpsValueF32::IVec3(_)),
+        "ivec4" => matches!(v, LpsValueF32::IVec4(_)),
+        "uvec2" => matches!(v, LpsValueF32::UVec2(_)),
+        "uvec3" => matches!(v, LpsValueF32::UVec3(_)),
+        "uvec4" => matches!(v, LpsValueF32::UVec4(_)),
+        "bvec2" => matches!(v, LpsValueF32::BVec2(_)),
+        "bvec3" => matches!(v, LpsValueF32::BVec3(_)),
+        "bvec4" => matches!(v, LpsValueF32::BVec4(_)),
+        "mat2" => matches!(v, LpsValueF32::Mat2x2(_)),
+        "mat3" => matches!(v, LpsValueF32::Mat3x3(_)),
+        "mat4" => matches!(v, LpsValueF32::Mat4x4(_)),
         _ => false,
     }
 }
 
 /// If `s` is a `type[N](...)` array constructor, parse and return `Some(Ok(value))`.
 /// Returns `Ok(None)` if the string does not start with a known array type prefix.
-fn parse_typed_array_constructor(s: &str) -> Result<Option<LpsValue>> {
+fn parse_typed_array_constructor(s: &str) -> Result<Option<LpsValueF32>> {
     let s = s.trim();
     let Some((base, rest)) = parse_typed_array_prefix(s) else {
         return Ok(None);
@@ -135,36 +135,36 @@ fn parse_typed_array_constructor(s: &str) -> Result<Option<LpsValue>> {
         }
         elems.push(v);
     }
-    Ok(Some(LpsValue::Array(elems.into_boxed_slice())))
+    Ok(Some(LpsValueF32::Array(elems.into_boxed_slice())))
 }
 
 /// Parse a GLSL value from a string.
 /// Supports scalars, vectors, and matrices.
-pub fn parse_glsl_value(s: &str) -> Result<LpsValue> {
+pub fn parse_glsl_value(s: &str) -> Result<LpsValueF32> {
     let s = s.trim();
 
     // Check for uint suffix (u or U)
     if s.ends_with('u') || s.ends_with('U') {
         let num_str = &s[..s.len() - 1];
         if let Ok(u) = num_str.parse::<u32>() {
-            return Ok(LpsValue::U32(u));
+            return Ok(LpsValueF32::U32(u));
         }
     }
 
     // Try parsing as integer
     if let Ok(i) = s.parse::<i32>() {
-        return Ok(LpsValue::I32(i));
+        return Ok(LpsValueF32::I32(i));
     }
 
     // Try parsing as float
     if let Ok(f) = s.parse::<f32>() {
-        return Ok(LpsValue::F32(f));
+        return Ok(LpsValueF32::F32(f));
     }
 
     // Try parsing as boolean
     match s {
-        "true" => return Ok(LpsValue::Bool(true)),
-        "false" => return Ok(LpsValue::Bool(false)),
+        "true" => return Ok(LpsValueF32::Bool(true)),
+        "false" => return Ok(LpsValueF32::Bool(false)),
         _ => {}
     }
 
@@ -264,7 +264,7 @@ pub fn parse_function_call(expression: &str) -> Result<(String, Vec<String>)> {
 }
 
 /// Parse function call arguments from strings to GlslValue.
-pub fn parse_function_arguments(arg_strings: &[String]) -> Result<Vec<LpsValue>> {
+pub fn parse_function_arguments(arg_strings: &[String]) -> Result<Vec<LpsValueF32>> {
     arg_strings
         .iter()
         .map(|arg_str| parse_glsl_value(arg_str))
@@ -272,7 +272,7 @@ pub fn parse_function_arguments(arg_strings: &[String]) -> Result<Vec<LpsValue>>
 }
 
 /// Format a GLSL value as a string (temporary stub - will be moved to util::file_update).
-fn format_glsl_value(value: &LpsValue) -> String {
+fn format_glsl_value(value: &LpsValueF32) -> String {
     // TODO: Move this to util::file_update in Phase 4
     // For now, use a simple format
     format!("{value:?}")
@@ -280,8 +280,8 @@ fn format_glsl_value(value: &LpsValue) -> String {
 
 /// Compare actual and expected values.
 pub fn compare_results(
-    actual: &LpsValue,
-    expected: &LpsValue,
+    actual: &LpsValueF32,
+    expected: &LpsValueF32,
     comparison: ComparisonOp,
     tolerance: Option<f32>,
 ) -> Result<(), String> {
@@ -298,7 +298,7 @@ pub fn compare_results(
             }
         }
         ComparisonOp::Approx => {
-            let tolerance = tolerance.unwrap_or(LpsValue::DEFAULT_TOLERANCE);
+            let tolerance = tolerance.unwrap_or(LpsValueF32::DEFAULT_TOLERANCE);
             if actual.approx_eq(expected, tolerance) {
                 Ok(())
             } else {
@@ -317,35 +317,39 @@ pub fn compare_results(
 mod tests {
     use super::*;
     use crate::parse::test_type::ComparisonOp;
-    use lpvm::LpsValue;
+    use lpvm::LpsValueF32;
 
     #[test]
     fn test_parse_glsl_value_int() {
-        assert!(parse_glsl_value("42").unwrap().eq(&LpsValue::I32(42)));
-        assert!(parse_glsl_value("-10").unwrap().eq(&LpsValue::I32(-10)));
+        assert!(parse_glsl_value("42").unwrap().eq(&LpsValueF32::I32(42)));
+        assert!(parse_glsl_value("-10").unwrap().eq(&LpsValueF32::I32(-10)));
     }
 
     #[test]
     fn test_parse_glsl_value_float() {
         let v1 = parse_glsl_value("3.14").unwrap();
-        assert!(v1.approx_eq(&LpsValue::F32(3.14), 0.001));
+        assert!(v1.approx_eq(&LpsValueF32::F32(3.14), 0.001));
         let v2 = parse_glsl_value("-0.5").unwrap();
-        assert!(v2.approx_eq(&LpsValue::F32(-0.5), 0.001));
+        assert!(v2.approx_eq(&LpsValueF32::F32(-0.5), 0.001));
     }
 
     #[test]
     fn test_parse_glsl_value_uint() {
-        assert!(parse_glsl_value("42u").unwrap().eq(&LpsValue::U32(42)));
-        assert!(parse_glsl_value("100U").unwrap().eq(&LpsValue::U32(100)));
+        assert!(parse_glsl_value("42u").unwrap().eq(&LpsValueF32::U32(42)));
+        assert!(parse_glsl_value("100U").unwrap().eq(&LpsValueF32::U32(100)));
     }
 
     #[test]
     fn test_parse_glsl_value_bool() {
-        assert!(parse_glsl_value("true").unwrap().eq(&LpsValue::Bool(true)));
+        assert!(
+            parse_glsl_value("true")
+                .unwrap()
+                .eq(&LpsValueF32::Bool(true))
+        );
         assert!(
             parse_glsl_value("false")
                 .unwrap()
-                .eq(&LpsValue::Bool(false))
+                .eq(&LpsValueF32::Bool(false))
         );
     }
 
@@ -379,29 +383,29 @@ mod tests {
 
     #[test]
     fn test_compare_results_exact_match() {
-        let actual = LpsValue::I32(42);
-        let expected = LpsValue::I32(42);
+        let actual = LpsValueF32::I32(42);
+        let expected = LpsValueF32::I32(42);
         assert!(compare_results(&actual, &expected, ComparisonOp::Exact, None).is_ok());
     }
 
     #[test]
     fn test_compare_results_exact_mismatch() {
-        let actual = LpsValue::I32(42);
-        let expected = LpsValue::I32(43);
+        let actual = LpsValueF32::I32(42);
+        let expected = LpsValueF32::I32(43);
         assert!(compare_results(&actual, &expected, ComparisonOp::Exact, None).is_err());
     }
 
     #[test]
     fn test_compare_results_approx_match() {
-        let actual = LpsValue::F32(1.0);
-        let expected = LpsValue::F32(1.0001);
+        let actual = LpsValueF32::F32(1.0);
+        let expected = LpsValueF32::F32(1.0001);
         assert!(compare_results(&actual, &expected, ComparisonOp::Approx, Some(0.001)).is_ok());
     }
 
     #[test]
     fn test_compare_results_approx_mismatch() {
-        let actual = LpsValue::F32(1.0);
-        let expected = LpsValue::F32(1.1);
+        let actual = LpsValueF32::F32(1.0);
+        let expected = LpsValueF32::F32(1.1);
         assert!(compare_results(&actual, &expected, ComparisonOp::Approx, Some(0.001)).is_err());
     }
 }

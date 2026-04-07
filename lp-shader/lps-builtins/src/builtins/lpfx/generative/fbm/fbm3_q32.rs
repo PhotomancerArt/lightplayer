@@ -3,8 +3,8 @@
 //! Combines multiple octaves of 3D noise to create fractal patterns.
 
 use crate::builtins::lpfx::generative::snoise::snoise3_q32::lpfx_snoise3;
-use lps_q32::types::q32::Q32;
-use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::q32::Q32;
+use lps_q32::vec3_q32::Vec3Q32;
 
 /// FBM constants matching GLSL defaults
 const VALUE_INITIAL: Q32 = Q32::ZERO;
@@ -68,9 +68,9 @@ mod tests {
     #[test]
     fn test_fbm3_basic() {
         let result = __lp_lpfx_fbm3_q32(
-            Q32::from_f32(42.5).to_fixed(),
-            Q32::from_f32(10.3).to_fixed(),
-            Q32::from_f32(5.7).to_fixed(),
+            Q32::from_f32_wrapping(42.5).to_fixed(),
+            Q32::from_f32_wrapping(10.3).to_fixed(),
+            Q32::from_f32_wrapping(5.7).to_fixed(),
             4,
             123,
         );

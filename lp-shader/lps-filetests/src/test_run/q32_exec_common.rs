@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use lps_diagnostics::{ErrorCode, GlslError};
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
-use lpvm::LpsValue;
+use lpvm::LpsValueF32;
 use lpvm_cranelift::{CallError, GlslReturn, LpsValueF64};
 
 pub(crate) fn signatures_from_meta(meta: &LpsModuleSig) -> BTreeMap<String, LpsFnSig> {
@@ -29,7 +29,7 @@ fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<LpsType> {
 
 pub(crate) fn args_to_q32(
     gfn: &LpsFnSig,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
 ) -> Result<Vec<LpsValueF64>, GlslError> {
     if gfn.parameters.len() != args.len() {
         return Err(GlslError::new(
@@ -49,7 +49,7 @@ pub(crate) fn args_to_q32(
     Ok(out)
 }
 
-fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, GlslError> {
+fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValueF32) -> Result<LpsValueF64, GlslError> {
     use LpsType::*;
     let err = || {
         GlslError::new(
@@ -58,31 +58,31 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, Gl
         )
     };
     Ok(match (param_ty, v) {
-        (Float, LpsValue::F32(x)) => LpsValueF64::Float(*x as f64),
-        (Int, LpsValue::I32(x)) => LpsValueF64::Int(*x),
-        (UInt, LpsValue::U32(x)) => LpsValueF64::UInt(*x),
-        (Bool, LpsValue::Bool(b)) => LpsValueF64::Bool(*b),
-        (Vec2, LpsValue::Vec2(a)) => LpsValueF64::Vec2(a[0] as f64, a[1] as f64),
-        (Vec3, LpsValue::Vec3(a)) => LpsValueF64::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
-        (Vec4, LpsValue::Vec4(a)) => {
+        (Float, LpsValueF32::F32(x)) => LpsValueF64::Float(*x as f64),
+        (Int, LpsValueF32::I32(x)) => LpsValueF64::Int(*x),
+        (UInt, LpsValueF32::U32(x)) => LpsValueF64::UInt(*x),
+        (Bool, LpsValueF32::Bool(b)) => LpsValueF64::Bool(*b),
+        (Vec2, LpsValueF32::Vec2(a)) => LpsValueF64::Vec2(a[0] as f64, a[1] as f64),
+        (Vec3, LpsValueF32::Vec3(a)) => LpsValueF64::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
+        (Vec4, LpsValueF32::Vec4(a)) => {
             LpsValueF64::Vec4(a[0] as f64, a[1] as f64, a[2] as f64, a[3] as f64)
         }
-        (IVec2, LpsValue::IVec2(a)) => LpsValueF64::IVec2(a[0], a[1]),
-        (IVec3, LpsValue::IVec3(a)) => LpsValueF64::IVec3(a[0], a[1], a[2]),
-        (IVec4, LpsValue::IVec4(a)) => LpsValueF64::IVec4(a[0], a[1], a[2], a[3]),
-        (UVec2, LpsValue::UVec2(a)) => LpsValueF64::UVec2(a[0], a[1]),
-        (UVec3, LpsValue::UVec3(a)) => LpsValueF64::UVec3(a[0], a[1], a[2]),
-        (UVec4, LpsValue::UVec4(a)) => LpsValueF64::UVec4(a[0], a[1], a[2], a[3]),
-        (BVec2, LpsValue::BVec2(a)) => LpsValueF64::BVec2(a[0], a[1]),
-        (BVec3, LpsValue::BVec3(a)) => LpsValueF64::BVec3(a[0], a[1], a[2]),
-        (BVec4, LpsValue::BVec4(a)) => LpsValueF64::BVec4(a[0], a[1], a[2], a[3]),
-        (Mat2, LpsValue::Mat2x2(m)) => LpsValueF64::Mat2([
+        (IVec2, LpsValueF32::IVec2(a)) => LpsValueF64::IVec2(a[0], a[1]),
+        (IVec3, LpsValueF32::IVec3(a)) => LpsValueF64::IVec3(a[0], a[1], a[2]),
+        (IVec4, LpsValueF32::IVec4(a)) => LpsValueF64::IVec4(a[0], a[1], a[2], a[3]),
+        (UVec2, LpsValueF32::UVec2(a)) => LpsValueF64::UVec2(a[0], a[1]),
+        (UVec3, LpsValueF32::UVec3(a)) => LpsValueF64::UVec3(a[0], a[1], a[2]),
+        (UVec4, LpsValueF32::UVec4(a)) => LpsValueF64::UVec4(a[0], a[1], a[2], a[3]),
+        (BVec2, LpsValueF32::BVec2(a)) => LpsValueF64::BVec2(a[0], a[1]),
+        (BVec3, LpsValueF32::BVec3(a)) => LpsValueF64::BVec3(a[0], a[1], a[2]),
+        (BVec4, LpsValueF32::BVec4(a)) => LpsValueF64::BVec4(a[0], a[1], a[2], a[3]),
+        (Mat2, LpsValueF32::Mat2x2(m)) => LpsValueF64::Mat2([
             m[0][0] as f64,
             m[0][1] as f64,
             m[1][0] as f64,
             m[1][1] as f64,
         ]),
-        (Mat3, LpsValue::Mat3x3(m)) => LpsValueF64::Mat3([
+        (Mat3, LpsValueF32::Mat3x3(m)) => LpsValueF64::Mat3([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -93,7 +93,7 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, Gl
             m[2][1] as f64,
             m[2][2] as f64,
         ]),
-        (Mat4, LpsValue::Mat4x4(m)) => LpsValueF64::Mat4([
+        (Mat4, LpsValueF32::Mat4x4(m)) => LpsValueF64::Mat4([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -111,7 +111,7 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, Gl
             m[3][2] as f64,
             m[3][3] as f64,
         ]),
-        (Array { element, len }, LpsValue::Array(items)) => {
+        (Array { element, len }, LpsValueF32::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(err());
             }
@@ -121,7 +121,7 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, Gl
             }
             LpsValueF64::Array(q)
         }
-        (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
+        (Struct { members, .. }, LpsValueF32::Struct { fields, .. }) => {
             if members.len() != fields.len() {
                 return Err(err());
             }
@@ -135,8 +135,11 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<LpsValueF64, Gl
     })
 }
 
-/// Convert a [`LpsValueF64`] value to [`LpsValue`] using the logical LPIR [`LpsType`].
-pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &LpsValueF64) -> Result<LpsValue, GlslError> {
+/// Convert a [`LpsValueF64`] value to [`LpsValueF32`] using the logical LPIR [`LpsType`].
+pub(crate) fn glsl_q32_to_glsl_value(
+    ty: &LpsType,
+    q: &LpsValueF64,
+) -> Result<LpsValueF32, GlslError> {
     use LpsType::*;
     let bad = || {
         GlslError::new(
@@ -145,33 +148,33 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &LpsValueF64) -> Result<Lp
         )
     };
     Ok(match (ty, q) {
-        (Float, LpsValueF64::Float(x)) => LpsValue::F32(*x as f32),
-        (Int, LpsValueF64::Int(x)) => LpsValue::I32(*x),
-        (UInt, LpsValueF64::UInt(x)) => LpsValue::U32(*x),
-        (Bool, LpsValueF64::Bool(b)) => LpsValue::Bool(*b),
-        (Vec2, LpsValueF64::Vec2(a, b)) => LpsValue::Vec2([*a as f32, *b as f32]),
-        (Vec3, LpsValueF64::Vec3(a, b, c)) => LpsValue::Vec3([*a as f32, *b as f32, *c as f32]),
+        (Float, LpsValueF64::Float(x)) => LpsValueF32::F32(*x as f32),
+        (Int, LpsValueF64::Int(x)) => LpsValueF32::I32(*x),
+        (UInt, LpsValueF64::UInt(x)) => LpsValueF32::U32(*x),
+        (Bool, LpsValueF64::Bool(b)) => LpsValueF32::Bool(*b),
+        (Vec2, LpsValueF64::Vec2(a, b)) => LpsValueF32::Vec2([*a as f32, *b as f32]),
+        (Vec3, LpsValueF64::Vec3(a, b, c)) => LpsValueF32::Vec3([*a as f32, *b as f32, *c as f32]),
         (Vec4, LpsValueF64::Vec4(a, b, c, d)) => {
-            LpsValue::Vec4([*a as f32, *b as f32, *c as f32, *d as f32])
+            LpsValueF32::Vec4([*a as f32, *b as f32, *c as f32, *d as f32])
         }
-        (IVec2, LpsValueF64::IVec2(a, b)) => LpsValue::IVec2([*a, *b]),
-        (IVec3, LpsValueF64::IVec3(a, b, c)) => LpsValue::IVec3([*a, *b, *c]),
-        (IVec4, LpsValueF64::IVec4(a, b, c, d)) => LpsValue::IVec4([*a, *b, *c, *d]),
-        (UVec2, LpsValueF64::UVec2(a, b)) => LpsValue::UVec2([*a, *b]),
-        (UVec3, LpsValueF64::UVec3(a, b, c)) => LpsValue::UVec3([*a, *b, *c]),
-        (UVec4, LpsValueF64::UVec4(a, b, c, d)) => LpsValue::UVec4([*a, *b, *c, *d]),
-        (BVec2, LpsValueF64::BVec2(a, b)) => LpsValue::BVec2([*a, *b]),
-        (BVec3, LpsValueF64::BVec3(a, b, c)) => LpsValue::BVec3([*a, *b, *c]),
-        (BVec4, LpsValueF64::BVec4(a, b, c, d)) => LpsValue::BVec4([*a, *b, *c, *d]),
+        (IVec2, LpsValueF64::IVec2(a, b)) => LpsValueF32::IVec2([*a, *b]),
+        (IVec3, LpsValueF64::IVec3(a, b, c)) => LpsValueF32::IVec3([*a, *b, *c]),
+        (IVec4, LpsValueF64::IVec4(a, b, c, d)) => LpsValueF32::IVec4([*a, *b, *c, *d]),
+        (UVec2, LpsValueF64::UVec2(a, b)) => LpsValueF32::UVec2([*a, *b]),
+        (UVec3, LpsValueF64::UVec3(a, b, c)) => LpsValueF32::UVec3([*a, *b, *c]),
+        (UVec4, LpsValueF64::UVec4(a, b, c, d)) => LpsValueF32::UVec4([*a, *b, *c, *d]),
+        (BVec2, LpsValueF64::BVec2(a, b)) => LpsValueF32::BVec2([*a, *b]),
+        (BVec3, LpsValueF64::BVec3(a, b, c)) => LpsValueF32::BVec3([*a, *b, *c]),
+        (BVec4, LpsValueF64::BVec4(a, b, c, d)) => LpsValueF32::BVec4([*a, *b, *c, *d]),
         (Mat2, LpsValueF64::Mat2(a)) => {
-            LpsValue::Mat2x2([[a[0] as f32, a[1] as f32], [a[2] as f32, a[3] as f32]])
+            LpsValueF32::Mat2x2([[a[0] as f32, a[1] as f32], [a[2] as f32, a[3] as f32]])
         }
-        (Mat3, LpsValueF64::Mat3(a)) => LpsValue::Mat3x3([
+        (Mat3, LpsValueF64::Mat3(a)) => LpsValueF32::Mat3x3([
             [a[0] as f32, a[1] as f32, a[2] as f32],
             [a[3] as f32, a[4] as f32, a[5] as f32],
             [a[6] as f32, a[7] as f32, a[8] as f32],
         ]),
-        (Mat4, LpsValueF64::Mat4(a)) => LpsValue::Mat4x4([
+        (Mat4, LpsValueF64::Mat4(a)) => LpsValueF32::Mat4x4([
             [a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32],
             [a[4] as f32, a[5] as f32, a[6] as f32, a[7] as f32],
             [a[8] as f32, a[9] as f32, a[10] as f32, a[11] as f32],
@@ -185,7 +188,7 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &LpsValueF64) -> Result<Lp
             for it in items {
                 v.push(glsl_q32_to_glsl_value(element, it)?);
             }
-            LpsValue::Array(v.into_boxed_slice())
+            LpsValueF32::Array(v.into_boxed_slice())
         }
         (Struct { name, members }, LpsValueF64::Struct(items)) => {
             if items.len() != members.len() {
@@ -196,7 +199,7 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &LpsValueF64) -> Result<Lp
                 let key = m.name.clone().unwrap_or_else(|| format!("_{i}"));
                 fields.push((key, glsl_q32_to_glsl_value(&m.ty, &items[i])?));
             }
-            LpsValue::Struct {
+            LpsValueF32::Struct {
                 name: name.clone(),
                 fields,
             }
@@ -214,7 +217,7 @@ pub(crate) trait Q32ShaderExecutable {
     fn call_q32_ret(
         &mut self,
         name: &str,
-        args: &[LpsValue],
+        args: &[LpsValueF32],
     ) -> Result<GlslReturn<LpsValueF64>, GlslError>;
 
     fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig>;
@@ -223,7 +226,7 @@ pub(crate) trait Q32ShaderExecutable {
 pub(crate) fn impl_call_void<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
 ) -> Result<(), GlslError> {
     let gfn = find_gfn(exec.signatures_map(), name)?;
     if gfn.return_type != LpsType::Void {
@@ -248,7 +251,7 @@ fn find_gfn<'a>(
 pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
 ) -> Result<f32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     if sig.return_type != LpsType::Float {
@@ -270,7 +273,7 @@ pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
 ) -> Result<i32, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
@@ -296,7 +299,7 @@ pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
 ) -> Result<bool, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     if sig.return_type != LpsType::Bool {
@@ -318,7 +321,7 @@ pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     dim: usize,
 ) -> Result<Vec<f32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -352,7 +355,7 @@ pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     dim: usize,
 ) -> Result<Vec<i32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -384,7 +387,7 @@ pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     dim: usize,
 ) -> Result<Vec<u32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -416,7 +419,7 @@ pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     dim: usize,
 ) -> Result<Vec<bool>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
@@ -448,7 +451,7 @@ pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     rows: usize,
     cols: usize,
 ) -> Result<Vec<f32>, GlslError> {
@@ -485,10 +488,10 @@ pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
 pub(crate) fn call_array_from_q32<E: Q32ShaderExecutable>(
     exec: &mut E,
     name: &str,
-    args: &[LpsValue],
+    args: &[LpsValueF32],
     elem_ty: &LpsType,
     len: usize,
-) -> Result<Vec<LpsValue>, GlslError> {
+) -> Result<Vec<LpsValueF32>, GlslError> {
     let sig = find_gfn(exec.signatures_map(), name)?;
     match &sig.return_type {
         LpsType::Array { element, len: n } if **element == *elem_ty && *n as usize == len => {}
