@@ -14,5 +14,6 @@ default = []
 std = []
 
 [dependencies]
+lps-q32 = { path = "../lps-q32", default-features = false }
 lps-shared = { path = "../lps-shared" }
 lpir = { path = "../lpir" }

@@ -1,17 +1,15 @@
-//! Level-1 [`LpsValueF64`] calls using [`lps_shared::LpsModuleSig`].
+//! Level-1 [`LpsValueQ32`] calls using [`lps_shared::LpsModuleSig`].
 
 use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::LpsType;
+use lpvm::{CallError, CallResult, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg};
 
 use crate::jit_module::JitModule;
-use lps_shared::lps_value_f64::{
-    decode_q32_return, flatten_q32_arg, CallError, CallResult, GlslReturn, LpsValueF64,
-};
 
 impl JitModule {
     /// Typed Q32 call using GLSL metadata from lowering.
-    pub fn call(&self, name: &str, args: &[LpsValueF64]) -> CallResult<GlslReturn<LpsValueF64>> {
+    pub fn call(&self, name: &str, args: &[LpsValueQ32]) -> CallResult<GlslReturn<LpsValueQ32>> {
         if self.float_mode != FloatMode::Q32 {
             return Err(CallError::Unsupported(
                 "Level-1 GlslQ32 call requires FloatMode::Q32".into(),

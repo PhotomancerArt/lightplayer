@@ -6,12 +6,13 @@ use lp_riscv_elf::ElfLoadInfo;
 use lpir::{FloatMode as LpirFloatMode, IrModule};
 use lps_diagnostics::GlslError;
 use lps_exec::GlslExecutable;
+use lps_shared::LpsValueQ32;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValueF32;
+use lpvm_cranelift::GlslReturn;
 use lpvm_cranelift::{
     CompileOptions, CompilerError, link_object_with_builtins, object_bytes_from_ir,
 };
-use lpvm_cranelift::{GlslReturn, LpsValueF64};
 use lpvm_emu::glsl_q32_call_emulated;
 
 use super::q32_exec_common::{
@@ -68,7 +69,7 @@ impl Q32ShaderExecutable for LpirRv32Executable {
         &mut self,
         name: &str,
         args: &[LpsValueF32],
-    ) -> Result<GlslReturn<LpsValueF64>, GlslError> {
+    ) -> Result<GlslReturn<LpsValueQ32>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
                 lps_diagnostics::ErrorCode::E0101,

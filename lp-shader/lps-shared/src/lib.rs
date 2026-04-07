@@ -11,9 +11,7 @@ extern crate alloc;
 
 pub mod layout;
 pub mod lps_value_f32;
-pub mod lps_value_f64;
-pub mod lps_value_f64_convert;
-mod lps_value_q32;
+pub mod lps_value_q32;
 pub mod path;
 pub mod path_resolve;
 mod sig;
@@ -22,6 +20,8 @@ pub mod value_path;
 
 pub use layout::{array_stride, round_up, type_alignment, type_size};
 pub use lps_value_f32::LpsValueF32;
-pub use lps_value_q32::LpsValueQ32;
+pub use lps_value_q32::{
+    LpsValueQ32, LpsValueQ32Error, lps_value_f32_to_q32, q32_to_lps_value_f32,
+};
 pub use sig::{FnParam, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use types::{LayoutRules, LpsType, StructMember};

@@ -62,8 +62,8 @@ pub type GlslParamQualifier = ParamQualifier;
 /// Back-compat alias for a single formal parameter; prefer [`FnParam`].
 pub type LpsSig = FnParam;
 pub use lps_q32::q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
-pub use lps_shared::lps_value_f64::{
-    CallError, CallResult, GlslReturn, LpsValueF64, decode_q32_return, flatten_q32_arg,
+pub use lpvm::{
+    CallError, CallResult, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg,
 };
 #[cfg(feature = "riscv32-object")]
 pub use object_link::link_object_with_builtins;
@@ -108,9 +108,11 @@ mod tests {
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, LpsValueF64,
+        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, LpsValueQ32,
         MemoryStrategy, jit_from_ir,
     };
+    use lps_q32::Q32;
+    use lps_q32::q32_encode::q32_encode;
 
     fn jit_test_vmctx() -> *const u8 {
         // Use properly aligned storage for VmContext (needs 8-byte alignment for u64 fuel field).
@@ -861,10 +863,16 @@ func @apply_sin(v1:f32) -> f32 {
         .expect("jit");
         assert!(m.func_names().iter().any(|n| n == "add"));
         let ret = m
-            .call("add", &[LpsValueF64::Float(1.0), LpsValueF64::Float(2.0)])
+            .call(
+                "add",
+                &[
+                    LpsValueQ32::F32(Q32::from_fixed(q32_encode(1.0))),
+                    LpsValueQ32::F32(Q32::from_fixed(q32_encode(2.0))),
+                ],
+            )
             .expect("call");
         match ret.value {
-            Some(LpsValueF64::Float(x)) => assert!((x - 3.0).abs() < 1e-5),
+            Some(LpsValueQ32::F32(x)) => assert!((x.to_f32() - 3.0).abs() < 1e-5),
             other => panic!("expected float ~3.0, got {other:?}"),
         }
     }
@@ -889,12 +897,18 @@ func @apply_sin(v1:f32) -> f32 {
                 .expect("direct invoke")
         };
         let via_call = m
-            .call("add", &[LpsValueF64::Float(1.25), LpsValueF64::Float(-0.5)])
+            .call(
+                "add",
+                &[
+                    LpsValueQ32::F32(Q32::from_fixed(lps_q32::q32_encode::q32_encode(1.25))),
+                    LpsValueQ32::F32(Q32::from_fixed(lps_q32::q32_encode::q32_encode(-0.5))),
+                ],
+            )
             .expect("typed call");
         assert_eq!(via_direct.len(), 1);
         match via_call.value {
-            Some(LpsValueF64::Float(x)) => {
-                assert_eq!(via_direct[0], lps_q32::q32_encode::q32_encode_f64(x));
+            Some(LpsValueQ32::F32(x)) => {
+                assert_eq!(via_direct[0], x.to_fixed());
             }
             other => panic!("expected float return, got {other:?}"),
         }

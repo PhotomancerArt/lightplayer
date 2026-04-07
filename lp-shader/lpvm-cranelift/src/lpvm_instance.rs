@@ -1,7 +1,7 @@
 //! LPVM trait implementations: [`CraneliftInstance`] and [`lpvm::LpvmModule`] for [`CraneliftModule`].
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
@@ -9,10 +9,12 @@ use core::fmt;
 use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
-use lpvm::{LpsValueF32, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext};
+use lpvm::{
+    CallError, LpsValueF32, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext,
+    decode_q32_return, flatten_q32_arg, lps_value_f32_to_q32, q32_to_lps_value_f32,
+};
 
 use crate::lpvm_module::CraneliftModule;
-use lps_shared::lps_value_f64::{CallError, decode_q32_return, flatten_q32_arg};
 
 /// Execution error for [`CraneliftInstance`].
 #[derive(Debug)]
@@ -124,7 +126,8 @@ impl LpvmInstance for CraneliftInstance {
 
         let mut flat: Vec<i32> = Vec::new();
         for (p, a) in gfn.parameters.iter().zip(args.iter()) {
-            let q = lps_shared::lps_value_f64_convert::lps_value_to_f64(&p.ty, a)?;
+            let q = lps_value_f32_to_q32(&p.ty, a)
+                .map_err(|e| CallError::TypeMismatch(e.to_string()))?;
             flat.extend(flatten_q32_arg(p, &q)?);
         }
         if flat.len() != param_count {
@@ -166,7 +169,7 @@ impl LpvmInstance for CraneliftInstance {
         };
 
         let gq = decode_q32_return(&gfn.return_type, &words)?;
-        lps_shared::lps_value_f64_convert::glsl_f64_to_lps_value(&gfn.return_type, gq)
-            .map_err(InstanceError::Call)
+        q32_to_lps_value_f32(&gfn.return_type, gq)
+            .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
     }
 }

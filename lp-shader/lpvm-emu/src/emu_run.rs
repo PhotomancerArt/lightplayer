@@ -10,16 +10,14 @@ use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
 use lp_riscv_elf::ElfLoadInfo;
-use lp_riscv_emu::{LogLevel, Memory, Riscv32Emulator, DEFAULT_RAM_START, DEFAULT_SHARED_START};
-use lpir::module::IrModule;
+use lp_riscv_emu::{DEFAULT_RAM_START, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
+use lpir::module::IrModule;
 use lps_shared::{LpsModuleSig, LpsType};
 use lpvm::DEFAULT_VMCTX_FUEL;
+use lpvm::{CallError, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg};
 use lpvm_cranelift::error::CompileError;
-use lpvm_cranelift::{
-    decode_q32_return, flatten_q32_arg, signature_for_ir_func, CompileOptions, CompilerError,
-};
-use lpvm_cranelift::{CallError, GlslReturn, LpsValueF64};
+use lpvm_cranelift::{CompileOptions, CompilerError, signature_for_ir_func};
 use target_lexicon::Triple;
 
 use crate::memory::DEFAULT_SHARED_CAPACITY;
@@ -78,8 +76,8 @@ pub fn glsl_q32_call_emulated(
     glsl_meta: &LpsModuleSig,
     options: &CompileOptions,
     name: &str,
-    args: &[LpsValueF64],
-) -> Result<GlslReturn<LpsValueF64>, CallError> {
+    args: &[LpsValueQ32],
+) -> Result<GlslReturn<LpsValueQ32>, CallError> {
     if options.float_mode != FloatMode::Q32 {
         return Err(CallError::Unsupported(
             "emulated Q32 call requires FloatMode::Q32".into(),

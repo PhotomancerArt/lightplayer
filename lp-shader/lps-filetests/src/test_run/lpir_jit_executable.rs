@@ -5,15 +5,16 @@ use std::collections::BTreeMap;
 use lpir::FloatMode as LpirFloatMode;
 use lps_diagnostics::GlslError;
 use lps_exec::GlslExecutable;
+use lps_shared::LpsValueQ32;
 use lps_shared::{LpsFnSig, LpsType};
 use lpvm::LpsValueF32;
-use lpvm_cranelift::{jit, CompileOptions, CompilerError, JitModule};
-use lpvm_cranelift::{GlslReturn, LpsValueF64};
+use lpvm_cranelift::GlslReturn;
+use lpvm_cranelift::{CompileOptions, CompilerError, JitModule, jit};
 
 use super::q32_exec_common::{
-    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
-    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
+    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
+    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
+    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// Host JIT executable for `jit.q32` / `jit.f32` filetest targets.
@@ -55,7 +56,7 @@ impl Q32ShaderExecutable for LpirJitExecutable {
         &mut self,
         name: &str,
         args: &[LpsValueF32],
-    ) -> Result<GlslReturn<LpsValueF64>, GlslError> {
+    ) -> Result<GlslReturn<LpsValueQ32>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
                 lps_diagnostics::ErrorCode::E0101,
