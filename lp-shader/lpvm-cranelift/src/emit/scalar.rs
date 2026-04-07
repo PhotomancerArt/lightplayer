@@ -79,7 +79,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fneg(a)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_fneg(builder, a);
+                    let out = crate::q32_emit::emit_fneg(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -89,7 +89,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fabs(a)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_fabs(builder, a);
+                    let out = crate::q32_emit::emit_fabs(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -112,7 +112,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fmin(a, b)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_fmin(builder, a, b);
+                    let out = crate::q32_emit::emit_fmin(builder, a, b);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -123,7 +123,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fmax(a, b)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_fmax(builder, a, b);
+                    let out = crate::q32_emit::emit_fmax(builder, a, b);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -133,7 +133,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().floor(a)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_ffloor(builder, a);
+                    let out = crate::q32_emit::emit_ffloor(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -143,7 +143,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().ceil(a)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_fceil(builder, a);
+                    let out = crate::q32_emit::emit_fceil(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -153,7 +153,7 @@ pub(crate) fn emit_scalar(
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().trunc(a)),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_ftrunc(builder, a);
+                    let out = crate::q32_emit::emit_ftrunc(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -259,7 +259,7 @@ pub(crate) fn emit_scalar(
                 def_v_expr(builder, vars, *dst, |bd| bd.ins().f32const(*value));
             }
             FloatMode::Q32 => {
-                let encoded = crate::q32::q32_encode(*value);
+                let encoded = lps_q32::q32_encode::q32_encode(*value);
                 def_v_expr(builder, vars, *dst, |bd| {
                     bd.ins().iconst(types::I32, i64::from(encoded))
                 });
@@ -461,7 +461,7 @@ pub(crate) fn emit_scalar(
                     bd.ins().fcvt_to_sint_sat(types::I32, a)
                 }),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_to_sint(builder, a);
+                    let out = crate::q32_emit::emit_to_sint(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -473,7 +473,7 @@ pub(crate) fn emit_scalar(
                     bd.ins().fcvt_to_uint_sat(types::I32, a)
                 }),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_to_uint(builder, a);
+                    let out = crate::q32_emit::emit_to_uint(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -485,7 +485,7 @@ pub(crate) fn emit_scalar(
                     bd.ins().fcvt_from_sint(types::F32, a)
                 }),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_from_sint(builder, a);
+                    let out = crate::q32_emit::emit_from_sint(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }
@@ -497,7 +497,7 @@ pub(crate) fn emit_scalar(
                     bd.ins().fcvt_from_uint(types::F32, a)
                 }),
                 FloatMode::Q32 => {
-                    let out = crate::q32::emit_from_uint(builder, a);
+                    let out = crate::q32_emit::emit_from_uint(builder, a);
                     def_v(builder, vars, *dst, out);
                 }
             }

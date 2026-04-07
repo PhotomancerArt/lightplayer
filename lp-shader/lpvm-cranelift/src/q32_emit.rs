@@ -3,34 +3,7 @@
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{InstBuilder, Value, types};
 use cranelift_frontend::FunctionBuilder;
-
-const Q32_SHIFT: i64 = 16;
-const Q32_SCALE: f64 = 65536.0;
-const Q32_MAX: i64 = 0x7FFF_FFFF;
-const Q32_MIN: i64 = i32::MIN as i64;
-const Q32_FRAC: i32 = (1 << Q32_SHIFT) - 1;
-
-/// Encode an f32 constant as a Q16.16 fixed-point i32.
-pub(crate) fn q32_encode(value: f32) -> i32 {
-    q32_encode_f64(f64::from(value))
-}
-
-/// Encode `f64` as Q16.16 (Level-1 call interchange).
-pub(crate) fn q32_encode_f64(value: f64) -> i32 {
-    let scaled = libm::round(value * Q32_SCALE);
-    if scaled > Q32_MAX as f64 {
-        Q32_MAX as i32
-    } else if scaled < Q32_MIN as f64 {
-        i32::MIN
-    } else {
-        scaled as i32
-    }
-}
-
-/// Decode Q16.16 fixed-point to `f64`.
-pub(crate) fn q32_to_f64(raw: i32) -> f64 {
-    f64::from(raw) / Q32_SCALE
-}
+use lps_q32::q32_encode::{Q32_FRAC, Q32_SHIFT};
 
 pub(crate) fn emit_fneg(builder: &mut FunctionBuilder, v: Value) -> Value {
     builder.ins().ineg(v)
@@ -133,8 +106,7 @@ pub(crate) fn emit_from_uint(builder: &mut FunctionBuilder, v: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    use lps_q32::q32_encode::q32_encode;
     #[test]
     fn encode_basics() {
         assert_eq!(q32_encode(0.0), 0);

@@ -24,7 +24,7 @@
 //!
 //! Example (using a fictional `lpfx_example` to avoid duplicate symbol with actual builtins):
 //! ```rust
-//! use lps_builtins::glsl::q32::types::q32::Q32;
+//! use lps_q32::types::q32::Q32;
 //!
 //! // Public Rust API - can be inlined
 //! #[inline(always)]

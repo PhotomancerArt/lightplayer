@@ -9,15 +9,15 @@ use lps_exec::GlslExecutable;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
 use lpvm_cranelift::{
-    CompileOptions, CompilerError, link_object_with_builtins, object_bytes_from_ir,
+    link_object_with_builtins, object_bytes_from_ir, CompileOptions, CompilerError,
 };
-use lpvm_cranelift::{GlslQ32, GlslReturn};
+use lpvm_cranelift::{GlslReturn, Q32ShaderValue};
 use lpvm_emu::glsl_q32_call_emulated;
 
 use super::q32_exec_common::{
-    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
-    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
-    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
+    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
+    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
+    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
 };
 
 /// RV32 emulator-backed executable for `rv32.q32` filetests.
@@ -68,7 +68,7 @@ impl Q32ShaderExecutable for LpirRv32Executable {
         &mut self,
         name: &str,
         args: &[LpsValue],
-    ) -> Result<GlslReturn<GlslQ32>, GlslError> {
+    ) -> Result<GlslReturn<Q32ShaderValue>, GlslError> {
         let gfn = self.gfn_meta(name).ok_or_else(|| {
             GlslError::new(
                 lps_diagnostics::ErrorCode::E0101,

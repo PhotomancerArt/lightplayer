@@ -1,8 +1,8 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
-use crate::glsl::q32::fns;
-use crate::glsl::q32::types::q32::Q32;
+use crate::fns;
+use crate::lpir;
+use crate::types::q32::Q32;
 
 /// 2D vector for Q32 fixed-point arithmetic
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -65,7 +65,7 @@ impl Vec2Q32 {
     #[inline(always)]
     pub fn length(self) -> Q32 {
         let len_sq = self.length_squared();
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(len_sq.to_fixed()))
+        Q32::from_fixed(lpir::fsqrt_q32(len_sq.to_fixed()))
     }
 
     /// Distance to another vector

@@ -1,7 +1,7 @@
 //! 3D Fractal Brownian Motion noise function (float implementation - stub).
 
 use crate::builtins::lpfx::generative::fbm::fbm3_q32::__lp_lpfx_fbm3_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 #[lpfx_impl_macro::lpfx_impl(f32, "float lpfx_fbm(vec3 p, int octaves, uint seed)")]
 #[unsafe(no_mangle)]

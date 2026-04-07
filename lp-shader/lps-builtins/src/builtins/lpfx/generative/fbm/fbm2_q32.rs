@@ -9,8 +9,8 @@
 //! of this standard algorithm.
 
 use crate::builtins::lpfx::generative::snoise::snoise2_q32::lpfx_snoise2;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec2_q32::Vec2Q32;
 
 /// FBM constants matching GLSL defaults
 const VALUE_INITIAL: Q32 = Q32::ZERO;

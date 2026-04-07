@@ -1,7 +1,7 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
+use crate::types::q32::Q32;
+use crate::types::vec3_q32::Vec3Q32;
 
 /// 3x3 matrix for Q32 fixed-point arithmetic (GLSL-compatible, column-major storage)
 ///

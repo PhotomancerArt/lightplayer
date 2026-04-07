@@ -4,7 +4,7 @@
 //! For now, it calls the q32 version with conversion.
 
 use crate::builtins::lpfx::generative::snoise::snoise1_q32::__lp_lpfx_snoise1_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// 1D Simplex noise function (float version).
 ///

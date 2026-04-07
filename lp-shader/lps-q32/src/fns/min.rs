@@ -1,6 +1,6 @@
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use crate::types::vec2_q32::Vec2Q32;
+use crate::types::vec3_q32::Vec3Q32;
+use crate::types::vec4_q32::Vec4Q32;
 
 /// Component-wise minimum for Vec2Q32
 /// Returns the minimum of each component pair

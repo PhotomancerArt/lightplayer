@@ -8,9 +8,9 @@
 //! standard mathematical procedure documented in graphics literature. The formula is not
 //! subject to copyright. This Rust/Q32 port implements the standard algorithm.
 
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::vec4_q32::Vec4Q32;
 
 /// Epsilon constant to avoid division by zero.
 /// Using minimum representable Q32 value (1 in Q16.16 format = 1/65536 ≈ 0.000015).

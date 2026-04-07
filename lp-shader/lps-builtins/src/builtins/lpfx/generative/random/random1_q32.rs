@@ -3,7 +3,7 @@
 //! Returns values in [0, 1] range using fract(sin(x + seed) * 43758.5453)
 
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// Random constant multiplier
 /// In Q16.16: 43758.5453 * 65536 ≈ 2867801088

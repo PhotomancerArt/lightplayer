@@ -39,7 +39,7 @@ members = [
     "lp-shader/lps-filetests-app",
     "lp-shader/legacy/lps-wasm",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc",
+    "spikes/naga-wasm-poc", "lp-shader/lps-q32",
 ]
 resolver = "2"
 

@@ -3739,6 +3739,7 @@ dependencies = [
  "lp-model",
  "lp-shared",
  "lps-builtins",
+ "lps-q32",
  "lpvm",
  "lpvm-cranelift",
  "serde",
@@ -3883,6 +3884,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lpfx-impl-macro",
+ "lps-q32",
  "lpvm",
 ]
 
@@ -3984,8 +3986,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lps-q32"
+version = "40.0.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "lps-shared"
 version = "40.0.0"
+dependencies = [
+ "lps-q32",
+]
 
 [[package]]
 name = "lps-wasm"
@@ -4024,6 +4036,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-frontend",
+ "lps-q32",
  "lps-shared",
  "lpvm",
  "target-lexicon",

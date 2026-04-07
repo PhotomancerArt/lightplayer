@@ -1,7 +1,7 @@
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use crate::types::q32::Q32;
+use crate::types::vec2_q32::Vec2Q32;
+use crate::types::vec3_q32::Vec3Q32;
+use crate::types::vec4_q32::Vec4Q32;
 
 /// Component-wise step function for Vec2Q32
 /// Returns 1.0 if edge <= x, else 0.0 for each component

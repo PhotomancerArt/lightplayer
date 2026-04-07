@@ -8,4 +8,9 @@ description = "GLSL semantic types shared across compilers (new stack)"
 [lints]
 workspace = true
 
+[features]
+default = []
+std = []
+
 [dependencies]
+lps-q32 = { path = "../lps-q32" }

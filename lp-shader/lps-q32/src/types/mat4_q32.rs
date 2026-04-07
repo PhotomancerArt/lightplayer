@@ -1,8 +1,8 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::glsl::q32::types::mat3_q32::Mat3Q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use crate::types::mat3_q32::Mat3Q32;
+use crate::types::q32::Q32;
+use crate::types::vec4_q32::Vec4Q32;
 
 /// 4x4 matrix for Q32 fixed-point arithmetic (GLSL-compatible, column-major storage)
 ///

@@ -1,0 +1,13 @@
+[package]
+name = "lps-q32"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libm = "0.2"
+
+[lints]
+workspace = true

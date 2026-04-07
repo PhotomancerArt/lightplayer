@@ -3,8 +3,8 @@
 //! Returns vec3 in [-1, 1] range using dot products with different constant vectors
 
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
 
 /// Random constant multiplier
 /// In Q16.16: 43758.5453123 * 65536 ≈ 2867801088

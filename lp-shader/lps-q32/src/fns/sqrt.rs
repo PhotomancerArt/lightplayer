@@ -1,16 +1,16 @@
-use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use crate::lpir;
+use crate::types::q32::Q32;
+use crate::types::vec2_q32::Vec2Q32;
+use crate::types::vec3_q32::Vec3Q32;
+use crate::types::vec4_q32::Vec4Q32;
 
 /// Component-wise square root for Vec2Q32
 /// Returns sqrt(x) for each component
 #[inline(always)]
 pub fn sqrt_vec2(v: Vec2Q32) -> Vec2Q32 {
     Vec2Q32::new(
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.x.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.y.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.x.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.y.to_fixed())),
     )
 }
 
@@ -19,9 +19,9 @@ pub fn sqrt_vec2(v: Vec2Q32) -> Vec2Q32 {
 #[inline(always)]
 pub fn sqrt_vec3(v: Vec3Q32) -> Vec3Q32 {
     Vec3Q32::new(
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.x.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.y.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.z.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.x.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.y.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.z.to_fixed())),
     )
 }
 
@@ -30,10 +30,10 @@ pub fn sqrt_vec3(v: Vec3Q32) -> Vec3Q32 {
 #[inline(always)]
 pub fn sqrt_vec4(v: Vec4Q32) -> Vec4Q32 {
     Vec4Q32::new(
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.x.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.y.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.z.to_fixed())),
-        Q32::from_fixed(__lp_lpir_fsqrt_q32(v.w.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.x.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.y.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.z.to_fixed())),
+        Q32::from_fixed(lpir::fsqrt_q32(v.w.to_fixed())),
     )
 }
 

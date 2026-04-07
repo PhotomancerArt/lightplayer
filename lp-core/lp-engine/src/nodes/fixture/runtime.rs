@@ -11,7 +11,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use lp_model::FrameId;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, FixtureState, MappingCell};
 use lp_shared::fs::fs_event::FsChange;
-use lps_builtins::glsl::q32::types::q32::ToQ32;
+use lps_q32::types::q32::ToQ32;
 
 /// Fixture node runtime
 pub struct FixtureRuntime {
@@ -441,7 +441,7 @@ mod tests {
         // Simulate: pixel 0 has 2 entries (channels 0 and 1), pixel 1 has 1 entry (channel 0)
         use crate::nodes::fixture::mapping::{PixelMappingEntry, PrecomputedMapping};
         use lp_model::FrameId;
-        use lps_builtins::glsl::q32::types::q32::Q32;
+        use lps_q32::types::q32::Q32;
 
         let mut mapping = PrecomputedMapping::new(2, 1, FrameId::new(1));
         // Pixel 0: channel 0 (has_more = true)

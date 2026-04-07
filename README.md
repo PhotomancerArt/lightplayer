@@ -101,6 +101,8 @@ Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 - **`lps-frontend`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
 - **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
+- **`lps-q32`** Fixed-point Q16.16 types: `Q32` scalar, `Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`,
+  component-wise math helpers, constant encoding for compiler
 - **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
 - **`lps-diagnostics`** Error codes, spans, `GlslError`
 - **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)

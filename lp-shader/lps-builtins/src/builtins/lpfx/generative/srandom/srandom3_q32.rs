@@ -3,8 +3,8 @@
 //! Returns values in [-1, 1] range using -1.0 + 2.0 * random(p, seed)
 
 use crate::builtins::lpfx::generative::random::random3_q32::lpfx_random3;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
 
 /// 3D Signed Random function
 ///

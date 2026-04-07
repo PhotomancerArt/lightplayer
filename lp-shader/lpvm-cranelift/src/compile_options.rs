@@ -2,7 +2,7 @@
 
 use lpir::FloatMode;
 
-use crate::q32_options::Q32Options;
+use lps_q32::q32_options::Q32Options;
 
 /// Memory use strategy when lowering into a Cranelift module.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

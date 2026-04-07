@@ -21,7 +21,7 @@
 //! Also published under the terms of the MIT license.
 
 use crate::builtins::lpfx::generative::psrdnoise::psrdnoise3_q32::__lp_lpfx_psrdnoise3_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// 3D Periodic Simplex Rotational Domain noise function (float version).
 ///

@@ -12,7 +12,7 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{LpsValue, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext};
 
 use crate::lpvm_module::CraneliftModule;
-use crate::values::{CallError, decode_q32_return, flatten_q32_arg};
+use lps_shared::q32::q32_value::{CallError, decode_q32_return, flatten_q32_arg};
 
 /// Execution error for [`CraneliftInstance`].
 #[derive(Debug)]
@@ -124,7 +124,7 @@ impl LpvmInstance for CraneliftInstance {
 
         let mut flat: Vec<i32> = Vec::new();
         for (p, a) in gfn.parameters.iter().zip(args.iter()) {
-            let q = crate::q32_marshal::lps_value_to_glsl_q32(&p.ty, a)?;
+            let q = lps_shared::q32::q32_marshal::lps_value_to_glsl_q32(&p.ty, a)?;
             flat.extend(flatten_q32_arg(p, &q)?);
         }
         if flat.len() != param_count {
@@ -166,6 +166,7 @@ impl LpvmInstance for CraneliftInstance {
         };
 
         let gq = decode_q32_return(&gfn.return_type, &words)?;
-        crate::q32_marshal::glsl_q32_to_lps_value(&gfn.return_type, gq).map_err(InstanceError::Call)
+        lps_shared::q32::q32_marshal::glsl_q32_to_lps_value(&gfn.return_type, gq)
+            .map_err(InstanceError::Call)
     }
 }

@@ -27,6 +27,7 @@ hashbrown = { workspace = true }
 lpvm-cranelift = { path = "../../lp-shader/lpvm-cranelift", default-features = false, features = ["glsl"] }
 lpvm = { path = "../../lp-shader/lpvm", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
+lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
 lp-model = { path = "../lp-model", default-features = false }

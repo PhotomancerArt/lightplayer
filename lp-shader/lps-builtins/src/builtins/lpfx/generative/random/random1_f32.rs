@@ -3,7 +3,7 @@
 //! This is a stub implementation that calls the q32 version with conversion.
 
 use crate::builtins::lpfx::generative::random::random1_q32::__lp_lpfx_random1_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// 1D Random function (float version).
 ///

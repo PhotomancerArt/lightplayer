@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use lps_diagnostics::{ErrorCode, GlslError};
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
-use lpvm_cranelift::{CallError, GlslQ32, GlslReturn};
+use lpvm_cranelift::{CallError, GlslReturn, Q32ShaderValue};
 
 pub(crate) fn signatures_from_meta(meta: &LpsModuleSig) -> BTreeMap<String, LpsFnSig> {
     let mut m = BTreeMap::new();
@@ -27,7 +27,10 @@ fn core_type_to_lpir_glsl(ty: &LpsType) -> Option<LpsType> {
     }
 }
 
-pub(crate) fn args_to_q32(gfn: &LpsFnSig, args: &[LpsValue]) -> Result<Vec<GlslQ32>, GlslError> {
+pub(crate) fn args_to_q32(
+    gfn: &LpsFnSig,
+    args: &[LpsValue],
+) -> Result<Vec<Q32ShaderValue>, GlslError> {
     if gfn.parameters.len() != args.len() {
         return Err(GlslError::new(
             ErrorCode::E0400,
@@ -46,7 +49,7 @@ pub(crate) fn args_to_q32(gfn: &LpsFnSig, args: &[LpsValue]) -> Result<Vec<GlslQ
     Ok(out)
 }
 
-fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslError> {
+fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<Q32ShaderValue, GlslError> {
     use LpsType::*;
     let err = || {
         GlslError::new(
@@ -55,31 +58,31 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslEr
         )
     };
     Ok(match (param_ty, v) {
-        (Float, LpsValue::F32(x)) => GlslQ32::Float(*x as f64),
-        (Int, LpsValue::I32(x)) => GlslQ32::Int(*x),
-        (UInt, LpsValue::U32(x)) => GlslQ32::UInt(*x),
-        (Bool, LpsValue::Bool(b)) => GlslQ32::Bool(*b),
-        (Vec2, LpsValue::Vec2(a)) => GlslQ32::Vec2(a[0] as f64, a[1] as f64),
-        (Vec3, LpsValue::Vec3(a)) => GlslQ32::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
+        (Float, LpsValue::F32(x)) => Q32ShaderValue::Float(*x as f64),
+        (Int, LpsValue::I32(x)) => Q32ShaderValue::Int(*x),
+        (UInt, LpsValue::U32(x)) => Q32ShaderValue::UInt(*x),
+        (Bool, LpsValue::Bool(b)) => Q32ShaderValue::Bool(*b),
+        (Vec2, LpsValue::Vec2(a)) => Q32ShaderValue::Vec2(a[0] as f64, a[1] as f64),
+        (Vec3, LpsValue::Vec3(a)) => Q32ShaderValue::Vec3(a[0] as f64, a[1] as f64, a[2] as f64),
         (Vec4, LpsValue::Vec4(a)) => {
-            GlslQ32::Vec4(a[0] as f64, a[1] as f64, a[2] as f64, a[3] as f64)
+            Q32ShaderValue::Vec4(a[0] as f64, a[1] as f64, a[2] as f64, a[3] as f64)
         }
-        (IVec2, LpsValue::IVec2(a)) => GlslQ32::IVec2(a[0], a[1]),
-        (IVec3, LpsValue::IVec3(a)) => GlslQ32::IVec3(a[0], a[1], a[2]),
-        (IVec4, LpsValue::IVec4(a)) => GlslQ32::IVec4(a[0], a[1], a[2], a[3]),
-        (UVec2, LpsValue::UVec2(a)) => GlslQ32::UVec2(a[0], a[1]),
-        (UVec3, LpsValue::UVec3(a)) => GlslQ32::UVec3(a[0], a[1], a[2]),
-        (UVec4, LpsValue::UVec4(a)) => GlslQ32::UVec4(a[0], a[1], a[2], a[3]),
-        (BVec2, LpsValue::BVec2(a)) => GlslQ32::BVec2(a[0], a[1]),
-        (BVec3, LpsValue::BVec3(a)) => GlslQ32::BVec3(a[0], a[1], a[2]),
-        (BVec4, LpsValue::BVec4(a)) => GlslQ32::BVec4(a[0], a[1], a[2], a[3]),
-        (Mat2, LpsValue::Mat2x2(m)) => GlslQ32::Mat2([
+        (IVec2, LpsValue::IVec2(a)) => Q32ShaderValue::IVec2(a[0], a[1]),
+        (IVec3, LpsValue::IVec3(a)) => Q32ShaderValue::IVec3(a[0], a[1], a[2]),
+        (IVec4, LpsValue::IVec4(a)) => Q32ShaderValue::IVec4(a[0], a[1], a[2], a[3]),
+        (UVec2, LpsValue::UVec2(a)) => Q32ShaderValue::UVec2(a[0], a[1]),
+        (UVec3, LpsValue::UVec3(a)) => Q32ShaderValue::UVec3(a[0], a[1], a[2]),
+        (UVec4, LpsValue::UVec4(a)) => Q32ShaderValue::UVec4(a[0], a[1], a[2], a[3]),
+        (BVec2, LpsValue::BVec2(a)) => Q32ShaderValue::BVec2(a[0], a[1]),
+        (BVec3, LpsValue::BVec3(a)) => Q32ShaderValue::BVec3(a[0], a[1], a[2]),
+        (BVec4, LpsValue::BVec4(a)) => Q32ShaderValue::BVec4(a[0], a[1], a[2], a[3]),
+        (Mat2, LpsValue::Mat2x2(m)) => Q32ShaderValue::Mat2([
             m[0][0] as f64,
             m[0][1] as f64,
             m[1][0] as f64,
             m[1][1] as f64,
         ]),
-        (Mat3, LpsValue::Mat3x3(m)) => GlslQ32::Mat3([
+        (Mat3, LpsValue::Mat3x3(m)) => Q32ShaderValue::Mat3([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -90,7 +93,7 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslEr
             m[2][1] as f64,
             m[2][2] as f64,
         ]),
-        (Mat4, LpsValue::Mat4x4(m)) => GlslQ32::Mat4([
+        (Mat4, LpsValue::Mat4x4(m)) => Q32ShaderValue::Mat4([
             m[0][0] as f64,
             m[0][1] as f64,
             m[0][2] as f64,
@@ -116,7 +119,7 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslEr
             for v in items.iter() {
                 q.push(glsl_value_to_q32(element.as_ref(), v)?);
             }
-            GlslQ32::Array(q)
+            Q32ShaderValue::Array(q)
         }
         (Struct { members, .. }, LpsValue::Struct { fields, .. }) => {
             if members.len() != fields.len() {
@@ -126,14 +129,17 @@ fn glsl_value_to_q32(param_ty: &LpsType, v: &LpsValue) -> Result<GlslQ32, GlslEr
             for (m, (_, fv)) in members.iter().zip(fields.iter()) {
                 q.push(glsl_value_to_q32(&m.ty, fv)?);
             }
-            GlslQ32::Struct(q)
+            Q32ShaderValue::Struct(q)
         }
         _ => return Err(err()),
     })
 }
 
-/// Convert a [`GlslQ32`] value to [`LpsValue`] using the logical LPIR [`LpsType`].
-pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &GlslQ32) -> Result<LpsValue, GlslError> {
+/// Convert a [`Q32ShaderValue`] value to [`LpsValue`] using the logical LPIR [`LpsType`].
+pub(crate) fn glsl_q32_to_glsl_value(
+    ty: &LpsType,
+    q: &Q32ShaderValue,
+) -> Result<LpsValue, GlslError> {
     use LpsType::*;
     let bad = || {
         GlslError::new(
@@ -142,39 +148,39 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &GlslQ32) -> Result<LpsVal
         )
     };
     Ok(match (ty, q) {
-        (Float, GlslQ32::Float(x)) => LpsValue::F32(*x as f32),
-        (Int, GlslQ32::Int(x)) => LpsValue::I32(*x),
-        (UInt, GlslQ32::UInt(x)) => LpsValue::U32(*x),
-        (Bool, GlslQ32::Bool(b)) => LpsValue::Bool(*b),
-        (Vec2, GlslQ32::Vec2(a, b)) => LpsValue::Vec2([*a as f32, *b as f32]),
-        (Vec3, GlslQ32::Vec3(a, b, c)) => LpsValue::Vec3([*a as f32, *b as f32, *c as f32]),
-        (Vec4, GlslQ32::Vec4(a, b, c, d)) => {
+        (Float, Q32ShaderValue::Float(x)) => LpsValue::F32(*x as f32),
+        (Int, Q32ShaderValue::Int(x)) => LpsValue::I32(*x),
+        (UInt, Q32ShaderValue::UInt(x)) => LpsValue::U32(*x),
+        (Bool, Q32ShaderValue::Bool(b)) => LpsValue::Bool(*b),
+        (Vec2, Q32ShaderValue::Vec2(a, b)) => LpsValue::Vec2([*a as f32, *b as f32]),
+        (Vec3, Q32ShaderValue::Vec3(a, b, c)) => LpsValue::Vec3([*a as f32, *b as f32, *c as f32]),
+        (Vec4, Q32ShaderValue::Vec4(a, b, c, d)) => {
             LpsValue::Vec4([*a as f32, *b as f32, *c as f32, *d as f32])
         }
-        (IVec2, GlslQ32::IVec2(a, b)) => LpsValue::IVec2([*a, *b]),
-        (IVec3, GlslQ32::IVec3(a, b, c)) => LpsValue::IVec3([*a, *b, *c]),
-        (IVec4, GlslQ32::IVec4(a, b, c, d)) => LpsValue::IVec4([*a, *b, *c, *d]),
-        (UVec2, GlslQ32::UVec2(a, b)) => LpsValue::UVec2([*a, *b]),
-        (UVec3, GlslQ32::UVec3(a, b, c)) => LpsValue::UVec3([*a, *b, *c]),
-        (UVec4, GlslQ32::UVec4(a, b, c, d)) => LpsValue::UVec4([*a, *b, *c, *d]),
-        (BVec2, GlslQ32::BVec2(a, b)) => LpsValue::BVec2([*a, *b]),
-        (BVec3, GlslQ32::BVec3(a, b, c)) => LpsValue::BVec3([*a, *b, *c]),
-        (BVec4, GlslQ32::BVec4(a, b, c, d)) => LpsValue::BVec4([*a, *b, *c, *d]),
-        (Mat2, GlslQ32::Mat2(a)) => {
+        (IVec2, Q32ShaderValue::IVec2(a, b)) => LpsValue::IVec2([*a, *b]),
+        (IVec3, Q32ShaderValue::IVec3(a, b, c)) => LpsValue::IVec3([*a, *b, *c]),
+        (IVec4, Q32ShaderValue::IVec4(a, b, c, d)) => LpsValue::IVec4([*a, *b, *c, *d]),
+        (UVec2, Q32ShaderValue::UVec2(a, b)) => LpsValue::UVec2([*a, *b]),
+        (UVec3, Q32ShaderValue::UVec3(a, b, c)) => LpsValue::UVec3([*a, *b, *c]),
+        (UVec4, Q32ShaderValue::UVec4(a, b, c, d)) => LpsValue::UVec4([*a, *b, *c, *d]),
+        (BVec2, Q32ShaderValue::BVec2(a, b)) => LpsValue::BVec2([*a, *b]),
+        (BVec3, Q32ShaderValue::BVec3(a, b, c)) => LpsValue::BVec3([*a, *b, *c]),
+        (BVec4, Q32ShaderValue::BVec4(a, b, c, d)) => LpsValue::BVec4([*a, *b, *c, *d]),
+        (Mat2, Q32ShaderValue::Mat2(a)) => {
             LpsValue::Mat2x2([[a[0] as f32, a[1] as f32], [a[2] as f32, a[3] as f32]])
         }
-        (Mat3, GlslQ32::Mat3(a)) => LpsValue::Mat3x3([
+        (Mat3, Q32ShaderValue::Mat3(a)) => LpsValue::Mat3x3([
             [a[0] as f32, a[1] as f32, a[2] as f32],
             [a[3] as f32, a[4] as f32, a[5] as f32],
             [a[6] as f32, a[7] as f32, a[8] as f32],
         ]),
-        (Mat4, GlslQ32::Mat4(a)) => LpsValue::Mat4x4([
+        (Mat4, Q32ShaderValue::Mat4(a)) => LpsValue::Mat4x4([
             [a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32],
             [a[4] as f32, a[5] as f32, a[6] as f32, a[7] as f32],
             [a[8] as f32, a[9] as f32, a[10] as f32, a[11] as f32],
             [a[12] as f32, a[13] as f32, a[14] as f32, a[15] as f32],
         ]),
-        (Array { element, len }, GlslQ32::Array(items)) => {
+        (Array { element, len }, Q32ShaderValue::Array(items)) => {
             if items.len() != *len as usize {
                 return Err(bad());
             }
@@ -184,7 +190,7 @@ pub(crate) fn glsl_q32_to_glsl_value(ty: &LpsType, q: &GlslQ32) -> Result<LpsVal
             }
             LpsValue::Array(v.into_boxed_slice())
         }
-        (Struct { name, members }, GlslQ32::Struct(items)) => {
+        (Struct { name, members }, Q32ShaderValue::Struct(items)) => {
             if items.len() != members.len() {
                 return Err(bad());
             }
@@ -212,7 +218,7 @@ pub(crate) trait Q32ShaderExecutable {
         &mut self,
         name: &str,
         args: &[LpsValue],
-    ) -> Result<GlslReturn<GlslQ32>, GlslError>;
+    ) -> Result<GlslReturn<Q32ShaderValue>, GlslError>;
 
     fn signatures_map(&self) -> &BTreeMap<String, LpsFnSig>;
 }
@@ -256,7 +262,7 @@ pub(crate) fn call_f32_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match ret.value {
-        Some(GlslQ32::Float(x)) => Ok(x as f32),
+        Some(Q32ShaderValue::Float(x)) => Ok(x as f32),
         other => Err(GlslError::new(
             ErrorCode::E0400,
             format!("expected float return, got {other:?}"),
@@ -281,8 +287,8 @@ pub(crate) fn call_i32_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match ret.value {
-        Some(GlslQ32::Int(x)) => Ok(x),
-        Some(GlslQ32::UInt(x)) => Ok(x as i32),
+        Some(Q32ShaderValue::Int(x)) => Ok(x),
+        Some(Q32ShaderValue::UInt(x)) => Ok(x as i32),
         other => Err(GlslError::new(
             ErrorCode::E0400,
             format!("expected int return, got {other:?}"),
@@ -304,7 +310,7 @@ pub(crate) fn call_bool_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match ret.value {
-        Some(GlslQ32::Bool(b)) => Ok(b),
+        Some(Q32ShaderValue::Bool(b)) => Ok(b),
         other => Err(GlslError::new(
             ErrorCode::E0400,
             format!("expected bool return, got {other:?}"),
@@ -334,9 +340,9 @@ pub(crate) fn call_vec_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match ret.value {
-        Some(GlslQ32::Vec2(a, b)) if dim == 2 => Ok(vec![a as f32, b as f32]),
-        Some(GlslQ32::Vec3(a, b, c)) if dim == 3 => Ok(vec![a as f32, b as f32, c as f32]),
-        Some(GlslQ32::Vec4(a, b, c, d)) if dim == 4 => {
+        Some(Q32ShaderValue::Vec2(a, b)) if dim == 2 => Ok(vec![a as f32, b as f32]),
+        Some(Q32ShaderValue::Vec3(a, b, c)) if dim == 3 => Ok(vec![a as f32, b as f32, c as f32]),
+        Some(Q32ShaderValue::Vec4(a, b, c, d)) if dim == 4 => {
             Ok(vec![a as f32, b as f32, c as f32, d as f32])
         }
         other => Err(GlslError::new(
@@ -368,9 +374,9 @@ pub(crate) fn call_ivec_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match (&ret.value, dim) {
-        (Some(GlslQ32::IVec2(a, b)), 2) => Ok(vec![*a, *b]),
-        (Some(GlslQ32::IVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
-        (Some(GlslQ32::IVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
+        (Some(Q32ShaderValue::IVec2(a, b)), 2) => Ok(vec![*a, *b]),
+        (Some(Q32ShaderValue::IVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
+        (Some(Q32ShaderValue::IVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
         _ => Err(GlslError::new(
             ErrorCode::E0400,
             format!("unexpected ivec return: {:?}", ret.value),
@@ -400,9 +406,9 @@ pub(crate) fn call_uvec_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match (&ret.value, dim) {
-        (Some(GlslQ32::UVec2(a, b)), 2) => Ok(vec![*a, *b]),
-        (Some(GlslQ32::UVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
-        (Some(GlslQ32::UVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
+        (Some(Q32ShaderValue::UVec2(a, b)), 2) => Ok(vec![*a, *b]),
+        (Some(Q32ShaderValue::UVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
+        (Some(Q32ShaderValue::UVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
         _ => Err(GlslError::new(
             ErrorCode::E0400,
             format!("unexpected uvec return: {:?}", ret.value),
@@ -432,9 +438,9 @@ pub(crate) fn call_bvec_from_q32<E: Q32ShaderExecutable>(
     }
     let ret = exec.call_q32_ret(name, args)?;
     match (&ret.value, dim) {
-        (Some(GlslQ32::BVec2(a, b)), 2) => Ok(vec![*a, *b]),
-        (Some(GlslQ32::BVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
-        (Some(GlslQ32::BVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
+        (Some(Q32ShaderValue::BVec2(a, b)), 2) => Ok(vec![*a, *b]),
+        (Some(Q32ShaderValue::BVec3(a, b, c)), 3) => Ok(vec![*a, *b, *c]),
+        (Some(Q32ShaderValue::BVec4(a, b, c, d)), 4) => Ok(vec![*a, *b, *c, *d]),
         _ => Err(GlslError::new(
             ErrorCode::E0400,
             format!("unexpected bvec return: {:?}", ret.value),
@@ -466,9 +472,9 @@ pub(crate) fn call_mat_from_q32<E: Q32ShaderExecutable>(
     let n = cols * rows;
     let ret = exec.call_q32_ret(name, args)?;
     let flat: Vec<f32> = match &ret.value {
-        Some(GlslQ32::Mat2(a)) if n == 4 => a.iter().map(|x| *x as f32).collect(),
-        Some(GlslQ32::Mat3(a)) if n == 9 => a.iter().map(|x| *x as f32).collect(),
-        Some(GlslQ32::Mat4(a)) if n == 16 => a.iter().map(|x| *x as f32).collect(),
+        Some(Q32ShaderValue::Mat2(a)) if n == 4 => a.iter().map(|x| *x as f32).collect(),
+        Some(Q32ShaderValue::Mat3(a)) if n == 9 => a.iter().map(|x| *x as f32).collect(),
+        Some(Q32ShaderValue::Mat4(a)) if n == 16 => a.iter().map(|x| *x as f32).collect(),
         other => {
             return Err(GlslError::new(
                 ErrorCode::E0400,
@@ -507,7 +513,7 @@ pub(crate) fn call_array_from_q32<E: Q32ShaderExecutable>(
     })?;
     let ret = exec.call_q32_ret(name, args)?;
     match ret.value {
-        Some(GlslQ32::Array(items)) if items.len() == len => items
+        Some(Q32ShaderValue::Array(items)) if items.len() == len => items
             .iter()
             .map(|q| glsl_q32_to_glsl_value(&lpir_elem, q))
             .collect(),

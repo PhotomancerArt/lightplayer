@@ -13,6 +13,7 @@ pub mod layout;
 pub mod lps_value;
 pub mod path;
 pub mod path_resolve;
+pub mod q32;
 mod sig;
 mod types;
 pub mod value_path;

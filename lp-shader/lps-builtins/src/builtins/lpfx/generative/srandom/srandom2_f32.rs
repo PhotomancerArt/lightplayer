@@ -1,7 +1,7 @@
 //! 2D Signed Random function (float implementation - stub).
 
 use crate::builtins::lpfx::generative::srandom::srandom2_q32::__lp_lpfx_srandom2_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 #[lpfx_impl_macro::lpfx_impl(f32, "float lpfx_srandom(vec2 p, uint seed)")]
 #[unsafe(no_mangle)]

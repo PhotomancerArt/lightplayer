@@ -9,8 +9,8 @@
 //! copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::math::saturate_q32::lpfx_saturate_vec3_q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
 
 /// Fixed-point constants for hue2rgb calculation
 const TWO: Q32 = Q32(0x00020000); // 2.0 in Q16.16

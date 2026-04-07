@@ -31,10 +31,7 @@ mod lpvm_instance;
 mod lpvm_module;
 mod module_lower;
 mod process_sync;
-mod q32;
-pub mod q32_marshal;
-mod q32_options;
-mod values;
+mod q32_emit;
 
 #[cfg(feature = "riscv32-object")]
 mod object_link;
@@ -64,10 +61,12 @@ pub use lpvm_module::CraneliftModule;
 pub type GlslParamQualifier = ParamQualifier;
 /// Back-compat alias for a single formal parameter; prefer [`FnParam`].
 pub type LpsSig = FnParam;
+pub use lps_q32::q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
+pub use lps_shared::q32::q32_value::{
+    CallError, CallResult, GlslReturn, Q32ShaderValue, decode_q32_return, flatten_q32_arg,
+};
 #[cfg(feature = "riscv32-object")]
 pub use object_link::link_object_with_builtins;
-pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
-pub use values::{CallError, CallResult, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg};
 
 /// Options-only tests: run under `--no-default-features` (no host JIT execution).
 #[cfg(test)]
@@ -109,8 +108,8 @@ mod tests {
     #[cfg(feature = "glsl")]
     use super::jit;
     use super::{
-        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, GlslQ32,
-        MemoryStrategy, jit_from_ir,
+        CompileError, CompileOptions, CompilerError, CraneliftEngine, FloatMode, MemoryStrategy,
+        Q32ShaderValue, jit_from_ir,
     };
 
     fn jit_test_vmctx() -> *const u8 {
@@ -862,10 +861,13 @@ func @apply_sin(v1:f32) -> f32 {
         .expect("jit");
         assert!(m.func_names().iter().any(|n| n == "add"));
         let ret = m
-            .call("add", &[GlslQ32::Float(1.0), GlslQ32::Float(2.0)])
+            .call(
+                "add",
+                &[Q32ShaderValue::Float(1.0), Q32ShaderValue::Float(2.0)],
+            )
             .expect("call");
         match ret.value {
-            Some(GlslQ32::Float(x)) => assert!((x - 3.0).abs() < 1e-5),
+            Some(Q32ShaderValue::Float(x)) => assert!((x - 3.0).abs() < 1e-5),
             other => panic!("expected float ~3.0, got {other:?}"),
         }
     }
@@ -883,19 +885,22 @@ func @apply_sin(v1:f32) -> f32 {
         )
         .expect("jit");
         let dc = m.direct_call("add").expect("direct_call");
-        let a = crate::q32::q32_encode_f64(1.25);
-        let b = crate::q32::q32_encode_f64(-0.5);
+        let a = lps_q32::q32_encode::q32_encode_f64(1.25);
+        let b = lps_q32::q32_encode::q32_encode_f64(-0.5);
         let via_direct = unsafe {
             dc.call_i32(jit_test_vmctx(), &[a, b])
                 .expect("direct invoke")
         };
         let via_call = m
-            .call("add", &[GlslQ32::Float(1.25), GlslQ32::Float(-0.5)])
+            .call(
+                "add",
+                &[Q32ShaderValue::Float(1.25), Q32ShaderValue::Float(-0.5)],
+            )
             .expect("typed call");
         assert_eq!(via_direct.len(), 1);
         match via_call.value {
-            Some(GlslQ32::Float(x)) => {
-                assert_eq!(via_direct[0], crate::q32::q32_encode_f64(x));
+            Some(Q32ShaderValue::Float(x)) => {
+                assert_eq!(via_direct[0], lps_q32::q32_encode::q32_encode_f64(x));
             }
             other => panic!("expected float return, got {other:?}"),
         }
@@ -1024,7 +1029,7 @@ func @small(v1:f32) -> f32 {
     }
 
     fn q32(f: f32) -> i32 {
-        crate::q32::q32_encode(f)
+        lps_q32::q32_encode::q32_encode(f)
     }
 
     fn assert_q32_approx(actual: i32, expected_f64: f64, tolerance: f64) {

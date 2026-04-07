@@ -5,7 +5,7 @@
 
 use crate::builtins::lpfx::color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_q32;
 use crate::builtins::lpfx::color::space::hsv2rgb_q32::__lp_lpfx_hsv2rgb_vec4_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// Convert HSV color to RGB color (extern C wrapper for compiler).
 ///

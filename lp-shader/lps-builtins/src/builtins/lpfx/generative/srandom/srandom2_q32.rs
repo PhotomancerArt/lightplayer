@@ -8,8 +8,8 @@
 //! basic arithmetic. The underlying random function is MIT-licensed (David Hoskins).
 
 use crate::builtins::lpfx::generative::random::random2_q32::lpfx_random2;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec2_q32::Vec2Q32;
 
 /// 2D Signed Random function
 ///

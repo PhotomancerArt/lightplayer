@@ -1,9 +1,10 @@
-use crate::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
 /// Fixed-point arithmetic (16.16 format)
 ///
 /// Core type and conversion utilities for fixed-point fixed.
 use core::cmp::Ord;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+
+use crate::lpir;
 
 /// Fixed-point constants
 const SHIFT: i32 = 16;
@@ -52,7 +53,27 @@ impl Q32 {
         Q32(f)
     }
 
-    /// Create a Fixed from an f32
+    /// Create a `Q32` from an `f32`.
+    ///
+    /// This conversion **truncates toward zero** (via `as i32`) and does **not** saturate—
+    /// values outside the Q16.16 representable range wrap via Rust's `as` semantics.
+    ///
+    /// For **compiler constant emission** (rounding + saturation), use
+    /// [`q32_encode`](crate::q32_encode::q32_encode) instead. That function is designed
+    /// for codegen paths where `f32` shader constants are encoded as `i32` for embedding
+    /// in generated code.
+    ///
+    /// # Example
+    /// ```
+    /// use lps_q32::Q32;
+    ///
+    /// let q = Q32::from_f32(1.5);
+    /// assert_eq!(q.to_f32(), 1.5);
+    ///
+    /// // Truncation (not rounding): 0.6 * 65536 = 39321.6 → 39321
+    /// let q2 = Q32::from_f32(0.6);
+    /// assert_eq!(q2.to_fixed(), 39321);  // not 39322
+    /// ```
     #[inline(always)]
     pub fn from_f32(f: f32) -> Self {
         Q32((f * ONE as f32) as i32)
@@ -147,11 +168,11 @@ impl Q32 {
     /// Returns a + t * (b - a)
     #[inline]
     pub fn mix(self, other: Q32, t: Q32) -> Q32 {
-        crate::glsl::q32::fns::mix_q32(self, other, t)
+        self + t * (other - self)
     }
 
     pub fn sqrt(self) -> Q32 {
-        Q32(__lp_lpir_fsqrt_q32(self.0))
+        Q32(lpir::fsqrt_q32(self.0))
     }
 }
 

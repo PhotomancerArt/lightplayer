@@ -3,7 +3,7 @@
 //! Returns values in [-1, 1] range using -1.0 + 2.0 * random(x, seed)
 
 use crate::builtins::lpfx::generative::random::random1_q32::lpfx_random1;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// 1D Signed Random function
 ///

@@ -3,8 +3,8 @@
 //! Uses random values at grid cell corners and interpolates between them using cubic smoothing.
 
 use crate::builtins::lpfx::generative::random::random1_q32::lpfx_random1;
-use crate::glsl::q32::fns::{cubic_q32, mix_q32};
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::fns::{cubic_q32, mix_q32};
+use lps_q32::types::q32::Q32;
 
 /// 1D Gradient Noise function
 ///

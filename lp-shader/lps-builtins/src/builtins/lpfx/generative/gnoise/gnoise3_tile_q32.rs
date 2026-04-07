@@ -3,9 +3,9 @@
 //! Uses srandom3_tile for seamless tiling and dot products for gradient noise.
 
 use crate::builtins::lpfx::generative::srandom::srandom3_tile_q32::lpfx_srandom3_tile;
-use crate::glsl::q32::fns::{mix_q32, quintic_vec3};
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
+use lps_q32::fns::{mix_q32, quintic_vec3};
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
 
 /// 3D Tilable Gradient Noise function
 ///

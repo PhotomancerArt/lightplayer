@@ -30,8 +30,8 @@ LPIR                  flat, scalarized, mode-agnostic IR
 ```
 
 LPIR is LightPlayer's own intermediate representation. It keeps the compiler decoupled from
-Cranelift — see [`lpir/README.md`](lpir/README.md) for rationale and examples, and
-[`docs/design/lpir/`](../docs/design/lpir/) for the full spec.
+Cranelift — see `[lpir/README.md](lpir/README.md)` for rationale and examples, and
+`[docs/design/lpir/](../docs/design/lpir/)` for the full spec.
 
 ## Q32 fixed-point mode
 
@@ -41,20 +41,25 @@ native and WASM backends. Builtins (`sin`, `cos`, `sqrt`, etc.) are provided as 
 functions in `lps-builtins` and linked at JIT time.
 
 **Normative semantics** for Q32 (arithmetic, div-by-zero, relational builtins, filetest policy) are
-in [`docs/design/q32.md`](../docs/design/q32.md).
+in `[docs/design/q32.md](../docs/design/q32.md)`.
 
 Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
 ## Crate index
 
-**Full table:** [`CRATES.md`](CRATES.md).
+**Full table:** `[CRATES.md](CRATES.md)`.
 
 ### Frontend and IR
 
 - `lps-frontend/` — GLSL parsing (Naga) and lowering to LPIR
 - `lpir/` — LightPlayer IR (types, ops, builder, parser, printer, interpreter, validator)
 - `lps-shared/`, `lps-diagnostics/`, `lpvm/` — shared types and errors for
-  tests / exec helpers
+tests / exec helpers
+
+### Q32 Fixed-Point Types
+
+- `lps-q32/` — `Q32` fixed-point scalar, vector/matrix types (`Vec2Q32`–`Vec4Q32`,
+`Mat2Q32`–`Mat4Q32`), component-wise helpers, encode/decode for compiler constants
 
 ### Codegen
 
@@ -118,3 +123,4 @@ just build-ci
 # Fix, check, and test the whole GLSL stack
 just fci-glsl
 ```
+

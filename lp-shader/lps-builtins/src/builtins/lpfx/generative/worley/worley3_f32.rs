@@ -4,7 +4,7 @@
 //! For now, it calls the q32 version with conversion.
 
 use crate::builtins::lpfx::generative::worley::worley3_q32::__lp_lpfx_worley3_q32;
-use crate::glsl::q32::types::q32::Q32;
+use lps_q32::types::q32::Q32;
 
 /// 3D Worley noise function (float version).
 ///

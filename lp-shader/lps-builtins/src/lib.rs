@@ -8,7 +8,6 @@
 // mem module provides memcpy/memset/memcmp for no_std environments
 pub mod builtin_refs;
 pub mod builtins;
-pub mod glsl;
 pub mod host;
 pub mod mem;
 pub mod util;

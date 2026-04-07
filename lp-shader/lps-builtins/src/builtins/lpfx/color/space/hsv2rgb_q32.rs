@@ -8,9 +8,9 @@
 //! fact, not copyrightable expression. This Rust/Q32 port implements the standard algorithm.
 
 use crate::builtins::lpfx::color::space::hue2rgb_q32::lpfx_hue2rgb_q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::vec4_q32::Vec4Q32;
 
 /// Convert HSV color to RGB color.
 ///

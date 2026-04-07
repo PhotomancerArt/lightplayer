@@ -7,9 +7,9 @@
 //! procedure with no licensing concerns. While we may have referenced existing
 //! implementations, the operation itself is trivial and not copyrightable.
 
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec3_q32::Vec3Q32;
-use crate::glsl::q32::types::vec4_q32::Vec4Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec3_q32::Vec3Q32;
+use lps_q32::types::vec4_q32::Vec4Q32;
 
 /// Saturate a single Q32 value (clamp to [0, 1]).
 ///

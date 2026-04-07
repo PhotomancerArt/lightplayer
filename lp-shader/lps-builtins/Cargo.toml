@@ -17,6 +17,7 @@ test = ["std"]
 [dependencies]
 lpvm = { path = "../lpvm", default-features = false }
 lpfx-impl-macro = { path = "../lpfx-impl-macro" }
+lps-q32 = { path = "../lps-q32" }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]

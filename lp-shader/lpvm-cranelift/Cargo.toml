@@ -40,6 +40,7 @@ lpvm = { path = "../lpvm", default-features = false }
 lps-shared = { path = "../lps-shared" }
 lps-builtin-ids = { path = "../lps-builtin-ids" }
 lps-builtins = { path = "../lps-builtins", default-features = false }
+lps-q32 = { path = "../lps-q32", default-features = false }
 lps-frontend = { path = "../lps-frontend", optional = true }
 lpir = { path = "../lpir" }
 cranelift-codegen = { workspace = true, default-features = false, features = ["riscv32"] }

@@ -45,8 +45,8 @@
 use crate::builtins::glsl::cos_q32::__lps_cos_q32;
 use crate::builtins::glsl::mod_q32::__lps_mod_q32;
 use crate::builtins::glsl::sin_q32::__lps_sin_q32;
-use crate::glsl::q32::types::q32::Q32;
-use crate::glsl::q32::types::vec2_q32::Vec2Q32;
+use lps_q32::types::q32::Q32;
+use lps_q32::types::vec2_q32::Vec2Q32;
 
 /// Fixed-point constants
 const HALF: Q32 = Q32(0x00008000); // 0.5 in Q16.16
