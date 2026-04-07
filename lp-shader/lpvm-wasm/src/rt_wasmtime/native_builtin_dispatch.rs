@@ -8,15 +8,13 @@ use wasmtime::{Caller, Memory, Val};
 
 use lps_builtin_ids::BuiltinId;
 
-fn env_memory(caller: &mut Caller<'_, ()>) -> Result<Memory, wasmtime::Error> {
-    caller
-        .get_export("env")
-        .and_then(|e| e.into_memory())
-        .ok_or_else(|| wasmtime::Error::msg("missing env.memory"))
-}
-
+/// Linear memory handle supplied at link time (`env.memory` from [`super::link`]).
+///
+/// `Caller::get_export` only sees WASM **exports**; our shaders **import** `env.memory`, so there is
+/// no `"env"` export to discover. Always use the memory handle wired into the linker.
 pub(super) fn dispatch_native_builtin(
     mut caller: Caller<'_, ()>,
+    linked_env_memory: Memory,
     id: BuiltinId,
     params: &[Val],
     results: &mut [Val],
@@ -327,7 +325,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHsv2rgbF32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -346,7 +344,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHsv2rgbQ32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -365,7 +363,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHsv2rgbVec4F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
             let p1 = params[1].unwrap_f32();
@@ -386,7 +384,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHsv2rgbVec4Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
             let p1 = params[1].unwrap_i32();
@@ -407,7 +405,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHue2rgbF32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -422,7 +420,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxHue2rgbQ32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -437,7 +435,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxPsrdnoise2F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_5 = params[5].unwrap_i32() as u32 as usize;
             let mut buf_5 = [0f32; 2];
             let p0 = params[0].unwrap_f32();
@@ -455,7 +453,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxPsrdnoise2Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_5 = params[5].unwrap_i32() as u32 as usize;
             let mut buf_5 = [0i32; 2];
             let p0 = params[0].unwrap_i32();
@@ -473,7 +471,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxPsrdnoise3F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_7 = params[7].unwrap_i32() as u32 as usize;
             let mut buf_7 = [0f32; 3];
             let p0 = params[0].unwrap_f32();
@@ -493,7 +491,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxPsrdnoise3Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_7 = params[7].unwrap_i32() as u32 as usize;
             let mut buf_7 = [0i32; 3];
             let p0 = params[0].unwrap_i32();
@@ -561,7 +559,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxRgb2hsvF32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -580,7 +578,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxRgb2hsvQ32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -599,7 +597,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxRgb2hsvVec4F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
             let p1 = params[1].unwrap_f32();
@@ -620,7 +618,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxRgb2hsvVec4Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
             let p1 = params[1].unwrap_i32();
@@ -653,7 +651,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSaturateVec3F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -672,7 +670,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSaturateVec3Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -691,7 +689,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSaturateVec4F32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 4];
             let p1 = params[1].unwrap_f32();
@@ -712,7 +710,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSaturateVec4Q32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 4];
             let p1 = params[1].unwrap_i32();
@@ -829,7 +827,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSrandom3TileF32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -845,7 +843,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSrandom3TileQ32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -861,7 +859,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSrandom3VecF32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0f32; 3];
             let p1 = params[1].unwrap_f32();
@@ -876,7 +874,7 @@ pub(super) fn dispatch_native_builtin(
             Ok(())
         }
         BuiltinId::LpLpfxSrandom3VecQ32 => {
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
             let mut buf_0 = [0i32; 3];
             let p1 = params[1].unwrap_i32();
@@ -1000,7 +998,7 @@ pub(super) fn dispatch_native_builtin(
         }
         BuiltinId::LpVmGetFuelQ32 => {
             let vmctx_word = params[0].unwrap_i32();
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let base = vmctx_word as u32 as usize;
             let mut buf = [0u8; 8];
             mem.read(&caller, base, &mut buf)

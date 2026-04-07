@@ -47,7 +47,18 @@ impl WasmLpvmInstance {
         })
     }
 
-    fn prepare_call(&self, store: &mut wasmtime::Store<()>) -> Result<(), WasmError> {
+    fn prepare_call(
+        &self,
+        store: &mut wasmtime::Store<()>,
+        linear_memory: wasmtime::Memory,
+    ) -> Result<(), WasmError> {
+        // `__lp_get_fuel` reads `VmContext::fuel` as the first u64 in guest linear memory at the
+        // vmctx pointer we pass as WASM param 0 (see `marshal` — currently 0). Keep that word in
+        // sync with wasmtime execution fuel for filetests and host runs.
+        let fuel_le = DEFAULT_VMCTX_FUEL.to_le_bytes();
+        linear_memory
+            .write(&mut *store, 0, &fuel_le)
+            .map_err(|e| WasmError::runtime(format!("failed to write vmctx fuel header: {e}")))?;
         if let Some(base) = self.shadow_stack_base {
             let g = self
                 .instance
@@ -103,13 +114,14 @@ impl LpvmInstance for WasmLpvmInstance {
         let mut results = zero_results_for_type(&return_ty, self.float_mode);
 
         let mut guard = self.runtime.lock();
+        let mem = guard.memory;
         let store = &mut guard.store;
         let func = self
             .instance
             .get_func(&mut *store, name)
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
 
-        self.prepare_call(store)?;
+        self.prepare_call(store, mem)?;
         func.call(&mut *store, &wasm_args, &mut results)
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
 
@@ -153,13 +165,14 @@ impl LpvmInstance for WasmLpvmInstance {
         let wasm_args = build_wasm_args_q32_flat(&export.param_types, export.params.len(), args)?;
 
         let mut guard = self.runtime.lock();
+        let mem = guard.memory;
         let store = &mut guard.store;
         let func = self
             .instance
             .get_func(&mut *store, name)
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
 
-        self.prepare_call(store)?;
+        self.prepare_call(store, mem)?;
 
         if matches!(return_ty, LpsType::Void) {
             let mut results: Vec<Val> = Vec::new();

@@ -1,6 +1,6 @@
 //! Link shader WASM with native `builtins` imports and shared `env.memory`.
 
-use wasmtime::{Engine, ExternType, Func, Instance, Linker, Module, Store};
+use wasmtime::{Engine, ExternType, Func, Instance, Linker, Memory, Module, Store};
 
 use lps_builtin_ids::BuiltinId;
 
@@ -30,6 +30,7 @@ fn link_builtins(
     linker: &mut Linker<()>,
     store: &mut Store<()>,
     shader_mod: &Module,
+    env_memory_handle: Memory,
 ) -> Result<(), WasmError> {
     for imp in shader_mod.imports() {
         if imp.module() != "builtins" {
@@ -48,8 +49,9 @@ fn link_builtins(
 
         let func_ty = func_ty.to_owned();
         let name_for_closure = name.clone();
+        let env_mem = env_memory_handle;
         let func = Func::new(&mut *store, func_ty, move |caller, params, results| {
-            dispatch_native_builtin(caller, builtin_id, params, results)
+            dispatch_native_builtin(caller, env_mem, builtin_id, params, results)
         });
 
         linker
@@ -85,7 +87,7 @@ pub(crate) fn instantiate_wasm_module(
         .define(&mut *store, "env", "memory", memory)
         .map_err(|e| WasmError::runtime(format!("linker env.memory: {e}")))?;
 
-    link_builtins(&mut linker, &mut *store, &shader_mod)?;
+    link_builtins(&mut linker, &mut *store, &shader_mod, memory)?;
 
     linker
         .instantiate(&mut *store, &shader_mod)

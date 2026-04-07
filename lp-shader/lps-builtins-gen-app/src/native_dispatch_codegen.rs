@@ -103,7 +103,7 @@ fn emit_pointer_arm(b: &BuiltinInfo, plan: &[(usize, usize, &'static str)]) -> S
         b.module_path, b.function_name
     );
     let mut s = String::new();
-    s.push_str("            let mem = env_memory(&mut caller)?;\n");
+    s.push_str("            let mem = linked_env_memory;\n");
     for (idx, count, elem_ty) in plan {
         s.push_str(&format!(
             "            let off_{idx} = params[{idx}].unwrap_i32() as u32 as usize;\n"
@@ -178,7 +178,7 @@ fn emit_pointer_arm(b: &BuiltinInfo, plan: &[(usize, usize, &'static str)]) -> S
 
 fn emit_get_fuel_arm() -> &'static str {
     r#"            let vmctx_word = params[0].unwrap_i32();
-            let mem = env_memory(&mut caller)?;
+            let mem = linked_env_memory;
             let base = vmctx_word as u32 as usize;
             let mut buf = [0u8; 8];
             mem.read(&caller, base, &mut buf)
@@ -212,15 +212,13 @@ use wasmtime::{Caller, Memory, Val};
 
 use lps_builtin_ids::BuiltinId;
 
-fn env_memory(caller: &mut Caller<'_, ()>) -> Result<Memory, wasmtime::Error> {
-    caller
-        .get_export("env")
-        .and_then(|e| e.into_memory())
-        .ok_or_else(|| wasmtime::Error::msg("missing env.memory"))
-}
-
+/// Linear memory handle supplied at link time (`env.memory` from [`super::link`]).
+///
+/// `Caller::get_export` only sees WASM **exports**; our shaders **import** `env.memory`, so there is
+/// no `"env"` export to discover. Always use the memory handle wired into the linker.
 pub(super) fn dispatch_native_builtin(
     mut caller: Caller<'_, ()>,
+    linked_env_memory: Memory,
     id: BuiltinId,
     params: &[Val],
     results: &mut [Val],
