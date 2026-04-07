@@ -15,11 +15,11 @@ native JIT backend.
 ### In scope
 
 - Update `CraneliftEngine` to implement new `alloc()`/`free()`/`realloc()`
-  methods
+methods
 - Update `CraneliftModule::instantiate()` to accept engine reference
 - Update `CraneliftInstance` if needed
 - Implement `ShaderPtr` for Cranelift JIT: `native_ptr()` == `guest_value()`
-  (same address space, host memory)
+(same address space, host memory)
 - Cranelift's `alloc()` is a thin wrapper around host allocation
 - Unit tests validating the new trait interface works with JIT compilation
 
@@ -32,12 +32,11 @@ native JIT backend.
 ## Key Decisions
 
 1. **Host allocation for shared memory**: For Cranelift JIT, `alloc()` is
-   essentially `alloc::alloc::alloc()` or `Vec::with_capacity()`. The native
+  essentially `alloc::alloc::alloc()` or `Vec::with_capacity()`. The native
    pointer IS the guest pointer. `ShaderPtr` for JIT is trivially a single
    pointer.
-
 2. **Coexistence with old API**: The `JitModule` / `jit()` / `DirectCall`
-   API continues to work alongside the new trait implementations. No
+  API continues to work alongside the new trait implementations. No
    breaking changes to existing consumers.
 
 ## Deliverables

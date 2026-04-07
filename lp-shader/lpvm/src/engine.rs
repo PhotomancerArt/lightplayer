@@ -11,7 +11,7 @@ use crate::module::LpvmModule;
 /// Implementations typically hold configuration (e.g. wasmtime `Engine`) and a
 /// [`LpvmMemory`] implementation. All modules produced by [`Self::compile`]
 /// share the same memory arena (textures, globals). Host code allocates with
-/// [`Self::memory`]; guests see [`crate::ShaderPtr::guest_value`] via uniforms.
+/// [`Self::memory`]; guests see [`crate::LpvmBuffer::guest_base`] (or [`crate::LpvmPtr`]) via uniforms.
 ///
 /// # Per-instance vs shared
 ///

@@ -16,6 +16,8 @@ mod builtins;
 mod call;
 mod compile;
 mod compile_options;
+#[cfg(feature = "std")]
+mod cranelift_host_memory;
 mod direct_call;
 mod emit;
 pub mod error;
@@ -118,6 +120,33 @@ mod tests {
         // Use properly aligned storage for VmContext (needs 8-byte alignment for u64 fuel field).
         static VMCTX: core::mem::MaybeUninit<lpvm::VmContext> = core::mem::MaybeUninit::zeroed();
         VMCTX.as_ptr() as *const u8
+    }
+
+    #[test]
+    fn cranelift_engine_host_memory_alloc_free_realloc() {
+        use lpvm::AllocError;
+
+        let engine = CraneliftEngine::new(CompileOptions {
+            float_mode: FloatMode::Q32,
+            ..Default::default()
+        });
+        let a = engine.memory().alloc(32, 8).expect("alloc");
+        assert_eq!(a.size(), 32);
+        assert_eq!(a.align(), 8);
+        assert_eq!(a.guest_base(), a.native_ptr() as usize as u64);
+        let b = engine.memory().alloc(16, 8).expect("alloc2");
+        assert_ne!(a.native_ptr(), b.native_ptr());
+
+        let c = engine.memory().realloc(a, 64).expect("realloc");
+        assert_eq!(c.size(), 64);
+        assert_eq!(c.guest_base(), c.native_ptr() as usize as u64);
+
+        engine.memory().free(c);
+        engine.memory().free(b);
+        assert_eq!(
+            engine.memory().realloc(c, 8).unwrap_err(),
+            AllocError::InvalidPointer
+        );
     }
 
     #[test]
