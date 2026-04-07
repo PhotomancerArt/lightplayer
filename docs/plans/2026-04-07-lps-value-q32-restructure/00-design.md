@@ -18,7 +18,7 @@ lp-shader/
 ├── lpvm/src/
 │   ├── lib.rs                          # UPDATE: Export abi module
 │   ├── lpvm_data_q32.rs                # UPDATE: Add from_q32/to_q32 methods
-│   └── abi.rs                          # NEW: ABI marshaling (flatten/unflatten)
+│   └── lpvm_abi.rs                     # NEW: ABI marshaling (flatten/unflatten)
 │
 ├── lpvm-cranelift/src/
 │   ├── lib.rs                          # UPDATE: Export LpsValueQ32 instead of F64
@@ -205,3 +205,7 @@ The `LpvmInstance::call()` trait implementation handles LpsValueF32 → LpsValue
 7. **User/API**: Receives `LpsValueF32`
 
 This keeps the Q32 semantics explicit in the middle layer while presenting f32 to users.
+
+## Follow-up: `LpvmInstance::call_q32` (M5 / filetests)
+
+Filetests and other hosts may need to call Q32 shaders **without** representing float parameters as `f32` first. The **M5** plan adds **`LpvmInstance::call_q32`** with **flat `i32` ABI words** (same layout as `lpvm_abi` flattening), implemented by reusing this stack — not a second calling convention. See [`../../plans-done/2026-04-07-lpvm2-m5-filetests/00-notes.md`](../plans-done/2026-04-07-lpvm2-m5-filetests/00-notes.md).

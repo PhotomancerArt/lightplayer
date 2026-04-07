@@ -19,7 +19,7 @@ pub use mat2_q32::Mat2Q32;
 pub use mat3_q32::Mat3Q32;
 pub use mat4_q32::Mat4Q32;
 pub use q32::Q32;
-pub use q32_encode::{q32_encode, q32_encode_f64, q32_to_f64, Q32_FRAC, Q32_SHIFT};
+pub use q32_encode::{Q32_FRAC, Q32_SHIFT, q32_encode, q32_encode_f64, q32_to_f64};
 pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
 pub use vec2_q32::Vec2Q32;
 pub use vec3_q32::Vec3Q32;

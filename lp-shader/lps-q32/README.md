@@ -18,7 +18,7 @@ must conform.
 use lps_q32::{Q32, Vec3Q32, Vec2Q32};
 
 // Create from float (truncates toward zero)
-let a = Q32::from_f32(1.5);
+let a = Q32::from_f32_wrapping(1.5);
 let b = Q32::from_i32(2);           // 2.0 exactly
 
 // Saturating arithmetic
@@ -117,30 +117,32 @@ let v = Vec3Q32::from_f32(1.0, 2.0, 3.0);
 let transformed = m * v;        // (1, 2, 3)
 ```
 
-### Encoding for compiler constants (vs. runtime conversion)
+### Encoding: raw bits for compiler vs. typed values for runtime
 
-The crate provides **two different** float→Q32 conversion paths with different semantics:
+The crate provides **two different** float→Q32 paths with different semantics and return types:
 
-| Function | Use Case | Rounding | Out-of-range | Typical Caller |
-|----------|----------|----------|--------------|----------------|
-| `q32_encode(f32)` → `i32` | **Compiler constant emission** | `libm::round` (nearest) | **Saturate** to max/min | `lpvm-cranelift` generating `iconst` |
-| `Q32::from_f32(f32)` → `Q32` | **Runtime conversion** | Truncate toward zero | **Wrap** (Rust `as` semantics) | Builtins, engine mapping, tests |
+| Function | Returns | Use Case | Rounding | Out-of-range | Typical Caller |
+|----------|---------|----------|----------|--------------|----------------|
+| `q32_encode(f32)` → `i32` | **Raw `i32` bits** | Compiler constant emission | `libm::round` (nearest) | **Saturate** to max/min | `lpvm-cranelift` generating `iconst.i32` |
+| `Q32::from_f32_wrapping(f32)` → `Q32` | **Typed `Q32` value** | Runtime conversion | Truncate toward zero | **Wrap** (Rust `as` semantics) | Builtins, engine mapping, tests |
 
 **Why two paths?**
-- **Compiler constants** (`q32_encode`): When emitting a shader constant like `const float x = 50000.0;`, saturation ensures it becomes `0x7FFF_FFFF` (max) rather than wrapping negative. Rounding gives slightly better accuracy than truncation for constants.
-- **Runtime conversions** (`from_f32`): In running code, we want fast conversion (no rounding overhead, no clamp checks) that matches what a cast in generated code would do.
+
+- **Compiler constants** (`q32_encode`): Codegen emits raw `i32` constants into the instruction stream (e.g., `const float x = 50000.0;` → `iconst.i32 0x7FFF_FFFF`). Saturation prevents wrapping to negative, and rounding gives slightly better accuracy than truncation for constants. The function returns `i32` directly to avoid the conceptual indirection of "create Q32, then extract bits."
+
+- **Runtime conversions** (`from_f32_wrapping`): In running code, we want fast conversion (no rounding overhead, no clamp checks) that matches the semantics of a cast in generated code. Returns a proper `Q32` value for arithmetic.
 
 ```rust
-use lps_q32::{q32_encode, q32_encode_f64, Q32_SHIFT};
+use lps_q32::{q32_encode, q32_encode_f64, Q32, Q32_SHIFT};
 
-// Compiler emission: uses round + saturate
-let encoded = q32_encode(1.25);        // 0x0001_4000
-let encoded = q32_encode_f64(-0.5);    // 0xFFFF_8000
-let max = q32_encode(50000.0);         // 0x7FFF_FFFF (saturated)
+// Compiler emission: returns raw i32 bits (round + saturate)
+let encoded: i32 = q32_encode(1.25);        // 0x0001_4000
+let encoded = q32_encode_f64(-0.5);         // 0xFFFF_8000
+let max = q32_encode(50000.0);              // 0x7FFF_FFFF (saturated)
 
-// Runtime conversion: uses truncate + wrap
-let q = Q32::from_f32(1.25);           // truncates, no saturate
-let scale = 1i64 << Q32_SHIFT;         // 65536
+// Runtime conversion: returns Q32 value (truncate + wrap)
+let q = Q32::from_f32_wrapping(1.25);        // truncates, no saturate
+let scale = 1i64 << Q32_SHIFT;              // 65536
 ```
 
 ## Internal `lpir` Module

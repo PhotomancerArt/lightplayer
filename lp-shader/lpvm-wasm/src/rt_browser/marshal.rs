@@ -5,7 +5,7 @@ use std::format;
 use js_sys::Array;
 use lpir::FloatMode;
 use lps_shared::LpsType;
-use lpvm::LpsValueF32;
+use lpvm::{LpsValueF32, glsl_component_count};
 use wasm_bindgen::JsValue;
 
 use wasm_bindgen::JsCast;
@@ -194,6 +194,138 @@ pub(crate) fn build_js_args(
         )));
     }
     Ok(arr)
+}
+
+pub(crate) fn build_js_args_q32_flat(
+    param_types: &[LpsType],
+    export_param_slots: usize,
+    words: &[i32],
+) -> Result<Array, WasmError> {
+    let arr = Array::new();
+    arr.push(&JsValue::from_f64(0.0));
+    let mut woff = 0;
+    for ty in param_types {
+        let n = glsl_component_count(ty);
+        if woff + n > words.len() {
+            return Err(WasmError::runtime(format!(
+                "not enough Q32 argument words for browser call at offset {woff}"
+            )));
+        }
+        for i in 0..n {
+            arr.push(&JsValue::from_f64(words[woff + i] as f64));
+        }
+        woff += n;
+    }
+    if woff != words.len() {
+        return Err(WasmError::runtime(format!(
+            "extra Q32 argument words: used {woff}, got {}",
+            words.len()
+        )));
+    }
+    if arr.length() as usize != export_param_slots {
+        return Err(WasmError::runtime(format!(
+            "internal: flattened arg count {} != export param slots {}",
+            arr.length(),
+            export_param_slots
+        )));
+    }
+    Ok(arr)
+}
+
+fn collect_js_q32_words(
+    ty: &LpsType,
+    slots: &[JsValue],
+    fm: FloatMode,
+    off: &mut usize,
+    out: &mut Vec<i32>,
+) -> Result<(), WasmError> {
+    use LpsType::*;
+    if fm != FloatMode::Q32 {
+        return Err(WasmError::runtime(
+            "collect_js_q32_words requires FloatMode::Q32",
+        ));
+    }
+    match ty {
+        Void => Ok(()),
+        Float | Int | UInt | Bool => {
+            out.push(js_num_as_i32(&slots[*off])?);
+            *off += 1;
+            Ok(())
+        }
+        Vec2 | IVec2 | UVec2 | BVec2 => {
+            for _ in 0..2 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Vec3 | IVec3 | UVec3 | BVec3 => {
+            for _ in 0..3 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Vec4 | IVec4 | UVec4 | BVec4 => {
+            for _ in 0..4 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Mat2 => {
+            for _ in 0..4 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Mat3 => {
+            for _ in 0..9 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Mat4 => {
+            for _ in 0..16 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
+        Array { element, len } => {
+            for _ in 0..*len {
+                collect_js_q32_words(element, slots, fm, off, out)?;
+            }
+            Ok(())
+        }
+        Struct { members, .. } => {
+            for m in members {
+                collect_js_q32_words(&m.ty, slots, fm, off, out)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn js_result_to_q32_words(
+    ty: &LpsType,
+    result: &JsValue,
+    fm: FloatMode,
+) -> Result<Vec<i32>, WasmError> {
+    let n = glsl_type_to_wasm_components(ty, fm).len();
+    let slots = js_result_slots(result, n)?;
+    let mut off = 0;
+    let mut out = Vec::new();
+    collect_js_q32_words(ty, &slots, fm, &mut off, &mut out)?;
+    if off != slots.len() {
+        return Err(WasmError::runtime(format!(
+            "js Q32 return decode used {off} of {} slots",
+            slots.len()
+        )));
+    }
+    Ok(out)
 }
 
 fn js_result_slots(result: &JsValue, n: usize) -> Result<Vec<JsValue>, WasmError> {

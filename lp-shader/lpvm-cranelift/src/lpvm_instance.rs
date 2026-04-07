@@ -11,7 +11,7 @@ use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{
     CallError, LpsValueF32, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext,
-    decode_q32_return, flatten_q32_arg, lps_value_f32_to_q32, q32_to_lps_value_f32,
+    decode_q32_return, flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -93,6 +93,7 @@ impl LpvmInstance for CraneliftInstance {
             .iter()
             .find(|f| f.name == name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let return_ty = gfn.return_type.clone();
 
         for p in &gfn.parameters {
             if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
@@ -103,7 +104,7 @@ impl LpvmInstance for CraneliftInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
+        if return_ty == LpsType::Void {
             return Err(InstanceError::Unsupported(
                 "void return is not represented as LpsValue; use a typed return",
             ));
@@ -117,6 +118,52 @@ impl LpvmInstance for CraneliftInstance {
             .into());
         }
 
+        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let idx = *self
+            .module
+            .name_to_index
+            .get(name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let param_count = self.module.ir_param_counts[idx] as usize;
+        if flat.len() != param_count {
+            return Err(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                flat.len(),
+                param_count
+            ))
+            .into());
+        }
+
+        let words = self.call_q32(name, &flat)?;
+        let gq = decode_q32_return(&return_ty, &words)?;
+        q32_to_lps_value_f32(&return_ty, gq)
+            .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
+    }
+
+    fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        if self.module.float_mode() != FloatMode::Q32 {
+            return Err(InstanceError::Unsupported(
+                "CraneliftInstance::call_q32 requires FloatMode::Q32",
+            ));
+        }
+
+        let gfn = self
+            .module
+            .metadata()
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))
+                .into());
+            }
+        }
+
         let idx = *self
             .module
             .name_to_index
@@ -124,16 +171,22 @@ impl LpvmInstance for CraneliftInstance {
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
         let param_count = self.module.ir_param_counts[idx] as usize;
 
-        let mut flat: Vec<i32> = Vec::new();
-        for (p, a) in gfn.parameters.iter().zip(args.iter()) {
-            let q = lps_value_f32_to_q32(&p.ty, a)
-                .map_err(|e| CallError::TypeMismatch(e.to_string()))?;
-            flat.extend(flatten_q32_arg(p, &q)?);
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }
+            .into());
         }
-        if flat.len() != param_count {
+        if args.len() != param_count {
             return Err(CallError::Unsupported(format!(
                 "flattened argument count {} does not match IR param_count {}",
-                flat.len(),
+                args.len(),
                 param_count
             ))
             .into());
@@ -162,14 +215,16 @@ impl LpvmInstance for CraneliftInstance {
             crate::invoke::invoke_i32_args_returns(
                 code,
                 self.vmctx_ptr(),
-                flat.as_slice(),
+                args,
                 n_ret,
                 uses_struct_return,
             )?
         };
 
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+
+        Ok(words)
     }
 }

@@ -8,16 +8,18 @@ Update `lps-filetests` to use `LpsValueQ32` throughout the Q32 execution path.
 
 ### q32_exec_common.rs
 
-Change imports and trait:
+Change imports and trait (as landed: `CallError` / `GlslReturn` from `lpvm`, not a separate `abi` module name):
 ```rust
-use lpvm::abi::{CallError, GlslReturn, LpsValueQ32};  // Updated
+use lps_shared::LpsValueQ32;
+use lpvm::{CallError, GlslReturn, LpsValueF32};
+// (filetests may import CallError/GlslReturn via `lpvm_cranelift` re-exports instead)
 
 pub(crate) trait Q32ShaderExecutable {
     fn call_q32_ret(
         &mut self,
         name: &str,
-        args: &[LpsValueF32],  // Takes F32, converts internally
-    ) -> Result<GlslReturn<LpsValueQ32>, GlslError>;  // Returns Q32
+        args: &[LpsValueF32],
+    ) -> Result<GlslReturn<LpsValueQ32>, GlslError>;
 }
 ```
 

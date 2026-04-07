@@ -2,14 +2,11 @@
 
 pub mod compile;
 pub mod execution;
-pub mod lpir_jit_executable;
-pub mod lpir_rv32_executable;
+pub mod filetest_lpvm;
 pub mod parse_assert;
-pub mod q32_exec_common;
 pub mod run;
 pub mod run_detail;
 pub mod wasm_link;
-pub mod wasm_runner;
 
 // Re-exports
 pub use run::{PerTargetStats, run_test_file, run_test_file_with_line_filter};

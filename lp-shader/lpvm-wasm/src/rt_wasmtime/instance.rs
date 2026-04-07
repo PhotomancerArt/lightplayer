@@ -11,7 +11,10 @@ use wasmtime::{Instance, Val};
 
 use super::WasmLpvmSharedRuntime;
 use super::link;
-use super::marshal::{build_wasm_args, wasm_vals_to_lps_value, zero_results_for_type};
+use super::marshal::{
+    build_wasm_args, build_wasm_args_q32_flat, wasm_vals_to_lps_value, wasm_vals_to_q32_words,
+    zero_results_for_type,
+};
 use crate::error::WasmError;
 use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
 
@@ -118,5 +121,57 @@ impl LpvmInstance for WasmLpvmInstance {
             )));
         }
         Ok(val)
+    }
+
+    fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        if self.float_mode != FloatMode::Q32 {
+            return Err(WasmError::runtime(
+                "WasmLpvmInstance::call_q32 requires FloatMode::Q32",
+            ));
+        }
+
+        let fn_sig = self
+            .signatures
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+
+        for p in &fn_sig.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(WasmError::runtime(
+                    "out/inout parameters are not supported for direct calling.",
+                ));
+            }
+        }
+
+        let export = self.exports.get(name).cloned().ok_or_else(|| {
+            WasmError::runtime(format!("function '{name}' not found in WASM export table"))
+        })?;
+
+        let return_ty = export.return_type.clone();
+        let wasm_args = build_wasm_args_q32_flat(&export.param_types, export.params.len(), args)?;
+
+        let mut guard = self.runtime.lock();
+        let store = &mut guard.store;
+        let func = self
+            .instance
+            .get_func(&mut *store, name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+
+        self.prepare_call(store)?;
+
+        if matches!(return_ty, LpsType::Void) {
+            let mut results: Vec<Val> = Vec::new();
+            func.call(&mut *store, &wasm_args, &mut results)
+                .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+            return Ok(Vec::new());
+        }
+
+        let mut results = zero_results_for_type(&return_ty, self.float_mode);
+        func.call(&mut *store, &wasm_args, &mut results)
+            .map_err(|e| WasmError::runtime(format!("WASM trap: {e}")))?;
+
+        wasm_vals_to_q32_words(&return_ty, &results, self.float_mode)
     }
 }

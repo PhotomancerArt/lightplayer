@@ -14,7 +14,9 @@ use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport};
 
 use super::BrowserLpvmModule;
 use super::link;
-use super::marshal::{build_js_args, js_result_to_lps_value};
+use super::marshal::{
+    build_js_args, build_js_args_q32_flat, js_result_to_lps_value, js_result_to_q32_words,
+};
 
 pub struct BrowserLpvmInstance {
     instance: WebAssembly::Instance,
@@ -123,5 +125,52 @@ impl LpvmInstance for BrowserLpvmInstance {
             .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
 
         js_result_to_lps_value(&return_ty, &result, self.float_mode)
+    }
+
+    fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        if self.float_mode != FloatMode::Q32 {
+            return Err(WasmError::runtime(
+                "BrowserLpvmInstance::call_q32 requires FloatMode::Q32",
+            ));
+        }
+
+        let fn_sig = self
+            .signatures
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+
+        for p in &fn_sig.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(WasmError::runtime(
+                    "out/inout parameters are not supported for direct calling.",
+                ));
+            }
+        }
+
+        let export = self.exports.get(name).cloned().ok_or_else(|| {
+            WasmError::runtime(format!("function '{name}' not found in WASM export table"))
+        })?;
+
+        let return_ty = export.return_type.clone();
+        let js_args = build_js_args_q32_flat(&export.param_types, export.params.len(), args)?;
+
+        let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str(name))
+            .map_err(|e| WasmError::runtime(format!("get export {name}: {e:?}")))?;
+        let func: Function = func_val
+            .dyn_into()
+            .map_err(|_| WasmError::runtime(format!("'{name}' is not a function")))?;
+
+        self.prepare_call()?;
+        let result = func
+            .apply(&JsValue::NULL, &js_args)
+            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+
+        if matches!(return_ty, LpsType::Void) {
+            return Ok(Vec::new());
+        }
+
+        js_result_to_q32_words(&return_ty, &result, self.float_mode)
     }
 }

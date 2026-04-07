@@ -4,12 +4,79 @@
 //! [`Q32::to_fixed`] / [`Q32::from_fixed`] (`i32` lane words).
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
 use lps_q32::Q32;
-use lps_shared::{FnParam, LpsType, LpsValueQ32, ParamQualifier};
+use lps_shared::{FnParam, LpsType, LpsValueF32, LpsValueQ32, ParamQualifier};
+
+/// Split a single slice of flattened Q32 argument words (per-parameter order) into
+/// [`LpsValueQ32`] values matching `params`.
+pub fn unflatten_q32_args(
+    params: &[FnParam],
+    words: &[i32],
+) -> Result<Vec<LpsValueQ32>, CallError> {
+    let mut out = Vec::with_capacity(params.len());
+    let mut off = 0;
+    for p in params {
+        if p.qualifier != ParamQualifier::In {
+            return Err(CallError::Unsupported(String::from(
+                "out/inout parameters are not supported by Level-1 call_q32 yet",
+            )));
+        }
+        let n = glsl_component_count(&p.ty);
+        if off + n > words.len() {
+            return Err(CallError::Unsupported(format!(
+                "not enough Q32 argument words at parameter `{}`: need {}, have {} total",
+                p.name,
+                off + n,
+                words.len()
+            )));
+        }
+        let v = decode_q32_return(&p.ty, &words[off..off + n])?;
+        off += n;
+        out.push(v);
+    }
+    if off != words.len() {
+        return Err(CallError::Unsupported(format!(
+            "extra Q32 argument words: used {}, got {} total",
+            off,
+            words.len()
+        )));
+    }
+    Ok(out)
+}
+
+/// Flatten a returned [`LpsValueQ32`] to raw `i32` words (same layout as [`decode_q32_return`]).
+pub fn flatten_q32_return(ty: &LpsType, v: &LpsValueQ32) -> Result<Vec<i32>, CallError> {
+    let p = FnParam {
+        name: String::new(),
+        ty: ty.clone(),
+        qualifier: ParamQualifier::In,
+    };
+    flatten_q32_arg(&p, v)
+}
+
+/// Build flattened Q32 words from marshaled [`LpsValueF32`] arguments using GLSL metadata.
+pub fn flat_q32_words_from_f32_args(
+    params: &[FnParam],
+    args: &[LpsValueF32],
+) -> Result<Vec<i32>, CallError> {
+    if params.len() != args.len() {
+        return Err(CallError::Arity {
+            expected: params.len(),
+            got: args.len(),
+        });
+    }
+    let mut flat = Vec::new();
+    for (p, a) in params.iter().zip(args.iter()) {
+        let q = lps_shared::lps_value_f32_to_q32(&p.ty, a)
+            .map_err(|e| CallError::TypeMismatch(e.to_string()))?;
+        flat.extend(flatten_q32_arg(p, &q)?);
+    }
+    Ok(flat)
+}
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).
 #[derive(Clone, Debug, PartialEq)]

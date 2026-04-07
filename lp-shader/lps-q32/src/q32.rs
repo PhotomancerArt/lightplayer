@@ -4,7 +4,6 @@
 use core::cmp::Ord;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-
 use crate::lpir;
 
 /// Fixed-point constants

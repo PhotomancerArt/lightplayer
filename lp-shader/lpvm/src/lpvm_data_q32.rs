@@ -4,8 +4,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::data_error::DataError;
 use crate::LpsValueF32;
+use crate::data_error::DataError;
 use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 use lps_shared::path_resolve::LpsTypePathExt;
 use lps_shared::{LayoutRules, LpsType, StructMember};

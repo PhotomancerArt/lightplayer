@@ -4,7 +4,6 @@ use crate::output_mode::OutputMode;
 use crate::parse::{RunDirective, TestFile};
 use crate::targets::{AnnotationKind, Disposition, Target, directive_disposition};
 use crate::test_run::TestCaseStats;
-use lps_exec::GlslExecutable;
 
 use crate::test_run::compile;
 use crate::test_run::execution;
@@ -87,13 +86,13 @@ pub fn run(
         return Ok((Ok(()), stats, Vec::new(), Vec::new(), false));
     }
 
-    let mut executable = match compile::compile_for_target(
+    let compiled = match compile::compile_for_target(
         &test_file.glsl_source,
         target,
         &relative_path,
         log_level,
     ) {
-        Ok(exec) => exec,
+        Ok(c) => c,
         Err(e) => {
             let mut compile_failed_lines = Vec::new();
             let mut unimplemented_count = 0;
@@ -140,7 +139,7 @@ pub fn run(
         }
     };
 
-    // Process each run directive (reuse one compiled executable)
+    // Process each run directive (reuse one compiled module; new instance per directive)
     for directive in &test_file.run_directives {
         // Filter by line number if TEST_LINE is set
         if let Some(filter_line) = test_line_filter {
@@ -218,9 +217,43 @@ pub fn run(
             }
         };
 
-        // Execute function and get result
-        // Note: execute_function already includes emulator state in the error, so we don't add it again
-        let execution_result = execution::execute_function(&mut *executable, &func_name, &args);
+        let gfn = match compiled.get_function_signature(&func_name) {
+            Some(g) => g,
+            None => {
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
+                let error_msg = format!("function '{func_name}' not found");
+                eprintln_if_detail(output_mode, &error_msg);
+                errors.push(anyhow::anyhow!(error_msg));
+                continue;
+            }
+        };
+
+        let mut inst = match compiled.instantiate() {
+            Ok(i) => i,
+            Err(e) => {
+                record_result(
+                    disposition,
+                    false,
+                    &mut stats,
+                    &mut failed_lines,
+                    &mut unexpected_pass_lines,
+                    directive.line_number,
+                );
+                errors.push(e);
+                continue;
+            }
+        };
+
+        // Emulator diagnostics are appended inside `execute_function` when available.
+        let execution_result =
+            execution::execute_function(&mut inst, target, gfn, &func_name, &args);
 
         match (execution_result, trap_expectation) {
             (Ok(actual_value), Some(exp)) => {
@@ -249,7 +282,6 @@ pub fn run(
                     &relative_path,
                     directive.line_number,
                     Some(test_file.glsl_source.as_str()),
-                    Some(&*executable),
                     output_mode,
                     Some(&directive.expression_str),
                     target,
@@ -285,7 +317,6 @@ pub fn run(
                         &relative_path,
                         directive.line_number,
                         Some(test_file.glsl_source.as_str()),
-                        Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
                         target,
@@ -311,7 +342,6 @@ pub fn run(
                         &relative_path,
                         directive.line_number,
                         Some(test_file.glsl_source.as_str()),
-                        Some(&*executable),
                         output_mode,
                         Some(&directive.expression_str),
                         target,
@@ -345,7 +375,6 @@ pub fn run(
                             &relative_path,
                             directive.line_number,
                             Some(test_file.glsl_source.as_str()),
-                            Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
                             target,
@@ -375,7 +404,6 @@ pub fn run(
                             &relative_path,
                             directive.line_number,
                             Some(test_file.glsl_source.as_str()),
-                            Some(&*executable),
                             output_mode,
                             Some(&directive.expression_str),
                             target,
@@ -526,7 +554,6 @@ pub fn run(
                             &relative_path,
                             directive.line_number,
                             Some(test_file.glsl_source.as_str()),
-                            Some(&*executable),
                             output_mode,
                             Some(&format!(
                                 "{}() {} {}",
@@ -579,63 +606,18 @@ enum ErrorType {
     ExpectedTrapGotValue,
 }
 
-/// Format error with consistent section ordering.
-/// Sections appear in this order:
-/// 1. Emulator state (DEBUG mode only)
-/// 2. V-code (DEBUG mode only)
-/// 3. Transformed CLIF (DEBUG mode only)
-/// 4. Raw CLIF (DEBUG mode only)
-/// 5. Test GLSL
-/// 6. Error details (error message)
-/// 7. Rerun command(s) with DEBUG variant
+/// Format error with consistent section ordering (optional GLSL context, rerun hints).
 fn format_error(
     _error_type: ErrorType,
     error_message: &str,
     filename: &str,
     line_number: usize,
     test_glsl: Option<&str>,
-    executable: Option<&dyn GlslExecutable>,
     output_mode: OutputMode,
     _test_expression: Option<&str>,
     target: &Target,
 ) -> String {
     let mut parts = Vec::new();
-
-    // Debug sections (only in Debug mode)
-    if output_mode.show_debug_sections() {
-        if let Some(exec) = executable {
-            // Emulator state
-            if let Some(ref emulator_state) = exec.format_emulator_state() {
-                parts.push(emulator_state.clone());
-            }
-
-            // Disassembly (machine code for Cranelift, WAT for WASM)
-            if let Some(ref disasm) = exec.format_disassembly() {
-                parts.push(format!("=== Disassembly ===\n{disasm}"));
-            }
-
-            // V-code
-            if let Some(ref vcode) = exec.format_vcode() {
-                parts.push(format!("=== VCode ===\n{vcode}"));
-            }
-
-            // Transformed CLIF
-            let (_original_clif, transformed_clif) = exec.format_clif_ir();
-            if let Some(ref transformed) = transformed_clif {
-                parts.push(format!(
-                    "=== CLIF IR (AFTER transformation) ===\n{transformed}"
-                ));
-            }
-
-            // Raw CLIF
-            let (original_clif, _transformed_clif) = exec.format_clif_ir();
-            if let Some(ref original) = original_clif {
-                parts.push(format!(
-                    "=== CLIF IR (BEFORE transformation) ===\n{original}"
-                ));
-            }
-        }
-    }
 
     // Test GLSL
     if output_mode.show_full_output() {

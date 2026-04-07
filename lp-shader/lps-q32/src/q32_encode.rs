@@ -1,11 +1,20 @@
-//! Q16.16 encoding/decoding for **compiler constant emission**.
+//! Q16.16 raw encoding/decoding for **compiler constant emission**.
 //!
-//! These functions are designed for the codegen path (e.g., `lpvm-cranelift`) to encode
-//! `f32` shader constants as Q16.16 `i32` values embedded in generated code. They differ
-//! from [`Q32::from_f32`](crate::q32::Q32::from_f32_wrapping) in two important ways:
+//! This module provides **raw `i32` encoding** (`f32`/`f64` → `i32` bits) for the codegen
+//! path (e.g., `lpvm-cranelift`). These functions return raw fixed-point words suitable
+//! for embedding in generated code (`iconst.i32`), not typed `Q32` values.
 //!
-//! | Aspect | `q32_encode` (this module) | `Q32::from_f32` |
+//! ## Why a separate module?
+//!
+//! Codegen doesn't conceptually "create a Q32 instance"—it encodes floating-point
+//! constants as raw fixed-point bits for the VM. Using `Q32::new(value).to_fixed()`
+//! would be indirect and imply a typed value intermediate that isn't needed.
+//!
+//! ## Comparison: `q32_encode` vs `Q32::from_f32_wrapping`
+//!
+//! | Aspect | `q32_encode` (this module) | [`Q32::from_f32_wrapping`](crate::Q32::from_f32_wrapping) |
 //! |--------|---------------------------|-----------------|
+//! | Returns | `i32` (raw bits) | `Q32` (typed value) |
 //! | Rounding | `libm::round` (nearest) | Truncate toward zero (`as i32`) |
 //! | Out-of-range | **Saturate** to `0x7FFF_FFFF` / `i32::MIN` | **Wrap** (Rust `as` semantics) |
 //! | Primary use | Compiler constant emission | Runtime conversion in builtins/engine |
@@ -14,7 +23,7 @@
 //! maximum representable Q32 value rather than wrapping to a negative. The rounding
 //! gives slightly better accuracy for constants than truncation.
 //!
-//! For runtime conversions (e.g., inside builtin implementations), use `Q32::from_f32`
+//! For runtime conversions (e.g., inside builtin implementations), use [`Q32::from_f32_wrapping`]
 //! which is faster (no rounding, no clamping) and matches the semantics of a cast in
 //! generated code.
 
@@ -24,11 +33,13 @@ const Q32_MAX: i64 = 0x7FFF_FFFF;
 const Q32_MIN: i64 = i32::MIN as i64;
 pub const Q32_FRAC: i32 = (1 << Q32_SHIFT) - 1;
 
-/// Encode an `f32` constant as Q16.16 for **compiler emission**.
+/// Encode an `f32` constant as raw Q16.16 bits for **compiler emission**.
 ///
-/// Uses `libm::round` (not truncation) and **saturates** to the Q16.16 representable
-/// range (`[i32::MIN, 0x7FFF_FFFF]`). For runtime conversions, use [`Q32::from_f32`](crate::q32::Q32::from_f32_wrapping)
-/// which truncates and wraps instead.
+/// Returns `i32` raw fixed-point bits (not a `Q32` value). Uses `libm::round` (not truncation)
+/// and **saturates** to the Q16.16 representable range (`[i32::MIN, 0x7FFF_FFFF]`).
+///
+/// For constructing a runtime `Q32` value (e.g., in builtins), use [`Q32::from_f32_wrapping`](crate::Q32::from_f32_wrapping)
+/// which truncates and wraps instead, matching the semantics of a cast in generated code.
 ///
 /// # Example
 /// ```
@@ -42,9 +53,10 @@ pub fn q32_encode(value: f32) -> i32 {
     q32_encode_f64(f64::from(value))
 }
 
-/// Encode `f64` as Q16.16 for **compiler emission** (with rounding and saturation).
+/// Encode an `f64` constant as raw Q16.16 bits for **compiler emission**.
 ///
-/// See [`q32_encode`] for details. This is the `f64` version used for Level-1 call
+/// `f64` version of [`q32_encode`] with rounding and saturation. Returns `i32` raw
+/// fixed-point bits suitable for embedding in generated code. Used for Level-1 call
 /// interchange where higher precision intermediate is needed.
 pub fn q32_encode_f64(value: f64) -> i32 {
     let scaled = libm::round(value * Q32_SCALE);

@@ -47,6 +47,7 @@ impl WasmLpvmEngine {
 }
 
 /// Linked shader module: WASM bytes + metadata, ready to [`LpvmModule::instantiate`].
+#[derive(Clone)]
 pub struct WasmLpvmModule {
     pub(crate) engine: Engine,
     pub(crate) runtime: Arc<WasmLpvmSharedRuntime>,

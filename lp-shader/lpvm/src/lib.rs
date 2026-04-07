@@ -3,7 +3,7 @@
 //! Core traits:
 //! - [`LpvmEngine`] — compile LPIR and expose shared memory ([`LpvmMemory`])
 //! - [`LpvmModule`] — compiled artifact + [`LpvmModule::instantiate`]
-//! - [`LpvmInstance`] — call functions by name with [`LpsValueF32`] args
+//! - [`LpvmInstance`] — call functions by name ([`LpsValueF32`] or flat Q32 words via [`LpvmInstance::call_q32`])
 //! - [`LpvmMemory`] / [`ShaderPtr`] — host/guest shared heap
 //!
 //! Logical types ([`LpsType`], [`StructMember`], [`LayoutRules`]) and path
@@ -36,7 +36,8 @@ pub use lps_shared::path_resolve::{LpsTypePathExt, PathError};
 pub use lps_shared::value_path::{LpsValuePathError, LpsValuePathExt};
 pub use lps_shared::{LayoutRules, LpsType, StructMember};
 pub use lpvm_abi::{
-    CallError, CallResult, GlslReturn, decode_q32_return, flatten_q32_arg, glsl_component_count,
+    CallError, CallResult, GlslReturn, decode_q32_return, flat_q32_words_from_f32_args,
+    flatten_q32_arg, flatten_q32_return, glsl_component_count, unflatten_q32_args,
 };
 pub use lpvm_data_q32::LpvmDataQ32;
 pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};

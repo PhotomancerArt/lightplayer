@@ -12,7 +12,7 @@ use lpir::FloatMode;
 use lps_shared::{LpsType, ParamQualifier};
 use lpvm::{
     AllocError, CallError, LpsValueF32, LpvmInstance, LpvmMemory, decode_q32_return,
-    flatten_q32_arg, lps_value_f32_to_q32, q32_to_lps_value_f32,
+    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
 };
 use lpvm_cranelift::signature_for_ir_func;
 
@@ -49,6 +49,7 @@ impl core::error::Error for InstanceError {}
 pub struct EmuInstance {
     module: EmuModule,
     vmctx_guest: u32,
+    last_debug: Option<String>,
 }
 
 impl EmuInstance {
@@ -66,6 +67,7 @@ impl EmuInstance {
         Ok(Self {
             module,
             vmctx_guest: buf.guest_base() as u32,
+            last_debug: None,
         })
     }
 
@@ -83,6 +85,7 @@ impl LpvmInstance for EmuInstance {
     type Error = InstanceError;
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
+        self.last_debug = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call requires FloatMode::Q32",
@@ -95,6 +98,7 @@ impl LpvmInstance for EmuInstance {
             .functions
             .iter()
             .find(|f| f.name == name)
+            .cloned()
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
 
         for p in &gfn.parameters {
@@ -120,6 +124,57 @@ impl LpvmInstance for EmuInstance {
             .into());
         }
 
+        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let idx = self
+            .module
+            .ir
+            .functions
+            .iter()
+            .position(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let ir_func = &self.module.ir.functions[idx];
+        let param_count = ir_func.param_count as usize;
+        if flat.len() != param_count {
+            return Err(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                flat.len(),
+                param_count
+            ))
+            .into());
+        }
+
+        let words = self.invoke_flat(name, &flat)?;
+        let gq = decode_q32_return(&gfn.return_type, &words)?;
+        q32_to_lps_value_f32(&gfn.return_type, gq)
+            .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
+    }
+
+    fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        self.last_debug = None;
+        if self.module.options.float_mode != FloatMode::Q32 {
+            return Err(InstanceError::Unsupported(
+                "EmuInstance::call_q32 requires FloatMode::Q32",
+            ));
+        }
+
+        let gfn = self
+            .module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .cloned()
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))
+                .into());
+            }
+        }
+
         let idx = self
             .module
             .ir
@@ -130,26 +185,55 @@ impl LpvmInstance for EmuInstance {
         let ir_func = &self.module.ir.functions[idx];
         let param_count = ir_func.param_count as usize;
 
-        let mut flat: Vec<i32> = Vec::new();
-        for (p, a) in gfn.parameters.iter().zip(args.iter()) {
-            let q = lps_value_f32_to_q32(&p.ty, a)
-                .map_err(|e| CallError::TypeMismatch(e.to_string()))?;
-            flat.extend(flatten_q32_arg(p, &q)?);
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }
+            .into());
         }
-        if flat.len() != param_count {
+        if args.len() != param_count {
             return Err(CallError::Unsupported(format!(
                 "flattened argument count {} does not match IR param_count {}",
-                flat.len(),
+                args.len(),
                 param_count
             ))
             .into());
         }
 
+        let words = self.invoke_flat(name, args)?;
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+        Ok(words)
+    }
+
+    fn debug_state(&self) -> Option<String> {
+        self.last_debug.clone()
+    }
+}
+
+impl EmuInstance {
+    fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, InstanceError> {
         self.refresh_vmctx_header();
+
+        let idx = self
+            .module
+            .ir
+            .functions
+            .iter()
+            .position(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let ir_func = &self.module.ir.functions[idx];
 
         let mut full: Vec<i32> = Vec::with_capacity(1 + flat.len());
         full.push(self.vmctx_guest as i32);
-        full.extend_from_slice(&flat);
+        full.extend_from_slice(flat);
 
         let isa = emu_run::riscv32_reference_isa()
             .map_err(|e| InstanceError::Call(CallError::Unsupported(format!("{e}"))))?;
@@ -181,39 +265,42 @@ impl LpvmInstance for EmuInstance {
             .params
             .iter()
             .any(|p| p.purpose == ArgumentPurpose::StructReturn);
-        let ret = if has_sr {
+        let ret_result = if has_sr {
             emu.call_function_with_struct_return(entry, &data_args, &sig, n_ret * 4)
-                .map_err(|e| {
-                    InstanceError::Call(CallError::Unsupported(format!("emulator: {e:?}")))
-                })?
         } else {
-            emu.call_function(entry, &data_args, &sig).map_err(|e| {
-                InstanceError::Call(CallError::Unsupported(format!("emulator: {e:?}")))
-            })?
+            emu.call_function(entry, &data_args, &sig)
         };
 
-        let mut words = Vec::with_capacity(ret.len());
-        for dv in ret {
-            match dv {
-                DataValue::I32(w) => words.push(w),
-                other => {
+        match ret_result {
+            Ok(ret) => {
+                self.last_debug = None;
+                let mut words = Vec::with_capacity(ret.len());
+                for dv in ret {
+                    match dv {
+                        DataValue::I32(w) => words.push(w),
+                        other => {
+                            return Err(InstanceError::Call(CallError::Unsupported(format!(
+                                "unexpected emulator return value: {other:?}"
+                            ))));
+                        }
+                    }
+                }
+                if words.len() < n_ret {
                     return Err(InstanceError::Call(CallError::Unsupported(format!(
-                        "unexpected emulator return value: {other:?}"
+                        "emulator returned {} words, signature expects {}",
+                        words.len(),
+                        n_ret
                     ))));
                 }
+                words.truncate(n_ret);
+                Ok(words)
+            }
+            Err(e) => {
+                self.last_debug = Some(emu.dump_state());
+                Err(InstanceError::Call(CallError::Unsupported(format!(
+                    "emulator: {e:?}"
+                ))))
             }
         }
-        if words.len() < n_ret {
-            return Err(InstanceError::Call(CallError::Unsupported(format!(
-                "emulator returned {} words, signature expects {}",
-                words.len(),
-                n_ret
-            ))));
-        }
-        words.truncate(n_ret);
-
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| InstanceError::Call(CallError::TypeMismatch(e.to_string())))
     }
 }

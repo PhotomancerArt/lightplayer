@@ -16,12 +16,12 @@ fn main() {
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
 
     let exe_path_release = workspace_root
-        .join("../../target")
+        .join("target")
         .join(target)
         .join("release")
         .join("lps-builtins-emu-app");
     let exe_path_profile = workspace_root
-        .join("../../target")
+        .join("target")
         .join(target)
         .join(&profile)
         .join("lps-builtins-emu-app");
@@ -62,9 +62,20 @@ fn main() {
 fn find_workspace_root(start: &str) -> Option<std::path::PathBuf> {
     let mut dir = std::path::Path::new(start);
     loop {
+        // Check for workspace Cargo.toml two levels up (handles OUT_DIR being deep in target/build)
         let cargo_toml = dir.join("../../Cargo.toml");
         if cargo_toml.exists() {
             if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
+                if contents.contains("[workspace]") {
+                    // Return the directory containing Cargo.toml, not `dir`
+                    return Some(dir.parent()?.parent()?.to_path_buf());
+                }
+            }
+        }
+        // Also check current dir (for when running from workspace root)
+        let cargo_toml_here = dir.join("Cargo.toml");
+        if cargo_toml_here.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&cargo_toml_here) {
                 if contents.contains("[workspace]") {
                     return Some(dir.to_path_buf());
                 }

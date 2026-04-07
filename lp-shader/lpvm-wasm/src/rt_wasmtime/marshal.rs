@@ -4,7 +4,7 @@ use std::format;
 
 use lpir::FloatMode;
 use lps_shared::LpsType;
-use lpvm::LpsValueF32;
+use lpvm::{LpsValueF32, glsl_component_count};
 use wasm_encoder::ValType as WasmValType;
 use wasmtime::Val;
 
@@ -146,6 +146,159 @@ fn glsl_value_to_wasm_flat(
             )));
         }
     })
+}
+
+/// Build wasmtime [`Val`] arguments from flattened Q32 `i32` lanes (`FloatMode::Q32` only).
+pub(crate) fn build_wasm_args_q32_flat(
+    param_types: &[LpsType],
+    export_param_slots: usize,
+    words: &[i32],
+) -> Result<Vec<Val>, WasmError> {
+    let mut wasm_args = Vec::new();
+    wasm_args.push(Val::I32(0));
+    let mut woff = 0;
+    for ty in param_types {
+        let n = glsl_component_count(ty);
+        if woff + n > words.len() {
+            return Err(WasmError::runtime(format!(
+                "not enough Q32 argument words: need {} for next parameter, have {} past offset {}",
+                n,
+                words.len().saturating_sub(woff),
+                woff
+            )));
+        }
+        for i in 0..n {
+            wasm_args.push(Val::I32(words[woff + i]));
+        }
+        woff += n;
+    }
+    if woff != words.len() {
+        return Err(WasmError::runtime(format!(
+            "extra Q32 argument words: used {}, got {}",
+            woff,
+            words.len()
+        )));
+    }
+    if wasm_args.len() != export_param_slots {
+        return Err(WasmError::runtime(format!(
+            "internal: flattened arg count {} != export param slots {}",
+            wasm_args.len(),
+            export_param_slots
+        )));
+    }
+    Ok(wasm_args)
+}
+
+fn push_q32_words_from_val_slice(
+    ty: &LpsType,
+    vals: &[Val],
+    fm: FloatMode,
+    off: &mut usize,
+    out: &mut Vec<i32>,
+) -> Result<(), WasmError> {
+    use LpsType::*;
+    if fm != FloatMode::Q32 {
+        return Err(WasmError::runtime(
+            "internal: push_q32_words_from_val_slice expects FloatMode::Q32",
+        ));
+    }
+    match ty {
+        Void => Ok(()),
+        Float | Int | UInt | Bool => match vals.get(*off) {
+            Some(Val::I32(i)) => {
+                out.push(*i);
+                *off += 1;
+                Ok(())
+            }
+            other => Err(WasmError::runtime(format!(
+                "expected i32 return slot, got {other:?}"
+            ))),
+        },
+        Vec2 | IVec2 | UVec2 | BVec2 => {
+            for _ in 0..2 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Vec3 | IVec3 | UVec3 | BVec3 => {
+            for _ in 0..3 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Vec4 | IVec4 | UVec4 | BVec4 => {
+            for _ in 0..4 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Mat2 => {
+            for _ in 0..4 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Mat3 => {
+            for _ in 0..9 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Mat4 => {
+            for _ in 0..16 {
+                push_scalar_q32_word(vals, off, out)?;
+            }
+            Ok(())
+        }
+        Array { element, len } => {
+            for _ in 0..*len {
+                push_q32_words_from_val_slice(element, vals, fm, off, out)?;
+            }
+            Ok(())
+        }
+        Struct { members, .. } => {
+            for m in members {
+                push_q32_words_from_val_slice(&m.ty, vals, fm, off, out)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn push_scalar_q32_word(
+    vals: &[Val],
+    off: &mut usize,
+    out: &mut Vec<i32>,
+) -> Result<(), WasmError> {
+    match vals.get(*off) {
+        Some(Val::I32(i)) => {
+            out.push(*i);
+            *off += 1;
+            Ok(())
+        }
+        other => Err(WasmError::runtime(format!(
+            "expected i32 wasm return value, got {other:?}"
+        ))),
+    }
+}
+
+/// Collect flattened Q32 `i32` words from wasm results (`FloatMode::Q32`).
+pub(crate) fn wasm_vals_to_q32_words(
+    ty: &LpsType,
+    vals: &[Val],
+    fm: FloatMode,
+) -> Result<Vec<i32>, WasmError> {
+    let mut off = 0;
+    let mut out = Vec::new();
+    push_q32_words_from_val_slice(ty, vals, fm, &mut off, &mut out)?;
+    if off != vals.len() {
+        return Err(WasmError::runtime(format!(
+            "return decode used {} of {} wasm result values",
+            off,
+            vals.len()
+        )));
+    }
+    Ok(out)
 }
 
 pub(crate) fn build_wasm_args(
