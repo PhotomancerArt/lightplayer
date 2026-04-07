@@ -3,6 +3,13 @@
 //! On the reference embedded target (32-bit pointer), [`VmContext`] is 16 bytes. On 64-bit hosts
 //! the `metadata` pointer is wider and the struct is larger; use [`core::mem::offset_of!`] (or the
 //! `VMCTX_OFFSET_*` constants) instead of assuming a single cross-target size.
+//!
+//! # Per-instance vs shared memory
+//!
+//! [`VmContext`] is **per shader instance** (fuel, trap handler, metadata for instance locals).
+//! **Shared** data (textures, cross-shader globals) is allocated through
+//! [`LpvmEngine::memory`](crate::LpvmEngine::memory) as [`ShaderPtr`](crate::ShaderPtr) values;
+//! the guest sees [`ShaderPtr::guest_value`](crate::ShaderPtr::guest_value) via uniforms.
 
 use alloc::boxed::Box;
 
@@ -21,13 +28,16 @@ pub const VMCTX_OFFSET_METADATA: usize = core::mem::offset_of!(VmContext, metada
 /// Size of [`VmContext`] in bytes (target-dependent).
 pub const VMCTX_HEADER_SIZE: usize = core::mem::size_of::<VmContext>();
 
-/// Well-known fields at the start of every VMContext (single flat allocation).
+/// Per-instance VM state at the start of a VMContext allocation.
+///
+/// Shared heap data is **not** referenced from here; use [`LpvmEngine::memory`](crate::LpvmEngine::memory)
+/// and pass [`ShaderPtr::guest_value`](crate::ShaderPtr::guest_value) into shaders as uniforms.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct VmContext {
     pub fuel: u64,
     pub trap_handler: u32,
-    /// Describes globals/uniforms layout; may be null until wired up.
+    /// Per-instance globals/uniforms layout; may be null until wired up.
     pub metadata: *const LpsType,
 }
 

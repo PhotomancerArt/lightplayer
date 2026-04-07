@@ -6,7 +6,7 @@ use std::format;
 use lpir::IrModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
-use lpvm::LpvmEngine;
+use lpvm::{BumpLpvmMemory, LpvmEngine, LpvmMemory};
 use wasmtime::{Engine, Module};
 
 use crate::compile::compile_lpir;
@@ -15,10 +15,14 @@ use crate::options::WasmOptions;
 
 use super::instance::WasmLpvmInstance;
 
+/// Host-side bump arena until wasmtime linear memory is wired as [`LpvmMemory`].
+const DEFAULT_LPVM_SHARED_MEMORY_BYTES: usize = 256 * 1024;
+
 /// wasmtime engine; compiles LPIR with fixed [`WasmOptions`].
 pub struct WasmLpvmEngine {
     engine: Engine,
     compile_options: WasmOptions,
+    shared_memory: BumpLpvmMemory,
 }
 
 impl WasmLpvmEngine {
@@ -32,6 +36,7 @@ impl WasmLpvmEngine {
         Ok(Self {
             engine,
             compile_options,
+            shared_memory: BumpLpvmMemory::new(DEFAULT_LPVM_SHARED_MEMORY_BYTES),
         })
     }
 }
@@ -77,6 +82,10 @@ impl LpvmEngine for WasmLpvmEngine {
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
             opts: self.compile_options,
         })
+    }
+
+    fn memory(&self) -> &dyn LpvmMemory {
+        &self.shared_memory
     }
 }
 

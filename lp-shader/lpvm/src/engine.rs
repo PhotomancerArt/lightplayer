@@ -1,15 +1,22 @@
-//! `LpvmEngine` trait - backend configuration and compilation.
+//! `LpvmEngine` trait — compilation and shared memory.
 
 use lpir::module::IrModule;
 use lps_shared::LpsModuleSig;
 
+use crate::memory::LpvmMemory;
 use crate::module::LpvmModule;
 
-/// Backend engine that compiles LPIR modules and creates execution contexts.
+/// Backend engine: compiles LPIR and owns shared memory for cross-module data.
 ///
-/// Implementations hold shared configuration and cached resources (e.g.,
-/// wasmtime Engine with parsed builtins). A single engine can compile
-/// multiple modules.
+/// Implementations typically hold configuration (e.g. wasmtime `Engine`) and a
+/// [`LpvmMemory`] implementation. All modules produced by [`Self::compile`]
+/// share the same memory arena (textures, globals). Host code allocates with
+/// [`Self::memory`]; guests see [`crate::ShaderPtr::guest_value`] via uniforms.
+///
+/// # Per-instance vs shared
+///
+/// [`crate::VmContext`] is per shader instance (fuel, trap handler). Shared
+/// heap data is **not** stored in `VmContext`; use this memory API instead.
 pub trait LpvmEngine {
     /// Compiled module type produced by this engine.
     type Module: LpvmModule;
@@ -18,9 +25,8 @@ pub trait LpvmEngine {
     type Error: core::fmt::Display;
 
     /// Compile an LPIR module into a runnable module.
-    ///
-    /// The `meta` parameter provides the function signatures and other metadata
-    /// needed for the compiled artifact. Backends should store this to support
-    /// the `signatures()` method on `LpvmModule`.
     fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error>;
+
+    /// Shared memory allocator for this engine (textures, cross-shader data).
+    fn memory(&self) -> &dyn LpvmMemory;
 }

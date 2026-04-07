@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use lpir::IrModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
-use lpvm::LpvmEngine;
+use lpvm::{BumpLpvmMemory, LpvmEngine, LpvmMemory};
 use wasm_bindgen::JsValue;
 
 use crate::compile::compile_lpir;
@@ -15,6 +15,8 @@ use crate::module::{EnvMemorySpec, WasmExport};
 use crate::options::WasmOptions;
 
 use super::instance::BrowserLpvmInstance;
+
+const DEFAULT_LPVM_SHARED_MEMORY_BYTES: usize = 256 * 1024;
 
 thread_local! {
     static HOST_EXPORTS: RefCell<Option<JsValue>> = RefCell::new(None);
@@ -37,11 +39,15 @@ pub(crate) fn host_exports() -> Result<JsValue, WasmError> {
 
 pub struct BrowserLpvmEngine {
     compile_options: WasmOptions,
+    shared_memory: BumpLpvmMemory,
 }
 
 impl BrowserLpvmEngine {
     pub fn new(compile_options: WasmOptions) -> Self {
-        Self { compile_options }
+        Self {
+            compile_options,
+            shared_memory: BumpLpvmMemory::new(DEFAULT_LPVM_SHARED_MEMORY_BYTES),
+        }
     }
 }
 
@@ -74,6 +80,10 @@ impl LpvmEngine for BrowserLpvmEngine {
             shadow_stack_base: wm.shadow_stack_base,
             opts: self.compile_options,
         })
+    }
+
+    fn memory(&self) -> &dyn LpvmMemory {
+        &self.shared_memory
     }
 }
 
