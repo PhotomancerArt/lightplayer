@@ -1,5 +1,5 @@
 //! LPIR → Cranelift: host JIT (`std` + native ISA) or embedded JIT (`glsl` without `std`, RV32 ISA).
-//! Optional `riscv32-emu` links with `lps-builtins-emu-app` and `lp-riscv-emu` helpers.
+//! Optional `riscv32-object` enables RV32 object emission + builtins ELF link (see `lpvm-emu` to run in the emulator).
 //!
 //! **Dual API:** [`CraneliftEngine`], [`CraneliftModule`], [`CraneliftInstance`] implement
 //! [`lpvm::LpvmEngine`] / [`lpvm::LpvmModule`] / [`lpvm::LpvmInstance`]. The existing
@@ -32,26 +32,23 @@ mod lpvm_module;
 mod module_lower;
 mod process_sync;
 mod q32;
+pub mod q32_marshal;
 mod q32_options;
 mod values;
 
-#[cfg(feature = "riscv32-emu")]
-mod emu_run;
-#[cfg(feature = "riscv32-emu")]
+#[cfg(feature = "riscv32-object")]
 mod object_link;
-#[cfg(feature = "riscv32-emu")]
+#[cfg(feature = "riscv32-object")]
 mod object_module;
 
 #[cfg(feature = "glsl")]
 pub use compile::jit;
+#[cfg(feature = "riscv32-object")]
+pub use compile::object_bytes_from_ir;
 pub use compile::{jit_from_ir, jit_from_ir_owned};
-#[cfg(feature = "riscv32-emu")]
-pub use compile::{object_bytes_from_ir, run_lpir_function_i32};
 pub use compile_options::{CompileOptions, MemoryStrategy};
 pub use direct_call::DirectCall;
 pub use emit::signature_for_ir_func;
-#[cfg(feature = "riscv32-emu")]
-pub use emu_run::glsl_q32_call_emulated;
 pub use error::{CompileError, CompilerError};
 pub use jit_module::JitModule;
 pub use lpir::FloatMode;
@@ -67,10 +64,10 @@ pub use lpvm_module::CraneliftModule;
 pub type GlslParamQualifier = ParamQualifier;
 /// Back-compat alias for a single formal parameter; prefer [`FnParam`].
 pub type LpsSig = FnParam;
-#[cfg(feature = "riscv32-emu")]
+#[cfg(feature = "riscv32-object")]
 pub use object_link::link_object_with_builtins;
 pub use q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
-pub use values::{CallError, CallResult, GlslQ32, GlslReturn};
+pub use values::{CallError, CallResult, GlslQ32, GlslReturn, decode_q32_return, flatten_q32_arg};
 
 /// Options-only tests: run under `--no-default-features` (no host JIT execution).
 #[cfg(test)]
@@ -98,7 +95,7 @@ mod tests_options {
 }
 
 /// Host JIT tests: `jit_from_ir` with `std` uses the native ISA. Without `std`, JIT targets RV32
-/// and executing it on the host is undefined — those cases are covered by `riscv32-emu` / fw-emu.
+/// and executing it on the host is undefined — those cases are covered by `lpvm-emu` / fw-emu.
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use alloc::string::String;

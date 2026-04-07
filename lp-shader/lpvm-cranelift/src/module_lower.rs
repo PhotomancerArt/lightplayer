@@ -23,8 +23,11 @@ pub(crate) enum LpirFuncEmitOrder {
     Source,
     /// Lexicographic by LPIR function name (used for `ObjectModule` symbol order).
     #[cfg_attr(
-        not(feature = "riscv32-emu"),
-        allow(dead_code, reason = "only constructed when feature riscv32-emu is on")
+        not(feature = "riscv32-object"),
+        allow(
+            dead_code,
+            reason = "only constructed when feature riscv32-object is on"
+        )
     )]
     Name,
 }

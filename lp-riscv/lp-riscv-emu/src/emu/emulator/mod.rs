@@ -18,5 +18,5 @@ mod run_loops;
 mod state;
 mod types;
 
-pub use state::{DEFAULT_RAM_START, Riscv32Emulator};
+pub use state::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Riscv32Emulator};
 pub use types::{OomInfo, PanicInfo, StepResult, SyscallInfo};

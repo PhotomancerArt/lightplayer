@@ -15,7 +15,8 @@ lps-frontend = { path = "../lps-frontend" }
 lpvm = { path = "../lpvm", features = ["std"] }
 lps-wasm = { path = "../legacy/lps-wasm" }
 lpir = { path = "../lpir" }
-lpvm-cranelift = { path = "../lpvm-cranelift", features = ["riscv32-emu"] }
+lpvm-cranelift = { path = "../lpvm-cranelift", features = ["riscv32-object"] }
+lpvm-emu = { path = "../lpvm-emu" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }

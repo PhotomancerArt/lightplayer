@@ -25,12 +25,12 @@ std = [
 glsl = ["dep:lps-frontend"]
 cranelift-optimizer = ["cranelift-codegen/optimizer"]
 cranelift-verifier = ["cranelift-codegen/verifier"]
-riscv32-emu = [
+# RV32 relocatable object emission + link with builtins ELF (no emulator in this crate).
+riscv32-object = [
     "std",
     "glsl",
     "dep:cranelift-object",
     "dep:lp-riscv-elf",
-    "dep:lp-riscv-emu",
     "cranelift-codegen/riscv32",
 ]
 
@@ -50,4 +50,3 @@ cranelift-native = { workspace = true, optional = true }
 cranelift-object = { workspace = true, optional = true }
 target-lexicon = { workspace = true }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true }
-lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }

@@ -9,10 +9,10 @@ use lps_exec::GlslExecutable;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::LpsValue;
 use lpvm_cranelift::{
-    CompileOptions, CompilerError, glsl_q32_call_emulated, link_object_with_builtins,
-    object_bytes_from_ir,
+    CompileOptions, CompilerError, link_object_with_builtins, object_bytes_from_ir,
 };
 use lpvm_cranelift::{GlslQ32, GlslReturn};
+use lpvm_emu::glsl_q32_call_emulated;
 
 use super::q32_exec_common::{
     Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,

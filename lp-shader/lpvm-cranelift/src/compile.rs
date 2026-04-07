@@ -35,7 +35,5 @@ pub fn jit_from_ir_owned(
     build_jit_module(&ir, meta, *options)
 }
 
-#[cfg(feature = "riscv32-emu")]
-pub use crate::emu_run::run_lpir_function_i32;
-#[cfg(feature = "riscv32-emu")]
+#[cfg(feature = "riscv32-object")]
 pub use crate::object_module::object_bytes_from_ir;

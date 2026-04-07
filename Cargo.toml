@@ -24,6 +24,7 @@ members = [
     "lp-shader/lpvm-wasm",
     "lp-shader/lps-frontend",
     "lp-shader/lpvm-cranelift",
+    "lp-shader/lpvm-emu",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
     "lp-riscv/lp-riscv-emu-shared",

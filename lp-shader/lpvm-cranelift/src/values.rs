@@ -87,7 +87,7 @@ pub(crate) fn glsl_component_count(ty: &LpsType) -> usize {
     }
 }
 
-pub(crate) fn flatten_q32_arg(param: &FnParam, arg: &GlslQ32) -> Result<Vec<i32>, CallError> {
+pub fn flatten_q32_arg(param: &FnParam, arg: &GlslQ32) -> Result<Vec<i32>, CallError> {
     if param.qualifier != ParamQualifier::In {
         return Err(CallError::Unsupported(String::from(
             "out/inout parameters are not supported by Level-1 call() yet",
@@ -210,7 +210,7 @@ fn got_ty_name(v: &GlslQ32) -> &'static str {
     }
 }
 
-pub(crate) fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<GlslQ32, CallError> {
+pub fn decode_q32_return(ty: &LpsType, words: &[i32]) -> Result<GlslQ32, CallError> {
     let n = glsl_component_count(ty);
     if words.len() < n {
         return Err(CallError::Unsupported(format!(

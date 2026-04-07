@@ -1,4 +1,4 @@
-//! Link LPIR object with the builtins executable (feature `riscv32-emu`).
+//! Link LPIR object with the builtins executable (feature `riscv32-object`).
 
 use alloc::string::String;
 use alloc::vec::Vec;

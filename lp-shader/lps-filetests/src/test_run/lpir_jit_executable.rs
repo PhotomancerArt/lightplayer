@@ -7,13 +7,13 @@ use lps_diagnostics::GlslError;
 use lps_exec::GlslExecutable;
 use lps_shared::{LpsFnSig, LpsType};
 use lpvm::LpsValue;
-use lpvm_cranelift::{jit, CompileOptions, CompilerError, JitModule};
+use lpvm_cranelift::{CompileOptions, CompilerError, JitModule, jit};
 use lpvm_cranelift::{GlslQ32, GlslReturn};
 
 use super::q32_exec_common::{
-    args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32, call_f32_from_q32,
-    call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32, call_uvec_from_q32,
-    call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta, Q32ShaderExecutable,
+    Q32ShaderExecutable, args_to_q32, call_array_from_q32, call_bool_from_q32, call_bvec_from_q32,
+    call_f32_from_q32, call_i32_from_q32, call_ivec_from_q32, call_mat_from_q32,
+    call_uvec_from_q32, call_vec_from_q32, impl_call_void, map_call_err, signatures_from_meta,
 };
 
 /// Host JIT executable for `jit.q32` / `jit.f32` filetest targets.

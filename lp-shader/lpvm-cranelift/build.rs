@@ -1,11 +1,11 @@
-//! When `riscv32-emu` is enabled, embeds `lps-builtins-emu-app` for linking tests.
+//! When `riscv32-object` is enabled, embeds `lps-builtins-emu-app` for linking tests.
 //! Build the executable with `scripts/build-builtins.sh` from the workspace root.
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
     let out_path = std::path::Path::new(&out_dir).join("lp_builtins_lib.rs");
 
-    if std::env::var("CARGO_FEATURE_RISCV32_EMU").is_err() {
+    if std::env::var("CARGO_FEATURE_RISCV32_OBJECT").is_err() {
         std::fs::write(&out_path, "pub const LP_BUILTINS_EXE_BYTES: &[u8] = &[];\n")
             .expect("write lp_builtins_lib.rs");
         return;

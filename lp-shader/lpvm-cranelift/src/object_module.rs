@@ -1,4 +1,4 @@
-//! RISC-V32 relocatable ELF object emission from LPIR (feature `riscv32-emu`).
+//! RISC-V32 relocatable ELF object emission from LPIR (feature `riscv32-object`).
 
 use alloc::vec::Vec;
 
@@ -92,7 +92,7 @@ pub fn object_bytes_from_ir(
         .map(|v| v.to_vec())
 }
 
-#[cfg(all(test, feature = "riscv32-emu"))]
+#[cfg(all(test, feature = "riscv32-object"))]
 mod tests {
     use lpir::parse_module;
 
