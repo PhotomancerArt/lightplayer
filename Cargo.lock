@@ -3688,6 +3688,7 @@ dependencies = [
  "lp-shared",
  "lpir",
  "lps-frontend",
+ "lpvm-native",
  "notify",
  "rustc-demangle",
  "serde",
@@ -4035,6 +4036,7 @@ dependencies = [
 name = "lpvm-native"
 version = "40.0.0"
 dependencies = [
+ "lp-riscv-inst",
  "lpir",
  "lps-shared",
  "lpvm",

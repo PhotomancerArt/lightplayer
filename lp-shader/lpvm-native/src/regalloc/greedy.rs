@@ -111,6 +111,7 @@ mod tests {
             },
             args: Vec::new(),
             rets: Vec::new(),
+            src_op: None,
         }];
         let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
         for reg in CALLER_SAVED {
@@ -138,6 +139,7 @@ mod tests {
             },
             args: Vec::new(),
             rets: Vec::new(),
+            src_op: None,
         }];
         let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
         for reg in CALLEE_SAVED {
@@ -167,15 +169,18 @@ mod tests {
             VInst::IConst32 {
                 dst: VReg(1),
                 val: 1,
+                src_op: None,
             },
             VInst::IConst32 {
                 dst: VReg(2),
                 val: 2,
+                src_op: None,
             },
             VInst::Add32 {
                 dst: VReg(3),
                 src1: VReg(1),
                 src2: VReg(2),
+                src_op: None,
             },
         ];
         let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");

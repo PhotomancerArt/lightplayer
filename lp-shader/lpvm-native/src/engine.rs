@@ -12,12 +12,15 @@ use crate::module::NativeModule;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeCompileOptions {
     pub float_mode: lpir::FloatMode,
+    /// When true, emission records LPIR op indices per instruction (for disassembly / future DWARF).
+    pub debug_info: bool,
 }
 
 impl Default for NativeCompileOptions {
     fn default() -> Self {
         Self {
             float_mode: lpir::FloatMode::Q32,
+            debug_info: false,
         }
     }
 }
@@ -88,10 +91,10 @@ mod tests {
                         rhs: lpir::VReg(2),
                     },
                     Op::Return {
-                        values: VRegRange { start: 3, count: 1 },
+                        values: VRegRange { start: 0, count: 1 },
                     },
                 ],
-                vreg_pool: vec![],
+                vreg_pool: vec![lpir::VReg(3)],
             }],
         }
     }

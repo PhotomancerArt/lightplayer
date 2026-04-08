@@ -25,26 +25,45 @@ pub struct NativeReloc {
     pub symbol: String,
 }
 
+/// Machine code for one function plus relocations and optional debug line map.
+#[derive(Debug)]
+pub struct EmittedFunction {
+    pub code: Vec<u8>,
+    pub relocs: Vec<NativeReloc>,
+    /// When [`EmitContext`] was built with `debug_info`, maps each instruction's byte offset to an LPIR op index.
+    pub debug_lines: Vec<(u32, Option<u32>)>,
+}
+
 #[derive(Debug)]
 pub struct EmitContext {
     pub code: Vec<u8>,
     pub relocs: Vec<NativeReloc>,
+    pub debug_lines: Vec<(u32, Option<u32>)>,
     frame_size: i32,
     is_leaf: bool,
+    debug_info: bool,
+    current_src_op: Option<u32>,
 }
 
 impl EmitContext {
-    pub fn new(is_leaf: bool) -> Self {
+    pub fn new(is_leaf: bool, debug_info: bool) -> Self {
         Self {
             code: Vec::new(),
             relocs: Vec::new(),
+            debug_lines: Vec::new(),
             frame_size: 16,
             is_leaf,
+            debug_info,
+            current_src_op: None,
         }
     }
 
     fn push_u32(&mut self, w: u32) {
+        let offset = self.code.len() as u32;
         self.code.extend_from_slice(&w.to_le_bytes());
+        if self.debug_info && self.current_src_op.is_some() {
+            self.debug_lines.push((offset, self.current_src_op));
+        }
     }
 
     pub fn emit_prologue(&mut self) {
@@ -77,42 +96,62 @@ impl EmitContext {
     }
 
     pub fn emit_vinst(&mut self, inst: &VInst, alloc: &Allocation) -> Result<(), NativeError> {
+        self.current_src_op = inst.src_op();
         match inst {
-            VInst::Add32 { dst, src1, src2 } => {
+            VInst::Add32 {
+                dst, src1, src2, ..
+            } => {
                 let rd = Self::phys(alloc, *dst)? as u32;
                 let rs1 = Self::phys(alloc, *src1)? as u32;
                 let rs2 = Self::phys(alloc, *src2)? as u32;
                 self.push_u32(crate::isa::rv32::inst::encode_add(rd, rs1, rs2));
             }
-            VInst::Sub32 { dst, src1, src2 } => {
+            VInst::Sub32 {
+                dst, src1, src2, ..
+            } => {
                 let rd = Self::phys(alloc, *dst)? as u32;
                 let rs1 = Self::phys(alloc, *src1)? as u32;
                 let rs2 = Self::phys(alloc, *src2)? as u32;
                 self.push_u32(encode_sub(rd, rs1, rs2));
             }
-            VInst::Mul32 { dst, src1, src2 } => {
+            VInst::Mul32 {
+                dst, src1, src2, ..
+            } => {
                 let rd = Self::phys(alloc, *dst)? as u32;
                 let rs1 = Self::phys(alloc, *src1)? as u32;
                 let rs2 = Self::phys(alloc, *src2)? as u32;
                 self.push_u32(encode_mul(rd, rs1, rs2));
             }
-            VInst::Load32 { dst, base, offset } => {
+            VInst::Mov32 { dst, src, .. } => {
+                let rd = Self::phys(alloc, *dst)? as u32;
+                let rs = Self::phys(alloc, *src)? as u32;
+                if rd != rs {
+                    self.push_u32(encode_addi(rd, rs, 0));
+                }
+            }
+            VInst::Load32 {
+                dst, base, offset, ..
+            } => {
                 let rd = Self::phys(alloc, *dst)? as u32;
                 let rs1 = Self::phys(alloc, *base)? as u32;
                 self.push_u32(encode_lw(rd, rs1, *offset));
             }
-            VInst::Store32 { src, base, offset } => {
+            VInst::Store32 {
+                src, base, offset, ..
+            } => {
                 let rs2 = Self::phys(alloc, *src)? as u32;
                 let rs1 = Self::phys(alloc, *base)? as u32;
                 self.push_u32(encode_sw(rs2, rs1, *offset));
             }
-            VInst::IConst32 { dst, val } => {
+            VInst::IConst32 { dst, val, .. } => {
                 let rd = Self::phys(alloc, *dst)? as u32;
                 for w in iconst32_sequence(rd, *val) {
                     self.push_u32(w);
                 }
             }
-            VInst::Call { target, args, rets } => {
+            VInst::Call {
+                target, args, rets, ..
+            } => {
                 if args.len() > ARG_REGS.len() {
                     return Err(NativeError::TooManyArgs(args.len()));
                 }
@@ -142,7 +181,7 @@ impl EmitContext {
                     }
                 }
             }
-            VInst::Ret { vals } => {
+            VInst::Ret { vals, .. } => {
                 for (i, v) in vals.iter().enumerate() {
                     if i >= RET_REGS.len() {
                         return Err(NativeError::TooManyReturns(vals.len()));
@@ -154,10 +193,33 @@ impl EmitContext {
                     }
                 }
             }
-            VInst::Label(_) => {}
+            VInst::Label(..) => {}
         }
+        self.current_src_op = None;
         Ok(())
     }
+}
+
+/// Emit one function to RV32 bytes (and relocations). Used by ELF writer and debug assembly.
+pub fn emit_function_bytes(
+    func: &lpir::IrFunction,
+    float_mode: lpir::FloatMode,
+    debug_info: bool,
+) -> Result<EmittedFunction, NativeError> {
+    let vinsts = crate::lower::lower_ops(func, float_mode)?;
+    let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts)?;
+    let is_leaf = !vinsts.iter().any(|v| v.is_call());
+    let mut ctx = EmitContext::new(is_leaf, debug_info);
+    ctx.emit_prologue();
+    for v in &vinsts {
+        ctx.emit_vinst(v, &alloc)?;
+    }
+    ctx.emit_epilogue();
+    Ok(EmittedFunction {
+        code: ctx.code,
+        relocs: ctx.relocs,
+        debug_lines: ctx.debug_lines,
+    })
 }
 
 /// Append all local functions from `ir` into one RV32 ELF relocatable object.
@@ -183,15 +245,8 @@ pub fn emit_module_elf(
     let mut undefined_syms: BTreeMap<String, SymbolId> = BTreeMap::new();
 
     for func in &ir.functions {
-        let vinsts = crate::lower::lower_ops(&func.body, float_mode)?;
-        let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts)?;
-        let is_leaf = !vinsts.iter().any(|v| v.is_call());
-        let mut ctx = EmitContext::new(is_leaf);
-        ctx.emit_prologue();
-        for v in &vinsts {
-            ctx.emit_vinst(v, &alloc)?;
-        }
-        ctx.emit_epilogue();
+        let emitted = emit_function_bytes(func, float_mode, false)?;
+        let ctx = emitted;
 
         let func_off = obj.append_section_data(text, &ctx.code, 4);
         let scope = if func.is_entry {
@@ -278,19 +333,19 @@ mod tests {
                     rhs: VReg(2),
                 },
                 Op::Return {
-                    values: lpir::types::VRegRange { start: 3, count: 1 },
+                    values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],
-            vreg_pool: vec![],
+            vreg_pool: vec![VReg(3)],
         }
     }
 
     #[test]
     fn emit_leaf_prologue_epilogue_size() {
         let f = leaf_add();
-        let v = crate::lower::lower_ops(&f.body, lpir::FloatMode::Q32).expect("lower");
+        let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
-        let mut ctx = EmitContext::new(true);
+        let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue();
         for i in &v {
             ctx.emit_vinst(i, &a).expect("emit");
@@ -298,6 +353,16 @@ mod tests {
         ctx.emit_epilogue();
         assert!(ctx.code.len() >= 12);
         assert!(ctx.relocs.is_empty());
+    }
+
+    #[test]
+    fn debug_lines_populated_when_enabled() {
+        let f = leaf_add();
+        let e = emit_function_bytes(&f, lpir::FloatMode::Q32, true).expect("emit");
+        assert!(
+            !e.debug_lines.is_empty(),
+            "expected per-instruction debug lines"
+        );
     }
 
     #[test]
@@ -317,14 +382,14 @@ mod tests {
                     rhs: VReg(2),
                 },
                 Op::Return {
-                    values: lpir::types::VRegRange { start: 3, count: 1 },
+                    values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],
-            vreg_pool: vec![],
+            vreg_pool: vec![VReg(3)],
         };
-        let v = crate::lower::lower_ops(&f.body, lpir::FloatMode::Q32).expect("lower");
+        let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
-        let mut ctx = EmitContext::new(false);
+        let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue();
         for i in &v {
             ctx.emit_vinst(i, &a).expect("emit");

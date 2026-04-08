@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, heap_summary, mem_profile, serve, shader_lpir, upload};
+use commands::{create, dev, heap_summary, mem_profile, serve, shader_lpir, shader_rv32, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -87,6 +87,16 @@ enum Cli {
         #[arg(long)]
         skip_validate: bool,
     },
+    /// Compile a GLSL file to annotated RV32 assembly (`lpvm-native`, stdout).
+    ShaderRv32 {
+        path: std::path::PathBuf,
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+        #[arg(long, default_value = "q32")]
+        float_mode: String,
+        #[arg(long)]
+        hex: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -125,6 +135,17 @@ fn main() -> Result<()> {
             path,
             stats,
             skip_validate,
+        }),
+        Cli::ShaderRv32 {
+            path,
+            output,
+            float_mode,
+            hex,
+        } => shader_rv32::handle_shader_rv32(shader_rv32::ShaderRv32Args {
+            path,
+            output,
+            float_mode,
+            hex,
         }),
     }
 }

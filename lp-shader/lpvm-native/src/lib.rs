@@ -7,6 +7,7 @@
 
 extern crate alloc;
 
+pub mod debug_asm;
 pub mod engine;
 pub mod error;
 pub mod instance;
@@ -17,9 +18,11 @@ pub mod regalloc;
 pub mod types;
 pub mod vinst;
 
+pub use debug_asm::compile_module_asm_text;
 pub use engine::{NativeCompileOptions, NativeEngine};
 pub use error::{LowerError, NativeError};
 pub use instance::NativeInstance;
+pub use isa::rv32::debug::disasm::DisasmOptions;
 pub use isa::{CodeBlob, IsaBackend, Rv32Backend};
 pub use lower::{lower_op, lower_ops};
 pub use module::NativeModule;
