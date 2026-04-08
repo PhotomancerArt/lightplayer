@@ -5,10 +5,11 @@ extern crate alloc;
 use crate::error::ServerError;
 use crate::handlers;
 use crate::project_manager::ProjectManager;
-use alloc::{boxed::Box, format, rc::Rc, string::ToString, vec::Vec};
+use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
+use lp_engine::LpGraphics;
 use lp_model::{LpPath, LpPathBuf, Message};
 use lp_shared::fs::{FsChange, LpFs};
 use lp_shared::output::OutputProvider;
@@ -36,6 +37,8 @@ pub struct LpServer {
     memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
+    /// Shader backend (Cranelift, WASM, …).
+    graphics: Arc<dyn LpGraphics>,
 }
 
 impl LpServer {
@@ -55,12 +58,20 @@ impl LpServer {
     /// use lp_server::LpServer;
     /// use lp_shared::fs::LpFsStd;
     /// use lp_shared::output::MemoryOutputProvider;
-    /// use alloc::{boxed::Box, rc::Rc};
+    /// use alloc::{boxed::Box, rc::Rc, sync::Arc};
     /// use core::cell::RefCell;
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None, None);
+    /// let graphics = Arc::new(lp_engine::CraneliftGraphics::new());
+    /// let server = LpServer::new(
+    ///     output_provider,
+    ///     base_fs,
+    ///     "projects/".as_path(),
+    ///     None,
+    ///     None,
+    ///     graphics,
+    /// );
     /// ```
     pub fn new(
         output_provider: Rc<RefCell<dyn OutputProvider>>,
@@ -68,6 +79,7 @@ impl LpServer {
         projects_base_dir: &LpPath,
         memory_stats: Option<MemoryStatsFn>,
         time_provider: Option<Rc<dyn TimeProvider>>,
+        graphics: Arc<dyn LpGraphics>,
     ) -> Self {
         let project_manager = ProjectManager::new(projects_base_dir);
         Self {
@@ -77,6 +89,7 @@ impl LpServer {
             last_frame_time_us: RefCell::new(None),
             memory_stats,
             time_provider,
+            graphics,
         }
     }
 
@@ -103,12 +116,20 @@ impl LpServer {
     /// use lp_server::LpServer;
     /// use lp_shared::fs::LpFsMemory;
     /// use lp_shared::output::MemoryOutputProvider;
-    /// use alloc::{boxed::Box, rc::Rc, vec::Vec};
+    /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
     /// use core::cell::RefCell;
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsMemory::new());
-    /// let mut server = LpServer::new(output_provider, base_fs, "projects/".as_path(), None, None);
+    /// let graphics = Arc::new(lp_engine::CraneliftGraphics::new());
+    /// let mut server = LpServer::new(
+    ///     output_provider,
+    ///     base_fs,
+    ///     "projects/".as_path(),
+    ///     None,
+    ///     None,
+    ///     graphics,
+    /// );
     /// let incoming = vec![/* messages */];
     /// let responses = server.tick(16, incoming).unwrap();
     /// ```
@@ -253,6 +274,7 @@ impl LpServer {
                         &self.output_provider,
                         self.memory_stats.as_ref(),
                         self.time_provider.clone(),
+                        self.graphics.clone(),
                         client_msg,
                         theoretical_fps,
                     ) {
@@ -329,6 +351,7 @@ impl LpServer {
             self.output_provider.clone(),
             self.memory_stats,
             self.time_provider.clone(),
+            self.graphics.clone(),
         )
     }
 

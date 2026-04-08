@@ -94,12 +94,12 @@ mod flash_storage;
 #[cfg(not(feature = "memory_fs"))]
 mod lp_fs_flash;
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc, sync::Arc};
 use core::cell::RefCell;
 
 use board::esp32c6::init::{init_board, start_runtime};
 use lp_model::path::AsLpPath;
-use lp_server::LpServer;
+use lp_server::{CraneliftGraphics, LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
@@ -296,12 +296,14 @@ async fn main(spawner: embassy_executor::Spawner) {
         // Create server (with time provider for shader comp timing)
         esp_println::println!("[INIT] Creating LpServer instance...");
         let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+        let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
         let mut server = LpServer::new(
             output_provider,
             base_fs,
             "projects/".as_path(),
             Some(esp32_memory_stats),
             Some(time_provider_rc),
+            graphics,
         );
         esp_println::println!("[INIT] LpServer created");
 

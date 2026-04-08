@@ -9,7 +9,7 @@ rust-version.workspace = true
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
-lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"] }
+lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery", "cranelift"] }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false }
 lp-model = { path = "../../lp-core/lp-model", default-features = false }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }

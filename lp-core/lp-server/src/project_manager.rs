@@ -9,11 +9,12 @@ use alloc::{
     format,
     rc::Rc,
     string::{String, ToString},
+    sync::Arc,
     vec::Vec,
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lp_engine::MemoryStatsFn;
+use lp_engine::{LpGraphics, MemoryStatsFn};
 use lp_model::project::ProjectHandle;
 use lp_model::{LpPath, LpPathBuf};
 use lp_shared::fs::LpFs;
@@ -67,6 +68,7 @@ impl ProjectManager {
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
         time_provider: Option<Rc<dyn TimeProvider>>,
+        graphics: Arc<dyn LpGraphics>,
     ) -> Result<ProjectHandle, ServerError> {
         // Extract project name from path
         let name = self.extract_project_name_from_path(path.as_str())?;
@@ -104,6 +106,7 @@ impl ProjectManager {
             output_provider,
             memory_stats,
             time_provider,
+            graphics,
         )?;
 
         // Auto-initialize the project runtime

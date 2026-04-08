@@ -81,12 +81,15 @@ fn test_server_startup_with_memory_filesystem() {
     // Create server with memory filesystem
     let fs = LpFsMemory::new();
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: std::sync::Arc<dyn lp_server::LpGraphics> =
+        std::sync::Arc::new(lp_server::CraneliftGraphics::new());
     let _server = LpServer::new(
         output_provider,
         Box::new(fs),
         "projects".as_path(),
         None,
         None,
+        graphics,
     );
 
     // Server created successfully

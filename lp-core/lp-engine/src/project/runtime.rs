@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::gfx::LpGraphics;
 use crate::nodes::{FixtureRuntime, NodeRuntime, OutputRuntime, ShaderRuntime, TextureRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::frame_time::FrameTime;
@@ -7,6 +8,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use log;
@@ -48,6 +50,8 @@ pub struct ProjectRuntime {
     pub memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp duration). ESP32/emu pass, others None.
     pub time_provider: Option<Rc<dyn TimeProvider>>,
+    /// Shader / graphics backend (Cranelift, WASM, …).
+    pub graphics: Arc<dyn LpGraphics>,
 }
 
 /// Node entry in runtime
@@ -92,6 +96,7 @@ impl ProjectRuntime {
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
         time_provider: Option<Rc<dyn TimeProvider>>,
+        graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, Error> {
         let _config = crate::project::loader::load_from_filesystem(&*fs.borrow())?;
 
@@ -104,6 +109,7 @@ impl ProjectRuntime {
             next_handle: 1,
             memory_stats,
             time_provider,
+            graphics,
         })
     }
 
@@ -348,7 +354,7 @@ impl ProjectRuntime {
                         Box::new(tex_runtime)
                     }
                     NodeKind::Shader => {
-                        let mut shader_runtime = ShaderRuntime::new(handle);
+                        let mut shader_runtime = ShaderRuntime::new(handle, self.graphics.clone());
                         if let Some(config) = shader_config {
                             shader_runtime.set_config(config);
                         }

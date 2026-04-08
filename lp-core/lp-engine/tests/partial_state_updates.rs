@@ -1,8 +1,9 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::cell::RefCell;
-use lp_engine::{MemoryOutputProvider, ProjectRuntime};
+use lp_engine::{CraneliftGraphics, LpGraphics, MemoryOutputProvider, ProjectRuntime};
 use lp_model::AsLpPath;
 use lp_model::nodes::NodeSpecifier;
 use lp_model::nodes::fixture::{ColorOrder, FixtureConfig, MappingConfig, PathSpec, RingOrder};
@@ -53,9 +54,11 @@ fn test_partial_state_updates() {
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
 
     // Start runtime
-    let mut runtime = ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None).unwrap();
+    let mut runtime =
+        ProjectRuntime::new(fs.clone(), output_provider.clone(), None, None, graphics).unwrap();
     runtime.load_nodes().unwrap();
     runtime.init_nodes().unwrap();
     runtime.ensure_all_nodes_initialized().unwrap();

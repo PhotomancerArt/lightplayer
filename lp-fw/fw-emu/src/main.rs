@@ -15,14 +15,14 @@ mod serial;
 mod server_loop;
 mod time;
 
-use alloc::rc::Rc;
+use alloc::{rc::Rc, sync::Arc};
 use core::cell::RefCell;
 
 use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
 use lp_model::AsLpPath;
 use lp_riscv_emu_guest::allocator;
-use lp_server::LpServer;
+use lp_server::{CraneliftGraphics, LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 use lps_builtins::host_debug;
@@ -98,12 +98,14 @@ pub extern "C" fn _lp_main() -> ! {
 
     // Create server (with time provider for shader comp timing)
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
     let server = LpServer::new(
         output_provider,
         base_fs,
         "projects/".as_path(),
         None,
         Some(time_provider_rc),
+        graphics,
     );
 
     let transport = SerialTransport::new(serial_io);

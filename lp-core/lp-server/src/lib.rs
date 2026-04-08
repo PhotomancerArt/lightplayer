@@ -18,6 +18,9 @@ pub mod server;
 pub mod template;
 
 pub use error::ServerError;
+#[cfg(feature = "cranelift")]
+pub use lp_engine::CraneliftGraphics;
+pub use lp_engine::{LpGraphics, LpShader, ShaderCompileOptions};
 pub use project::Project;
 pub use project_manager::ProjectManager;
 pub use server::{LpServer, MemoryStatsFn};

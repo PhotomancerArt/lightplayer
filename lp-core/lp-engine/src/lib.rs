@@ -12,12 +12,16 @@
 extern crate alloc;
 
 pub mod error;
+pub mod gfx;
 pub mod nodes;
 pub mod output;
 pub mod project;
 pub mod runtime;
 
 pub use error::Error;
+#[cfg(feature = "cranelift")]
+pub use gfx::CraneliftGraphics;
+pub use gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 pub use nodes::{NodeConfig, NodeRuntime};
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
 pub use project::{MemoryStatsFn, ProjectRuntime};

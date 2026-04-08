@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::nodes::{NodeConfig, NodeRuntime};
 use crate::output::OutputProvider;
 use crate::runtime::contexts::{NodeInitContext, RenderContext, TextureHandle};
@@ -6,6 +7,7 @@ use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
+    sync::Arc,
 };
 #[cfg(feature = "panic-recovery")]
 use core::panic::AssertUnwindSafe;
@@ -20,38 +22,31 @@ use lp_shared::fs::fs_event::FsChange;
 #[cfg(feature = "panic-recovery")]
 use unwinding::panic::catch_unwind;
 
-use lpvm::VmContextHeader;
-use lpvm_cranelift::{CompileOptions, FloatMode, JitModule, MemoryStrategy, Q32Options, jit};
-
 /// Default max semantic errors forwarded from the GLSL → LPIR front-end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
-fn map_add_sub(m: AddSubMode) -> lpvm_cranelift::AddSubMode {
-    match m {
-        AddSubMode::Saturating => lpvm_cranelift::AddSubMode::Saturating,
-        AddSubMode::Wrapping => lpvm_cranelift::AddSubMode::Wrapping,
-    }
-}
-
-fn map_mul(m: MulMode) -> lpvm_cranelift::MulMode {
-    match m {
-        MulMode::Saturating => lpvm_cranelift::MulMode::Saturating,
-        MulMode::Wrapping => lpvm_cranelift::MulMode::Wrapping,
-    }
-}
-
-fn map_div(m: DivMode) -> lpvm_cranelift::DivMode {
-    match m {
-        DivMode::Saturating => lpvm_cranelift::DivMode::Saturating,
-        DivMode::Reciprocal => lpvm_cranelift::DivMode::Reciprocal,
+fn map_model_q32_options(opts: &lp_model::glsl_opts::GlslOpts) -> lps_q32::q32_options::Q32Options {
+    lps_q32::q32_options::Q32Options {
+        add_sub: match opts.add_sub {
+            AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
+            AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
+        },
+        mul: match opts.mul {
+            MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
+            MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
+        },
+        div: match opts.div {
+            DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
+            DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
+        },
     }
 }
 
 /// Shader node runtime
 pub struct ShaderRuntime {
     config: Option<ShaderConfig>,
-    jit_module: Option<JitModule>,
-    direct_call: Option<lpvm_cranelift::DirectCall>,
+    graphics: Arc<dyn LpGraphics>,
+    shader: Option<Box<dyn LpShader>>,
     texture_handle: Option<TextureHandle>,
     compilation_error: Option<String>,
     pub state: ShaderState,
@@ -60,11 +55,11 @@ pub struct ShaderRuntime {
 }
 
 impl ShaderRuntime {
-    pub fn new(node_handle: NodeHandle) -> Self {
+    pub fn new(node_handle: NodeHandle, graphics: Arc<dyn LpGraphics>) -> Self {
         Self {
             config: None,
-            jit_module: None,
-            direct_call: None,
+            graphics,
+            shader: None,
             texture_handle: None,
             compilation_error: None,
             state: ShaderState::new(FrameId::default()),
@@ -125,30 +120,28 @@ impl NodeRuntime for ShaderRuntime {
             message: String::from("Texture handle not resolved"),
         })?;
 
-        let dc = self.direct_call.as_ref().ok_or_else(|| Error::Other {
+        let shader = self.shader.as_mut().ok_or_else(|| Error::Other {
             message: String::from(
-                "Shader has no direct call for `main` (compilation may have omitted fast path)",
+                "Shader is not compiled (compilation may have failed or memory was shed)",
             ),
         })?;
 
+        if !shader.has_render() {
+            return Err(Error::Other {
+                message: String::from("Shader has no render() entry point"),
+            });
+        }
+
         let time = ctx.get_time();
         let texture = ctx.get_texture_mut(texture_handle)?;
-        let width = texture.width();
-        let height = texture.height();
-
-        Self::render_direct_call(dc, width, height, time, texture)?;
-        Ok(())
+        shader.render(texture, time)
     }
 
     fn shed_optional_buffers(
         &mut self,
         _output_provider: Option<&dyn OutputProvider>,
     ) -> Result<(), Error> {
-        self.jit_module = None;
-        self.direct_call = None;
-        // Keep `glsl_code` for the debug UI and for peers: `handle_fs_changes` sheds *all* nodes
-        // before one shader's GLSL edit, but only that node receives `handle_fs_change` — clearing
-        // source here would leave other shaders blank until reloaded.
+        self.shader = None;
         Ok(())
     }
 
@@ -233,8 +226,7 @@ impl NodeRuntime for ShaderRuntime {
                     let _ = self.load_and_compile_shader(&config, ctx);
                 }
                 lp_shared::fs::fs_event::ChangeType::Delete => {
-                    self.jit_module = None;
-                    self.direct_call = None;
+                    self.shader = None;
                     let error_msg = "GLSL file deleted".to_string();
                     self.compilation_error = Some(error_msg.clone());
                     let frame_id = FrameId::default();
@@ -249,58 +241,6 @@ impl NodeRuntime for ShaderRuntime {
 }
 
 impl ShaderRuntime {
-    fn render_direct_call(
-        dc: &lpvm_cranelift::DirectCall,
-        width: u32,
-        height: u32,
-        time: f32,
-        texture: &mut lp_shared::Texture,
-    ) -> Result<(), Error> {
-        const Q32_SCALE: i32 = 65536;
-        let time_q32 = (time * 65536.0 + 0.5) as i32;
-        let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
-        let vmctx = VmContextHeader::default();
-        let vmctx_ptr = core::ptr::from_ref(&vmctx).cast::<u8>();
-
-        for y in 0..height {
-            for x in 0..width {
-                let frag_coord_q32 = [(x as i32) * Q32_SCALE, (y as i32) * Q32_SCALE];
-                let args = [
-                    frag_coord_q32[0],
-                    frag_coord_q32[1],
-                    output_size_q32[0],
-                    output_size_q32[1],
-                    time_q32,
-                ];
-                let mut rgba_q32 = [0i32; 4];
-                unsafe {
-                    dc.call_i32_buf(vmctx_ptr, &args, &mut rgba_q32)
-                        .map_err(|e| Error::Other {
-                            message: format!("Shader direct call failed: {e}"),
-                        })?;
-                }
-
-                let clamp_q32 = |v: i32| -> i32 {
-                    if v < 0 {
-                        0
-                    } else if v > Q32_SCALE {
-                        Q32_SCALE
-                    } else {
-                        v
-                    }
-                };
-
-                let r = ((clamp_q32(rgba_q32[0]) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let g = ((clamp_q32(rgba_q32[1]) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let b = ((clamp_q32(rgba_q32[2]) as i64 * 65535) / Q32_SCALE as i64) as u16;
-                let a = ((clamp_q32(rgba_q32[3]) as i64 * 65535) / Q32_SCALE as i64) as u16;
-
-                texture.set_pixel_u16(x, y, [r, g, b, a]);
-            }
-        }
-        Ok(())
-    }
-
     fn resolve_texture_handle(
         &mut self,
         config: &ShaderConfig,
@@ -364,39 +304,34 @@ impl ShaderRuntime {
         let q32_options = self
             .config
             .as_ref()
-            .map(|c| Q32Options {
-                add_sub: map_add_sub(c.glsl_opts.add_sub),
-                mul: map_mul(c.glsl_opts.mul),
-                div: map_div(c.glsl_opts.div),
-            })
+            .map(|c| map_model_q32_options(&c.glsl_opts))
             .unwrap_or_default();
 
-        let options = CompileOptions {
-            float_mode: FloatMode::Q32,
+        let compile_opts = ShaderCompileOptions {
             q32_options,
-            // Match host `GlslOptions`: `memory_optimized == false` equivalent.
-            memory_strategy: MemoryStrategy::Default,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
         };
 
-        self.jit_module = None;
-        self.direct_call = None;
+        self.shader = None;
+        self.compilation_error = None;
 
         #[cfg(feature = "panic-recovery")]
-        let compile_result: Result<JitModule, String> =
-            match catch_unwind(AssertUnwindSafe(|| jit(glsl_source, &options))) {
+        let compile_result: Result<Box<dyn LpShader>, String> =
+            match catch_unwind(AssertUnwindSafe(|| {
+                self.graphics.compile_shader(glsl_source, &compile_opts)
+            })) {
                 Ok(inner) => inner.map_err(|e| format!("{e}")),
                 Err(_) => Err(String::from("OOM during shader compilation")),
             };
         #[cfg(not(feature = "panic-recovery"))]
-        let compile_result: Result<JitModule, String> =
-            jit(glsl_source, &options).map_err(|e| format!("{e}"));
+        let compile_result: Result<Box<dyn LpShader>, String> = self
+            .graphics
+            .compile_shader(glsl_source, &compile_opts)
+            .map_err(|e| format!("{e}"));
 
         match compile_result {
-            Ok(module) => {
-                let dc = module.direct_call("render");
-                self.direct_call = dc;
-                self.jit_module = Some(module);
+            Ok(shader) => {
+                self.shader = Some(shader);
                 self.compilation_error = None;
                 let frame_id = FrameId::default();
                 self.state.error.set(frame_id, None);
@@ -404,8 +339,7 @@ impl ShaderRuntime {
             }
             Err(e) => {
                 self.compilation_error = Some(e.clone());
-                self.jit_module = None;
-                self.direct_call = None;
+                self.shader = None;
                 let frame_id = FrameId::default();
                 self.state.error.set(frame_id, Some(e.clone()));
                 log::warn!(
@@ -428,7 +362,6 @@ impl ShaderRuntime {
     ) -> Result<(), Error> {
         let glsl_source = self.load_glsl_source(config, ctx)?;
         let frame_id = FrameId::default();
-        // Expose source to clients even when compilation fails or after a global shed dropped JIT state.
         self.state.glsl_code.set(frame_id, glsl_source.clone());
 
         let start_ms = ctx.now_ms();
@@ -450,14 +383,15 @@ impl ShaderRuntime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cranelift"))]
 mod tests {
     use super::*;
 
     #[test]
     fn test_shader_runtime_creation() {
         let handle = lp_model::NodeHandle::new(0);
-        let runtime = ShaderRuntime::new(handle);
+        let graphics: Arc<dyn LpGraphics> = Arc::new(crate::CraneliftGraphics::new());
+        let runtime = ShaderRuntime::new(handle, graphics);
         let _boxed: alloc::boxed::Box<dyn NodeRuntime> = alloc::boxed::Box::new(runtime);
     }
 }
