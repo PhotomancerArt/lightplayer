@@ -7,6 +7,9 @@ use alloc::vec::Vec;
 
 pub use greedy::GreedyAlloc;
 
+use lpir::IrFunction;
+
+use crate::error::NativeError;
 use crate::isa::rv32::abi::{CALLER_SAVED, PhysReg};
 use crate::types::NativeType;
 use crate::vinst::VInst;
@@ -23,7 +26,15 @@ impl VRegInfo {
     }
 }
 
-/// Result of register allocation (M1: greedy placement + call clobber set).
+impl From<&IrFunction> for VRegInfo {
+    fn from(f: &IrFunction) -> Self {
+        Self {
+            types: f.vreg_types.iter().map(|t| NativeType::from(*t)).collect(),
+        }
+    }
+}
+
+/// Result of register allocation (greedy placement + call clobber set).
 #[derive(Debug, Clone)]
 pub struct Allocation {
     /// `vreg.0` as index -> physical register if assigned.
@@ -37,5 +48,5 @@ pub fn clobber_set_for_call() -> BTreeSet<PhysReg> {
 }
 
 pub trait RegAlloc {
-    fn allocate(&self, vinsts: &[VInst], vreg_info: &VRegInfo) -> Allocation;
+    fn allocate(&self, func: &IrFunction, vinsts: &[VInst]) -> Result<Allocation, NativeError>;
 }

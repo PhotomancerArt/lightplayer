@@ -1,6 +1,7 @@
-//! [`LpvmModule`] — compiled artifact (M3 will hold code bytes).
+//! [`LpvmModule`] — compiled ELF object (`.o`) for linking / emulation.
 
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lps_shared::LpsModuleSig;
 use lpvm::LpvmModule;
@@ -8,16 +9,25 @@ use lpvm::LpvmModule;
 use crate::error::NativeError;
 use crate::instance::NativeInstance;
 
-/// Compiled module placeholder.
+/// Compiled module: RV32 ELF relocatable object + signature metadata.
 #[derive(Debug)]
 pub struct NativeModule {
+    /// ELF object bytes (`.o`), may contain multiple `.text` symbols.
+    pub elf: Vec<u8>,
     signatures: LpsModuleSig,
 }
 
 impl NativeModule {
-    /// Construct a module shell (for tests; [`NativeEngine::compile`] returns `Err` until M2).
+    /// Construct a module shell (for tests).
     pub fn new_for_test(signatures: LpsModuleSig) -> Self {
-        Self { signatures }
+        Self {
+            elf: Vec::new(),
+            signatures,
+        }
+    }
+
+    pub(crate) fn from_parts(elf: Vec<u8>, signatures: LpsModuleSig) -> Self {
+        Self { elf, signatures }
     }
 }
 

@@ -1,7 +1,7 @@
 //! LPIR → custom RISC-V backend (`lpvm-native`).
 //!
-//! M1 provides crate structure, [`VInst`], lowering, RV32 ABI contracts, greedy regalloc, and
-//! [`LpvmEngine`] stubs. Instruction emission and linking are M2+.
+//! M1: [`VInst`], lowering, RV32 ABI, greedy regalloc. M2: RV32 encoding, emission, ELF `.o` output
+//! ([`crate::isa::rv32::emit::emit_module_elf`]).
 
 #![no_std]
 

@@ -26,6 +26,13 @@ impl core::error::Error for LowerError {}
 pub enum NativeError {
     NotYetImplemented(String),
     Lower(LowerError),
+    EmptyModule,
+    ImportsNotSupportedYet,
+    TooManyVRegs { count: usize, max: usize },
+    TooManyArgs(usize),
+    TooManyReturns(usize),
+    UnassignedVReg(u32),
+    ObjectWrite(String),
 }
 
 impl fmt::Display for NativeError {
@@ -33,6 +40,20 @@ impl fmt::Display for NativeError {
         match self {
             NativeError::NotYetImplemented(s) => write!(f, "not yet implemented: {s}"),
             NativeError::Lower(e) => write!(f, "{e}"),
+            NativeError::EmptyModule => write!(f, "empty LPIR module"),
+            NativeError::ImportsNotSupportedYet => {
+                write!(f, "lpvm-native M2: imports are not supported yet")
+            }
+            NativeError::TooManyVRegs { count, max } => {
+                write!(
+                    f,
+                    "too many vregs for greedy allocator: {count} (max {max})"
+                )
+            }
+            NativeError::TooManyArgs(n) => write!(f, "too many arguments for RV32 ABI: {n}"),
+            NativeError::TooManyReturns(n) => write!(f, "too many return values: {n}"),
+            NativeError::UnassignedVReg(v) => write!(f, "unassigned vreg {v}"),
+            NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
         }
     }
 }

@@ -55,6 +55,16 @@ Key relocation types for builtin calls:
 - `R_RISCV_CALL_PLT` — auipc+jalr pair for 32-bit PC-relative calls
 - `R_RISCV_JAL` — 20-bit PC-relative jump (simpler, ±1MB range)
 
+## `object` crate (ELF writer, no_std)
+
+`lpvm-native` uses:
+
+```toml
+object = { version = "0.37", default-features = false, features = ["write_core", "elf"] }
+```
+
+`write_core` alone does not enable ELF; add the `elf` feature. This keeps `std` off while writing relocatable `.o` files.
+
 ## External References
 
 - **RISC-V Spec v2.2**: https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf

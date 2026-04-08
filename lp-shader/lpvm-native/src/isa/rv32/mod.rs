@@ -2,5 +2,6 @@
 
 pub mod abi;
 pub mod emit;
+pub mod inst;
 
 pub use abi::*;

@@ -4038,6 +4038,7 @@ dependencies = [
  "lpir",
  "lps-shared",
  "lpvm",
+ "object",
 ]
 
 [[package]]

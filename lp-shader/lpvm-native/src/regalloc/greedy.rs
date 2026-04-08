@@ -1,10 +1,13 @@
-//! Greedy round-robin allocator over [`crate::isa::rv32::abi::ALLOCA_REGS`].
+//! Greedy allocator: pin parameters to a0–a7, assign defs to [`crate::isa::rv32::abi::ALLOCA_REGS`].
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
-use super::{Allocation, RegAlloc, VRegInfo};
-use crate::isa::rv32::abi::{ALLOCA_REGS, CALLER_SAVED, PhysReg};
+use lpir::IrFunction;
+
+use super::{Allocation, RegAlloc};
+use crate::error::NativeError;
+use crate::isa::rv32::abi::{ALLOCA_REGS, ARG_REGS, CALLER_SAVED, PhysReg};
 use crate::vinst::VInst;
 
 pub struct GreedyAlloc;
@@ -22,7 +25,49 @@ impl Default for GreedyAlloc {
 }
 
 impl RegAlloc for GreedyAlloc {
-    fn allocate(&self, vinsts: &[VInst], vreg_info: &VRegInfo) -> Allocation {
+    fn allocate(&self, func: &IrFunction, vinsts: &[VInst]) -> Result<Allocation, NativeError> {
+        let n = func.vreg_types.len();
+        let slots = func.total_param_slots() as usize;
+        if slots > ARG_REGS.len() {
+            return Err(NativeError::TooManyArgs(slots));
+        }
+
+        let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
+        for i in 0..slots {
+            if i < n {
+                vreg_to_phys[i] = Some(ARG_REGS[i]);
+            }
+        }
+
+        let mut next_alloca = 0usize;
+        for inst in vinsts {
+            for v in inst.defs() {
+                let vi = v.0 as usize;
+                if vi >= n {
+                    continue;
+                }
+                if vreg_to_phys[vi].is_none() {
+                    if next_alloca >= ALLOCA_REGS.len() {
+                        return Err(NativeError::TooManyVRegs {
+                            count: next_alloca + 1,
+                            max: ALLOCA_REGS.len(),
+                        });
+                    }
+                    vreg_to_phys[vi] = Some(ALLOCA_REGS[next_alloca]);
+                    next_alloca += 1;
+                }
+            }
+        }
+
+        for inst in vinsts {
+            for v in inst.uses() {
+                let vi = v.0 as usize;
+                if vi < n && vreg_to_phys[vi].is_none() {
+                    return Err(NativeError::UnassignedVReg(v.0));
+                }
+            }
+        }
+
         let mut clobbered: BTreeSet<PhysReg> = BTreeSet::new();
         for inst in vinsts {
             if inst.is_call() {
@@ -30,50 +75,44 @@ impl RegAlloc for GreedyAlloc {
             }
         }
 
-        let n = vreg_info.count();
-        let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
-
-        let mut next = 0usize;
-        for inst in vinsts {
-            for v in inst.defs() {
-                let i = v.0 as usize;
-                if i >= vreg_to_phys.len() {
-                    continue;
-                }
-                if vreg_to_phys[i].is_none() {
-                    let phys = ALLOCA_REGS[next % ALLOCA_REGS.len()];
-                    next += 1;
-                    vreg_to_phys[i] = Some(phys);
-                }
-            }
-        }
-
-        Allocation {
+        Ok(Allocation {
             vreg_to_phys,
             clobbered,
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
+    use alloc::vec;
+
+    use lpir::VReg;
 
     use super::*;
-    use crate::types::NativeType;
     use crate::vinst::SymbolRef;
 
     #[test]
     fn call_clobbers_all_caller_saved() {
+        let f = IrFunction {
+            name: String::from("f"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 0,
+            return_types: vec![],
+            vreg_types: vec![],
+            slots: vec![],
+            body: vec![],
+            vreg_pool: vec![],
+        };
         let vinsts = alloc::vec![VInst::Call {
             target: SymbolRef {
-                name: String::from("f"),
+                name: String::from("g"),
             },
             args: Vec::new(),
             rets: Vec::new(),
         }];
-        let info = VRegInfo { types: Vec::new() };
-        let a = GreedyAlloc::new().allocate(&vinsts, &info);
+        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
         for reg in CALLER_SAVED {
             assert!(a.clobbered.contains(reg), "x{reg} not clobbered");
         }
@@ -82,15 +121,25 @@ mod tests {
     #[test]
     fn callee_saved_not_clobbered_by_call() {
         use crate::isa::rv32::abi::CALLEE_SAVED;
+        let f = IrFunction {
+            name: String::from("f"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 0,
+            return_types: vec![],
+            vreg_types: vec![],
+            slots: vec![],
+            body: vec![],
+            vreg_pool: vec![],
+        };
         let vinsts = alloc::vec![VInst::Call {
             target: SymbolRef {
-                name: String::from("f"),
+                name: String::from("g"),
             },
             args: Vec::new(),
             rets: Vec::new(),
         }];
-        let info = VRegInfo { types: Vec::new() };
-        let a = GreedyAlloc::new().allocate(&vinsts, &info);
+        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
         for reg in CALLEE_SAVED {
             if !CALLER_SAVED.contains(reg) {
                 assert!(
@@ -103,26 +152,35 @@ mod tests {
 
     #[test]
     fn assigns_defs_round_robin() {
-        use lpir::VReg;
-        let v0 = VReg(0);
-        let v1 = VReg(1);
+        let f = IrFunction {
+            name: String::from("f"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 0,
+            return_types: vec![],
+            vreg_types: vec![lpir::IrType::I32; 4],
+            slots: vec![],
+            body: vec![],
+            vreg_pool: vec![],
+        };
         let vinsts = alloc::vec![
-            VInst::Add32 {
-                dst: v0,
-                src1: v0,
-                src2: v1,
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 1,
+            },
+            VInst::IConst32 {
+                dst: VReg(2),
+                val: 2,
             },
             VInst::Add32 {
-                dst: v1,
-                src1: v0,
-                src2: v1,
+                dst: VReg(3),
+                src1: VReg(1),
+                src2: VReg(2),
             },
         ];
-        let info = VRegInfo {
-            types: alloc::vec![NativeType::I32, NativeType::I32],
-        };
-        let a = GreedyAlloc::new().allocate(&vinsts, &info);
-        assert!(a.vreg_to_phys[0].is_some());
+        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
         assert!(a.vreg_to_phys[1].is_some());
+        assert!(a.vreg_to_phys[2].is_some());
+        assert!(a.vreg_to_phys[3].is_some());
     }
 }

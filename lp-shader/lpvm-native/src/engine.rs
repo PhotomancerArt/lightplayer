@@ -1,12 +1,11 @@
-//! [`LpvmEngine`] implementation (compile is M2+).
-
-use alloc::string::String;
+//! [`LpvmEngine`] — compile LPIR module to RV32 ELF.
 
 use lpir::IrModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{BumpLpvmMemory, LpvmEngine, LpvmMemory};
 
 use crate::error::NativeError;
+use crate::isa::rv32::emit::emit_module_elf;
 use crate::module::NativeModule;
 
 /// Backend-specific compile options (not shared with Cranelift / WASM).
@@ -26,7 +25,7 @@ impl Default for NativeCompileOptions {
 /// Default bump arena size for shared memory until firmware wires a real region.
 const DEFAULT_BUMP_BYTES: usize = 64 * 1024;
 
-/// Native code generator engine (stub compile in M1).
+/// Native code generator: LPIR → RV32 ELF object.
 pub struct NativeEngine {
     pub options: NativeCompileOptions,
     memory: BumpLpvmMemory,
@@ -45,10 +44,9 @@ impl LpvmEngine for NativeEngine {
     type Module = NativeModule;
     type Error = NativeError;
 
-    fn compile(&self, _ir: &IrModule, _meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        Err(NativeError::NotYetImplemented(String::from(
-            "M2: lower, regalloc, emit",
-        )))
+    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+        let elf = emit_module_elf(ir, self.options.float_mode)?;
+        Ok(NativeModule::from_parts(elf, meta.clone()))
     }
 
     fn memory(&self) -> &dyn LpvmMemory {
@@ -58,26 +56,53 @@ impl LpvmEngine for NativeEngine {
 
 #[cfg(test)]
 mod tests {
-    use lpir::IrModule;
+    use alloc::string::String;
+    use alloc::vec;
+
+    use lpir::types::VRegRange;
+    use lpir::{IrFunction, IrModule, Op};
     use lps_shared::LpsModuleSig;
 
     use super::*;
 
-    #[test]
-    fn compile_returns_not_yet_implemented() {
-        let engine = NativeEngine::new(NativeCompileOptions::default());
-        let ir = IrModule::default();
-        let meta = LpsModuleSig::default();
-        let err = engine.compile(&ir, &meta).expect_err("M1 stub");
-        match err {
-            NativeError::NotYetImplemented(s) => assert!(s.contains("M2")),
-            e => panic!("unexpected {e:?}"),
+    fn minimal_iadd_module() -> IrModule {
+        IrModule {
+            imports: vec![],
+            functions: vec![IrFunction {
+                name: String::from("add"),
+                is_entry: true,
+                vmctx_vreg: lpir::VReg(0),
+                param_count: 2,
+                return_types: vec![lpir::IrType::I32],
+                vreg_types: vec![
+                    lpir::IrType::I32,
+                    lpir::IrType::I32,
+                    lpir::IrType::I32,
+                    lpir::IrType::I32,
+                ],
+                slots: vec![],
+                body: vec![
+                    Op::Iadd {
+                        dst: lpir::VReg(3),
+                        lhs: lpir::VReg(1),
+                        rhs: lpir::VReg(2),
+                    },
+                    Op::Return {
+                        values: VRegRange { start: 3, count: 1 },
+                    },
+                ],
+                vreg_pool: vec![],
+            }],
         }
     }
 
     #[test]
-    fn memory_returns_bump() {
+    fn compile_produces_elf_magic() {
         let engine = NativeEngine::new(NativeCompileOptions::default());
-        let _ = engine.memory();
+        let ir = minimal_iadd_module();
+        let meta = LpsModuleSig::default();
+        let m = engine.compile(&ir, &meta).expect("compile");
+        assert!(m.elf.len() > 16);
+        assert_eq!(&m.elf[0..4], &[0x7f, b'E', b'L', b'F']);
     }
 }
