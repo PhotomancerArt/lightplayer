@@ -121,10 +121,10 @@ impl LpvmInstance for CraneliftInstance {
         let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
         let idx = *self
             .module
-            .name_to_index
+            .name_to_index()
             .get(name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let param_count = self.module.ir_param_counts[idx] as usize;
+        let param_count = self.module.ir_param_counts()[idx] as usize;
         if flat.len() != param_count {
             return Err(CallError::Unsupported(format!(
                 "flattened argument count {} does not match IR param_count {}",
@@ -166,10 +166,10 @@ impl LpvmInstance for CraneliftInstance {
 
         let idx = *self
             .module
-            .name_to_index
+            .name_to_index()
             .get(name)
             .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
-        let param_count = self.module.ir_param_counts[idx] as usize;
+        let param_count = self.module.ir_param_counts()[idx] as usize;
 
         let expected_words: usize = gfn
             .parameters
@@ -202,7 +202,7 @@ impl LpvmInstance for CraneliftInstance {
             .any(|p| p.purpose == ArgumentPurpose::StructReturn);
         let n_ret = self
             .module
-            .logical_return_words
+            .logical_return_words()
             .get(name)
             .copied()
             .unwrap_or_else(|| sig.returns.len());

@@ -1,9 +1,9 @@
 //! LPIR → Cranelift: host JIT (`std` + native ISA) or embedded JIT (`glsl` without `std`, RV32 ISA).
 //! Optional `riscv32-object` enables RV32 object emission + builtins ELF link (see `lpvm-emu` to run in the emulator).
 //!
-//! **Dual API:** [`CraneliftEngine`], [`CraneliftModule`], [`CraneliftInstance`] implement
-//! [`lpvm::LpvmEngine`] / [`lpvm::LpvmModule`] / [`lpvm::LpvmInstance`]. The existing
-//! [`JitModule`] and [`jit_from_ir`] entry points remain for current engine code.
+//! **Primary API:** [`CraneliftEngine`], [`CraneliftModule`], [`CraneliftInstance`] implement
+//! [`lpvm::LpvmEngine`] / [`lpvm::LpvmModule`] / [`lpvm::LpvmInstance`]. [`jit_from_ir`] and
+//! [`jit`] are thin helpers over [`CraneliftModule::compile`].
 
 #![no_std]
 
@@ -16,7 +16,6 @@ mod builtins;
 mod call;
 mod compile;
 mod compile_options;
-#[cfg(feature = "std")]
 mod cranelift_host_memory;
 mod direct_call;
 mod emit;
@@ -47,7 +46,6 @@ pub use compile_options::{CompileOptions, MemoryStrategy};
 pub use direct_call::DirectCall;
 pub use emit::signature_for_ir_func;
 pub use error::{CompileError, CompilerError};
-pub use jit_module::JitModule;
 pub use lpir::FloatMode;
 pub use lps_shared::path_resolve::PathError;
 pub use lps_shared::{

@@ -36,6 +36,7 @@ riscv32-object = [
 
 [dependencies]
 libm = "0.2"
+spin = { workspace = true }
 lpvm = { path = "../lpvm", default-features = false }
 lps-shared = { path = "../lps-shared" }
 lps-builtin-ids = { path = "../lps-builtin-ids" }

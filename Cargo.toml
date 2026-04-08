@@ -19,7 +19,6 @@ members = [
     "lp-shader/lps-filetests-gen-app",
     "lp-shader/lps-shared",
     "lp-shader/lps-diagnostics",
-    "lp-shader/legacy/lps-exec",
     "lp-shader/lpvm",
     "lp-shader/lpvm-wasm",
     "lp-shader/lps-frontend",
@@ -35,9 +34,7 @@ members = [
     "lp-riscv/lp-riscv-emu-guest-test-app",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
-    "lp-shader/legacy/lps-builtins-wasm",
     "lp-shader/lps-filetests-app",
-    "lp-shader/legacy/lps-wasm",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc", "lp-shader/lps-q32",
 ]
@@ -63,7 +60,6 @@ default-members = [
     "lp-shader/lps-filetests-gen-app",
     "lp-shader/lps-shared",
     "lp-shader/lps-diagnostics",
-    "lp-shader/legacy/lps-exec",
     "lp-shader/lpvm",
     "lp-shader/lpvm-wasm",
     "lp-shader/lps-frontend",
@@ -138,6 +134,7 @@ regex = "1.9.1"
 glob = "0.3.3"
 object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
 critical-section = { version = "1.2.0", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }

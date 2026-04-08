@@ -3739,6 +3739,7 @@ dependencies = [
  "lp-model",
  "lp-shared",
  "lps-builtins",
+ "lps-frontend",
  "lps-q32",
  "lpvm",
  "lpvm-cranelift",
@@ -3908,24 +3909,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "lps-builtins-wasm"
-version = "40.0.0"
-dependencies = [
- "lps-builtins",
-]
-
-[[package]]
 name = "lps-diagnostics"
 version = "40.0.0"
-
-[[package]]
-name = "lps-exec"
-version = "40.0.0"
-dependencies = [
- "lps-diagnostics",
- "lps-shared",
- "lpvm",
-]
 
 [[package]]
 name = "lps-filetests"
@@ -3941,7 +3926,6 @@ dependencies = [
  "lps-diagnostics",
  "lps-frontend",
  "lps-shared",
- "lps-wasm",
  "lpvm",
  "lpvm-cranelift",
  "lpvm-emu",
@@ -4000,19 +3984,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lps-wasm"
-version = "40.0.0"
-dependencies = [
- "anyhow",
- "log",
- "lpir",
- "lps-builtin-ids",
- "lps-frontend",
- "wasm-encoder 0.245.1",
- "wasmtime",
-]
-
-[[package]]
 name = "lpvm"
 version = "40.0.0"
 dependencies = [
@@ -4040,6 +4011,7 @@ dependencies = [
  "lps-q32",
  "lps-shared",
  "lpvm",
+ "spin",
  "target-lexicon",
 ]
 
@@ -5911,6 +5883,12 @@ name = "somni-parser"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0f368519fc6c85fc1afdb769fb5a51123f6158013e143656e25a3485a0d401c"
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "spinning_top"

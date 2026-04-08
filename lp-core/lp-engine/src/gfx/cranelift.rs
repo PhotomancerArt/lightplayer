@@ -7,8 +7,10 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use lp_shared::Texture;
-use lpvm::VmContextHeader;
-use lpvm_cranelift::{CompileOptions, DirectCall, FloatMode, JitModule, MemoryStrategy, jit};
+use lpvm::{LpvmEngine, VmContextHeader};
+use lpvm_cranelift::{
+    CompileOptions, CraneliftEngine, CraneliftModule, DirectCall, FloatMode, MemoryStrategy,
+};
 
 /// Graphics backend using on-device/host Cranelift JIT.
 pub struct CraneliftGraphics;
@@ -32,13 +34,24 @@ impl LpGraphics for CraneliftGraphics {
         source: &str,
         options: &ShaderCompileOptions,
     ) -> Result<Box<dyn LpShader>, Error> {
+        // Frontend: GLSL -> LPIR (using lps_frontend)
+        let naga = lps_frontend::compile(source).map_err(|e| Error::Other {
+            message: format!("{e}"),
+        })?;
+        let (ir, meta) = lps_frontend::lower(&naga).map_err(|e| Error::Other {
+            message: format!("{e}"),
+        })?;
+        drop(naga);
+
+        // Backend: LPIR -> machine code (using CraneliftEngine)
         let compile = CompileOptions {
             float_mode: FloatMode::Q32,
             q32_options: options.q32_options,
             memory_strategy: MemoryStrategy::Default,
             max_errors: options.max_errors,
         };
-        let module = jit(source, &compile).map_err(|e| Error::Other {
+        let engine = CraneliftEngine::new(compile);
+        let module = engine.compile(&ir, &meta).map_err(|e| Error::Other {
             message: format!("{e}"),
         })?;
         let direct_call = module.direct_call("render");
@@ -54,7 +67,7 @@ impl LpGraphics for CraneliftGraphics {
 }
 
 struct CraneliftShader {
-    _module: JitModule,
+    _module: CraneliftModule,
     direct_call: Option<DirectCall>,
 }
 

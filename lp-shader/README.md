@@ -64,7 +64,7 @@ tests / exec helpers
 ### Codegen
 
 - `lpvm-cranelift/` — LPIR → Cranelift → machine code (RISC-V on device, host JIT with `std`)
-- `lps-wasm/` — LPIR → WASM (browser preview, `wasm.q32` filetests)
+- `lpvm-wasm/` — LPIR → WASM (browser preview, `wasm.q32` filetests)
 
 ### Builtins
 
@@ -72,7 +72,6 @@ tests / exec helpers
 - `lps-builtins/` — `extern "C"` builtin implementations (Q32 / f32, LPFX)
 - `lps-builtins-gen-app/` — Scans builtins; emits IDs, ABI, refs, WASM import types
 - `lps-builtins-emu-app/` — RISC-V guest linking all builtins (emulator filetests)
-- `lps-builtins-wasm/` — WASM `cdylib` of builtins (`import-memory`)
 - `lpfx-impl-macro/` — Proc-macros for LPFX builtin definitions
 
 ### Testing
@@ -80,7 +79,6 @@ tests / exec helpers
 - `lps-filetests/` — Cranelift-style GLSL filetests (JIT, RV32, WASM targets)
 - `lps-filetests-gen-app/` — Generator for repetitive vector/matrix tests
 - `lps-filetests-app/` — Filetest runner CLI
-- `lps-exec/` — `GlslExecutable` trait; backend glue for filetests
 
 ### Browser demo
 

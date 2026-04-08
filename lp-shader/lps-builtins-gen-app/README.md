@@ -12,7 +12,6 @@ stubs so the compiler and tests stay in sync.
 | `lps-builtin-ids/src/lib.rs`                     | `BuiltinId` enum and helpers                                     |
 | `lpvm-cranelift/src/generated_builtin_abi.rs`    | Cranelift lowering: symbol names and signatures                  |
 | `lps-builtins-emu-app/src/builtin_refs.rs`       | Force-link all builtins for RV32 emu                             |
-| `lps-builtins-wasm/src/builtin_refs.rs`          | Same for `wasm32` cdylib                                         |
 | `lps-builtins/src/builtins/glsl/mod.rs`          | `mod` list for GLSL builtins                                     |
 | `lps-builtins/src/builtins/lpir/mod.rs`          | `mod` list for LPIR builtins                                     |
 | `lps-wasm/src/emit/builtin_wasm_import_types.rs` | WASM import typing for Q32 builtins                              |

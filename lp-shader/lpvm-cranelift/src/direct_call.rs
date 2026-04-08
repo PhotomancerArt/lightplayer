@@ -4,6 +4,7 @@ use cranelift_codegen::ir::{ArgumentPurpose, Type};
 use cranelift_codegen::isa::CallConv;
 
 use crate::jit_module::JitModule;
+use crate::lpvm_module::CraneliftModule;
 use lpvm::CallError;
 
 /// Raw JIT function pointer plus arity for [`DirectCall::call_i32`].
@@ -48,6 +49,13 @@ impl JitModule {
             ret_i32_count: logical_ret,
             uses_struct_return,
         })
+    }
+}
+
+impl CraneliftModule {
+    /// Level-3 handle: same as [`JitModule::direct_call`].
+    pub fn direct_call(&self, name: &str) -> Option<DirectCall> {
+        self.0.direct_call(name)
     }
 }
 

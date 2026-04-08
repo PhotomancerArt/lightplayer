@@ -12,7 +12,6 @@ lps-shared = { path = "../lps-shared" }
 lps-diagnostics = { path = "../lps-diagnostics", features = ["std"] }
 lps-frontend = { path = "../lps-frontend" }
 lpvm = { path = "../lpvm", features = ["std"] }
-lps-wasm = { path = "../legacy/lps-wasm" }
 lpir = { path = "../lpir" }
 lpvm-cranelift = { path = "../lpvm-cranelift", features = ["riscv32-object"] }
 lpvm-emu = { path = "../lpvm-emu" }

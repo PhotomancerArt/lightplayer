@@ -11,11 +11,13 @@ elsewhere, trust this folder and fix drift when you touch files.
 
 Long-term naming groups the shader system into three prefixes:
 
+
 | Layer      | Prefix   | Role                                         | Knows about                                 |
-|------------|----------|----------------------------------------------|---------------------------------------------|
-| **Shader** | `lps-*`  | Frontends, logical types, shader-layer tests | vec3, mat4, GLSL (today), WGSL (future)     |
+| ---------- | -------- | -------------------------------------------- | ------------------------------------------- |
+| **Shader** | `lps-`*  | Frontends, logical types, shader-layer tests | vec3, mat4, GLSL (today), WGSL (future)     |
 | **IR**     | `lpir`   | Scalarized intermediate representation       | `IrType` (F32, I32, Pointer), ops, vregs    |
-| **VM**     | `lpvm-*` | Runtime, execution, backends                 | Module, Instance, Memory, values, VMContext |
+| **VM**     | `lpvm-`* | Runtime, execution, backends                 | Module, Instance, Memory, values, VMContext |
+
 
 `lps` is not self-explanatory on first read; it is the **LightPlayer shader**
 layer, parallel to how `lpir` and `lpvm` abbreviate their domains.
@@ -33,13 +35,14 @@ lps-filetests ──► lps-*, lpir, lpvm-*   (integration tests)
 
 **Important:** `lps-core`’s `Type` / `FunctionSignature` are **not** LPIR
 concepts. LPIR is scalarized; it does not carry logical vec3/mat4 as a first-class
-IR type. Those types live in **`lps-shared`** (rename of `lps-core`), not in
+IR type. Those types live in `**lps-shared`** (rename of `lps-core`), not in
 `lpir`.
 
 ### Target crate map (shader layer)
 
+
 | Current / transitional | Target (`lps-*`)                                   |
-|------------------------|----------------------------------------------------|
+| ---------------------- | -------------------------------------------------- |
 | `lps-core`             | `lps-shared`                                       |
 | `lps-frontend`         | `lps-frontend`                                     |
 | `lps-builtins`         | `lps-builtins`                                     |
@@ -47,8 +50,9 @@ IR type. Those types live in **`lps-shared`** (rename of `lps-core`), not in
 | `lps-filetests`        | `lps-filetests`                                    |
 | `lps-diagnostics`      | `lps-diagnostics` (or keep name if shared tooling) |
 
+
 ABI/runtime types from `lpvm` and exec traits from `lps-exec` move
-into **`lpvm`**, not into `lps-shared`.
+into `**lpvm**`, not into `lps-shared`.
 
 ## What is LPVM?
 
@@ -67,8 +71,8 @@ development simulation target. The engine must be backend-agnostic: Cranelift
 JIT on ESP32/desktop, browser WebAssembly API in-browser. LPVM enables this by
 abstracting the runtime behind traits that are monomorphized per firmware target.
 
-**Naming cleanup**: retire the `lp-shader/` catch-all. Use **`lps-*`** for the
-shader/language layer, **`lpir`** for scalarized IR only, **`lpvm-*`** for the
+**Naming cleanup**: retire the `lp-shader/` catch-all. Use `**lps-*`** for the
+shader/language layer, `**lpir**` for scalarized IR only, `**lpvm-***` for the
 runtime. Long-term, the old `lps` directory name goes away.
 
 ## Architecture
@@ -118,8 +122,8 @@ Logical shader types: `LpsType`, `LpsFunctionSignature`, `LpsParameter`,
 ### `lpvm` (core)
 
 Types, traits, and VM/runtime-specific concepts. `no_std + alloc`. Depends on
-**`lpir`** (IR module, lowering inputs) and **`lps-shared`** (what callers think
-functions look like). Replaces **`lpvm`** and **`lps-exec`** (trait
+`**lpir`** (IR module, lowering inputs) and `**lps-shared**` (what callers think
+functions look like). Replaces `**lpvm**` and `**lps-exec**` (trait
 concepts → `LpvmModule` / `LpvmInstance`).
 
 Contains: `LpvmValue`, `LpvmData`, layout, `LpvmVmContext`, path helpers,
@@ -132,27 +136,20 @@ Backends implementing the LPVM traits. See milestone docs.
 ## Design Decisions
 
 1. **One `lpvm` core crate** — traits and runtime types stay together; avoids
-   circular deps.
-
-2. **Separate backend crates** — different dependency trees (cranelift-\*,
-   lp-riscv-\*, wasmtime).
-
-3. **`lps-shared` is not `lpir`** — logical shader types are not scalarized IR.
-   `lpir` stays free of vec3/mat4 as IR types.
-
-4. **`lpvm` depends on `lps-shared` and `lpir`** — runtime needs both “what the
-   IR looks like” and “what the user-facing signature is.”
-
+  circular deps.
+2. **Separate backend crates** — different dependency trees (cranelift-,
+  lp-riscv-, wasmtime).
+3. `**lps-shared` is not `lpir`** — logical shader types are not scalarized IR.
+  `lpir` stays free of vec3/mat4 as IR types.
+4. `**lpvm` depends on `lps-shared` and `lpir**` — runtime needs both “what the
+  IR looks like” and “what the user-facing signature is.”
 5. **Engine is backend-agnostic** — `lp-engine` depends only on `lpvm` traits,
-   generic over `M: LpvmModule`. Firmware picks `lpvm-cranelift` or `lpvm-wasm`.
-
-6. **`Lpvm` prefix on VM-layer external types** — disambiguates from Cranelift,
-   wasm, naga. **`Lps` prefix on shader-layer types** in `lps-shared`.
-
-7. **`lp-riscv-emu` refactor required** — before `lpvm-rv32` can wrap it cleanly.
-
-8. **`lpvm-interp` deferred** — interpreter stays in `lpir::interp` until needed
-   behind LPVM traits.
+  generic over `M: LpvmModule`. Firmware picks `lpvm-cranelift` or `lpvm-wasm`.
+6. `**Lpvm` prefix on VM-layer external types** — disambiguates from Cranelift,
+  wasm, naga. `**Lps` prefix on shader-layer types** in `lps-shared`.
+7. `**lp-riscv-emu` refactor required** — before `lpvm-rv32` can wrap it cleanly.
+8. `**lpvm-interp` deferred** — interpreter stays in `lpir::interp` until needed
+  behind LPVM traits.
 
 ## Constraints
 
@@ -160,42 +157,42 @@ Backends implementing the LPVM traits. See milestone docs.
 - Cranelift JIT backend available on embedded without `std`.
 - Migration must be incremental.
 - Hot path (function calls, global state reset) must be as fast as possible —
-  generics over trait objects.
+generics over trait objects.
 - Filetests and engine share code paths where possible — tests exercise the
-  real pipeline.
+real pipeline.
 - Easy-in-tests and maximum-performance are sometimes at odds; reasonable
-  concessions accepted.
+concessions accepted.
 
 ## Milestones
 
 ### Ordering rationale
 
 - In-place refactors first — renames and moves are low-risk and mechanical.
-  Get them done before building new things on top.
+Get them done before building new things on top.
 - Build new system alongside old — avoid breaking the whole build. Old and new
-  coexist until consumers are migrated.
+coexist until consumers are migrated.
 - WASM first — it has the strictest model (we don't control the WASM runtime)
-  and the least flexibility. Let it drive the API design.
+and the least flexibility. Let it drive the API design.
 - Cranelift second — validates the API with a backend we control.
-  Add trait impls alongside existing API. Surfaces any kinks.
+Add trait impls alongside existing API. Surfaces any kinks.
 - RV32 emu third — emulation feature in same crate. Object compilation,
-  ELF linking, emulator. By this point the API is stable.
+ELF linking, emulator. By this point the API is stable.
 - Migrate consumers last — filetests first (they validate everything), then
-  engine (production path).
+engine (production path).
 - Delete old code only after everything is migrated and passing.
 
 ### [M1: Renames, moves, and new types](m1-renames-moves-new-types.md)
 
-Introduce **`lps-shared`** (logical types), **`lpvm`** core crate, wire
+Introduce `**lps-shared`** (logical types), `**lpvm**` core crate, wire
 dependencies (`lpvm` → `lpir` + `lps-shared`). Mechanical refactoring; no new
 backends.
 
-### [M2: `lpvm-wasm`](m2-lpvm-wasm.md)
+### [M2: `lpvm-wasm](m2-lpvm-wasm.md)`
 
 Build the WASM backend first — strictest model drives the API. Emission +
 wasmtime runtime. Unit tests.
 
-### [M3: `lpvm-cranelift`](m3-lpvm-cranelift.md)
+### [M3: `lpvm-cranelift](m3-lpvm-cranelift.md)`
 
 Build the Cranelift JIT backend. Validates the API with a second backend.
 Must work on `riscv32imac-unknown-none-elf` without `std`.
@@ -208,7 +205,7 @@ feature.
 
 ### [M5: Migrate filetests](m5-migrate-filetests.md)
 
-Port **`lps-filetests`** from `GlslExecutable` to LPVM traits. All three backends.
+Port `**lps-filetests**` from `GlslExecutable` to LPVM traits. All three backends.
 Primary validation step.
 
 ### [M6: Migrate engine](m6-migrate-engine.md)

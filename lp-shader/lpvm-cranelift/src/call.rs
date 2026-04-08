@@ -6,6 +6,7 @@ use lps_shared::LpsType;
 use lpvm::{CallError, CallResult, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg};
 
 use crate::jit_module::JitModule;
+use crate::lpvm_module::CraneliftModule;
 
 impl JitModule {
     /// Typed Q32 call using GLSL metadata from lowering.
@@ -76,5 +77,12 @@ impl JitModule {
             value: Some(value),
             outs: alloc::vec::Vec::new(),
         })
+    }
+}
+
+impl CraneliftModule {
+    /// Typed Q32 call using GLSL metadata from lowering (delegates to the inner JIT module).
+    pub fn call(&self, name: &str, args: &[LpsValueQ32]) -> CallResult<GlslReturn<LpsValueQ32>> {
+        self.0.call(name, args)
     }
 }

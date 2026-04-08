@@ -267,3 +267,64 @@ pub fn translate_function(
     builder.seal_all_blocks();
     Ok(())
 }
+
+#[cfg(test)]
+mod struct_return_signature_tests {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use cranelift_codegen::ir::ArgumentPurpose;
+    use cranelift_codegen::isa::CallConv;
+    use cranelift_codegen::settings;
+    use cranelift_codegen::settings::Configurable;
+    use lpir::{FloatMode, IrFunction, IrType, VMCTX_VREG};
+    use target_lexicon::Triple;
+
+    use super::signature_for_ir_func;
+
+    fn riscv32_isa() -> cranelift_codegen::isa::OwnedTargetIsa {
+        let triple: Triple = "riscv32imac-unknown-none-elf".parse().unwrap();
+        let mut b = settings::builder();
+        b.set("regalloc_algorithm", "single_pass").unwrap();
+        b.set("is_pic", "false").unwrap();
+        let flags = settings::Flags::new(b);
+        cranelift_codegen::isa::lookup(triple)
+            .unwrap()
+            .finish(flags)
+            .unwrap()
+    }
+
+    /// `invoke_sysv_struct_return_buf` must pass arguments in the same order as here: sret, vmctx,
+    /// then user scalars (see `signature_for_ir_func` when `enable_multi_ret_implicit_sret` applies).
+    #[test]
+    fn riscv32_vec4_return_struct_return_param_before_vmctx() {
+        let isa = riscv32_isa();
+        let ptr_ty = isa.pointer_type();
+        let func = IrFunction {
+            name: String::from("render"),
+            is_entry: true,
+            vmctx_vreg: VMCTX_VREG,
+            param_count: 1,
+            return_types: vec![IrType::I32, IrType::I32, IrType::I32, IrType::I32],
+            vreg_types: vec![IrType::Pointer, IrType::I32],
+            slots: Vec::new(),
+            body: Vec::new(),
+            vreg_pool: Vec::new(),
+        };
+        let sig = signature_for_ir_func(
+            &func,
+            CallConv::SystemV,
+            FloatMode::Q32,
+            ptr_ty,
+            isa.as_ref(),
+        );
+        assert_eq!(sig.params.len(), 3, "sret + vmctx + one user i32");
+        assert_eq!(sig.params[0].purpose, ArgumentPurpose::StructReturn);
+        assert_eq!(sig.params[1].purpose, ArgumentPurpose::Normal);
+        assert_eq!(sig.params[2].purpose, ArgumentPurpose::Normal);
+        assert!(
+            sig.returns.is_empty(),
+            "StructReturn ABI: returns live in the buffer, not in Signature::returns"
+        );
+    }
+}

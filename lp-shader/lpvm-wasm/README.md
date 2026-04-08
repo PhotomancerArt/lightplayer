@@ -57,12 +57,9 @@ let result = instance.call("main", &[LpsValue::F32(1.0)])?;
 # Emission tests only (no wasmtime)
 cargo test -p lpvm-wasm --no-default-features
 
-# Full runtime tests with builtins
-cargo build -p lps-builtins-wasm --target wasm32-unknown-unknown --release
+# Full runtime tests with native builtins
 cargo test -p lpvm-wasm
 ```
-
-Runtime tests require `lps_builtins_wasm.wasm` at the standard path or set via `lps_BUILTINS_WASM` environment variable.
 
 ## Architecture
 

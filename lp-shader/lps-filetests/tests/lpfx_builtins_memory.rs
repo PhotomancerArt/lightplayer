@@ -1,8 +1,6 @@
 //! Host-side checks for LPFX builtins and scratch memory.
 
 use lps_filetests::test_run::wasm_link::{builtins_wasm_path, instantiate_wasm_module};
-use lps_frontend::FloatMode;
-use lps_wasm::{WasmOptions, glsl_wasm};
 use wasmtime::{Engine, Instance, Memory, MemoryType, Module, Store, Val};
 
 #[test]
@@ -51,6 +49,10 @@ fn lpfx_saturate_vec3_q32_writes_shared_memory() {
 #[test]
 #[ignore = "WASM import ABI mismatch for vec3 LPFX (multi-return vs result-pointer). See docs/roadmaps/2026-03-25-lpir-features/"]
 fn shader_lpfx_saturate_vec3_writes_scratch_then_reads_it() {
+    use lpir::FloatMode as IrFloatMode;
+    use lps_frontend::{FloatMode, compile, lower};
+    use lpvm_wasm::{WasmOptions, compile_lpir};
+
     let src = r#"
 float test_get_rx() {
     vec3 v = vec3(-0.5, 0.5, 1.5);
@@ -77,17 +79,21 @@ float test_lpfx_saturate_vec3() {
     return valid ? 1.0 : 0.0;
 }
 "#;
-    let compiled = glsl_wasm(
-        src,
-        WasmOptions {
-            float_mode: FloatMode::Q32,
-        },
-    )
-    .expect("compile");
+    // Frontend: GLSL -> LPIR
+    let naga = compile(src).expect("parse GLSL");
+    let (ir, meta) = lower(&naga).expect("lower to LPIR");
+    drop(naga);
+
+    // Backend: LPIR -> WASM
+    let wasm_opts = WasmOptions {
+        float_mode: IrFloatMode::Q32,
+    };
+    let compiled = compile_lpir(&ir, &meta, &wasm_opts).expect("compile to WASM");
+
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
     let (instance, mem) =
-        instantiate_wasm_module(&engine, &mut store, &compiled.bytes).expect("instantiate");
+        instantiate_wasm_module(&engine, &mut store, compiled.bytes()).expect("instantiate");
     let memory = mem.expect("builtins-linked memory");
 
     let get_rx = instance

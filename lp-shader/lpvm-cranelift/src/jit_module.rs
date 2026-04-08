@@ -22,7 +22,9 @@ use crate::process_sync;
 use crate::jit_memory::AllocJitMemoryProvider;
 
 /// Finalized JIT shader module with GLSL metadata for typed calls.
-pub struct JitModule {
+///
+/// Public surface is [`crate::CraneliftModule`], which wraps this type in [`alloc::sync::Arc`].
+pub(crate) struct JitModule {
     pub(crate) inner: JITModule,
     pub(crate) glsl_meta: LpsModuleSig,
     pub(crate) func_names: Vec<String>,
@@ -57,14 +59,6 @@ impl JitModule {
     /// Cranelift signature recorded for `name`.
     pub fn signature(&self, name: &str) -> Option<&Signature> {
         self.signatures.get(name)
-    }
-
-    pub fn call_conv(&self) -> CallConv {
-        self.call_conv
-    }
-
-    pub fn pointer_type(&self) -> types::Type {
-        self.pointer_type
     }
 
     pub fn float_mode(&self) -> FloatMode {

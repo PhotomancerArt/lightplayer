@@ -69,7 +69,7 @@ fn emulator_with_shared(
     Riscv32Emulator::from_memory(mem, &[]).with_log_level(LogLevel::None)
 }
 
-/// Q32 typed call through the linked RV32 image (same marshalling as [`lpvm_cranelift::JitModule::call`]).
+/// Q32 typed call through the linked RV32 image (same marshalling as [`lpvm_cranelift::CraneliftModule::call`]).
 pub fn glsl_q32_call_emulated(
     load: &ElfLoadInfo,
     ir: &IrModule,

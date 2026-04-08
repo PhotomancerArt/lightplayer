@@ -1,7 +1,7 @@
-//! Host linear allocation for [`LpvmMemory`] on the native JIT path (`std`).
+//! Global-allocator linear [`LpvmMemory`] for Cranelift JIT (any target with [`alloc`]).
 //!
 //! Guest and host share one address space: [`LpvmBuffer::guest_base`] equals the zero-extended
-//! host pointer. A [`std::sync::Mutex`] + [`BTreeMap`] tracks live allocations so `free`/`realloc`
+//! host pointer. A [`spin::Mutex`] + [`BTreeMap`] tracks live allocations so `free`/`realloc`
 //! only accept buffers this allocator created (Rust's global `dealloc` needs the exact layout).
 
 use alloc::alloc::{alloc, dealloc, realloc};
@@ -10,9 +10,9 @@ use alloc::collections::BTreeMap;
 use core::alloc::Layout;
 
 use lpvm::{AllocError, LpvmBuffer, LpvmMemory};
-use std::sync::Mutex;
+use spin::Mutex;
 
-/// Real `alloc` / `dealloc` / `realloc` over the process heap for Cranelift JIT hosts.
+/// Real `alloc` / `dealloc` / `realloc` via the global allocator (host or embedded `#[global_allocator]`).
 pub struct CraneliftHostMemory {
     live: Mutex<BTreeMap<u64, (usize, usize)>>,
 }
@@ -50,10 +50,7 @@ impl LpvmMemory for CraneliftHostMemory {
             return Err(AllocError::OutOfMemory);
         }
         let guest = Self::key(native);
-        self.live
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(guest, (size, align));
+        self.live.lock().insert(guest, (size, align));
         Ok(LpvmBuffer::new(native, guest, size, align))
     }
 
@@ -61,11 +58,7 @@ impl LpvmMemory for CraneliftHostMemory {
         let guest = buffer.guest_base();
         let size = buffer.size();
         let align = buffer.align();
-        let removed = self
-            .live
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&guest);
+        let removed = self.live.lock().remove(&guest);
         if removed.is_none() {
             return;
         }
@@ -88,10 +81,7 @@ impl LpvmMemory for CraneliftHostMemory {
         let old_size = buffer.size();
         let align = buffer.align();
 
-        let mut map = self
-            .live
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut map = self.live.lock();
         if !map.contains_key(&guest) {
             return Err(AllocError::InvalidPointer);
         }

@@ -2,38 +2,23 @@
 
 use lpir::module::IrModule;
 use lps_shared::LpsModuleSig;
-#[cfg(not(feature = "std"))]
-use lpvm::BumpLpvmMemory;
 use lpvm::{LpvmEngine, LpvmMemory};
 
 use crate::compile_options::CompileOptions;
-#[cfg(feature = "std")]
 use crate::cranelift_host_memory::CraneliftHostMemory;
 use crate::error::CompilerError;
 use crate::lpvm_module::CraneliftModule;
 
-/// Default shared-memory arena size for [`CraneliftEngine`] when built without `std` (bump heap).
-#[cfg(not(feature = "std"))]
-const DEFAULT_LPVM_SHARED_MEMORY_BYTES: usize = 256 * 1024;
-
 /// Cranelift JIT engine implementing [`LpvmEngine`].
-///
-/// This is the new trait-based API for LPVM compilation. It coexists with
-/// the existing [`crate::jit_module::JitModule`] API until M7 (migration complete).
 ///
 /// # Memory
 ///
-/// With **`std`**, shared memory uses the host heap ([`CraneliftHostMemory`]): `LpvmBuffer` carries
-/// the same address as `guest_base` (single address space for JIT).
-///
-/// Without **`std`**, a fixed [`BumpLpvmMemory`] arena is used until a no_std allocator + lock
-/// strategy is wired.
+/// Shared memory uses the **global allocator** ([`CraneliftHostMemory`]): `LpvmBuffer` carries the
+/// same address as `guest_base` (single address space for JIT). Works on `no_std` + `alloc` targets
+/// (e.g. ESP32) as long as a global allocator is registered — no fixed-size bump arena.
 pub struct CraneliftEngine {
     options: CompileOptions,
-    #[cfg(feature = "std")]
     shared_memory: CraneliftHostMemory,
-    #[cfg(not(feature = "std"))]
-    shared_memory: BumpLpvmMemory,
 }
 
 impl CraneliftEngine {
@@ -41,10 +26,7 @@ impl CraneliftEngine {
     pub fn new(options: CompileOptions) -> Self {
         Self {
             options,
-            #[cfg(feature = "std")]
             shared_memory: CraneliftHostMemory::new(),
-            #[cfg(not(feature = "std"))]
-            shared_memory: BumpLpvmMemory::new(DEFAULT_LPVM_SHARED_MEMORY_BYTES),
         }
     }
 }

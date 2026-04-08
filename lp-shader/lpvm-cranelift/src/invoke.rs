@@ -32,8 +32,8 @@ struct CRet4 {
     v3: i32,
 }
 
-/// System V / RISC-V32: hidden StructReturn pointer as the first `extern "C"` argument (`a0` /
-/// `rdi`) plus user `i32` args; callee writes `out.len()` words.
+/// System V / RISC-V32: [`crate::emit::signature_for_ir_func`] places **StructReturn first**, then
+/// **vmctx**, then user scalars (so `a0`/`rdi` = sret, `a1`/`rsi` = vmctx on RV32 / System V).
 #[cfg(any(
     target_arch = "riscv32",
     all(
@@ -51,49 +51,49 @@ unsafe fn invoke_sysv_struct_return_buf(
     unsafe {
         match user.len() {
             0 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32) = transmute(code);
-                f(vmctx, buf);
+                let f: extern "C" fn(*mut i32, VmCtxWord) = transmute(code);
+                f(buf, vmctx);
             }
             1 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32) = transmute(code);
-                f(vmctx, buf, user[0]);
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32) = transmute(code);
+                f(buf, vmctx, user[0]);
             }
             2 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1]);
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32) = transmute(code);
+                f(buf, vmctx, user[0], user[1]);
             }
             3 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2]);
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32) = transmute(code);
+                f(buf, vmctx, user[0], user[1], user[2]);
             }
             4 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32) = transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2], user[3]);
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32, i32) = transmute(code);
+                f(buf, vmctx, user[0], user[1], user[2], user[3]);
             }
             5 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32) =
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32, i32, i32) =
                     transmute(code);
-                f(vmctx, buf, user[0], user[1], user[2], user[3], user[4]);
+                f(buf, vmctx, user[0], user[1], user[2], user[3], user[4]);
             }
             6 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32) =
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32, i32, i32, i32) =
                     transmute(code);
                 f(
-                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5],
+                    buf, vmctx, user[0], user[1], user[2], user[3], user[4], user[5],
                 );
             }
             7 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32) =
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32, i32, i32, i32, i32) =
                     transmute(code);
                 f(
-                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                    buf, vmctx, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
                 );
             }
             8 => {
-                let f: extern "C" fn(VmCtxWord, *mut i32, i32, i32, i32, i32, i32, i32, i32, i32) =
+                let f: extern "C" fn(*mut i32, VmCtxWord, i32, i32, i32, i32, i32, i32, i32, i32) =
                     transmute(code);
                 f(
-                    vmctx, buf, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
+                    buf, vmctx, user[0], user[1], user[2], user[3], user[4], user[5], user[6],
                     user[7],
                 );
             }
