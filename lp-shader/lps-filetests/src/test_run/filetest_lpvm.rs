@@ -5,6 +5,7 @@ use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
+use lpvm_native::{NativeCompileOptions, NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 use lpvm_wasm::{
     WasmOptions as LpvmWasmOptions,
     rt_wasmtime::{WasmLpvmEngine, WasmLpvmInstance, WasmLpvmModule},
@@ -16,8 +17,10 @@ use crate::targets::{Backend, FloatMode as TargetFloatMode, Target};
 pub enum CompiledShader {
     /// Host Cranelift JIT (`jit.q32`).
     Jit(CraneliftModule),
-    /// Linked RV32 + shared arena (`rv32.q32`).
+    /// Linked RV32 + shared arena via Cranelift (`rv32.q32`).
     Emu(EmuModule),
+    /// Linked RV32 + shared arena via native backend (`rv32lp.q32`).
+    Native(NativeEmuModule),
     /// wasmtime module (`wasm.q32`).
     Wasm(WasmLpvmModule),
 }
@@ -26,8 +29,10 @@ pub enum CompiledShader {
 pub enum FiletestInstance {
     /// Host Cranelift JIT instance.
     Jit(CraneliftInstance),
-    /// RV32 emulator instance with guest VMContext.
+    /// RV32 emulator instance with guest VMContext (Cranelift path).
     Emu(EmuInstance),
+    /// RV32 emulator instance with guest VMContext (native path).
+    Native(NativeEmuInstance),
     /// wasmtime-linked shader instance.
     Wasm(WasmLpvmInstance),
 }
@@ -37,6 +42,7 @@ impl CompiledShader {
         match self {
             Self::Jit(m) => m.signatures(),
             Self::Emu(m) => m.signatures(),
+            Self::Native(m) => m.signatures(),
             Self::Wasm(m) => m.signatures(),
         }
     }
@@ -48,6 +54,9 @@ impl CompiledShader {
             }
             Self::Emu(m) => {
                 FiletestInstance::Emu(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
+            }
+            Self::Native(m) => {
+                FiletestInstance::Native(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
             Self::Wasm(m) => {
                 FiletestInstance::Wasm(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
@@ -61,6 +70,7 @@ impl FiletestInstance {
         match self {
             Self::Jit(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Emu(i) => i.call(name, args).map_err(|e| e.to_string()),
+            Self::Native(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call(name, args).map_err(|e| e.to_string()),
         }
     }
@@ -69,6 +79,7 @@ impl FiletestInstance {
         match self {
             Self::Jit(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Emu(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
+            Self::Native(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
         }
     }
@@ -77,6 +88,7 @@ impl FiletestInstance {
         match self {
             Self::Jit(_) => None,
             Self::Emu(i) => i.debug_state(),
+            Self::Native(i) => i.debug_state(),
             Self::Wasm(_) => None,
         }
     }
@@ -106,6 +118,14 @@ impl CompiledShader {
             Backend::Rv32 => {
                 let engine = EmuEngine::new(opts);
                 Ok(Self::Emu(engine.compile(&ir, &meta)?))
+            }
+            Backend::Rv32lp => {
+                let native_opts = NativeCompileOptions {
+                    float_mode: fm,
+                    ..Default::default()
+                };
+                let engine = NativeEmuEngine::new(native_opts);
+                Ok(Self::Native(engine.compile(&ir, &meta)?))
             }
             Backend::Wasm => {
                 let wasm_opts = LpvmWasmOptions { float_mode: fm };

@@ -47,7 +47,8 @@ impl EmuSharedArena {
         self.shared_start
     }
 
-    pub(crate) fn lock_storage(&self) -> std::sync::MutexGuard<'_, Vec<u8>> {
+    /// Lock the shared backing buffer (guest addresses = [`Self::shared_start`] + index).
+    pub fn lock_storage(&self) -> std::sync::MutexGuard<'_, Vec<u8>> {
         self.storage.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

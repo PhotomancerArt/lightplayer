@@ -15,6 +15,20 @@ mod module;
 pub use emu_run::{glsl_q32_call_emulated, run_loaded_function_i32, run_lpir_function_i32};
 pub use engine::EmuEngine;
 pub use instance::{EmuInstance, InstanceError};
+
+/// Guest vmctx header size for emulator-backed instances (fuel + trap + metadata).
+pub const GUEST_VMCTX_BYTES: usize = emu_run::GUEST_VMCTX_BYTES;
+
+/// Initialize guest vmctx header (fuel + trap + metadata).
+pub fn write_guest_vmctx_header(out: &mut [u8]) {
+    emu_run::write_guest_vmctx_header(out);
+}
+
+/// RV32 ISA configuration used by [`EmuInstance`] and native-linked emulation.
+pub fn riscv32_lpvm_reference_isa()
+-> Result<cranelift_codegen::isa::OwnedTargetIsa, lpvm_cranelift::CompilerError> {
+    emu_run::riscv32_reference_isa()
+}
 pub use lpvm_cranelift::{
     CompileOptions, CompilerError, link_object_with_builtins, object_bytes_from_ir,
 };

@@ -227,9 +227,6 @@ pub fn emit_module_elf(
     ir: &lpir::IrModule,
     float_mode: lpir::FloatMode,
 ) -> Result<Vec<u8>, NativeError> {
-    if !ir.imports.is_empty() {
-        return Err(NativeError::ImportsNotSupportedYet);
-    }
     if ir.functions.is_empty() {
         return Err(NativeError::EmptyModule);
     }

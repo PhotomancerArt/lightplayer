@@ -9,8 +9,10 @@ pub use display::parse_target_filters;
 pub enum Backend {
     /// Host LPIR JIT (`lpvm-cranelift`).
     Jit,
-    /// LPIR → RV32 object + linked builtins + emulator.
+    /// LPIR → RV32 via Cranelift + linked builtins + emulator.
     Rv32,
+    /// LPIR → RV32 via native backend + linked builtins + emulator.
+    Rv32lp,
     /// WebAssembly via wasmtime.
     Wasm,
 }
@@ -58,7 +60,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32 — used for error messages and CLI.
+/// Order: wasm, jit, rv32, rv32lp — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         backend: Backend::Wasm,
@@ -78,9 +80,16 @@ pub const ALL_TARGETS: &[Target] = &[
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
+    Target {
+        backend: Backend::Rv32lp,
+        float_mode: FloatMode::Q32,
+        isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
 ];
 
-/// Default targets for local `cargo test` / app runs: RV32 + WASM (Q32).
+/// Default targets for local `cargo test` / app runs: RV32 (Cranelift) + WASM (Q32).
+/// Note: rv32lp is experimental; enable explicitly with `--target rv32lp.q32`.
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
 pub const DEFAULT_TARGETS: &[Target] = &[ALL_TARGETS[2], ALL_TARGETS[0]];
 

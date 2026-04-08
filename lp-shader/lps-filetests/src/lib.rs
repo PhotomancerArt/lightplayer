@@ -1738,9 +1738,7 @@ mod format_summary_tests {
         stats.total = 6;
         stats.unimplemented = 6;
         let (_, parentheticals) = format_file_counts(&stats, false, true, true);
-        let cf = parentheticals
-            .find("compile failed")
-            .expect("compile failed");
+        let cf = parentheticals.find("compile-fail").expect("compile-fail");
         let un = parentheticals
             .find("6 unimplemented")
             .expect("6 unimplemented");
