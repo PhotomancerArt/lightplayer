@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, heap_summary, mem_profile, serve, upload};
+use commands::{create, dev, heap_summary, mem_profile, serve, shader_lpir, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -76,6 +76,17 @@ enum Cli {
         #[arg(long, default_value = "20")]
         top: usize,
     },
+    /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
+    ShaderLpir {
+        /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
+        path: std::path::PathBuf,
+        /// Print per-function op/vreg counts to stderr (stdout stays pure LPIR for piping)
+        #[arg(long)]
+        stats: bool,
+        /// Print LPIR even if validation fails (warnings to log); use for debugging
+        #[arg(long)]
+        skip_validate: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -106,5 +117,14 @@ fn main() -> Result<()> {
         Cli::HeapSummary { trace_dir, top } => {
             heap_summary::handle_heap_summary(&heap_summary::HeapSummaryArgs { trace_dir, top })
         }
+        Cli::ShaderLpir {
+            path,
+            stats,
+            skip_validate,
+        } => shader_lpir::handle_shader_lpir(shader_lpir::ShaderLpirArgs {
+            path,
+            stats,
+            skip_validate,
+        }),
     }
 }
