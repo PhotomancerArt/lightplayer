@@ -112,10 +112,10 @@ impl FrameLayout {
     }
 
     /// Same memory as [`Self::spill_offset_from_sp`], expressed so that
-    /// `spill_offset_from_fp(k) = spill_offset_from_sp(k) + total_size` (frame high edge).
+    /// `spill_offset_from_fp(k) = spill_offset_from_sp(k) - total_size` (frame high edge).
     pub fn spill_offset_from_fp(&self, index: u32) -> Option<i32> {
         self.spill_offset_from_sp(index)
-            .map(|o| o + self.total_size as i32)
+            .map(|o| o - self.total_size as i32)
     }
 
     pub fn lpir_offset_from_sp(&self, slot_id: u32) -> Option<i32> {
@@ -200,8 +200,9 @@ mod tests {
         let frame = FrameLayout::compute(&abi, 2, PregSet::EMPTY, &[], true);
         let sp0 = frame.spill_offset_from_sp(0).unwrap();
         let fp0 = frame.spill_offset_from_fp(0).unwrap();
-        assert!(fp0 > sp0);
-        assert_eq!(fp0 - sp0, frame.total_size as i32);
+        // FP-relative offset is negative (spills are below FP, which points to frame top)
+        assert!(fp0 < sp0);
+        assert_eq!(sp0 - fp0, frame.total_size as i32);
     }
 
     #[test]

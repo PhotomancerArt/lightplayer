@@ -297,6 +297,10 @@ pub fn run(
                     || error_str.contains("trap")
                     || error_str.contains("execution trapped");
 
+                // Extract error message and debug section (if present)
+                let error_msg = extract_error_message(&error_str);
+                let debug_section = extract_debug_section(&error_str);
+
                 if is_trap {
                     // Unexpected trap
                     record_result(
@@ -307,8 +311,6 @@ pub fn run(
                         &mut unexpected_pass_lines,
                         directive.line_number,
                     );
-                    // Extract just the error message (before emulator state)
-                    let error_msg = extract_error_message(&error_str);
                     let formatted_error = format_error(
                         ErrorType::UnexpectedTrap,
                         &format!(
@@ -321,13 +323,21 @@ pub fn run(
                         Some(&directive.expression_str),
                         target,
                     );
-                    eprintln_if_detail(output_mode, &formatted_error);
-                    errors.push(anyhow::anyhow!("{formatted_error}"));
+                    // Append debug section if available and in debug mode
+                    let full_error = if let Some(debug) = debug_section {
+                        if output_mode.show_debug_sections() {
+                            format!("{formatted_error}\n\n{debug}")
+                        } else {
+                            formatted_error
+                        }
+                    } else {
+                        formatted_error
+                    };
+                    eprintln_if_detail(output_mode, &full_error);
+                    errors.push(anyhow::anyhow!("{full_error}"));
                     continue;
                 } else {
                     // Other error - format through unified formatter
-                    // Extract just the error message (before emulator state)
-                    let error_msg = extract_error_message(&error_str);
                     record_result(
                         disposition,
                         false,
@@ -346,8 +356,18 @@ pub fn run(
                         Some(&directive.expression_str),
                         target,
                     );
-                    eprintln_if_detail(output_mode, &formatted_error);
-                    errors.push(anyhow::anyhow!("{formatted_error}"));
+                    // Append debug section if available and in debug mode
+                    let full_error = if let Some(debug) = debug_section {
+                        if output_mode.show_debug_sections() {
+                            format!("{formatted_error}\n\n{debug}")
+                        } else {
+                            formatted_error
+                        }
+                    } else {
+                        formatted_error
+                    };
+                    eprintln_if_detail(output_mode, &full_error);
+                    errors.push(anyhow::anyhow!("{full_error}"));
                     continue;
                 }
             }
@@ -670,6 +690,18 @@ fn extract_error_message(error_str: &str) -> String {
     } else {
         // No debug sections found, return as-is
         error_str.trim().to_string()
+    }
+}
+
+/// Extract the debug section from an error string (if present).
+/// Returns the debug info section including the marker, or None if not found.
+fn extract_debug_section(error_str: &str) -> Option<String> {
+    if let Some(pos) = error_str.find("=== Emulator State ===") {
+        Some(error_str[pos..].trim().to_string())
+    } else if let Some(pos) = error_str.find("=== Debug Info ===") {
+        Some(error_str[pos..].trim().to_string())
+    } else {
+        None
     }
 }
 

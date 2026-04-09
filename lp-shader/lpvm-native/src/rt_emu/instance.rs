@@ -126,7 +126,14 @@ impl NativeEmuInstance {
                 Ok(words)
             }
             Err(e) => {
-                self.last_debug = Some(emu.dump_state());
+                // Capture full debug info including disassembly and instruction log
+                let mut debug_parts = Vec::new();
+                debug_parts.push(format!("=== Debug Info ==="));
+                debug_parts.push(format!("Error: {e:?}"));
+                debug_parts.push(emu.dump_state());
+                debug_parts.push(emu.format_debug_info(Some(emu.get_pc()), 50));
+                let debug_info = debug_parts.join("\n\n");
+                self.last_debug = Some(debug_info);
                 Err(NativeError::Call(CallError::Unsupported(format!(
                     "emulator: {e:?}"
                 ))))
