@@ -68,5 +68,17 @@ pub fn clobber_set_for_call() -> BTreeSet<PhysReg> {
 }
 
 pub trait RegAlloc {
-    fn allocate(&self, func: &IrFunction, vinsts: &[VInst]) -> Result<Allocation, NativeError>;
+    /// Allocate registers for a function.
+    ///
+    /// # Arguments
+    /// * `func` - The LPIR function
+    /// * `vinsts` - The lowered VInsts
+    /// * `arg_reg_offset` - Offset into ARG_REGS for parameter assignment.
+    ///   0 for direct returns (params start at a0), 1 for sret (params start at a1)
+    fn allocate(
+        &self,
+        func: &IrFunction,
+        vinsts: &[VInst],
+        arg_reg_offset: usize,
+    ) -> Result<Allocation, NativeError>;
 }

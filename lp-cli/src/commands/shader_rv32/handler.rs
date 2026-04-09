@@ -14,7 +14,7 @@ pub fn handle_shader_rv32(args: ShaderRv32Args) -> Result<()> {
         .with_context(|| format!("read {}", args.path.display()))?;
 
     let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
-    let (ir, _meta) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+    let (ir, sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
 
     if let Err(errs) = validate_module(&ir) {
         anyhow::bail!(
@@ -34,6 +34,7 @@ pub fn handle_shader_rv32(args: ShaderRv32Args) -> Result<()> {
 
     let asm = compile_module_asm_text(
         &ir,
+        &sig,
         float_mode,
         DisasmOptions {
             show_hex_offset: args.hex,

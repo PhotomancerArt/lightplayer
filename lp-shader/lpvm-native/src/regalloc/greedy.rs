@@ -25,7 +25,12 @@ impl Default for GreedyAlloc {
 }
 
 impl RegAlloc for GreedyAlloc {
-    fn allocate(&self, func: &IrFunction, vinsts: &[VInst]) -> Result<Allocation, NativeError> {
+    fn allocate(
+        &self,
+        func: &IrFunction,
+        vinsts: &[VInst],
+        arg_reg_offset: usize,
+    ) -> Result<Allocation, NativeError> {
         // First, find the maximum vreg index used in the function
         // This includes vregs from vreg_pool (e.g., used in Return)
         let max_vreg = vinsts
@@ -35,21 +40,21 @@ impl RegAlloc for GreedyAlloc {
             .max()
             .unwrap_or(0);
 
-
         // Total vregs = max index + 1 (must cover all used vreg indices)
         let n = (func.vreg_types.len()).max(max_vreg + 1);
 
         let slots = func.total_param_slots() as usize;
-        if slots > ARG_REGS.len() {
+        // For sret, arg_reg_offset=1, so we need slots + 1 <= ARG_REGS.len()
+        if slots + arg_reg_offset > ARG_REGS.len() {
             return Err(NativeError::TooManyArgs(slots));
         }
 
         let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
 
-        // Assign params to arg regs (unchanged)
+        // Assign params to arg regs with offset (sret shifts params to a1+)
         for i in 0..slots.min(n) {
-            vreg_to_phys[i] = Some(ARG_REGS[i]);
+            vreg_to_phys[i] = Some(ARG_REGS[arg_reg_offset + i]);
         }
 
         // Collect all vregs that need assignment (defs + uses that aren't defs)
@@ -176,7 +181,7 @@ mod tests {
             rets: Vec::new(),
             src_op: None,
         }];
-        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for reg in CALLER_SAVED {
             assert!(a.clobbered.contains(reg), "x{reg} not clobbered");
         }
@@ -204,7 +209,7 @@ mod tests {
             rets: Vec::new(),
             src_op: None,
         }];
-        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for reg in CALLEE_SAVED {
             if !CALLER_SAVED.contains(reg) {
                 assert!(
@@ -246,7 +251,7 @@ mod tests {
                 src_op: None,
             },
         ];
-        let a = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         assert!(a.vreg_to_phys[1].is_some());
         assert!(a.vreg_to_phys[2].is_some());
         assert!(a.vreg_to_phys[3].is_some());
@@ -284,7 +289,7 @@ mod tests {
         // So effectively fewer for allocation - we use 30 vregs to ensure spilling
         let f = func_with_n_vregs(30);
         let vinsts = many_iconst_vinsts(29); // vregs 1-29
-        let alloc = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         assert!(
             alloc.spill_count() > 0,
             "expected spills when registers exhausted, got {} spills",
@@ -296,7 +301,7 @@ mod tests {
     fn spilled_vreg_has_no_phys_reg() {
         let f = func_with_n_vregs(30);
         let vinsts = many_iconst_vinsts(29);
-        let alloc = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for spilled in &alloc.spill_slots {
             let vi = spilled.0 as usize;
             assert!(
@@ -311,7 +316,7 @@ mod tests {
     fn is_spilled_detects_spilled_vregs() {
         let f = func_with_n_vregs(30);
         let vinsts = many_iconst_vinsts(29);
-        let alloc = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for spilled in &alloc.spill_slots {
             assert!(
                 alloc.is_spilled(*spilled),
@@ -325,7 +330,7 @@ mod tests {
     fn spill_count_matches_spill_slots_len() {
         let f = func_with_n_vregs(30);
         let vinsts = many_iconst_vinsts(29);
-        let alloc = GreedyAlloc::new().allocate(&f, &vinsts).expect("alloc");
+        let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         assert_eq!(alloc.spill_count(), alloc.spill_slots.len() as u32);
     }
 
@@ -365,7 +370,7 @@ mod tests {
         // This should either:
         // 1. Assign vreg 35 to a register/spill, or
         // 2. Error clearly if the design doesn't support this
-        let result = GreedyAlloc::new().allocate(&f, &vinsts);
+        let result = GreedyAlloc::new().allocate(&f, &vinsts, 0);
 
         // Currently this fails with UnassignedVReg(35)
         // The fix should make this pass
@@ -415,7 +420,7 @@ mod tests {
             src_op: None,
         });
 
-        let result = GreedyAlloc::new().allocate(&f, &vinsts);
+        let result = GreedyAlloc::new().allocate(&f, &vinsts, 0);
         assert!(
             result.is_ok(),
             "allocator should handle 26 locals + pool vreg, got: {:?}",

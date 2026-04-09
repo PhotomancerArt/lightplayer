@@ -34,7 +34,7 @@ impl LpvmEngine for NativeEmuEngine {
     type Error = NativeError;
 
     fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        let elf = emit_module_elf(ir, self.options.float_mode)?;
+        let elf = emit_module_elf(ir, meta, self.options.float_mode)?;
         let load = Arc::new(lpvm_cranelift::link_object_with_builtins(&elf)?);
         Ok(NativeEmuModule {
             ir: ir.clone(),

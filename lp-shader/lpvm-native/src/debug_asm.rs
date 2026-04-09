@@ -1,23 +1,49 @@
 //! GLSL/LPIR → annotated RV32 assembly text (host debugging).
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lpir::IrModule;
+use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
 use crate::error::NativeError;
+use crate::isa::rv32::abi::AbiInfo;
 use crate::isa::rv32::debug::LineTable;
 use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
 use crate::isa::rv32::emit::emit_function_bytes;
 
 /// Emit annotated assembly for every function in `ir` (concatenated).
+///
+/// # Arguments
+/// * `ir` - The LPIR module to emit
+/// * `sig` - Module signatures containing function metadata
+/// * `float_mode` - Floating point mode
+/// * `opts` - Disassembly options
 pub fn compile_module_asm_text(
     ir: &IrModule,
+    sig: &LpsModuleSig,
     float_mode: lpir::FloatMode,
     opts: DisasmOptions,
 ) -> Result<String, NativeError> {
+    // Build a map from function name to signature
+    let sig_map: BTreeMap<&str, &LpsFnSig> = sig
+        .functions
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+
     let mut out = String::new();
     for func in &ir.functions {
-        let emitted = emit_function_bytes(func, float_mode, true)?;
+        // Get signature or use default (void -> void)
+        let default_sig = LpsFnSig {
+            name: func.name.clone(),
+            return_type: LpsType::Void,
+            parameters: Vec::new(),
+        };
+        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
+        let abi_info = AbiInfo::from_lps_sig(fn_sig);
+        let emitted = emit_function_bytes(func, &abi_info, float_mode, true)?;
         let table = LineTable::from_debug_lines(&emitted.debug_lines);
         out.push_str(&disassemble_function(&emitted.code, &table, func, opts));
         out.push('\n');
@@ -32,6 +58,7 @@ mod tests {
 
     use lpir::types::VRegRange;
     use lpir::{IrFunction, IrModule, IrType, Op, VReg};
+    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, ParamQualifier};
 
     use super::*;
     use crate::isa::rv32::debug::disasm::DisasmOptions;
@@ -61,7 +88,25 @@ mod tests {
                 vreg_pool: vec![VReg(3)],
             }],
         };
-        let s = compile_module_asm_text(&ir, lpir::FloatMode::Q32, DisasmOptions::default())
+        let sig = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("add"),
+                return_type: LpsType::Float,
+                parameters: vec![
+                    FnParam {
+                        name: String::from("a"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("b"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+            }],
+        };
+        let s = compile_module_asm_text(&ir, &sig, lpir::FloatMode::Q32, DisasmOptions::default())
             .expect("asm");
         assert!(s.contains(".globl\tadd"));
         assert!(s.contains("LPIR[0]:"));

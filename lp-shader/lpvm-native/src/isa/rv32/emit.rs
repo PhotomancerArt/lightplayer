@@ -8,7 +8,7 @@ use object::{
     Architecture, BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf,
 };
 
-use super::abi::{self, ARG_REGS, FrameLayout, PhysReg, RET_REGS, S0, SP};
+use super::abi::{self, AbiInfo, ARG_REGS, FrameLayout, PhysReg, RET_REGS, S0, SP, A0, SRET_PTR};
 use super::inst::{
     encode_addi, encode_auipc, encode_jalr, encode_lw, encode_mul, encode_ret, encode_sub,
     encode_sw, iconst32_sequence,
@@ -17,6 +17,7 @@ use crate::error::NativeError;
 use crate::regalloc::{Allocation, GreedyAlloc, RegAlloc};
 use crate::vinst::VInst;
 use lpir::VReg;
+use lps_shared;
 
 /// Byte offset in `.text` where a relocation applies (at the `auipc` of an auipc+jalr pair).
 #[derive(Clone, Debug)]
@@ -76,7 +77,8 @@ impl EmitContext {
     }
 
     /// Emit function prologue: adjust sp, save ra and s0 if needed.
-    pub fn emit_prologue(&mut self) {
+    /// For sret functions, also saves the sret pointer (in a0) to s1.
+    pub fn emit_prologue(&mut self, abi_info: &AbiInfo) {
         let sp = u32::from(SP);
         let frame_size = self.frame.size as i32;
 
@@ -101,10 +103,21 @@ impl EmitContext {
             let s0 = u32::from(S0);
             self.push_u32(encode_addi(s0, sp, frame_size));
         }
+
+        // For sret functions: save sret pointer (a0) to callee-saved s1
+        // This preserves it across the function body which may clobber a0
+        if abi_info.is_sret() {
+            let a0 = u32::from(A0);
+            let s1 = u32::from(SRET_PTR);
+            self.push_u32(encode_addi(s1, a0, 0)); // mv s1, a0
+        }
     }
 
     /// Emit function epilogue: restore ra/s0, adjust sp, return.
-    pub fn emit_epilogue(&mut self) {
+    ///
+    /// For sret functions, the return values have already been stored to the
+    /// buffer pointed to by a0. Normal return just executes ret.
+    pub fn emit_epilogue(&mut self, _abi_info: &AbiInfo) {
         let sp = u32::from(SP);
         let frame_size = self.frame.size as i32;
 
@@ -190,7 +203,12 @@ impl EmitContext {
         }
     }
 
-    pub fn emit_vinst(&mut self, inst: &VInst, alloc: &Allocation) -> Result<(), NativeError> {
+    pub fn emit_vinst(
+        &mut self,
+        inst: &VInst,
+        alloc: &Allocation,
+        abi_info: &AbiInfo,
+    ) -> Result<(), NativeError> {
         self.current_src_op = inst.src_op();
         match inst {
             VInst::Add32 {
@@ -288,14 +306,26 @@ impl EmitContext {
                 }
             }
             VInst::Ret { vals, .. } => {
-                for (i, v) in vals.iter().enumerate() {
-                    if i >= RET_REGS.len() {
-                        return Err(NativeError::TooManyReturns(vals.len()));
+                if abi_info.is_sret() {
+                    // Sret: store values to buffer pointed to by s1
+                    // s1 was loaded with the sret buffer address in the prologue
+                    // (since a0 may be clobbered during function execution)
+                    let base_reg = SRET_PTR as u32; // s1
+                    for (i, v) in vals.iter().enumerate() {
+                        let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
+                        let offset = (i * 4) as i32;
+                        // Store each scalar to s1 + offset
+                        self.push_u32(encode_sw(src, base_reg, offset));
                     }
-                    let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
-                    let dst = RET_REGS[i] as u32;
-                    if src != dst {
-                        self.push_u32(encode_addi(dst, src, 0));
+                    // Return value buffer address is already in a0 per ABI
+                } else {
+                    // Direct return: move values to a0-a3
+                    for (i, v) in vals.iter().enumerate() {
+                        let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
+                        let dst = RET_REGS[i] as u32;
+                        if src != dst {
+                            self.push_u32(encode_addi(dst, src, 0));
+                        }
                     }
                 }
             }
@@ -307,13 +337,21 @@ impl EmitContext {
 }
 
 /// Emit one function to RV32 bytes (and relocations). Used by ELF writer and debug assembly.
+///
+/// # Arguments
+/// * `func` - The LPIR function to emit
+/// * `abi_info` - ABI information for the function (sret vs direct, arg registers, etc.)
+/// * `float_mode` - Floating point mode (Q32 or SoftFloat)
+/// * `debug_info` - Whether to include debug line information
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
+    abi_info: &AbiInfo,
     float_mode: lpir::FloatMode,
     debug_info: bool,
 ) -> Result<EmittedFunction, NativeError> {
     let vinsts = crate::lower::lower_ops(func, float_mode)?;
-    let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts)?;
+    let arg_reg_offset = abi_info.arg_reg_offset();
+    let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts, arg_reg_offset)?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
 
     // Create frame with spill count from allocation
@@ -324,11 +362,11 @@ pub fn emit_function_bytes(
     };
 
     let mut ctx = EmitContext::with_frame(frame, debug_info);
-    ctx.emit_prologue();
+    ctx.emit_prologue(abi_info);
     for v in &vinsts {
-        ctx.emit_vinst(v, &alloc)?;
+        ctx.emit_vinst(v, &alloc, abi_info)?;
     }
-    ctx.emit_epilogue();
+    ctx.emit_epilogue(abi_info);
     Ok(EmittedFunction {
         code: ctx.code,
         relocs: ctx.relocs,
@@ -337,13 +375,26 @@ pub fn emit_function_bytes(
 }
 
 /// Append all local functions from `ir` into one RV32 ELF relocatable object.
+///
+/// # Arguments
+/// * `ir` - The LPIR module to emit
+/// * `sig` - Module signatures containing function metadata (for ABI classification)
+/// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 pub fn emit_module_elf(
     ir: &lpir::IrModule,
+    sig: &lps_shared::LpsModuleSig,
     float_mode: lpir::FloatMode,
 ) -> Result<Vec<u8>, NativeError> {
     if ir.functions.is_empty() {
         return Err(NativeError::EmptyModule);
     }
+
+    // Build a map from function name to LpsFnSig for ABI classification
+    let sig_map: BTreeMap<&str, &lps_shared::LpsFnSig> = sig
+        .functions
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
 
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
     obj.flags = FileFlags::Elf {
@@ -356,7 +407,15 @@ pub fn emit_module_elf(
     let mut undefined_syms: BTreeMap<String, SymbolId> = BTreeMap::new();
 
     for func in &ir.functions {
-        let emitted = emit_function_bytes(func, float_mode, false)?;
+        // Get the signature for this function, or use a default (void -> void) if not found
+        let default_sig = lps_shared::LpsFnSig {
+            name: func.name.clone(),
+            return_type: lps_shared::LpsType::Void,
+            parameters: alloc::vec::Vec::new(),
+        };
+        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
+        let abi_info = AbiInfo::from_lps_sig(fn_sig);
+        let emitted = emit_function_bytes(func, &abi_info, float_mode, false)?;
         let ctx = emitted;
 
         let func_off = obj.append_section_data(text, &ctx.code, 4);
@@ -419,9 +478,21 @@ mod tests {
     use alloc::vec;
 
     fn alloc_fn(f: &lpir::IrFunction, v: &[VInst]) -> crate::regalloc::Allocation {
-        RegAlloc::allocate(&GreedyAlloc, f, v).expect("alloc")
+        // Tests use direct return (not sret), so arg_reg_offset = 0
+        RegAlloc::allocate(&GreedyAlloc, f, v, 0).expect("alloc")
     }
     use lpir::{IrFunction, Op};
+    use lps_shared::{LpsFnSig, LpsType};
+
+    /// Helper to create a simple AbiInfo for testing (void return, no params).
+    fn test_abi_info() -> super::AbiInfo {
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: LpsType::Void,
+            parameters: Vec::new(),
+        };
+        super::AbiInfo::from_lps_sig(&sig)
+    }
 
     fn leaf_add() -> IrFunction {
         IrFunction {
@@ -457,11 +528,12 @@ mod tests {
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
         let mut ctx = EmitContext::new(true, false);
-        ctx.emit_prologue();
+        let abi = test_abi_info();
+        ctx.emit_prologue(&abi);
         for i in &v {
-            ctx.emit_vinst(i, &a).expect("emit");
+            ctx.emit_vinst(i, &a, &abi).expect("emit");
         }
-        ctx.emit_epilogue();
+        ctx.emit_epilogue(&abi);
         assert!(ctx.code.len() >= 12);
         assert!(ctx.relocs.is_empty());
     }
@@ -469,7 +541,8 @@ mod tests {
     #[test]
     fn debug_lines_populated_when_enabled() {
         let f = leaf_add();
-        let e = emit_function_bytes(&f, lpir::FloatMode::Q32, true).expect("emit");
+        let abi = test_abi_info();
+        let e = emit_function_bytes(&f, &abi, lpir::FloatMode::Q32, true).expect("emit");
         assert!(
             !e.debug_lines.is_empty(),
             "expected per-instruction debug lines"
@@ -501,11 +574,12 @@ mod tests {
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
         let mut ctx = EmitContext::new(false, false);
-        ctx.emit_prologue();
+        let abi = test_abi_info();
+        ctx.emit_prologue(&abi);
         for i in &v {
-            ctx.emit_vinst(i, &a).expect("emit");
+            ctx.emit_vinst(i, &a, &abi).expect("emit");
         }
-        ctx.emit_epilogue();
+        ctx.emit_epilogue(&abi);
         assert_eq!(ctx.relocs.len(), 1);
         assert!(ctx.relocs[0].symbol.contains("fadd"));
     }

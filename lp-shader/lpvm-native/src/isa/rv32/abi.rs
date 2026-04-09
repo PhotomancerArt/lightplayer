@@ -19,6 +19,12 @@ pub const T2: PhysReg = 7;
 /// Frame pointer (callee-saved).
 pub const S0: PhysReg = 8;
 
+/// Sret pointer preservation register (callee-saved).
+/// When a function uses the sret calling convention, a0 contains the buffer
+/// pointer at entry. We save it to s1 in the prologue and use s1 when
+/// storing return values, since a0 may be clobbered by the function body.
+pub const SRET_PTR: PhysReg = 9; // s1
+
 pub const A0: PhysReg = 10;
 pub const A1: PhysReg = 11;
 
@@ -178,6 +184,65 @@ impl ReturnClass {
             let regs = RET_REGS.iter().copied().take(scalar_count).collect();
             ReturnClass::Direct { regs }
         }
+    }
+
+    /// Classify a single LpsType (convenience for single-return functions).
+    pub fn from_lps_type(return_type: &lps_shared::LpsType) -> Self {
+        Self::from_lps_types(&[return_type.clone()])
+    }
+}
+
+/// Per-function ABI information for the RV32 calling convention.
+/// Determines sret vs direct return and argument register assignment.
+#[derive(Debug, Clone)]
+pub struct AbiInfo {
+    /// Return classification (Direct or Sret)
+    pub return_class: ReturnClass,
+    /// Physical registers for arguments (may be shifted for sret)
+    pub arg_regs: Vec<PhysReg>,
+    /// Size of sret buffer if applicable (bytes)
+    pub sret_size: Option<u32>,
+    /// Scalar count of return type
+    pub return_scalar_count: u32,
+}
+
+impl AbiInfo {
+    /// Derive ABI info from an LPIR function and its signature.
+    ///
+    /// For sret functions (>4 scalars), the buffer pointer is passed in a0,
+    /// so real arguments start at a1.
+    pub fn from_lps_sig(sig: &lps_shared::LpsFnSig) -> Self {
+        let return_class = ReturnClass::from_lps_type(&sig.return_type);
+        let return_scalar_count = scalar_count_of_type(&sig.return_type) as u32;
+
+        let (arg_regs, sret_size) = match &return_class {
+            ReturnClass::Sret { .. } => {
+                // Sret: buffer ptr in a0, real args start at a1
+                (ARG_REGS[1..].to_vec(), Some(return_scalar_count * 4))
+            }
+            ReturnClass::Direct { .. } => {
+                // Direct: normal arg layout starting at a0
+                (ARG_REGS.to_vec(), None)
+            }
+        };
+
+        Self {
+            return_class,
+            arg_regs,
+            sret_size,
+            return_scalar_count,
+        }
+    }
+
+    /// Returns true if this function uses the sret calling convention.
+    pub fn is_sret(&self) -> bool {
+        matches!(self.return_class, ReturnClass::Sret { .. })
+    }
+
+    /// Returns the offset into ARG_REGS for parameter assignment.
+    /// 0 for direct returns (params start at a0), 1 for sret (params start at a1).
+    pub fn arg_reg_offset(&self) -> usize {
+        if self.is_sret() { 1 } else { 0 }
     }
 }
 
@@ -425,5 +490,84 @@ mod tests {
         },];
         // After 2 spills (8 bytes), stack slot 0 is at -8 - 8 = -16
         assert_eq!(frame.stack_slot_offset(0), -16);
+    }
+
+    // AbiInfo tests
+    #[test]
+    fn abi_info_mat4_is_sret() {
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: LpsType::Mat4,
+            parameters: vec![],
+        };
+
+        let abi = AbiInfo::from_lps_sig(&sig);
+        assert!(
+            matches!(abi.return_class, ReturnClass::Sret { ptr_reg: A0 }),
+            "mat4 should use sret"
+        );
+        assert_eq!(abi.sret_size, Some(64), "mat4 = 16 scalars * 4 bytes");
+        assert_eq!(abi.return_scalar_count, 16);
+    }
+
+    #[test]
+    fn abi_info_vec4_is_direct() {
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: LpsType::Vec4,
+            parameters: vec![],
+        };
+
+        let abi = AbiInfo::from_lps_sig(&sig);
+        assert!(
+            matches!(abi.return_class, ReturnClass::Direct { .. }),
+            "vec4 should be direct"
+        );
+        assert_eq!(abi.sret_size, None);
+        assert_eq!(abi.return_scalar_count, 4);
+    }
+
+    #[test]
+    fn abi_info_args_shifted_for_sret() {
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: LpsType::Mat4, // sret
+            parameters: vec![
+                FnParam {
+                    name: String::from("a"),
+                    ty: LpsType::Float,
+                    qualifier: ParamQualifier::In,
+                },
+                FnParam {
+                    name: String::from("b"),
+                    ty: LpsType::Float,
+                    qualifier: ParamQualifier::In,
+                },
+            ],
+        };
+
+        let abi = AbiInfo::from_lps_sig(&sig);
+        // For sret, args start at a1 (a0 holds sret pointer)
+        assert_eq!(abi.arg_regs.len(), 7, "7 regs available (a1-a7)");
+        assert_eq!(abi.arg_regs[0], A1, "first real arg in a1");
+        assert_eq!(abi.arg_regs[1], ARG_REGS[2], "second real arg in a2");
+    }
+
+    #[test]
+    fn abi_info_args_start_at_a0_for_direct() {
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: LpsType::Float, // direct
+            parameters: vec![FnParam {
+                name: String::from("a"),
+                ty: LpsType::Float,
+                qualifier: ParamQualifier::In,
+            }],
+        };
+
+        let abi = AbiInfo::from_lps_sig(&sig);
+        // For direct, args start at a0
+        assert_eq!(abi.arg_regs.len(), 8, "8 regs available (a0-a7)");
+        assert_eq!(abi.arg_regs[0], A0, "first arg in a0");
     }
 }

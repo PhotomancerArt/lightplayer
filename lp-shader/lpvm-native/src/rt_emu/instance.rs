@@ -88,6 +88,9 @@ impl NativeEmuInstance {
         );
         let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(LogLevel::None);
 
+        // The emulator handles sret natively: call_function_with_struct_return
+        // allocates a buffer on the emulator stack, passes its address in a0
+        // (shifting other args), executes, and reads results back as DataValues.
         let has_sr = sig
             .params
             .iter()

@@ -15,6 +15,10 @@ use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::settings::{self, Configurable, Flags};
 
+/// Default fuel limit for function calls (max instructions).
+/// Prevents infinite loops during buggy shader execution.
+const DEFAULT_FUNCTION_CALL_FUEL: u64 = 1_000_000;
+
 impl Riscv32Emulator {
     /// Call a compiled function using the RISC-V calling convention.
     ///
@@ -109,7 +113,19 @@ impl Riscv32Emulator {
         self.regs[1] = halt_address as i32; // ra = halt_address
 
         // Execute until function returns (EBREAK or PC at halt address)
+        let mut fuel = DEFAULT_FUNCTION_CALL_FUEL;
         loop {
+            // Check fuel limit to prevent infinite loops
+            fuel -= 1;
+            if fuel == 0 {
+                return Err(EmulatorError::InstructionLimitExceeded {
+                    limit: DEFAULT_FUNCTION_CALL_FUEL,
+                    executed: DEFAULT_FUNCTION_CALL_FUEL,
+                    pc: self.pc,
+                    regs: self.regs,
+                });
+            }
+
             // Check if PC is at halt address (function returned via RET)
             if self.pc == halt_address {
                 // Function returned via RET
@@ -264,7 +280,19 @@ impl Riscv32Emulator {
         self.regs[1] = halt_address as i32; // ra = halt_address
 
         // Execute until function returns (EBREAK or PC at halt address)
+        let mut fuel = DEFAULT_FUNCTION_CALL_FUEL;
         loop {
+            // Check fuel limit to prevent infinite loops
+            fuel -= 1;
+            if fuel == 0 {
+                return Err(EmulatorError::InstructionLimitExceeded {
+                    limit: DEFAULT_FUNCTION_CALL_FUEL,
+                    executed: DEFAULT_FUNCTION_CALL_FUEL,
+                    pc: self.pc,
+                    regs: self.regs,
+                });
+            }
+
             // Check if PC is at halt address (function returned via RET)
             if self.pc == halt_address {
                 // Function returned via RET
