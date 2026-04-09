@@ -1,5 +1,6 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
+use lp_riscv_emu::LogLevel;
 use lpir::{FloatMode as LpirFloatMode, IrModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
@@ -100,7 +101,11 @@ fn lower_glsl(source: &str) -> anyhow::Result<(IrModule, LpsModuleSig)> {
 }
 
 impl CompiledShader {
-    pub(crate) fn compile_glsl(source: &str, target: &Target) -> anyhow::Result<Self> {
+    pub(crate) fn compile_glsl(
+        source: &str,
+        target: &Target,
+        emu_log_level: LogLevel,
+    ) -> anyhow::Result<Self> {
         let (ir, meta) = lower_glsl(source)?;
         let fm = match target.float_mode {
             TargetFloatMode::Q32 => LpirFloatMode::Q32,
@@ -122,6 +127,7 @@ impl CompiledShader {
             Backend::Rv32lp => {
                 let native_opts = NativeCompileOptions {
                     float_mode: fm,
+                    emu_trace_instructions: emu_log_level == LogLevel::Instructions,
                     ..Default::default()
                 };
                 let engine = NativeEmuEngine::new(native_opts);

@@ -37,6 +37,7 @@ pub enum NativeError {
     UnresolvedLabel(u32),
     DuplicateLabel(u32),
     BranchOffsetOutOfRange,
+    MissingSretSlot,
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
@@ -71,6 +72,12 @@ impl fmt::Display for NativeError {
             }
             NativeError::BranchOffsetOutOfRange => {
                 write!(f, "branch/jal target out of RV32 immediate range")
+            }
+            NativeError::MissingSretSlot => {
+                write!(
+                    f,
+                    "sret call requires caller sret stack slot but frame has none"
+                )
             }
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]

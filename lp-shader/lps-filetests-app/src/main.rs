@@ -57,8 +57,8 @@ struct TestOptions {
     #[arg(long)]
     assume_yes: bool,
     /// Run only the specified target(s): comma-separated and/or backend shorthand (jit, wasm, rv32)
-    /// or full names (jit.q32). Example: `--target wasm,jit` or `--target rv32`.
-    #[arg(long)]
+    /// or full names (jit.q32). Example: `-t wasm,jit` or `--target rv32`.
+    #[arg(short, long)]
     target: Option<String>,
     #[command(flatten)]
     output_mode: OutputModeCli,

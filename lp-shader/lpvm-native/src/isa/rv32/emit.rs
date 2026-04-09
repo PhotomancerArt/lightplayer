@@ -1,6 +1,6 @@
 //! RV32 emission: machine code, relocations, ELF object (`object` crate).
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -16,9 +16,10 @@ use super::inst::{
     encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
-use crate::abi::{FrameLayout, PReg, PregSet};
+use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
 use crate::error::NativeError;
 use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
+use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
 use lps_shared;
@@ -39,6 +40,18 @@ pub struct EmittedFunction {
     pub debug_lines: Vec<(u32, Option<u32>)>,
 }
 
+/// Stack slots used around [`VInst::Call`] to preserve caller state across the RV32 ABI clobber set.
+#[derive(Clone, Debug)]
+pub(crate) struct CallSaveLayout {
+    /// First spill slot index reserved for per-call register saves (after regalloc spills).
+    slot_base: u32,
+    max_per_call: u32,
+    clobber_hw: BTreeSet<u8>,
+    /// When the caller returns via sret, `s1` holds the outer sret pointer; nested sret callees
+    /// overwrite `s1`, so we spill it here before any call and reload after.
+    s1_slot: Option<u32>,
+}
+
 #[derive(Debug)]
 pub struct EmitContext {
     pub code: Vec<u8>,
@@ -51,6 +64,7 @@ pub struct EmitContext {
     label_offsets: Vec<Option<usize>>,
     branch_fixups: Vec<BranchFixup>,
     jal_fixups: Vec<JalFixup>,
+    call_save: Option<CallSaveLayout>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,9 +93,68 @@ fn jal_offset_valid(imm: i32) -> bool {
     imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
 }
 
+fn call_clobber_hw(abi: &FuncAbi) -> BTreeSet<u8> {
+    abi.call_clobbers().iter().map(|p| p.hw).collect()
+}
+
+fn regs_saved_for_call(
+    alloc: &Allocation,
+    rets: &[VReg],
+    clobber: &BTreeSet<u8>,
+) -> Vec<(VReg, PhysReg)> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for (vi, po) in alloc.vreg_to_phys.iter().enumerate() {
+        let Some(p) = po else {
+            continue;
+        };
+        let v = VReg(vi as u32);
+        if alloc.is_spilled(v) {
+            continue;
+        }
+        if rets.contains(&v) {
+            continue;
+        }
+        if !clobber.contains(p) {
+            continue;
+        }
+        if seen.insert(*p) {
+            out.push((v, *p));
+        }
+    }
+    out.sort_by_key(|(v, _)| v.0);
+    out
+}
+
+fn max_regs_saved_across_calls(
+    vinsts: &[VInst],
+    alloc: &Allocation,
+    clobber: &BTreeSet<u8>,
+) -> u32 {
+    let mut m = 0u32;
+    for inst in vinsts {
+        if let VInst::Call { rets, .. } = inst {
+            m = m.max(regs_saved_for_call(alloc, rets.as_slice(), clobber).len() as u32);
+        }
+    }
+    m
+}
+
+fn phys_homes_of_non_spilled(alloc: &Allocation, vregs: &[VReg]) -> BTreeSet<u8> {
+    let mut out = BTreeSet::new();
+    for v in vregs {
+        if !alloc.is_spilled(*v) {
+            if let Some(p) = alloc.vreg_to_phys.get(v.0 as usize).copied().flatten() {
+                out.insert(p);
+            }
+        }
+    }
+    out
+}
+
 impl EmitContext {
     /// Create a new emit context with the given frame layout.
-    pub fn with_frame(frame: FrameLayout, debug_info: bool) -> Self {
+    fn with_frame(frame: FrameLayout, debug_info: bool, call_save: Option<CallSaveLayout>) -> Self {
         Self {
             code: Vec::new(),
             relocs: Vec::new(),
@@ -92,6 +165,7 @@ impl EmitContext {
             label_offsets: Vec::new(),
             branch_fixups: Vec::new(),
             jal_fixups: Vec::new(),
+            call_save,
         }
     }
 
@@ -104,8 +178,8 @@ impl EmitContext {
             parameters: vec![],
         };
         let func_abi = func_abi_rv32(&sig, 1);
-        let frame = FrameLayout::compute(&func_abi, 0, PregSet::EMPTY, &[], is_leaf);
-        Self::with_frame(frame, debug_info)
+        let frame = FrameLayout::compute(&func_abi, 0, PregSet::EMPTY, &[], is_leaf, 0);
+        Self::with_frame(frame, debug_info, None)
     }
 
     fn push_u32(&mut self, w: u32) {
@@ -116,60 +190,54 @@ impl EmitContext {
         }
     }
 
-    /// Emit function prologue: adjust sp, save ra and s0 if needed.
+    /// Emit function prologue: adjust sp, save ra/s0/callee-saved regs.
     /// For sret functions, also saves the sret pointer (in a0) to s1.
     pub fn emit_prologue(&mut self, is_sret: bool) {
         let sp = SP.hw as u32;
         let frame_size = self.frame.total_size as i32;
 
-        // Adjust stack pointer
         self.push_u32(encode_addi(sp, sp, -frame_size));
 
-        // Save s0 (frame pointer) if we have one
         if let Some(fp_off) = self.frame.fp_offset_from_sp {
             self.push_u32(encode_sw(S0.hw as u32, sp, fp_off));
         }
 
-        // Save ra if non-leaf
         if let Some(ra_off) = self.frame.ra_offset_from_sp {
             self.push_u32(encode_sw(abi::RA.hw as u32, sp, ra_off));
         }
 
-        // Set up frame pointer: s0 = sp + frame_size
-        if self.frame.save_fp {
-            let sp = SP.hw as u32;
-            let s0 = S0.hw as u32;
-            self.push_u32(encode_addi(s0, sp, frame_size));
+        let callee_saves = self.frame.callee_save_offsets.clone();
+        for &(preg, off) in &callee_saves {
+            self.push_u32(encode_sw(preg.hw as u32, sp, off));
         }
 
-        // For sret functions: save sret pointer (a0) to callee-saved s1
-        // This preserves it across the function body which may clobber a0
+        if self.frame.save_fp {
+            self.push_u32(encode_addi(S0.hw as u32, sp, frame_size));
+        }
+
         if is_sret {
-            let a0 = A0.hw as u32;
-            let s1 = S1.hw as u32;
-            self.push_u32(encode_addi(s1, a0, 0)); // mv s1, a0
+            self.push_u32(encode_addi(S1.hw as u32, A0.hw as u32, 0));
         }
     }
 
-    /// Emit function epilogue: restore ra/s0, adjust sp, return.
-    ///
-    /// For sret functions, the return values have already been stored to the
-    /// buffer pointed to by a0. Normal return just executes ret.
+    /// Emit function epilogue: restore callee-saved regs/ra/s0, adjust sp, return.
     pub fn emit_epilogue(&mut self) {
         let sp = SP.hw as u32;
         let frame_size = self.frame.total_size as i32;
 
-        // Restore ra if saved
+        let callee_saves = self.frame.callee_save_offsets.clone();
+        for &(preg, off) in callee_saves.iter().rev() {
+            self.push_u32(encode_lw(preg.hw as u32, sp, off));
+        }
+
         if let Some(ra_off) = self.frame.ra_offset_from_sp {
             self.push_u32(encode_lw(abi::RA.hw as u32, sp, ra_off));
         }
 
-        // Restore s0 if saved
         if let Some(fp_off) = self.frame.fp_offset_from_sp {
             self.push_u32(encode_lw(S0.hw as u32, sp, fp_off));
         }
 
-        // Adjust stack pointer back
         self.push_u32(encode_addi(sp, sp, frame_size));
         self.push_u32(encode_ret());
     }
@@ -248,6 +316,159 @@ impl EmitContext {
             // VReg was spilled - store temp to stack
             self.store_spill(slot_index, temp);
         }
+    }
+
+    fn spill_fp_off(&self, slot: u32) -> Result<i32, NativeError> {
+        self.frame
+            .spill_offset_from_fp(slot)
+            .ok_or(NativeError::UnassignedVReg(slot))
+    }
+
+    fn emit_call_preserves_before(
+        &mut self,
+        alloc: &Allocation,
+        rets: &[VReg],
+        caller_is_sret: bool,
+    ) -> Result<(), NativeError> {
+        let Some(layout) = self.call_save.clone() else {
+            return Ok(());
+        };
+        if let Some(s1_slot) = layout.s1_slot {
+            if caller_is_sret {
+                let o = self.spill_fp_off(s1_slot)?;
+                self.push_u32(encode_sw(S1.hw as u32, S0.hw as u32, o));
+            }
+        }
+        let list = regs_saved_for_call(alloc, rets, &layout.clobber_hw);
+        if list.len() as u32 > layout.max_per_call {
+            return Err(NativeError::TooManyVRegs {
+                count: list.len(),
+                max: layout.max_per_call as usize,
+            });
+        }
+        for (i, (_, p)) in list.iter().enumerate() {
+            let slot = layout.slot_base + i as u32;
+            let o = self.spill_fp_off(slot)?;
+            self.push_u32(encode_sw(*p as u32, S0.hw as u32, o));
+        }
+        Ok(())
+    }
+
+    fn emit_call_preserves_after(
+        &mut self,
+        alloc: &Allocation,
+        rets: &[VReg],
+        caller_is_sret: bool,
+    ) -> Result<(), NativeError> {
+        let Some(layout) = self.call_save.clone() else {
+            return Ok(());
+        };
+        let list = regs_saved_for_call(alloc, rets, &layout.clobber_hw);
+        let ret_homes = phys_homes_of_non_spilled(alloc, rets);
+        for (i, (_, p)) in list.iter().enumerate().rev() {
+            if ret_homes.contains(p) {
+                continue;
+            }
+            let slot = layout.slot_base + i as u32;
+            let o = self.spill_fp_off(slot)?;
+            self.push_u32(encode_lw(*p as u32, S0.hw as u32, o));
+        }
+        if let Some(s1_slot) = layout.s1_slot {
+            if caller_is_sret {
+                let o = self.spill_fp_off(s1_slot)?;
+                self.push_u32(encode_lw(S1.hw as u32, S0.hw as u32, o));
+            }
+        }
+        Ok(())
+    }
+
+    /// Direct-return call: args in a0–a7, results in a0–a1.
+    fn emit_call_direct(
+        &mut self,
+        alloc: &Allocation,
+        target: &SymbolRef,
+        args: &[VReg],
+        rets: &[VReg],
+        caller_is_sret: bool,
+    ) -> Result<(), NativeError> {
+        self.emit_call_preserves_before(alloc, rets, caller_is_sret)?;
+        if args.len() > ARG_REGS.len() {
+            return Err(NativeError::TooManyArgs(args.len()));
+        }
+        for (i, a) in args.iter().enumerate() {
+            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let to = ARG_REGS[i].hw as u32;
+            if from != to {
+                self.push_u32(encode_addi(to, from, 0));
+            }
+        }
+        let auipc_off = self.code.len();
+        let ra = abi::RA.hw as u32;
+        self.push_u32(encode_auipc(ra, 0));
+        self.push_u32(encode_jalr(ra, ra, 0));
+        self.relocs.push(NativeReloc {
+            offset: auipc_off,
+            symbol: target.name.clone(),
+        });
+        for (i, r) in rets.iter().enumerate() {
+            if i >= RET_REGS.len() {
+                return Err(NativeError::TooManyReturns(i + 1));
+            }
+            let dst = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
+            let src = RET_REGS[i].hw as u32;
+            if dst != src {
+                self.push_u32(encode_addi(dst, src, 0));
+            }
+            self.store_def_vreg(alloc, *r, Self::TEMP0);
+        }
+        self.emit_call_preserves_after(alloc, rets, caller_is_sret)?;
+        Ok(())
+    }
+
+    /// Callee uses sret: pass buffer address in a0, args in a1–a7, load results from frame slot.
+    fn emit_call_sret(
+        &mut self,
+        alloc: &Allocation,
+        target: &SymbolRef,
+        args: &[VReg],
+        rets: &[VReg],
+        caller_is_sret: bool,
+    ) -> Result<(), NativeError> {
+        self.emit_call_preserves_before(alloc, rets, caller_is_sret)?;
+        let sret_off = self
+            .frame
+            .sret_slot_offset_from_fp()
+            .ok_or(NativeError::MissingSretSlot)?;
+        if args.len() > ARG_REGS.len() - 1 {
+            return Err(NativeError::TooManyArgs(args.len()));
+        }
+        let a0 = A0.hw as u32;
+        let s0 = S0.hw as u32;
+        self.push_u32(encode_addi(a0, s0, sret_off));
+        for (i, a) in args.iter().enumerate() {
+            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let to = ARG_REGS[i + 1].hw as u32;
+            if from != to {
+                self.push_u32(encode_addi(to, from, 0));
+            }
+        }
+        let auipc_off = self.code.len();
+        let ra = abi::RA.hw as u32;
+        self.push_u32(encode_auipc(ra, 0));
+        self.push_u32(encode_jalr(ra, ra, 0));
+        self.relocs.push(NativeReloc {
+            offset: auipc_off,
+            symbol: target.name.clone(),
+        });
+        let base_off = sret_off;
+        for (i, r) in rets.iter().enumerate() {
+            let off = base_off + (i * 4) as i32;
+            let rd = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
+            self.push_u32(encode_lw(rd, s0, off));
+            self.store_def_vreg(alloc, *r, Self::TEMP0);
+        }
+        self.emit_call_preserves_after(alloc, rets, caller_is_sret)?;
+        Ok(())
     }
 
     fn ensure_label_slot(&mut self, id: LabelId) {
@@ -647,36 +868,22 @@ impl EmitContext {
                 self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Call {
-                target, args, rets, ..
+                target,
+                args,
+                rets,
+                callee_uses_sret,
+                ..
             } => {
-                if args.len() > ARG_REGS.len() {
-                    return Err(NativeError::TooManyArgs(args.len()));
-                }
-                for (i, a) in args.iter().enumerate() {
-                    let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
-                    let to = ARG_REGS[i].hw as u32;
-                    if from != to {
-                        self.push_u32(encode_addi(to, from, 0));
-                    }
-                }
-                let auipc_off = self.code.len();
-                let ra = abi::RA.hw as u32;
-                self.push_u32(encode_auipc(ra, 0));
-                self.push_u32(encode_jalr(ra, ra, 0));
-                self.relocs.push(NativeReloc {
-                    offset: auipc_off,
-                    symbol: target.name.clone(),
-                });
-                for (i, r) in rets.iter().enumerate() {
-                    if i >= RET_REGS.len() {
-                        return Err(NativeError::TooManyReturns(i + 1));
-                    }
-                    let dst = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
-                    let src = RET_REGS[i].hw as u32;
-                    if dst != src {
-                        self.push_u32(encode_addi(dst, src, 0));
-                    }
-                    self.store_def_vreg(alloc, *r, Self::TEMP0);
+                if *callee_uses_sret {
+                    self.emit_call_sret(alloc, target, args.as_slice(), rets.as_slice(), is_sret)?;
+                } else {
+                    self.emit_call_direct(
+                        alloc,
+                        target,
+                        args.as_slice(),
+                        rets.as_slice(),
+                        is_sret,
+                    )?;
                 }
             }
             VInst::Ret { vals, .. } => {
@@ -716,16 +923,20 @@ impl EmitContext {
 ///
 /// # Arguments
 /// * `func` - The LPIR function to emit
+/// * `ir` - Module containing `func` (for call lowering)
+/// * `module_abi` - Pre-computed ABI and max callee sret size
 /// * `fn_sig` - Surface signature (ABI classification, must match `func` parameter layout)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `debug_info` - Whether to include debug line information
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
+    ir: &lpir::IrModule,
+    module_abi: &ModuleAbi,
     fn_sig: &lps_shared::LpsFnSig,
     float_mode: lpir::FloatMode,
     debug_info: bool,
 ) -> Result<EmittedFunction, NativeError> {
-    let vinsts = crate::lower::lower_ops(func, float_mode)?;
+    let vinsts = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
     let alloc = GreedyAlloc::new().allocate_with_func_abi(func, &vinsts, &func_abi)?;
@@ -747,16 +958,43 @@ pub fn emit_function_bytes(
         used_callee_saved.insert(S1);
     }
 
-    // Create frame with spill count from allocation
+    let caller_sret_bytes = module_abi.max_callee_sret_bytes();
+    let has_call = vinsts.iter().any(|v| v.is_call());
+    let clobber_hw = call_clobber_hw(&func_abi);
+    let max_call_saves = if has_call {
+        max_regs_saved_across_calls(&vinsts, &alloc, &clobber_hw)
+    } else {
+        0
+    };
+    let s1_save_words = u32::from(is_sret && has_call);
+    let extra_spill = max_call_saves.saturating_add(s1_save_words);
     let frame = FrameLayout::compute(
         &func_abi,
-        alloc.spill_count(),
+        alloc.spill_count().saturating_add(extra_spill),
         used_callee_saved,
         &[],
         is_leaf,
+        caller_sret_bytes,
     );
 
-    let mut ctx = EmitContext::with_frame(frame, debug_info);
+    let slot_base = alloc.spill_count();
+    let s1_slot = if is_sret && has_call {
+        Some(slot_base + max_call_saves)
+    } else {
+        None
+    };
+    let call_save = if has_call {
+        Some(CallSaveLayout {
+            slot_base,
+            max_per_call: max_call_saves,
+            clobber_hw,
+            s1_slot,
+        })
+    } else {
+        None
+    };
+
+    let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
     ctx.emit_prologue(is_sret);
     for v in &vinsts {
         ctx.emit_vinst(v, &alloc, is_sret)?;
@@ -785,6 +1023,8 @@ pub fn emit_module_elf(
         return Err(NativeError::EmptyModule);
     }
 
+    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+
     // Build a map from function name to LpsFnSig for ABI classification
     let sig_map: BTreeMap<&str, &lps_shared::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
@@ -810,7 +1050,7 @@ pub fn emit_module_elf(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
-        let emitted = emit_function_bytes(func, fn_sig, float_mode, false)?;
+        let emitted = emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, false)?;
         let ctx = emitted;
 
         let func_off = obj.append_section_data(text, &ctx.code, 4);
@@ -869,11 +1109,31 @@ pub fn emit_module_elf(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abi::ModuleAbi;
     use crate::regalloc::GreedyAlloc;
     use alloc::vec;
 
-    use lpir::{IrFunction, Op};
-    use lps_shared::{FnParam, LpsFnSig, LpsType, ParamQualifier};
+    use lpir::{IrFunction, IrModule, Op};
+    use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
+
+    fn ir_single(f: IrFunction) -> IrModule {
+        IrModule {
+            imports: vec![],
+            functions: vec![f],
+        }
+    }
+
+    fn leaf_sig_module() -> LpsModuleSig {
+        LpsModuleSig {
+            functions: vec![leaf_lps_sig()],
+        }
+    }
+
+    fn call_c_sig_module() -> LpsModuleSig {
+        LpsModuleSig {
+            functions: vec![call_test_lps_sig()],
+        }
+    }
 
     /// [`LpsFnSig`] consistent with [`leaf_add`] (vmctx + two scalar params, scalar return).
     fn leaf_lps_sig() -> LpsFnSig {
@@ -946,7 +1206,9 @@ mod tests {
     #[test]
     fn emit_leaf_prologue_epilogue_size() {
         let f = leaf_add();
-        let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
+        let ir = ir_single(f.clone());
+        let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
+        let v = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
         let a = GreedyAlloc::new()
             .allocate_with_func_abi(&f, &v, &func_abi)
@@ -964,7 +1226,10 @@ mod tests {
     #[test]
     fn debug_lines_populated_when_enabled() {
         let f = leaf_add();
-        let e = emit_function_bytes(&f, &leaf_lps_sig(), lpir::FloatMode::Q32, true).expect("emit");
+        let ir = ir_single(f.clone());
+        let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
+        let e = emit_function_bytes(&f, &ir, &mabi, &leaf_lps_sig(), lpir::FloatMode::Q32, true)
+            .expect("emit");
         assert!(
             !e.debug_lines.is_empty(),
             "expected per-instruction debug lines"
@@ -993,7 +1258,9 @@ mod tests {
             ],
             vreg_pool: vec![VReg(3)],
         };
-        let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
+        let ir = ir_single(f.clone());
+        let mabi = ModuleAbi::from_ir_and_sig(&ir, &call_c_sig_module());
+        let v = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
         let a = GreedyAlloc::new()
             .allocate_with_func_abi(&f, &v, &func_abi)

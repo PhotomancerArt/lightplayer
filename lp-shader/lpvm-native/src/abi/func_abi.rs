@@ -1,6 +1,11 @@
 //! Per-function ABI state for register roles, params, return, and allocation.
 
+use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
+
+use lpir::IrModule;
+use lps_shared::LpsModuleSig;
 
 use crate::abi::PReg;
 use crate::abi::PregSet;
@@ -108,11 +113,58 @@ impl FuncAbi {
     }
 }
 
+/// Pre-computed ABI for every [`LpsFnSig`] in a module plus max callee sret buffer size.
+#[derive(Clone, Debug)]
+pub struct ModuleAbi {
+    func_abis: BTreeMap<String, FuncAbi>,
+    max_callee_sret_bytes: u32,
+}
+
+impl ModuleAbi {
+    /// Build from surface signatures and LPIR imports (import return shapes affect caller sret).
+    pub fn from_ir_and_sig(ir: &IrModule, sig: &LpsModuleSig) -> Self {
+        use crate::abi::classify::entry_param_scalar_count;
+        use crate::isa::rv32::abi::{self, func_abi_rv32};
+
+        let mut func_abis = BTreeMap::new();
+        let mut max_sret_bytes = 0u32;
+
+        for fn_sig in &sig.functions {
+            let n = entry_param_scalar_count(fn_sig);
+            let fa = func_abi_rv32(fn_sig, n);
+            if let Some(w) = fa.sret_word_count() {
+                max_sret_bytes = max_sret_bytes.max(w * 4);
+            }
+            func_abis.insert(fn_sig.name.clone(), fa);
+        }
+
+        for imp in &ir.imports {
+            let n = imp.return_types.len();
+            if n > abi::SRET_SCALAR_THRESHOLD {
+                max_sret_bytes = max_sret_bytes.max((n as u32) * 4);
+            }
+        }
+
+        Self {
+            func_abis,
+            max_callee_sret_bytes: max_sret_bytes,
+        }
+    }
+
+    pub fn func_abi(&self, name: &str) -> Option<&FuncAbi> {
+        self.func_abis.get(name)
+    }
+
+    pub fn max_callee_sret_bytes(&self) -> u32 {
+        self.max_callee_sret_bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
 
-    use lps_shared::{LpsFnSig, LpsType};
+    use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
     use crate::abi::classify::entry_param_scalar_count;
     use crate::isa::rv32::abi as rv32;
@@ -232,5 +284,61 @@ mod tests {
         };
         let abi = rv32::func_abi_rv32(&sig, 1);
         assert_eq!(abi.stack_alignment(), 16);
+    }
+
+    #[test]
+    fn module_abi_empty() {
+        use lpir::IrModule;
+
+        let ir = IrModule::default();
+        let sig = LpsModuleSig { functions: vec![] };
+        let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
+        assert_eq!(m.max_callee_sret_bytes(), 0);
+        assert!(m.func_abi("x").is_none());
+    }
+
+    #[test]
+    fn module_abi_tracks_max_sret() {
+        use lpir::IrModule;
+
+        let ir = IrModule::default();
+        let sig = LpsModuleSig {
+            functions: vec![
+                LpsFnSig {
+                    name: "f".into(),
+                    return_type: LpsType::Vec4,
+                    parameters: vec![],
+                },
+                LpsFnSig {
+                    name: "g".into(),
+                    return_type: LpsType::Mat4,
+                    parameters: vec![],
+                },
+            ],
+        };
+        let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
+        assert_eq!(m.max_callee_sret_bytes(), 64);
+        assert!(m.func_abi("f").expect("f").is_sret());
+        assert_eq!(m.func_abi("f").expect("f").sret_word_count(), Some(4));
+        assert_eq!(m.func_abi("g").expect("g").sret_word_count(), Some(16));
+    }
+
+    #[test]
+    fn module_abi_import_sret_contributes_max() {
+        use alloc::string::String;
+        use lpir::{ImportDecl, IrModule, IrType};
+
+        let mut ir = IrModule::default();
+        ir.imports.push(ImportDecl {
+            module_name: String::from("b"),
+            func_name: String::from("big_ret"),
+            param_types: vec![],
+            return_types: vec![IrType::I32; 5],
+            lpfx_glsl_params: None,
+            needs_vmctx: false,
+        });
+        let sig = LpsModuleSig { functions: vec![] };
+        let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
+        assert_eq!(m.max_callee_sret_bytes(), 20);
     }
 }

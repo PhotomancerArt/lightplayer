@@ -10,7 +10,7 @@ pub fn compile_for_target(
     source: &str,
     target: &Target,
     _relative_path: &str,
-    _log_level: LogLevel,
+    log_level: LogLevel,
 ) -> anyhow::Result<CompiledShader> {
-    CompiledShader::compile_glsl(source, target)
+    CompiledShader::compile_glsl(source, target, log_level)
 }

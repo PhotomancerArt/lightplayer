@@ -8,6 +8,9 @@ use lpir::{IrFunction, Op, VRegRange};
 
 use super::LineTable;
 
+/// 1-based text column where `(` for the LPIR op index starts (monospace).
+const LPIR_COMMENT_INDEX_PAREN_COL: usize = 60;
+
 /// Options for text output.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DisasmOptions {
@@ -60,12 +63,12 @@ fn format_return(values: VRegRange, func: &IrFunction) -> String {
     s
 }
 
-fn lpir_comment_by_index(func: &IrFunction, src_op: u32) -> String {
+fn lpir_op_description(func: &IrFunction, src_op: u32) -> String {
     let i = src_op as usize;
     if i >= func.body.len() {
-        return format!("LPIR[{src_op}]: <out of range>");
+        return String::from("<out of range>");
     }
-    format!("LPIR[{src_op}]: {}", format_lpir_op(&func.body[i], func))
+    format_lpir_op(&func.body[i], func)
 }
 
 /// Disassemble one function's code with LPIR source comments.
@@ -82,6 +85,7 @@ pub fn disassemble_function(
     out.push_str(&format!("{name}:\n"));
 
     let mut offset = 0u32;
+    let mut prev_src_op: Option<u32> = None;
     while offset as usize + 4 <= code.len() {
         let chunk = &code[offset as usize..offset as usize + 4];
         let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
@@ -95,9 +99,22 @@ pub fn disassemble_function(
         }
 
         if let Some(src_op) = line_table.src_op_at_offset(offset) {
-            let ann = lpir_comment_by_index(func, src_op);
-            out.push_str(&format!("{prefix}{asm:<36}# {ann}\n"));
+            if prev_src_op != Some(src_op) {
+                let desc = lpir_op_description(func, src_op);
+                out.push('\n');
+                out.push_str("# ");
+                out.push_str(&desc);
+                let used = 2 + desc.len();
+                let before_paren = LPIR_COMMENT_INDEX_PAREN_COL.saturating_sub(1);
+                if used < before_paren {
+                    out.extend(core::iter::repeat(' ').take(before_paren - used));
+                }
+                out.push_str(&format!("({src_op})\n"));
+            }
+            prev_src_op = Some(src_op);
+            out.push_str(&format!("{prefix}{asm}\n"));
         } else {
+            prev_src_op = None;
             out.push_str(&format!("{prefix}{asm}\n"));
         }
 
@@ -144,7 +161,7 @@ mod tests {
         let table = LineTable::from_debug_lines(&[(0, Some(0u32))]);
         let s = disassemble_function(&code, &table, &func, DisasmOptions::default());
         assert!(s.contains("add:"));
-        assert!(s.contains("LPIR[0]:"));
-        assert!(s.contains("iadd"));
+        assert!(s.contains("# v3 = iadd v1, v2"));
+        assert!(s.contains("(0)"));
     }
 }

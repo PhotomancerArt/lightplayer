@@ -86,7 +86,12 @@ impl NativeEmuInstance {
             DEFAULT_SHARED_START,
             lp_riscv_emu::DEFAULT_RAM_START,
         );
-        let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(LogLevel::None);
+        let log_level = if self.module.options.emu_trace_instructions {
+            LogLevel::Instructions
+        } else {
+            LogLevel::None
+        };
+        let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
 
         // The emulator handles sret natively: call_function_with_struct_return
         // allocates a buffer on the emulator stack, passes its address in a0
@@ -131,7 +136,7 @@ impl NativeEmuInstance {
                 debug_parts.push(format!("=== Debug Info ==="));
                 debug_parts.push(format!("Error: {e:?}"));
                 debug_parts.push(emu.dump_state());
-                debug_parts.push(emu.format_debug_info(Some(emu.get_pc()), 50));
+                debug_parts.push(emu.format_debug_info(Some(emu.get_pc()), 100));
                 let debug_info = debug_parts.join("\n\n");
                 self.last_debug = Some(debug_info);
                 Err(NativeError::Call(CallError::Unsupported(format!(

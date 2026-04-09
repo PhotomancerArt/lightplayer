@@ -7,5 +7,5 @@ mod regset;
 pub mod classify;
 
 pub use frame::{FrameLayout, SlotKind};
-pub use func_abi::FuncAbi;
+pub use func_abi::{FuncAbi, ModuleAbi};
 pub use regset::{PReg, PregSet, RegClass};

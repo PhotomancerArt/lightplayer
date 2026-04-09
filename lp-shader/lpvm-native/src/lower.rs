@@ -4,9 +4,11 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{FloatMode, IrFunction, Op};
+use lpir::{CalleeRef, FloatMode, IrFunction, IrModule, Op};
 
+use crate::abi::ModuleAbi;
 use crate::error::LowerError;
+use crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD;
 use crate::vinst::{IcmpCond, LabelId, SymbolRef, VInst};
 
 /// Lower one LPIR op. `src_op` is the index in [`IrFunction::body`].
@@ -15,6 +17,8 @@ pub fn lower_op(
     float_mode: FloatMode,
     src_op: Option<u32>,
     func: &IrFunction,
+    ir: &IrModule,
+    abi: &ModuleAbi,
 ) -> Result<VInst, LowerError> {
     match op {
         Op::Iadd { dst, lhs, rhs } => Ok(VInst::Add32 {
@@ -222,6 +226,7 @@ pub fn lower_op(
             },
             args: alloc::vec![*lhs, *rhs],
             rets: alloc::vec![*dst],
+            callee_uses_sret: false,
             src_op,
         }),
         Op::Fsub { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
@@ -230,6 +235,7 @@ pub fn lower_op(
             },
             args: alloc::vec![*lhs, *rhs],
             rets: alloc::vec![*dst],
+            callee_uses_sret: false,
             src_op,
         }),
         Op::Fmul { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
@@ -238,6 +244,7 @@ pub fn lower_op(
             },
             args: alloc::vec![*lhs, *rhs],
             rets: alloc::vec![*dst],
+            callee_uses_sret: false,
             src_op,
         }),
 
@@ -270,6 +277,37 @@ pub fn lower_op(
             ),
         }),
 
+        Op::Call {
+            callee,
+            args,
+            results,
+        } => {
+            let name =
+                resolve_callee_name(ir, *callee).ok_or_else(|| LowerError::UnsupportedOp {
+                    description: format!("Call: callee index out of range ({callee:?})"),
+                })?;
+            let args_slice = func.pool_slice(*args);
+            if args_slice.len() != args.count as usize {
+                return Err(LowerError::UnsupportedOp {
+                    description: String::from("Call: args vreg_pool slice out of range"),
+                });
+            }
+            let results_slice = func.pool_slice(*results);
+            if results_slice.len() != results.count as usize {
+                return Err(LowerError::UnsupportedOp {
+                    description: String::from("Call: results vreg_pool slice out of range"),
+                });
+            }
+            let callee_uses_sret = callee_return_uses_sret(ir, abi, *callee);
+            Ok(VInst::Call {
+                target: SymbolRef { name },
+                args: args_slice.to_vec(),
+                rets: results_slice.to_vec(),
+                callee_uses_sret,
+                src_op,
+            })
+        }
+
         other => Err(LowerError::UnsupportedOp {
             description: format!("{other:?}"),
         }),
@@ -286,6 +324,8 @@ struct LoopFrame {
 
 struct LowerCtx<'a> {
     func: &'a IrFunction,
+    ir: &'a IrModule,
+    abi: &'a ModuleAbi,
     float_mode: FloatMode,
     out: Vec<VInst>,
     next_label: LabelId,
@@ -365,8 +405,10 @@ impl<'a> LowerCtx<'a> {
                     let eo = *end_offset as usize;
                     // Body: from after LoopStart to continuing_offset
                     self.lower_range(i + 1, co)?;
-                    // Emit continue block label if there's a continue section
-                    if co > i + 1 && co < eo {
+                    // Continuing ops (increment, br_if_not, …) when `co < end`. When `co == i + 1`
+                    // the body is empty but continuing still starts at the first op after LoopStart;
+                    // we must emit it (otherwise the loop back-edge never hits BrIfNot).
+                    if co < eo {
                         self.out
                             .push(VInst::Label(continuing, Some(*continuing_offset)));
                         self.lower_range(co, eo.saturating_sub(1))?
@@ -433,8 +475,14 @@ impl<'a> LowerCtx<'a> {
                         }
                     }
                     let is_return = matches!(other, Op::Return { .. });
-                    self.out
-                        .push(lower_op(other, self.float_mode, Some(i as u32), self.func)?);
+                    self.out.push(lower_op(
+                        other,
+                        self.float_mode,
+                        Some(i as u32),
+                        self.func,
+                        self.ir,
+                        self.abi,
+                    )?);
                     if is_return {
                         self.out.push(VInst::Br {
                             target: self.epilogue_label,
@@ -450,9 +498,16 @@ impl<'a> LowerCtx<'a> {
 }
 
 /// Lower full function body (including if/else and loop control flow).
-pub fn lower_ops(func: &IrFunction, float_mode: FloatMode) -> Result<Vec<VInst>, LowerError> {
+pub fn lower_ops(
+    func: &IrFunction,
+    ir: &IrModule,
+    abi: &ModuleAbi,
+    float_mode: FloatMode,
+) -> Result<Vec<VInst>, LowerError> {
     let mut ctx = LowerCtx {
         func,
+        ir,
+        abi,
         float_mode,
         out: Vec::with_capacity(func.body.len().saturating_mul(2)),
         next_label: 0,
@@ -465,6 +520,32 @@ pub fn lower_ops(func: &IrFunction, float_mode: FloatMode) -> Result<Vec<VInst>,
     Ok(ctx.out)
 }
 
+fn resolve_callee_name(ir: &IrModule, callee: CalleeRef) -> Option<String> {
+    let idx = callee.0 as usize;
+    let ni = ir.imports.len();
+    if idx < ni {
+        ir.imports.get(idx).map(|imp| imp.func_name.clone())
+    } else {
+        ir.functions.get(idx - ni).map(|f| f.name.clone())
+    }
+}
+
+fn callee_return_uses_sret(ir: &IrModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
+    let idx = callee.0 as usize;
+    let ni = ir.imports.len();
+    if idx < ni {
+        return ir.imports[idx].return_types.len() > SRET_SCALAR_THRESHOLD;
+    }
+    let Some(f) = ir.functions.get(idx - ni) else {
+        return false;
+    };
+    if let Some(fa) = abi.func_abi(f.name.as_str()) {
+        fa.is_sret()
+    } else {
+        f.return_types.len() > SRET_SCALAR_THRESHOLD
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
@@ -473,7 +554,14 @@ mod tests {
     use super::*;
     use crate::vinst::IcmpCond;
     use lpir::types::VRegRange;
-    use lpir::{IrType, VReg};
+    use lpir::{IrModule, IrType, VReg};
+    use lps_shared::LpsModuleSig;
+
+    fn empty_ir_abi() -> (IrModule, ModuleAbi) {
+        let ir = IrModule::default();
+        let abi = ModuleAbi::from_ir_and_sig(&ir, &LpsModuleSig { functions: vec![] });
+        (ir, abi)
+    }
 
     fn v(n: u32) -> VReg {
         VReg(n)
@@ -501,7 +589,8 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
-        let got = lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok");
+        let (ir, abi) = empty_ir_abi();
+        let got = lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
             VInst::Add32 {
@@ -521,16 +610,19 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
-        match lower_op(&op, FloatMode::Q32, Some(3), &f).expect("ok") {
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(3), &f, &ir, &abi).expect("ok") {
             VInst::Call {
                 target,
                 args,
                 rets,
+                callee_uses_sret,
                 src_op,
             } => {
                 assert_eq!(target.name, "__lp_lpir_fadd_q32");
                 assert_eq!(args, vec![v(0), v(1)]);
                 assert_eq!(rets, vec![v(2)]);
+                assert!(!callee_uses_sret);
                 assert_eq!(src_op, Some(3));
             }
             other => panic!("expected Call, got {other:?}"),
@@ -545,7 +637,8 @@ mod tests {
             rhs: v(2),
         };
         let f = empty_func();
-        assert!(lower_op(&op, FloatMode::F32, None, &f).is_err());
+        let (ir, abi) = empty_ir_abi();
+        assert!(lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).is_err());
     }
 
     #[test]
@@ -555,7 +648,8 @@ mod tests {
             src: v(0),
         };
         let f = empty_func();
-        let got = lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok");
+        let (ir, abi) = empty_ir_abi();
+        let got = lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
             VInst::Neg32 {
@@ -574,8 +668,9 @@ mod tests {
             imm: 0,
         };
         let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
         assert!(matches!(
-            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
             VInst::IeqImm32 {
                 dst: VReg(1),
                 src: VReg(0),
@@ -593,8 +688,9 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
         assert!(matches!(
-            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
             VInst::And32 {
                 dst: VReg(2),
                 src1: VReg(0),
@@ -611,8 +707,9 @@ mod tests {
             src: v(0),
         };
         let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
         assert!(matches!(
-            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
             VInst::Bnot32 {
                 dst: VReg(1),
                 src: VReg(0),
@@ -629,7 +726,8 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
-        let got = lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok");
+        let (ir, abi) = empty_ir_abi();
+        let got = lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
             VInst::DivS32 {
@@ -649,7 +747,8 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
-        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
             VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::Eq),
             other => panic!("expected Icmp32, got {other:?}"),
         }
@@ -663,7 +762,8 @@ mod tests {
             rhs: v(1),
         };
         let f = empty_func();
-        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
             VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::LtU),
             other => panic!("expected Icmp32, got {other:?}"),
         }
@@ -678,7 +778,8 @@ mod tests {
             if_false: v(2),
         };
         let f = empty_func();
-        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
             VInst::Select32 {
                 dst,
                 cond,
@@ -712,7 +813,8 @@ mod tests {
         let op = Op::Return {
             values: VRegRange { start: 0, count: 2 },
         };
-        let got = lower_op(&op, FloatMode::Q32, Some(1), &f).expect("ok");
+        let (ir, abi) = empty_ir_abi();
+        let got = lower_op(&op, FloatMode::Q32, Some(1), &f, &ir, &abi).expect("ok");
         match got {
             VInst::Ret { vals, src_op } => {
                 assert_eq!(vals, vec![v(10), v(11)]);

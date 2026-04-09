@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
     REGEN_GEN_FILES=true
     shift
     ;;
-  --target)
+  --target | -t)
     TARGET_ARG=("--target" "$2")
     shift 2
     ;;
@@ -112,7 +112,7 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
-    --target SPEC       Run target(s): comma-separated, backend shorthand (jit,wasm,rv32), or full names (jit.q32)
+    -t, --target SPEC   Run target(s): comma-separated, backend shorthand (jit,wasm,rv32), or full names (jit.q32)
     --summary           Same as --concise (alias for the wrapper script)
     --debug             Full output plus CLIF/disassembly on failure (same as DEBUG=1)
     --concise           Minimal output even for a single file

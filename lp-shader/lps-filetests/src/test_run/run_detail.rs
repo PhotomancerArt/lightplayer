@@ -35,7 +35,9 @@ pub fn run(
         .to_string();
 
     let test_line_filter = line_filter;
-    let log_level = if output_mode.show_full_output() {
+    // Per-instruction emu logging is slow; enable only for DEBUG=1 / `--debug` so failures
+    // include `Execution history:` from lp-riscv-emu.
+    let log_level = if output_mode.show_debug_sections() {
         LogLevel::Instructions
     } else {
         LogLevel::None

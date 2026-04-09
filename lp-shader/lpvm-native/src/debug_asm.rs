@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 use lpir::IrModule;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
+use crate::abi::ModuleAbi;
 use crate::error::NativeError;
 use crate::isa::rv32::debug::LineTable;
 use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
@@ -29,6 +30,8 @@ pub fn compile_module_asm_text(
     let sig_map: BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
+    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
+
     let mut out = String::new();
     for func in &ir.functions {
         // Get signature or use default (void -> void)
@@ -41,7 +44,7 @@ pub fn compile_module_asm_text(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
-        let emitted = emit_function_bytes(func, fn_sig, float_mode, true)?;
+        let emitted = emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true)?;
         let table = LineTable::from_debug_lines(&emitted.debug_lines);
         out.push_str(&disassemble_function(&emitted.code, &table, func, opts));
         out.push('\n');
@@ -107,7 +110,7 @@ mod tests {
         let s = compile_module_asm_text(&ir, &sig, lpir::FloatMode::Q32, DisasmOptions::default())
             .expect("asm");
         assert!(s.contains(".globl\tadd"));
-        assert!(s.contains("LPIR[0]:"));
+        assert!(s.contains("(0)"));
         assert!(s.contains("iadd"));
     }
 }

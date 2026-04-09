@@ -183,6 +183,8 @@ pub enum VInst {
         target: SymbolRef,
         args: Vec<VReg>,
         rets: Vec<VReg>,
+        /// Callee returns via hidden sret pointer in a0; caller must pass buffer and load results.
+        callee_uses_sret: bool,
         src_op: Option<u32>,
     },
     Ret {

@@ -22,6 +22,7 @@ pub mod vinst;
 #[cfg(feature = "emu")]
 pub mod rt_emu;
 
+pub use abi::ModuleAbi;
 pub use debug_asm::compile_module_asm_text;
 pub use error::{LowerError, NativeError};
 pub use isa::{CodeBlob, IsaBackend, Rv32Backend};

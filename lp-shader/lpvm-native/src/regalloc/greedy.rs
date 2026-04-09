@@ -243,6 +243,7 @@ mod tests {
             },
             args: Vec::new(),
             rets: Vec::new(),
+            callee_uses_sret: false,
             src_op: None,
         }];
         let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
