@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpir::{FloatMode, IrFunction, Op};
 
 use crate::error::LowerError;
-use crate::vinst::{IcmpCond, SymbolRef, VInst};
+use crate::vinst::{IcmpCond, LabelId, SymbolRef, VInst};
 
 /// Lower one LPIR op. `src_op` is the index in [`IrFunction::body`].
 pub fn lower_op(
@@ -257,24 +257,212 @@ pub fn lower_op(
             })
         }
 
+        Op::IfStart { .. } | Op::Else | Op::End | Op::LoopStart { .. } => {
+            Err(LowerError::UnsupportedOp {
+                description: String::from(
+                    "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Else/End)",
+                ),
+            })
+        }
+        Op::Break | Op::Continue | Op::BrIfNot { .. } => Err(LowerError::UnsupportedOp {
+            description: String::from(
+                "break/continue/br_if_not must be lowered via lower_ops with loop context",
+            ),
+        }),
+
         other => Err(LowerError::UnsupportedOp {
             description: format!("{other:?}"),
         }),
     }
 }
 
-/// Lower a straight-line slice of ops (no control-flow markers). Stops at first error.
-pub fn lower_ops(func: &IrFunction, float_mode: FloatMode) -> Result<Vec<VInst>, LowerError> {
-    let mut out = Vec::with_capacity(func.body.len());
-    for (i, op) in func.body.iter().enumerate() {
-        if let Op::Copy { dst, src } = op {
-            if dst == src {
-                continue;
+/// Loop frame for tracking loop control flow targets.
+struct LoopFrame {
+    /// Label for the continue block (target of `Continue`).
+    continuing: LabelId,
+    /// Label after the loop (target of `Break` and exit-false of `BrIfNot`).
+    exit: LabelId,
+}
+
+struct LowerCtx<'a> {
+    func: &'a IrFunction,
+    float_mode: FloatMode,
+    out: Vec<VInst>,
+    next_label: LabelId,
+    loop_stack: Vec<LoopFrame>,
+    epilogue_label: LabelId,
+}
+
+impl<'a> LowerCtx<'a> {
+    fn alloc_label(&mut self) -> LabelId {
+        let id = self.next_label;
+        self.next_label = self.next_label.wrapping_add(1);
+        id
+    }
+
+    fn lower_range(&mut self, start: usize, end: usize) -> Result<(), LowerError> {
+        let mut i = start;
+        while i < end {
+            match &self.func.body[i] {
+                Op::IfStart {
+                    cond,
+                    else_offset,
+                    end_offset,
+                } => {
+                    let eo = *else_offset as usize;
+                    let merge_after = *end_offset as usize;
+                    let else_is_empty = matches!(self.func.body.get(eo), Some(Op::End));
+                    if else_is_empty {
+                        // `else_offset` points at `End` (no `Else` op); false and true paths share one label.
+                        let merge = self.alloc_label();
+                        self.out.push(VInst::BrIf {
+                            cond: *cond,
+                            target: merge,
+                            invert: true,
+                            src_op: Some(i as u32),
+                        });
+                        self.lower_range(i + 1, eo)?;
+                        self.out.push(VInst::Br {
+                            target: merge,
+                            src_op: Some(i as u32),
+                        });
+                        self.out.push(VInst::Label(merge, Some(eo as u32)));
+                    } else {
+                        let else_label = self.alloc_label();
+                        let end_label = self.alloc_label();
+                        self.out.push(VInst::BrIf {
+                            cond: *cond,
+                            target: else_label,
+                            invert: true,
+                            src_op: Some(i as u32),
+                        });
+                        self.lower_range(i + 1, eo)?;
+                        self.out.push(VInst::Br {
+                            target: end_label,
+                            src_op: Some(i as u32),
+                        });
+                        self.out.push(VInst::Label(else_label, Some(*else_offset)));
+                        self.lower_range(eo + 1, merge_after)?;
+                        let end_idx = merge_after.saturating_sub(1);
+                        self.out.push(VInst::Label(end_label, Some(end_idx as u32)));
+                    }
+                    i = merge_after;
+                }
+                Op::LoopStart {
+                    continuing_offset,
+                    end_offset,
+                } => {
+                    let header = self.alloc_label();
+                    let continuing = self.alloc_label();
+                    let exit = self.alloc_label();
+                    self.out.push(VInst::Br {
+                        target: header,
+                        src_op: Some(i as u32),
+                    });
+                    self.out.push(VInst::Label(header, Some((i + 1) as u32)));
+                    self.loop_stack.push(LoopFrame { continuing, exit });
+                    let co = *continuing_offset as usize;
+                    let eo = *end_offset as usize;
+                    // Body: from after LoopStart to continuing_offset
+                    self.lower_range(i + 1, co)?;
+                    // Emit continue block label if there's a continue section
+                    if co > i + 1 && co < eo {
+                        self.out
+                            .push(VInst::Label(continuing, Some(*continuing_offset)));
+                        self.lower_range(co, eo.saturating_sub(1))?
+                    }
+                    // Loop-closing End: back-edge to header
+                    self.out.push(VInst::Br {
+                        target: header,
+                        src_op: Some((eo.saturating_sub(1)) as u32),
+                    });
+                    self.out.push(VInst::Label(exit, Some(*end_offset)));
+                    self.loop_stack.pop();
+                    i = eo;
+                }
+                Op::Break => {
+                    let frame =
+                        self.loop_stack
+                            .last()
+                            .ok_or_else(|| LowerError::UnsupportedOp {
+                                description: String::from("break outside loop"),
+                            })?;
+                    self.out.push(VInst::Br {
+                        target: frame.exit,
+                        src_op: Some(i as u32),
+                    });
+                    i += 1;
+                }
+                Op::Continue => {
+                    let frame =
+                        self.loop_stack
+                            .last()
+                            .ok_or_else(|| LowerError::UnsupportedOp {
+                                description: String::from("continue outside loop"),
+                            })?;
+                    self.out.push(VInst::Br {
+                        target: frame.continuing,
+                        src_op: Some(i as u32),
+                    });
+                    i += 1;
+                }
+                Op::BrIfNot { cond } => {
+                    let frame =
+                        self.loop_stack
+                            .last()
+                            .ok_or_else(|| LowerError::UnsupportedOp {
+                                description: String::from("br_if_not outside loop"),
+                            })?;
+                    // If cond is false, exit the loop; if true, fall through (continue loop)
+                    self.out.push(VInst::BrIf {
+                        cond: *cond,
+                        target: frame.exit,
+                        invert: true,
+                        src_op: Some(i as u32),
+                    });
+                    i += 1;
+                }
+                Op::Else | Op::End => {
+                    i += 1;
+                }
+                other => {
+                    if let Op::Copy { dst, src } = other {
+                        if dst == src {
+                            i += 1;
+                            continue;
+                        }
+                    }
+                    let is_return = matches!(other, Op::Return { .. });
+                    self.out
+                        .push(lower_op(other, self.float_mode, Some(i as u32), self.func)?);
+                    if is_return {
+                        self.out.push(VInst::Br {
+                            target: self.epilogue_label,
+                            src_op: Some(i as u32),
+                        });
+                    }
+                    i += 1;
+                }
             }
         }
-        out.push(lower_op(op, float_mode, Some(i as u32), func)?);
+        Ok(())
     }
-    Ok(out)
+}
+
+/// Lower full function body (including if/else and loop control flow).
+pub fn lower_ops(func: &IrFunction, float_mode: FloatMode) -> Result<Vec<VInst>, LowerError> {
+    let mut ctx = LowerCtx {
+        func,
+        float_mode,
+        out: Vec::with_capacity(func.body.len().saturating_mul(2)),
+        next_label: 0,
+        loop_stack: Vec::new(),
+        epilogue_label: 0,
+    };
+    ctx.epilogue_label = ctx.alloc_label();
+    ctx.lower_range(0, func.body.len())?;
+    ctx.out.push(VInst::Label(ctx.epilogue_label, None));
+    Ok(ctx.out)
 }
 
 #[cfg(test)]

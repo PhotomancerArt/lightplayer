@@ -143,6 +143,19 @@ pub enum VInst {
         if_false: VReg,
         src_op: Option<u32>,
     },
+    /// Unconditional jump to `target` (`jal x0, offset`).
+    Br {
+        target: LabelId,
+        src_op: Option<u32>,
+    },
+    /// Conditional branch: `invert == true` → branch when `cond == 0` (`beq`);
+    /// `invert == false` → branch when `cond != 0` (`bne`).
+    BrIf {
+        cond: VReg,
+        target: LabelId,
+        invert: bool,
+        src_op: Option<u32>,
+    },
     /// `addi dst, src, 0` — used for LPIR `Copy` when registers differ.
     Mov32 {
         dst: VReg,
@@ -201,6 +214,8 @@ impl VInst {
             | VInst::Icmp32 { src_op, .. }
             | VInst::IeqImm32 { src_op, .. }
             | VInst::Select32 { src_op, .. }
+            | VInst::Br { src_op, .. }
+            | VInst::BrIf { src_op, .. }
             | VInst::Mov32 { src_op, .. }
             | VInst::Load32 { src_op, .. }
             | VInst::Store32 { src_op, .. }
@@ -236,7 +251,7 @@ impl VInst {
             | VInst::Mov32 { dst, .. }
             | VInst::Load32 { dst, .. }
             | VInst::IConst32 { dst, .. } => v.push(*dst),
-            VInst::Store32 { .. } | VInst::Label(..) => {}
+            VInst::Store32 { .. } | VInst::Label(..) | VInst::Br { .. } | VInst::BrIf { .. } => {}
             VInst::Call { rets, .. } => v.extend(rets.iter().copied()),
             VInst::Ret { .. } => {}
         }
@@ -303,7 +318,8 @@ impl VInst {
                 v.push(*src);
                 v.push(*base);
             }
-            VInst::IConst32 { .. } | VInst::Label(..) => {}
+            VInst::IConst32 { .. } | VInst::Label(..) | VInst::Br { .. } => {}
+            VInst::BrIf { cond, .. } => v.push(*cond),
             VInst::Call { args, .. } => v.extend(args.iter().copied()),
             VInst::Ret { vals, .. } => v.extend(vals.iter().copied()),
         }

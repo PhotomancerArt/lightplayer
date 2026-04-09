@@ -34,6 +34,9 @@ pub enum NativeError {
     TooManyReturns(usize),
     UnassignedVReg(u32),
     SpilledVReg(u32),
+    UnresolvedLabel(u32),
+    DuplicateLabel(u32),
+    BranchOffsetOutOfRange,
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
@@ -59,6 +62,15 @@ impl fmt::Display for NativeError {
             NativeError::UnassignedVReg(v) => write!(f, "unassigned vreg {v}"),
             NativeError::SpilledVReg(v) => {
                 write!(f, "spilled vreg {v} (no physical register assigned)")
+            }
+            NativeError::UnresolvedLabel(id) => {
+                write!(f, "unresolved control-flow label {id}")
+            }
+            NativeError::DuplicateLabel(id) => {
+                write!(f, "duplicate control-flow label {id}")
+            }
+            NativeError::BranchOffsetOutOfRange => {
+                write!(f, "branch/jal target out of RV32 immediate range")
             }
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]

@@ -11,15 +11,15 @@ use object::{
 
 use super::abi::{self, A0, ARG_REGS, RET_REGS, S0, S1, SP, callee_saved_int, func_abi_rv32};
 use super::inst::{
-    encode_add, encode_addi, encode_and, encode_auipc, encode_div, encode_divu, encode_jalr,
-    encode_lw, encode_mul, encode_or, encode_rem, encode_remu, encode_ret, encode_sll, encode_slt,
-    encode_sltiu, encode_sltu, encode_sra, encode_srl, encode_sub, encode_sw, encode_xor,
-    encode_xori, iconst32_sequence,
+    encode_add, encode_addi, encode_and, encode_auipc, encode_beq, encode_bne, encode_div,
+    encode_divu, encode_jal, encode_jalr, encode_lw, encode_mul, encode_or, encode_rem,
+    encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
+    encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
 use crate::abi::{FrameLayout, PReg, PregSet};
 use crate::error::NativeError;
 use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
-use crate::vinst::{IcmpCond, VInst};
+use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
 use lps_shared;
 
@@ -47,6 +47,36 @@ pub struct EmitContext {
     frame: FrameLayout,
     debug_info: bool,
     current_src_op: Option<u32>,
+    /// `label_offsets[id]` = byte offset of [`VInst::Label`], when recorded.
+    label_offsets: Vec<Option<usize>>,
+    branch_fixups: Vec<BranchFixup>,
+    jal_fixups: Vec<JalFixup>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BranchFixup {
+    instr_offset: usize,
+    target: LabelId,
+    rs1: u32,
+    rs2: u32,
+    is_beq: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct JalFixup {
+    instr_offset: usize,
+    target: LabelId,
+    rd: u32,
+}
+
+#[inline]
+fn branch_offset_valid(imm: i32) -> bool {
+    imm % 2 == 0 && (-4096..=4094).contains(&imm)
+}
+
+#[inline]
+fn jal_offset_valid(imm: i32) -> bool {
+    imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
 }
 
 impl EmitContext {
@@ -59,6 +89,9 @@ impl EmitContext {
             frame,
             debug_info,
             current_src_op: None,
+            label_offsets: Vec::new(),
+            branch_fixups: Vec::new(),
+            jal_fixups: Vec::new(),
         }
     }
 
@@ -215,6 +248,63 @@ impl EmitContext {
             // VReg was spilled - store temp to stack
             self.store_spill(slot_index, temp);
         }
+    }
+
+    fn ensure_label_slot(&mut self, id: LabelId) {
+        let i = id as usize;
+        if i >= self.label_offsets.len() {
+            self.label_offsets.resize(i + 1, None);
+        }
+    }
+
+    fn label_offset_get(&self, id: LabelId) -> Option<usize> {
+        self.label_offsets.get(id as usize).copied().flatten()
+    }
+
+    fn record_label(&mut self, id: LabelId) -> Result<(), NativeError> {
+        self.ensure_label_slot(id);
+        if self.label_offsets[id as usize].is_some() {
+            return Err(NativeError::DuplicateLabel(id));
+        }
+        self.label_offsets[id as usize] = Some(self.code.len());
+        Ok(())
+    }
+
+    /// Patch [`BranchFixup`] / [`JalFixup`] placeholders after all labels are known.
+    pub fn resolve_branch_fixups(&mut self) -> Result<(), NativeError> {
+        for f in &self.branch_fixups {
+            let target = self
+                .label_offsets
+                .get(f.target as usize)
+                .copied()
+                .flatten()
+                .ok_or(NativeError::UnresolvedLabel(f.target))?;
+            let pc_rel = target as i32 - f.instr_offset as i32;
+            if !branch_offset_valid(pc_rel) {
+                return Err(NativeError::BranchOffsetOutOfRange);
+            }
+            let w = if f.is_beq {
+                encode_beq(f.rs1, f.rs2, pc_rel)
+            } else {
+                encode_bne(f.rs1, f.rs2, pc_rel)
+            };
+            self.code[f.instr_offset..f.instr_offset + 4].copy_from_slice(&w.to_le_bytes());
+        }
+        for f in &self.jal_fixups {
+            let target = self
+                .label_offsets
+                .get(f.target as usize)
+                .copied()
+                .flatten()
+                .ok_or(NativeError::UnresolvedLabel(f.target))?;
+            let pc_rel = target as i32 - f.instr_offset as i32;
+            if !jal_offset_valid(pc_rel) {
+                return Err(NativeError::BranchOffsetOutOfRange);
+            }
+            let w = encode_jal(f.rd, pc_rel);
+            self.code[f.instr_offset..f.instr_offset + 4].copy_from_slice(&w.to_le_bytes());
+        }
+        Ok(())
     }
 
     fn emit_icmp(
@@ -477,6 +567,53 @@ impl EmitContext {
             } => {
                 self.emit_select32(alloc, *dst, *cond, *if_true, *if_false)?;
             }
+            VInst::Br { target, .. } => {
+                let instr_off = self.code.len();
+                if let Some(tgt) = self.label_offset_get(*target) {
+                    let imm = tgt as i32 - instr_off as i32;
+                    if !jal_offset_valid(imm) {
+                        return Err(NativeError::BranchOffsetOutOfRange);
+                    }
+                    self.push_u32(encode_jal(0, imm));
+                } else {
+                    self.push_u32(0);
+                    self.jal_fixups.push(JalFixup {
+                        instr_offset: instr_off,
+                        target: *target,
+                        rd: 0,
+                    });
+                }
+            }
+            VInst::BrIf {
+                cond,
+                target,
+                invert,
+                ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *cond, Self::TEMP0)? as u32;
+                let instr_off = self.code.len();
+                if let Some(tgt) = self.label_offset_get(*target) {
+                    let imm = tgt as i32 - instr_off as i32;
+                    if !branch_offset_valid(imm) {
+                        return Err(NativeError::BranchOffsetOutOfRange);
+                    }
+                    let w = if *invert {
+                        encode_beq(rs1, 0, imm)
+                    } else {
+                        encode_bne(rs1, 0, imm)
+                    };
+                    self.push_u32(w);
+                } else {
+                    self.push_u32(0);
+                    self.branch_fixups.push(BranchFixup {
+                        instr_offset: instr_off,
+                        target: *target,
+                        rs1,
+                        rs2: 0,
+                        is_beq: *invert,
+                    });
+                }
+            }
             VInst::Mov32 { dst, src, .. } => {
                 let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
                 let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
@@ -566,7 +703,9 @@ impl EmitContext {
                     }
                 }
             }
-            VInst::Label(..) => {}
+            VInst::Label(id, _) => {
+                self.record_label(*id)?;
+            }
         }
         self.current_src_op = None;
         Ok(())
@@ -622,6 +761,7 @@ pub fn emit_function_bytes(
     for v in &vinsts {
         ctx.emit_vinst(v, &alloc, is_sret)?;
     }
+    ctx.resolve_branch_fixups()?;
     ctx.emit_epilogue();
     Ok(EmittedFunction {
         code: ctx.code,

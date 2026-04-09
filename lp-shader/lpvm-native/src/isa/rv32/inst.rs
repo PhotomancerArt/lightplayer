@@ -47,8 +47,12 @@ const OP_STORE: u32 = 0b0100011;
 const OP_LUI: u32 = 0b0110111;
 const OP_AUIPC: u32 = 0b0010111;
 const OP_JALR: u32 = 0b1100111;
+const OP_BRANCH: u32 = 0b1100011;
+const OP_JAL: u32 = 0b1101111;
 
 const F3_ADD: u32 = 0;
+const F3_BEQ: u32 = 0;
+const F3_BNE: u32 = 0b001;
 const F3_SLL: u32 = 0b001;
 const F3_SLT: u32 = 0b010;
 const F3_SLTU: u32 = 0b011;
@@ -199,6 +203,54 @@ pub fn encode_sw(rs2: u32, rs1: u32, offset: i32) -> u32 {
     encode_s_type(OP_STORE, F3_LW, rs1, rs2, offset)
 }
 
+/// B-type branch: `imm` is byte offset (must be even, ±4 KiB).
+#[inline]
+pub fn encode_b_type(funct3: u32, rs1: u32, rs2: u32, imm: i32) -> u32 {
+    let imm = imm as u32;
+    debug_assert!((imm & 1) == 0, "branch offset must be 2-byte aligned");
+    let imm_12 = (imm >> 12) & 1;
+    let imm_10_5 = (imm >> 5) & 0x3f;
+    let imm_4_1 = (imm >> 1) & 0xf;
+    let imm_11 = (imm >> 11) & 1;
+    OP_BRANCH
+        | (imm_11 << 7)
+        | (imm_4_1 << 8)
+        | ((funct3 & 7) << 12)
+        | ((rs1 & 0x1f) << 15)
+        | ((rs2 & 0x1f) << 20)
+        | (imm_10_5 << 25)
+        | (imm_12 << 31)
+}
+
+/// beq rs1, rs2, imm
+#[inline]
+pub fn encode_beq(rs1: u32, rs2: u32, imm: i32) -> u32 {
+    encode_b_type(F3_BEQ, rs1, rs2, imm)
+}
+
+/// bne rs1, rs2, imm
+#[inline]
+pub fn encode_bne(rs1: u32, rs2: u32, imm: i32) -> u32 {
+    encode_b_type(F3_BNE, rs1, rs2, imm)
+}
+
+/// jal rd, imm — `imm` is byte offset (must be even, ±1 MiB).
+#[inline]
+pub fn encode_jal(rd: u32, imm: i32) -> u32 {
+    let imm = imm as u32;
+    debug_assert!((imm & 1) == 0, "jal offset must be 2-byte aligned");
+    let imm_20 = (imm >> 20) & 1;
+    let imm_10_1 = (imm >> 1) & 0x3ff;
+    let imm_11 = (imm >> 11) & 1;
+    let imm_19_12 = (imm >> 12) & 0xff;
+    (OP_JAL & 0x7f)
+        | ((rd & 0x1f) << 7)
+        | (imm_19_12 << 12)
+        | (imm_11 << 20)
+        | (imm_10_1 << 21)
+        | (imm_20 << 31)
+}
+
 /// jalr rd, rs1, offset
 #[inline]
 pub fn encode_jalr(rd: u32, rs1: u32, offset: i32) -> u32 {
@@ -271,5 +323,15 @@ mod tests {
         assert_eq!(encode_auipc(1, 0), 0x00000097);
         assert_eq!(encode_jalr(1, 1, 0), 0x000080e7);
         assert_eq!(encode_ret(), 0x00008067);
+    }
+
+    #[test]
+    fn encode_beq_bne_jal_smoke() {
+        let beq = encode_beq(1, 2, 16);
+        assert_eq!(beq & 0x7f, 0x63);
+        let bne = encode_bne(3, 4, -8);
+        assert_eq!(bne & 0x7f, 0x63);
+        let jal = encode_jal(0, 32);
+        assert_eq!(jal & 0x7f, 0x6f);
     }
 }
