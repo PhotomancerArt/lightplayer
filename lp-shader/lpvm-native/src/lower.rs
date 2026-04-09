@@ -297,6 +297,58 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
+        Op::Fdiv { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fdiv_q32"),
+            },
+            args: alloc::vec![*lhs, *rhs],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+
+        Op::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::Eq,
+            src_op,
+        }),
+        Op::Fne { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::Ne,
+            src_op,
+        }),
+        Op::Flt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LtS,
+            src_op,
+        }),
+        Op::Fle { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LeS,
+            src_op,
+        }),
+        Op::Fgt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GtS,
+            src_op,
+        }),
+        Op::Fge { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GeS,
+            src_op,
+        }),
 
         // Q32 float constants: convert f32 to Q32 fixed-point (multiply by 65536.0)
         Op::FconstF32 { dst, value } if float_mode == FloatMode::Q32 => {
@@ -308,11 +360,19 @@ pub fn lower_op(
             })
         }
 
-        Op::Fadd { .. } | Op::Fsub { .. } | Op::Fmul { .. } | Op::FconstF32 { .. } => {
-            Err(LowerError::UnsupportedOp {
-                description: String::from("float op in F32 mode (M1: Q32 only for float lowering)"),
-            })
-        }
+        Op::Fadd { .. }
+        | Op::Fsub { .. }
+        | Op::Fmul { .. }
+        | Op::Fdiv { .. }
+        | Op::FconstF32 { .. }
+        | Op::Feq { .. }
+        | Op::Fne { .. }
+        | Op::Flt { .. }
+        | Op::Fle { .. }
+        | Op::Fgt { .. }
+        | Op::Fge { .. } => Err(LowerError::UnsupportedOp {
+            description: String::from("float op requires Q32 mode (F32 not supported on rv32)"),
+        }),
 
         Op::IfStart { .. } | Op::Else | Op::End | Op::LoopStart { .. } => {
             Err(LowerError::UnsupportedOp {
@@ -602,6 +662,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
+    use crate::error::LowerError;
     use crate::vinst::IcmpCond;
     use lpir::types::{SlotId, VRegRange};
     use lpir::{IrModule, IrType, VReg};
@@ -740,6 +801,90 @@ mod tests {
     }
 
     #[test]
+    fn lower_q32_fdiv_to_call() {
+        let op = Op::Fdiv {
+            dst: v(2),
+            lhs: v(0),
+            rhs: v(1),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
+            VInst::Call {
+                target,
+                args,
+                rets,
+                callee_uses_sret,
+                src_op,
+            } => {
+                assert_eq!(target.name, "__lp_lpir_fdiv_q32");
+                assert_eq!(args, vec![v(0), v(1)]);
+                assert_eq!(rets, vec![v(2)]);
+                assert!(!callee_uses_sret);
+                assert_eq!(src_op, Some(0));
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_q32_float_comparisons_to_signed_icmp() {
+        let cases = [
+            (
+                Op::Feq {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::Eq,
+            ),
+            (
+                Op::Fne {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::Ne,
+            ),
+            (
+                Op::Flt {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::LtS,
+            ),
+            (
+                Op::Fle {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::LeS,
+            ),
+            (
+                Op::Fgt {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::GtS,
+            ),
+            (
+                Op::Fge {
+                    dst: v(2),
+                    lhs: v(0),
+                    rhs: v(1),
+                },
+                IcmpCond::GeS,
+            ),
+        ];
+        for (op, want) in cases {
+            assert_q32_fcmp(want, op);
+        }
+    }
+
+    #[test]
     fn lower_f32_float_unsupported() {
         let op = Op::Fadd {
             dst: v(0),
@@ -748,7 +893,24 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        assert!(lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).is_err());
+        let err = lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect_err("F32 float");
+        match err {
+            LowerError::UnsupportedOp { description } => {
+                assert!(
+                    description.contains("Q32"),
+                    "expected Q32 hint in {description:?}"
+                );
+            }
+        }
+        let div = Op::Fdiv {
+            dst: v(0),
+            lhs: v(1),
+            rhs: v(2),
+        };
+        assert!(matches!(
+            lower_op(&div, FloatMode::F32, None, &f, &ir, &abi),
+            Err(LowerError::UnsupportedOp { .. })
+        ));
     }
 
     #[test]
@@ -931,6 +1093,21 @@ mod tests {
                 assert_eq!(src_op, Some(1));
             }
             other => panic!("expected Ret, got {other:?}"),
+        }
+    }
+
+    fn assert_q32_fcmp(want: IcmpCond, op: Op) {
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok") {
+            VInst::Icmp32 {
+                cond,
+                dst: VReg(2),
+                lhs: VReg(0),
+                rhs: VReg(1),
+                ..
+            } => assert_eq!(cond, want),
+            other => panic!("expected Icmp32, got {other:?}"),
         }
     }
 }
