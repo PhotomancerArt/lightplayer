@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 pub use greedy::GreedyAlloc;
 
-use lpir::IrFunction;
+use lpir::{IrFunction, VReg};
 
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{CALLER_SAVED, PhysReg};
@@ -40,6 +40,26 @@ pub struct Allocation {
     /// `vreg.0` as index -> physical register if assigned.
     pub vreg_to_phys: Vec<Option<PhysReg>>,
     pub clobbered: BTreeSet<PhysReg>,
+    /// VRegs assigned to spill slots (no physical register assigned).
+    pub spill_slots: Vec<VReg>,
+}
+
+impl Allocation {
+    /// Number of spill slots assigned.
+    pub fn spill_count(&self) -> u32 {
+        self.spill_slots.len() as u32
+    }
+
+    /// Check if a vreg is spilled.
+    pub fn is_spilled(&self, v: VReg) -> bool {
+        self.spill_slots.contains(&v)
+    }
+
+    /// Get spill slot index for a spilled vreg.
+    /// Returns `Some(slot_index)` if the vreg is spilled, `None` otherwise.
+    pub fn spill_slot(&self, v: VReg) -> Option<u32> {
+        self.spill_slots.iter().position(|&sv| sv == v).map(|p| p as u32)
+    }
 }
 
 /// All caller-saved registers are clobbered by an outgoing call.

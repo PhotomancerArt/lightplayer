@@ -83,9 +83,21 @@ pub fn lower_op(
             src_op,
         }),
 
-        Op::Fadd { .. } | Op::Fsub { .. } | Op::Fmul { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from("float op in F32 mode (M1: Q32 only for float lowering)"),
-        }),
+        // Q32 float constants: convert f32 to Q32 fixed-point (multiply by 65536.0)
+        Op::FconstF32 { dst, value } if float_mode == FloatMode::Q32 => {
+            let q32_val = ((*value as f64) * 65536.0) as i32;
+            Ok(VInst::IConst32 {
+                dst: *dst,
+                val: q32_val,
+                src_op,
+            })
+        }
+
+        Op::Fadd { .. } | Op::Fsub { .. } | Op::Fmul { .. } | Op::FconstF32 { .. } => {
+            Err(LowerError::UnsupportedOp {
+                description: String::from("float op in F32 mode (M1: Q32 only for float lowering)"),
+            })
+        }
 
         other => Err(LowerError::UnsupportedOp {
             description: format!("{other:?}"),

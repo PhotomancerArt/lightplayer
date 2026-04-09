@@ -4,7 +4,8 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 use lpir::{FloatMode, validate_module};
-use lpvm_native::{DisasmOptions, compile_module_asm_text};
+use lpvm_native::compile_module_asm_text;
+use lpvm_native::isa::rv32::debug::disasm::DisasmOptions;
 
 use super::args::ShaderRv32Args;
 

@@ -33,6 +33,7 @@ pub enum NativeError {
     TooManyArgs(usize),
     TooManyReturns(usize),
     UnassignedVReg(u32),
+    SpilledVReg(u32),
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
@@ -56,6 +57,9 @@ impl fmt::Display for NativeError {
             NativeError::TooManyArgs(n) => write!(f, "too many arguments for RV32 ABI: {n}"),
             NativeError::TooManyReturns(n) => write!(f, "too many return values: {n}"),
             NativeError::UnassignedVReg(v) => write!(f, "unassigned vreg {v}"),
+            NativeError::SpilledVReg(v) => {
+                write!(f, "spilled vreg {v} (no physical register assigned)")
+            }
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => write!(f, "link: {e}"),

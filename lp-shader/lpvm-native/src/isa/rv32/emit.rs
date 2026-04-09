@@ -8,7 +8,7 @@ use object::{
     Architecture, BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf,
 };
 
-use super::abi::{self, ARG_REGS, PhysReg, RET_REGS, SP};
+use super::abi::{self, ARG_REGS, FrameLayout, PhysReg, RET_REGS, S0, SP};
 use super::inst::{
     encode_addi, encode_auipc, encode_jalr, encode_lw, encode_mul, encode_ret, encode_sub,
     encode_sw, iconst32_sequence,
@@ -39,23 +39,32 @@ pub struct EmitContext {
     pub code: Vec<u8>,
     pub relocs: Vec<NativeReloc>,
     pub debug_lines: Vec<(u32, Option<u32>)>,
-    frame_size: i32,
-    is_leaf: bool,
+    frame: FrameLayout,
     debug_info: bool,
     current_src_op: Option<u32>,
 }
 
 impl EmitContext {
-    pub fn new(is_leaf: bool, debug_info: bool) -> Self {
+    /// Create a new emit context with the given frame layout.
+    pub fn with_frame(frame: FrameLayout, debug_info: bool) -> Self {
         Self {
             code: Vec::new(),
             relocs: Vec::new(),
             debug_lines: Vec::new(),
-            frame_size: 16,
-            is_leaf,
+            frame,
             debug_info,
             current_src_op: None,
         }
+    }
+
+    /// Create a new emit context for a leaf function.
+    pub fn new(is_leaf: bool, debug_info: bool) -> Self {
+        let frame = if is_leaf {
+            abi::leaf_frame()
+        } else {
+            abi::nonleaf_frame(0)
+        };
+        Self::with_frame(frame, debug_info)
     }
 
     fn push_u32(&mut self, w: u32) {
@@ -66,25 +75,58 @@ impl EmitContext {
         }
     }
 
+    /// Emit function prologue: adjust sp, save ra and s0 if needed.
     pub fn emit_prologue(&mut self) {
         let sp = u32::from(SP);
-        self.push_u32(encode_addi(sp, sp, -self.frame_size));
-        if !self.is_leaf {
-            let off = self.frame_size - 4;
-            self.push_u32(encode_sw(u32::from(abi::RA), sp, off));
+        let frame_size = self.frame.size as i32;
+
+        // Adjust stack pointer
+        self.push_u32(encode_addi(sp, sp, -frame_size));
+
+        // Save s0 (frame pointer) if we have one
+        if self.frame.saved_s0 {
+            let s0_off = self.frame.size as i32 + self.frame.s0_save_offset;
+            self.push_u32(encode_sw(u32::from(S0), sp, s0_off));
+        }
+
+        // Save ra if non-leaf
+        if self.frame.saved_ra {
+            let ra_off = self.frame.size as i32 + self.frame.ra_save_offset;
+            self.push_u32(encode_sw(u32::from(abi::RA), sp, ra_off));
+        }
+
+        // Set up frame pointer: s0 = sp + frame_size
+        if self.frame.saved_s0 {
+            let sp = u32::from(SP);
+            let s0 = u32::from(S0);
+            self.push_u32(encode_addi(s0, sp, frame_size));
         }
     }
 
+    /// Emit function epilogue: restore ra/s0, adjust sp, return.
     pub fn emit_epilogue(&mut self) {
         let sp = u32::from(SP);
-        if !self.is_leaf {
-            let off = self.frame_size - 4;
-            self.push_u32(encode_lw(u32::from(abi::RA), sp, off));
+        let frame_size = self.frame.size as i32;
+
+        // Restore ra if saved
+        if self.frame.saved_ra {
+            let ra_off = self.frame.size as i32 + self.frame.ra_save_offset;
+            self.push_u32(encode_lw(u32::from(abi::RA), sp, ra_off));
         }
-        self.push_u32(encode_addi(sp, sp, self.frame_size));
+
+        // Restore s0 if saved
+        if self.frame.saved_s0 {
+            let s0_off = self.frame.size as i32 + self.frame.s0_save_offset;
+            self.push_u32(encode_lw(u32::from(S0), sp, s0_off));
+        }
+
+        // Adjust stack pointer back
+        self.push_u32(encode_addi(sp, sp, frame_size));
         self.push_u32(encode_ret());
     }
 
+    /// Get the physical register for a vreg.
+    /// Returns Err if the vreg is not assigned (shouldn't happen after successful regalloc).
     fn phys(alloc: &Allocation, v: VReg) -> Result<PhysReg, NativeError> {
         let i = v.0 as usize;
         alloc
@@ -95,59 +137,122 @@ impl EmitContext {
             .ok_or_else(|| NativeError::UnassignedVReg(v.0))
     }
 
+    /// Temporary registers for spill handling.
+    const TEMP0: PhysReg = 5; // t0
+    const TEMP1: PhysReg = 6; // t1
+
+    /// Emit a load from a spill slot into a temporary register.
+    /// Returns the temporary register.
+    fn load_spill(&mut self, slot_index: u32, temp: PhysReg) -> PhysReg {
+        let offset = self.frame.spill_to_offset(slot_index);
+        self.push_u32(encode_lw(u32::from(temp), u32::from(S0), offset));
+        temp
+    }
+
+    /// Emit a store from a temporary register to a spill slot.
+    fn store_spill(&mut self, slot_index: u32, temp: PhysReg) {
+        let offset = self.frame.spill_to_offset(slot_index);
+        self.push_u32(encode_sw(u32::from(temp), u32::from(S0), offset));
+    }
+
+    /// Get or load a vreg for use (source operand).
+    /// If the vreg is spilled, loads it into the specified temp register.
+    /// Otherwise returns the assigned physical register.
+    fn use_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) -> Result<PhysReg, NativeError> {
+        if let Some(slot_index) = alloc.spill_slot(v) {
+            // VReg is spilled - load from stack into temp register
+            Ok(self.load_spill(slot_index, temp))
+        } else {
+            // VReg has a physical register
+            Self::phys(alloc, v)
+        }
+    }
+
+    /// Get or reserve a vreg for definition (destination operand).
+    /// If the vreg is spilled, returns the temp register (caller must store after use).
+    /// Otherwise returns the assigned physical register.
+    fn def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) -> Result<PhysReg, NativeError> {
+        if alloc.is_spilled(v) {
+            // VReg is spilled - use temp as temporary, caller must store
+            Ok(temp)
+        } else {
+            // VReg has a physical register
+            Self::phys(alloc, v)
+        }
+    }
+
+    /// Store a spilled vreg after it was written to a temporary register.
+    /// Call this after `def_vreg` when the vreg was spilled.
+    fn store_def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) {
+        if let Some(slot_index) = alloc.spill_slot(v) {
+            // VReg was spilled - store temp to stack
+            self.store_spill(slot_index, temp);
+        }
+    }
+
     pub fn emit_vinst(&mut self, inst: &VInst, alloc: &Allocation) -> Result<(), NativeError> {
         self.current_src_op = inst.src_op();
         match inst {
             VInst::Add32 {
                 dst, src1, src2, ..
             } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
-                let rs1 = Self::phys(alloc, *src1)? as u32;
-                let rs2 = Self::phys(alloc, *src2)? as u32;
+                // Use TEMP0 for src1, TEMP1 for src2 if spilled
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                // Result can go to TEMP0 if dst is spilled
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 self.push_u32(crate::isa::rv32::inst::encode_add(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Sub32 {
                 dst, src1, src2, ..
             } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
-                let rs1 = Self::phys(alloc, *src1)? as u32;
-                let rs2 = Self::phys(alloc, *src2)? as u32;
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_sub(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Mul32 {
                 dst, src1, src2, ..
             } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
-                let rs1 = Self::phys(alloc, *src1)? as u32;
-                let rs2 = Self::phys(alloc, *src2)? as u32;
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_mul(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Mov32 { dst, src, .. } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
-                let rs = Self::phys(alloc, *src)? as u32;
+                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 if rd != rs {
                     self.push_u32(encode_addi(rd, rs, 0));
                 }
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Load32 {
                 dst, base, offset, ..
             } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
-                let rs1 = Self::phys(alloc, *base)? as u32;
+                // base must not use TEMP0 if dst will use TEMP0
+                // For simplicity: load base first (into TEMP1), then use TEMP0 for result
+                let rs1 = self.use_vreg(alloc, *base, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_lw(rd, rs1, *offset));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Store32 {
                 src, base, offset, ..
             } => {
-                let rs2 = Self::phys(alloc, *src)? as u32;
-                let rs1 = Self::phys(alloc, *base)? as u32;
+                let rs2 = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
+                let rs1 = self.use_vreg(alloc, *base, Self::TEMP1)? as u32;
                 self.push_u32(encode_sw(rs2, rs1, *offset));
             }
             VInst::IConst32 { dst, val, .. } => {
-                let rd = Self::phys(alloc, *dst)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 for w in iconst32_sequence(rd, *val) {
                     self.push_u32(w);
                 }
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::Call {
                 target, args, rets, ..
@@ -156,7 +261,7 @@ impl EmitContext {
                     return Err(NativeError::TooManyArgs(args.len()));
                 }
                 for (i, a) in args.iter().enumerate() {
-                    let from = Self::phys(alloc, *a)? as u32;
+                    let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
                     let to = ARG_REGS[i] as u32;
                     if from != to {
                         self.push_u32(encode_addi(to, from, 0));
@@ -174,11 +279,12 @@ impl EmitContext {
                     if i >= RET_REGS.len() {
                         return Err(NativeError::TooManyReturns(i + 1));
                     }
-                    let dst = Self::phys(alloc, *r)? as u32;
+                    let dst = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
                     let src = RET_REGS[i] as u32;
                     if dst != src {
                         self.push_u32(encode_addi(dst, src, 0));
                     }
+                    self.store_def_vreg(alloc, *r, Self::TEMP0);
                 }
             }
             VInst::Ret { vals, .. } => {
@@ -186,7 +292,7 @@ impl EmitContext {
                     if i >= RET_REGS.len() {
                         return Err(NativeError::TooManyReturns(vals.len()));
                     }
-                    let src = Self::phys(alloc, *v)? as u32;
+                    let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
                     let dst = RET_REGS[i] as u32;
                     if src != dst {
                         self.push_u32(encode_addi(dst, src, 0));
@@ -209,7 +315,15 @@ pub fn emit_function_bytes(
     let vinsts = crate::lower::lower_ops(func, float_mode)?;
     let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts)?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
-    let mut ctx = EmitContext::new(is_leaf, debug_info);
+
+    // Create frame with spill count from allocation
+    let frame = if is_leaf && alloc.spill_count() == 0 {
+        abi::leaf_frame()
+    } else {
+        abi::nonleaf_frame(alloc.spill_count())
+    };
+
+    let mut ctx = EmitContext::with_frame(frame, debug_info);
     ctx.emit_prologue();
     for v in &vinsts {
         ctx.emit_vinst(v, &alloc)?;
