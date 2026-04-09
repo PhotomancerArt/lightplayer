@@ -174,6 +174,19 @@ pub enum VInst {
         offset: i32,
         src_op: Option<u32>,
     },
+    /// `dst` holds `sp + slot_offset` for LPIR stack slot `slot` at emit time.
+    SlotAddr {
+        dst: VReg,
+        slot: u32,
+        src_op: Option<u32>,
+    },
+    /// `memcpy(dst_base, src_base, size)` with `size` a multiple of 4; uses temps only.
+    MemcpyWords {
+        dst_base: VReg,
+        src_base: VReg,
+        size: u32,
+        src_op: Option<u32>,
+    },
     IConst32 {
         dst: VReg,
         val: i32,
@@ -221,6 +234,8 @@ impl VInst {
             | VInst::Mov32 { src_op, .. }
             | VInst::Load32 { src_op, .. }
             | VInst::Store32 { src_op, .. }
+            | VInst::SlotAddr { src_op, .. }
+            | VInst::MemcpyWords { src_op, .. }
             | VInst::IConst32 { src_op, .. }
             | VInst::Call { src_op, .. }
             | VInst::Ret { src_op, .. } => *src_op,
@@ -252,8 +267,13 @@ impl VInst {
             | VInst::Select32 { dst, .. }
             | VInst::Mov32 { dst, .. }
             | VInst::Load32 { dst, .. }
+            | VInst::SlotAddr { dst, .. }
             | VInst::IConst32 { dst, .. } => v.push(*dst),
-            VInst::Store32 { .. } | VInst::Label(..) | VInst::Br { .. } | VInst::BrIf { .. } => {}
+            VInst::Store32 { .. }
+            | VInst::MemcpyWords { .. }
+            | VInst::Label(..)
+            | VInst::Br { .. }
+            | VInst::BrIf { .. } => {}
             VInst::Call { rets, .. } => v.extend(rets.iter().copied()),
             VInst::Ret { .. } => {}
         }
@@ -319,6 +339,13 @@ impl VInst {
             VInst::Store32 { src, base, .. } => {
                 v.push(*src);
                 v.push(*base);
+            }
+            VInst::SlotAddr { .. } => {}
+            VInst::MemcpyWords {
+                dst_base, src_base, ..
+            } => {
+                v.push(*dst_base);
+                v.push(*src_base);
             }
             VInst::IConst32 { .. } | VInst::Label(..) | VInst::Br { .. } => {}
             VInst::BrIf { cond, .. } => v.push(*cond),

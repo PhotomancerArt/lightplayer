@@ -207,6 +207,56 @@ pub fn lower_op(
             val: *value,
             src_op,
         }),
+
+        Op::Load { dst, base, offset } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Load: offset does not fit i32"),
+            })?;
+            Ok(VInst::Load32 {
+                dst: *dst,
+                base: *base,
+                offset: off,
+                src_op,
+            })
+        }
+        Op::Store {
+            base,
+            offset,
+            value,
+        } => {
+            let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
+                description: String::from("Store: offset does not fit i32"),
+            })?;
+            Ok(VInst::Store32 {
+                src: *value,
+                base: *base,
+                offset: off,
+                src_op,
+            })
+        }
+        Op::SlotAddr { dst, slot } => Ok(VInst::SlotAddr {
+            dst: *dst,
+            slot: slot.0,
+            src_op,
+        }),
+        Op::Memcpy {
+            dst_addr,
+            src_addr,
+            size,
+        } => {
+            if size % 4 != 0 {
+                return Err(LowerError::UnsupportedOp {
+                    description: String::from("Memcpy: size must be a multiple of 4"),
+                });
+            }
+            Ok(VInst::MemcpyWords {
+                dst_base: *dst_addr,
+                src_base: *src_addr,
+                size: *size,
+                src_op,
+            })
+        }
+
         Op::Return { values } => {
             let slice = func.pool_slice(*values);
             if slice.len() != values.count as usize {
@@ -553,7 +603,7 @@ mod tests {
 
     use super::*;
     use crate::vinst::IcmpCond;
-    use lpir::types::VRegRange;
+    use lpir::types::{SlotId, VRegRange};
     use lpir::{IrModule, IrType, VReg};
     use lps_shared::LpsModuleSig;
 
@@ -598,6 +648,66 @@ mod tests {
                 src1: VReg(0),
                 src2: VReg(1),
                 src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_load_store_slot_memcpy() {
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        let load = Op::Load {
+            dst: v(3),
+            base: v(2),
+            offset: 4,
+        };
+        assert!(matches!(
+            lower_op(&load, FloatMode::Q32, None, &f, &ir, &abi).expect("load"),
+            VInst::Load32 {
+                dst: VReg(3),
+                base: VReg(2),
+                offset: 4,
+                ..
+            }
+        ));
+        let store = Op::Store {
+            base: v(2),
+            offset: 8,
+            value: v(3),
+        };
+        assert!(matches!(
+            lower_op(&store, FloatMode::Q32, None, &f, &ir, &abi).expect("store"),
+            VInst::Store32 {
+                src: VReg(3),
+                base: VReg(2),
+                offset: 8,
+                ..
+            }
+        ));
+        let sa = Op::SlotAddr {
+            dst: v(1),
+            slot: SlotId(0),
+        };
+        assert!(matches!(
+            lower_op(&sa, FloatMode::Q32, None, &f, &ir, &abi).expect("slot_addr"),
+            VInst::SlotAddr {
+                dst: VReg(1),
+                slot: 0,
+                ..
+            }
+        ));
+        let mc = Op::Memcpy {
+            dst_addr: v(4),
+            src_addr: v(5),
+            size: 12,
+        };
+        assert!(matches!(
+            lower_op(&mc, FloatMode::Q32, None, &f, &ir, &abi).expect("memcpy"),
+            VInst::MemcpyWords {
+                dst_base: VReg(4),
+                src_base: VReg(5),
+                size: 12,
+                ..
             }
         ));
     }

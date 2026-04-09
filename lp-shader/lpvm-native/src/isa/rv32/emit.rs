@@ -17,7 +17,7 @@ use super::inst::{
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
-use crate::error::NativeError;
+use crate::error::{LowerError, NativeError};
 use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
@@ -867,6 +867,63 @@ impl EmitContext {
                 }
                 self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
+            VInst::SlotAddr { dst, slot, .. } => {
+                let off = self
+                    .frame
+                    .lpir_offset_from_sp(*slot)
+                    .ok_or(NativeError::InvalidLpirSlot(*slot))?;
+                let sp_reg = SP.hw as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                if (-2048..2048).contains(&off) {
+                    self.push_u32(encode_addi(rd, sp_reg, off));
+                } else {
+                    let t_off = Self::TEMP1 as u32;
+                    let t_alt = Self::TEMP2 as u32;
+                    let scratch = if rd == t_off { t_alt } else { t_off };
+                    for w in iconst32_sequence(scratch, off) {
+                        self.push_u32(w);
+                    }
+                    self.push_u32(encode_add(rd, sp_reg, scratch));
+                }
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::MemcpyWords {
+                dst_base,
+                src_base,
+                size,
+                ..
+            } => {
+                let t_data = Self::TEMP0 as u32;
+                let p_src = Self::TEMP1 as u32;
+                let p_dst = Self::TEMP2 as u32;
+                let r_src = self.use_vreg(alloc, *src_base, Self::TEMP1)? as u32;
+                let r_dst = self.use_vreg(alloc, *dst_base, Self::TEMP2)? as u32;
+                if r_src != p_src {
+                    self.push_u32(encode_addi(p_src, r_src, 0));
+                }
+                if r_dst != p_dst {
+                    self.push_u32(encode_addi(p_dst, r_dst, 0));
+                }
+                let mut remaining = *size as i32;
+                while remaining > 0 {
+                    let mut local_off = 0i32;
+                    while local_off + 4 <= remaining && local_off <= 2047 - 3 {
+                        self.push_u32(encode_lw(t_data, p_src, local_off));
+                        self.push_u32(encode_sw(t_data, p_dst, local_off));
+                        local_off += 4;
+                    }
+                    if local_off == 0 {
+                        return Err(NativeError::Lower(LowerError::UnsupportedOp {
+                            description: String::from("internal: memcpy chunk"),
+                        }));
+                    }
+                    if local_off < remaining {
+                        self.push_u32(encode_addi(p_src, p_src, local_off));
+                        self.push_u32(encode_addi(p_dst, p_dst, local_off));
+                    }
+                    remaining -= local_off;
+                }
+            }
             VInst::Call {
                 target,
                 args,
@@ -968,11 +1025,17 @@ pub fn emit_function_bytes(
     };
     let s1_save_words = u32::from(is_sret && has_call);
     let extra_spill = max_call_saves.saturating_add(s1_save_words);
+    let lpir_slot_sizes: Vec<(u32, u32)> = func
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (i as u32, s.size))
+        .collect();
     let frame = FrameLayout::compute(
         &func_abi,
         alloc.spill_count().saturating_add(extra_spill),
         used_callee_saved,
-        &[],
+        &lpir_slot_sizes,
         is_leaf,
         caller_sret_bytes,
     );

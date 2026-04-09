@@ -38,6 +38,8 @@ pub enum NativeError {
     DuplicateLabel(u32),
     BranchOffsetOutOfRange,
     MissingSretSlot,
+    /// LPIR `slot_addr` referenced a slot missing from the frame layout.
+    InvalidLpirSlot(u32),
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
@@ -78,6 +80,9 @@ impl fmt::Display for NativeError {
                     f,
                     "sret call requires caller sret stack slot but frame has none"
                 )
+            }
+            NativeError::InvalidLpirSlot(id) => {
+                write!(f, "LPIR stack slot ss{id} has no frame offset")
             }
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]
