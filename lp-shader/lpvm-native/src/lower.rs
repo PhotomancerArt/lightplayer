@@ -306,6 +306,29 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
+        Op::Fneg { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Neg32 {
+            dst: *dst,
+            src: *src,
+            src_op,
+        }),
+        Op::ItofS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_itof_s_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::ItofU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_itof_u_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
 
         Op::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
@@ -364,13 +387,16 @@ pub fn lower_op(
         | Op::Fsub { .. }
         | Op::Fmul { .. }
         | Op::Fdiv { .. }
+        | Op::Fneg { .. }
         | Op::FconstF32 { .. }
         | Op::Feq { .. }
         | Op::Fne { .. }
         | Op::Flt { .. }
         | Op::Fle { .. }
         | Op::Fgt { .. }
-        | Op::Fge { .. } => Err(LowerError::UnsupportedOp {
+        | Op::Fge { .. }
+        | Op::ItofS { .. }
+        | Op::ItofU { .. } => Err(LowerError::UnsupportedOp {
             description: String::from("float op requires Q32 mode (F32 not supported on rv32)"),
         }),
 
@@ -820,6 +846,76 @@ mod tests {
                 assert_eq!(target.name, "__lp_lpir_fdiv_q32");
                 assert_eq!(args, vec![v(0), v(1)]);
                 assert_eq!(rets, vec![v(2)]);
+                assert!(!callee_uses_sret);
+                assert_eq!(src_op, Some(0));
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_q32_fneg_to_neg32() {
+        let op = Op::Fneg {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        assert!(matches!(
+            lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
+            VInst::Neg32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_q32_itof_s_to_call() {
+        let op = Op::ItofS {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
+            VInst::Call {
+                target,
+                args,
+                rets,
+                callee_uses_sret,
+                src_op,
+            } => {
+                assert_eq!(target.name, "__lp_lpir_itof_s_q32");
+                assert_eq!(args, vec![v(0)]);
+                assert_eq!(rets, vec![v(1)]);
+                assert!(!callee_uses_sret);
+                assert_eq!(src_op, Some(0));
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_q32_itof_u_to_call() {
+        let op = Op::ItofU {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
+            VInst::Call {
+                target,
+                args,
+                rets,
+                callee_uses_sret,
+                src_op,
+            } => {
+                assert_eq!(target.name, "__lp_lpir_itof_u_q32");
+                assert_eq!(args, vec![v(0)]);
+                assert_eq!(rets, vec![v(1)]);
                 assert!(!callee_uses_sret);
                 assert_eq!(src_op, Some(0));
             }

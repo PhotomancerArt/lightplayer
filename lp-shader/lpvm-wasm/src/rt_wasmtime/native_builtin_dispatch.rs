@@ -996,6 +996,18 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirItofSQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::itof_s_q32::__lp_lpir_itof_s_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirItofUQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpVmGetFuelQ32 => {
             let vmctx_word = params[0].unwrap_i32();
             let mem = linked_env_memory;

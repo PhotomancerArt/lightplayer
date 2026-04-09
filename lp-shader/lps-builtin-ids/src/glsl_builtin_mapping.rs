@@ -72,6 +72,8 @@ pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
         ("fnearest", 1) => Some(BuiltinId::LpLpirFnearestQ32),
         ("sqrt", 1) => Some(BuiltinId::LpLpirFsqrtQ32),
         ("fsub", 2) => Some(BuiltinId::LpLpirFsubQ32),
+        ("itof_s", 1) => Some(BuiltinId::LpLpirItofSQ32),
+        ("itof_u", 1) => Some(BuiltinId::LpLpirItofUQ32),
         _ => None,
     }
 }

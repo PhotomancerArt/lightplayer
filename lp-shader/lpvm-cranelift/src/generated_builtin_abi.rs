@@ -43,6 +43,8 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpGlslTanhQ32
         | BuiltinId::LpLpirFnearestQ32
         | BuiltinId::LpLpirFsqrtQ32
+        | BuiltinId::LpLpirItofSQ32
+        | BuiltinId::LpLpirItofUQ32
         | BuiltinId::LpLpfxSaturateQ32
         | BuiltinId::LpVmGetFuelQ32 => {
             // extern "C" fn(i32) -> i32
@@ -328,7 +330,9 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         lpfx::generative,
         lpfx::hash,
         lpfx::math,
-        lpir::{fadd_q32, fdiv_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32},
+        lpir::{
+            fadd_q32, fdiv_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32, itof_s_q32, itof_u_q32,
+        },
         vm::get_fuel_q32,
     };
     match builtin {
@@ -361,6 +365,8 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpirFnearestQ32 => fnearest_q32::__lp_lpir_fnearest_q32 as *const u8,
         BuiltinId::LpLpirFsqrtQ32 => fsqrt_q32::__lp_lpir_fsqrt_q32 as *const u8,
         BuiltinId::LpLpirFsubQ32 => fsub_q32::__lp_lpir_fsub_q32 as *const u8,
+        BuiltinId::LpLpirItofSQ32 => itof_s_q32::__lp_lpir_itof_s_q32 as *const u8,
+        BuiltinId::LpLpirItofUQ32 => itof_u_q32::__lp_lpir_itof_u_q32 as *const u8,
         BuiltinId::LpLpfxFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32 as *const u8,
         BuiltinId::LpLpfxFbm2Q32 => generative::fbm::fbm2_q32::__lp_lpfx_fbm2_q32 as *const u8,
         BuiltinId::LpLpfxFbm3F32 => generative::fbm::fbm3_f32::__lp_lpfx_fbm3_f32 as *const u8,

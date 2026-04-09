@@ -14,3 +14,5 @@ pub mod fmul_q32;
 pub mod fnearest_q32;
 pub mod fsqrt_q32;
 pub mod fsub_q32;
+pub mod itof_s_q32;
+pub mod itof_u_q32;
