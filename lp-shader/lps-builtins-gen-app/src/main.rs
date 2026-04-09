@@ -74,7 +74,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     generate_builtin_ids(&builtin_ids_path, &builtins);
 
     let lpir_builtin_abi_path = workspace_root
-        .join("legacy")
         .join("lpvm-cranelift")
         .join("src")
         .join("generated_builtin_abi.rs");
@@ -152,14 +151,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("builtin_wasm_import_types.rs");
     generate_wasm_import_types(&wasm_import_types_path, &builtins);
 
-    let wasm_import_types_legacy_path = workspace_root
-        .join("legacy")
-        .join("lps-wasm")
-        .join("src")
-        .join("emit")
-        .join("builtin_wasm_import_types.rs");
-    generate_wasm_import_types(&wasm_import_types_legacy_path, &builtins);
-
     let native_dispatch_path = workspace_root
         .join("lpvm-wasm")
         .join("src")
@@ -184,7 +175,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &vm_mod_rs_path,
             &glsl_map_path,
             &wasm_import_types_path,
-            &wasm_import_types_legacy_path,
             &native_dispatch_path,
         ],
     );
