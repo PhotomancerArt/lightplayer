@@ -316,7 +316,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native abi2::classify
+cargo test -p lpvm-native abi::classify
 ```
 
 All classification tests should pass. Test edge cases:

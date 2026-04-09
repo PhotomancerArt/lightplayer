@@ -207,7 +207,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native abi2::regset
+cargo test -p lpvm-native abi::regset
 ```
 
 All tests should pass. No other code changes yet.

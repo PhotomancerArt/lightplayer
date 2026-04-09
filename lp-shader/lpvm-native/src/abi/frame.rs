@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::abi2::{FuncAbi, PReg, PregSet};
+use crate::abi::{FuncAbi, PReg, PregSet};
 
 /// Classifies a stack slot for debugging / tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,8 +131,8 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::abi2::classify::entry_param_scalar_count;
-    use crate::isa::rv32::abi2 as rv32;
+    use crate::abi::classify::entry_param_scalar_count;
+    use crate::isa::rv32::abi as rv32;
     use lps_shared::{LpsFnSig, LpsType};
 
     fn abi_float() -> FuncAbi {

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use lps_shared::{LpsFnSig, LpsType};
 
-use crate::abi2::PReg;
+use crate::abi::PReg;
 
 /// Where one scalar word of a parameter or return lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -87,7 +87,7 @@ Each layer testable in isolation without full compiler context:
 ## Validation
 
 ```bash
-cargo test -p lpvm-native abi2
+cargo test -p lpvm-native abi
 cargo check -p lpvm-native --target riscv32imac-unknown-none-elf
 ```
 

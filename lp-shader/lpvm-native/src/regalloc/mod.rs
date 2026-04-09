@@ -10,9 +10,12 @@ pub use greedy::GreedyAlloc;
 use lpir::{IrFunction, VReg};
 
 use crate::error::NativeError;
-use crate::isa::rv32::abi::{CALLER_SAVED, PhysReg};
+use crate::isa::rv32::abi::{callee_saved_int, caller_saved_int};
 use crate::types::NativeType;
 use crate::vinst::VInst;
+
+/// Physical register index (x0-x31).
+pub type PhysReg = u8;
 
 /// Per-vreg typing for allocation (parallel to LPIR vreg_types).
 #[derive(Debug, Clone)]
@@ -67,7 +70,12 @@ impl Allocation {
 
 /// All caller-saved registers are clobbered by an outgoing call.
 pub fn clobber_set_for_call() -> BTreeSet<PhysReg> {
-    CALLER_SAVED.iter().copied().collect()
+    caller_saved_int().iter().map(|p| p.hw).collect()
+}
+
+/// All callee-saved registers (for testing/assertions).
+pub fn clobber_set_callee_saved() -> BTreeSet<PhysReg> {
+    callee_saved_int().iter().map(|p| p.hw).collect()
 }
 
 pub trait RegAlloc {

@@ -294,7 +294,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native abi2::func_abi
+cargo test -p lpvm-native abi::func_abi
 ```
 
 All tests should pass. Verify:

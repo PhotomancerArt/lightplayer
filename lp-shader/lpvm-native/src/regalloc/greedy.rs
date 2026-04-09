@@ -1,15 +1,15 @@
-//! Greedy allocator: pin parameters to ABI locations, assign defs to [`crate::abi2::FuncAbi`] allocatable int set.
+//! Greedy allocator: pin parameters to ABI locations, assign defs to [`crate::abi::FuncAbi`] allocatable int set.
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use lpir::IrFunction;
 
-use super::{Allocation, RegAlloc};
-use crate::abi2::classify::ArgLoc;
-use crate::abi2::{FuncAbi, PReg, RegClass};
+use super::{Allocation, PhysReg, RegAlloc};
+use crate::abi::classify::ArgLoc;
+use crate::abi::{FuncAbi, PReg, RegClass};
 use crate::error::NativeError;
-use crate::isa::rv32::abi::{ALLOCA_REGS, ARG_REGS, CALLER_SAVED, PhysReg};
+use crate::isa::rv32::abi::{ARG_REGS, RET_REGS, alloca_base_int, caller_saved_int};
 use crate::vinst::{VInst, VReg};
 
 fn abi2_int_preg_to_phys(p: PReg) -> Result<PhysReg, NativeError> {
@@ -20,7 +20,7 @@ fn abi2_int_preg_to_phys(p: PReg) -> Result<PhysReg, NativeError> {
 }
 
 /// Integer [`PReg`]s in `set`, sorted by hardware index (deterministic allocation order).
-fn sorted_allocatable_ints(set: crate::abi2::PregSet) -> Vec<PhysReg> {
+fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PhysReg> {
     let mut v: Vec<PhysReg> = set
         .iter()
         .filter(|p| p.class == RegClass::Int)
@@ -32,6 +32,16 @@ fn sorted_allocatable_ints(set: crate::abi2::PregSet) -> Vec<PhysReg> {
 
 fn clobber_set_from_abi(abi: &FuncAbi) -> BTreeSet<PhysReg> {
     abi.call_clobbers()
+        .iter()
+        .filter(|p| p.class == RegClass::Int)
+        .map(|p| p.hw)
+        .collect()
+}
+
+/// Helper to convert caller_saved_int() PregSet to PhysReg BTreeSet for tests.
+#[cfg(test)]
+fn caller_saved_set() -> BTreeSet<PhysReg> {
+    caller_saved_int()
         .iter()
         .filter(|p| p.class == RegClass::Int)
         .map(|p| p.hw)
@@ -171,119 +181,34 @@ impl RegAlloc for GreedyAlloc {
         vinsts: &[VInst],
         arg_reg_offset: usize,
     ) -> Result<Allocation, NativeError> {
-        // First, find the maximum vreg index used in the function
-        // This includes vregs from vreg_pool (e.g., used in Return)
-        let max_vreg = vinsts
-            .iter()
-            .flat_map(|v| v.defs().chain(v.uses()))
-            .map(|v| v.0 as usize)
-            .max()
-            .unwrap_or(0);
+        // Build a simple FuncAbi for legacy direct-return (non-sret) allocation
+        let return_method = crate::abi::classify::ReturnMethod::Direct {
+            locs: RET_REGS[..2]
+                .iter()
+                .map(|r| crate::abi::classify::ArgLoc::Reg(*r))
+                .collect(),
+        };
+        let allocatable = alloca_base_int(); // s1 is available for direct returns
+        let precolors: Vec<(u32, PReg)> = (0..func.total_param_slots() as usize)
+            .enumerate()
+            .map(|(i, vreg)| (vreg as u32, ARG_REGS[arg_reg_offset + i]))
+            .collect();
+        let caller_saved = caller_saved_int();
+        let callee_saved = crate::isa::rv32::abi::callee_saved_int();
 
-        // Total vregs = max index + 1 (must cover all used vreg indices)
-        let n = (func.vreg_types.len()).max(max_vreg + 1);
+        let abi = FuncAbi::new_raw(
+            precolors
+                .iter()
+                .map(|(_, p)| crate::abi::classify::ArgLoc::Reg(*p))
+                .collect(),
+            return_method,
+            allocatable,
+            precolors,
+            caller_saved,
+            callee_saved,
+        );
 
-        let slots = func.total_param_slots() as usize;
-        // For sret, arg_reg_offset=1, so we need slots + 1 <= ARG_REGS.len()
-        if slots + arg_reg_offset > ARG_REGS.len() {
-            return Err(NativeError::TooManyArgs(slots));
-        }
-
-        let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
-        let mut spill_slots: Vec<VReg> = Vec::new();
-
-        // Assign params to arg regs with offset (sret shifts params to a1+)
-        for i in 0..slots.min(n) {
-            vreg_to_phys[i] = Some(ARG_REGS[arg_reg_offset + i]);
-        }
-
-        // Collect all vregs that need assignment (defs + uses that aren't defs)
-        // This handles pool vregs like those in Ret { vals: ... } that are used
-        // but may not be defined as VInst defs (they're defined by LPIR body ops)
-        let mut needs_assignment: alloc::collections::BTreeSet<VReg> =
-            alloc::collections::BTreeSet::new();
-
-        // Track which vregs are used in Return - these MUST have registers
-        // (cannot be spilled) because they need to be in RET_REGS for the ABI
-        let mut ret_uses: alloc::collections::BTreeSet<VReg> = alloc::collections::BTreeSet::new();
-
-        for inst in vinsts {
-            for v in inst.defs() {
-                needs_assignment.insert(v);
-            }
-            for v in inst.uses() {
-                needs_assignment.insert(v);
-            }
-            // Identify return values - they must be in registers
-            if let VInst::Ret { vals, .. } = inst {
-                for v in vals {
-                    ret_uses.insert(*v);
-                }
-            }
-        }
-
-        // Assign to allocatable regs, spill when exhausted
-        // First assign return values to ensure they get registers
-        let mut next_alloca = 0usize;
-
-        for v in &ret_uses {
-            let vi = v.0 as usize;
-            if vi >= n || vreg_to_phys[vi].is_some() {
-                continue;
-            }
-            if next_alloca < ALLOCA_REGS.len() {
-                vreg_to_phys[vi] = Some(ALLOCA_REGS[next_alloca]);
-                next_alloca += 1;
-            } else {
-                // Return value couldn't get a register - this is an error
-                // because we can't spill return values (ABI requires them in registers)
-                return Err(NativeError::TooManyReturns(ret_uses.len()));
-            }
-        }
-
-        // Then assign all other vregs
-        for v in needs_assignment {
-            let vi = v.0 as usize;
-            if vi >= n || vreg_to_phys[vi].is_some() {
-                continue;
-            }
-
-            if next_alloca < ALLOCA_REGS.len() {
-                vreg_to_phys[vi] = Some(ALLOCA_REGS[next_alloca]);
-                next_alloca += 1;
-            } else {
-                // Spill: no register, assign to spill slot
-                spill_slots.push(v);
-                // vreg_to_phys[vi] remains None to indicate spilled
-            }
-        }
-
-        // Verify all used vregs have allocation or spill
-        for inst in vinsts {
-            for v in inst.uses() {
-                let vi = v.0 as usize;
-                if vi >= n {
-                    return Err(NativeError::UnassignedVReg(v.0));
-                }
-                if vreg_to_phys[vi].is_none() && !spill_slots.contains(&v) {
-                    return Err(NativeError::UnassignedVReg(v.0));
-                }
-            }
-        }
-
-        // Collect clobbers (unchanged)
-        let mut clobbered: BTreeSet<PhysReg> = BTreeSet::new();
-        for inst in vinsts {
-            if inst.is_call() {
-                clobbered.extend(CALLER_SAVED.iter().copied());
-            }
-        }
-
-        Ok(Allocation {
-            vreg_to_phys,
-            clobbered,
-            spill_slots,
-        })
+        self.allocate_with_func_abi(func, vinsts, &abi)
     }
 }
 
@@ -299,34 +224,8 @@ mod tests {
 
     #[test]
     fn call_clobbers_all_caller_saved() {
-        let f = IrFunction {
-            name: String::from("f"),
-            is_entry: true,
-            vmctx_vreg: VReg(0),
-            param_count: 0,
-            return_types: vec![],
-            vreg_types: vec![],
-            slots: vec![],
-            body: vec![],
-            vreg_pool: vec![],
-        };
-        let vinsts = alloc::vec![VInst::Call {
-            target: SymbolRef {
-                name: String::from("g"),
-            },
-            args: Vec::new(),
-            rets: Vec::new(),
-            src_op: None,
-        }];
-        let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
-        for reg in CALLER_SAVED {
-            assert!(a.clobbered.contains(reg), "x{reg} not clobbered");
-        }
-    }
+        use crate::regalloc::clobber_set_callee_saved;
 
-    #[test]
-    fn callee_saved_not_clobbered_by_call() {
-        use crate::isa::rv32::abi::CALLEE_SAVED;
         let f = IrFunction {
             name: String::from("f"),
             is_entry: true,
@@ -347,10 +246,14 @@ mod tests {
             src_op: None,
         }];
         let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
-        for reg in CALLEE_SAVED {
-            if !CALLER_SAVED.contains(reg) {
+        for reg in caller_saved_set() {
+            assert!(a.clobbered.contains(&reg), "x{reg} not clobbered");
+        }
+        // Verify no callee-saved registers are clobbered
+        for reg in clobber_set_callee_saved() {
+            if !caller_saved_set().contains(&reg) {
                 assert!(
-                    !a.clobbered.contains(reg),
+                    !a.clobbered.contains(&reg),
                     "callee-saved x{reg} should not be in clobber set"
                 );
             }
@@ -569,8 +472,8 @@ mod tests {
     fn allocate_with_func_abi_sret_vmctx_in_a1() {
         use lps_shared::{LpsFnSig, LpsType};
 
+        use crate::isa::rv32::abi::func_abi_rv32;
         use crate::isa::rv32::abi::{A0, A1};
-        use crate::isa::rv32::abi2::func_abi_rv32;
 
         let sig = LpsFnSig {
             name: String::from("f"),
@@ -593,7 +496,7 @@ mod tests {
         let a = GreedyAlloc::new()
             .allocate_with_func_abi(&f, &vinsts, &abi)
             .expect("alloc");
-        assert_eq!(a.vreg_to_phys[0], Some(A1), "vmctx uses a1 when sret");
-        assert_ne!(a.vreg_to_phys[0], Some(A0));
+        assert_eq!(a.vreg_to_phys[0], Some(A1.hw), "vmctx uses a1 when sret");
+        assert_ne!(a.vreg_to_phys[0], Some(A0.hw));
     }
 }

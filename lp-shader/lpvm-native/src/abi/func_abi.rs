@@ -2,14 +2,14 @@
 
 use alloc::vec::Vec;
 
-use crate::abi2::PReg;
-use crate::abi2::PregSet;
-use crate::abi2::classify::{ArgLoc, ReturnMethod};
+use crate::abi::PReg;
+use crate::abi::PregSet;
+use crate::abi::classify::{ArgLoc, ReturnMethod};
 
 /// ABI for one shader function: register roles for params, return, and allocation.
 ///
 /// This is an ISA-neutral data container. Use ISA-specific constructors like
-/// [`crate::isa::rv32::abi2::func_abi_rv32`] to build instances.
+/// [`crate::isa::rv32::abi::func_abi_rv32`] to build instances.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncAbi {
     param_locs: Vec<ArgLoc>,
@@ -114,8 +114,8 @@ mod tests {
 
     use lps_shared::{LpsFnSig, LpsType};
 
-    use crate::abi2::classify::entry_param_scalar_count;
-    use crate::isa::rv32::abi2 as rv32;
+    use crate::abi::classify::entry_param_scalar_count;
+    use crate::isa::rv32::abi as rv32;
 
     #[test]
     fn direct_allocatable_includes_s1() {

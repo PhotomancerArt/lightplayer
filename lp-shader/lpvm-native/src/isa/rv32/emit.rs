@@ -2,19 +2,21 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 use object::write::{Object, Relocation, StandardSection, Symbol, SymbolId, SymbolSection};
 use object::{
     Architecture, BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf,
 };
 
-use super::abi::{self, A0, ARG_REGS, AbiInfo, FrameLayout, PhysReg, RET_REGS, S0, SP, SRET_PTR};
+use super::abi::{self, A0, ARG_REGS, RET_REGS, S0, S1, SP, callee_saved_int, func_abi_rv32};
 use super::inst::{
     encode_addi, encode_auipc, encode_jalr, encode_lw, encode_mul, encode_ret, encode_sub,
     encode_sw, iconst32_sequence,
 };
+use crate::abi::{FrameLayout, PReg, PregSet};
 use crate::error::NativeError;
-use crate::regalloc::{Allocation, GreedyAlloc};
+use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
 use crate::vinst::VInst;
 use lpir::VReg;
 use lps_shared;
@@ -60,11 +62,14 @@ impl EmitContext {
 
     /// Create a new emit context for a leaf function.
     pub fn new(is_leaf: bool, debug_info: bool) -> Self {
-        let frame = if is_leaf {
-            abi::leaf_frame()
-        } else {
-            abi::nonleaf_frame(0)
+        // Build minimal FuncAbi for leaf frame computation
+        let sig = lps_shared::LpsFnSig {
+            name: String::from("__leaf"),
+            return_type: lps_shared::LpsType::Void,
+            parameters: vec![],
         };
+        let func_abi = func_abi_rv32(&sig, 1);
+        let frame = FrameLayout::compute(&func_abi, 0, PregSet::EMPTY, &[], is_leaf);
         Self::with_frame(frame, debug_info)
     }
 
@@ -78,37 +83,35 @@ impl EmitContext {
 
     /// Emit function prologue: adjust sp, save ra and s0 if needed.
     /// For sret functions, also saves the sret pointer (in a0) to s1.
-    pub fn emit_prologue(&mut self, abi_info: &AbiInfo) {
-        let sp = u32::from(SP);
-        let frame_size = self.frame.size as i32;
+    pub fn emit_prologue(&mut self, is_sret: bool) {
+        let sp = SP.hw as u32;
+        let frame_size = self.frame.total_size as i32;
 
         // Adjust stack pointer
         self.push_u32(encode_addi(sp, sp, -frame_size));
 
         // Save s0 (frame pointer) if we have one
-        if self.frame.saved_s0 {
-            let s0_off = self.frame.size as i32 + self.frame.s0_save_offset;
-            self.push_u32(encode_sw(u32::from(S0), sp, s0_off));
+        if let Some(fp_off) = self.frame.fp_offset_from_sp {
+            self.push_u32(encode_sw(S0.hw as u32, sp, fp_off));
         }
 
         // Save ra if non-leaf
-        if self.frame.saved_ra {
-            let ra_off = self.frame.size as i32 + self.frame.ra_save_offset;
-            self.push_u32(encode_sw(u32::from(abi::RA), sp, ra_off));
+        if let Some(ra_off) = self.frame.ra_offset_from_sp {
+            self.push_u32(encode_sw(abi::RA.hw as u32, sp, ra_off));
         }
 
         // Set up frame pointer: s0 = sp + frame_size
-        if self.frame.saved_s0 {
-            let sp = u32::from(SP);
-            let s0 = u32::from(S0);
+        if self.frame.save_fp {
+            let sp = SP.hw as u32;
+            let s0 = S0.hw as u32;
             self.push_u32(encode_addi(s0, sp, frame_size));
         }
 
         // For sret functions: save sret pointer (a0) to callee-saved s1
         // This preserves it across the function body which may clobber a0
-        if abi_info.is_sret() {
-            let a0 = u32::from(A0);
-            let s1 = u32::from(SRET_PTR);
+        if is_sret {
+            let a0 = A0.hw as u32;
+            let s1 = S1.hw as u32;
             self.push_u32(encode_addi(s1, a0, 0)); // mv s1, a0
         }
     }
@@ -117,20 +120,18 @@ impl EmitContext {
     ///
     /// For sret functions, the return values have already been stored to the
     /// buffer pointed to by a0. Normal return just executes ret.
-    pub fn emit_epilogue(&mut self, _abi_info: &AbiInfo) {
-        let sp = u32::from(SP);
-        let frame_size = self.frame.size as i32;
+    pub fn emit_epilogue(&mut self) {
+        let sp = SP.hw as u32;
+        let frame_size = self.frame.total_size as i32;
 
         // Restore ra if saved
-        if self.frame.saved_ra {
-            let ra_off = self.frame.size as i32 + self.frame.ra_save_offset;
-            self.push_u32(encode_lw(u32::from(abi::RA), sp, ra_off));
+        if let Some(ra_off) = self.frame.ra_offset_from_sp {
+            self.push_u32(encode_lw(abi::RA.hw as u32, sp, ra_off));
         }
 
         // Restore s0 if saved
-        if self.frame.saved_s0 {
-            let s0_off = self.frame.size as i32 + self.frame.s0_save_offset;
-            self.push_u32(encode_lw(u32::from(S0), sp, s0_off));
+        if let Some(fp_off) = self.frame.fp_offset_from_sp {
+            self.push_u32(encode_lw(S0.hw as u32, sp, fp_off));
         }
 
         // Adjust stack pointer back
@@ -157,15 +158,15 @@ impl EmitContext {
     /// Emit a load from a spill slot into a temporary register.
     /// Returns the temporary register.
     fn load_spill(&mut self, slot_index: u32, temp: PhysReg) -> PhysReg {
-        let offset = self.frame.spill_to_offset(slot_index);
-        self.push_u32(encode_lw(u32::from(temp), u32::from(S0), offset));
+        let offset = self.frame.spill_offset_from_fp(slot_index).unwrap_or(-8);
+        self.push_u32(encode_lw(temp as u32, S0.hw as u32, offset));
         temp
     }
 
     /// Emit a store from a temporary register to a spill slot.
     fn store_spill(&mut self, slot_index: u32, temp: PhysReg) {
-        let offset = self.frame.spill_to_offset(slot_index);
-        self.push_u32(encode_sw(u32::from(temp), u32::from(S0), offset));
+        let offset = self.frame.spill_offset_from_fp(slot_index).unwrap_or(-8);
+        self.push_u32(encode_sw(temp as u32, S0.hw as u32, offset));
     }
 
     /// Get or load a vreg for use (source operand).
@@ -217,7 +218,7 @@ impl EmitContext {
         &mut self,
         inst: &VInst,
         alloc: &Allocation,
-        abi_info: &AbiInfo,
+        is_sret: bool,
     ) -> Result<(), NativeError> {
         self.current_src_op = inst.src_op();
         match inst {
@@ -290,13 +291,13 @@ impl EmitContext {
                 }
                 for (i, a) in args.iter().enumerate() {
                     let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
-                    let to = ARG_REGS[i] as u32;
+                    let to = ARG_REGS[i].hw as u32;
                     if from != to {
                         self.push_u32(encode_addi(to, from, 0));
                     }
                 }
                 let auipc_off = self.code.len();
-                let ra = u32::from(abi::RA);
+                let ra = abi::RA.hw as u32;
                 self.push_u32(encode_auipc(ra, 0));
                 self.push_u32(encode_jalr(ra, ra, 0));
                 self.relocs.push(NativeReloc {
@@ -308,7 +309,7 @@ impl EmitContext {
                         return Err(NativeError::TooManyReturns(i + 1));
                     }
                     let dst = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
-                    let src = RET_REGS[i] as u32;
+                    let src = RET_REGS[i].hw as u32;
                     if dst != src {
                         self.push_u32(encode_addi(dst, src, 0));
                     }
@@ -316,11 +317,11 @@ impl EmitContext {
                 }
             }
             VInst::Ret { vals, .. } => {
-                if abi_info.is_sret() {
+                if is_sret {
                     // Sret: store values to buffer pointed to by s1
                     // s1 was loaded with the sret buffer address in the prologue
                     // (since a0 may be clobbered during function execution)
-                    let base_reg = SRET_PTR as u32; // s1
+                    let base_reg = S1.hw as u32; // s1
                     for (i, v) in vals.iter().enumerate() {
                         let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
                         let offset = (i * 4) as i32;
@@ -329,10 +330,10 @@ impl EmitContext {
                     }
                     // Return value buffer address is already in a0 per ABI
                 } else {
-                    // Direct return: move values to a0-a3
+                    // Direct return: move values to a0-a1
                     for (i, v) in vals.iter().enumerate() {
                         let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
-                        let dst = RET_REGS[i] as u32;
+                        let dst = RET_REGS[i].hw as u32;
                         if src != dst {
                             self.push_u32(encode_addi(dst, src, 0));
                         }
@@ -359,26 +360,43 @@ pub fn emit_function_bytes(
     float_mode: lpir::FloatMode,
     debug_info: bool,
 ) -> Result<EmittedFunction, NativeError> {
-    let abi_info = AbiInfo::from_lps_sig(fn_sig);
     let vinsts = crate::lower::lower_ops(func, float_mode)?;
     let slots = func.total_param_slots() as usize;
-    let func_abi = super::abi2::func_abi_rv32(fn_sig, slots);
+    let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
     let alloc = GreedyAlloc::new().allocate_with_func_abi(func, &vinsts, &func_abi)?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
+    let is_sret = func_abi.is_sret();
+
+    // Compute used callee-saved registers from allocation
+    let mut used_callee_saved = PregSet::EMPTY;
+    for preg_opt in &alloc.vreg_to_phys {
+        if let Some(preg) = preg_opt {
+            let p = PReg::int(*preg);
+            if callee_saved_int().contains(p) {
+                used_callee_saved.insert(p);
+            }
+        }
+    }
+    // For sret, s1 is always "used" (reserved for preservation)
+    if is_sret {
+        used_callee_saved.insert(S1);
+    }
 
     // Create frame with spill count from allocation
-    let frame = if is_leaf && alloc.spill_count() == 0 {
-        abi::leaf_frame()
-    } else {
-        abi::nonleaf_frame(alloc.spill_count())
-    };
+    let frame = FrameLayout::compute(
+        &func_abi,
+        alloc.spill_count(),
+        used_callee_saved,
+        &[],
+        is_leaf,
+    );
 
     let mut ctx = EmitContext::with_frame(frame, debug_info);
-    ctx.emit_prologue(&abi_info);
+    ctx.emit_prologue(is_sret);
     for v in &vinsts {
-        ctx.emit_vinst(v, &alloc, &abi_info)?;
+        ctx.emit_vinst(v, &alloc, is_sret)?;
     }
-    ctx.emit_epilogue(&abi_info);
+    ctx.emit_epilogue();
     Ok(EmittedFunction {
         code: ctx.code,
         relocs: ctx.relocs,
@@ -485,13 +503,9 @@ pub fn emit_module_elf(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regalloc::{GreedyAlloc, RegAlloc};
+    use crate::regalloc::GreedyAlloc;
     use alloc::vec;
 
-    fn alloc_fn(f: &lpir::IrFunction, v: &[VInst]) -> crate::regalloc::Allocation {
-        // Tests use direct return (not sret), so arg_reg_offset = 0
-        RegAlloc::allocate(&GreedyAlloc, f, v, 0).expect("alloc")
-    }
     use lpir::{IrFunction, Op};
     use lps_shared::{FnParam, LpsFnSig, LpsType, ParamQualifier};
 
@@ -515,10 +529,6 @@ mod tests {
         }
     }
 
-    fn leaf_abi_info() -> super::AbiInfo {
-        super::AbiInfo::from_lps_sig(&leaf_lps_sig())
-    }
-
     /// Matches [`reloc_recorded_on_call`] IR (two float params, float return).
     fn call_test_lps_sig() -> LpsFnSig {
         LpsFnSig {
@@ -537,10 +547,6 @@ mod tests {
                 },
             ],
         }
-    }
-
-    fn call_test_abi_info() -> super::AbiInfo {
-        super::AbiInfo::from_lps_sig(&call_test_lps_sig())
     }
 
     fn leaf_add() -> IrFunction {
@@ -575,14 +581,16 @@ mod tests {
     fn emit_leaf_prologue_epilogue_size() {
         let f = leaf_add();
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
-        let a = alloc_fn(&f, &v);
+        let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
+        let a = GreedyAlloc::new()
+            .allocate_with_func_abi(&f, &v, &func_abi)
+            .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
-        let abi = leaf_abi_info();
-        ctx.emit_prologue(&abi);
+        ctx.emit_prologue(false); // not sret
         for i in &v {
-            ctx.emit_vinst(i, &a, &abi).expect("emit");
+            ctx.emit_vinst(i, &a, false).expect("emit");
         }
-        ctx.emit_epilogue(&abi);
+        ctx.emit_epilogue();
         assert!(ctx.code.len() >= 12);
         assert!(ctx.relocs.is_empty());
     }
@@ -620,14 +628,16 @@ mod tests {
             vreg_pool: vec![VReg(3)],
         };
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
-        let a = alloc_fn(&f, &v);
+        let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
+        let a = GreedyAlloc::new()
+            .allocate_with_func_abi(&f, &v, &func_abi)
+            .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
-        let abi = call_test_abi_info();
-        ctx.emit_prologue(&abi);
+        ctx.emit_prologue(false); // not sret
         for i in &v {
-            ctx.emit_vinst(i, &a, &abi).expect("emit");
+            ctx.emit_vinst(i, &a, false).expect("emit");
         }
-        ctx.emit_epilogue(&abi);
+        ctx.emit_epilogue();
         assert_eq!(ctx.relocs.len(), 1);
         assert!(ctx.relocs[0].symbol.contains("fadd"));
     }

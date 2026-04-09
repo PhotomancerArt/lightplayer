@@ -35,8 +35,8 @@ pub use classify::{ArgLoc, ReturnMethod, classify_params, classify_return};
 pub use func_abi::FuncAbi;
 pub use frame::{FrameLayout, SlotKind};
 
-// ISA-specific constants are in isa::rv32::abi2
-// Re-exported there as pub use abi2::* plus rv32-specific sets
+// ISA-specific constants are in isa::rv32::abi
+// Re-exported there as pub use abi::* plus rv32-specific sets
 ```
 
 ## isa/rv32/abi2.rs Update
@@ -44,10 +44,10 @@ pub use frame::{FrameLayout, SlotKind};
 Update the file to re-export abi2 types and add RV32-specific constants:
 
 ```rust
-//! RV32 ILP32 ABI constants for abi2.
+//! RV32 ILP32 ABI constants for abi.
 //!
 //! This module provides RV32-specific register constants and pre-built
-//! register sets for the abi2 system.
+//! register sets for the abi system.
 
 pub use crate::abi2::*;  // Re-export PReg, RegClass, PregSet, etc.
 
@@ -80,7 +80,7 @@ Add the abi2 module to `lp-shader/lpvm-native/src/lib.rs`:
 ```rust
 // ... existing modules ...
 
-// New abi2 system (will replace abi.rs after transition)
+// New abi system (will replace abi.rs after transition)
 pub mod abi2;
 
 // Existing modules
@@ -106,8 +106,8 @@ pub use rv32::{abi, abi2};
 # Check it all compiles
 cargo check -p lpvm-native
 
-# Run all abi2 tests
-cargo test -p lpvm-native abi2
+# Run all abi tests
+cargo test -p lpvm-native abi
 
 # Verify no overlap with existing abi module
 cargo test -p lpvm-native 2>&1 | grep -E "(abi|abi2)" | head -20

@@ -194,8 +194,8 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native abi2::rv32
-cargo test -p lpvm-native isa::rv32::abi2
+cargo test -p lpvm-native abi::rv32
+cargo test -p lpvm-native isa::rv32::abi
 ```
 
 All tests should pass. No changes to existing code.

@@ -9,7 +9,7 @@ Final validation of the abi2 module, documentation review, and preparation for t
 ### 1. Grep for TODOs and temp code
 
 ```bash
-grep -r "TODO\|FIXME\|XXX\|unimplemented" lp-shader/lpvm-native/src/abi2/
+grep -r "TODO\|FIXME\|XXX\|unimplemented" lp-shader/lpvm-native/src/abi/
 ```
 
 Any `unimplemented!()` for Float register class should remain - that's expected for RV32F future work.
@@ -25,7 +25,7 @@ Verify all public types have doc comments:
 ### 3. Unused code check
 
 ```bash
-cargo clippy -p lpvm-native -- -Wunused 2>&1 | grep abi2
+cargo clippy -p lpvm-native -- -Wunused 2>&1 | grep abi
 ```
 
 No warnings about unused code in abi2 module (except possibly Float branches).
@@ -50,8 +50,8 @@ abi2 module should compile for no_std target (no std dependencies).
 ## Validation Commands
 
 ```bash
-# Full test suite for abi2
-cargo test -p lpvm-native abi2 -- --nocapture
+# Full test suite for abi
+cargo test -p lpvm-native abi -- --nocapture
 
 # Check compiles on host
 cargo check -p lpvm-native

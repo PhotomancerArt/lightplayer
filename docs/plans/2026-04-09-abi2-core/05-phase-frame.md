@@ -353,7 +353,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native abi2::frame
+cargo test -p lpvm-native abi::frame
 ```
 
 All tests should pass. Verify:
