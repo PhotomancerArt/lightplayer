@@ -8,13 +8,13 @@ use object::{
     Architecture, BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf,
 };
 
-use super::abi::{self, AbiInfo, ARG_REGS, FrameLayout, PhysReg, RET_REGS, S0, SP, A0, SRET_PTR};
+use super::abi::{self, A0, ARG_REGS, AbiInfo, FrameLayout, PhysReg, RET_REGS, S0, SP, SRET_PTR};
 use super::inst::{
     encode_addi, encode_auipc, encode_jalr, encode_lw, encode_mul, encode_ret, encode_sub,
     encode_sw, iconst32_sequence,
 };
 use crate::error::NativeError;
-use crate::regalloc::{Allocation, GreedyAlloc, RegAlloc};
+use crate::regalloc::{Allocation, GreedyAlloc};
 use crate::vinst::VInst;
 use lpir::VReg;
 use lps_shared;
@@ -171,7 +171,12 @@ impl EmitContext {
     /// Get or load a vreg for use (source operand).
     /// If the vreg is spilled, loads it into the specified temp register.
     /// Otherwise returns the assigned physical register.
-    fn use_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) -> Result<PhysReg, NativeError> {
+    fn use_vreg(
+        &mut self,
+        alloc: &Allocation,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
         if let Some(slot_index) = alloc.spill_slot(v) {
             // VReg is spilled - load from stack into temp register
             Ok(self.load_spill(slot_index, temp))
@@ -184,7 +189,12 @@ impl EmitContext {
     /// Get or reserve a vreg for definition (destination operand).
     /// If the vreg is spilled, returns the temp register (caller must store after use).
     /// Otherwise returns the assigned physical register.
-    fn def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) -> Result<PhysReg, NativeError> {
+    fn def_vreg(
+        &mut self,
+        alloc: &Allocation,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
         if alloc.is_spilled(v) {
             // VReg is spilled - use temp as temporary, caller must store
             Ok(temp)
@@ -340,18 +350,20 @@ impl EmitContext {
 ///
 /// # Arguments
 /// * `func` - The LPIR function to emit
-/// * `abi_info` - ABI information for the function (sret vs direct, arg registers, etc.)
+/// * `fn_sig` - Surface signature (ABI classification, must match `func` parameter layout)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `debug_info` - Whether to include debug line information
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
-    abi_info: &AbiInfo,
+    fn_sig: &lps_shared::LpsFnSig,
     float_mode: lpir::FloatMode,
     debug_info: bool,
 ) -> Result<EmittedFunction, NativeError> {
+    let abi_info = AbiInfo::from_lps_sig(fn_sig);
     let vinsts = crate::lower::lower_ops(func, float_mode)?;
-    let arg_reg_offset = abi_info.arg_reg_offset();
-    let alloc = RegAlloc::allocate(&GreedyAlloc, func, &vinsts, arg_reg_offset)?;
+    let slots = func.total_param_slots() as usize;
+    let func_abi = super::abi2::func_abi_rv32(fn_sig, slots);
+    let alloc = GreedyAlloc::new().allocate_with_func_abi(func, &vinsts, &func_abi)?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
 
     // Create frame with spill count from allocation
@@ -362,11 +374,11 @@ pub fn emit_function_bytes(
     };
 
     let mut ctx = EmitContext::with_frame(frame, debug_info);
-    ctx.emit_prologue(abi_info);
+    ctx.emit_prologue(&abi_info);
     for v in &vinsts {
-        ctx.emit_vinst(v, &alloc, abi_info)?;
+        ctx.emit_vinst(v, &alloc, &abi_info)?;
     }
-    ctx.emit_epilogue(abi_info);
+    ctx.emit_epilogue(&abi_info);
     Ok(EmittedFunction {
         code: ctx.code,
         relocs: ctx.relocs,
@@ -390,11 +402,8 @@ pub fn emit_module_elf(
     }
 
     // Build a map from function name to LpsFnSig for ABI classification
-    let sig_map: BTreeMap<&str, &lps_shared::LpsFnSig> = sig
-        .functions
-        .iter()
-        .map(|s| (s.name.as_str(), s))
-        .collect();
+    let sig_map: BTreeMap<&str, &lps_shared::LpsFnSig> =
+        sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
     obj.flags = FileFlags::Elf {
@@ -413,9 +422,11 @@ pub fn emit_module_elf(
             return_type: lps_shared::LpsType::Void,
             parameters: alloc::vec::Vec::new(),
         };
-        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
-        let abi_info = AbiInfo::from_lps_sig(fn_sig);
-        let emitted = emit_function_bytes(func, &abi_info, float_mode, false)?;
+        let fn_sig = sig_map
+            .get(func.name.as_str())
+            .copied()
+            .unwrap_or(&default_sig);
+        let emitted = emit_function_bytes(func, fn_sig, float_mode, false)?;
         let ctx = emitted;
 
         let func_off = obj.append_section_data(text, &ctx.code, 4);
@@ -482,16 +493,54 @@ mod tests {
         RegAlloc::allocate(&GreedyAlloc, f, v, 0).expect("alloc")
     }
     use lpir::{IrFunction, Op};
-    use lps_shared::{LpsFnSig, LpsType};
+    use lps_shared::{FnParam, LpsFnSig, LpsType, ParamQualifier};
 
-    /// Helper to create a simple AbiInfo for testing (void return, no params).
-    fn test_abi_info() -> super::AbiInfo {
-        let sig = LpsFnSig {
-            name: String::from("test"),
-            return_type: LpsType::Void,
-            parameters: Vec::new(),
-        };
-        super::AbiInfo::from_lps_sig(&sig)
+    /// [`LpsFnSig`] consistent with [`leaf_add`] (vmctx + two scalar params, scalar return).
+    fn leaf_lps_sig() -> LpsFnSig {
+        LpsFnSig {
+            name: String::from("leaf_add"),
+            return_type: LpsType::Int,
+            parameters: vec![
+                FnParam {
+                    name: String::from("a"),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                },
+                FnParam {
+                    name: String::from("b"),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                },
+            ],
+        }
+    }
+
+    fn leaf_abi_info() -> super::AbiInfo {
+        super::AbiInfo::from_lps_sig(&leaf_lps_sig())
+    }
+
+    /// Matches [`reloc_recorded_on_call`] IR (two float params, float return).
+    fn call_test_lps_sig() -> LpsFnSig {
+        LpsFnSig {
+            name: String::from("c"),
+            return_type: LpsType::Float,
+            parameters: vec![
+                FnParam {
+                    name: String::from("a"),
+                    ty: LpsType::Float,
+                    qualifier: ParamQualifier::In,
+                },
+                FnParam {
+                    name: String::from("b"),
+                    ty: LpsType::Float,
+                    qualifier: ParamQualifier::In,
+                },
+            ],
+        }
+    }
+
+    fn call_test_abi_info() -> super::AbiInfo {
+        super::AbiInfo::from_lps_sig(&call_test_lps_sig())
     }
 
     fn leaf_add() -> IrFunction {
@@ -528,7 +577,7 @@ mod tests {
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
         let mut ctx = EmitContext::new(true, false);
-        let abi = test_abi_info();
+        let abi = leaf_abi_info();
         ctx.emit_prologue(&abi);
         for i in &v {
             ctx.emit_vinst(i, &a, &abi).expect("emit");
@@ -541,8 +590,7 @@ mod tests {
     #[test]
     fn debug_lines_populated_when_enabled() {
         let f = leaf_add();
-        let abi = test_abi_info();
-        let e = emit_function_bytes(&f, &abi, lpir::FloatMode::Q32, true).expect("emit");
+        let e = emit_function_bytes(&f, &leaf_lps_sig(), lpir::FloatMode::Q32, true).expect("emit");
         assert!(
             !e.debug_lines.is_empty(),
             "expected per-instruction debug lines"
@@ -574,7 +622,7 @@ mod tests {
         let v = crate::lower::lower_ops(&f, lpir::FloatMode::Q32).expect("lower");
         let a = alloc_fn(&f, &v);
         let mut ctx = EmitContext::new(false, false);
-        let abi = test_abi_info();
+        let abi = call_test_abi_info();
         ctx.emit_prologue(&abi);
         for i in &v {
             ctx.emit_vinst(i, &a, &abi).expect("emit");

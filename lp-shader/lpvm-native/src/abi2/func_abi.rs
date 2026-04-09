@@ -85,6 +85,27 @@ impl FuncAbi {
             _ => &[],
         }
     }
+
+    /// Physical register this vreg is forced to use by the ABI, if any.
+    pub fn precolor_of(&self, vreg: u32) -> Option<PReg> {
+        self.precolors
+            .iter()
+            .find(|(v, _)| *v == vreg)
+            .map(|(_, p)| *p)
+    }
+
+    /// Number of scalar words written to the sret buffer, when [`Self::is_sret`].
+    pub fn sret_word_count(&self) -> Option<u32> {
+        match &self.return_method {
+            ReturnMethod::Sret { word_count, .. } => Some(*word_count),
+            _ => None,
+        }
+    }
+
+    /// Minimum stack frame alignment for this ABI (bytes).
+    pub fn stack_alignment(&self) -> u32 {
+        16
+    }
 }
 
 #[cfg(test)]
@@ -155,5 +176,61 @@ mod tests {
         assert!(!a.contains(rv32::A0));
         assert!(!a.contains(rv32::T0));
         assert!(!a.contains(rv32::S0));
+    }
+
+    #[test]
+    fn precolor_of_vmctx_direct() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Float,
+            parameters: vec![],
+        };
+        let abi = rv32::func_abi_rv32(&sig, 1);
+        assert_eq!(abi.precolor_of(0), Some(rv32::A0));
+        assert_eq!(abi.precolor_of(99), None);
+    }
+
+    #[test]
+    fn precolor_of_vmctx_sret() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Vec4,
+            parameters: vec![],
+        };
+        let abi = rv32::func_abi_rv32(&sig, 1);
+        assert_eq!(abi.precolor_of(0), Some(rv32::A1));
+    }
+
+    #[test]
+    fn sret_word_count_mat4() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Mat4,
+            parameters: vec![],
+        };
+        let abi = rv32::func_abi_rv32(&sig, 1);
+        assert_eq!(abi.sret_word_count(), Some(16));
+    }
+
+    #[test]
+    fn sret_word_count_none_for_direct() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Float,
+            parameters: vec![],
+        };
+        let abi = rv32::func_abi_rv32(&sig, 1);
+        assert_eq!(abi.sret_word_count(), None);
+    }
+
+    #[test]
+    fn stack_alignment_is_16() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Float,
+            parameters: vec![],
+        };
+        let abi = rv32::func_abi_rv32(&sig, 1);
+        assert_eq!(abi.stack_alignment(), 16);
     }
 }

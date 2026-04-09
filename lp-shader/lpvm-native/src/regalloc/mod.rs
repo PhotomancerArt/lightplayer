@@ -58,7 +58,10 @@ impl Allocation {
     /// Get spill slot index for a spilled vreg.
     /// Returns `Some(slot_index)` if the vreg is spilled, `None` otherwise.
     pub fn spill_slot(&self, v: VReg) -> Option<u32> {
-        self.spill_slots.iter().position(|&sv| sv == v).map(|p| p as u32)
+        self.spill_slots
+            .iter()
+            .position(|&sv| sv == v)
+            .map(|p| p as u32)
     }
 }
 

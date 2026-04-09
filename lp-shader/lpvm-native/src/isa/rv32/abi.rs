@@ -159,11 +159,10 @@ impl fmt::Display for AbiError {
 impl core::error::Error for AbiError {}
 
 /// Return value classification for RV32 ILP32 calling convention.
-/// ≤16 bytes (4 scalars): returned in registers a0-a3.
-/// >16 bytes: returned via sret pointer in a0 (caller-allocated buffer).
+/// Up to two scalar words: returned in `a0`–`a1`. More than two: sret pointer in `a0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReturnClass {
-    /// Return in registers a0-a3 (up to 4 scalar values).
+    /// Return in registers a0–a1 (up to two scalar values).
     Direct { regs: Vec<PhysReg> },
     /// Return via struct return pointer in a0.
     /// Caller allocates buffer, passes address in a0 as first arg.
@@ -172,15 +171,15 @@ pub enum ReturnClass {
 
 impl ReturnClass {
     /// Classify return types for RV32 ILP32 ABI.
-    /// Threshold: 16 bytes = 4 I32/F32 scalars.
+    ///
+    /// Matches Cranelift / [`lpvm_cranelift::signature_for_ir_func`]: more than **two** scalar
+    /// return words use a struct-return pointer in `a0` (see Cranelift #9510).
     pub fn from_lps_types(return_types: &[lps_shared::LpsType]) -> Self {
         let scalar_count: usize = return_types.iter().map(scalar_count_of_type).sum();
 
-        if scalar_count > 4 {
-            // Large return: use sret pointer
+        if scalar_count > 2 {
             ReturnClass::Sret { ptr_reg: A0 }
         } else {
-            // Small return: direct in a0-a3
             let regs = RET_REGS.iter().copied().take(scalar_count).collect();
             ReturnClass::Direct { regs }
         }
@@ -209,7 +208,7 @@ pub struct AbiInfo {
 impl AbiInfo {
     /// Derive ABI info from an LPIR function and its signature.
     ///
-    /// For sret functions (>4 scalars), the buffer pointer is passed in a0,
+    /// For sret functions (>2 scalar return words), the buffer pointer is passed in a0,
     /// so real arguments start at a1.
     pub fn from_lps_sig(sig: &lps_shared::LpsFnSig) -> Self {
         let return_class = ReturnClass::from_lps_type(&sig.return_type);
@@ -382,9 +381,9 @@ mod tests {
     }
 
     #[test]
-    fn classify_vec4_is_direct_a0_to_a3() {
+    fn classify_vec4_is_sret() {
         let rc = ReturnClass::from_lps_types(&[Ty::Vec4]);
-        assert!(matches!(rc, ReturnClass::Direct { regs } if regs == vec![A0, A1, 12, 13]));
+        assert!(matches!(rc, ReturnClass::Sret { ptr_reg: A0 }));
     }
 
     #[test]
@@ -395,15 +394,13 @@ mod tests {
     }
 
     #[test]
-    fn classify_two_vec2_is_direct_four_scalars() {
-        // Vec2 + Vec2 = 2 + 2 = 4 scalars, exactly at limit
+    fn classify_two_vec2_is_sret() {
         let rc = ReturnClass::from_lps_types(&[Ty::Vec2, Ty::Vec2]);
-        assert!(matches!(rc, ReturnClass::Direct { regs } if regs.len() == 4));
+        assert!(matches!(rc, ReturnClass::Sret { .. }));
     }
 
     #[test]
     fn classify_vec4_scalar_is_sret() {
-        // Vec4 + Float = 4 + 1 = 5 scalars, exceeds limit
         let rc = ReturnClass::from_lps_types(&[Ty::Vec4, Ty::Float]);
         assert!(matches!(rc, ReturnClass::Sret { .. }));
     }
@@ -416,10 +413,9 @@ mod tests {
     }
 
     #[test]
-    fn classify_mat2_is_direct() {
-        // Mat2 = 4 scalars (2x2), exactly at limit
+    fn classify_mat2_is_sret() {
         let rc = ReturnClass::from_lps_types(&[Ty::Mat2]);
-        assert!(matches!(rc, ReturnClass::Direct { regs } if regs.len() == 4));
+        assert!(matches!(rc, ReturnClass::Sret { .. }));
     }
 
     #[test]
@@ -429,9 +425,9 @@ mod tests {
     }
 
     #[test]
-    fn classify_ivec3_is_direct_three_regs() {
+    fn classify_ivec3_is_sret() {
         let rc = ReturnClass::from_lps_types(&[Ty::IVec3]);
-        assert!(matches!(rc, ReturnClass::Direct { regs } if regs == vec![A0, A1, 12]));
+        assert!(matches!(rc, ReturnClass::Sret { .. }));
     }
 
     // Frame layout and stack slot tests
@@ -511,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn abi_info_vec4_is_direct() {
+    fn abi_info_vec4_is_sret() {
         let sig = LpsFnSig {
             name: String::from("test"),
             return_type: LpsType::Vec4,
@@ -520,10 +516,10 @@ mod tests {
 
         let abi = AbiInfo::from_lps_sig(&sig);
         assert!(
-            matches!(abi.return_class, ReturnClass::Direct { .. }),
-            "vec4 should be direct"
+            matches!(abi.return_class, ReturnClass::Sret { .. }),
+            "vec4 uses sret (>2 scalars)"
         );
-        assert_eq!(abi.sret_size, None);
+        assert_eq!(abi.sret_size, Some(16));
         assert_eq!(abi.return_scalar_count, 4);
     }
 

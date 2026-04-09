@@ -8,7 +8,6 @@ use lpir::IrModule;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
 use crate::error::NativeError;
-use crate::isa::rv32::abi::AbiInfo;
 use crate::isa::rv32::debug::LineTable;
 use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
 use crate::isa::rv32::emit::emit_function_bytes;
@@ -27,11 +26,8 @@ pub fn compile_module_asm_text(
     opts: DisasmOptions,
 ) -> Result<String, NativeError> {
     // Build a map from function name to signature
-    let sig_map: BTreeMap<&str, &LpsFnSig> = sig
-        .functions
-        .iter()
-        .map(|s| (s.name.as_str(), s))
-        .collect();
+    let sig_map: BTreeMap<&str, &LpsFnSig> =
+        sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut out = String::new();
     for func in &ir.functions {
@@ -41,9 +37,11 @@ pub fn compile_module_asm_text(
             return_type: LpsType::Void,
             parameters: Vec::new(),
         };
-        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
-        let abi_info = AbiInfo::from_lps_sig(fn_sig);
-        let emitted = emit_function_bytes(func, &abi_info, float_mode, true)?;
+        let fn_sig = sig_map
+            .get(func.name.as_str())
+            .copied()
+            .unwrap_or(&default_sig);
+        let emitted = emit_function_bytes(func, fn_sig, float_mode, true)?;
         let table = LineTable::from_debug_lines(&emitted.debug_lines);
         out.push_str(&disassemble_function(&emitted.code, &table, func, opts));
         out.push('\n');
