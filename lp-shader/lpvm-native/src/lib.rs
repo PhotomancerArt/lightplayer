@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+pub mod abi2;
 pub mod debug_asm;
 pub mod error;
 pub mod isa;
