@@ -29,7 +29,7 @@ pub use lower::{lower_op, lower_ops};
 pub use native_options::NativeCompileOptions;
 pub use regalloc::{Allocation, GreedyAlloc, RegAlloc, VRegInfo};
 pub use types::NativeType;
-pub use vinst::{SymbolRef, VInst};
+pub use vinst::{IcmpCond, SymbolRef, VInst};
 
 #[cfg(feature = "emu")]
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};

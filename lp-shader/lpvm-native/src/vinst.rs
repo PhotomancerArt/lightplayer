@@ -14,6 +14,21 @@ pub struct SymbolRef {
 /// Label id for future control-flow lowering.
 pub type LabelId = u32;
 
+/// Integer comparison condition for [`VInst::Icmp32`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IcmpCond {
+    Eq,
+    Ne,
+    LtS,
+    LeS,
+    GtS,
+    GeS,
+    LtU,
+    LeU,
+    GtU,
+    GeU,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VInst {
     Add32 {
@@ -28,10 +43,104 @@ pub enum VInst {
         src2: VReg,
         src_op: Option<u32>,
     },
+    /// Negate: 0 - src (uses hardware x0 register)
+    Neg32 {
+        dst: VReg,
+        src: VReg,
+        src_op: Option<u32>,
+    },
     Mul32 {
         dst: VReg,
         src1: VReg,
         src2: VReg,
+        src_op: Option<u32>,
+    },
+    And32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    Or32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    Xor32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    /// Bitwise not: `xori dst, src, -1`
+    Bnot32 {
+        dst: VReg,
+        src: VReg,
+        src_op: Option<u32>,
+    },
+    Shl32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    ShrS32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    ShrU32 {
+        dst: VReg,
+        src1: VReg,
+        src2: VReg,
+        src_op: Option<u32>,
+    },
+    DivS32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        src_op: Option<u32>,
+    },
+    DivU32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        src_op: Option<u32>,
+    },
+    RemS32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        src_op: Option<u32>,
+    },
+    RemU32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        src_op: Option<u32>,
+    },
+    Icmp32 {
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        cond: IcmpCond,
+        src_op: Option<u32>,
+    },
+    /// `src == imm` as i32 0/1.
+    IeqImm32 {
+        dst: VReg,
+        src: VReg,
+        imm: i32,
+        src_op: Option<u32>,
+    },
+    /// Branchless `cond ? if_true : if_false` with `cond` in {0, 1}.
+    Select32 {
+        dst: VReg,
+        cond: VReg,
+        if_true: VReg,
+        if_false: VReg,
         src_op: Option<u32>,
     },
     /// `addi dst, src, 0` — used for LPIR `Copy` when registers differ.
@@ -76,7 +185,22 @@ impl VInst {
         match self {
             VInst::Add32 { src_op, .. }
             | VInst::Sub32 { src_op, .. }
+            | VInst::Neg32 { src_op, .. }
             | VInst::Mul32 { src_op, .. }
+            | VInst::And32 { src_op, .. }
+            | VInst::Or32 { src_op, .. }
+            | VInst::Xor32 { src_op, .. }
+            | VInst::Bnot32 { src_op, .. }
+            | VInst::Shl32 { src_op, .. }
+            | VInst::ShrS32 { src_op, .. }
+            | VInst::ShrU32 { src_op, .. }
+            | VInst::DivS32 { src_op, .. }
+            | VInst::DivU32 { src_op, .. }
+            | VInst::RemS32 { src_op, .. }
+            | VInst::RemU32 { src_op, .. }
+            | VInst::Icmp32 { src_op, .. }
+            | VInst::IeqImm32 { src_op, .. }
+            | VInst::Select32 { src_op, .. }
             | VInst::Mov32 { src_op, .. }
             | VInst::Load32 { src_op, .. }
             | VInst::Store32 { src_op, .. }
@@ -93,7 +217,22 @@ impl VInst {
         match self {
             VInst::Add32 { dst, .. }
             | VInst::Sub32 { dst, .. }
+            | VInst::Neg32 { dst, .. }
             | VInst::Mul32 { dst, .. }
+            | VInst::And32 { dst, .. }
+            | VInst::Or32 { dst, .. }
+            | VInst::Xor32 { dst, .. }
+            | VInst::Bnot32 { dst, .. }
+            | VInst::Shl32 { dst, .. }
+            | VInst::ShrS32 { dst, .. }
+            | VInst::ShrU32 { dst, .. }
+            | VInst::DivS32 { dst, .. }
+            | VInst::DivU32 { dst, .. }
+            | VInst::RemS32 { dst, .. }
+            | VInst::RemU32 { dst, .. }
+            | VInst::Icmp32 { dst, .. }
+            | VInst::IeqImm32 { dst, .. }
+            | VInst::Select32 { dst, .. }
             | VInst::Mov32 { dst, .. }
             | VInst::Load32 { dst, .. }
             | VInst::IConst32 { dst, .. } => v.push(*dst),
@@ -110,9 +249,53 @@ impl VInst {
         match self {
             VInst::Add32 { src1, src2, .. }
             | VInst::Sub32 { src1, src2, .. }
-            | VInst::Mul32 { src1, src2, .. } => {
+            | VInst::Mul32 { src1, src2, .. }
+            | VInst::And32 { src1, src2, .. }
+            | VInst::Or32 { src1, src2, .. }
+            | VInst::Xor32 { src1, src2, .. }
+            | VInst::Shl32 { src1, src2, .. }
+            | VInst::ShrS32 { src1, src2, .. }
+            | VInst::ShrU32 { src1, src2, .. }
+            | VInst::DivS32 {
+                lhs: src1,
+                rhs: src2,
+                ..
+            }
+            | VInst::DivU32 {
+                lhs: src1,
+                rhs: src2,
+                ..
+            }
+            | VInst::RemS32 {
+                lhs: src1,
+                rhs: src2,
+                ..
+            }
+            | VInst::RemU32 {
+                lhs: src1,
+                rhs: src2,
+                ..
+            }
+            | VInst::Icmp32 {
+                lhs: src1,
+                rhs: src2,
+                ..
+            } => {
                 v.push(*src1);
                 v.push(*src2);
+            }
+            VInst::Select32 {
+                cond,
+                if_true,
+                if_false,
+                ..
+            } => {
+                v.push(*cond);
+                v.push(*if_true);
+                v.push(*if_false);
+            }
+            VInst::Neg32 { src, .. } | VInst::Bnot32 { src, .. } | VInst::IeqImm32 { src, .. } => {
+                v.push(*src)
             }
             VInst::Mov32 { src, .. } => v.push(*src),
             VInst::Load32 { base, .. } => v.push(*base),

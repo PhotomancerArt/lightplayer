@@ -11,13 +11,15 @@ use object::{
 
 use super::abi::{self, A0, ARG_REGS, RET_REGS, S0, S1, SP, callee_saved_int, func_abi_rv32};
 use super::inst::{
-    encode_addi, encode_auipc, encode_jalr, encode_lw, encode_mul, encode_ret, encode_sub,
-    encode_sw, iconst32_sequence,
+    encode_add, encode_addi, encode_and, encode_auipc, encode_div, encode_divu, encode_jalr,
+    encode_lw, encode_mul, encode_or, encode_rem, encode_remu, encode_ret, encode_sll, encode_slt,
+    encode_sltiu, encode_sltu, encode_sra, encode_srl, encode_sub, encode_sw, encode_xor,
+    encode_xori, iconst32_sequence,
 };
 use crate::abi::{FrameLayout, PReg, PregSet};
 use crate::error::NativeError;
 use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
-use crate::vinst::VInst;
+use crate::vinst::{IcmpCond, VInst};
 use lpir::VReg;
 use lps_shared;
 
@@ -151,9 +153,10 @@ impl EmitContext {
             .ok_or_else(|| NativeError::UnassignedVReg(v.0))
     }
 
-    /// Temporary registers for spill handling.
+    /// Temporary registers for spill handling and multi-instruction lowering.
     const TEMP0: PhysReg = 5; // t0
     const TEMP1: PhysReg = 6; // t1
+    const TEMP2: PhysReg = 7; // t2
 
     /// Emit a load from a spill slot into a temporary register.
     /// Returns the temporary register.
@@ -214,6 +217,113 @@ impl EmitContext {
         }
     }
 
+    fn emit_icmp(
+        &mut self,
+        alloc: &Allocation,
+        dst: VReg,
+        lhs: VReg,
+        rhs: VReg,
+        cond: IcmpCond,
+    ) -> Result<(), NativeError> {
+        let rs_l = self.use_vreg(alloc, lhs, Self::TEMP0)? as u32;
+        let rs_r = self.use_vreg(alloc, rhs, Self::TEMP1)? as u32;
+        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        let scratch = Self::TEMP2 as u32;
+
+        match cond {
+            IcmpCond::LtS => {
+                self.push_u32(encode_slt(rd, rs_l, rs_r));
+            }
+            IcmpCond::LtU => {
+                self.push_u32(encode_sltu(rd, rs_l, rs_r));
+            }
+            IcmpCond::GtS => {
+                self.push_u32(encode_slt(rd, rs_r, rs_l));
+            }
+            IcmpCond::GtU => {
+                self.push_u32(encode_sltu(rd, rs_r, rs_l));
+            }
+            IcmpCond::Eq => {
+                self.push_u32(encode_xor(scratch, rs_l, rs_r));
+                self.push_u32(encode_sltiu(rd, scratch, 1));
+            }
+            IcmpCond::Ne => {
+                self.push_u32(encode_xor(scratch, rs_l, rs_r));
+                self.push_u32(encode_sltu(rd, 0, scratch));
+            }
+            IcmpCond::LeS => {
+                self.push_u32(encode_slt(scratch, rs_r, rs_l));
+                self.push_u32(encode_xori(rd, scratch, 1));
+            }
+            IcmpCond::LeU => {
+                self.push_u32(encode_sltu(scratch, rs_r, rs_l));
+                self.push_u32(encode_xori(rd, scratch, 1));
+            }
+            IcmpCond::GeS => {
+                self.push_u32(encode_slt(scratch, rs_l, rs_r));
+                self.push_u32(encode_xori(rd, scratch, 1));
+            }
+            IcmpCond::GeU => {
+                self.push_u32(encode_sltu(scratch, rs_l, rs_r));
+                self.push_u32(encode_xori(rd, scratch, 1));
+            }
+        }
+
+        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        Ok(())
+    }
+
+    /// `dst = (src == imm) ? 1 : 0`
+    fn emit_ieq_imm(
+        &mut self,
+        alloc: &Allocation,
+        dst: VReg,
+        src: VReg,
+        imm: i32,
+    ) -> Result<(), NativeError> {
+        let mut rs = self.use_vreg(alloc, src, Self::TEMP0)? as u32;
+        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        const IMM12: core::ops::RangeInclusive<i32> = -2048_i32..=2047_i32;
+        if IMM12.contains(&imm) {
+            let scratch = Self::TEMP2 as u32;
+            self.push_u32(encode_xori(scratch, rs, imm));
+            self.push_u32(encode_sltiu(rd, scratch, 1));
+        } else {
+            if rs == Self::TEMP1 as u32 {
+                self.push_u32(encode_addi(Self::TEMP0 as u32, rs, 0));
+                rs = Self::TEMP0 as u32;
+            }
+            for w in iconst32_sequence(Self::TEMP1 as u32, imm) {
+                self.push_u32(w);
+            }
+            self.push_u32(encode_xor(Self::TEMP2 as u32, rs, Self::TEMP1 as u32));
+            self.push_u32(encode_sltiu(rd, Self::TEMP2 as u32, 1));
+        }
+        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        Ok(())
+    }
+
+    fn emit_select32(
+        &mut self,
+        alloc: &Allocation,
+        dst: VReg,
+        cond: VReg,
+        if_true: VReg,
+        if_false: VReg,
+    ) -> Result<(), NativeError> {
+        let p_true = self.use_vreg(alloc, if_true, Self::TEMP0)? as u32;
+        let p_false = self.use_vreg(alloc, if_false, Self::TEMP1)? as u32;
+        let p_cond = self.use_vreg(alloc, cond, Self::TEMP2)? as u32;
+
+        self.push_u32(encode_sub(Self::TEMP0 as u32, p_true, p_false));
+        self.push_u32(encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, p_cond));
+
+        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        self.push_u32(encode_add(rd, Self::TEMP0 as u32, p_false));
+        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        Ok(())
+    }
+
     pub fn emit_vinst(
         &mut self,
         inst: &VInst,
@@ -242,6 +352,13 @@ impl EmitContext {
                 self.push_u32(encode_sub(rd, rs1, rs2));
                 self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
+            VInst::Neg32 { dst, src, .. } => {
+                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                // Emit: sub rd, x0, rs (where x0=0 is the hardware zero register)
+                self.push_u32(encode_sub(rd, 0, rs));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
             VInst::Mul32 {
                 dst, src1, src2, ..
             } => {
@@ -250,6 +367,115 @@ impl EmitContext {
                 let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_mul(rd, rs1, rs2));
                 self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::And32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_and(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::Or32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_or(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::Xor32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_xor(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::Bnot32 { dst, src, .. } => {
+                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_xori(rd, rs, -1));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::Shl32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_sll(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::ShrS32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_sra(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::ShrU32 {
+                dst, src1, src2, ..
+            } => {
+                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_srl(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::DivS32 { dst, lhs, rhs, .. } => {
+                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_div(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::DivU32 { dst, lhs, rhs, .. } => {
+                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_divu(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::RemS32 { dst, lhs, rhs, .. } => {
+                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_rem(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::RemU32 { dst, lhs, rhs, .. } => {
+                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
+                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
+                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                self.push_u32(encode_remu(rd, rs1, rs2));
+                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+            }
+            VInst::Icmp32 {
+                dst,
+                lhs,
+                rhs,
+                cond,
+                ..
+            } => {
+                self.emit_icmp(alloc, *dst, *lhs, *rhs, *cond)?;
+            }
+            VInst::IeqImm32 { dst, src, imm, .. } => {
+                self.emit_ieq_imm(alloc, *dst, *src, *imm)?;
+            }
+            VInst::Select32 {
+                dst,
+                cond,
+                if_true,
+                if_false,
+                ..
+            } => {
+                self.emit_select32(alloc, *dst, *cond, *if_true, *if_false)?;
             }
             VInst::Mov32 { dst, src, .. } => {
                 let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;

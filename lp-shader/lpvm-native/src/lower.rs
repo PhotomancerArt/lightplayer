@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpir::{FloatMode, IrFunction, Op};
 
 use crate::error::LowerError;
-use crate::vinst::{SymbolRef, VInst};
+use crate::vinst::{IcmpCond, SymbolRef, VInst};
 
 /// Lower one LPIR op. `src_op` is the index in [`IrFunction::body`].
 pub fn lower_op(
@@ -33,6 +33,164 @@ pub fn lower_op(
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
+            src_op,
+        }),
+        Op::IdivS { dst, lhs, rhs } => Ok(VInst::DivS32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            src_op,
+        }),
+        Op::IdivU { dst, lhs, rhs } => Ok(VInst::DivU32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            src_op,
+        }),
+        Op::IremS { dst, lhs, rhs } => Ok(VInst::RemS32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            src_op,
+        }),
+        Op::IremU { dst, lhs, rhs } => Ok(VInst::RemU32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            src_op,
+        }),
+        Op::Ineg { dst, src } => Ok(VInst::Neg32 {
+            dst: *dst,
+            src: *src,
+            src_op,
+        }),
+        Op::Ieq { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::Eq,
+            src_op,
+        }),
+        Op::Ine { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::Ne,
+            src_op,
+        }),
+        Op::IltS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LtS,
+            src_op,
+        }),
+        Op::IleS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LeS,
+            src_op,
+        }),
+        Op::IgtS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GtS,
+            src_op,
+        }),
+        Op::IgeS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GeS,
+            src_op,
+        }),
+        Op::IltU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LtU,
+            src_op,
+        }),
+        Op::IleU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::LeU,
+            src_op,
+        }),
+        Op::IgtU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GtU,
+            src_op,
+        }),
+        Op::IgeU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+            dst: *dst,
+            lhs: *lhs,
+            rhs: *rhs,
+            cond: IcmpCond::GeU,
+            src_op,
+        }),
+        Op::IeqImm { dst, src, imm } => Ok(VInst::IeqImm32 {
+            dst: *dst,
+            src: *src,
+            imm: *imm,
+            src_op,
+        }),
+        Op::Iand { dst, lhs, rhs } => Ok(VInst::And32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::Ior { dst, lhs, rhs } => Ok(VInst::Or32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::Ixor { dst, lhs, rhs } => Ok(VInst::Xor32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::Ibnot { dst, src } => Ok(VInst::Bnot32 {
+            dst: *dst,
+            src: *src,
+            src_op,
+        }),
+        Op::Ishl { dst, lhs, rhs } => Ok(VInst::Shl32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::IshrS { dst, lhs, rhs } => Ok(VInst::ShrS32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::IshrU { dst, lhs, rhs } => Ok(VInst::ShrU32 {
+            dst: *dst,
+            src1: *lhs,
+            src2: *rhs,
+            src_op,
+        }),
+        Op::Select {
+            dst,
+            cond,
+            if_true,
+            if_false,
+        } => Ok(VInst::Select32 {
+            dst: *dst,
+            cond: *cond,
+            if_true: *if_true,
+            if_false: *if_false,
             src_op,
         }),
         Op::Copy { dst, src } => Ok(VInst::Mov32 {
@@ -125,6 +283,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
+    use crate::vinst::IcmpCond;
     use lpir::types::VRegRange;
     use lpir::{IrType, VReg};
 
@@ -199,6 +358,154 @@ mod tests {
         };
         let f = empty_func();
         assert!(lower_op(&op, FloatMode::F32, None, &f).is_err());
+    }
+
+    #[test]
+    fn lower_ineg() {
+        let op = Op::Ineg {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let got = lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok");
+        assert!(matches!(
+            got,
+            VInst::Neg32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_ieq_imm() {
+        let op = Op::IeqImm {
+            dst: v(1),
+            src: v(0),
+            imm: 0,
+        };
+        let f = empty_func();
+        assert!(matches!(
+            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            VInst::IeqImm32 {
+                dst: VReg(1),
+                src: VReg(0),
+                imm: 0,
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_iand() {
+        let op = Op::Iand {
+            dst: v(2),
+            lhs: v(0),
+            rhs: v(1),
+        };
+        let f = empty_func();
+        assert!(matches!(
+            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            VInst::And32 {
+                dst: VReg(2),
+                src1: VReg(0),
+                src2: VReg(1),
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_ibnot() {
+        let op = Op::Ibnot {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        assert!(matches!(
+            lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok"),
+            VInst::Bnot32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_idivs() {
+        let op = Op::IdivS {
+            dst: v(2),
+            lhs: v(0),
+            rhs: v(1),
+        };
+        let f = empty_func();
+        let got = lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok");
+        assert!(matches!(
+            got,
+            VInst::DivS32 {
+                dst: VReg(2),
+                lhs: VReg(0),
+                rhs: VReg(1),
+                src_op: Some(0),
+            }
+        ));
+    }
+
+    #[test]
+    fn lower_ieq_to_icmp() {
+        let op = Op::Ieq {
+            dst: v(2),
+            lhs: v(0),
+            rhs: v(1),
+        };
+        let f = empty_func();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+            VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::Eq),
+            other => panic!("expected Icmp32, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_iltu_to_icmp() {
+        let op = Op::IltU {
+            dst: v(2),
+            lhs: v(0),
+            rhs: v(1),
+        };
+        let f = empty_func();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+            VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::LtU),
+            other => panic!("expected Icmp32, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_select() {
+        let op = Op::Select {
+            dst: v(3),
+            cond: v(0),
+            if_true: v(1),
+            if_false: v(2),
+        };
+        let f = empty_func();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f).expect("ok") {
+            VInst::Select32 {
+                dst,
+                cond,
+                if_true,
+                if_false,
+                src_op,
+            } => {
+                assert_eq!(dst, v(3));
+                assert_eq!(cond, v(0));
+                assert_eq!(if_true, v(1));
+                assert_eq!(if_false, v(2));
+                assert_eq!(src_op, Some(0));
+            }
+            other => panic!("expected Select32, got {other:?}"),
+        }
     }
 
     #[test]
