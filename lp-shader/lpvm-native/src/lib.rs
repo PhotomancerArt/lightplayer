@@ -16,6 +16,7 @@ pub mod error;
 pub mod isa;
 pub mod lower;
 pub mod native_options;
+pub mod peephole;
 pub mod regalloc;
 pub mod types;
 pub mod vinst;

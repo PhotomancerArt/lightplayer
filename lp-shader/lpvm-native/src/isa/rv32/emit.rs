@@ -1065,6 +1065,8 @@ pub fn emit_function_bytes(
     alloc_trace: bool,
 ) -> Result<EmittedFunction, NativeError> {
     let lowered = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
+    let mut lowered = lowered;
+    crate::peephole::optimize(&mut lowered.vinsts);
     let vinsts = &lowered.vinsts;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
