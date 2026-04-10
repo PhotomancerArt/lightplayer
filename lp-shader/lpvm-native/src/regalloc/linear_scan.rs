@@ -10,23 +10,23 @@ use alloc::vec::Vec;
 
 use lpir::IrFunction;
 
-use super::{Allocation, PhysReg, RegAlloc};
+use super::{Allocation, PReg, RegAlloc};
 use crate::abi::classify::ArgLoc;
-use crate::abi::{FuncAbi, PReg, PregSet, RegClass};
+use crate::abi::{FuncAbi, PregSet, RegClass};
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{ARG_REGS, RET_REGS, alloca_base_int, caller_saved_int};
 use crate::lower::LoopRegion;
 use crate::vinst::{VInst, VReg};
 
-fn abi2_int_preg_to_phys(p: PReg) -> Result<PhysReg, NativeError> {
+fn abi2_int_preg_to_phys(p: crate::abi::PReg) -> Result<PReg, NativeError> {
     match p.class {
         RegClass::Int => Ok(p.hw),
         RegClass::Float => Err(NativeError::UnassignedVReg(p.hw as u32)),
     }
 }
 
-fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PhysReg> {
-    let mut v: Vec<PhysReg> = set
+fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PReg> {
+    let mut v: Vec<PReg> = set
         .iter()
         .filter(|p| p.class == RegClass::Int)
         .map(|p| p.hw)
@@ -46,7 +46,7 @@ struct Interval {
     start: u32,
     end: u32,
     /// ABI-fixed physical register (register params).
-    fixed_reg: Option<PhysReg>,
+    fixed_reg: Option<PReg>,
 }
 
 /// Event types for allocation tracing/debug output.
@@ -57,19 +57,19 @@ enum AllocEvent {
     LiveStart {
         idx: usize,
         vreg: VReg,
-        preg: Option<PhysReg>,
+        preg: Option<PReg>,
     },
     /// VReg expires after this instruction index.
     LiveEnd {
         idx: usize,
         vreg: VReg,
-        preg: Option<PhysReg>,
+        preg: Option<PReg>,
     },
     /// Register assignment at this instruction.
     Assign {
         idx: usize,
         vreg: VReg,
-        preg: PhysReg,
+        preg: PReg,
     },
     /// Spill decision for vreg.
     Spill { idx: usize, vreg: VReg, slot: usize },
@@ -460,7 +460,7 @@ fn param_intervals(
 struct Active {
     end: u32,
     vreg: VReg,
-    preg: PhysReg,
+    preg: PReg,
 }
 
 /// Spill victim: interval with the latest end; tie-break prefers an `IConst32` vreg (rematerial).
@@ -521,7 +521,7 @@ impl LinearScan {
             return Err(NativeError::TooManyArgs(slots));
         }
 
-        let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
+        let mut vreg_to_phys: Vec<Option<PReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
         let mut rematerial_iconst: Vec<Option<i32>> = alloc::vec![None; n];
         let mut incoming_stack_params: Vec<(VReg, i32)> = Vec::new();
@@ -607,9 +607,9 @@ impl LinearScan {
 
             let mut used = PregSet::EMPTY;
             for a in &active {
-                used.insert(PReg::int(a.preg));
+                used.insert(crate::abi::PReg::int(a.preg));
             }
-            let free = alloca_list.iter().copied().find(|p| !used.contains(PReg::int(*p)));
+            let free = alloca_list.iter().copied().find(|p| !used.contains(crate::abi::PReg::int(*p)));
 
             if let Some(preg) = free {
                 vreg_to_phys[iv.vreg.0 as usize] = Some(preg);

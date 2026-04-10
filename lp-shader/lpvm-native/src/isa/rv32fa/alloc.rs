@@ -5,7 +5,7 @@ use core::fmt;
 
 use lpir::{IrFunction, VReg};
 
-use super::abi::{self, PhysReg, RET_REGS, SCRATCH};
+use super::abi::{self, PReg, RET_REGS, SCRATCH};
 use super::inst::PInst;
 use crate::abi::FuncAbi;
 use crate::abi::classify::ArgLoc;
@@ -102,20 +102,20 @@ pub fn allocate(
         }
     }
 
-    let mut preg: Vec<Option<PhysReg>> = vec![None; n];
+    let mut preg: Vec<Option<PReg>> = vec![None; n];
     for i in 0..func.total_param_slots() as u32 {
         if let Some(p) = func_abi.precolor_of(i) {
             preg[i as usize] = Some(p.hw);
         }
     }
 
-    let mut free: Vec<PhysReg> = abi::ALLOC_POOL.iter().rev().copied().collect();
+    let mut free: Vec<PReg> = abi::ALLOC_POOL.iter().rev().copied().collect();
     let mut out: Vec<PInst> = Vec::new();
-    let alloc_reg = |free: &mut Vec<PhysReg>| -> Result<PhysReg, AllocError> {
+    let alloc_reg = |free: &mut Vec<PReg>| -> Result<PReg, AllocError> {
         free.pop().ok_or(AllocError::PoolExhausted)
     };
 
-    let release = |v: VReg, preg: &mut [Option<PhysReg>], free: &mut Vec<PhysReg>, idx: usize| {
+    let release = |v: VReg, preg: &mut [Option<PReg>], free: &mut Vec<PReg>, idx: usize| {
         let vi = v.0 as usize;
         if vi >= preg.len() {
             return;
@@ -133,7 +133,7 @@ pub fn allocate(
         }
     };
 
-    let get = |v: VReg, preg: &mut [Option<PhysReg>]| -> Result<PhysReg, AllocError> {
+    let get = |v: VReg, preg: &mut [Option<PReg>]| -> Result<PReg, AllocError> {
         let vi = v.0 as usize;
         preg[vi].ok_or(AllocError::PoolExhausted)
     };

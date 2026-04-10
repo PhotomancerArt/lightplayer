@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::abi::{PhysReg, RA_REG, SP_REG};
+use super::abi::{PReg, RA_REG, SP_REG};
 use super::inst::PInst;
 use crate::isa::rv32::inst::{
     encode_add, encode_addi, encode_and, encode_auipc, encode_b_type, encode_beq, encode_bne,
@@ -182,7 +182,7 @@ impl PhysEmitter {
         }
     }
 
-    fn emit_memcpy_words(&mut self, dst: PhysReg, src: PhysReg, size: u32) {
+    fn emit_memcpy_words(&mut self, dst: PReg, src: PReg, size: u32) {
         let mut data_temp: u32 = 29;
         if dst as u32 == data_temp || src as u32 == data_temp {
             data_temp = 30;

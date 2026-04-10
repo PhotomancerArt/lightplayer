@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::isa::rv32fa::abi::{self, PhysReg};
+use crate::isa::rv32fa::abi::{self, PReg};
 use crate::isa::rv32fa::inst::PInst;
 use crate::vinst::SymbolRef;
 
@@ -29,7 +29,7 @@ impl core::fmt::Display for ParseError {
     }
 }
 
-fn reg(r: PhysReg) -> &'static str {
+fn reg(r: PReg) -> &'static str {
     abi::reg_name(r)
 }
 
@@ -145,7 +145,7 @@ fn parse_u32(s: &str) -> Result<u32, ()> {
     s.trim().parse::<u32>().map_err(|_| ())
 }
 
-fn parse_mem_operand(s: &str) -> Result<(i32, PhysReg), ()> {
+fn parse_mem_operand(s: &str) -> Result<(i32, PReg), ()> {
     let s = s.trim();
     let open = s.find('(').ok_or(())?;
     let close = s.find(')').ok_or(())?;
@@ -196,7 +196,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PInst, ParseError> {
     let rest = s[mn.len()..].trim();
     let ops = split_operands(rest);
 
-    let r = |i: usize| -> Result<PhysReg, ParseError> {
+    let r = |i: usize| -> Result<PReg, ParseError> {
         ops.get(i)
             .ok_or_else(|| ParseError::new(line_no, "missing operand"))
             .and_then(|s| abi::parse_reg(s).map_err(|_| ParseError::new(line_no, "bad register")))

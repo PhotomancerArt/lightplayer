@@ -5,14 +5,14 @@ use alloc::vec::Vec;
 
 use lpir::IrFunction;
 
-use super::{Allocation, PhysReg, RegAlloc};
+use super::{Allocation, PReg, RegAlloc};
 use crate::abi::classify::ArgLoc;
-use crate::abi::{FuncAbi, PReg, PregSet, RegClass};
+use crate::abi::{FuncAbi, PregSet, RegClass};
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{ARG_REGS, RET_REGS, alloca_base_int, caller_saved_int};
 use crate::vinst::{VInst, VReg};
 
-fn abi2_int_preg_to_phys(p: PReg) -> Result<PhysReg, NativeError> {
+fn abi2_int_preg_to_phys(p: crate::abi::PReg) -> Result<PReg, NativeError> {
     match p.class {
         RegClass::Int => Ok(p.hw),
         RegClass::Float => Err(NativeError::UnassignedVReg(p.hw as u32)),
@@ -20,8 +20,8 @@ fn abi2_int_preg_to_phys(p: PReg) -> Result<PhysReg, NativeError> {
 }
 
 /// Integer [`PReg`]s in `set`, sorted by hardware index (deterministic allocation order).
-fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PhysReg> {
-    let mut v: Vec<PhysReg> = set
+fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PReg> {
+    let mut v: Vec<PReg> = set
         .iter()
         .filter(|p| p.class == RegClass::Int)
         .map(|p| p.hw)
@@ -72,7 +72,7 @@ impl GreedyAlloc {
             return Err(NativeError::TooManyArgs(slots));
         }
 
-        let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
+        let mut vreg_to_phys: Vec<Option<PReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
         let mut rematerial_iconst: Vec<Option<i32>> = alloc::vec![None; n];
         let mut incoming_stack_params: Vec<(VReg, i32)> = Vec::new();

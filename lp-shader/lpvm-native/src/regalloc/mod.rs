@@ -17,7 +17,7 @@ use crate::types::NativeType;
 use crate::vinst::VInst;
 
 /// Physical register index (x0-x31).
-pub type PhysReg = u8;
+pub type PReg = u8;
 
 /// Per-vreg typing for allocation (parallel to LPIR vreg_types).
 #[derive(Debug, Clone)]
@@ -43,7 +43,7 @@ impl From<&IrFunction> for VRegInfo {
 #[derive(Debug, Clone)]
 pub struct Allocation {
     /// `vreg.0` as index -> physical register if assigned.
-    pub vreg_to_phys: Vec<Option<PhysReg>>,
+    pub vreg_to_phys: Vec<Option<PReg>>,
     pub clobbered: PregSet,
     /// VRegs assigned to spill slots (no physical register assigned).
     pub spill_slots: Vec<VReg>,

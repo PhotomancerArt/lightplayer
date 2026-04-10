@@ -1,24 +1,24 @@
-//! Integer ABI names and register helpers for the fastalloc RV32 path (`PhysReg` = `u8`).
+//! Integer ABI names and register helpers for the fastalloc RV32 path (`PReg` = `u8`).
 
 /// Physical GPR index (x0–x31).
-pub type PhysReg = u8;
+pub type PReg = u8;
 
-pub const RA_REG: PhysReg = 1;
-pub const SP_REG: PhysReg = 2;
-pub const FP_REG: PhysReg = 8;
+pub const RA_REG: PReg = 1;
+pub const SP_REG: PReg = 2;
+pub const FP_REG: PReg = 8;
 
 /// Argument / return GPRs (a0–a7).
-pub const ARG_REGS: [PhysReg; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
-pub const RET_REGS: [PhysReg; 2] = [10, 11];
+pub const ARG_REGS: [PReg; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+pub const RET_REGS: [PReg; 2] = [10, 11];
 
 /// Scratch for lowering sequences (not in [`ALLOC_POOL`]).
-pub const SCRATCH: PhysReg = 28;
+pub const SCRATCH: PReg = 28;
 
 /// Registers available for temporaries (excludes zero, ra, sp, fp, a0–a7, [`SCRATCH`]).
-pub const ALLOC_POOL: &[PhysReg] = &[5, 6, 7, 29, 30, 31, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
+pub const ALLOC_POOL: &[PReg] = &[5, 6, 7, 29, 30, 31, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
 
 /// Parse register name to physical register number (standard RISC-V ABI names).
-pub fn parse_reg(name: &str) -> Result<PhysReg, ()> {
+pub fn parse_reg(name: &str) -> Result<PReg, ()> {
     match name {
         "x0" | "zero" => Ok(0),
         "x1" | "ra" => Ok(1),
@@ -57,7 +57,7 @@ pub fn parse_reg(name: &str) -> Result<PhysReg, ()> {
 }
 
 /// ABI-style name for debugging / text format (preferred alias when unambiguous).
-pub fn reg_name(reg: PhysReg) -> &'static str {
+pub fn reg_name(reg: PReg) -> &'static str {
     match reg {
         0 => "zero",
         1 => "ra",
@@ -96,7 +96,7 @@ pub fn reg_name(reg: PhysReg) -> &'static str {
 }
 
 #[inline]
-pub fn pool_contains(r: PhysReg) -> bool {
+pub fn pool_contains(r: PReg) -> bool {
     ALLOC_POOL.iter().any(|&x| x == r)
 }
 

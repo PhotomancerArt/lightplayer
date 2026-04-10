@@ -16,9 +16,9 @@ use super::inst::{
     encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
-use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
+use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PregSet};
 use crate::error::{LowerError, NativeError};
-use crate::regalloc::{Allocation, GreedyAlloc, LinearScan, PhysReg};
+use crate::regalloc::{Allocation, GreedyAlloc, LinearScan};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
@@ -102,7 +102,7 @@ fn call_clobber_hw(abi: &FuncAbi) -> u32 {
     bits
 }
 
-fn regs_saved_for_call(alloc: &Allocation, rets: &[VReg], clobber: u32) -> Vec<(VReg, PhysReg)> {
+fn regs_saved_for_call(alloc: &Allocation, rets: &[VReg], clobber: u32) -> Vec<(VReg, PReg)> {
     let mut seen = 0u32;
     let mut out = Vec::new();
     for (vi, po) in alloc.vreg_to_phys.iter().enumerate() {
@@ -271,7 +271,7 @@ impl EmitContext {
 
     /// Get the physical register for a vreg.
     /// Returns Err if the vreg is not assigned (shouldn't happen after successful regalloc).
-    fn phys(alloc: &Allocation, v: VReg) -> Result<PhysReg, NativeError> {
+    fn phys(alloc: &Allocation, v: VReg) -> Result<PReg, NativeError> {
         let i = v.0 as usize;
         alloc
             .vreg_to_phys
@@ -282,20 +282,20 @@ impl EmitContext {
     }
 
     /// Temporary registers for spill handling and multi-instruction lowering.
-    const TEMP0: PhysReg = 5; // t0
-    const TEMP1: PhysReg = 6; // t1
-    const TEMP2: PhysReg = 7; // t2
+    const TEMP0: PReg = 5; // t0
+    const TEMP1: PReg = 6; // t1
+    const TEMP2: PReg = 7; // t2
 
     /// Emit a load from a spill slot into a temporary register.
     /// Returns the temporary register.
-    fn load_spill(&mut self, slot_index: u32, temp: PhysReg) -> PhysReg {
+    fn load_spill(&mut self, slot_index: u32, temp: PReg) -> PReg {
         let offset = self.frame.spill_offset_from_fp(slot_index).unwrap_or(-8);
         self.push_u32(encode_lw(temp as u32, S0.hw as u32, offset));
         temp
     }
 
     /// Emit a store from a temporary register to a spill slot.
-    fn store_spill(&mut self, slot_index: u32, temp: PhysReg) {
+    fn store_spill(&mut self, slot_index: u32, temp: PReg) {
         let offset = self.frame.spill_offset_from_fp(slot_index).unwrap_or(-8);
         self.push_u32(encode_sw(temp as u32, S0.hw as u32, offset));
     }
@@ -303,12 +303,7 @@ impl EmitContext {
     /// Get or load a vreg for use (source operand).
     /// If the vreg is spilled, loads it into the specified temp register.
     /// Otherwise returns the assigned physical register.
-    fn use_vreg(
-        &mut self,
-        alloc: &Allocation,
-        v: VReg,
-        temp: PhysReg,
-    ) -> Result<PhysReg, NativeError> {
+    fn use_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PReg) -> Result<PReg, NativeError> {
         if let Some(imm) = alloc.rematerial_iconst32(v) {
             let rd = temp as u32;
             for w in iconst32_sequence(rd, imm) {
@@ -328,12 +323,7 @@ impl EmitContext {
     /// Get or reserve a vreg for definition (destination operand).
     /// If the vreg is spilled, returns the temp register (caller must store after use).
     /// Otherwise returns the assigned physical register.
-    fn def_vreg(
-        &mut self,
-        alloc: &Allocation,
-        v: VReg,
-        temp: PhysReg,
-    ) -> Result<PhysReg, NativeError> {
+    fn def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PReg) -> Result<PReg, NativeError> {
         if alloc.is_spilled(v) {
             // VReg is spilled - use temp as temporary, caller must store
             Ok(temp)
@@ -345,7 +335,7 @@ impl EmitContext {
 
     /// Store a spilled vreg after it was written to a temporary register.
     /// Call this after `def_vreg` when the vreg was spilled.
-    fn store_def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PhysReg) {
+    fn store_def_vreg(&mut self, alloc: &Allocation, v: VReg, temp: PReg) {
         if let Some(slot_index) = alloc.spill_slot(v) {
             // VReg was spilled - store temp to stack
             self.store_spill(slot_index, temp);

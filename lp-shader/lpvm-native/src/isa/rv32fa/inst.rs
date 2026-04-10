@@ -2,7 +2,7 @@
 
 use crate::vinst::SymbolRef;
 
-pub use super::abi::PhysReg;
+pub use super::abi::PReg;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PInst {
@@ -14,141 +14,141 @@ pub enum PInst {
     },
 
     Add {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Sub {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Mul {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Div {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Divu {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Rem {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Remu {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
 
     And {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Or {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Xor {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
 
     Sll {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Srl {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Sra {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
 
     Neg {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
     Not {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
     Mv {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
 
     Slt {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Sltu {
-        dst: PhysReg,
-        src1: PhysReg,
-        src2: PhysReg,
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
     },
     Seqz {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
     Snez {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
     Sltz {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
     Sgtz {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
     },
 
     Li {
-        dst: PhysReg,
+        dst: PReg,
         imm: i32,
     },
     Addi {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
         imm: i32,
     },
 
     Lw {
-        dst: PhysReg,
-        base: PhysReg,
+        dst: PReg,
+        base: PReg,
         offset: i32,
     },
     Sw {
-        src: PhysReg,
-        base: PhysReg,
+        src: PReg,
+        base: PReg,
         offset: i32,
     },
 
     SlotAddr {
-        dst: PhysReg,
+        dst: PReg,
         slot: u32,
     },
     MemcpyWords {
-        dst: PhysReg,
-        src: PhysReg,
+        dst: PReg,
+        src: PReg,
         size: u32,
     },
 
@@ -158,23 +158,23 @@ pub enum PInst {
     Ret,
 
     Beq {
-        src1: PhysReg,
-        src2: PhysReg,
+        src1: PReg,
+        src2: PReg,
         target: u32,
     },
     Bne {
-        src1: PhysReg,
-        src2: PhysReg,
+        src1: PReg,
+        src2: PReg,
         target: u32,
     },
     Blt {
-        src1: PhysReg,
-        src2: PhysReg,
+        src1: PReg,
+        src2: PReg,
         target: u32,
     },
     Bge {
-        src1: PhysReg,
-        src2: PhysReg,
+        src1: PReg,
+        src2: PReg,
         target: u32,
     },
     J {
