@@ -8,7 +8,7 @@ use lpvm_native::abi::ModuleAbi;
 use lpvm_native::isa::rv32::abi::func_abi_rv32;
 use lpvm_native::isa::rv32::debug::disasm::DisasmOptions;
 use lpvm_native::isa::rv32fa;
-use lpvm_native::isa::rv32fa::debug::physinst;
+use lpvm_native::isa::rv32fa::debug::PInst;
 use lpvm_native::isa::rv32fa::emit::PhysEmitter;
 use lpvm_native::{compile_module_asm_text, lower_ops, peephole};
 
@@ -104,10 +104,10 @@ fn run_fast_pipeline(
         let phys = rv32fa::alloc::allocate(&lowered.vinsts, &func_abi, func)
             .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
 
-        if args.show_physinst {
-            eprintln!("=== PhysInst {} ===", func.name);
+        if args.show_PInst {
+            eprintln!("=== PInst {} ===", func.name);
             for inst in &phys {
-                eprintln!("{}", physinst::format(inst));
+                eprintln!("{}", PInst::format(inst));
             }
         }
 
@@ -130,7 +130,7 @@ fn run_fast_pipeline(
         }
 
         out.push_str(&format!(".globl\t{}\n", func.name));
-        out.push_str(&format!("{}\n", physinst::format_block(&phys)));
+        out.push_str(&format!("{}\n", PInst::format_block(&phys)));
         out.push('\n');
     }
 

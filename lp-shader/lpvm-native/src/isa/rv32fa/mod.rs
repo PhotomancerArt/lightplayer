@@ -1,4 +1,4 @@
-//! Fast allocator pipeline for RV32 (straight-line PhysInst → bytes).
+//! Fast allocator pipeline for RV32 (straight-line PInst → bytes).
 //!
 //! Backward-walk register allocation is planned; the current allocator is
 //! forward with last-use freeing and ABI precolors.

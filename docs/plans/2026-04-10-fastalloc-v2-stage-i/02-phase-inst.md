@@ -1,8 +1,8 @@
-# Phase 2: PhysInst Enum
+# Phase 2: PInst Enum
 
 ## Scope
 
-Define the `PhysInst` enum mirroring all VInst variants.
+Define the `PInst` enum mirroring all VInst variants.
 
 ## Implementation
 
@@ -11,117 +11,117 @@ Create `rv32fa/inst.rs`:
 ```rust
 //! Physical-register instructions.
 //!
-//! Every field that was VReg in VInst is now PhysReg (u8).
+//! Every field that was VReg in VInst is now PReg (u8).
 
 use crate::vinst::{IcmpCond, SymbolRef};
 
-pub type PhysReg = u8;
+pub type PReg = u8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PhysInst {
+pub enum PInst {
     // Frame operations (prologue/epilogue)
     FrameSetup { spill_slots: u32 },
     FrameTeardown { spill_slots: u32 },
 
     // Arithmetic - R-type instructions
-    Add { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Sub { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Mul { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Div { dst: PhysReg, src1: PhysReg, src2: PhysReg },      // Signed division
-    Divu { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Unsigned division
-    Rem { dst: PhysReg, src1: PhysReg, src2: PhysReg },      // Signed remainder
-    Remu { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Unsigned remainder
+    Add { dst: PReg, src1: PReg, src2: PReg },
+    Sub { dst: PReg, src1: PReg, src2: PReg },
+    Mul { dst: PReg, src1: PReg, src2: PReg },
+    Div { dst: PReg, src1: PReg, src2: PReg },      // Signed division
+    Divu { dst: PReg, src1: PReg, src2: PReg },     // Unsigned division
+    Rem { dst: PReg, src1: PReg, src2: PReg },      // Signed remainder
+    Remu { dst: PReg, src1: PReg, src2: PReg },     // Unsigned remainder
 
     // Logical
-    And { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Or { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Xor { dst: PhysReg, src1: PhysReg, src2: PhysReg },
+    And { dst: PReg, src1: PReg, src2: PReg },
+    Or { dst: PReg, src1: PReg, src2: PReg },
+    Xor { dst: PReg, src1: PReg, src2: PReg },
 
     // Shifts
-    Sll { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Shift left logical
-    Srl { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Shift right logical
-    Sra { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Shift right arithmetic
+    Sll { dst: PReg, src1: PReg, src2: PReg },     // Shift left logical
+    Srl { dst: PReg, src1: PReg, src2: PReg },     // Shift right logical
+    Sra { dst: PReg, src1: PReg, src2: PReg },     // Shift right arithmetic
 
     // Unary
-    Neg { dst: PhysReg, src: PhysReg },                     // Negate
-    Not { dst: PhysReg, src: PhysReg },                     // Bitwise not
-    Mv { dst: PhysReg, src: PhysReg },                      // Move
+    Neg { dst: PReg, src: PReg },                     // Negate
+    Not { dst: PReg, src: PReg },                     // Bitwise not
+    Mv { dst: PReg, src: PReg },                      // Move
 
     // Comparison - results in 0 or 1
-    Slt { dst: PhysReg, src1: PhysReg, src2: PhysReg },     // Set less than (signed)
-    Sltu { dst: PhysReg, src1: PhysReg, src2: PhysReg },    // Set less than unsigned
-    Seqz { dst: PhysReg, src: PhysReg },                    // Set if equal zero
-    Snez { dst: PhysReg, src: PhysReg },                   // Set if not equal zero
-    Sltz { dst: PhysReg, src: PhysReg },                   // Set if less than zero
-    Sgtz { dst: PhysReg, src: PhysReg },                   // Set if greater than zero
+    Slt { dst: PReg, src1: PReg, src2: PReg },     // Set less than (signed)
+    Sltu { dst: PReg, src1: PReg, src2: PReg },    // Set less than unsigned
+    Seqz { dst: PReg, src: PReg },                    // Set if equal zero
+    Snez { dst: PReg, src: PReg },                   // Set if not equal zero
+    Sltz { dst: PReg, src: PReg },                   // Set if less than zero
+    Sgtz { dst: PReg, src: PReg },                   // Set if greater than zero
 
     // Immediate operations
-    Li { dst: PhysReg, imm: i32 },                        // Load immediate (pseudoinstruction)
-    Addi { dst: PhysReg, src: PhysReg, imm: i32 },        // Add immediate
+    Li { dst: PReg, imm: i32 },                        // Load immediate (pseudoinstruction)
+    Addi { dst: PReg, src: PReg, imm: i32 },        // Add immediate
 
     // Memory
-    Lw { dst: PhysReg, base: PhysReg, offset: i32 },      // Load word
-    Sw { src: PhysReg, base: PhysReg, offset: i32 },      // Store word
+    Lw { dst: PReg, base: PReg, offset: i32 },      // Load word
+    Sw { src: PReg, base: PReg, offset: i32 },      // Store word
 
     // Stack slot
-    SlotAddr { dst: PhysReg, slot: u32 },                 // Get address of stack slot
+    SlotAddr { dst: PReg, slot: u32 },                 // Get address of stack slot
 
     // Block memory
-    MemcpyWords { dst: PhysReg, src: PhysReg, size: u32 }, // Copy size bytes (multiple of 4)
+    MemcpyWords { dst: PReg, src: PReg, size: u32 }, // Copy size bytes (multiple of 4)
 
     // Control flow
     Call { target: SymbolRef },                           // Call function
     Ret,                                                 // Return
 
     // Branches (for future control flow support)
-    Beq { src1: PhysReg, src2: PhysReg, target: u32 },   // Branch if equal
-    Bne { src1: PhysReg, src2: PhysReg, target: u32 },   // Branch if not equal
-    Blt { src1: PhysReg, src2: PhysReg, target: u32 },   // Branch if less than
-    Bge { src1: PhysReg, src2: PhysReg, target: u32 },   // Branch if greater/equal
+    Beq { src1: PReg, src2: PReg, target: u32 },   // Branch if equal
+    Bne { src1: PReg, src2: PReg, target: u32 },   // Branch if not equal
+    Blt { src1: PReg, src2: PReg, target: u32 },   // Branch if less than
+    Bge { src1: PReg, src2: PReg, target: u32 },   // Branch if greater/equal
     J { target: u32 },                                   // Unconditional jump
 }
 
-impl PhysInst {
+impl PInst {
     /// Human-readable mnemonic for debugging.
     pub fn mnemonic(&self) -> &'static str {
         match self {
-            PhysInst::FrameSetup { .. } => "FrameSetup",
-            PhysInst::FrameTeardown { .. } => "FrameTeardown",
-            PhysInst::Add { .. } => "add",
-            PhysInst::Sub { .. } => "sub",
-            PhysInst::Mul { .. } => "mul",
-            PhysInst::Div { .. } => "div",
-            PhysInst::Divu { .. } => "divu",
-            PhysInst::Rem { .. } => "rem",
-            PhysInst::Remu { .. } => "remu",
-            PhysInst::And { .. } => "and",
-            PhysInst::Or { .. } => "or",
-            PhysInst::Xor { .. } => "xor",
-            PhysInst::Sll { .. } => "sll",
-            PhysInst::Srl { .. } => "srl",
-            PhysInst::Sra { .. } => "sra",
-            PhysInst::Neg { .. } => "neg",
-            PhysInst::Not { .. } => "not",
-            PhysInst::Mv { .. } => "mv",
-            PhysInst::Slt { .. } => "slt",
-            PhysInst::Sltu { .. } => "sltu",
-            PhysInst::Seqz { .. } => "seqz",
-            PhysInst::Snez { .. } => "snez",
-            PhysInst::Sltz { .. } => "sltz",
-            PhysInst::Sgtz { .. } => "sgtz",
-            PhysInst::Li { .. } => "li",
-            PhysInst::Addi { .. } => "addi",
-            PhysInst::Lw { .. } => "lw",
-            PhysInst::Sw { .. } => "sw",
-            PhysInst::SlotAddr { .. } => "SlotAddr",
-            PhysInst::MemcpyWords { .. } => "MemcpyWords",
-            PhysInst::Call { .. } => "call",
-            PhysInst::Ret => "ret",
-            PhysInst::Beq { .. } => "beq",
-            PhysInst::Bne { .. } => "bne",
-            PhysInst::Blt { .. } => "blt",
-            PhysInst::Bge { .. } => "bge",
-            PhysInst::J { .. } => "j",
+            PInst::FrameSetup { .. } => "FrameSetup",
+            PInst::FrameTeardown { .. } => "FrameTeardown",
+            PInst::Add { .. } => "add",
+            PInst::Sub { .. } => "sub",
+            PInst::Mul { .. } => "mul",
+            PInst::Div { .. } => "div",
+            PInst::Divu { .. } => "divu",
+            PInst::Rem { .. } => "rem",
+            PInst::Remu { .. } => "remu",
+            PInst::And { .. } => "and",
+            PInst::Or { .. } => "or",
+            PInst::Xor { .. } => "xor",
+            PInst::Sll { .. } => "sll",
+            PInst::Srl { .. } => "srl",
+            PInst::Sra { .. } => "sra",
+            PInst::Neg { .. } => "neg",
+            PInst::Not { .. } => "not",
+            PInst::Mv { .. } => "mv",
+            PInst::Slt { .. } => "slt",
+            PInst::Sltu { .. } => "sltu",
+            PInst::Seqz { .. } => "seqz",
+            PInst::Snez { .. } => "snez",
+            PInst::Sltz { .. } => "sltz",
+            PInst::Sgtz { .. } => "sgtz",
+            PInst::Li { .. } => "li",
+            PInst::Addi { .. } => "addi",
+            PInst::Lw { .. } => "lw",
+            PInst::Sw { .. } => "sw",
+            PInst::SlotAddr { .. } => "SlotAddr",
+            PInst::MemcpyWords { .. } => "MemcpyWords",
+            PInst::Call { .. } => "call",
+            PInst::Ret => "ret",
+            PInst::Beq { .. } => "beq",
+            PInst::Bne { .. } => "bne",
+            PInst::Blt { .. } => "blt",
+            PInst::Bge { .. } => "bge",
+            PInst::J { .. } => "j",
         }
     }
 }

@@ -4,8 +4,8 @@
 
 Create the `isa/rv32fa/` directory with:
 1. Copied ABI definitions from `rv32/abi.rs`
-2. `PhysInst` enum mirroring all VInst variants with `PhysReg` (u8)
-3. `PhysInst` text parser/formatter using role-specific register names (a0, s0, t0)
+2. `PInst` enum mirroring all VInst variants with `PReg` (u8)
+3. `PInst` text parser/formatter using role-specific register names (a0, s0, t0)
 4. Module wiring in `isa/mod.rs`
 
 ## File Structure
@@ -22,10 +22,10 @@ lp-shader/lpvm-native/src/isa/
 └── rv32fa/                  # NEW
     ├── mod.rs               # Module exports
     ├── abi.rs               # Copied from rv32/abi.rs
-    ├── inst.rs              # PhysInst enum
+    ├── inst.rs              # PInst enum
     └── debug/
         ├── mod.rs           # Debug module exports
-        └── physinst.rs      # Parser and formatter
+        └── pinst.rs         # Parser and formatter
 ```
 
 ## Conceptual Architecture
@@ -35,16 +35,16 @@ VInst (virtual registers)
    |
    | lower/alloc
    v
-PhysInst (physical registers)
+PInst (physical registers)
    |
    | emit
    v
 bytes (machine code)
 ```
 
-PhysInst is a parallel IR to VInst:
+PInst is a parallel IR to VInst:
 - Same operations, same semantics
-- VReg → PhysReg (u8)
+- VReg → PReg (u8)
 - IConst32 → LoadImm (rematerialized)
 - Added: FrameSetup, FrameTeardown (prologue/epilogue)
 
@@ -62,39 +62,36 @@ ABI definitions for RV32. Includes:
 ### 2. inst.rs
 
 ```rust
-pub type PhysReg = u8;
+pub type PReg = u8;
 
-pub enum PhysInst {
+pub enum PInst {
     // Frame operations
     FrameSetup { spill_slots: u32 },
     FrameTeardown { spill_slots: u32 },
 
     // Arithmetic
-    Add32 { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    Sub32 { dst: PhysReg, src1: PhysReg, src2: PhysReg },
-    // ... all other arithmetic (Mul32, And32, etc.)
+    Add { dst: PReg, src1: PReg, src2: PReg },
+    Sub { dst: PReg, src1: PReg, src2: PReg },
+    // ... all other arithmetic (Mul, And, etc.)
     // ... Div*, Rem*
 
     // Unary
-    Neg32 { dst: PhysReg, src: PhysReg },
-    Bnot32 { dst: PhysReg, src: PhysReg },
-    Mov32 { dst: PhysReg, src: PhysReg },
+    Neg { dst: PReg, src: PReg },
+    Not { dst: PReg, src: PReg },
+    Mv { dst: PReg, src: PReg },
 
     // Comparison
-    Icmp32 { dst: PhysReg, cond: IcmpCond, lhs: PhysReg, rhs: PhysReg },
-    IeqImm32 { dst: PhysReg, src: PhysReg, imm: i32 },
-
-    // Select
-    Select32 { dst: PhysReg, cond: PhysReg, if_true: PhysReg, if_false: PhysReg },
+    Slt { dst: PReg, src1: PReg, src2: PReg },
+    Seqz { dst: PReg, src: PReg },
 
     // Memory
-    Load32 { dst: PhysReg, base: PhysReg, offset: i32 },
-    Store32 { src: PhysReg, base: PhysReg, offset: i32 },
-    MemcpyWords { dst_base: PhysReg, src_base: PhysReg, size: u32 },
-    SlotAddr { dst: PhysReg, slot: u32 },
+    Lw { dst: PReg, base: PReg, offset: i32 },
+    Sw { src: PReg, base: PReg, offset: i32 },
+    MemcpyWords { dst: PReg, src: PReg, size: u32 },
+    SlotAddr { dst: PReg, slot: u32 },
 
     // Immediate (rematerialized)
-    LoadImm { dst: PhysReg, val: i32 },
+    Li { dst: PReg, imm: i32 },
 
     // Control
     Call { target: SymbolRef },
@@ -102,7 +99,7 @@ pub enum PhysInst {
 }
 ```
 
-### 3. debug/physinst.rs
+### 3. debug/pinst.rs
 
 Parser and formatter using **standard RISC-V assembly syntax**:
 
@@ -145,25 +142,25 @@ FrameTeardown 4         # epilogue
 - `fp`/`s0`: x8 (frame pointer)
 
 **Functions:**
-- `parse(input: &str) -> Result<Vec<PhysInst>, ParseError>`
-- `format(physinsts: &[PhysInst]) -> String`
-- `parse_reg(name: &str) -> Result<PhysReg, ParseError>`: "a0" -> 10
-- `reg_name(reg: PhysReg) -> &'static str`: 10 -> "a0"
+- `parse(input: &str) -> Result<Vec<PInst>, ParseError>`
+- `format(pinsts: &[PInst]) -> String`
+- `parse_reg(name: &str) -> Result<PReg, ParseError>`: "a0" -> 10
+- `reg_name(reg: PReg) -> &'static str`: 10 -> "a0"
 
 ## Key Design Decisions
 
 1. **Copy ABI, don't re-export**: Clean separation per roadmap
 2. **Role-specific register names**: a0, s0, t0 instead of r0-r31 - more readable
-3. **Complete PhysInst enum**: All variants now, no uncertainty
+3. **Complete PInst enum**: All variants now, no uncertainty
 4. **LoadImm replaces IConst32**: Explicit rematerialization at emit time
-5. **Frame operations explicit**: FrameSetup/Teardown are PhysInst, not VInst
+5. **Frame operations explicit**: FrameSetup/Teardown are PInst, not VInst
 
 ## Differences from VInst
 
-| Aspect | VInst | PhysInst |
-|--------|-------|----------|
-| Registers | `VReg` (virtual) | `PhysReg` (u8, physical) |
-| Constants | `IConst32 { dst, val }` | `LoadImm { dst, val }` |
+| Aspect | VInst | PInst |
+|--------|-------|-----|
+| Registers | `VReg` (virtual) | `PReg` (u8, physical) |
+| Constants | `IConst32 { dst, val }` | `Li { dst, imm }` |
 | Frame | Not represented | `FrameSetup`, `FrameTeardown` |
 | Text format | `i0 = Add32 i1, i2` | `add a0, a1, a2` (RISC-V asm) |
 
@@ -176,6 +173,6 @@ FrameTeardown 4         # epilogue
 ## Validate
 
 ```bash
-cargo test -p lpvm-native --lib -- rv32fa::debug::physinst
+cargo test -p lpvm-native --lib -- rv32fa::debug::pinst
 cargo check -p lpvm-native --lib
 ```

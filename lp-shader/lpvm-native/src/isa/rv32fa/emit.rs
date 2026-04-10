@@ -1,10 +1,10 @@
-//! [`PhysInst`](super::inst::PhysInst) → RISC-V machine code (mechanical encoding).
+//! [`PInst`](super::inst::PInst) → RISC-V machine code (mechanical encoding).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::abi::{PhysReg, RA_REG, SP_REG};
-use super::inst::PhysInst;
+use super::inst::PInst;
 use crate::isa::rv32::inst::{
     encode_add, encode_addi, encode_and, encode_auipc, encode_b_type, encode_beq, encode_bne,
     encode_div, encode_divu, encode_jal, encode_jalr, encode_lw, encode_mul, encode_or, encode_rem,
@@ -36,106 +36,106 @@ impl PhysEmitter {
         self.code.extend_from_slice(&w.to_le_bytes());
     }
 
-    pub fn emit(&mut self, inst: &PhysInst) {
+    pub fn emit(&mut self, inst: &PInst) {
         match inst {
-            PhysInst::FrameSetup { spill_slots } => self.emit_frame_setup(*spill_slots),
-            PhysInst::FrameTeardown { spill_slots } => self.emit_frame_teardown(*spill_slots),
+            PInst::FrameSetup { spill_slots } => self.emit_frame_setup(*spill_slots),
+            PInst::FrameTeardown { spill_slots } => self.emit_frame_teardown(*spill_slots),
 
-            PhysInst::Add { dst, src1, src2 } => {
+            PInst::Add { dst, src1, src2 } => {
                 self.push_u32(encode_add(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Sub { dst, src1, src2 } => {
+            PInst::Sub { dst, src1, src2 } => {
                 self.push_u32(encode_sub(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Mul { dst, src1, src2 } => {
+            PInst::Mul { dst, src1, src2 } => {
                 self.push_u32(encode_mul(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Div { dst, src1, src2 } => {
+            PInst::Div { dst, src1, src2 } => {
                 self.push_u32(encode_div(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Divu { dst, src1, src2 } => {
+            PInst::Divu { dst, src1, src2 } => {
                 self.push_u32(encode_divu(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Rem { dst, src1, src2 } => {
+            PInst::Rem { dst, src1, src2 } => {
                 self.push_u32(encode_rem(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Remu { dst, src1, src2 } => {
+            PInst::Remu { dst, src1, src2 } => {
                 self.push_u32(encode_remu(*dst as u32, *src1 as u32, *src2 as u32));
             }
 
-            PhysInst::And { dst, src1, src2 } => {
+            PInst::And { dst, src1, src2 } => {
                 self.push_u32(encode_and(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Or { dst, src1, src2 } => {
+            PInst::Or { dst, src1, src2 } => {
                 self.push_u32(encode_or(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Xor { dst, src1, src2 } => {
+            PInst::Xor { dst, src1, src2 } => {
                 self.push_u32(encode_xor(*dst as u32, *src1 as u32, *src2 as u32));
             }
 
-            PhysInst::Sll { dst, src1, src2 } => {
+            PInst::Sll { dst, src1, src2 } => {
                 self.push_u32(encode_sll(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Srl { dst, src1, src2 } => {
+            PInst::Srl { dst, src1, src2 } => {
                 self.push_u32(encode_srl(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Sra { dst, src1, src2 } => {
+            PInst::Sra { dst, src1, src2 } => {
                 self.push_u32(encode_sra(*dst as u32, *src1 as u32, *src2 as u32));
             }
 
-            PhysInst::Neg { dst, src } => {
+            PInst::Neg { dst, src } => {
                 self.push_u32(encode_sub(*dst as u32, 0, *src as u32));
             }
-            PhysInst::Not { dst, src } => {
+            PInst::Not { dst, src } => {
                 self.push_u32(encode_xori(*dst as u32, *src as u32, -1));
             }
-            PhysInst::Mv { dst, src } => {
+            PInst::Mv { dst, src } => {
                 self.push_u32(encode_addi(*dst as u32, *src as u32, 0));
             }
 
-            PhysInst::Slt { dst, src1, src2 } => {
+            PInst::Slt { dst, src1, src2 } => {
                 self.push_u32(encode_slt(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Sltu { dst, src1, src2 } => {
+            PInst::Sltu { dst, src1, src2 } => {
                 self.push_u32(encode_sltu(*dst as u32, *src1 as u32, *src2 as u32));
             }
-            PhysInst::Seqz { dst, src } => {
+            PInst::Seqz { dst, src } => {
                 self.push_u32(encode_sltiu(*dst as u32, *src as u32, 1));
             }
-            PhysInst::Snez { dst, src } => {
+            PInst::Snez { dst, src } => {
                 self.push_u32(encode_sltu(*dst as u32, 0, *src as u32));
             }
-            PhysInst::Sltz { dst, src } => {
+            PInst::Sltz { dst, src } => {
                 self.push_u32(encode_slt(*dst as u32, *src as u32, 0));
             }
-            PhysInst::Sgtz { dst, src } => {
+            PInst::Sgtz { dst, src } => {
                 self.push_u32(encode_slt(*dst as u32, 0, *src as u32));
             }
 
-            PhysInst::Li { dst, imm } => {
+            PInst::Li { dst, imm } => {
                 for w in iconst32_sequence(*dst as u32, *imm) {
                     self.push_u32(w);
                 }
             }
-            PhysInst::Addi { dst, src, imm } => {
+            PInst::Addi { dst, src, imm } => {
                 self.push_u32(encode_addi(*dst as u32, *src as u32, *imm));
             }
 
-            PhysInst::Lw { dst, base, offset } => {
+            PInst::Lw { dst, base, offset } => {
                 self.push_u32(encode_lw(*dst as u32, *base as u32, *offset));
             }
-            PhysInst::Sw { src, base, offset } => {
+            PInst::Sw { src, base, offset } => {
                 self.push_u32(encode_sw(*src as u32, *base as u32, *offset));
             }
 
-            PhysInst::SlotAddr { dst, slot } => {
+            PInst::SlotAddr { dst, slot } => {
                 let off = (*slot as i32).saturating_mul(4);
                 self.push_u32(encode_addi(*dst as u32, SP_REG as u32, off));
             }
 
-            PhysInst::MemcpyWords { dst, src, size } => self.emit_memcpy_words(*dst, *src, *size),
+            PInst::MemcpyWords { dst, src, size } => self.emit_memcpy_words(*dst, *src, *size),
 
-            PhysInst::Call { target } => {
+            PInst::Call { target } => {
                 let auipc_off = self.code.len();
                 self.push_u32(encode_auipc(RA_REG as u32, 0));
                 self.push_u32(encode_jalr(RA_REG as u32, RA_REG as u32, 0));
@@ -144,39 +144,39 @@ impl PhysEmitter {
                     symbol: target.name.clone(),
                 });
             }
-            PhysInst::Ret => {
+            PInst::Ret => {
                 self.push_u32(encode_ret());
             }
 
-            PhysInst::Beq {
+            PInst::Beq {
                 src1,
                 src2,
                 target: _,
             } => {
                 self.push_u32(encode_beq(*src1 as u32, *src2 as u32, 0));
             }
-            PhysInst::Bne {
+            PInst::Bne {
                 src1,
                 src2,
                 target: _,
             } => {
                 self.push_u32(encode_bne(*src1 as u32, *src2 as u32, 0));
             }
-            PhysInst::Blt {
+            PInst::Blt {
                 src1,
                 src2,
                 target: _,
             } => {
                 self.push_u32(encode_b_type(0b100, *src1 as u32, *src2 as u32, 0));
             }
-            PhysInst::Bge {
+            PInst::Bge {
                 src1,
                 src2,
                 target: _,
             } => {
                 self.push_u32(encode_b_type(0b101, *src1 as u32, *src2 as u32, 0));
             }
-            PhysInst::J { target: _ } => {
+            PInst::J { target: _ } => {
                 self.push_u32(encode_jal(0, 0));
             }
         }
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn test_emit_add() {
         let mut emitter = PhysEmitter::new();
-        emitter.emit(&PhysInst::Add {
+        emitter.emit(&PInst::Add {
             dst: 10,
             src1: 11,
             src2: 12,
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_emit_li() {
         let mut emitter = PhysEmitter::new();
-        emitter.emit(&PhysInst::Li { dst: 10, imm: 42 });
+        emitter.emit(&PInst::Li { dst: 10, imm: 42 });
         let code = emitter.finish();
         assert_eq!(code, &[0x13, 0x05, 0xA0, 0x02]);
     }
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn test_emit_ret() {
         let mut emitter = PhysEmitter::new();
-        emitter.emit(&PhysInst::Ret);
+        emitter.emit(&PInst::Ret);
         let code = emitter.finish();
         assert_eq!(code, &[0x67, 0x80, 0x00, 0x00]);
     }

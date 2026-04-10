@@ -13,6 +13,6 @@ pub struct ShaderRv32Args {
     /// `linear` or `fast`.
     pub pipeline: String,
     pub show_vinst: bool,
-    pub show_physinst: bool,
+    pub show_PInst: bool,
     pub disassemble: bool,
 }

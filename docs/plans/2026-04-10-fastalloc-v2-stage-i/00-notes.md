@@ -104,6 +104,7 @@ Ret
 ## Notes
 
 - Peephole optimizer is already done and working
-- VInst parser (M0) is the template for PhysInst parser
-- Frame operations (FrameSetup/FrameTeardown) are unique to PhysInst - not in VInst
-- **PhysInst text format uses standard RISC-V assembly syntax** (add a0, a1, a2) - differentiates from VInst format and follows existing standards
+- VInst parser (M0) is the template for PInst parser
+- Frame operations (FrameSetup/FrameTeardown) are unique to PInst - not in VInst
+- **PInst text format uses standard RISC-V assembly syntax** (add a0, a1, a2) - differentiates from VInst format and follows existing standards
+- **Nomenclature**: VReg → PReg, VInst → PInst (Physical Instruction)

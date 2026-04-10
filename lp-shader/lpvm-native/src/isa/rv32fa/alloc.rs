@@ -1,4 +1,4 @@
-//! Straight-line allocation: [`VInst`](crate::vinst::VInst) → [`PhysInst`](super::inst::PhysInst).
+//! Straight-line allocation: [`VInst`](crate::vinst::VInst) → [`PInst`](super::inst::PInst).
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -6,7 +6,7 @@ use core::fmt;
 use lpir::{IrFunction, VReg};
 
 use super::abi::{self, PhysReg, RET_REGS, SCRATCH};
-use super::inst::PhysInst;
+use super::inst::PInst;
 use crate::abi::FuncAbi;
 use crate::abi::classify::ArgLoc;
 use crate::vinst::{IcmpCond, VInst};
@@ -72,7 +72,7 @@ pub fn allocate(
     vinsts: &[VInst],
     func_abi: &FuncAbi,
     func: &IrFunction,
-) -> Result<Vec<PhysInst>, AllocError> {
+) -> Result<Vec<PInst>, AllocError> {
     if func_abi.is_sret() {
         return Err(AllocError::UnsupportedSret);
     }
@@ -110,7 +110,7 @@ pub fn allocate(
     }
 
     let mut free: Vec<PhysReg> = abi::ALLOC_POOL.iter().rev().copied().collect();
-    let mut out: Vec<PhysInst> = Vec::new();
+    let mut out: Vec<PInst> = Vec::new();
     let alloc_reg = |free: &mut Vec<PhysReg>| -> Result<PhysReg, AllocError> {
         free.pop().ok_or(AllocError::PoolExhausted)
     };
@@ -152,10 +152,10 @@ pub fn allocate(
                     let src = get(*v, &mut preg)?;
                     let dst_ret = RET_REGS[k];
                     if src != dst_ret {
-                        out.push(PhysInst::Mv { dst: dst_ret, src });
+                        out.push(PInst::Mv { dst: dst_ret, src });
                     }
                 }
-                out.push(PhysInst::Ret);
+                out.push(PInst::Ret);
             }
             VInst::IConst32 { dst, val, .. } => {
                 let direct_ret = matches!(
@@ -167,14 +167,14 @@ pub fn allocate(
                 } else {
                     alloc_reg(&mut free)?
                 };
-                out.push(PhysInst::Li { dst: p, imm: *val });
+                out.push(PInst::Li { dst: p, imm: *val });
                 preg[dst.0 as usize] = Some(p);
             }
             VInst::Mov32 { dst, src, .. } => {
                 let s = get(*src, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
                 if s != p {
-                    out.push(PhysInst::Mv { dst: p, src: s });
+                    out.push(PInst::Mv { dst: p, src: s });
                 }
                 preg[dst.0 as usize] = Some(p);
             }
@@ -184,7 +184,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Add {
+                out.push(PInst::Add {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -197,7 +197,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Sub {
+                out.push(PInst::Sub {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -210,7 +210,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Mul {
+                out.push(PInst::Mul {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -223,7 +223,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::And {
+                out.push(PInst::And {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -236,7 +236,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Or {
+                out.push(PInst::Or {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -249,7 +249,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Xor {
+                out.push(PInst::Xor {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -259,13 +259,13 @@ pub fn allocate(
             VInst::Neg32 { dst, src, .. } => {
                 let s = get(*src, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Neg { dst: p, src: s });
+                out.push(PInst::Neg { dst: p, src: s });
                 preg[dst.0 as usize] = Some(p);
             }
             VInst::Bnot32 { dst, src, .. } => {
                 let s = get(*src, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Not { dst: p, src: s });
+                out.push(PInst::Not { dst: p, src: s });
                 preg[dst.0 as usize] = Some(p);
             }
             VInst::Shl32 {
@@ -274,7 +274,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Sll {
+                out.push(PInst::Sll {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -287,7 +287,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Sra {
+                out.push(PInst::Sra {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -300,7 +300,7 @@ pub fn allocate(
                 let a = get(*src1, &mut preg)?;
                 let b = get(*src2, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Srl {
+                out.push(PInst::Srl {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -311,7 +311,7 @@ pub fn allocate(
                 let a = get(*lhs, &mut preg)?;
                 let b = get(*rhs, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Div {
+                out.push(PInst::Div {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -322,7 +322,7 @@ pub fn allocate(
                 let a = get(*lhs, &mut preg)?;
                 let b = get(*rhs, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Divu {
+                out.push(PInst::Divu {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -333,7 +333,7 @@ pub fn allocate(
                 let a = get(*lhs, &mut preg)?;
                 let b = get(*rhs, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Rem {
+                out.push(PInst::Rem {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -344,7 +344,7 @@ pub fn allocate(
                 let a = get(*lhs, &mut preg)?;
                 let b = get(*rhs, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Remu {
+                out.push(PInst::Remu {
                     dst: p,
                     src1: a,
                     src2: b,
@@ -363,95 +363,95 @@ pub fn allocate(
                 let d = alloc_reg(&mut free)?;
                 match cond {
                     IcmpCond::Eq => {
-                        out.push(PhysInst::Xor {
+                        out.push(PInst::Xor {
                             dst: SCRATCH,
                             src1: l,
                             src2: r,
                         });
-                        out.push(PhysInst::Seqz {
+                        out.push(PInst::Seqz {
                             dst: d,
                             src: SCRATCH,
                         });
                     }
                     IcmpCond::Ne => {
-                        out.push(PhysInst::Xor {
+                        out.push(PInst::Xor {
                             dst: SCRATCH,
                             src1: l,
                             src2: r,
                         });
-                        out.push(PhysInst::Snez {
+                        out.push(PInst::Snez {
                             dst: d,
                             src: SCRATCH,
                         });
                     }
                     IcmpCond::LtS => {
-                        out.push(PhysInst::Slt {
+                        out.push(PInst::Slt {
                             dst: d,
                             src1: l,
                             src2: r,
                         });
                     }
                     IcmpCond::LeS => {
-                        out.push(PhysInst::Slt {
+                        out.push(PInst::Slt {
                             dst: SCRATCH,
                             src1: r,
                             src2: l,
                         });
-                        out.push(PhysInst::Seqz {
+                        out.push(PInst::Seqz {
                             dst: d,
                             src: SCRATCH,
                         });
                     }
                     IcmpCond::GtS => {
-                        out.push(PhysInst::Slt {
+                        out.push(PInst::Slt {
                             dst: d,
                             src1: r,
                             src2: l,
                         });
                     }
                     IcmpCond::GeS => {
-                        out.push(PhysInst::Slt {
+                        out.push(PInst::Slt {
                             dst: SCRATCH,
                             src1: l,
                             src2: r,
                         });
-                        out.push(PhysInst::Seqz {
+                        out.push(PInst::Seqz {
                             dst: d,
                             src: SCRATCH,
                         });
                     }
                     IcmpCond::LtU => {
-                        out.push(PhysInst::Sltu {
+                        out.push(PInst::Sltu {
                             dst: d,
                             src1: l,
                             src2: r,
                         });
                     }
                     IcmpCond::LeU => {
-                        out.push(PhysInst::Sltu {
+                        out.push(PInst::Sltu {
                             dst: SCRATCH,
                             src1: r,
                             src2: l,
                         });
-                        out.push(PhysInst::Seqz {
+                        out.push(PInst::Seqz {
                             dst: d,
                             src: SCRATCH,
                         });
                     }
                     IcmpCond::GtU => {
-                        out.push(PhysInst::Sltu {
+                        out.push(PInst::Sltu {
                             dst: d,
                             src1: r,
                             src2: l,
                         });
                     }
                     IcmpCond::GeU => {
-                        out.push(PhysInst::Sltu {
+                        out.push(PInst::Sltu {
                             dst: SCRATCH,
                             src1: l,
                             src2: r,
                         });
-                        out.push(PhysInst::Seqz {
+                        out.push(PInst::Seqz {
                             dst: d,
                             src: SCRATCH,
                         });
@@ -462,16 +462,16 @@ pub fn allocate(
             VInst::IeqImm32 { dst, src, imm, .. } => {
                 let s = get(*src, &mut preg)?;
                 let d = alloc_reg(&mut free)?;
-                out.push(PhysInst::Li {
+                out.push(PInst::Li {
                     dst: SCRATCH,
                     imm: *imm,
                 });
-                out.push(PhysInst::Xor {
+                out.push(PInst::Xor {
                     dst: SCRATCH,
                     src1: s,
                     src2: SCRATCH,
                 });
-                out.push(PhysInst::Seqz {
+                out.push(PInst::Seqz {
                     dst: d,
                     src: SCRATCH,
                 });
@@ -482,7 +482,7 @@ pub fn allocate(
             } => {
                 let b = get(*base, &mut preg)?;
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::Lw {
+                out.push(PInst::Lw {
                     dst: p,
                     base: b,
                     offset: *offset,
@@ -494,7 +494,7 @@ pub fn allocate(
             } => {
                 let s = get(*src, &mut preg)?;
                 let b = get(*base, &mut preg)?;
-                out.push(PhysInst::Sw {
+                out.push(PInst::Sw {
                     src: s,
                     base: b,
                     offset: *offset,
@@ -502,7 +502,7 @@ pub fn allocate(
             }
             VInst::SlotAddr { dst, slot, .. } => {
                 let p = alloc_reg(&mut free)?;
-                out.push(PhysInst::SlotAddr {
+                out.push(PInst::SlotAddr {
                     dst: p,
                     slot: *slot,
                 });
@@ -516,7 +516,7 @@ pub fn allocate(
             } => {
                 let d = get(*dst_base, &mut preg)?;
                 let s = get(*src_base, &mut preg)?;
-                out.push(PhysInst::MemcpyWords {
+                out.push(PInst::MemcpyWords {
                     dst: d,
                     src: s,
                     size: *size,
@@ -540,9 +540,9 @@ pub fn allocate(
     }
 
     let mut wrapped = Vec::with_capacity(out.len() + 2);
-    wrapped.push(PhysInst::FrameSetup { spill_slots: 0 });
+    wrapped.push(PInst::FrameSetup { spill_slots: 0 });
     wrapped.extend(out);
-    wrapped.push(PhysInst::FrameTeardown { spill_slots: 0 });
+    wrapped.push(PInst::FrameTeardown { spill_slots: 0 });
     Ok(wrapped)
 }
 
@@ -584,10 +584,10 @@ mod tests {
         };
         let fa = func_abi_rv32(&sig, func.total_param_slots() as usize);
         let phys = allocate(&vinsts, &fa, &func).unwrap();
-        assert!(matches!(phys[0], PhysInst::FrameSetup { .. }));
-        assert!(matches!(phys[1], PhysInst::Li { dst: 10, imm: 42 }));
-        assert!(matches!(phys[2], PhysInst::Ret));
-        assert!(matches!(phys[3], PhysInst::FrameTeardown { .. }));
+        assert!(matches!(phys[0], PInst::FrameSetup { .. }));
+        assert!(matches!(phys[1], PInst::Li { dst: 10, imm: 42 }));
+        assert!(matches!(phys[2], PInst::Ret));
+        assert!(matches!(phys[3], PInst::FrameTeardown { .. }));
     }
 
     #[test]
@@ -638,12 +638,9 @@ mod tests {
         };
         let fa = func_abi_rv32(&sig, func.total_param_slots() as usize);
         let phys = allocate(&vinsts, &fa, &func).unwrap();
-        assert!(matches!(phys[0], PhysInst::FrameSetup { .. }));
-        assert!(matches!(phys[phys.len() - 2], PhysInst::Ret));
-        assert!(matches!(
-            phys[phys.len() - 1],
-            PhysInst::FrameTeardown { .. }
-        ));
+        assert!(matches!(phys[0], PInst::FrameSetup { .. }));
+        assert!(matches!(phys[phys.len() - 2], PInst::Ret));
+        assert!(matches!(phys[phys.len() - 1], PInst::FrameTeardown { .. }));
     }
 
     #[test]

@@ -1,11 +1,11 @@
-//! [`PhysInst`](crate::isa::rv32fa::inst::PhysInst) parser and formatter (RISC-V assembly style).
+//! [`PInst`](crate::isa::rv32fa::inst::PInst) parser and formatter (RISC-V assembly style).
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::isa::rv32fa::abi::{self, PhysReg};
-use crate::isa::rv32fa::inst::PhysInst;
+use crate::isa::rv32fa::inst::PInst;
 use crate::vinst::SymbolRef;
 
 #[derive(Debug, Clone)]
@@ -33,103 +33,103 @@ fn reg(r: PhysReg) -> &'static str {
     abi::reg_name(r)
 }
 
-pub fn format(inst: &PhysInst) -> String {
+pub fn format(inst: &PInst) -> String {
     match inst {
-        PhysInst::FrameSetup { spill_slots } => format!("FrameSetup {}", spill_slots),
-        PhysInst::FrameTeardown { spill_slots } => format!("FrameTeardown {}", spill_slots),
+        PInst::FrameSetup { spill_slots } => format!("FrameSetup {}", spill_slots),
+        PInst::FrameTeardown { spill_slots } => format!("FrameTeardown {}", spill_slots),
 
-        PhysInst::Add { dst, src1, src2 } => {
+        PInst::Add { dst, src1, src2 } => {
             format!("add {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Sub { dst, src1, src2 } => {
+        PInst::Sub { dst, src1, src2 } => {
             format!("sub {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Mul { dst, src1, src2 } => {
+        PInst::Mul { dst, src1, src2 } => {
             format!("mul {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Div { dst, src1, src2 } => {
+        PInst::Div { dst, src1, src2 } => {
             format!("div {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Divu { dst, src1, src2 } => {
+        PInst::Divu { dst, src1, src2 } => {
             format!("divu {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Rem { dst, src1, src2 } => {
+        PInst::Rem { dst, src1, src2 } => {
             format!("rem {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Remu { dst, src1, src2 } => {
+        PInst::Remu { dst, src1, src2 } => {
             format!("remu {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
 
-        PhysInst::And { dst, src1, src2 } => {
+        PInst::And { dst, src1, src2 } => {
             format!("and {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Or { dst, src1, src2 } => {
+        PInst::Or { dst, src1, src2 } => {
             format!("or {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Xor { dst, src1, src2 } => {
+        PInst::Xor { dst, src1, src2 } => {
             format!("xor {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
 
-        PhysInst::Sll { dst, src1, src2 } => {
+        PInst::Sll { dst, src1, src2 } => {
             format!("sll {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Srl { dst, src1, src2 } => {
+        PInst::Srl { dst, src1, src2 } => {
             format!("srl {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Sra { dst, src1, src2 } => {
+        PInst::Sra { dst, src1, src2 } => {
             format!("sra {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
 
-        PhysInst::Neg { dst, src } => format!("neg {}, {}", reg(*dst), reg(*src)),
-        PhysInst::Not { dst, src } => format!("not {}, {}", reg(*dst), reg(*src)),
-        PhysInst::Mv { dst, src } => format!("mv {}, {}", reg(*dst), reg(*src)),
+        PInst::Neg { dst, src } => format!("neg {}, {}", reg(*dst), reg(*src)),
+        PInst::Not { dst, src } => format!("not {}, {}", reg(*dst), reg(*src)),
+        PInst::Mv { dst, src } => format!("mv {}, {}", reg(*dst), reg(*src)),
 
-        PhysInst::Slt { dst, src1, src2 } => {
+        PInst::Slt { dst, src1, src2 } => {
             format!("slt {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Sltu { dst, src1, src2 } => {
+        PInst::Sltu { dst, src1, src2 } => {
             format!("sltu {}, {}, {}", reg(*dst), reg(*src1), reg(*src2))
         }
-        PhysInst::Seqz { dst, src } => format!("seqz {}, {}", reg(*dst), reg(*src)),
-        PhysInst::Snez { dst, src } => format!("snez {}, {}", reg(*dst), reg(*src)),
-        PhysInst::Sltz { dst, src } => format!("sltz {}, {}", reg(*dst), reg(*src)),
-        PhysInst::Sgtz { dst, src } => format!("sgtz {}, {}", reg(*dst), reg(*src)),
+        PInst::Seqz { dst, src } => format!("seqz {}, {}", reg(*dst), reg(*src)),
+        PInst::Snez { dst, src } => format!("snez {}, {}", reg(*dst), reg(*src)),
+        PInst::Sltz { dst, src } => format!("sltz {}, {}", reg(*dst), reg(*src)),
+        PInst::Sgtz { dst, src } => format!("sgtz {}, {}", reg(*dst), reg(*src)),
 
-        PhysInst::Li { dst, imm } => format!("li {}, {}", reg(*dst), imm),
-        PhysInst::Addi { dst, src, imm } => format!("addi {}, {}, {}", reg(*dst), reg(*src), imm),
+        PInst::Li { dst, imm } => format!("li {}, {}", reg(*dst), imm),
+        PInst::Addi { dst, src, imm } => format!("addi {}, {}, {}", reg(*dst), reg(*src), imm),
 
-        PhysInst::Lw { dst, base, offset } => {
+        PInst::Lw { dst, base, offset } => {
             format!("lw {}, {}({})", reg(*dst), offset, reg(*base))
         }
-        PhysInst::Sw { src, base, offset } => {
+        PInst::Sw { src, base, offset } => {
             format!("sw {}, {}({})", reg(*src), offset, reg(*base))
         }
 
-        PhysInst::SlotAddr { dst, slot } => format!("SlotAddr {}, {}", reg(*dst), slot),
+        PInst::SlotAddr { dst, slot } => format!("SlotAddr {}, {}", reg(*dst), slot),
 
-        PhysInst::MemcpyWords { dst, src, size } => {
+        PInst::MemcpyWords { dst, src, size } => {
             format!("MemcpyWords {}, {}, {}", reg(*dst), reg(*src), size)
         }
 
-        PhysInst::Call { target } => format!("call {}", target.name),
-        PhysInst::Ret => String::from("ret"),
-        PhysInst::Beq { src1, src2, target } => {
+        PInst::Call { target } => format!("call {}", target.name),
+        PInst::Ret => String::from("ret"),
+        PInst::Beq { src1, src2, target } => {
             format!("beq {}, {}, @{}", reg(*src1), reg(*src2), target)
         }
-        PhysInst::Bne { src1, src2, target } => {
+        PInst::Bne { src1, src2, target } => {
             format!("bne {}, {}, @{}", reg(*src1), reg(*src2), target)
         }
-        PhysInst::Blt { src1, src2, target } => {
+        PInst::Blt { src1, src2, target } => {
             format!("blt {}, {}, @{}", reg(*src1), reg(*src2), target)
         }
-        PhysInst::Bge { src1, src2, target } => {
+        PInst::Bge { src1, src2, target } => {
             format!("bge {}, {}, @{}", reg(*src1), reg(*src2), target)
         }
-        PhysInst::J { target } => format!("j @{}", target),
+        PInst::J { target } => format!("j @{}", target),
     }
 }
 
-pub fn format_block(inst: &[PhysInst]) -> String {
+pub fn format_block(inst: &[PInst]) -> String {
     inst.iter().map(format).collect::<Vec<_>>().join("\n")
 }
 
@@ -184,7 +184,7 @@ fn split_operands(rest: &str) -> Vec<String> {
     out
 }
 
-pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
+pub fn parse_line(line: &str, line_no: usize) -> Result<PInst, ParseError> {
     let s = trim_comment(line);
     if s.is_empty() {
         return Err(ParseError::new(line_no, "empty line"));
@@ -203,123 +203,123 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
     };
 
     match mn {
-        "FrameSetup" => Ok(PhysInst::FrameSetup {
+        "FrameSetup" => Ok(PInst::FrameSetup {
             spill_slots: parse_u32(ops.get(0).map(|s| s.as_str()).unwrap_or("0"))
                 .map_err(|_| ParseError::new(line_no, "bad spill_slots"))?,
         }),
-        "FrameTeardown" => Ok(PhysInst::FrameTeardown {
+        "FrameTeardown" => Ok(PInst::FrameTeardown {
             spill_slots: parse_u32(ops.get(0).map(|s| s.as_str()).unwrap_or("0"))
                 .map_err(|_| ParseError::new(line_no, "bad spill_slots"))?,
         }),
-        "add" => Ok(PhysInst::Add {
+        "add" => Ok(PInst::Add {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "sub" => Ok(PhysInst::Sub {
+        "sub" => Ok(PInst::Sub {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "mul" => Ok(PhysInst::Mul {
+        "mul" => Ok(PInst::Mul {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "div" => Ok(PhysInst::Div {
+        "div" => Ok(PInst::Div {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "divu" => Ok(PhysInst::Divu {
+        "divu" => Ok(PInst::Divu {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "rem" => Ok(PhysInst::Rem {
+        "rem" => Ok(PInst::Rem {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "remu" => Ok(PhysInst::Remu {
+        "remu" => Ok(PInst::Remu {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "and" => Ok(PhysInst::And {
+        "and" => Ok(PInst::And {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "or" => Ok(PhysInst::Or {
+        "or" => Ok(PInst::Or {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "xor" => Ok(PhysInst::Xor {
+        "xor" => Ok(PInst::Xor {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "sll" => Ok(PhysInst::Sll {
+        "sll" => Ok(PInst::Sll {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "srl" => Ok(PhysInst::Srl {
+        "srl" => Ok(PInst::Srl {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "sra" => Ok(PhysInst::Sra {
+        "sra" => Ok(PInst::Sra {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "neg" => Ok(PhysInst::Neg {
+        "neg" => Ok(PInst::Neg {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "not" => Ok(PhysInst::Not {
+        "not" => Ok(PInst::Not {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "mv" => Ok(PhysInst::Mv {
+        "mv" => Ok(PInst::Mv {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "slt" => Ok(PhysInst::Slt {
+        "slt" => Ok(PInst::Slt {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "sltu" => Ok(PhysInst::Sltu {
+        "sltu" => Ok(PInst::Sltu {
             dst: r(0)?,
             src1: r(1)?,
             src2: r(2)?,
         }),
-        "seqz" => Ok(PhysInst::Seqz {
+        "seqz" => Ok(PInst::Seqz {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "snez" => Ok(PhysInst::Snez {
+        "snez" => Ok(PInst::Snez {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "sltz" => Ok(PhysInst::Sltz {
+        "sltz" => Ok(PInst::Sltz {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "sgtz" => Ok(PhysInst::Sgtz {
+        "sgtz" => Ok(PInst::Sgtz {
             dst: r(0)?,
             src: r(1)?,
         }),
-        "li" => Ok(PhysInst::Li {
+        "li" => Ok(PInst::Li {
             dst: r(0)?,
             imm: parse_i32(ops.get(1).map(|s| s.as_str()).unwrap_or("0"))
                 .map_err(|_| ParseError::new(line_no, "bad imm"))?,
         }),
-        "addi" => Ok(PhysInst::Addi {
+        "addi" => Ok(PInst::Addi {
             dst: r(0)?,
             src: r(1)?,
             imm: parse_i32(ops.get(2).map(|s| s.as_str()).unwrap_or("0"))
@@ -332,7 +332,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
                     .ok_or_else(|| ParseError::new(line_no, "missing mem"))?,
             )
             .map_err(|_| ParseError::new(line_no, "bad lw operand"))?;
-            Ok(PhysInst::Lw {
+            Ok(PInst::Lw {
                 dst,
                 base,
                 offset: off,
@@ -345,18 +345,18 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
                     .ok_or_else(|| ParseError::new(line_no, "missing mem"))?,
             )
             .map_err(|_| ParseError::new(line_no, "bad sw operand"))?;
-            Ok(PhysInst::Sw {
+            Ok(PInst::Sw {
                 src,
                 base,
                 offset: off,
             })
         }
-        "SlotAddr" => Ok(PhysInst::SlotAddr {
+        "SlotAddr" => Ok(PInst::SlotAddr {
             dst: r(0)?,
             slot: parse_u32(ops.get(1).map(|s| s.as_str()).unwrap_or("0"))
                 .map_err(|_| ParseError::new(line_no, "bad slot"))?,
         }),
-        "MemcpyWords" => Ok(PhysInst::MemcpyWords {
+        "MemcpyWords" => Ok(PInst::MemcpyWords {
             dst: r(0)?,
             src: r(1)?,
             size: parse_u32(ops.get(2).map(|s| s.as_str()).unwrap_or("0"))
@@ -367,7 +367,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
                 .get(0)
                 .ok_or_else(|| ParseError::new(line_no, "missing symbol"))?
                 .clone();
-            Ok(PhysInst::Call {
+            Ok(PInst::Call {
                 target: SymbolRef { name },
             })
         }
@@ -375,7 +375,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
             if !rest.is_empty() {
                 return Err(ParseError::new(line_no, "unexpected operands on ret"));
             }
-            Ok(PhysInst::Ret)
+            Ok(PInst::Ret)
         }
         "beq" | "bne" | "blt" | "bge" => {
             let a = r(0)?;
@@ -390,22 +390,22 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
                 return Err(ParseError::new(line_no, "branch target must be @N"));
             };
             Ok(match mn {
-                "beq" => PhysInst::Beq {
+                "beq" => PInst::Beq {
                     src1: a,
                     src2: b,
                     target: id,
                 },
-                "bne" => PhysInst::Bne {
+                "bne" => PInst::Bne {
                     src1: a,
                     src2: b,
                     target: id,
                 },
-                "blt" => PhysInst::Blt {
+                "blt" => PInst::Blt {
                     src1: a,
                     src2: b,
                     target: id,
                 },
-                "bge" => PhysInst::Bge {
+                "bge" => PInst::Bge {
                     src1: a,
                     src2: b,
                     target: id,
@@ -423,13 +423,13 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PhysInst, ParseError> {
             } else {
                 return Err(ParseError::new(line_no, "jump target must be @N"));
             };
-            Ok(PhysInst::J { target: id })
+            Ok(PInst::J { target: id })
         }
         _ => Err(ParseError::new(line_no, format!("unknown mnemonic `{mn}`"))),
     }
 }
 
-pub fn parse(input: &str) -> Result<Vec<PhysInst>, ParseError> {
+pub fn parse(input: &str) -> Result<Vec<PInst>, ParseError> {
     let mut out = Vec::new();
     for (i, line) in input.lines().enumerate() {
         let line_no = i + 1;
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_format_add() {
-        let inst = PhysInst::Add {
+        let inst = PInst::Add {
             dst: 10,
             src1: 11,
             src2: 12,
@@ -458,13 +458,13 @@ mod tests {
 
     #[test]
     fn test_format_li() {
-        let inst = PhysInst::Li { dst: 10, imm: 42 };
+        let inst = PInst::Li { dst: 10, imm: 42 };
         assert_eq!(format(&inst), "li a0, 42");
     }
 
     #[test]
     fn test_format_lw() {
-        let inst = PhysInst::Lw {
+        let inst = PInst::Lw {
             dst: 10,
             base: 2,
             offset: 4,
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_format_sw() {
-        let inst = PhysInst::Sw {
+        let inst = PInst::Sw {
             src: 10,
             base: 2,
             offset: 8,
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_format_ret() {
-        let inst = PhysInst::Ret;
+        let inst = PInst::Ret;
         assert_eq!(format(&inst), "ret");
     }
 
@@ -493,7 +493,7 @@ mod tests {
         let inst = parse_line("add a0, a1, a2", 1).unwrap();
         assert!(matches!(
             inst,
-            PhysInst::Add {
+            PInst::Add {
                 dst: 10,
                 src1: 11,
                 src2: 12
@@ -504,18 +504,18 @@ mod tests {
     #[test]
     fn test_parse_li() {
         let inst = parse_line("li a0, 42", 1).unwrap();
-        assert!(matches!(inst, PhysInst::Li { dst: 10, imm: 42 }));
+        assert!(matches!(inst, PInst::Li { dst: 10, imm: 42 }));
     }
 
     #[test]
     fn test_parse_ret() {
         let inst = parse_line("ret", 1).unwrap();
-        assert!(matches!(inst, PhysInst::Ret));
+        assert!(matches!(inst, PInst::Ret));
     }
 
     #[test]
     fn test_roundtrip_add() {
-        let original = PhysInst::Add {
+        let original = PInst::Add {
             dst: 10,
             src1: 11,
             src2: 12,
