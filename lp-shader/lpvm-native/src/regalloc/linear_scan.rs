@@ -609,7 +609,10 @@ impl LinearScan {
             for a in &active {
                 used.insert(PReg::int(a.preg));
             }
-            let free = alloca_list.iter().copied().find(|p| !used.contains(PReg::int(*p)));
+            let free = alloca_list
+                .iter()
+                .copied()
+                .find(|p| !used.contains(PReg::int(*p)));
 
             if let Some(preg) = free {
                 vreg_to_phys[iv.vreg.0 as usize] = Some(preg);

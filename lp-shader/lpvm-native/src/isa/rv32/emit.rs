@@ -102,11 +102,41 @@ fn call_clobber_hw(abi: &FuncAbi) -> u32 {
     bits
 }
 
+/// Compute which vregs are live (used) after a given instruction position.
+/// This is a quick local scan - we only look ahead until the next Label or Br,
+/// which defines a basic block boundary in our structured control flow.
+#[allow(dead_code)]
+fn compute_live_out(vinsts: &[VInst], pos: usize) -> alloc::collections::BTreeSet<VReg> {
+    let mut live = alloc::collections::BTreeSet::new();
+
+    // Scan forward from the next instruction
+    for i in (pos + 1)..vinsts.len() {
+        let inst = &vinsts[i];
+
+        // Control flow boundaries stop the scan
+        match inst {
+            VInst::Label { .. } | VInst::Br { .. } | VInst::BrIf { .. } => break,
+            _ => {}
+        }
+
+        // All uses are live (same-block scan until control flow; no kill tracking).
+        for v in inst.uses() {
+            live.insert(v);
+        }
+    }
+
+    live
+}
+
 fn regs_saved_for_call(
     alloc: &Allocation,
     rets: &[VReg],
     clobber: u32,
+    _vinsts: &[VInst],
+    _call_pos: usize,
 ) -> Vec<(VReg, PhysReg)> {
+    // TODO: use liveness analysis to only save registers whose vregs are live after the call.
+    // For now, we save all clobbered registers that have vregs assigned (conservative but safe).
     let mut seen = 0u32;
     let mut out = Vec::new();
     for (vi, po) in alloc.vreg_to_phys.iter().enumerate() {
@@ -123,6 +153,7 @@ fn regs_saved_for_call(
         if clobber & (1u32 << *p) == 0 {
             continue;
         }
+
         let bit = 1u32 << *p;
         if seen & bit == 0 {
             seen |= bit;
@@ -133,15 +164,13 @@ fn regs_saved_for_call(
     out
 }
 
-fn max_regs_saved_across_calls(
-    vinsts: &[VInst],
-    alloc: &Allocation,
-    clobber: u32,
-) -> u32 {
+fn max_regs_saved_across_calls(vinsts: &[VInst], alloc: &Allocation, clobber: u32) -> u32 {
     let mut m = 0u32;
-    for inst in vinsts {
+    for (pos, inst) in vinsts.iter().enumerate() {
         if let VInst::Call { rets, .. } = inst {
-            m = m.max(regs_saved_for_call(alloc, rets.as_slice(), clobber).len() as u32);
+            m = m.max(
+                regs_saved_for_call(alloc, rets.as_slice(), clobber, vinsts, pos).len() as u32,
+            );
         }
     }
     m
@@ -371,6 +400,8 @@ impl EmitContext {
         alloc: &Allocation,
         rets: &[VReg],
         caller_is_sret: bool,
+        vinsts: &[VInst],
+        pos: usize,
     ) -> Result<(), NativeError> {
         let Some(layout) = self.call_save.clone() else {
             return Ok(());
@@ -381,7 +412,7 @@ impl EmitContext {
                 self.push_u32(encode_sw(S1.hw as u32, S0.hw as u32, o));
             }
         }
-        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw);
+        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw, vinsts, pos);
         if list.len() as u32 > layout.max_per_call {
             return Err(NativeError::TooManyVRegs {
                 count: list.len(),
@@ -401,11 +432,13 @@ impl EmitContext {
         alloc: &Allocation,
         rets: &[VReg],
         caller_is_sret: bool,
+        vinsts: &[VInst],
+        pos: usize,
     ) -> Result<(), NativeError> {
         let Some(layout) = self.call_save.clone() else {
             return Ok(());
         };
-        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw);
+        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw, vinsts, pos);
         let ret_homes = phys_homes_of_non_spilled(alloc, rets);
         for (i, (_, p)) in list.iter().enumerate().rev() {
             if ret_homes & (1u32 << *p) != 0 {
@@ -432,8 +465,10 @@ impl EmitContext {
         args: &[VReg],
         rets: &[VReg],
         caller_is_sret: bool,
+        vinsts: &[VInst],
+        pos: usize,
     ) -> Result<(), NativeError> {
-        self.emit_call_preserves_before(alloc, rets, caller_is_sret)?;
+        self.emit_call_preserves_before(alloc, rets, caller_is_sret, vinsts, pos)?;
         let reg_cap = ARG_REGS.len();
         let sp_hw = SP.hw as u32;
         for (i, a) in args.iter().enumerate().take(reg_cap) {
@@ -467,7 +502,7 @@ impl EmitContext {
             }
             self.store_def_vreg(alloc, *r, Self::TEMP0);
         }
-        self.emit_call_preserves_after(alloc, rets, caller_is_sret)?;
+        self.emit_call_preserves_after(alloc, rets, caller_is_sret, vinsts, pos)?;
         Ok(())
     }
 
@@ -479,8 +514,10 @@ impl EmitContext {
         args: &[VReg],
         rets: &[VReg],
         caller_is_sret: bool,
+        vinsts: &[VInst],
+        pos: usize,
     ) -> Result<(), NativeError> {
-        self.emit_call_preserves_before(alloc, rets, caller_is_sret)?;
+        self.emit_call_preserves_before(alloc, rets, caller_is_sret, vinsts, pos)?;
         let sret_off = self
             .frame
             .sret_slot_offset_from_fp()
@@ -517,7 +554,7 @@ impl EmitContext {
             self.push_u32(encode_lw(rd, s0, off));
             self.store_def_vreg(alloc, *r, Self::TEMP0);
         }
-        self.emit_call_preserves_after(alloc, rets, caller_is_sret)?;
+        self.emit_call_preserves_after(alloc, rets, caller_is_sret, vinsts, pos)?;
         Ok(())
     }
 
@@ -688,6 +725,8 @@ impl EmitContext {
     pub fn emit_vinst(
         &mut self,
         inst: &VInst,
+        vinsts: &[VInst],
+        pos: usize,
         alloc: &Allocation,
         is_sret: bool,
     ) -> Result<(), NativeError> {
@@ -986,7 +1025,15 @@ impl EmitContext {
                 ..
             } => {
                 if *callee_uses_sret {
-                    self.emit_call_sret(alloc, target, args.as_slice(), rets.as_slice(), is_sret)?;
+                    self.emit_call_sret(
+                        alloc,
+                        target,
+                        args.as_slice(),
+                        rets.as_slice(),
+                        is_sret,
+                        vinsts,
+                        pos,
+                    )?;
                 } else {
                     self.emit_call_direct(
                         alloc,
@@ -994,6 +1041,8 @@ impl EmitContext {
                         args.as_slice(),
                         rets.as_slice(),
                         is_sret,
+                        vinsts,
+                        pos,
                     )?;
                 }
             }
@@ -1133,8 +1182,8 @@ pub fn emit_function_bytes(
 
     let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
     ctx.emit_prologue(is_sret, &alloc)?;
-    for v in vinsts {
-        ctx.emit_vinst(v, &alloc, is_sret)?;
+    for (pos, v) in vinsts.iter().enumerate() {
+        ctx.emit_vinst(v, vinsts, pos, &alloc, is_sret)?;
     }
     ctx.resolve_branch_fixups()?;
     ctx.emit_epilogue();
@@ -1361,8 +1410,9 @@ mod tests {
             .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue(false, &a).expect("prologue");
-        for i in &lowered.vinsts {
-            ctx.emit_vinst(i, &a, false).expect("emit");
+        for (pos, i) in lowered.vinsts.iter().enumerate() {
+            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &a, false)
+                .expect("emit");
         }
         ctx.emit_epilogue();
         assert!(ctx.code.len() >= 12);
@@ -1420,8 +1470,9 @@ mod tests {
             .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue(false, &a).expect("prologue");
-        for i in &lowered.vinsts {
-            ctx.emit_vinst(i, &a, false).expect("emit");
+        for (pos, i) in lowered.vinsts.iter().enumerate() {
+            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &a, false)
+                .expect("emit");
         }
         ctx.emit_epilogue();
         assert_eq!(ctx.relocs.len(), 1);

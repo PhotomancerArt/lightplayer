@@ -18,4 +18,4 @@ pub use builtins::BuiltinTable;
 pub use compiler::{JitEmitContext, compile_module_jit};
 pub use engine::NativeJitEngine;
 pub use instance::NativeJitInstance;
-pub use module::{NativeJitModule, NativeJitDirectCall};
+pub use module::{NativeJitDirectCall, NativeJitModule};

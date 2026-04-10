@@ -55,19 +55,20 @@ impl NativeJitModule {
     /// eliminating per-call string lookups and metadata searches.
     pub fn direct_call(&self, name: &str) -> Option<NativeJitDirectCall> {
         let entry_offset = self.inner.entry_offsets.get(name).copied()?;
-        
-        let ir_func_idx = self.inner.ir.functions
+
+        let ir_func_idx = self
+            .inner
+            .ir
+            .functions
             .iter()
             .position(|f| f.name == name)?;
         let ir_func = &self.inner.ir.functions[ir_func_idx];
-        
-        let gfn = self.inner.meta.functions
-            .iter()
-            .find(|f| f.name == name)?;
-        
+
+        let gfn = self.inner.meta.functions.iter().find(|f| f.name == name)?;
+
         let slots = ir_func.total_param_slots() as usize;
         let func_abi = crate::isa::rv32::abi::func_abi_rv32(gfn, slots);
-        
+
         Some(NativeJitDirectCall {
             entry_offset,
             arg_count: ir_func.param_count as usize,

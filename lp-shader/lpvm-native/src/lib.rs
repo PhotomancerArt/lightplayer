@@ -40,4 +40,6 @@ pub use vinst::{IcmpCond, SymbolRef, VInst};
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 
 #[cfg(target_arch = "riscv32")]
-pub use rt_jit::{BuiltinTable, NativeJitDirectCall, NativeJitEngine, NativeJitInstance, NativeJitModule};
+pub use rt_jit::{
+    BuiltinTable, NativeJitDirectCall, NativeJitEngine, NativeJitInstance, NativeJitModule,
+};

@@ -15,7 +15,7 @@ use crate::error::NativeError;
 use crate::isa::rv32::abi::func_abi_rv32;
 
 use super::call::rv32_jalr_a0_a7;
-use super::module::{NativeJitModule, NativeJitDirectCall};
+use super::module::{NativeJitDirectCall, NativeJitModule};
 
 /// Per-instance state: [`NativeJitModule`] plus guest vmctx pointer.
 pub struct NativeJitInstance {
@@ -56,16 +56,14 @@ impl NativeJitInstance {
                 "NativeJitInstance::call_direct: more than 8 argument words need stack args (not implemented)",
             ))));
         }
-        
+
         let mut full: [i32; 8] = [0; 8];
         full[0] = self.vmctx_guest as i32;
         for (i, arg) in args.iter().enumerate() {
             full[1 + i] = *arg;
         }
 
-        let entry = unsafe { 
-            self.module.buffer().entry_ptr(handle.entry_offset) as usize 
-        };
+        let entry = unsafe { self.module.buffer().entry_ptr(handle.entry_offset) as usize };
 
         if handle.is_sret {
             // sret path: a0 = sret buffer pointer, a1-a7 = args
@@ -74,7 +72,7 @@ impl NativeJitInstance {
                     "NativeJitInstance::call_direct: sret + more than 7 argument words need stack args (not implemented)",
                 ))));
             }
-            
+
             // Use out buffer as sret buffer
             let sret_ptr = out.as_mut_ptr() as usize;
             // Note: full[0] is vmctx, so we pass full[0..7] into a1-a7
@@ -85,10 +83,8 @@ impl NativeJitInstance {
         } else {
             // Direct return path: returns in a0, a1
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct_arr(&full);
-            let (r0, r1) = unsafe { 
-                rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) 
-            };
-            
+            let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+
             match handle.ret_count {
                 0 => {}
                 1 => out[0] = r0,
@@ -104,7 +100,7 @@ impl NativeJitInstance {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -191,7 +187,9 @@ fn pack_regs_direct(words: &[i32]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
 }
 
 fn pack_regs_direct_arr(words: &[i32; 8]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
-    (words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7])
+    (
+        words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7],
+    )
 }
 
 fn pack_regs_sret(sret: i32, words: &[i32]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
@@ -207,14 +205,13 @@ fn pack_regs_sret_direct(sret: i32, words: &[i32; 8]) -> (i32, i32, i32, i32, i3
     // words[0] is vmctx, words[1..] are user args
     // sret goes to a0, vmctx goes to a1, user args to a2-a7
     (
-        sret,
-        words[0],  // vmctx -> a1
-        words[1],  // user arg 0 -> a2
-        words[2],  // user arg 1 -> a3
-        words[3],  // user arg 2 -> a4
-        words[4],  // user arg 3 -> a5
-        words[5],  // user arg 4 -> a6
-        words[6],  // user arg 5 -> a7
+        sret, words[0], // vmctx -> a1
+        words[1], // user arg 0 -> a2
+        words[2], // user arg 1 -> a3
+        words[3], // user arg 2 -> a4
+        words[4], // user arg 3 -> a5
+        words[5], // user arg 4 -> a6
+        words[6], // user arg 5 -> a7
     )
 }
 
