@@ -1466,6 +1466,30 @@ fn format_decimal_with_commas(n: u64) -> String {
     out
 }
 
+/// Smallest positive `guest_instructions_total` among targets (for relative perf column).
+fn min_positive_guest_instructions(
+    per_target: &BTreeMap<String, test_run::TestCaseStats>,
+) -> Option<u64> {
+    per_target
+        .values()
+        .map(|s| s.guest_instructions_total)
+        .filter(|&t| t > 0)
+        .min()
+}
+
+/// Multiplier vs fastest target with instruction data; `—` when this target has no counts.
+fn format_inst_vs_fastest(total: u64, fastest: u64) -> String {
+    if total == 0 || fastest == 0 {
+        return "—".to_string();
+    }
+    let ratio = total as f64 / fastest as f64;
+    if ratio <= 1.0005 {
+        "1.00×".to_string()
+    } else {
+        format!("{ratio:.2}×")
+    }
+}
+
 /// Format per-file test counts with expected-fail information.
 fn format_file_counts(
     stats: &test_run::TestCaseStats,
@@ -1575,13 +1599,45 @@ fn format_target_table(
     let col_unsupported = 11;
     let col_compile_fail = 12;
 
+    let fastest_inst = min_positive_guest_instructions(per_target);
+    let show_perf = fastest_inst.is_some();
+    let fastest = fastest_inst.unwrap_or(0);
+
+    let (col_sigma_inst, col_vs_fast) = if show_perf {
+        let mut w_inst = "Σ inst".len();
+        let mut w_rel = "vs fastest".len();
+        for s in per_target.values() {
+            let inst_cell = if s.guest_instructions_total > 0 {
+                format!(
+                    "{} inst",
+                    format_decimal_with_commas(s.guest_instructions_total)
+                )
+            } else {
+                "—".to_string()
+            };
+            w_inst = w_inst.max(inst_cell.len());
+            let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
+            w_rel = w_rel.max(rel_cell.len());
+        }
+        (w_inst, w_rel)
+    } else {
+        (0usize, 0usize)
+    };
+
     let mut out = String::new();
 
     // Header
-    let header = format!(
-        "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}",
-        "", "pass", "fail", "unimpl", "unsupported", "compile-fail"
-    );
+    let header = if show_perf {
+        format!(
+            "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}  {:>col_sigma_inst$}  {:>col_vs_fast$}",
+            "", "pass", "fail", "unimpl", "unsupported", "compile-fail", "Σ inst", "vs fastest"
+        )
+    } else {
+        format!(
+            "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}",
+            "", "pass", "fail", "unimpl", "unsupported", "compile-fail"
+        )
+    };
     if with_color {
         out.push_str(&format!("{}{}{}\n", colors::DIM, header, colors::RESET));
     } else {
@@ -1626,9 +1682,33 @@ fn format_target_table(
             compile_fail_pad
         };
 
-        out.push_str(&format!(
-            "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}\n"
-        ));
+        if show_perf {
+            let inst_cell = if s.guest_instructions_total > 0 {
+                format!(
+                    "{} inst",
+                    format_decimal_with_commas(s.guest_instructions_total)
+                )
+            } else {
+                "—".to_string()
+            };
+            let inst_padded = format!("{:>col_sigma_inst$}", inst_cell);
+            let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
+            let rel_padded = format!("{:>col_vs_fast$}", rel_cell);
+
+            let inst_cell_out = if s.guest_instructions_total > 0 && with_color {
+                format!("{}{inst_padded}{}", colors::BLUE, colors::RESET)
+            } else {
+                inst_padded
+            };
+
+            out.push_str(&format!(
+                "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}  {inst_cell_out}  {rel_padded}\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}\n"
+            ));
+        }
     }
 
     out
@@ -1776,5 +1856,43 @@ mod format_summary_tests {
         cf.insert("wasm.q32".to_string(), true);
         let m = compile_fail_counts_for_table(&per_target, &cf);
         assert_eq!(m.get("wasm.q32").copied(), Some(1));
+    }
+
+    #[test]
+    fn format_inst_vs_fastest_one_is_baseline() {
+        assert_eq!(format_inst_vs_fastest(100, 100), "1.00×");
+        assert_eq!(format_inst_vs_fastest(0, 100), "—");
+    }
+
+    #[test]
+    fn format_inst_vs_fastest_ratio() {
+        assert_eq!(format_inst_vs_fastest(138, 100), "1.38×");
+    }
+
+    #[test]
+    fn format_target_table_includes_perf_when_any_guest_inst() {
+        let mut a = test_run::TestCaseStats::default();
+        a.passed = 3;
+        a.guest_instructions_total = 178;
+        let mut b = test_run::TestCaseStats::default();
+        b.passed = 3;
+        b.guest_instructions_total = 246;
+        let mut c = test_run::TestCaseStats::default();
+        c.passed = 3;
+        let mut per_target: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
+        per_target.insert("rv32.q32".to_string(), a);
+        per_target.insert("rv32lp.q32".to_string(), b);
+        per_target.insert("wasm.q32".to_string(), c);
+        let cf: BTreeMap<String, usize> = BTreeMap::new();
+        let table = format_target_table(&per_target, &cf);
+        assert!(table.contains("Σ inst"), "expected Σ inst column: {table}");
+        assert!(
+            table.contains("vs fastest"),
+            "expected vs fastest column: {table}"
+        );
+        assert!(table.contains("178 inst"));
+        assert!(table.contains("246 inst"));
+        assert!(table.contains("1.00×"));
+        assert!(table.contains("1.38×"));
     }
 }
