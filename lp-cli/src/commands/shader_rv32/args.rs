@@ -10,4 +10,9 @@ pub struct ShaderRv32Args {
     pub hex: bool,
     /// Print register allocation trace to stderr (linear scan / liveness).
     pub alloc_trace: bool,
+    /// `linear` or `fast`.
+    pub pipeline: String,
+    pub show_vinst: bool,
+    pub show_physinst: bool,
+    pub disassemble: bool,
 }

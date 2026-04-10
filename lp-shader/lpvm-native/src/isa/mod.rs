@@ -1,6 +1,7 @@
 //! ISA abstraction (one backend per target family).
 
 pub mod rv32;
+pub mod rv32fa;
 
 use alloc::string::String;
 use alloc::vec::Vec;

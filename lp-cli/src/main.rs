@@ -99,6 +99,18 @@ enum Cli {
         /// Print register allocation trace to stderr (off by default)
         #[arg(long)]
         alloc_trace: bool,
+        /// Codegen pipeline: `linear` (default) or `fast` (straight-line PhysInst fastalloc).
+        #[arg(long, default_value = "linear")]
+        pipeline: String,
+        /// With `--pipeline fast`, print VInst listing to stderr.
+        #[arg(long)]
+        show_vinst: bool,
+        /// With `--pipeline fast`, print PhysInst listing to stderr.
+        #[arg(long)]
+        show_physinst: bool,
+        /// With `--pipeline fast`, print raw instruction disassembly to stderr.
+        #[arg(long)]
+        disassemble: bool,
     },
 }
 
@@ -145,12 +157,20 @@ fn main() -> Result<()> {
             float_mode,
             hex,
             alloc_trace,
+            pipeline,
+            show_vinst,
+            show_physinst,
+            disassemble,
         } => shader_rv32::handle_shader_rv32(shader_rv32::ShaderRv32Args {
             path,
             output,
             float_mode,
             hex,
             alloc_trace,
+            pipeline,
+            show_vinst,
+            show_physinst,
+            disassemble,
         }),
     }
 }
