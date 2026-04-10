@@ -1,0 +1,24 @@
+➜  lightplayer-native git:(feature/native) ✗ scripts/glsl-filetests.sh lpvm/native/perf -t rv32,rv32lp
+
+Running 7 test file(s)...
+
+✓  3/ 3   rv32.q32  lpvm/native/perf/caller-save-pressure.glsl (85 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/caller-save-pressure.glsl (252 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/live-range-interference.glsl (208 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/live-range-interference.glsl (684 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/mat4-reg-pressure.glsl (753 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/mat4-reg-pressure.glsl (1,979 inst)
+✓  5/ 5   rv32.q32  lpvm/native/perf/nested-call-overhead.glsl (244 inst)
+✓  5/ 5 rv32lp.q32  lpvm/native/perf/nested-call-overhead.glsl (568 inst)
+✓  2/ 2   rv32.q32  lpvm/native/perf/spill-density.glsl (303 inst)
+✓  2/ 2 rv32lp.q32  lpvm/native/perf/spill-density.glsl (1,072 inst)
+✓  3/ 3   rv32.q32  lpvm/native/perf/stack-args-incoming.glsl (178 inst)
+✓  3/ 3 rv32lp.q32  lpvm/native/perf/stack-args-incoming.glsl (246 inst)
+✓  2/ 2   rv32.q32  lpvm/native/perf/stack-args-outgoing.glsl (163 inst)
+✓  2/ 2 rv32lp.q32  lpvm/native/perf/stack-args-outgoing.glsl (238 inst)
+
+                  pass    fail   unimpl  unsupported  compile-fail  total inst  vs fastest
+      rv32.q32      21       0        0            0             0  1,934 inst       1.00×
+    rv32lp.q32      21       0        0            0             0  5,039 inst       2.61×
+
+42/42 tests passed, 7/7 files passed, 168ms
