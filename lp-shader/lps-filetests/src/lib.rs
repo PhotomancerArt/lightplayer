@@ -1490,6 +1490,21 @@ fn format_inst_vs_fastest(total: u64, fastest: u64) -> String {
     }
 }
 
+/// Color for summary perf columns: fastest = green, within 20% = yellow, else red.
+fn perf_summary_color(total: u64, fastest: u64) -> Option<&'static str> {
+    if total == 0 || fastest == 0 {
+        return None;
+    }
+    let ratio = total as f64 / fastest as f64;
+    if ratio <= 1.0005 {
+        Some(colors::GREEN)
+    } else if ratio <= 1.2 {
+        Some(colors::YELLOW)
+    } else {
+        Some(colors::RED)
+    }
+}
+
 /// Format per-file test counts with expected-fail information.
 fn format_file_counts(
     stats: &test_run::TestCaseStats,
@@ -1695,14 +1710,28 @@ fn format_target_table(
             let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
             let rel_padded = format!("{:>col_vs_fast$}", rel_cell);
 
-            let inst_cell_out = if s.guest_instructions_total > 0 && with_color {
-                format!("{}{inst_padded}{}", colors::BLUE, colors::RESET)
+            let color = perf_summary_color(s.guest_instructions_total, fastest);
+            let inst_cell_out = if with_color {
+                if let Some(c) = color {
+                    format!("{}{inst_padded}{}", c, colors::RESET)
+                } else {
+                    inst_padded
+                }
             } else {
                 inst_padded
             };
+            let rel_cell_out = if with_color {
+                if let Some(c) = color {
+                    format!("{}{rel_padded}{}", c, colors::RESET)
+                } else {
+                    rel_padded
+                }
+            } else {
+                rel_padded
+            };
 
             out.push_str(&format!(
-                "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}  {inst_cell_out}  {rel_padded}\n"
+                "{name:>w_name$}  {pass_cell}  {fail_cell}  {unimpl_cell}  {unsupported_cell}  {compile_fail_cell}  {inst_cell_out}  {rel_cell_out}\n"
             ));
         } else {
             out.push_str(&format!(
@@ -1867,6 +1896,15 @@ mod format_summary_tests {
     #[test]
     fn format_inst_vs_fastest_ratio() {
         assert_eq!(format_inst_vs_fastest(138, 100), "1.38×");
+    }
+
+    #[test]
+    fn perf_summary_color_tiers() {
+        assert_eq!(perf_summary_color(0, 100), None);
+        assert_eq!(perf_summary_color(100, 100), Some(colors::GREEN));
+        assert_eq!(perf_summary_color(100, 0), None);
+        assert_eq!(perf_summary_color(120, 100), Some(colors::YELLOW));
+        assert_eq!(perf_summary_color(121, 100), Some(colors::RED));
     }
 
     #[test]
