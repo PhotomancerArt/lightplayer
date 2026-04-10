@@ -66,12 +66,20 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 /// Map `@lpir::*` import name + argument count to a Q32 builtin.
 pub fn lpir_q32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
     match (name, arg_count) {
+        ("fabs", 1) => Some(BuiltinId::LpLpirFabsQ32),
         ("fadd", 2) => Some(BuiltinId::LpLpirFaddQ32),
+        ("fceil", 1) => Some(BuiltinId::LpLpirFceilQ32),
         ("fdiv", 2) => Some(BuiltinId::LpLpirFdivQ32),
+        ("ffloor", 1) => Some(BuiltinId::LpLpirFfloorQ32),
+        ("fmax", 2) => Some(BuiltinId::LpLpirFmaxQ32),
+        ("fmin", 2) => Some(BuiltinId::LpLpirFminQ32),
         ("fmul", 2) => Some(BuiltinId::LpLpirFmulQ32),
         ("fnearest", 1) => Some(BuiltinId::LpLpirFnearestQ32),
         ("sqrt", 1) => Some(BuiltinId::LpLpirFsqrtQ32),
         ("fsub", 2) => Some(BuiltinId::LpLpirFsubQ32),
+        ("ftoi_sat_s", 1) => Some(BuiltinId::LpLpirFtoiSatSQ32),
+        ("ftoi_sat_u", 1) => Some(BuiltinId::LpLpirFtoiSatUQ32),
+        ("ftrunc", 1) => Some(BuiltinId::LpLpirFtruncQ32),
         ("itof_s", 1) => Some(BuiltinId::LpLpirItofSQ32),
         ("itof_u", 1) => Some(BuiltinId::LpLpirItofUQ32),
         _ => None,

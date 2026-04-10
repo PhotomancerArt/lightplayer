@@ -104,10 +104,17 @@ use lps_builtins::builtins::lpfx::{
 };
 use lps_builtins::builtins::lpir::fadd_q32::__lp_lpir_fadd_q32;
 use lps_builtins::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32;
+use lps_builtins::builtins::lpir::float_misc_q32::{
+    __lp_lpir_fabs_q32, __lp_lpir_fceil_q32, __lp_lpir_ffloor_q32, __lp_lpir_fmax_q32,
+    __lp_lpir_fmin_q32, __lp_lpir_ftrunc_q32,
+};
 use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 use lps_builtins::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32;
 use lps_builtins::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32;
 use lps_builtins::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32;
+use lps_builtins::builtins::lpir::ftoi_sat_q32::{
+    __lp_lpir_ftoi_sat_s_q32, __lp_lpir_ftoi_sat_u_q32,
+};
 use lps_builtins::builtins::lpir::itof_s_q32::__lp_lpir_itof_s_q32;
 use lps_builtins::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32;
 use lps_builtins::builtins::vm::get_fuel_q32::__lp_vm_get_fuel_q32;
@@ -141,12 +148,20 @@ pub fn ensure_builtins_referenced() {
         let __lps_sinh_q32_fn: extern "C" fn(i32) -> i32 = __lps_sinh_q32;
         let __lps_tan_q32_fn: extern "C" fn(i32) -> i32 = __lps_tan_q32;
         let __lps_tanh_q32_fn: extern "C" fn(i32) -> i32 = __lps_tanh_q32;
+        let _lpir_fabs_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fabs_q32;
         let _lpir_fadd_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fadd_q32;
+        let _lpir_fceil_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fceil_q32;
         let _lpir_fdiv_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fdiv_q32;
+        let _lpir_ffloor_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ffloor_q32;
+        let _lpir_fmax_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmax_q32;
+        let _lpir_fmin_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmin_q32;
         let _lpir_fmul_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fmul_q32;
         let _lpir_fnearest_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fnearest_q32;
         let _lpir_fsqrt_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_fsqrt_q32;
         let _lpir_fsub_q32_fn: extern "C" fn(i32, i32) -> i32 = __lp_lpir_fsub_q32;
+        let _lpir_ftoi_sat_s_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftoi_sat_s_q32;
+        let _lpir_ftoi_sat_u_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftoi_sat_u_q32;
+        let _lpir_ftrunc_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_ftrunc_q32;
         let _lpir_itof_s_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_itof_s_q32;
         let _lpir_itof_u_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpir_itof_u_q32;
         let _lpfx_fbm2_f32_fn: extern "C" fn(f32, f32, i32, u32) -> f32 = __lp_lpfx_fbm2_f32;
@@ -291,12 +306,20 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&__lps_sinh_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_tan_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&__lps_tanh_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fabs_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fadd_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fceil_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fdiv_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_ffloor_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fmax_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_fmin_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fmul_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fnearest_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fsqrt_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_fsub_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_ftoi_sat_s_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_ftoi_sat_u_q32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpir_ftrunc_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_itof_s_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpir_itof_u_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfx_fbm2_f32_fn as *const _);

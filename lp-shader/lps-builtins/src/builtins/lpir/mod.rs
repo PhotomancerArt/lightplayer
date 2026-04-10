@@ -10,9 +10,11 @@
 
 pub mod fadd_q32;
 pub mod fdiv_q32;
+pub mod float_misc_q32;
 pub mod fmul_q32;
 pub mod fnearest_q32;
 pub mod fsqrt_q32;
 pub mod fsub_q32;
+pub mod ftoi_sat_q32;
 pub mod itof_s_q32;
 pub mod itof_u_q32;

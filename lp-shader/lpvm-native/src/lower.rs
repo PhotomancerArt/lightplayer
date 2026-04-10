@@ -383,12 +383,116 @@ pub fn lower_op(
             })
         }
 
+        Op::Fsqrt { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fsqrt_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Fnearest { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fnearest_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Fabs { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fabs_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Fmin { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fmin_q32"),
+            },
+            args: alloc::vec![*lhs, *rhs],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Fmax { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fmax_q32"),
+            },
+            args: alloc::vec![*lhs, *rhs],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Ffloor { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_ffloor_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Fceil { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_fceil_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::Ftrunc { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_ftrunc_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::FtoiSatS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_ftoi_sat_s_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::FtoiSatU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+            target: SymbolRef {
+                name: String::from("__lp_lpir_ftoi_sat_u_q32"),
+            },
+            args: alloc::vec![*src],
+            rets: alloc::vec![*dst],
+            callee_uses_sret: false,
+            src_op,
+        }),
+        Op::FfromI32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov32 {
+            dst: *dst,
+            src: *src,
+            src_op,
+        }),
+
         Op::Fadd { .. }
         | Op::Fsub { .. }
         | Op::Fmul { .. }
         | Op::Fdiv { .. }
         | Op::Fneg { .. }
         | Op::FconstF32 { .. }
+        | Op::Fsqrt { .. }
+        | Op::Fnearest { .. }
+        | Op::Fabs { .. }
+        | Op::Fmin { .. }
+        | Op::Fmax { .. }
+        | Op::Ffloor { .. }
+        | Op::Fceil { .. }
+        | Op::Ftrunc { .. }
         | Op::Feq { .. }
         | Op::Fne { .. }
         | Op::Flt { .. }
@@ -396,7 +500,10 @@ pub fn lower_op(
         | Op::Fgt { .. }
         | Op::Fge { .. }
         | Op::ItofS { .. }
-        | Op::ItofU { .. } => Err(LowerError::UnsupportedOp {
+        | Op::ItofU { .. }
+        | Op::FtoiSatS { .. }
+        | Op::FtoiSatU { .. }
+        | Op::FfromI32Bits { .. } => Err(LowerError::UnsupportedOp {
             description: String::from("float op requires Q32 mode (F32 not supported on rv32)"),
         }),
 
@@ -921,6 +1028,70 @@ mod tests {
             }
             other => panic!("expected Call, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lower_q32_fsqrt_to_call() {
+        let op = Op::Fsqrt {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
+            VInst::Call {
+                target,
+                args,
+                rets,
+                callee_uses_sret,
+                src_op,
+            } => {
+                assert_eq!(target.name, "__lp_lpir_fsqrt_q32");
+                assert_eq!(args, vec![v(0)]);
+                assert_eq!(rets, vec![v(1)]);
+                assert!(!callee_uses_sret);
+                assert_eq!(src_op, Some(0));
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_q32_ffloor_to_call() {
+        let op = Op::Ffloor {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        match lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
+            VInst::Call {
+                target, args, rets, ..
+            } => {
+                assert_eq!(target.name, "__lp_lpir_ffloor_q32");
+                assert_eq!(args, vec![v(0)]);
+                assert_eq!(rets, vec![v(1)]);
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_q32_ffrom_i32_bits_to_mov32() {
+        let op = Op::FfromI32Bits {
+            dst: v(1),
+            src: v(0),
+        };
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        assert!(matches!(
+            lower_op(&op, FloatMode::Q32, Some(2), &f, &ir, &abi).expect("ok"),
+            VInst::Mov32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: Some(2),
+            }
+        ));
     }
 
     #[test]

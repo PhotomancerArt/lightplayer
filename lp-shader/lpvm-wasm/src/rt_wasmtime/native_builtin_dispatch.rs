@@ -956,6 +956,12 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFabsQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fabs_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFaddQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
@@ -963,10 +969,36 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFceilQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fceil_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFdivQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let r = lps_builtins::builtins::lpir::fdiv_q32::__lp_lpir_fdiv_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFfloorQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_ffloor_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFmaxQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fmax_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFminQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let p1 = params[1].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fmin_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
@@ -993,6 +1025,24 @@ pub(super) fn dispatch_native_builtin(
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let r = lps_builtins::builtins::lpir::fsub_q32::__lp_lpir_fsub_q32(p0, p1);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoiSatSQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoiSatUQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::ftoi_sat_q32::__lp_lpir_ftoi_sat_u_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtruncQ32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_ftrunc_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }

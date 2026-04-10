@@ -41,8 +41,14 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpGlslSinhQ32
         | BuiltinId::LpGlslTanQ32
         | BuiltinId::LpGlslTanhQ32
+        | BuiltinId::LpLpirFabsQ32
+        | BuiltinId::LpLpirFceilQ32
+        | BuiltinId::LpLpirFfloorQ32
         | BuiltinId::LpLpirFnearestQ32
         | BuiltinId::LpLpirFsqrtQ32
+        | BuiltinId::LpLpirFtoiSatSQ32
+        | BuiltinId::LpLpirFtoiSatUQ32
+        | BuiltinId::LpLpirFtruncQ32
         | BuiltinId::LpLpirItofSQ32
         | BuiltinId::LpLpirItofUQ32
         | BuiltinId::LpLpfxSaturateQ32
@@ -57,6 +63,8 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpGlslPowQ32
         | BuiltinId::LpLpirFaddQ32
         | BuiltinId::LpLpirFdivQ32
+        | BuiltinId::LpLpirFmaxQ32
+        | BuiltinId::LpLpirFminQ32
         | BuiltinId::LpLpirFmulQ32
         | BuiltinId::LpLpirFsubQ32
         | BuiltinId::LpLpfxGnoise1Q32
@@ -331,7 +339,8 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         lpfx::hash,
         lpfx::math,
         lpir::{
-            fadd_q32, fdiv_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32, itof_s_q32, itof_u_q32,
+            fadd_q32, fdiv_q32, float_misc_q32, fmul_q32, fnearest_q32, fsqrt_q32, fsub_q32,
+            ftoi_sat_q32, itof_s_q32, itof_u_q32,
         },
         vm::get_fuel_q32,
     };
@@ -359,12 +368,20 @@ pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpGlslSinhQ32 => sinh_q32::__lps_sinh_q32 as *const u8,
         BuiltinId::LpGlslTanQ32 => tan_q32::__lps_tan_q32 as *const u8,
         BuiltinId::LpGlslTanhQ32 => tanh_q32::__lps_tanh_q32 as *const u8,
+        BuiltinId::LpLpirFabsQ32 => float_misc_q32::__lp_lpir_fabs_q32 as *const u8,
         BuiltinId::LpLpirFaddQ32 => fadd_q32::__lp_lpir_fadd_q32 as *const u8,
+        BuiltinId::LpLpirFceilQ32 => float_misc_q32::__lp_lpir_fceil_q32 as *const u8,
         BuiltinId::LpLpirFdivQ32 => fdiv_q32::__lp_lpir_fdiv_q32 as *const u8,
+        BuiltinId::LpLpirFfloorQ32 => float_misc_q32::__lp_lpir_ffloor_q32 as *const u8,
+        BuiltinId::LpLpirFmaxQ32 => float_misc_q32::__lp_lpir_fmax_q32 as *const u8,
+        BuiltinId::LpLpirFminQ32 => float_misc_q32::__lp_lpir_fmin_q32 as *const u8,
         BuiltinId::LpLpirFmulQ32 => fmul_q32::__lp_lpir_fmul_q32 as *const u8,
         BuiltinId::LpLpirFnearestQ32 => fnearest_q32::__lp_lpir_fnearest_q32 as *const u8,
         BuiltinId::LpLpirFsqrtQ32 => fsqrt_q32::__lp_lpir_fsqrt_q32 as *const u8,
         BuiltinId::LpLpirFsubQ32 => fsub_q32::__lp_lpir_fsub_q32 as *const u8,
+        BuiltinId::LpLpirFtoiSatSQ32 => ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32 as *const u8,
+        BuiltinId::LpLpirFtoiSatUQ32 => ftoi_sat_q32::__lp_lpir_ftoi_sat_u_q32 as *const u8,
+        BuiltinId::LpLpirFtruncQ32 => float_misc_q32::__lp_lpir_ftrunc_q32 as *const u8,
         BuiltinId::LpLpirItofSQ32 => itof_s_q32::__lp_lpir_itof_s_q32 as *const u8,
         BuiltinId::LpLpirItofUQ32 => itof_u_q32::__lp_lpir_itof_u_q32 as *const u8,
         BuiltinId::LpLpfxFbm2F32 => generative::fbm::fbm2_f32::__lp_lpfx_fbm2_f32 as *const u8,
