@@ -4,11 +4,12 @@
 
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::string::String;
 use alloc::sync::Arc;
 
 use lp_shared::Texture;
-use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
-use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine, NativeJitInstance};
+use lpvm::{LpvmEngine, LpvmModule};
+use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitDirectCall, NativeJitEngine, NativeJitInstance};
 
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpShader, ShaderCompileOptions};
@@ -66,11 +67,7 @@ impl LpGraphics for NativeJitGraphics {
                 message: format!("{e}"),
             })?;
 
-        let has_render = module
-            .signatures()
-            .functions
-            .iter()
-            .any(|f| f.name == "render");
+        let direct_call = module.direct_call("render");
 
         let instance = module
             .instantiate()
@@ -82,7 +79,7 @@ impl LpGraphics for NativeJitGraphics {
 
         Ok(Box::new(NativeJitShader {
             instance,
-            has_render,
+            direct_call,
         }))
     }
 
@@ -93,13 +90,17 @@ impl LpGraphics for NativeJitGraphics {
 
 struct NativeJitShader {
     instance: NativeJitInstance,
-    has_render: bool,
+    direct_call: Option<NativeJitDirectCall>,
 }
 
 impl LpShader for NativeJitShader {
     fn render(&mut self, texture: &mut Texture, time: f32) -> Result<(), crate::error::Error> {
-        render_native_jit(
+        let dc = self.direct_call.as_ref().ok_or_else(|| crate::error::Error::Other {
+            message: String::from("Shader has no render entry point"),
+        })?;
+        render_native_jit_direct(
             &mut self.instance,
+            dc,
             texture.width(),
             texture.height(),
             time,
@@ -108,12 +109,13 @@ impl LpShader for NativeJitShader {
     }
 
     fn has_render(&self) -> bool {
-        self.has_render
+        self.direct_call.is_some()
     }
 }
 
-fn render_native_jit(
+fn render_native_jit_direct(
     instance: &mut NativeJitInstance,
+    dc: &NativeJitDirectCall,
     width: u32,
     height: u32,
     time: f32,
@@ -122,6 +124,17 @@ fn render_native_jit(
     const Q32_SCALE: i32 = 65536;
     let time_q32 = (time * 65536.0 + 0.5) as i32;
     let output_size_q32 = [(width as i32) * Q32_SCALE, (height as i32) * Q32_SCALE];
+    
+    let clamp_q32 = |v: i32| -> i32 {
+        if v < 0 {
+            0
+        } else if v > Q32_SCALE {
+            Q32_SCALE
+        } else {
+            v
+        }
+    };
+    
     for y in 0..height {
         for x in 0..width {
             let frag_coord_q32 = [(x as i32) * Q32_SCALE, (y as i32) * Q32_SCALE];
@@ -132,31 +145,14 @@ fn render_native_jit(
                 output_size_q32[1],
                 time_q32,
             ];
-            let rgba_q32 =
-                instance
-                    .call_q32("render", &args)
-                    .map_err(|e| crate::error::Error::Other {
-                        message: format!("Shader native JIT call failed: {e}"),
-                    })?;
-
-            let clamp_q32 = |v: i32| -> i32 {
-                if v < 0 {
-                    0
-                } else if v > Q32_SCALE {
-                    Q32_SCALE
-                } else {
-                    v
-                }
-            };
-
-            if rgba_q32.len() < 4 {
-                return Err(crate::error::Error::Other {
-                    message: format!(
-                        "expected 4 return words from render, got {}",
-                        rgba_q32.len()
-                    ),
-                });
-            }
+            
+            // Stack-allocated return buffer (no heap allocation!)
+            let mut rgba_q32 = [0i32; 4];
+            instance
+                .call_direct(dc, &args, &mut rgba_q32)
+                .map_err(|e| crate::error::Error::Other {
+                    message: format!("Shader native JIT call failed: {e}"),
+                })?;
 
             let r = ((clamp_q32(rgba_q32[0]) as i64 * 65535) / Q32_SCALE as i64) as u16;
             let g = ((clamp_q32(rgba_q32[1]) as i64 * 65535) / Q32_SCALE as i64) as u16;

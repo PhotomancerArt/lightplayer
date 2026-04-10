@@ -22,6 +22,18 @@ pub(crate) struct NativeJitModuleInner {
     pub options: NativeCompileOptions,
 }
 
+/// Cached function handle for fast calls (like cranelift's `DirectCall`).
+///
+/// Created once at compile time via [`NativeJitModule::direct_call`],
+/// then reused for zero-overhead per-pixel calls.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeJitDirectCall {
+    pub(crate) entry_offset: usize,
+    pub(crate) arg_count: usize,
+    pub(crate) ret_count: usize,
+    pub(crate) is_sret: bool,
+}
+
 /// JIT-compiled module (immutable after [`NativeJitEngine::compile`]).
 #[derive(Clone)]
 pub struct NativeJitModule {
@@ -35,6 +47,33 @@ impl NativeJitModule {
 
     pub(crate) fn entry_offset(&self, name: &str) -> Option<usize> {
         self.inner.entry_offsets.get(name).copied()
+    }
+
+    /// Create a cached function handle for fast direct calls.
+    ///
+    /// This resolves the function index, entry offset, and ABI info at compile time,
+    /// eliminating per-call string lookups and metadata searches.
+    pub fn direct_call(&self, name: &str) -> Option<NativeJitDirectCall> {
+        let entry_offset = self.inner.entry_offsets.get(name).copied()?;
+        
+        let ir_func_idx = self.inner.ir.functions
+            .iter()
+            .position(|f| f.name == name)?;
+        let ir_func = &self.inner.ir.functions[ir_func_idx];
+        
+        let gfn = self.inner.meta.functions
+            .iter()
+            .find(|f| f.name == name)?;
+        
+        let slots = ir_func.total_param_slots() as usize;
+        let func_abi = crate::isa::rv32::abi::func_abi_rv32(gfn, slots);
+        
+        Some(NativeJitDirectCall {
+            entry_offset,
+            arg_count: ir_func.param_count as usize,
+            ret_count: ir_func.return_types.len(),
+            is_sret: func_abi.is_sret(),
+        })
     }
 }
 
