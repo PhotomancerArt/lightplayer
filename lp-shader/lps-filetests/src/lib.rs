@@ -1619,7 +1619,7 @@ fn format_target_table(
     let fastest = fastest_inst.unwrap_or(0);
 
     let (col_sigma_inst, col_vs_fast) = if show_perf {
-        let mut w_inst = "Σ inst".len();
+        let mut w_inst = "total inst".len();
         let mut w_rel = "vs fastest".len();
         for s in per_target.values() {
             let inst_cell = if s.guest_instructions_total > 0 {
@@ -1645,7 +1645,7 @@ fn format_target_table(
     let header = if show_perf {
         format!(
             "{:>w_name$}  {:>col_pass$}  {:>col_fail$}  {:>col_unimpl$}  {:>col_unsupported$}  {:>col_compile_fail$}  {:>col_sigma_inst$}  {:>col_vs_fast$}",
-            "", "pass", "fail", "unimpl", "unsupported", "compile-fail", "Σ inst", "vs fastest"
+            "", "pass", "fail", "unimpl", "unsupported", "compile-fail", "total inst", "vs fastest"
         )
     } else {
         format!(
@@ -1923,7 +1923,10 @@ mod format_summary_tests {
         per_target.insert("wasm.q32".to_string(), c);
         let cf: BTreeMap<String, usize> = BTreeMap::new();
         let table = format_target_table(&per_target, &cf);
-        assert!(table.contains("Σ inst"), "expected Σ inst column: {table}");
+        assert!(
+            table.contains("total inst"),
+            "expected total inst column: {table}"
+        );
         assert!(
             table.contains("vs fastest"),
             "expected vs fastest column: {table}"
