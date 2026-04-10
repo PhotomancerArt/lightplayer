@@ -1,10 +1,14 @@
 //! Register allocation interface.
 
+mod adapter;
+mod fastalloc;
 mod greedy;
 mod linear_scan;
 
 use alloc::vec::Vec;
 
+pub use adapter::{AllocationAdapter, CallSaveEditParams};
+pub use fastalloc::FastAllocator;
 pub use greedy::GreedyAlloc;
 pub use linear_scan::LinearScan;
 
@@ -52,6 +56,48 @@ pub struct Allocation {
     pub rematerial_iconst: Vec<Option<i32>>,
     /// Incoming parameters passed on the stack: ABI byte offset from entry SP / callee `s0` after prologue.
     pub incoming_stack_params: Vec<(VReg, i32)>,
+}
+
+/// Where an operand's value lives for [`FastAllocation`] emission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperandHome {
+    Reg(PhysReg),
+    Spill(u32),
+    Remat(i32),
+}
+
+/// Position of an edit relative to a [`crate::vinst::VInst`] index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditPos {
+    Before(usize),
+    After(usize),
+}
+
+/// High-level move for the fast-alloc emitter to lower.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Location {
+    Reg(PhysReg),
+    Stack(u32),
+    Imm(i32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Move { from: Location, to: Location },
+}
+
+/// Per-instruction operand homes + explicit edits (fastalloc / M1 adapter output).
+#[derive(Debug, Clone)]
+pub struct FastAllocation {
+    /// `operand_homes[operand_base[i]..]` holds uses then defs for instruction `i`
+    /// (defs omitted for rematerialized [`crate::vinst::VInst::IConst32`] destinations).
+    pub operand_homes: Vec<OperandHome>,
+    pub operand_base: Vec<usize>,
+    pub edits: Vec<(EditPos, Edit)>,
+    pub spill_slot_count: u32,
+    pub incoming_stack_params: Vec<(VReg, i32)>,
+    /// Max caller-save slots needed around any call (fastalloc); adapter uses `0`.
+    pub max_call_preserve_slots: u32,
 }
 
 impl Allocation {

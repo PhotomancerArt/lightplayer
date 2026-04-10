@@ -27,12 +27,13 @@ pub mod rt_emu;
 pub mod rt_jit;
 
 pub use abi::ModuleAbi;
+pub use config::{REG_ALLOC_ALGORITHM, RegAllocAlgorithm};
 pub use debug_asm::compile_module_asm_text;
 pub use error::{LowerError, NativeError};
 pub use isa::{CodeBlob, IsaBackend, Rv32Backend};
 pub use lower::{LoopRegion, LoweredFunction, lower_op, lower_ops};
 pub use native_options::NativeCompileOptions;
-pub use regalloc::{Allocation, GreedyAlloc, LinearScan, RegAlloc, VRegInfo};
+pub use regalloc::{Allocation, FastAllocator, GreedyAlloc, LinearScan, RegAlloc, VRegInfo};
 pub use types::NativeType;
 pub use vinst::{IcmpCond, SymbolRef, VInst};
 

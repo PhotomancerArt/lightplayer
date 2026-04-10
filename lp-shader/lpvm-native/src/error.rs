@@ -50,6 +50,19 @@ pub enum NativeError {
     /// JIT relocation or symbol resolution failure (RISC-V firmware path).
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
+    /// Fastalloc does not support control flow in the lowered [`crate::vinst::VInst`] list yet.
+    FastallocUnsupportedControlFlow {
+        /// [`lpir::IrFunction::name`] being compiled.
+        ir_function_name: String,
+        /// Index into the flattened [`crate::vinst::VInst`] sequence for this function.
+        vinst_index: usize,
+        /// [`crate::vinst::VInst::mnemonic`] for the offending instruction.
+        mnemonic: &'static str,
+        /// LPIR body op index when the vinst carries `src_op` (matches debug line mapping).
+        lpir_op_index: Option<u32>,
+    },
+    /// Internal failure in fast register allocation (straight-line allocator).
+    FastallocInternal(&'static str),
 }
 
 impl fmt::Display for NativeError {
@@ -96,6 +109,22 @@ impl fmt::Display for NativeError {
             NativeError::Alloc(s) => write!(f, "allocation error: {s}"),
             #[cfg(target_arch = "riscv32")]
             NativeError::JitLink(s) => write!(f, "JIT link: {s}"),
+            NativeError::FastallocUnsupportedControlFlow {
+                ir_function_name,
+                vinst_index,
+                mnemonic,
+                lpir_op_index,
+            } => {
+                write!(
+                    f,
+                    "fast register allocation does not support control flow yet (function '{ir_function_name}', vinst[{vinst_index}]: {mnemonic})"
+                )?;
+                match lpir_op_index {
+                    Some(i) => write!(f, " (LPIR op index {i})"),
+                    None => write!(f, " (no LPIR op index on this vinst)"),
+                }
+            }
+            NativeError::FastallocInternal(msg) => write!(f, "fast register allocation: {msg}"),
         }
     }
 }

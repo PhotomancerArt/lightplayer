@@ -17,8 +17,12 @@ use super::inst::{
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
+use crate::config::{REG_ALLOC_ALGORITHM, RegAllocAlgorithm};
 use crate::error::{LowerError, NativeError};
-use crate::regalloc::{Allocation, GreedyAlloc, LinearScan, PhysReg};
+use crate::regalloc::{
+    Allocation, AllocationAdapter, CallSaveEditParams, Edit, EditPos, FastAllocation,
+    FastAllocator, GreedyAlloc, LinearScan, Location, OperandHome, PhysReg,
+};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
@@ -208,6 +212,112 @@ fn phys_homes_of_non_spilled(alloc: &Allocation, vregs: &[VReg]) -> u32 {
         }
     }
     out
+}
+
+/// Operand resolution for [`EmitContext::emit_vinst`] (legacy [`Allocation`] vs [`FastAllocation`]).
+pub(crate) trait OperandSource {
+    fn use_vreg_os(
+        &mut self,
+        ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError>;
+
+    fn def_vreg_os(
+        &mut self,
+        ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError>;
+
+    fn store_def_vreg_os(&mut self, ctx: &mut EmitContext, v: VReg, temp: PhysReg);
+}
+
+pub(crate) struct LegacyOperandSource<'a> {
+    pub alloc: &'a Allocation,
+}
+
+impl OperandSource for LegacyOperandSource<'_> {
+    fn use_vreg_os(
+        &mut self,
+        ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
+        ctx.use_vreg(self.alloc, v, temp)
+    }
+
+    fn def_vreg_os(
+        &mut self,
+        ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
+        ctx.def_vreg(self.alloc, v, temp)
+    }
+
+    fn store_def_vreg_os(&mut self, ctx: &mut EmitContext, v: VReg, temp: PhysReg) {
+        ctx.store_def_vreg(self.alloc, v, temp);
+    }
+}
+
+pub(crate) struct FastOperandSource<'a> {
+    pub fast: &'a FastAllocation,
+    pub idx: usize,
+    last_def: Option<OperandHome>,
+}
+
+impl OperandSource for FastOperandSource<'_> {
+    fn use_vreg_os(
+        &mut self,
+        ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
+        let h = *self
+            .fast
+            .operand_homes
+            .get(self.idx)
+            .ok_or_else(|| NativeError::UnassignedVReg(v.0))?;
+        self.idx += 1;
+        self.last_def = None;
+        match h {
+            OperandHome::Reg(p) => Ok(p),
+            OperandHome::Spill(s) => Ok(ctx.load_spill(s, temp)),
+            OperandHome::Remat(k) => {
+                let rd = temp as u32;
+                for w in iconst32_sequence(rd, k) {
+                    ctx.push_u32(w);
+                }
+                Ok(temp)
+            }
+        }
+    }
+
+    fn def_vreg_os(
+        &mut self,
+        _ctx: &mut EmitContext,
+        v: VReg,
+        temp: PhysReg,
+    ) -> Result<PhysReg, NativeError> {
+        let h = *self
+            .fast
+            .operand_homes
+            .get(self.idx)
+            .ok_or_else(|| NativeError::UnassignedVReg(v.0))?;
+        self.idx += 1;
+        self.last_def = Some(h);
+        match h {
+            OperandHome::Reg(p) => Ok(p),
+            OperandHome::Spill(_) | OperandHome::Remat(_) => Ok(temp),
+        }
+    }
+
+    fn store_def_vreg_os(&mut self, ctx: &mut EmitContext, _v: VReg, temp: PhysReg) {
+        if let Some(OperandHome::Spill(s)) = self.last_def.take() {
+            ctx.store_spill(s, temp);
+        }
+    }
 }
 
 impl EmitContext {
@@ -458,28 +568,32 @@ impl EmitContext {
     }
 
     /// Direct-return call: args in a0–a7, results in a0–a1.
-    fn emit_call_direct(
+    fn emit_call_direct<S: OperandSource>(
         &mut self,
-        alloc: &Allocation,
+        op_src: &mut S,
+        preserve_alloc: &Allocation,
         target: &SymbolRef,
         args: &[VReg],
         rets: &[VReg],
         caller_is_sret: bool,
         vinsts: &[VInst],
         pos: usize,
+        preserve_embedded: bool,
     ) -> Result<(), NativeError> {
-        self.emit_call_preserves_before(alloc, rets, caller_is_sret, vinsts, pos)?;
+        if preserve_embedded {
+            self.emit_call_preserves_before(preserve_alloc, rets, caller_is_sret, vinsts, pos)?;
+        }
         let reg_cap = ARG_REGS.len();
         let sp_hw = SP.hw as u32;
         for (i, a) in args.iter().enumerate().take(reg_cap) {
-            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let from = op_src.use_vreg_os(self, *a, Self::TEMP0)? as u32;
             let to = ARG_REGS[i].hw as u32;
             if from != to {
                 self.push_u32(encode_addi(to, from, 0));
             }
         }
         for (i, a) in args.iter().enumerate().skip(reg_cap) {
-            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let from = op_src.use_vreg_os(self, *a, Self::TEMP0)? as u32;
             let stk_off = ((i - reg_cap) * 4) as i32;
             self.push_u32(encode_sw(from, sp_hw, stk_off));
         }
@@ -495,29 +609,35 @@ impl EmitContext {
             if i >= RET_REGS.len() {
                 return Err(NativeError::TooManyReturns(i + 1));
             }
-            let dst = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
-            let src = RET_REGS[i].hw as u32;
-            if dst != src {
-                self.push_u32(encode_addi(dst, src, 0));
+            let dst = op_src.def_vreg_os(self, *r, Self::TEMP0)? as u32;
+            let ret_hw = RET_REGS[i].hw as u32;
+            if dst != ret_hw {
+                self.push_u32(encode_addi(dst, ret_hw, 0));
             }
-            self.store_def_vreg(alloc, *r, Self::TEMP0);
+            op_src.store_def_vreg_os(self, *r, Self::TEMP0);
         }
-        self.emit_call_preserves_after(alloc, rets, caller_is_sret, vinsts, pos)?;
+        if preserve_embedded {
+            self.emit_call_preserves_after(preserve_alloc, rets, caller_is_sret, vinsts, pos)?;
+        }
         Ok(())
     }
 
     /// Callee uses sret: pass buffer address in a0, args in a1–a7, load results from frame slot.
-    fn emit_call_sret(
+    fn emit_call_sret<S: OperandSource>(
         &mut self,
-        alloc: &Allocation,
+        op_src: &mut S,
+        preserve_alloc: &Allocation,
         target: &SymbolRef,
         args: &[VReg],
         rets: &[VReg],
         caller_is_sret: bool,
         vinsts: &[VInst],
         pos: usize,
+        preserve_embedded: bool,
     ) -> Result<(), NativeError> {
-        self.emit_call_preserves_before(alloc, rets, caller_is_sret, vinsts, pos)?;
+        if preserve_embedded {
+            self.emit_call_preserves_before(preserve_alloc, rets, caller_is_sret, vinsts, pos)?;
+        }
         let sret_off = self
             .frame
             .sret_slot_offset_from_fp()
@@ -528,14 +648,14 @@ impl EmitContext {
         let sp_hw = SP.hw as u32;
         self.push_u32(encode_addi(a0, s0, sret_off));
         for (i, a) in args.iter().enumerate().take(reg_cap) {
-            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let from = op_src.use_vreg_os(self, *a, Self::TEMP0)? as u32;
             let to = ARG_REGS[i + 1].hw as u32;
             if from != to {
                 self.push_u32(encode_addi(to, from, 0));
             }
         }
         for (i, a) in args.iter().enumerate().skip(reg_cap) {
-            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let from = op_src.use_vreg_os(self, *a, Self::TEMP0)? as u32;
             let stk_off = ((i - reg_cap) * 4) as i32;
             self.push_u32(encode_sw(from, sp_hw, stk_off));
         }
@@ -550,11 +670,13 @@ impl EmitContext {
         let base_off = sret_off;
         for (i, r) in rets.iter().enumerate() {
             let off = base_off + (i * 4) as i32;
-            let rd = self.def_vreg(alloc, *r, Self::TEMP0)? as u32;
+            let rd = op_src.def_vreg_os(self, *r, Self::TEMP0)? as u32;
             self.push_u32(encode_lw(rd, s0, off));
-            self.store_def_vreg(alloc, *r, Self::TEMP0);
+            op_src.store_def_vreg_os(self, *r, Self::TEMP0);
         }
-        self.emit_call_preserves_after(alloc, rets, caller_is_sret, vinsts, pos)?;
+        if preserve_embedded {
+            self.emit_call_preserves_after(preserve_alloc, rets, caller_is_sret, vinsts, pos)?;
+        }
         Ok(())
     }
 
@@ -615,17 +737,17 @@ impl EmitContext {
         Ok(())
     }
 
-    fn emit_icmp(
+    fn emit_icmp<S: OperandSource>(
         &mut self,
-        alloc: &Allocation,
+        src: &mut S,
         dst: VReg,
         lhs: VReg,
         rhs: VReg,
         cond: IcmpCond,
     ) -> Result<(), NativeError> {
-        let rs_l = self.use_vreg(alloc, lhs, Self::TEMP0)? as u32;
-        let rs_r = self.use_vreg(alloc, rhs, Self::TEMP1)? as u32;
-        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        let rs_l = src.use_vreg_os(self, lhs, Self::TEMP0)? as u32;
+        let rs_r = src.use_vreg_os(self, rhs, Self::TEMP1)? as u32;
+        let rd = src.def_vreg_os(self, dst, Self::TEMP0)? as u32;
         let scratch = Self::TEMP2 as u32;
 
         match cond {
@@ -667,20 +789,20 @@ impl EmitContext {
             }
         }
 
-        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        src.store_def_vreg_os(self, dst, Self::TEMP0);
         Ok(())
     }
 
     /// `dst = (src == imm) ? 1 : 0`
-    fn emit_ieq_imm(
+    fn emit_ieq_imm<S: OperandSource>(
         &mut self,
-        alloc: &Allocation,
+        src: &mut S,
         dst: VReg,
-        src: VReg,
+        src_v: VReg,
         imm: i32,
     ) -> Result<(), NativeError> {
-        let mut rs = self.use_vreg(alloc, src, Self::TEMP0)? as u32;
-        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        let mut rs = src.use_vreg_os(self, src_v, Self::TEMP0)? as u32;
+        let rd = src.def_vreg_os(self, dst, Self::TEMP0)? as u32;
         const IMM12: core::ops::RangeInclusive<i32> = -2048_i32..=2047_i32;
         if IMM12.contains(&imm) {
             let scratch = Self::TEMP2 as u32;
@@ -697,37 +819,89 @@ impl EmitContext {
             self.push_u32(encode_xor(Self::TEMP2 as u32, rs, Self::TEMP1 as u32));
             self.push_u32(encode_sltiu(rd, Self::TEMP2 as u32, 1));
         }
-        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        src.store_def_vreg_os(self, dst, Self::TEMP0);
         Ok(())
     }
 
-    fn emit_select32(
+    fn emit_select32<S: OperandSource>(
         &mut self,
-        alloc: &Allocation,
+        src: &mut S,
         dst: VReg,
         cond: VReg,
         if_true: VReg,
         if_false: VReg,
     ) -> Result<(), NativeError> {
-        let p_true = self.use_vreg(alloc, if_true, Self::TEMP0)? as u32;
-        let p_false = self.use_vreg(alloc, if_false, Self::TEMP1)? as u32;
-        let p_cond = self.use_vreg(alloc, cond, Self::TEMP2)? as u32;
+        let p_true = src.use_vreg_os(self, if_true, Self::TEMP0)? as u32;
+        let p_false = src.use_vreg_os(self, if_false, Self::TEMP1)? as u32;
+        let p_cond = src.use_vreg_os(self, cond, Self::TEMP2)? as u32;
 
         self.push_u32(encode_sub(Self::TEMP0 as u32, p_true, p_false));
         self.push_u32(encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, p_cond));
 
-        let rd = self.def_vreg(alloc, dst, Self::TEMP0)? as u32;
+        let rd = src.def_vreg_os(self, dst, Self::TEMP0)? as u32;
         self.push_u32(encode_add(rd, Self::TEMP0 as u32, p_false));
-        self.store_def_vreg(alloc, dst, Self::TEMP0);
+        src.store_def_vreg_os(self, dst, Self::TEMP0);
         Ok(())
     }
 
-    pub fn emit_vinst(
+    /// Emit explicit [`FastAllocation`] edits before or after instruction `pos`.
+    pub(crate) fn emit_fast_edits(
+        &mut self,
+        fast: &FastAllocation,
+        pos: usize,
+        before: bool,
+    ) -> Result<(), NativeError> {
+        for (ep, edit) in &fast.edits {
+            let want = match ep {
+                EditPos::Before(i) => before && *i == pos,
+                EditPos::After(i) => !before && *i == pos,
+            };
+            if !want {
+                continue;
+            }
+            self.emit_edit(*edit)?;
+        }
+        Ok(())
+    }
+
+    fn emit_edit(&mut self, edit: Edit) -> Result<(), NativeError> {
+        match edit {
+            Edit::Move { from, to } => match (from, to) {
+                (Location::Reg(s), Location::Reg(d)) => {
+                    if s != d {
+                        self.push_u32(encode_addi(d as u32, s as u32, 0));
+                    }
+                }
+                (Location::Reg(r), Location::Stack(slot)) => {
+                    let o = self.spill_fp_off(slot)?;
+                    self.push_u32(encode_sw(r as u32, S0.hw as u32, o));
+                }
+                (Location::Stack(slot), Location::Reg(r)) => {
+                    let o = self.spill_fp_off(slot)?;
+                    self.push_u32(encode_lw(r as u32, S0.hw as u32, o));
+                }
+                (Location::Imm(k), Location::Reg(r)) => {
+                    for w in iconst32_sequence(r as u32, k) {
+                        self.push_u32(w);
+                    }
+                }
+                _ => {
+                    return Err(NativeError::Lower(LowerError::UnsupportedOp {
+                        description: String::from("emit_edit: unsupported Move"),
+                    }));
+                }
+            },
+        }
+        Ok(())
+    }
+
+    pub(crate) fn emit_vinst<S: OperandSource>(
         &mut self,
         inst: &VInst,
         vinsts: &[VInst],
         pos: usize,
-        alloc: &Allocation,
+        src: &mut S,
+        meta_alloc: &Allocation,
         is_sret: bool,
     ) -> Result<(), NativeError> {
         self.current_src_op = inst.src_op();
@@ -736,125 +910,129 @@ impl EmitContext {
                 dst, src1, src2, ..
             } => {
                 // Use TEMP0 for src1, TEMP1 for src2 if spilled
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
                 // Result can go to TEMP0 if dst is spilled
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(crate::isa::rv32::inst::encode_add(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Sub32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_sub(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
-            VInst::Neg32 { dst, src, .. } => {
-                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+            VInst::Neg32 {
+                dst, src: src_v, ..
+            } => {
+                let rs = src.use_vreg_os(self, *src_v, Self::TEMP0)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 // Emit: sub rd, x0, rs (where x0=0 is the hardware zero register)
                 self.push_u32(encode_sub(rd, 0, rs));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Mul32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_mul(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::And32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_and(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Or32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_or(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Xor32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_xor(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
-            VInst::Bnot32 { dst, src, .. } => {
-                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+            VInst::Bnot32 {
+                dst, src: src_v, ..
+            } => {
+                let rs = src.use_vreg_os(self, *src_v, Self::TEMP0)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_xori(rd, rs, -1));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Shl32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_sll(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::ShrS32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_sra(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::ShrU32 {
                 dst, src1, src2, ..
             } => {
-                let rs1 = self.use_vreg(alloc, *src1, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *src2, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *src1, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *src2, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_srl(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::DivS32 { dst, lhs, rhs, .. } => {
-                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *lhs, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *rhs, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_div(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::DivU32 { dst, lhs, rhs, .. } => {
-                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *lhs, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *rhs, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_divu(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::RemS32 { dst, lhs, rhs, .. } => {
-                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *lhs, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *rhs, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_rem(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::RemU32 { dst, lhs, rhs, .. } => {
-                let rs1 = self.use_vreg(alloc, *lhs, Self::TEMP0)? as u32;
-                let rs2 = self.use_vreg(alloc, *rhs, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *lhs, Self::TEMP0)? as u32;
+                let rs2 = src.use_vreg_os(self, *rhs, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_remu(rd, rs1, rs2));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Icmp32 {
                 dst,
@@ -863,10 +1041,15 @@ impl EmitContext {
                 cond,
                 ..
             } => {
-                self.emit_icmp(alloc, *dst, *lhs, *rhs, *cond)?;
+                self.emit_icmp(src, *dst, *lhs, *rhs, *cond)?;
             }
-            VInst::IeqImm32 { dst, src, imm, .. } => {
-                self.emit_ieq_imm(alloc, *dst, *src, *imm)?;
+            VInst::IeqImm32 {
+                dst,
+                src: src_v,
+                imm,
+                ..
+            } => {
+                self.emit_ieq_imm(src, *dst, *src_v, *imm)?;
             }
             VInst::Select32 {
                 dst,
@@ -875,7 +1058,7 @@ impl EmitContext {
                 if_false,
                 ..
             } => {
-                self.emit_select32(alloc, *dst, *cond, *if_true, *if_false)?;
+                self.emit_select32(src, *dst, *cond, *if_true, *if_false)?;
             }
             VInst::Br { target, .. } => {
                 let instr_off = self.code.len();
@@ -900,7 +1083,7 @@ impl EmitContext {
                 invert,
                 ..
             } => {
-                let rs1 = self.use_vreg(alloc, *cond, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *cond, Self::TEMP0)? as u32;
                 let instr_off = self.code.len();
                 if let Some(tgt) = self.label_offset_get(*target) {
                     let imm = tgt as i32 - instr_off as i32;
@@ -924,40 +1107,45 @@ impl EmitContext {
                     });
                 }
             }
-            VInst::Mov32 { dst, src, .. } => {
-                let rs = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+            VInst::Mov32 {
+                dst, src: src_v, ..
+            } => {
+                let rs = src.use_vreg_os(self, *src_v, Self::TEMP0)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 if rd != rs {
                     self.push_u32(encode_addi(rd, rs, 0));
                 }
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Load32 {
                 dst, base, offset, ..
             } => {
                 // base must not use TEMP0 if dst will use TEMP0
                 // For simplicity: load base first (into TEMP1), then use TEMP0 for result
-                let rs1 = self.use_vreg(alloc, *base, Self::TEMP1)? as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *base, Self::TEMP1)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 self.push_u32(encode_lw(rd, rs1, *offset));
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::Store32 {
-                src, base, offset, ..
+                src: val_v,
+                base,
+                offset,
+                ..
             } => {
-                let rs2 = self.use_vreg(alloc, *src, Self::TEMP0)? as u32;
-                let rs1 = self.use_vreg(alloc, *base, Self::TEMP1)? as u32;
+                let rs2 = src.use_vreg_os(self, *val_v, Self::TEMP0)? as u32;
+                let rs1 = src.use_vreg_os(self, *base, Self::TEMP1)? as u32;
                 self.push_u32(encode_sw(rs2, rs1, *offset));
             }
             VInst::IConst32 { dst, val, .. } => {
-                if alloc.rematerial_iconst32(*dst).is_some() {
+                if meta_alloc.rematerial_iconst32(*dst).is_some() {
                     // No register/stack home; each use emits `iconst32_sequence`.
                 } else {
-                    let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                    let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                     for w in iconst32_sequence(rd, *val) {
                         self.push_u32(w);
                     }
-                    self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                    src.store_def_vreg_os(self, *dst, Self::TEMP0);
                 }
             }
             VInst::SlotAddr { dst, slot, .. } => {
@@ -966,7 +1154,7 @@ impl EmitContext {
                     .lpir_offset_from_sp(*slot)
                     .ok_or(NativeError::InvalidLpirSlot(*slot))?;
                 let sp_reg = SP.hw as u32;
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                let rd = src.def_vreg_os(self, *dst, Self::TEMP0)? as u32;
                 if (-2048..2048).contains(&off) {
                     self.push_u32(encode_addi(rd, sp_reg, off));
                 } else {
@@ -978,7 +1166,7 @@ impl EmitContext {
                     }
                     self.push_u32(encode_add(rd, sp_reg, scratch));
                 }
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
+                src.store_def_vreg_os(self, *dst, Self::TEMP0);
             }
             VInst::MemcpyWords {
                 dst_base,
@@ -989,8 +1177,8 @@ impl EmitContext {
                 let t_data = Self::TEMP0 as u32;
                 let p_src = Self::TEMP1 as u32;
                 let p_dst = Self::TEMP2 as u32;
-                let r_src = self.use_vreg(alloc, *src_base, Self::TEMP1)? as u32;
-                let r_dst = self.use_vreg(alloc, *dst_base, Self::TEMP2)? as u32;
+                let r_src = src.use_vreg_os(self, *src_base, Self::TEMP1)? as u32;
+                let r_dst = src.use_vreg_os(self, *dst_base, Self::TEMP2)? as u32;
                 if r_src != p_src {
                     self.push_u32(encode_addi(p_src, r_src, 0));
                 }
@@ -1024,25 +1212,30 @@ impl EmitContext {
                 callee_uses_sret,
                 ..
             } => {
+                let preserve_embedded = self.call_save.is_some();
                 if *callee_uses_sret {
                     self.emit_call_sret(
-                        alloc,
+                        src,
+                        meta_alloc,
                         target,
                         args.as_slice(),
                         rets.as_slice(),
                         is_sret,
                         vinsts,
                         pos,
+                        preserve_embedded,
                     )?;
                 } else {
                     self.emit_call_direct(
-                        alloc,
+                        src,
+                        meta_alloc,
                         target,
                         args.as_slice(),
                         rets.as_slice(),
                         is_sret,
                         vinsts,
                         pos,
+                        preserve_embedded,
                     )?;
                 }
             }
@@ -1053,19 +1246,19 @@ impl EmitContext {
                     // (since a0 may be clobbered during function execution)
                     let base_reg = S1.hw as u32; // s1
                     for (i, v) in vals.iter().enumerate() {
-                        let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
+                        let val_reg = src.use_vreg_os(self, *v, Self::TEMP0)? as u32;
                         let offset = (i * 4) as i32;
                         // Store each scalar to s1 + offset
-                        self.push_u32(encode_sw(src, base_reg, offset));
+                        self.push_u32(encode_sw(val_reg, base_reg, offset));
                     }
                     // Return value buffer address is already in a0 per ABI
                 } else {
                     // Direct return: move values to a0-a1
                     for (i, v) in vals.iter().enumerate() {
-                        let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
+                        let val_reg = src.use_vreg_os(self, *v, Self::TEMP0)? as u32;
                         let dst = RET_REGS[i].hw as u32;
-                        if src != dst {
-                            self.push_u32(encode_addi(dst, src, 0));
+                        if val_reg != dst {
+                            self.push_u32(encode_addi(dst, val_reg, 0));
                         }
                     }
                 }
@@ -1086,11 +1279,88 @@ fn allocate_for_emit(
     loop_regions: &[crate::lower::LoopRegion],
     alloc_trace: bool,
 ) -> Result<Allocation, NativeError> {
-    if crate::config::USE_LINEAR_SCAN_REGALLOC {
-        LinearScan::new().allocate_with_func_abi(func, vinsts, func_abi, loop_regions, alloc_trace)
-    } else {
-        let _ = alloc_trace;
-        GreedyAlloc::new().allocate_with_func_abi(func, vinsts, func_abi)
+    match REG_ALLOC_ALGORITHM {
+        RegAllocAlgorithm::LinearScan => LinearScan::new().allocate_with_func_abi(
+            func,
+            vinsts,
+            func_abi,
+            loop_regions,
+            alloc_trace,
+        ),
+        RegAllocAlgorithm::Greedy => {
+            let _ = alloc_trace;
+            GreedyAlloc::new().allocate_with_func_abi(func, vinsts, func_abi)
+        }
+        RegAllocAlgorithm::Fast => Err(NativeError::FastallocInternal(
+            "REG_ALLOC_ALGORITHM::Fast uses FastAllocator::allocate_with_func_abi from emit_function_bytes, not allocate_for_emit",
+        )),
+    }
+}
+
+/// Insert s1 spill/reload around each call (matches [`AllocationAdapter`] ordering) when fastalloc
+/// omitted them because `s1_slot` is only known after frame layout.
+fn inject_s1_edits_for_fastalloc_calls(
+    edits: &mut Vec<(EditPos, Edit)>,
+    vinsts: &[VInst],
+    s1_slot: u32,
+) {
+    let s1_hw = S1.hw;
+    // Insert from the last call upward so indices stay valid as the vec grows.
+    for pos in (0..vinsts.len()).rev() {
+        if !matches!(vinsts[pos], VInst::Call { .. }) {
+            continue;
+        }
+        let s1_before = (
+            EditPos::Before(pos),
+            Edit::Move {
+                from: Location::Reg(s1_hw),
+                to: Location::Stack(s1_slot),
+            },
+        );
+        let s1_after = (
+            EditPos::After(pos),
+            Edit::Move {
+                from: Location::Stack(s1_slot),
+                to: Location::Reg(s1_hw),
+            },
+        );
+        let before_insert = edits
+            .iter()
+            .position(|(ep, _)| matches!(ep, EditPos::Before(p) if *p == pos))
+            .unwrap_or_else(|| {
+                edits
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, (ep, _))| match ep {
+                        EditPos::Before(p) if *p > pos => Some(i),
+                        _ => None,
+                    })
+                    .unwrap_or(edits.len())
+            });
+        let after_insert = edits
+            .iter()
+            .enumerate()
+            .filter(|(_, (ep, _))| matches!(ep, EditPos::After(p) if *p == pos))
+            .map(|(i, _)| i)
+            .last()
+            .map(|i| i + 1)
+            .unwrap_or_else(|| {
+                edits
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, (ep, _))| match ep {
+                        EditPos::After(p) if *p > pos => Some(i),
+                        _ => None,
+                    })
+                    .unwrap_or(edits.len())
+            });
+        if after_insert >= before_insert {
+            edits.insert(after_insert, s1_after);
+            edits.insert(before_insert, s1_before);
+        } else {
+            edits.insert(before_insert, s1_before);
+            edits.insert(after_insert + 1, s1_after);
+        }
     }
 }
 
@@ -1103,7 +1373,7 @@ fn allocate_for_emit(
 /// * `fn_sig` - Surface signature (ABI classification, must match `func` parameter layout)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `debug_info` - Whether to include debug line information
-/// * `alloc_trace` - When [`crate::config::USE_LINEAR_SCAN_REGALLOC`] is true, print allocation trace to stderr
+/// * `alloc_trace` - When true and [`crate::config::REG_ALLOC_ALGORITHM`] is [`RegAllocAlgorithm::LinearScan`], print allocation trace to stderr
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
     ir: &lpir::IrModule,
@@ -1117,7 +1387,17 @@ pub fn emit_function_bytes(
     let vinsts = &lowered.vinsts;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
-    let alloc = allocate_for_emit(func, vinsts, &func_abi, &lowered.loop_regions, alloc_trace)?;
+    let (alloc, fast_from_walk) = match REG_ALLOC_ALGORITHM {
+        RegAllocAlgorithm::Fast => {
+            let (fast, alloc) =
+                FastAllocator::new().allocate_with_func_abi(func, vinsts, &func_abi)?;
+            (alloc, Some(fast))
+        }
+        RegAllocAlgorithm::LinearScan | RegAllocAlgorithm::Greedy => (
+            allocate_for_emit(func, vinsts, &func_abi, &lowered.loop_regions, alloc_trace)?,
+            None,
+        ),
+    };
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
     let is_sret = func_abi.is_sret();
 
@@ -1131,6 +1411,16 @@ pub fn emit_function_bytes(
             }
         }
     }
+    if let Some(ref f) = fast_from_walk {
+        for h in &f.operand_homes {
+            if let OperandHome::Reg(p) = h {
+                let pr = PReg::int(*p);
+                if callee_saved_int().contains(pr) {
+                    used_callee_saved.insert(pr);
+                }
+            }
+        }
+    }
     // For sret, s1 is always "used" (reserved for preservation)
     if is_sret {
         used_callee_saved.insert(S1);
@@ -1140,7 +1430,12 @@ pub fn emit_function_bytes(
     let has_call = vinsts.iter().any(|v| v.is_call());
     let clobber_hw = call_clobber_hw(&func_abi);
     let max_call_saves = if has_call {
-        max_regs_saved_across_calls(vinsts, &alloc, clobber_hw)
+        let m = max_regs_saved_across_calls(vinsts, &alloc, clobber_hw);
+        if let Some(ref f) = fast_from_walk {
+            m.max(f.max_call_preserve_slots)
+        } else {
+            m
+        }
     } else {
         0
     };
@@ -1180,11 +1475,47 @@ pub fn emit_function_bytes(
         None
     };
 
-    let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
-    ctx.emit_prologue(is_sret, &alloc)?;
-    for (pos, v) in vinsts.iter().enumerate() {
-        ctx.emit_vinst(v, vinsts, pos, &alloc, is_sret)?;
-    }
+    let call_save_edit_params = call_save.as_ref().map(|layout| CallSaveEditParams {
+        slot_base: layout.slot_base,
+        clobber_hw: layout.clobber_hw,
+        s1_slot: layout.s1_slot,
+        caller_is_sret: is_sret,
+    });
+
+    let mut ctx = if crate::config::USE_FAST_ALLOC_EMIT {
+        let fast = if let Some(mut f) = fast_from_walk {
+            if is_sret && has_call {
+                if let Some(ss) = s1_slot {
+                    inject_s1_edits_for_fastalloc_calls(&mut f.edits, vinsts, ss);
+                }
+            }
+            f
+        } else {
+            AllocationAdapter::adapt(&alloc, vinsts, call_save_edit_params)
+        };
+        let mut ctx = EmitContext::with_frame(frame, debug_info, None);
+        ctx.emit_prologue(is_sret, &alloc)?;
+        for (pos, v) in vinsts.iter().enumerate() {
+            ctx.emit_fast_edits(&fast, pos, true)?;
+            let mut fos = FastOperandSource {
+                fast: &fast,
+                idx: fast.operand_base[pos],
+                last_def: None,
+            };
+            ctx.emit_vinst(v, vinsts, pos, &mut fos, &alloc, is_sret)?;
+            ctx.emit_fast_edits(&fast, pos, false)?;
+        }
+        ctx
+    } else {
+        let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
+        ctx.emit_prologue(is_sret, &alloc)?;
+        for (pos, v) in vinsts.iter().enumerate() {
+            let mut los = LegacyOperandSource { alloc: &alloc };
+            ctx.emit_vinst(v, vinsts, pos, &mut los, &alloc, is_sret)?;
+        }
+        ctx
+    };
+
     ctx.resolve_branch_fixups()?;
     ctx.emit_epilogue();
     Ok(EmittedFunction {
@@ -1307,6 +1638,7 @@ pub fn emit_module_elf(
 mod tests {
     use super::*;
     use crate::abi::ModuleAbi;
+    use crate::regalloc::LinearScan;
     use alloc::vec;
 
     use lpir::{IrFunction, IrModule, Op};
@@ -1406,12 +1738,14 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
-        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
+        let a = LinearScan::new()
+            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue(false, &a).expect("prologue");
         for (pos, i) in lowered.vinsts.iter().enumerate() {
-            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &a, false)
+            let mut los = LegacyOperandSource { alloc: &a };
+            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &mut los, &a, false)
                 .expect("emit");
         }
         ctx.emit_epilogue();
@@ -1466,12 +1800,14 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &call_c_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
-        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
+        let a = LinearScan::new()
+            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue(false, &a).expect("prologue");
         for (pos, i) in lowered.vinsts.iter().enumerate() {
-            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &a, false)
+            let mut los = LegacyOperandSource { alloc: &a };
+            ctx.emit_vinst(i, lowered.vinsts.as_slice(), pos, &mut los, &a, false)
                 .expect("emit");
         }
         ctx.emit_epilogue();
