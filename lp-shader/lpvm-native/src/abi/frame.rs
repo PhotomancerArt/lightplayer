@@ -35,6 +35,8 @@ pub struct FrameLayout {
     pub sret_slot_size: u32,
     /// SP-relative byte offset to the caller sret area (after spills + LPIR slots).
     sret_slot_base_from_sp: i32,
+    /// Bytes at `[SP, SP + caller_arg_stack_size)` reserved for outgoing stack arguments (16-byte aligned).
+    pub caller_arg_stack_size: u32,
 }
 
 impl FrameLayout {
@@ -43,6 +45,9 @@ impl FrameLayout {
     ///
     /// `caller_sret_bytes`: max callee sret buffer size this function may need when calling
     /// sret-returning functions; 0 if none.
+    ///
+    /// `caller_outgoing_stack_bytes`: max contiguous bytes needed at `SP+0` for stack-passed
+    /// call arguments (typically `max_stack_words * 4` over all calls); need not be aligned.
     pub fn compute(
         _abi: &FuncAbi,
         spill_count: u32,
@@ -50,6 +55,7 @@ impl FrameLayout {
         lpir_slot_sizes: &[(u32, u32)],
         is_leaf: bool,
         caller_sret_bytes: u32,
+        caller_outgoing_stack_bytes: u32,
     ) -> Self {
         let save_ra = !is_leaf;
         let save_fp = true;
@@ -57,6 +63,7 @@ impl FrameLayout {
         let mut callee_list: Vec<PReg> = used_callee_saved.iter().collect();
         callee_list.sort_by_key(|p| (p.class as u8, p.hw));
 
+        let caller_arg_stack_size = (caller_outgoing_stack_bytes.saturating_add(15)) & !15u32;
         let spill_bytes = spill_count.saturating_mul(4);
         let lpir_bytes: u32 = lpir_slot_sizes.iter().map(|(_, s)| *s).sum();
         let sret_slot_size = if caller_sret_bytes == 0 {
@@ -64,8 +71,10 @@ impl FrameLayout {
         } else {
             (caller_sret_bytes.saturating_add(15)) & !15u32
         };
-        let sret_slot_base_from_sp = (spill_bytes + lpir_bytes) as i32;
-        let body_bytes = spill_bytes
+        let spill_base_from_sp = caller_arg_stack_size as i32;
+        let sret_slot_base_from_sp = (caller_arg_stack_size + spill_bytes + lpir_bytes) as i32;
+        let body_bytes = caller_arg_stack_size
+            .saturating_add(spill_bytes)
             .saturating_add(lpir_bytes)
             .saturating_add(sret_slot_size);
 
@@ -76,10 +85,8 @@ impl FrameLayout {
         let raw_total = body_bytes.saturating_add(link_bytes);
         let total_size = (raw_total.saturating_add(15)) & !15;
 
-        let spill_base_from_sp = 0i32;
-
         let mut lpir_slot_offsets = Vec::with_capacity(lpir_slot_sizes.len());
-        let mut pos = spill_bytes as i32;
+        let mut pos = (caller_arg_stack_size + spill_bytes) as i32;
         for (id, sz) in lpir_slot_sizes.iter().copied() {
             lpir_slot_offsets.push((id, pos));
             pos += sz as i32;
@@ -117,6 +124,7 @@ impl FrameLayout {
             lpir_slot_offsets,
             sret_slot_size,
             sret_slot_base_from_sp,
+            caller_arg_stack_size,
         }
     }
 
@@ -174,7 +182,7 @@ mod tests {
     #[test]
     fn leaf_skips_ra_save_flag() {
         let abi = abi_float();
-        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], true, 0);
+        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], true, 0, 0);
         assert!(!frame.save_ra);
         assert!(frame.save_fp);
         assert!(frame.ra_offset_from_sp.is_none());
@@ -184,7 +192,7 @@ mod tests {
     #[test]
     fn non_leaf_saves_ra() {
         let abi = abi_float();
-        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 0);
+        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 0, 0);
         assert!(frame.save_ra);
         assert!(frame.ra_offset_from_sp.is_some());
         assert!(frame.fp_offset_from_sp.is_some());
@@ -195,14 +203,14 @@ mod tests {
     fn callee_saved_get_offsets() {
         let abi = abi_float();
         let used = PregSet::singleton(rv32::S2).union(PregSet::singleton(rv32::S3));
-        let frame = FrameLayout::compute(&abi, 0, used, &[], true, 0);
+        let frame = FrameLayout::compute(&abi, 0, used, &[], true, 0, 0);
         assert_eq!(frame.callee_save_offsets.len(), 2);
     }
 
     #[test]
     fn spill_offsets_step_by_four() {
         let abi = abi_float();
-        let frame = FrameLayout::compute(&abi, 3, PregSet::EMPTY, &[], true, 0);
+        let frame = FrameLayout::compute(&abi, 3, PregSet::EMPTY, &[], true, 0, 0);
         assert_eq!(frame.spill_count, 3);
         let o0 = frame.spill_offset_from_sp(0).unwrap();
         let o1 = frame.spill_offset_from_sp(1).unwrap();
@@ -216,7 +224,7 @@ mod tests {
     fn total_size_aligned_16() {
         let abi = abi_float();
         for spill in [0u32, 3, 5] {
-            let frame = FrameLayout::compute(&abi, spill, PregSet::EMPTY, &[], false, 0);
+            let frame = FrameLayout::compute(&abi, spill, PregSet::EMPTY, &[], false, 0, 0);
             assert_eq!(frame.total_size % 16, 0);
         }
     }
@@ -224,7 +232,7 @@ mod tests {
     #[test]
     fn spill_fp_relation_matches_total_size() {
         let abi = abi_float();
-        let frame = FrameLayout::compute(&abi, 2, PregSet::EMPTY, &[], true, 0);
+        let frame = FrameLayout::compute(&abi, 2, PregSet::EMPTY, &[], true, 0, 0);
         let sp0 = frame.spill_offset_from_sp(0).unwrap();
         let fp0 = frame.spill_offset_from_fp(0).unwrap();
         // FP-relative offset is negative (spills are below FP, which points to frame top)
@@ -236,7 +244,7 @@ mod tests {
     fn lpir_slots_recorded() {
         let abi = abi_float();
         let lpir = [(0u32, 16u32), (1u32, 8u32)];
-        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &lpir, true, 0);
+        let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &lpir, true, 0, 0);
         assert_eq!(frame.lpir_offset_from_sp(0), Some(0));
         assert_eq!(frame.lpir_offset_from_sp(1), Some(16));
     }
@@ -244,13 +252,21 @@ mod tests {
     #[test]
     fn caller_sret_slot_increases_body() {
         let abi = abi_float();
-        let frame0 = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 0);
-        let frame64 = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 64);
+        let frame0 = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 0, 0);
+        let frame64 = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], false, 64, 0);
         assert_eq!(frame0.sret_slot_size, 0);
         assert!(frame0.sret_slot_offset_from_fp().is_none());
         assert_eq!(frame64.sret_slot_size, 64);
         assert!(frame64.total_size >= frame0.total_size.saturating_add(64));
         let off = frame64.sret_slot_offset_from_fp().expect("sret");
         assert!(off < 0);
+    }
+
+    #[test]
+    fn caller_outgoing_stack_shifts_spill_base() {
+        let abi = abi_float();
+        let frame = FrameLayout::compute(&abi, 1, PregSet::EMPTY, &[], false, 0, 4);
+        assert_eq!(frame.caller_arg_stack_size, 16);
+        assert_eq!(frame.spill_offset_from_sp(0), Some(16));
     }
 }

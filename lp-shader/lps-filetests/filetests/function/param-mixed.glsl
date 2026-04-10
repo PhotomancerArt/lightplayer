@@ -99,3 +99,60 @@ float test_param_mixed_order() {
 }
 
 // run: test_param_mixed_order() ~= 19.0
+
+// ============================================================================
+// Large Types with Mixed Qualifiers (mat4 = 16 scalars, exercises stack params)
+// ============================================================================
+
+void extract_diagonal(in mat4 m, out vec4 diagonal) {
+    diagonal = vec4(m[0][0], m[1][1], m[2][2], m[3][3]);
+}
+
+float test_mat4_in_out() {
+    vec4 diag;
+    extract_diagonal(mat4(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 2.0, 0.0, 0.0,
+        0.0, 0.0, 3.0, 0.0,
+        0.0, 0.0, 0.0, 4.0
+    ), diag);
+    return diag.x + diag.y + diag.z + diag.w;
+}
+
+// run: test_mat4_in_out() ~= 10.0
+
+void scale_mat4(inout mat4 m, in float s) {
+    m = m * s;
+}
+
+float test_mat4_inout() {
+    mat4 m = mat4(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    );
+    scale_mat4(m, 2.0);
+    return m[0][0] + m[1][1] + m[2][2] + m[3][3];
+}
+
+// run: test_mat4_inout() ~= 8.0
+
+void process_mat4(in mat4 input, out mat4 output, inout float scalar) {
+    output = input * 2.0;
+    scalar = scalar + input[0][0];
+}
+
+float test_mat4_mixed_all() {
+    float s = 5.0;
+    mat4 out_m;
+    process_mat4(mat4(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    ), out_m, s);
+    return s + out_m[0][0];
+}
+
+// run: test_mat4_mixed_all() ~= 8.0

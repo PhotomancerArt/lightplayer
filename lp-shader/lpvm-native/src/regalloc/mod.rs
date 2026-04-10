@@ -45,6 +45,8 @@ pub struct Allocation {
     pub clobbered: BTreeSet<PhysReg>,
     /// VRegs assigned to spill slots (no physical register assigned).
     pub spill_slots: Vec<VReg>,
+    /// Incoming parameters passed on the stack: ABI byte offset from entry SP / callee `s0` after prologue.
+    pub incoming_stack_params: Vec<(VReg, i32)>,
 }
 
 impl Allocation {

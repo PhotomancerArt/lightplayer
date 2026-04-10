@@ -140,6 +140,28 @@ fn max_regs_saved_across_calls(
     m
 }
 
+/// Max bytes required at `SP+0` for stack-passed arguments across all calls in this function.
+fn max_caller_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
+    let mut max_b = 0u32;
+    for inst in vinsts {
+        if let VInst::Call {
+            args,
+            callee_uses_sret,
+            ..
+        } = inst
+        {
+            let cap = if *callee_uses_sret {
+                ARG_REGS.len() - 1
+            } else {
+                ARG_REGS.len()
+            };
+            let n_stack = args.len().saturating_sub(cap);
+            max_b = max_b.max((n_stack as u32).saturating_mul(4));
+        }
+    }
+    max_b
+}
+
 fn phys_homes_of_non_spilled(alloc: &Allocation, vregs: &[VReg]) -> BTreeSet<u8> {
     let mut out = BTreeSet::new();
     for v in vregs {
@@ -178,7 +200,7 @@ impl EmitContext {
             parameters: vec![],
         };
         let func_abi = func_abi_rv32(&sig, 1);
-        let frame = FrameLayout::compute(&func_abi, 0, PregSet::EMPTY, &[], is_leaf, 0);
+        let frame = FrameLayout::compute(&func_abi, 0, PregSet::EMPTY, &[], is_leaf, 0, 0);
         Self::with_frame(frame, debug_info, None)
     }
 
@@ -192,7 +214,7 @@ impl EmitContext {
 
     /// Emit function prologue: adjust sp, save ra/s0/callee-saved regs.
     /// For sret functions, also saves the sret pointer (in a0) to s1.
-    pub fn emit_prologue(&mut self, is_sret: bool) {
+    pub fn emit_prologue(&mut self, is_sret: bool, alloc: &Allocation) -> Result<(), NativeError> {
         let sp = SP.hw as u32;
         let frame_size = self.frame.total_size as i32;
 
@@ -215,9 +237,15 @@ impl EmitContext {
             self.push_u32(encode_addi(S0.hw as u32, sp, frame_size));
         }
 
+        for &(v, off) in &alloc.incoming_stack_params {
+            let rd = Self::phys(alloc, v)? as u32;
+            self.push_u32(encode_lw(rd, S0.hw as u32, off));
+        }
+
         if is_sret {
             self.push_u32(encode_addi(S1.hw as u32, A0.hw as u32, 0));
         }
+        Ok(())
     }
 
     /// Emit function epilogue: restore callee-saved regs/ra/s0, adjust sp, return.
@@ -392,15 +420,19 @@ impl EmitContext {
         caller_is_sret: bool,
     ) -> Result<(), NativeError> {
         self.emit_call_preserves_before(alloc, rets, caller_is_sret)?;
-        if args.len() > ARG_REGS.len() {
-            return Err(NativeError::TooManyArgs(args.len()));
-        }
-        for (i, a) in args.iter().enumerate() {
+        let reg_cap = ARG_REGS.len();
+        let sp_hw = SP.hw as u32;
+        for (i, a) in args.iter().enumerate().take(reg_cap) {
             let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
             let to = ARG_REGS[i].hw as u32;
             if from != to {
                 self.push_u32(encode_addi(to, from, 0));
             }
+        }
+        for (i, a) in args.iter().enumerate().skip(reg_cap) {
+            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let stk_off = ((i - reg_cap) * 4) as i32;
+            self.push_u32(encode_sw(from, sp_hw, stk_off));
         }
         let auipc_off = self.code.len();
         let ra = abi::RA.hw as u32;
@@ -439,18 +471,22 @@ impl EmitContext {
             .frame
             .sret_slot_offset_from_fp()
             .ok_or(NativeError::MissingSretSlot)?;
-        if args.len() > ARG_REGS.len() - 1 {
-            return Err(NativeError::TooManyArgs(args.len()));
-        }
+        let reg_cap = ARG_REGS.len() - 1;
         let a0 = A0.hw as u32;
         let s0 = S0.hw as u32;
+        let sp_hw = SP.hw as u32;
         self.push_u32(encode_addi(a0, s0, sret_off));
-        for (i, a) in args.iter().enumerate() {
+        for (i, a) in args.iter().enumerate().take(reg_cap) {
             let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
             let to = ARG_REGS[i + 1].hw as u32;
             if from != to {
                 self.push_u32(encode_addi(to, from, 0));
             }
+        }
+        for (i, a) in args.iter().enumerate().skip(reg_cap) {
+            let from = self.use_vreg(alloc, *a, Self::TEMP0)? as u32;
+            let stk_off = ((i - reg_cap) * 4) as i32;
+            self.push_u32(encode_sw(from, sp_hw, stk_off));
         }
         let auipc_off = self.code.len();
         let ra = abi::RA.hw as u32;
@@ -1031,6 +1067,7 @@ pub fn emit_function_bytes(
         .enumerate()
         .map(|(i, s)| (i as u32, s.size))
         .collect();
+    let caller_out_bytes = max_caller_outgoing_stack_bytes(&vinsts);
     let frame = FrameLayout::compute(
         &func_abi,
         alloc.spill_count().saturating_add(extra_spill),
@@ -1038,6 +1075,7 @@ pub fn emit_function_bytes(
         &lpir_slot_sizes,
         is_leaf,
         caller_sret_bytes,
+        caller_out_bytes,
     );
 
     let slot_base = alloc.spill_count();
@@ -1058,7 +1096,7 @@ pub fn emit_function_bytes(
     };
 
     let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
-    ctx.emit_prologue(is_sret);
+    ctx.emit_prologue(is_sret, &alloc)?;
     for v in &vinsts {
         ctx.emit_vinst(v, &alloc, is_sret)?;
     }
@@ -1277,7 +1315,7 @@ mod tests {
             .allocate_with_func_abi(&f, &v, &func_abi)
             .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
-        ctx.emit_prologue(false); // not sret
+        ctx.emit_prologue(false, &a).expect("prologue");
         for i in &v {
             ctx.emit_vinst(i, &a, false).expect("emit");
         }
@@ -1329,7 +1367,7 @@ mod tests {
             .allocate_with_func_abi(&f, &v, &func_abi)
             .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
-        ctx.emit_prologue(false); // not sret
+        ctx.emit_prologue(false, &a).expect("prologue");
         for i in &v {
             ctx.emit_vinst(i, &a, false).expect("emit");
         }

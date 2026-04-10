@@ -82,14 +82,24 @@ impl GreedyAlloc {
 
         let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
+        let mut incoming_stack_params: Vec<(VReg, i32)> = Vec::new();
+
+        let alloca_list = sorted_allocatable_ints(abi.allocatable());
+        let mut next_alloca = 0usize;
 
         for i in 0..slots {
             match param_locs[i] {
                 ArgLoc::Reg(p) => {
                     vreg_to_phys[i] = Some(abi2_int_preg_to_phys(p)?);
                 }
-                ArgLoc::Stack { .. } => {
-                    return Err(NativeError::TooManyArgs(slots));
+                ArgLoc::Stack { offset, .. } => {
+                    let v = VReg(i as u32);
+                    let Some(p) = alloca_list.get(next_alloca).copied() else {
+                        return Err(NativeError::TooManyArgs(slots));
+                    };
+                    vreg_to_phys[i] = Some(p);
+                    incoming_stack_params.push((v, offset));
+                    next_alloca += 1;
                 }
             }
         }
@@ -110,9 +120,6 @@ impl GreedyAlloc {
                 }
             }
         }
-
-        let alloca_list = sorted_allocatable_ints(abi.allocatable());
-        let mut next_alloca = 0usize;
 
         for v in &ret_uses {
             let vi = v.0 as usize;
@@ -164,6 +171,7 @@ impl GreedyAlloc {
             vreg_to_phys,
             clobbered,
             spill_slots,
+            incoming_stack_params,
         })
     }
 }
