@@ -125,6 +125,7 @@ cargo test -p lps-filetests --test filetest -- 2026-04-10-debug1
 When a test fails:
 
 1. Run with debug logging to see the trace:
+
    ```bash
    RUST_LOG=debug cargo test -p lps-filetests --test filetest -- 2026-04-10-debug1 2>&1 | head -100
    ```

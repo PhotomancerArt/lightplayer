@@ -11,6 +11,7 @@ extern crate alloc;
 
 pub mod abi;
 pub mod config;
+pub mod debug;
 pub mod debug_asm;
 pub mod error;
 pub mod isa;

@@ -5,6 +5,7 @@
 The first fastalloc attempt (Stage II M2) failed due to architectural issues: the `OperandSource` trait created an implicit sequential ordering contract between allocator and emitter. This contract was violated by Select32 and MemcpyWords (operand order mismatch) and IConst32 remat (count disagreement). Debugging was painful because the contract was implicit and untestable.
 
 This roadmap implements a clean-slate fastalloc pipeline with:
+
 1. **Debug-first architecture** - Every IR (LPIR, VInst, PhysInst) has textual representation
 2. **CLI visibility** - `shader-rv32fa` command with `--trace`, `--show-vinst`, `--show-cfg`
 3. **Filetest integration** - Automatic trace output on failure via DEBUG env
@@ -54,22 +55,22 @@ lp-cli/src/commands/
 
 ## Milestones
 
-| M | Name | Scope | Debug Output |
-|---|------|-------|--------------|
-| **M0** | VInst Textual IR | VInst parser/formatter | `lp-cli shader-lpir --show-vinst` |
-| **M1** | Core Types | PhysInst enum, ABI copy | `lp-cli shader-rv32fa --show-physinst` (parse check) |
-| **M2** | CLI & Debug Infra | `shader-rv32fa` command, filetest wiring | `--trace`, `--show-vinst`, `--show-physinst` flags |
-| **M3** | Functional Emitter | PhysInst -> bytes | `--emit` to see machine code |
-| **M4** | Allocator Shell | CFG, liveness, trace structure | `--show-cfg`, `--show-liveness`, trace with stubbed decisions |
-| **M5** | Allocation Core | Backward walk, LRU, spill | Full trace showing real decisions |
-| **M6** | Call Clobbers | Caller-save handling | Trace shows spill/reload around calls |
-| **M7** | Integration | Wire to emit_function_bytes | End-to-end with full trace on error |
-| **M8** | Validation | Filetests, edge cases, cleanup | All filetests pass, trace useful |
+| M      | Name               | Scope                                    | Debug Output                                                  |
+| ------ | ------------------ | ---------------------------------------- | ------------------------------------------------------------- |
+| **M0** | VInst Textual IR   | VInst parser/formatter                   | `lp-cli shader-lpir --show-vinst`                             |
+| **M1** | Core Types         | PhysInst enum, ABI copy                  | `lp-cli shader-rv32fa --show-physinst` (parse check)          |
+| **M2** | CLI & Debug Infra  | `shader-rv32fa` command, filetest wiring | `--trace`, `--show-vinst`, `--show-physinst` flags            |
+| **M3** | Functional Emitter | PhysInst -> bytes                        | `--emit` to see machine code                                  |
+| **M4** | Allocator Shell    | CFG, liveness, trace structure           | `--show-cfg`, `--show-liveness`, trace with stubbed decisions |
+| **M5** | Allocation Core    | Backward walk, LRU, spill                | Full trace showing real decisions                             |
+| **M6** | Call Clobbers      | Caller-save handling                     | Trace shows spill/reload around calls                         |
+| **M7** | Integration        | Wire to emit_function_bytes              | End-to-end with full trace on error                           |
+| **M8** | Validation         | Filetests, edge cases, cleanup           | All filetests pass, trace useful                              |
 
 ## Success Criteria
 
 1. **native-rv32-iadd.glsl** compiles and runs correctly
-2. **debug1.glsl** (minimal failing case from v1) compiles and runs correctly  
+2. **debug1.glsl** (minimal failing case from v1) compiles and runs correctly
 3. **rainbow_flat.glsl** (simplified rainbow) compiles and runs correctly
 4. Every IR stage has debug output: LPIR, VInst, CFG, liveness, PhysInst
 5. Trace is useful for understanding allocator decisions

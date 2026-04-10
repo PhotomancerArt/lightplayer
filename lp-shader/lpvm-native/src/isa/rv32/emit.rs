@@ -102,11 +102,7 @@ fn call_clobber_hw(abi: &FuncAbi) -> u32 {
     bits
 }
 
-fn regs_saved_for_call(
-    alloc: &Allocation,
-    rets: &[VReg],
-    clobber: u32,
-) -> Vec<(VReg, PhysReg)> {
+fn regs_saved_for_call(alloc: &Allocation, rets: &[VReg], clobber: u32) -> Vec<(VReg, PhysReg)> {
     let mut seen = 0u32;
     let mut out = Vec::new();
     for (vi, po) in alloc.vreg_to_phys.iter().enumerate() {
@@ -133,11 +129,7 @@ fn regs_saved_for_call(
     out
 }
 
-fn max_regs_saved_across_calls(
-    vinsts: &[VInst],
-    alloc: &Allocation,
-    clobber: u32,
-) -> u32 {
+fn max_regs_saved_across_calls(vinsts: &[VInst], alloc: &Allocation, clobber: u32) -> u32 {
     let mut m = 0u32;
     for inst in vinsts {
         if let VInst::Call { rets, .. } = inst {
