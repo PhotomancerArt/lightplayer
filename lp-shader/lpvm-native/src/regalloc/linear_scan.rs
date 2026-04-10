@@ -12,7 +12,7 @@ use lpir::IrFunction;
 
 use super::{Allocation, PhysReg, RegAlloc};
 use crate::abi::classify::ArgLoc;
-use crate::abi::{FuncAbi, PReg, RegClass};
+use crate::abi::{FuncAbi, PReg, PregSet, RegClass};
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{ARG_REGS, RET_REGS, alloca_base_int, caller_saved_int};
 use crate::lower::LoopRegion;
@@ -35,12 +35,8 @@ fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PhysReg> {
     v
 }
 
-fn clobber_set_from_abi(abi: &FuncAbi) -> BTreeSet<PhysReg> {
+fn clobber_set_from_abi(abi: &FuncAbi) -> PregSet {
     abi.call_clobbers()
-        .iter()
-        .filter(|p| p.class == RegClass::Int)
-        .map(|p| p.hw)
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -609,8 +605,11 @@ impl LinearScan {
                 continue;
             }
 
-            let used: BTreeSet<PhysReg> = active.iter().map(|a| a.preg).collect();
-            let free = alloca_list.iter().copied().find(|p| !used.contains(p));
+            let mut used = PregSet::EMPTY;
+            for a in &active {
+                used.insert(PReg::int(a.preg));
+            }
+            let free = alloca_list.iter().copied().find(|p| !used.contains(PReg::int(*p)));
 
             if let Some(preg) = free {
                 vreg_to_phys[iv.vreg.0 as usize] = Some(preg);
@@ -742,10 +741,10 @@ impl LinearScan {
             }
         }
 
-        let mut clobbered: BTreeSet<PhysReg> = BTreeSet::new();
+        let mut clobbered = PregSet::EMPTY;
         for inst in vinsts {
             if inst.is_call() {
-                clobbered.extend(clobber_set_from_abi(abi));
+                clobbered = clobbered.union(clobber_set_from_abi(abi));
             }
         }
 
@@ -876,7 +875,7 @@ mod tests {
             .allocate(&f, &vinsts, 0)
             .expect("greedy");
         let l = LinearScan::new().allocate(&f, &vinsts, 0).expect("linear");
-        assert_eq!(g.clobbered, l.clobbered);
+        assert_eq!(g.clobbered.bits(), l.clobbered.bits());
     }
 
     #[test]

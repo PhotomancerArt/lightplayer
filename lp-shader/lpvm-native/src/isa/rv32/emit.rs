@@ -1,6 +1,6 @@
 //! RV32 emission: machine code, relocations, ELF object (`object` crate).
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -46,7 +46,8 @@ pub(crate) struct CallSaveLayout {
     /// First spill slot index reserved for per-call register saves (after regalloc spills).
     slot_base: u32,
     max_per_call: u32,
-    clobber_hw: BTreeSet<u8>,
+    /// Bitset of clobbered registers (bit i set = register i is clobbered by call).
+    clobber_hw: u32,
     /// When the caller returns via sret, `s1` holds the outer sret pointer; nested sret callees
     /// overwrite `s1`, so we spill it here before any call and reload after.
     s1_slot: Option<u32>,
@@ -93,16 +94,20 @@ fn jal_offset_valid(imm: i32) -> bool {
     imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
 }
 
-fn call_clobber_hw(abi: &FuncAbi) -> BTreeSet<u8> {
-    abi.call_clobbers().iter().map(|p| p.hw).collect()
+fn call_clobber_hw(abi: &FuncAbi) -> u32 {
+    let mut bits = 0u32;
+    for p in abi.call_clobbers().iter() {
+        bits |= 1u32 << p.hw;
+    }
+    bits
 }
 
 fn regs_saved_for_call(
     alloc: &Allocation,
     rets: &[VReg],
-    clobber: &BTreeSet<u8>,
+    clobber: u32,
 ) -> Vec<(VReg, PhysReg)> {
-    let mut seen = BTreeSet::new();
+    let mut seen = 0u32;
     let mut out = Vec::new();
     for (vi, po) in alloc.vreg_to_phys.iter().enumerate() {
         let Some(p) = po else {
@@ -115,10 +120,12 @@ fn regs_saved_for_call(
         if rets.contains(&v) {
             continue;
         }
-        if !clobber.contains(p) {
+        if clobber & (1u32 << *p) == 0 {
             continue;
         }
-        if seen.insert(*p) {
+        let bit = 1u32 << *p;
+        if seen & bit == 0 {
+            seen |= bit;
             out.push((v, *p));
         }
     }
@@ -129,7 +136,7 @@ fn regs_saved_for_call(
 fn max_regs_saved_across_calls(
     vinsts: &[VInst],
     alloc: &Allocation,
-    clobber: &BTreeSet<u8>,
+    clobber: u32,
 ) -> u32 {
     let mut m = 0u32;
     for inst in vinsts {
@@ -162,12 +169,12 @@ fn max_caller_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
     max_b
 }
 
-fn phys_homes_of_non_spilled(alloc: &Allocation, vregs: &[VReg]) -> BTreeSet<u8> {
-    let mut out = BTreeSet::new();
+fn phys_homes_of_non_spilled(alloc: &Allocation, vregs: &[VReg]) -> u32 {
+    let mut out = 0u32;
     for v in vregs {
         if !alloc.is_spilled(*v) {
             if let Some(p) = alloc.vreg_to_phys.get(v.0 as usize).copied().flatten() {
-                out.insert(p);
+                out |= 1u32 << p;
             }
         }
     }
@@ -374,7 +381,7 @@ impl EmitContext {
                 self.push_u32(encode_sw(S1.hw as u32, S0.hw as u32, o));
             }
         }
-        let list = regs_saved_for_call(alloc, rets, &layout.clobber_hw);
+        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw);
         if list.len() as u32 > layout.max_per_call {
             return Err(NativeError::TooManyVRegs {
                 count: list.len(),
@@ -398,10 +405,10 @@ impl EmitContext {
         let Some(layout) = self.call_save.clone() else {
             return Ok(());
         };
-        let list = regs_saved_for_call(alloc, rets, &layout.clobber_hw);
+        let list = regs_saved_for_call(alloc, rets, layout.clobber_hw);
         let ret_homes = phys_homes_of_non_spilled(alloc, rets);
         for (i, (_, p)) in list.iter().enumerate().rev() {
-            if ret_homes.contains(p) {
+            if ret_homes & (1u32 << *p) != 0 {
                 continue;
             }
             let slot = layout.slot_base + i as u32;
@@ -1084,7 +1091,7 @@ pub fn emit_function_bytes(
     let has_call = vinsts.iter().any(|v| v.is_call());
     let clobber_hw = call_clobber_hw(&func_abi);
     let max_call_saves = if has_call {
-        max_regs_saved_across_calls(vinsts, &alloc, &clobber_hw)
+        max_regs_saved_across_calls(vinsts, &alloc, clobber_hw)
     } else {
         0
     };

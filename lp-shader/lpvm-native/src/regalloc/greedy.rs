@@ -7,7 +7,7 @@ use lpir::IrFunction;
 
 use super::{Allocation, PhysReg, RegAlloc};
 use crate::abi::classify::ArgLoc;
-use crate::abi::{FuncAbi, PReg, RegClass};
+use crate::abi::{FuncAbi, PReg, PregSet, RegClass};
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{ARG_REGS, RET_REGS, alloca_base_int, caller_saved_int};
 use crate::vinst::{VInst, VReg};
@@ -30,22 +30,14 @@ fn sorted_allocatable_ints(set: crate::abi::PregSet) -> Vec<PhysReg> {
     v
 }
 
-fn clobber_set_from_abi(abi: &FuncAbi) -> BTreeSet<PhysReg> {
+fn clobber_set_from_abi(abi: &FuncAbi) -> PregSet {
     abi.call_clobbers()
-        .iter()
-        .filter(|p| p.class == RegClass::Int)
-        .map(|p| p.hw)
-        .collect()
 }
 
-/// Helper to convert caller_saved_int() PregSet to PhysReg BTreeSet for tests.
+/// Helper to convert caller_saved_int() PregSet to PregSet for tests.
 #[cfg(test)]
-fn caller_saved_set() -> BTreeSet<PhysReg> {
+fn caller_saved_set() -> PregSet {
     caller_saved_int()
-        .iter()
-        .filter(|p| p.class == RegClass::Int)
-        .map(|p| p.hw)
-        .collect()
 }
 
 pub struct GreedyAlloc;
@@ -170,10 +162,10 @@ impl GreedyAlloc {
             }
         }
 
-        let mut clobbered: BTreeSet<PhysReg> = BTreeSet::new();
+        let mut clobbered = PregSet::EMPTY;
         for inst in vinsts {
             if inst.is_call() {
-                clobbered.extend(clobber_set_from_abi(abi));
+                clobbered = clobbered.union(clobber_set_from_abi(abi));
             }
         }
 
@@ -266,14 +258,16 @@ mod tests {
             src_op: None,
         }];
         let a = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
-        for reg in caller_saved_set() {
-            assert!(a.clobbered.contains(&reg), "x{reg} not clobbered");
+        for preg in caller_saved_set().iter() {
+            let reg = preg.hw;
+            assert!(a.clobbered.contains(preg), "x{reg} not clobbered");
         }
         // Verify no callee-saved registers are clobbered
-        for reg in clobber_set_callee_saved() {
-            if !caller_saved_set().contains(&reg) {
+        for preg in clobber_set_callee_saved().iter() {
+            let reg = preg.hw;
+            if !caller_saved_set().contains(preg) {
                 assert!(
-                    !a.clobbered.contains(&reg),
+                    !a.clobbered.contains(preg),
                     "callee-saved x{reg} should not be in clobber set"
                 );
             }

@@ -3,7 +3,6 @@
 mod greedy;
 mod linear_scan;
 
-use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 pub use greedy::GreedyAlloc;
@@ -11,6 +10,7 @@ pub use linear_scan::LinearScan;
 
 use lpir::{IrFunction, VReg};
 
+use crate::abi::PregSet;
 use crate::error::NativeError;
 use crate::isa::rv32::abi::{callee_saved_int, caller_saved_int};
 use crate::types::NativeType;
@@ -44,7 +44,7 @@ impl From<&IrFunction> for VRegInfo {
 pub struct Allocation {
     /// `vreg.0` as index -> physical register if assigned.
     pub vreg_to_phys: Vec<Option<PhysReg>>,
-    pub clobbered: BTreeSet<PhysReg>,
+    pub clobbered: PregSet,
     /// VRegs assigned to spill slots (no physical register assigned).
     pub spill_slots: Vec<VReg>,
     /// `vreg.0` -> constant value when the vreg is defined only by [`VInst::IConst32`] and has no
@@ -81,13 +81,13 @@ impl Allocation {
 }
 
 /// All caller-saved registers are clobbered by an outgoing call.
-pub fn clobber_set_for_call() -> BTreeSet<PhysReg> {
-    caller_saved_int().iter().map(|p| p.hw).collect()
+pub fn clobber_set_for_call() -> PregSet {
+    caller_saved_int()
 }
 
 /// All callee-saved registers (for testing/assertions).
-pub fn clobber_set_callee_saved() -> BTreeSet<PhysReg> {
-    callee_saved_int().iter().map(|p| p.hw).collect()
+pub fn clobber_set_callee_saved() -> PregSet {
+    callee_saved_int()
 }
 
 /// Last `IConst32` value per vreg index (SSA: single logical def).
