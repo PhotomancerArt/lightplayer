@@ -43,3 +43,4 @@ lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 lps-builtins = { path = "../lps-builtins", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }

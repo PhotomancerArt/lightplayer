@@ -10,6 +10,11 @@
 extern crate alloc;
 extern crate unwinding;
 
+#[cfg(not(any(feature = "native-jit", feature = "cranelift")))]
+compile_error!(
+    "fw-emu: enable `native-jit` (default) or `cranelift` for the shader graphics backend"
+);
+
 mod output;
 mod serial;
 mod server_loop;
@@ -22,7 +27,11 @@ use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
 use lp_model::AsLpPath;
 use lp_riscv_emu_guest::allocator;
-use lp_server::{CraneliftGraphics, LpGraphics, LpServer};
+#[cfg(feature = "cranelift")]
+use lp_server::CraneliftGraphics;
+#[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+use lp_server::NativeJitGraphics;
+use lp_server::{LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 use lps_builtins::host_debug;
@@ -47,6 +56,11 @@ pub extern "C" fn _lp_main() -> ! {
     init_emu_logger();
 
     host_debug!("[fw-emu] Starting firmware emulator...");
+
+    #[cfg(feature = "cranelift")]
+    log::info!("[fw-emu] Shader backend: Cranelift (LPIR → lpvm-cranelift)");
+    #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+    log::info!("[fw-emu] Shader backend: native JIT (lpvm-native rt_jit)");
 
     // Create serial I/O first (needed for test_unwind check)
     let serial_io = SyscallSerialIo::new();
@@ -98,7 +112,10 @@ pub extern "C" fn _lp_main() -> ! {
 
     // Create server (with time provider for shader comp timing)
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
+    #[cfg(feature = "cranelift")]
     let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+    #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+    let graphics: Arc<dyn LpGraphics> = Arc::new(NativeJitGraphics::new());
     let server = LpServer::new(
         output_provider,
         base_fs,

@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server"]
+default = ["esp32c6", "server", "native-jit"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -21,6 +21,14 @@ server = [
     "lp-shared",
     "ser-write-json",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
+# RV32 native JIT shaders (`lpvm-native` `rt_jit`); default for on-device testing
+native-jit = ["lp-server/native-jit"]
+# Cranelift JIT for shaders (comparison); use `--no-default-features --features esp32c6,server,cranelift`
+cranelift = [
+    "lp-server/cranelift",
+    "lp-server/cranelift-optimizer",
+    "lp-server/cranelift-verifier",
+]
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lp-shared)
 test_gpio = []  # Test GPIO pin toggle
@@ -42,9 +50,8 @@ esp-println = { version = "0.16.1", default-features = false, features = ["esp32
 esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
-# Note: cranelift-optimizer and cranelift-verifier features are intentionally NOT enabled to reduce binary size
-# This saves ~166-219 KB by disabling unused Cranelift optimizer and verifier code
-lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery", "cranelift"], optional = true }
+# Graphics backend: enable `native-jit` (default) or `cranelift` via features — do not pin `cranelift` here
+lp-server = { path = "../../lp-core/lp-server", default-features = false, features = ["panic-recovery"], optional = true }
 lp-shared = { path = "../../lp-core/lp-shared", default-features = false, optional = true }
 lp-model = { path = "../../lp-core/lp-model", default-features = false, optional = true, features = ["ser-write-json"] }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }

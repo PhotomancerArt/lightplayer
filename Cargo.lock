@@ -3741,11 +3741,13 @@ dependencies = [
  "lp-engine-client",
  "lp-model",
  "lp-shared",
+ "lpir",
  "lps-builtins",
  "lps-frontend",
  "lps-q32",
  "lpvm",
  "lpvm-cranelift",
+ "lpvm-native",
  "serde",
  "unwinding",
 ]
@@ -4050,6 +4052,7 @@ dependencies = [
  "lpvm-cranelift",
  "lpvm-emu",
  "object",
+ "spin",
 ]
 
 [[package]]

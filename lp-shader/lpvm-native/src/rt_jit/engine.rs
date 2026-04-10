@@ -4,22 +4,20 @@ use alloc::sync::Arc;
 
 use lpir::IrModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{BumpLpvmMemory, LpvmEngine, LpvmMemory};
+use lpvm::{LpvmEngine, LpvmMemory};
 
 use crate::error::NativeError;
 use crate::native_options::NativeCompileOptions;
 
 use super::builtins::BuiltinTable;
 use super::compiler::compile_module_jit;
+use super::host_memory::NativeHostMemory;
 use super::module::{NativeJitModule, NativeJitModuleInner};
-
-/// Default shared bump arena size (matches emulator order of magnitude).
-const JIT_SHARED_CAPACITY: usize = 256 * 1024;
 
 /// Compiles LPIR to a single in-memory RV32 image with patched builtin calls.
 pub struct NativeJitEngine {
     builtin_table: Arc<BuiltinTable>,
-    arena: Arc<BumpLpvmMemory>,
+    memory: NativeHostMemory,
     options: NativeCompileOptions,
 }
 
@@ -28,7 +26,7 @@ impl NativeJitEngine {
     pub fn new(builtin_table: Arc<BuiltinTable>, options: NativeCompileOptions) -> Self {
         Self {
             builtin_table,
-            arena: Arc::new(BumpLpvmMemory::new(JIT_SHARED_CAPACITY)),
+            memory: NativeHostMemory::new(),
             options,
         }
     }
@@ -57,13 +55,12 @@ impl LpvmEngine for NativeJitEngine {
                 meta: meta.clone(),
                 buffer,
                 entry_offsets,
-                arena: Arc::clone(&self.arena),
                 options: self.options,
             }),
         })
     }
 
     fn memory(&self) -> &dyn LpvmMemory {
-        self.arena.as_ref()
+        &self.memory
     }
 }

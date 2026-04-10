@@ -11,6 +11,7 @@ use crate::error::NativeError;
 use crate::native_options::NativeCompileOptions;
 
 use super::buffer::JitBuffer;
+use super::host_memory::NativeHostMemory;
 use super::instance::NativeJitInstance;
 
 pub(crate) struct NativeJitModuleInner {
@@ -18,7 +19,6 @@ pub(crate) struct NativeJitModuleInner {
     pub meta: LpsModuleSig,
     pub buffer: JitBuffer,
     pub entry_offsets: alloc::collections::BTreeMap<alloc::string::String, usize>,
-    pub arena: Arc<lpvm::BumpLpvmMemory>,
     pub options: NativeCompileOptions,
 }
 
@@ -49,9 +49,8 @@ impl LpvmModule for NativeJitModule {
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         let align = 16usize;
         let size = VMCTX_HEADER_SIZE.max(align);
-        let buf = self
-            .inner
-            .arena
+        let memory = NativeHostMemory::new();
+        let buf = memory
             .alloc(size, align)
             .map_err(|e: AllocError| NativeError::Alloc(alloc::format!("{e:?}")))?;
         unsafe {

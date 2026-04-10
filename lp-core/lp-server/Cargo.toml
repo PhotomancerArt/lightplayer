@@ -10,8 +10,10 @@ rust-version.workspace = true
 default = ["std", "cranelift", "cranelift-optimizer", "cranelift-verifier"]
 # Panic recovery via catch_unwind (shader compilation, node render)
 panic-recovery = ["lp-engine/panic-recovery"]
-# Cranelift JIT shader backend (required for shader nodes on device)
+# Cranelift JIT shader backend (host / comparison builds)
 cranelift = ["lp-engine/cranelift"]
+# RV32 native JIT shader backend (`fw-emu` / ESP32 default path)
+native-jit = ["lp-engine/native-jit"]
 # Enable Cranelift optimizer (egraph-based optimizations) - saves ~147-200 KB when disabled
 cranelift-optimizer = ["lp-engine/cranelift-optimizer"]
 # Enable Cranelift verifier (function verification) - saves ~19 KB when disabled

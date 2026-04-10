@@ -9,6 +9,7 @@ mod builtins;
 mod call;
 mod compiler;
 mod engine;
+mod host_memory;
 mod instance;
 mod module;
 

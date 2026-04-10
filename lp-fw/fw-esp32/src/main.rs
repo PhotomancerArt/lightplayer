@@ -19,6 +19,14 @@ extern crate alloc;
 )]
 extern crate unwinding;
 
+#[cfg(all(
+    feature = "server",
+    not(any(feature = "native-jit", feature = "cranelift"))
+))]
+compile_error!(
+    "fw-esp32: enable `native-jit` (default) or `cranelift` for the shader graphics backend"
+);
+
 use core::alloc::Layout;
 use core::panic::PanicInfo;
 
@@ -99,7 +107,11 @@ use core::cell::RefCell;
 
 use board::esp32c6::init::{init_board, start_runtime};
 use lp_model::path::AsLpPath;
-use lp_server::{CraneliftGraphics, LpGraphics, LpServer};
+#[cfg(feature = "cranelift")]
+use lp_server::CraneliftGraphics;
+#[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+use lp_server::NativeJitGraphics;
+use lp_server::{LpGraphics, LpServer};
 use lp_shared::fs::LpFsMemory;
 use lp_shared::output::OutputProvider;
 
@@ -206,6 +218,11 @@ async fn main(spawner: embassy_executor::Spawner) {
         // Initialize log crate to write to outgoing serial (host will see these)
         crate::logger::init(serial::io_task::log_write_to_outgoing);
 
+        #[cfg(feature = "cranelift")]
+        log::info!("[fw-esp32] Shader backend: Cranelift (LPIR → lpvm-cranelift)");
+        #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+        log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
+
         #[cfg(feature = "test_oom")]
         {
             // Test 1: simple panic (not OOM) — validates basic unwinding
@@ -293,31 +310,38 @@ async fn main(spawner: embassy_executor::Spawner) {
         #[cfg(feature = "memory_fs")]
         esp_println::println!("[INIT] In-memory filesystem created");
 
-        // Create server (with time provider for shader comp timing)
-        esp_println::println!("[INIT] Creating LpServer instance...");
-        let time_provider_rc = Rc::new(Esp32TimeProvider::new());
-        let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
-        let mut server = LpServer::new(
-            output_provider,
-            base_fs,
-            "projects/".as_path(),
-            Some(esp32_memory_stats),
-            Some(time_provider_rc),
-            graphics,
-        );
-        esp_println::println!("[INIT] LpServer created");
+        // Create server (with time provider for shader comp timing). Requires a graphics backend
+        // (`native-jit` default or `cranelift`); see `compile_error!` above when `server` lacks both.
+        #[cfg(any(feature = "cranelift", feature = "native-jit"))]
+        {
+            esp_println::println!("[INIT] Creating LpServer instance...");
+            let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+            #[cfg(feature = "cranelift")]
+            let graphics: Arc<dyn LpGraphics> = Arc::new(CraneliftGraphics::new());
+            #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
+            let graphics: Arc<dyn LpGraphics> = Arc::new(NativeJitGraphics::new());
+            let mut server = LpServer::new(
+                output_provider,
+                base_fs,
+                "projects/".as_path(),
+                Some(esp32_memory_stats),
+                Some(time_provider_rc),
+                graphics,
+            );
+            esp_println::println!("[INIT] LpServer created");
 
-        // Auto-load project at boot (from config or lexical-first)
-        boot::auto_load_project(&mut server);
+            // Auto-load project at boot (from config or lexical-first)
+            boot::auto_load_project(&mut server);
 
-        // Create time provider
-        esp_println::println!("[INIT] Creating time provider...");
-        let time_provider = Esp32TimeProvider::new();
-        esp_println::println!("[INIT] Time provider created");
+            // Create time provider
+            esp_println::println!("[INIT] Creating time provider...");
+            let time_provider = Esp32TimeProvider::new();
+            esp_println::println!("[INIT] Time provider created");
 
-        esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
+            esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
 
-        // Run server loop (never returns)
-        run_server_loop(server, transport, time_provider).await;
+            // Run server loop (never returns)
+            run_server_loop(server, transport, time_provider).await;
+        }
     }
 }

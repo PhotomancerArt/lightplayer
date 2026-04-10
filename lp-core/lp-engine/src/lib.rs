@@ -21,6 +21,8 @@ pub mod runtime;
 pub use error::Error;
 #[cfg(feature = "cranelift")]
 pub use gfx::CraneliftGraphics;
+#[cfg(all(target_arch = "riscv32", feature = "native-jit"))]
+pub use gfx::NativeJitGraphics;
 pub use gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 pub use nodes::{NodeConfig, NodeRuntime};
 pub use output::{MemoryOutputProvider, OutputChannelHandle, OutputFormat, OutputProvider};
