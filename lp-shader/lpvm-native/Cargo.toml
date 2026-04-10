@@ -40,3 +40,6 @@ lpvm-cranelift = { path = "../lpvm-cranelift", optional = true, default-features
 ] }
 lpvm-emu = { path = "../lpvm-emu", optional = true, default-features = false, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
+
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+lps-builtins = { path = "../lps-builtins", default-features = false }

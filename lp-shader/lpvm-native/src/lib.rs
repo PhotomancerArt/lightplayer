@@ -23,6 +23,9 @@ pub mod vinst;
 #[cfg(feature = "emu")]
 pub mod rt_emu;
 
+#[cfg(target_arch = "riscv32")]
+pub mod rt_jit;
+
 pub use abi::ModuleAbi;
 pub use debug_asm::compile_module_asm_text;
 pub use error::{LowerError, NativeError};
@@ -35,3 +38,6 @@ pub use vinst::{IcmpCond, SymbolRef, VInst};
 
 #[cfg(feature = "emu")]
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
+
+#[cfg(target_arch = "riscv32")]
+pub use rt_jit::{BuiltinTable, NativeJitEngine, NativeJitInstance, NativeJitModule};

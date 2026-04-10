@@ -82,7 +82,10 @@ impl GreedyAlloc {
 
         let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
+        let mut rematerial_iconst: Vec<Option<i32>> = alloc::vec![None; n];
         let mut incoming_stack_params: Vec<(VReg, i32)> = Vec::new();
+
+        let iconst_defs = super::collect_iconst_defs(vinsts, n);
 
         let alloca_list = sorted_allocatable_ints(abi.allocatable());
         let mut next_alloca = 0usize;
@@ -129,6 +132,8 @@ impl GreedyAlloc {
             if next_alloca < alloca_list.len() {
                 vreg_to_phys[vi] = Some(alloca_list[next_alloca]);
                 next_alloca += 1;
+            } else if let Some(k) = iconst_defs[vi] {
+                rematerial_iconst[vi] = Some(k);
             } else {
                 spill_slots.push(*v);
             }
@@ -143,6 +148,8 @@ impl GreedyAlloc {
             if next_alloca < alloca_list.len() {
                 vreg_to_phys[vi] = Some(alloca_list[next_alloca]);
                 next_alloca += 1;
+            } else if let Some(k) = iconst_defs[vi] {
+                rematerial_iconst[vi] = Some(k);
             } else {
                 spill_slots.push(v);
             }
@@ -154,7 +161,10 @@ impl GreedyAlloc {
                 if vi >= n {
                     return Err(NativeError::UnassignedVReg(v.0));
                 }
-                if vreg_to_phys[vi].is_none() && !spill_slots.contains(&v) {
+                if vreg_to_phys[vi].is_none()
+                    && !spill_slots.contains(&v)
+                    && rematerial_iconst[vi].is_none()
+                {
                     return Err(NativeError::UnassignedVReg(v.0));
                 }
             }
@@ -171,6 +181,7 @@ impl GreedyAlloc {
             vreg_to_phys,
             clobbered,
             spill_slots,
+            rematerial_iconst,
             incoming_stack_params,
         })
     }
@@ -321,11 +332,12 @@ mod tests {
         }
     }
 
-    fn many_iconst_vinsts(count: usize) -> Vec<VInst> {
+    /// Copies from vmctx (`v0`); not rematerializable, so excess vregs use stack spill slots.
+    fn many_mov_from_vmctx(count: usize) -> Vec<VInst> {
         (1..=count)
-            .map(|i| VInst::IConst32 {
+            .map(|i| VInst::Mov32 {
                 dst: VReg(i as u32),
-                val: i as i32,
+                src: VReg(0),
                 src_op: None,
             })
             .collect()
@@ -337,7 +349,7 @@ mod tests {
         // ALLOCA_REGS has 16 registers (s0-s11 + t3-t6), but s0 is reserved as frame pointer
         // So effectively fewer for allocation - we use 30 vregs to ensure spilling
         let f = func_with_n_vregs(30);
-        let vinsts = many_iconst_vinsts(29); // vregs 1-29
+        let vinsts = many_mov_from_vmctx(29); // vregs 1-29
         let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         assert!(
             alloc.spill_count() > 0,
@@ -349,7 +361,7 @@ mod tests {
     #[test]
     fn spilled_vreg_has_no_phys_reg() {
         let f = func_with_n_vregs(30);
-        let vinsts = many_iconst_vinsts(29);
+        let vinsts = many_mov_from_vmctx(29);
         let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for spilled in &alloc.spill_slots {
             let vi = spilled.0 as usize;
@@ -364,7 +376,7 @@ mod tests {
     #[test]
     fn is_spilled_detects_spilled_vregs() {
         let f = func_with_n_vregs(30);
-        let vinsts = many_iconst_vinsts(29);
+        let vinsts = many_mov_from_vmctx(29);
         let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         for spilled in &alloc.spill_slots {
             assert!(
@@ -378,7 +390,7 @@ mod tests {
     #[test]
     fn spill_count_matches_spill_slots_len() {
         let f = func_with_n_vregs(30);
-        let vinsts = many_iconst_vinsts(29);
+        let vinsts = many_mov_from_vmctx(29);
         let alloc = GreedyAlloc::new().allocate(&f, &vinsts, 0).expect("alloc");
         assert_eq!(alloc.spill_count(), alloc.spill_slots.len() as u32);
     }

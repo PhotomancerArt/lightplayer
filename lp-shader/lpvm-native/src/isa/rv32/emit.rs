@@ -310,6 +310,13 @@ impl EmitContext {
         v: VReg,
         temp: PhysReg,
     ) -> Result<PhysReg, NativeError> {
+        if let Some(imm) = alloc.rematerial_iconst32(v) {
+            let rd = temp as u32;
+            for w in iconst32_sequence(rd, imm) {
+                self.push_u32(w);
+            }
+            return Ok(temp);
+        }
         if let Some(slot_index) = alloc.spill_slot(v) {
             // VReg is spilled - load from stack into temp register
             Ok(self.load_spill(slot_index, temp))
@@ -897,11 +904,15 @@ impl EmitContext {
                 self.push_u32(encode_sw(rs2, rs1, *offset));
             }
             VInst::IConst32 { dst, val, .. } => {
-                let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
-                for w in iconst32_sequence(rd, *val) {
-                    self.push_u32(w);
+                if alloc.rematerial_iconst32(*dst).is_some() {
+                    // No register/stack home; each use emits `iconst32_sequence`.
+                } else {
+                    let rd = self.def_vreg(alloc, *dst, Self::TEMP0)? as u32;
+                    for w in iconst32_sequence(rd, *val) {
+                        self.push_u32(w);
+                    }
+                    self.store_def_vreg(alloc, *dst, Self::TEMP0);
                 }
-                self.store_def_vreg(alloc, *dst, Self::TEMP0);
             }
             VInst::SlotAddr { dst, slot, .. } => {
                 let off = self

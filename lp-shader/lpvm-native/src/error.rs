@@ -43,10 +43,13 @@ pub enum NativeError {
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
-    #[cfg(feature = "emu")]
+    #[cfg(any(feature = "emu", target_arch = "riscv32"))]
     Call(lpvm::CallError),
-    #[cfg(feature = "emu")]
+    #[cfg(any(feature = "emu", target_arch = "riscv32"))]
     Alloc(String),
+    /// JIT relocation or symbol resolution failure (RISC-V firmware path).
+    #[cfg(target_arch = "riscv32")]
+    JitLink(String),
 }
 
 impl fmt::Display for NativeError {
@@ -87,10 +90,12 @@ impl fmt::Display for NativeError {
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => write!(f, "link: {e}"),
-            #[cfg(feature = "emu")]
+            #[cfg(any(feature = "emu", target_arch = "riscv32"))]
             NativeError::Call(e) => write!(f, "{e}"),
-            #[cfg(feature = "emu")]
+            #[cfg(any(feature = "emu", target_arch = "riscv32"))]
             NativeError::Alloc(s) => write!(f, "allocation error: {s}"),
+            #[cfg(target_arch = "riscv32")]
+            NativeError::JitLink(s) => write!(f, "JIT link: {s}"),
         }
     }
 }
@@ -101,7 +106,7 @@ impl core::error::Error for NativeError {
             NativeError::Lower(e) => Some(e),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => Some(e),
-            #[cfg(feature = "emu")]
+            #[cfg(any(feature = "emu", target_arch = "riscv32"))]
             NativeError::Call(e) => Some(e),
             _ => None,
         }
@@ -121,7 +126,7 @@ impl From<lpvm_cranelift::CompilerError> for NativeError {
     }
 }
 
-#[cfg(feature = "emu")]
+#[cfg(any(feature = "emu", target_arch = "riscv32"))]
 impl From<lpvm::CallError> for NativeError {
     fn from(e: lpvm::CallError) -> Self {
         NativeError::Call(e)

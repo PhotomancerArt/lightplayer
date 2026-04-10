@@ -54,6 +54,7 @@ struct Interval {
 }
 
 /// Event types for allocation tracing/debug output.
+#[cfg_attr(not(feature = "emu"), allow(dead_code))]
 #[derive(Debug, Clone)]
 enum AllocEvent {
     /// VReg becomes live at this instruction index.
@@ -76,6 +77,8 @@ enum AllocEvent {
     },
     /// Spill decision for vreg.
     Spill { idx: usize, vreg: VReg, slot: usize },
+    /// No stack slot: vreg is rematerialized from this `i32` at each use.
+    Rematerial { idx: usize, vreg: VReg, val: i32 },
     /// Free-form comment at instruction (reserved for future trace hooks).
     #[allow(dead_code)]
     Comment { idx: usize, msg: String },
@@ -98,6 +101,7 @@ impl AllocTrace {
 
     /// Render the trace as a compact columnar view showing liveness.
     /// Columns are reused: when a vreg expires, its column becomes available for new vregs.
+    #[cfg_attr(not(feature = "emu"), allow(dead_code))]
     fn render(&self, vinsts: &[VInst]) -> String {
         use alloc::collections::BTreeMap;
         use alloc::collections::BTreeSet;
@@ -125,6 +129,7 @@ impl AllocTrace {
                 AllocEvent::LiveEnd { idx, .. } => *idx,
                 AllocEvent::Assign { idx, .. } => *idx,
                 AllocEvent::Spill { idx, .. } => *idx,
+                AllocEvent::Rematerial { idx, .. } => *idx,
                 AllocEvent::Comment { idx, .. } => *idx,
             };
             events_at.entry(idx).or_default().push(event);
@@ -249,6 +254,9 @@ impl AllocTrace {
                         }
                         AllocEvent::Spill { vreg, slot, .. } => {
                             comments.push(format!("spill(v{}) [{}]", vreg.0, slot));
+                        }
+                        AllocEvent::Rematerial { vreg, val, .. } => {
+                            comments.push(format!("remat(v{}) = {}", vreg.0, val));
                         }
                         AllocEvent::Comment { msg, .. } => {
                             comments.push(msg.clone());
@@ -459,6 +467,32 @@ struct Active {
     preg: PhysReg,
 }
 
+/// Spill victim: interval with the latest end; tie-break prefers an `IConst32` vreg (rematerial).
+fn pick_spill_victim(iv: &Interval, active: &[Active], iconst_defs: &[Option<i32>]) -> VReg {
+    let max_end = core::iter::once(iv.end)
+        .chain(active.iter().map(|a| a.end))
+        .max()
+        .unwrap_or(iv.end);
+    let mut pool: Vec<VReg> = Vec::new();
+    if iv.end == max_end {
+        pool.push(iv.vreg);
+    }
+    for a in active {
+        if a.end == max_end {
+            pool.push(a.vreg);
+        }
+    }
+    pool.sort_unstable_by_key(|v| v.0);
+    pool.dedup();
+    if pool.is_empty() {
+        return iv.vreg;
+    }
+    pool.iter()
+        .copied()
+        .find(|v| iconst_defs.get(v.0 as usize).copied().flatten().is_some())
+        .unwrap_or(pool[0])
+}
+
 pub struct LinearScan;
 
 impl LinearScan {
@@ -474,6 +508,9 @@ impl LinearScan {
         loop_regions: &[LoopRegion],
         alloc_trace: bool,
     ) -> Result<Allocation, NativeError> {
+        #[cfg(not(feature = "emu"))]
+        let _ = alloc_trace;
+
         let max_vreg = vinsts
             .iter()
             .flat_map(|v| v.defs().chain(v.uses()))
@@ -490,8 +527,10 @@ impl LinearScan {
 
         let mut vreg_to_phys: Vec<Option<PhysReg>> = alloc::vec![None; n];
         let mut spill_slots: Vec<VReg> = Vec::new();
+        let mut rematerial_iconst: Vec<Option<i32>> = alloc::vec![None; n];
         let mut incoming_stack_params: Vec<(VReg, i32)> = Vec::new();
 
+        let iconst_defs = super::collect_iconst_defs(vinsts, n);
         let alloca_list = sorted_allocatable_ints(abi.allocatable());
 
         for i in 0..slots {
@@ -589,36 +628,52 @@ impl LinearScan {
                 continue;
             }
 
-            // Spill path
-            let mut victim_v = iv.vreg;
-            let mut victim_end = iv.end;
-            for a in &active {
-                if a.end > victim_end {
-                    victim_end = a.end;
-                    victim_v = a.vreg;
-                }
-            }
+            // Spill path: victim = latest end; tie-break prefers IConst32 (rematerial, no stack).
+            let victim_v = pick_spill_victim(&iv, &active, &iconst_defs);
 
             if victim_v == iv.vreg {
-                let slot = spill_slots.len();
-                spill_slots.push(iv.vreg);
                 vreg_to_phys[iv.vreg.0 as usize] = None;
-                trace.push(AllocEvent::Spill {
-                    idx: start_idx,
-                    vreg: iv.vreg,
-                    slot,
-                });
+                if let Some(k) = iconst_defs[iv.vreg.0 as usize] {
+                    rematerial_iconst[iv.vreg.0 as usize] = Some(k);
+                    trace.push(AllocEvent::Rematerial {
+                        idx: start_idx,
+                        vreg: iv.vreg,
+                        val: k,
+                    });
+                } else {
+                    let slot = spill_slots.len();
+                    spill_slots.push(iv.vreg);
+                    trace.push(AllocEvent::Spill {
+                        idx: start_idx,
+                        vreg: iv.vreg,
+                        slot,
+                    });
+                }
             } else {
                 let preg = vreg_to_phys[victim_v.0 as usize]
                     .ok_or_else(|| NativeError::UnassignedVReg(victim_v.0))?;
                 vreg_to_phys[victim_v.0 as usize] = None;
-                spill_slots.push(victim_v);
+                let victim_end = active
+                    .iter()
+                    .find(|a| a.vreg == victim_v)
+                    .map(|a| a.end)
+                    .unwrap_or(iv.end);
                 let victim_idx = ((victim_end - 1) / 2) as usize;
-                trace.push(AllocEvent::Spill {
-                    idx: victim_idx,
-                    vreg: victim_v,
-                    slot: spill_slots.len() - 1,
-                });
+                if let Some(k) = iconst_defs[victim_v.0 as usize] {
+                    rematerial_iconst[victim_v.0 as usize] = Some(k);
+                    trace.push(AllocEvent::Rematerial {
+                        idx: victim_idx,
+                        vreg: victim_v,
+                        val: k,
+                    });
+                } else {
+                    spill_slots.push(victim_v);
+                    trace.push(AllocEvent::Spill {
+                        idx: victim_idx,
+                        vreg: victim_v,
+                        slot: spill_slots.len() - 1,
+                    });
+                }
                 active.retain(|a| a.vreg != victim_v);
                 vreg_to_phys[iv.vreg.0 as usize] = Some(preg);
                 trace.push(AllocEvent::Assign {
@@ -645,7 +700,8 @@ impl LinearScan {
             });
         }
 
-        // Render trace when explicitly enabled (stderr; off in production paths)
+        // Render trace when explicitly enabled (stderr; host `emu` builds only).
+        #[cfg(feature = "emu")]
         if alloc_trace {
             extern crate std;
             std::eprintln!("=== Allocation trace for {} ===\n", func.name);
@@ -654,7 +710,13 @@ impl LinearScan {
             for (i, p) in vreg_to_phys.iter().enumerate() {
                 match p {
                     Some(r) => std::eprintln!("  v{} -> x{}", i, r),
-                    None => std::eprintln!("  v{} -> [spill]", i),
+                    None => {
+                        if let Some(k) = rematerial_iconst.get(i).copied().flatten() {
+                            std::eprintln!("  v{} -> [remat {}]", i, k);
+                        } else {
+                            std::eprintln!("  v{} -> [spill]", i);
+                        }
+                    }
                 }
             }
             if !spill_slots.is_empty() {
@@ -671,7 +733,10 @@ impl LinearScan {
                 if vi >= n {
                     return Err(NativeError::UnassignedVReg(v.0));
                 }
-                if vreg_to_phys[vi].is_none() && !spill_slots.contains(&v) {
+                if vreg_to_phys[vi].is_none()
+                    && !spill_slots.contains(&v)
+                    && rematerial_iconst[vi].is_none()
+                {
                     return Err(NativeError::UnassignedVReg(v.0));
                 }
             }
@@ -688,6 +753,7 @@ impl LinearScan {
             vreg_to_phys,
             clobbered,
             spill_slots,
+            rematerial_iconst,
             incoming_stack_params,
         })
     }
@@ -811,5 +877,40 @@ mod tests {
             .expect("greedy");
         let l = LinearScan::new().allocate(&f, &vinsts, 0).expect("linear");
         assert_eq!(g.clobbered, l.clobbered);
+    }
+
+    #[test]
+    fn linear_scan_rematerial_iconst_under_pressure() {
+        let n = 20u32;
+        let mut vinsts: Vec<VInst> = (1..=n)
+            .map(|i| VInst::IConst32 {
+                dst: VReg(i),
+                val: i as i32,
+                src_op: None,
+            })
+            .collect();
+        vinsts.push(VInst::Ret {
+            vals: (1..=n).map(VReg).collect(),
+            src_op: None,
+        });
+        let f = IrFunction {
+            name: String::from("many_const"),
+            is_entry: true,
+            vmctx_vreg: VReg(0),
+            param_count: 0,
+            return_types: alloc::vec![lpir::IrType::I32; n as usize],
+            vreg_types: alloc::vec![lpir::IrType::I32; (n + 1) as usize],
+            slots: vec![],
+            body: vec![],
+            vreg_pool: vec![],
+        };
+        let l = LinearScan::new().allocate(&f, &vinsts, 0).expect("linear");
+        let remat = l.rematerial_iconst.iter().filter(|x| x.is_some()).count();
+        assert!(
+            remat > 0,
+            "expected rematerial IConst32 under pressure, got {} remat, {} spill slots",
+            remat,
+            l.spill_count()
+        );
     }
 }

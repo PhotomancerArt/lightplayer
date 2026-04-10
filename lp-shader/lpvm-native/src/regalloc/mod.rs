@@ -47,6 +47,9 @@ pub struct Allocation {
     pub clobbered: BTreeSet<PhysReg>,
     /// VRegs assigned to spill slots (no physical register assigned).
     pub spill_slots: Vec<VReg>,
+    /// `vreg.0` -> constant value when the vreg is defined only by [`VInst::IConst32`] and has no
+    /// register or stack home: uses rematerialize the immediate instead of `lw` from a spill slot.
+    pub rematerial_iconst: Vec<Option<i32>>,
     /// Incoming parameters passed on the stack: ABI byte offset from entry SP / callee `s0` after prologue.
     pub incoming_stack_params: Vec<(VReg, i32)>,
 }
@@ -57,9 +60,14 @@ impl Allocation {
         self.spill_slots.len() as u32
     }
 
-    /// Check if a vreg is spilled.
+    /// Check if a vreg is spilled to the stack.
     pub fn is_spilled(&self, v: VReg) -> bool {
         self.spill_slots.contains(&v)
+    }
+
+    /// Constant to rematerialize at each use, if this vreg has no physical or stack slot.
+    pub fn rematerial_iconst32(&self, v: VReg) -> Option<i32> {
+        self.rematerial_iconst.get(v.0 as usize).copied().flatten()
     }
 
     /// Get spill slot index for a spilled vreg.
@@ -80,6 +88,20 @@ pub fn clobber_set_for_call() -> BTreeSet<PhysReg> {
 /// All callee-saved registers (for testing/assertions).
 pub fn clobber_set_callee_saved() -> BTreeSet<PhysReg> {
     callee_saved_int().iter().map(|p| p.hw).collect()
+}
+
+/// Last `IConst32` value per vreg index (SSA: single logical def).
+pub(super) fn collect_iconst_defs(vinsts: &[VInst], n: usize) -> Vec<Option<i32>> {
+    let mut m = alloc::vec![None; n];
+    for inst in vinsts {
+        if let VInst::IConst32 { dst, val, .. } = inst {
+            let i = dst.0 as usize;
+            if i < n {
+                m[i] = Some(*val);
+            }
+        }
+    }
+    m
 }
 
 pub trait RegAlloc {

@@ -3888,6 +3888,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lpfx-impl-macro",
+ "lps-builtin-ids",
  "lps-q32",
  "lpvm",
 ]
@@ -4043,6 +4044,7 @@ dependencies = [
  "lp-riscv-inst",
  "lpir",
  "lps-builtin-ids",
+ "lps-builtins",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",

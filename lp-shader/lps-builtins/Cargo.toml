@@ -15,6 +15,7 @@ std = ["log/std"]
 test = ["std"]
 
 [dependencies]
+lps-builtin-ids = { path = "../lps-builtin-ids" }
 lpvm = { path = "../lpvm", default-features = false }
 lpfx-impl-macro = { path = "../lpfx-impl-macro" }
 lps-q32 = { path = "../lps-q32" }
