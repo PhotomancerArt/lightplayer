@@ -8,6 +8,8 @@ pub const LIGHT_GREEN: &str = "\x1b[92m";
 pub const RED: &str = "\x1b[31m";
 /// Yellow color
 pub const YELLOW: &str = "\x1b[33m";
+/// Blue (bright) for secondary metrics (e.g. instruction counts)
+pub const BLUE: &str = "\x1b[94m";
 /// Dim/grey color
 pub const DIM: &str = "\x1b[2m";
 /// Bold text

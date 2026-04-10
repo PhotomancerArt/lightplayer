@@ -93,6 +93,15 @@ impl FiletestInstance {
             Self::Wasm(_) => None,
         }
     }
+
+    pub(crate) fn last_guest_instruction_count(&self) -> Option<u64> {
+        match self {
+            Self::Jit(i) => i.last_guest_instruction_count(),
+            Self::Emu(i) => i.last_guest_instruction_count(),
+            Self::Native(i) => i.last_guest_instruction_count(),
+            Self::Wasm(i) => i.last_guest_instruction_count(),
+        }
+    }
 }
 
 fn lower_glsl(source: &str) -> anyhow::Result<(IrModule, LpsModuleSig)> {

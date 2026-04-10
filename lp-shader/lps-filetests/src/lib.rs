@@ -470,7 +470,7 @@ pub fn run(
             if show_target_col {
                 for t in &active_targets {
                     let tn = t.name();
-                    let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                    let tstats = per_target.get(&tn).cloned().unwrap_or_default();
                     let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                     let (status_marker, _) = if line_failed {
                         (
@@ -599,7 +599,7 @@ pub fn run(
             if show_target_col {
                 for t in &active_targets {
                     let tn = t.name();
-                    let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                    let tstats = per_target.get(&tn).cloned().unwrap_or_default();
                     let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                     let (status_marker, _) = if line_failed {
                         (
@@ -922,7 +922,7 @@ pub fn run(
                 if show_target_col {
                     for t in &active_targets {
                         let tn = t.name();
-                        let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                        let tstats = per_target.get(&tn).cloned().unwrap_or_default();
                         let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                         let status_marker = if line_failed {
                             if colors::should_color() {
@@ -1037,7 +1037,7 @@ pub fn run(
                     // When not showing target columns, still track per-target failures
                     for t in &active_targets {
                         let tn = t.name();
-                        let tstats = per_target.get(&tn).copied().unwrap_or_default();
+                        let tstats = per_target.get(&tn).cloned().unwrap_or_default();
                         let line_failed = per_target_file_line_failed(harness_completed, &tstats);
                         if line_failed {
                             failed_tests.push(FailedTest {
@@ -1454,6 +1454,18 @@ fn compile_fail_counts_for_table(
         .collect()
 }
 
+fn format_decimal_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// Format per-file test counts with expected-fail information.
 fn format_file_counts(
     stats: &test_run::TestCaseStats,
@@ -1518,6 +1530,17 @@ fn format_file_counts(
     }
     if !harness_completed && stats.total > 0 {
         suffix_parts.push("(harness error; LP_FILETESTS_HARNESS_LOG=1)".to_string());
+    }
+    if stats.guest_instructions_total > 0 {
+        let part = format!(
+            "({} inst)",
+            format_decimal_with_commas(stats.guest_instructions_total)
+        );
+        suffix_parts.push(if colors::should_color() {
+            format!("{}{}{}", colors::BLUE, part, colors::RESET)
+        } else {
+            part
+        });
     }
 
     let parentheticals = if suffix_parts.is_empty() {

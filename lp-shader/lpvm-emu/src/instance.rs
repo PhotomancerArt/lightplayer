@@ -50,6 +50,7 @@ pub struct EmuInstance {
     module: EmuModule,
     vmctx_guest: u32,
     last_debug: Option<String>,
+    last_guest_instruction_count: Option<u64>,
 }
 
 impl EmuInstance {
@@ -68,6 +69,7 @@ impl EmuInstance {
             module,
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
+            last_guest_instruction_count: None,
         })
     }
 
@@ -86,6 +88,7 @@ impl LpvmInstance for EmuInstance {
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         self.last_debug = None;
+        self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call requires FloatMode::Q32",
@@ -151,6 +154,7 @@ impl LpvmInstance for EmuInstance {
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
         self.last_debug = None;
+        self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "EmuInstance::call_q32 requires FloatMode::Q32",
@@ -216,10 +220,15 @@ impl LpvmInstance for EmuInstance {
     fn debug_state(&self) -> Option<String> {
         self.last_debug.clone()
     }
+
+    fn last_guest_instruction_count(&self) -> Option<u64> {
+        self.last_guest_instruction_count
+    }
 }
 
 impl EmuInstance {
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, InstanceError> {
+        self.last_guest_instruction_count = None;
         self.refresh_vmctx_header();
 
         let idx = self
@@ -273,6 +282,7 @@ impl EmuInstance {
 
         match ret_result {
             Ok(ret) => {
+                let n_inst = emu.get_instruction_count();
                 self.last_debug = None;
                 let mut words = Vec::with_capacity(ret.len());
                 for dv in ret {
@@ -293,9 +303,11 @@ impl EmuInstance {
                     ))));
                 }
                 words.truncate(n_ret);
+                self.last_guest_instruction_count = Some(n_inst);
                 Ok(words)
             }
             Err(e) => {
+                self.last_guest_instruction_count = None;
                 self.last_debug = Some(emu.dump_state());
                 Err(InstanceError::Call(CallError::Unsupported(format!(
                     "emulator: {e:?}"

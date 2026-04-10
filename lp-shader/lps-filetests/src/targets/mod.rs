@@ -88,8 +88,7 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: RV32 (Cranelift) + WASM (Q32).
-/// Note: rv32lp is experimental; enable explicitly with `--target rv32lp.q32`.
+/// Default targets for local `cargo test` / app runs: rv32lp, rv32 (Cranelift), wasm (Q32).
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
 pub const DEFAULT_TARGETS: &[Target] = &[ALL_TARGETS[3], ALL_TARGETS[2], ALL_TARGETS[0]];
 
@@ -195,9 +194,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_targets_is_rv32_and_wasm() {
-        assert_eq!(DEFAULT_TARGETS.len(), 2);
-        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32.q32");
-        assert_eq!(DEFAULT_TARGETS[1].name(), "wasm.q32");
+    fn test_default_targets_order_matches_const() {
+        assert_eq!(DEFAULT_TARGETS.len(), 3);
+        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32lp.q32");
+        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32.q32");
+        assert_eq!(DEFAULT_TARGETS[2].name(), "wasm.q32");
     }
 }

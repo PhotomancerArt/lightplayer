@@ -89,6 +89,11 @@ fn rv32lp_native_emulator_compiles_and_runs_iadd() {
         LpsValueF32::I32(v) => assert_eq!(v, 8, "5 + 3 = 8"),
         other => panic!("expected I32, got {:?}", other),
     }
+
+    let n = instance
+        .last_guest_instruction_count()
+        .expect("guest instruction count after successful call");
+    assert!(n > 0, "expected non-zero guest instructions");
 }
 
 /// Smoke test: compile and execute via Q32 flat call interface.
@@ -112,4 +117,9 @@ fn rv32lp_native_emulator_call_q32_flat() {
 
     assert_eq!(results.len(), 1, "one return value");
     assert_eq!(results[0], 8i32, "5 + 3 = 8");
+
+    let n = instance
+        .last_guest_instruction_count()
+        .expect("guest instruction count after successful call_q32");
+    assert!(n > 0, "expected non-zero guest instructions");
 }

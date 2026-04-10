@@ -26,6 +26,7 @@ pub struct NativeEmuInstance {
     pub(crate) module: NativeEmuModule,
     pub(crate) vmctx_guest: u32,
     pub(crate) last_debug: Option<String>,
+    pub(crate) last_guest_instruction_count: Option<u64>,
 }
 
 impl NativeEmuInstance {
@@ -46,6 +47,7 @@ impl NativeEmuInstance {
     }
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
+        self.last_guest_instruction_count = None;
         self.refresh_vmctx_header();
 
         let idx = self
@@ -108,6 +110,7 @@ impl NativeEmuInstance {
 
         match ret_result {
             Ok(ret) => {
+                let n_inst = emu.get_instruction_count();
                 self.last_debug = None;
                 let mut words = Vec::with_capacity(ret.len());
                 for dv in ret {
@@ -128,9 +131,11 @@ impl NativeEmuInstance {
                     ))));
                 }
                 words.truncate(n_ret);
+                self.last_guest_instruction_count = Some(n_inst);
                 Ok(words)
             }
             Err(e) => {
+                self.last_guest_instruction_count = None;
                 // Capture full debug info including disassembly and instruction log
                 let mut debug_parts = Vec::new();
                 debug_parts.push(format!("=== Debug Info ==="));
@@ -152,6 +157,7 @@ impl LpvmInstance for NativeEmuInstance {
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         self.last_debug = None;
+        self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeEmuInstance::call requires FloatMode::Q32",
@@ -214,6 +220,7 @@ impl LpvmInstance for NativeEmuInstance {
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
         self.last_debug = None;
+        self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeEmuInstance::call_q32 requires FloatMode::Q32",
@@ -275,5 +282,9 @@ impl LpvmInstance for NativeEmuInstance {
 
     fn debug_state(&self) -> Option<String> {
         self.last_debug.clone()
+    }
+
+    fn last_guest_instruction_count(&self) -> Option<u64> {
+        self.last_guest_instruction_count
     }
 }

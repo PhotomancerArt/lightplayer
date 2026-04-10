@@ -47,4 +47,10 @@ pub trait LpvmInstance {
     fn debug_state(&self) -> Option<String> {
         None
     }
+
+    /// Guest instructions executed for the last **successful** call (e.g. RV32 emulator
+    /// `call_function` body only, after per-call reset). JIT/WASM typically return `None`.
+    fn last_guest_instruction_count(&self) -> Option<u64> {
+        None
+    }
 }

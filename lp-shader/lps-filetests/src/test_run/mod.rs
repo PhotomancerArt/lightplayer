@@ -14,7 +14,7 @@ pub use run::{PerTargetStats, run_test_file, run_test_file_with_line_filter};
 use crate::targets::{AnnotationKind, Disposition};
 
 /// Statistics for test case execution within a file.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TestCaseStats {
     /// Number of test cases that passed.
     pub passed: usize,
@@ -28,6 +28,8 @@ pub struct TestCaseStats {
     pub unexpected_pass: usize,
     /// Tests annotated @unsupported for this target (skipped — not applicable by design).
     pub unsupported: usize,
+    /// Sum of guest RV32 instructions for successful `// run:` executions (emu backends only).
+    pub guest_instructions_total: u64,
 }
 
 impl TestCaseStats {
@@ -45,6 +47,7 @@ impl TestCaseStats {
         self.unimplemented += o.unimplemented;
         self.unexpected_pass += o.unexpected_pass;
         self.unsupported += o.unsupported;
+        self.guest_instructions_total += o.guest_instructions_total;
     }
 }
 

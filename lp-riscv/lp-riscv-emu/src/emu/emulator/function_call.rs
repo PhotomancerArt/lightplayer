@@ -212,6 +212,10 @@ impl Riscv32Emulator {
             });
         }
 
+        // Match `call_function`: per-call log + instruction counter (guest steps only, after ABI setup).
+        self.clear_logs();
+        self.instruction_count = 0;
+
         // Allocate buffer for struct return
         let buffer_addr = allocate_struct_return_buffer(self, struct_size)?;
 

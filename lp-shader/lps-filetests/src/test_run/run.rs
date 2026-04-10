@@ -68,7 +68,6 @@ pub fn run_test_file_with_line_filter(
             run_detail::run(test_file, path, line_filter, output_mode, target)?;
 
         let target_name = target.name();
-        per_target.insert(target_name.clone(), stats);
         compile_failed_by_target.insert(target_name.clone(), compile_failed);
 
         combined_stats.passed += stats.passed;
@@ -77,6 +76,10 @@ pub fn run_test_file_with_line_filter(
         combined_stats.unimplemented += stats.unimplemented;
         combined_stats.unexpected_pass += stats.unexpected_pass;
         combined_stats.unsupported += stats.unsupported;
+        if targets.len() == 1 {
+            combined_stats.guest_instructions_total = stats.guest_instructions_total;
+        }
+        per_target.insert(target_name.clone(), stats);
 
         if !unexpected_pass.is_empty() {
             unexpected_pass_by_target.insert(target_name.clone(), unexpected_pass);

@@ -485,6 +485,8 @@ pub fn run(
                             &mut unexpected_pass_lines,
                             directive.line_number,
                         );
+                        stats.guest_instructions_total +=
+                            inst.last_guest_instruction_count().unwrap_or(0);
                         // Print success message in detailed mode
                         if output_mode.show_full_output() {
                             use crate::{colors, colors::should_color};
