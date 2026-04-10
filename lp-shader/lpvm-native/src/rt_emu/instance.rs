@@ -116,7 +116,10 @@ impl NativeEmuInstance {
                     debug_parts.push(String::from("=== Debug Info ==="));
                     debug_parts.push(String::from("Execution completed normally."));
                     debug_parts.push(emu.dump_state());
-                    debug_parts.push(emu.format_debug_info(Some(emu.get_pc()), 100));
+                    debug_parts.push(emu.format_debug_info(
+                        Some(emu.get_pc()),
+                        lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                    ));
                     self.last_debug = Some(debug_parts.join("\n\n"));
                 } else {
                     self.last_debug = None;
@@ -150,7 +153,10 @@ impl NativeEmuInstance {
                 debug_parts.push(format!("=== Debug Info ==="));
                 debug_parts.push(format!("Error: {e:?}"));
                 debug_parts.push(emu.dump_state());
-                debug_parts.push(emu.format_debug_info(Some(emu.get_pc()), 100));
+                debug_parts.push(emu.format_debug_info(
+                    Some(emu.get_pc()),
+                    lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                ));
                 let debug_info = debug_parts.join("\n\n");
                 self.last_debug = Some(debug_info);
                 Err(NativeError::Call(CallError::Unsupported(format!(

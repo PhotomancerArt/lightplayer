@@ -18,7 +18,7 @@ use super::inst::{
 };
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
 use crate::error::{LowerError, NativeError};
-use crate::regalloc::{Allocation, LinearScan, PhysReg};
+use crate::regalloc::{Allocation, GreedyAlloc, LinearScan, PhysReg};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
@@ -1012,6 +1012,21 @@ impl EmitContext {
     }
 }
 
+fn allocate_for_emit(
+    func: &lpir::IrFunction,
+    vinsts: &[VInst],
+    func_abi: &FuncAbi,
+    loop_regions: &[crate::lower::LoopRegion],
+    alloc_trace: bool,
+) -> Result<Allocation, NativeError> {
+    if crate::config::USE_LINEAR_SCAN_REGALLOC {
+        LinearScan::new().allocate_with_func_abi(func, vinsts, func_abi, loop_regions, alloc_trace)
+    } else {
+        let _ = alloc_trace;
+        GreedyAlloc::new().allocate_with_func_abi(func, vinsts, func_abi)
+    }
+}
+
 /// Emit one function to RV32 bytes (and relocations). Used by ELF writer and debug assembly.
 ///
 /// # Arguments
@@ -1021,7 +1036,7 @@ impl EmitContext {
 /// * `fn_sig` - Surface signature (ABI classification, must match `func` parameter layout)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `debug_info` - Whether to include debug line information
-/// * `alloc_trace` - When true, print linear-scan allocation trace to stderr
+/// * `alloc_trace` - When [`crate::config::USE_LINEAR_SCAN_REGALLOC`] is true, print allocation trace to stderr
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
     ir: &lpir::IrModule,
@@ -1035,13 +1050,7 @@ pub fn emit_function_bytes(
     let vinsts = &lowered.vinsts;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
-    let alloc = LinearScan::new().allocate_with_func_abi(
-        func,
-        vinsts,
-        &func_abi,
-        &lowered.loop_regions,
-        alloc_trace,
-    )?;
+    let alloc = allocate_for_emit(func, vinsts, &func_abi, &lowered.loop_regions, alloc_trace)?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
     let is_sret = func_abi.is_sret();
 
@@ -1214,7 +1223,8 @@ pub fn emit_module_elf(
                     symbol: sym_id,
                     addend: 0,
                     flags: object::RelocationFlags::Elf {
-                        r_type: elf::R_RISCV_CALL_PLT,
+                        // Standard R_RISCV_CALL_PLT is 17. The object crate incorrectly defines it as 19.
+                        r_type: 17,
                     },
                 },
             )
@@ -1230,7 +1240,6 @@ pub fn emit_module_elf(
 mod tests {
     use super::*;
     use crate::abi::ModuleAbi;
-    use crate::regalloc::LinearScan;
     use alloc::vec;
 
     use lpir::{IrFunction, IrModule, Op};
@@ -1330,8 +1339,7 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
-        let a = LinearScan::new()
-            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
+        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue(false, &a).expect("prologue");
@@ -1390,8 +1398,7 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &call_c_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
-        let a = LinearScan::new()
-            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
+        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue(false, &a).expect("prologue");

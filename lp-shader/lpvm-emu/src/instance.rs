@@ -1,5 +1,6 @@
 //! [`EmuInstance`]: per-instance VMContext slot in shared memory + emulated [`LpvmInstance::call`].
 
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -268,7 +269,12 @@ impl EmuInstance {
             DEFAULT_SHARED_START,
             lp_riscv_emu::DEFAULT_RAM_START,
         );
-        let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(LogLevel::None);
+        let log_level = if self.module.options.emu_trace_instructions {
+            LogLevel::Instructions
+        } else {
+            LogLevel::None
+        };
+        let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
 
         let has_sr = sig
             .params
@@ -283,7 +289,19 @@ impl EmuInstance {
         match ret_result {
             Ok(ret) => {
                 let n_inst = emu.get_instruction_count();
-                self.last_debug = None;
+                if self.module.options.emu_trace_instructions {
+                    let mut debug_parts = Vec::new();
+                    debug_parts.push(String::from("=== Debug Info ==="));
+                    debug_parts.push(String::from("Execution completed normally."));
+                    debug_parts.push(emu.dump_state());
+                    debug_parts.push(emu.format_debug_info(
+                        Some(emu.get_pc()),
+                        lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                    ));
+                    self.last_debug = Some(debug_parts.join("\n\n"));
+                } else {
+                    self.last_debug = None;
+                }
                 let mut words = Vec::with_capacity(ret.len());
                 for dv in ret {
                     match dv {
@@ -308,7 +326,15 @@ impl EmuInstance {
             }
             Err(e) => {
                 self.last_guest_instruction_count = None;
-                self.last_debug = Some(emu.dump_state());
+                let mut debug_parts = Vec::new();
+                debug_parts.push(String::from("=== Debug Info ==="));
+                debug_parts.push(format!("Error: {e:?}"));
+                debug_parts.push(emu.dump_state());
+                debug_parts.push(emu.format_debug_info(
+                    Some(emu.get_pc()),
+                    lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                ));
+                self.last_debug = Some(debug_parts.join("\n\n"));
                 Err(InstanceError::Call(CallError::Unsupported(format!(
                     "emulator: {e:?}"
                 ))))

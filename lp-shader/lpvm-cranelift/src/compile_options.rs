@@ -19,6 +19,9 @@ pub struct CompileOptions {
     pub q32_options: Q32Options,
     pub memory_strategy: MemoryStrategy,
     pub max_errors: Option<usize>,
+    /// When true, the LPVM RV32 emulator enables instruction-level guest logging for debug dumps.
+    /// Ignored by JIT and object-only compilation.
+    pub emu_trace_instructions: bool,
 }
 
 impl Default for CompileOptions {
@@ -28,6 +31,7 @@ impl Default for CompileOptions {
             q32_options: Q32Options::default(),
             memory_strategy: MemoryStrategy::default(),
             max_errors: None,
+            emu_trace_instructions: false,
         }
     }
 }

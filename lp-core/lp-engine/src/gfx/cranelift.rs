@@ -49,6 +49,7 @@ impl LpGraphics for CraneliftGraphics {
             q32_options: options.q32_options,
             memory_strategy: MemoryStrategy::Default,
             max_errors: options.max_errors,
+            emu_trace_instructions: false,
         };
         let engine = CraneliftEngine::new(compile);
         let module = engine.compile(&ir, &meta).map_err(|e| Error::Other {

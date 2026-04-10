@@ -96,6 +96,15 @@ fn apply_single_relocation(
             reloc.symbol_name, reloc.offset
         ))?;
 
+    // Address 0 in the map means an undefined symbol that was never linked to a real definition.
+    if target_addr == 0 {
+        return Err(format!(
+            "Relocation for '{}' at offset 0x{:x}: symbol resolved to address 0 (undefined). \
+             Check that the object uses the same symbol name as the base image (e.g. C ABI name from BuiltinId).",
+            reloc.symbol_name, reloc.offset
+        ));
+    }
+
     // Get section address info
     // Try direct lookup first, then try normalized name (for subsections like .text._init -> .text)
     let section_info = section_addrs

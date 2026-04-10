@@ -4042,6 +4042,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lpir",
+ "lps-builtin-ids",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",

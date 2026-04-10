@@ -13,6 +13,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+// Compile-time configuration
+pub mod config;
+
 // Re-export instruction utilities for convenience
 pub use lp_riscv_inst::{Gpr, Inst, decode_instruction, format_instruction};
 

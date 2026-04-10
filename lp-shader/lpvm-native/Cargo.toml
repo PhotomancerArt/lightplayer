@@ -28,6 +28,7 @@ lpir = { path = "../lpir" }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
 lpvm = { path = "../lpvm" }
 lps-shared = { path = "../lps-shared" }
+lps-builtin-ids = { path = "../lps-builtin-ids" }
 object = { version = "0.37", default-features = false, features = ["write_core", "elf"] }
 cranelift-codegen = { workspace = true, optional = true, default-features = false, features = [
     "riscv32",

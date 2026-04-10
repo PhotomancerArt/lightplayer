@@ -122,6 +122,7 @@ impl CompiledShader {
         };
         let opts = CompileOptions {
             float_mode: fm,
+            emu_trace_instructions: emu_log_level == LogLevel::Instructions,
             ..Default::default()
         };
         match target.backend {
@@ -137,7 +138,7 @@ impl CompiledShader {
                 let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
                 let native_opts = NativeCompileOptions {
                     float_mode: fm,
-                    emu_trace_instructions: emu_log_level == LogLevel::Instructions,
+                    emu_trace_instructions: opts.emu_trace_instructions,
                     alloc_trace,
                     ..Default::default()
                 };

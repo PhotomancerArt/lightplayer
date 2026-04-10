@@ -5,6 +5,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FloatMode, IrFunction, IrModule, Op};
+use lps_builtin_ids::{
+    BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
+    lpir_q32_builtin_id, vm_q32_builtin_id,
+};
 
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
@@ -793,10 +797,102 @@ fn resolve_callee_name(ir: &IrModule, callee: CalleeRef) -> Option<String> {
     let idx = callee.0 as usize;
     let ni = ir.imports.len();
     if idx < ni {
-        ir.imports.get(idx).map(|imp| imp.func_name.clone())
+        // For imports, map to the C ABI symbol name using BuiltinId
+        ir.imports.get(idx).map(|imp| {
+            // Try to resolve to a BuiltinId to get the proper C symbol name
+            if let Some(bid) = resolve_import_to_builtin(imp) {
+                String::from(bid.name())
+            } else {
+                // Fallback: use the import name directly (for non-builtin imports)
+                imp.func_name.clone()
+            }
+        })
     } else {
         ir.functions.get(idx - ni).map(|f| f.name.clone())
     }
+}
+
+/// Map an LPIR import declaration to a BuiltinId to get the C ABI symbol name.
+/// Mirrors Cranelift's resolve_import in lpvm-cranelift/src/builtins.rs
+fn resolve_import_to_builtin(decl: &lpir::module::ImportDecl) -> Option<BuiltinId> {
+    match decl.module_name.as_str() {
+        "glsl" => {
+            let ac = decl.param_types.len();
+            glsl_q32_math_builtin_id(&decl.func_name, ac)
+        }
+        "lpir" => {
+            let ac = decl.param_types.len();
+            lpir_q32_builtin_id(&decl.func_name, ac)
+        }
+        "lpfx" => {
+            // LPFX builtins are named like "lpfx_psrdnoise_34" - strip the suffix
+            let base = lpfx_strip_suffix(&decl.func_name)?;
+            // Get GLSL kinds from lpfx_glsl_params CSV or fall back to IR types
+            let kinds = lpfx_glsl_kinds_from_decl(decl);
+            glsl_lpfx_q32_builtin_id(base, &kinds)
+        }
+        "vm" => {
+            let ac = decl.param_types.len();
+            vm_q32_builtin_id(&decl.func_name, ac)
+        }
+        _ => None,
+    }
+}
+
+/// Strip the numeric suffix from LPFX import names (e.g., "lpfx_psrdnoise_34" → "lpfx_psrdnoise").
+fn lpfx_strip_suffix(func_name: &str) -> Option<&str> {
+    let (base, tail) = func_name.rsplit_once('_')?;
+    tail.parse::<u32>().ok()?;
+    Some(base)
+}
+
+/// Get GLSL parameter kinds from lpfx_glsl_params CSV or infer from IR types.
+fn lpfx_glsl_kinds_from_decl(decl: &lpir::module::ImportDecl) -> Vec<GlslParamKind> {
+    if let Some(ref enc) = decl.lpfx_glsl_params {
+        parse_lpfx_glsl_params_csv(enc)
+            .unwrap_or_else(|_| ir_params_to_glsl_kinds(&decl.param_types))
+    } else {
+        ir_params_to_glsl_kinds(&decl.param_types)
+    }
+}
+
+/// Parse LPFX glsl params CSV (e.g., "Vec2,Vec2,Float,Vec2,UInt").
+fn parse_lpfx_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
+    if enc.is_empty() {
+        return Ok(Vec::new());
+    }
+    enc.split(',')
+        .map(|t| match t.trim() {
+            "Float" => Ok(GlslParamKind::Float),
+            "Int" => Ok(GlslParamKind::Int),
+            "UInt" => Ok(GlslParamKind::UInt),
+            "Vec2" => Ok(GlslParamKind::Vec2),
+            "Vec3" => Ok(GlslParamKind::Vec3),
+            "Vec4" => Ok(GlslParamKind::Vec4),
+            "IVec2" => Ok(GlslParamKind::IVec2),
+            "IVec3" => Ok(GlslParamKind::IVec3),
+            "IVec4" => Ok(GlslParamKind::IVec4),
+            "UVec2" => Ok(GlslParamKind::UVec2),
+            "UVec3" => Ok(GlslParamKind::UVec3),
+            "UVec4" => Ok(GlslParamKind::UVec4),
+            "BVec2" => Ok(GlslParamKind::BVec2),
+            "BVec3" => Ok(GlslParamKind::BVec3),
+            "BVec4" => Ok(GlslParamKind::BVec4),
+            other => Err(format!("unknown LPFX glsl param tag `{other}`")),
+        })
+        .collect()
+}
+
+/// Convert LPIR parameter types to GLSL parameter kinds for LPFX overload resolution.
+fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
+    use lpir::IrType;
+    params
+        .iter()
+        .map(|t| match t {
+            IrType::F32 => GlslParamKind::Float,
+            IrType::I32 | IrType::Pointer => GlslParamKind::UInt,
+        })
+        .collect()
 }
 
 fn callee_return_uses_sret(ir: &IrModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
