@@ -18,7 +18,7 @@ use super::inst::{
 };
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PregSet};
 use crate::error::{LowerError, NativeError};
-use crate::regalloc::{Allocation, GreedyAlloc, LinearScan};
+use crate::regalloc::{Allocation, GreedyAlloc, LinearScan, PReg};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
@@ -1060,7 +1060,7 @@ pub fn emit_function_bytes(
     let mut used_callee_saved = PregSet::EMPTY;
     for preg_opt in &alloc.vreg_to_phys {
         if let Some(preg) = preg_opt {
-            let p = PReg::int(*preg);
+            let p = crate::abi::PReg::int(*preg);
             if callee_saved_int().contains(p) {
                 used_callee_saved.insert(p);
             }

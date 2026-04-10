@@ -1,0 +1,3 @@
+- Remove all the old alloc code
+- Rename rv32fa to rv32
+- Remove legacy `shader-rv32` (including `--pipeline fast`) once `shader-rv32fa` and any linear-only tooling are migrated

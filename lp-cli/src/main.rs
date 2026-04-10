@@ -9,7 +9,9 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, heap_summary, mem_profile, serve, shader_lpir, shader_rv32, upload};
+use commands::{
+    create, dev, heap_summary, mem_profile, serve, shader_lpir, shader_rv32, shader_rv32fa, upload,
+};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -107,10 +109,15 @@ enum Cli {
         show_vinst: bool,
         /// With `--pipeline fast`, print PInst listing to stderr.
         #[arg(long)]
-        show_PInst: bool,
+        show_pinst: bool,
         /// With `--pipeline fast`, print raw instruction disassembly to stderr.
         #[arg(long)]
         disassemble: bool,
+    },
+    /// Fastalloc RV32FA pipeline with verbose stderr (see `--help`).
+    ShaderRv32fa {
+        #[command(flatten)]
+        args: shader_rv32fa::Args,
     },
 }
 
@@ -159,7 +166,7 @@ fn main() -> Result<()> {
             alloc_trace,
             pipeline,
             show_vinst,
-            show_PInst,
+            show_pinst,
             disassemble,
         } => shader_rv32::handle_shader_rv32(shader_rv32::ShaderRv32Args {
             path,
@@ -169,8 +176,9 @@ fn main() -> Result<()> {
             alloc_trace,
             pipeline,
             show_vinst,
-            show_PInst,
+            show_pinst,
             disassemble,
         }),
+        Cli::ShaderRv32fa { args } => shader_rv32fa::handle_shader_rv32fa(args),
     }
 }

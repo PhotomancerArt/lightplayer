@@ -778,7 +778,7 @@ impl RegAlloc for LinearScan {
                 .collect(),
         };
         let allocatable = alloca_base_int();
-        let precolors: Vec<(u32, PReg)> = (0..func.total_param_slots() as usize)
+        let precolors: Vec<(u32, crate::abi::PReg)> = (0..func.total_param_slots() as usize)
             .enumerate()
             .map(|(i, vreg)| (vreg as u32, ARG_REGS[arg_reg_offset + i]))
             .collect();
