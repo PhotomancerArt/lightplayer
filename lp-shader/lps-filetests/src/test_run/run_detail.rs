@@ -7,6 +7,7 @@ use crate::test_run::TestCaseStats;
 
 use crate::test_run::compile;
 use crate::test_run::execution;
+use crate::test_run::filetest_lpvm::FiletestInstance;
 use crate::test_run::parse_assert;
 use crate::test_run::record_result;
 use anyhow::Result;
@@ -268,7 +269,7 @@ pub fn run(
                     &mut unexpected_pass_lines,
                     directive.line_number,
                 );
-                let error_msg = format_error(
+                let formatted = format_error(
                     ErrorType::ExpectedTrapGotValue,
                     &format!(
                         "expected trap but execution succeeded\n\nExpected: trap{}\nActual: value {}",
@@ -288,8 +289,9 @@ pub fn run(
                     Some(&directive.expression_str),
                     target,
                 );
-                eprintln_if_detail(output_mode, &error_msg);
-                errors.push(anyhow::anyhow!("{error_msg}"));
+                let full_error = append_debug_state_if_requested(output_mode, &inst, formatted);
+                eprintln_if_detail(output_mode, &full_error);
+                errors.push(anyhow::anyhow!("{full_error}"));
                 continue;
             }
             (Err(e), None) => {
@@ -585,8 +587,10 @@ pub fn run(
                             )),
                             target,
                         );
-                        eprintln_if_detail(output_mode, &formatted_error);
-                        errors.push(anyhow::anyhow!("{formatted_error}"));
+                        let full_error =
+                            append_debug_state_if_requested(output_mode, &inst, formatted_error);
+                        eprintln_if_detail(output_mode, &full_error);
+                        errors.push(anyhow::anyhow!("{full_error}"));
                         // }
                     }
                 }
@@ -733,6 +737,22 @@ fn format_code_block(source: &str) -> String {
         .map(|(i, line)| format!("{:width$} | {}", i + 1, line, width = max_line_num_width))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// When `DEBUG=1`, append guest emulator trace / state from the last call (same data as on
+/// execution errors, but successful calls only stash it on the instance).
+fn append_debug_state_if_requested(
+    output_mode: OutputMode,
+    inst: &FiletestInstance,
+    message: String,
+) -> String {
+    if !output_mode.show_debug_sections() {
+        return message;
+    }
+    match inst.debug_state() {
+        Some(debug) if !debug.is_empty() => format!("{message}\n\n{debug}"),
+        _ => message,
+    }
 }
 
 /// Per-`// run:` diagnostic on parse/execute/compare failure (Detail/Debug only; concise runs use

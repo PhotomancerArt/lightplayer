@@ -39,6 +39,7 @@ pub fn handle_shader_rv32(args: ShaderRv32Args) -> Result<()> {
         DisasmOptions {
             show_hex_offset: args.hex,
         },
+        args.alloc_trace,
     )
     .map_err(|e| anyhow::anyhow!("lpvm-native: {e:?}"))?;
 

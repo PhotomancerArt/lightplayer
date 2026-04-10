@@ -20,11 +20,13 @@ use crate::isa::rv32::emit::emit_function_bytes;
 /// * `sig` - Module signatures containing function metadata
 /// * `float_mode` - Floating point mode
 /// * `opts` - Disassembly options
+/// * `alloc_trace` - When true, print linear-scan allocation trace to stderr for each function
 pub fn compile_module_asm_text(
     ir: &IrModule,
     sig: &LpsModuleSig,
     float_mode: lpir::FloatMode,
     opts: DisasmOptions,
+    alloc_trace: bool,
 ) -> Result<String, NativeError> {
     // Build a map from function name to signature
     let sig_map: BTreeMap<&str, &LpsFnSig> =
@@ -44,7 +46,8 @@ pub fn compile_module_asm_text(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
-        let emitted = emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true)?;
+        let emitted =
+            emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true, alloc_trace)?;
         let table = LineTable::from_debug_lines(&emitted.debug_lines);
         out.push_str(&disassemble_function(&emitted.code, &table, func, opts));
         out.push('\n');
@@ -107,8 +110,14 @@ mod tests {
                 ],
             }],
         };
-        let s = compile_module_asm_text(&ir, &sig, lpir::FloatMode::Q32, DisasmOptions::default())
-            .expect("asm");
+        let s = compile_module_asm_text(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            DisasmOptions::default(),
+            false,
+        )
+        .expect("asm");
         assert!(s.contains(".globl\tadd"));
         assert!(s.contains("(0)"));
         assert!(s.contains("iadd"));

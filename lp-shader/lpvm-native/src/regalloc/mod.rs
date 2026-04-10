@@ -1,11 +1,13 @@
 //! Register allocation interface.
 
 mod greedy;
+mod linear_scan;
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 pub use greedy::GreedyAlloc;
+pub use linear_scan::LinearScan;
 
 use lpir::{IrFunction, VReg};
 

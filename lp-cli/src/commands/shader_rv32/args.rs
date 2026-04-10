@@ -8,4 +8,6 @@ pub struct ShaderRv32Args {
     pub output: Option<PathBuf>,
     pub float_mode: String,
     pub hex: bool,
+    /// Print register allocation trace to stderr (linear scan / liveness).
+    pub alloc_trace: bool,
 }

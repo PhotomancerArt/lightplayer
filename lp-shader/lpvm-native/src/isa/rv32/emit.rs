@@ -18,7 +18,7 @@ use super::inst::{
 };
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PReg, PregSet};
 use crate::error::{LowerError, NativeError};
-use crate::regalloc::{Allocation, GreedyAlloc, PhysReg};
+use crate::regalloc::{Allocation, LinearScan, PhysReg};
 use crate::vinst::SymbolRef;
 use crate::vinst::{IcmpCond, LabelId, VInst};
 use lpir::VReg;
@@ -1021,6 +1021,7 @@ impl EmitContext {
 /// * `fn_sig` - Surface signature (ABI classification, must match `func` parameter layout)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `debug_info` - Whether to include debug line information
+/// * `alloc_trace` - When true, print linear-scan allocation trace to stderr
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
     ir: &lpir::IrModule,
@@ -1028,11 +1029,19 @@ pub fn emit_function_bytes(
     fn_sig: &lps_shared::LpsFnSig,
     float_mode: lpir::FloatMode,
     debug_info: bool,
+    alloc_trace: bool,
 ) -> Result<EmittedFunction, NativeError> {
-    let vinsts = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
+    let lowered = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
+    let vinsts = &lowered.vinsts;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
-    let alloc = GreedyAlloc::new().allocate_with_func_abi(func, &vinsts, &func_abi)?;
+    let alloc = LinearScan::new().allocate_with_func_abi(
+        func,
+        vinsts,
+        &func_abi,
+        &lowered.loop_regions,
+        alloc_trace,
+    )?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
     let is_sret = func_abi.is_sret();
 
@@ -1055,7 +1064,7 @@ pub fn emit_function_bytes(
     let has_call = vinsts.iter().any(|v| v.is_call());
     let clobber_hw = call_clobber_hw(&func_abi);
     let max_call_saves = if has_call {
-        max_regs_saved_across_calls(&vinsts, &alloc, &clobber_hw)
+        max_regs_saved_across_calls(vinsts, &alloc, &clobber_hw)
     } else {
         0
     };
@@ -1067,7 +1076,7 @@ pub fn emit_function_bytes(
         .enumerate()
         .map(|(i, s)| (i as u32, s.size))
         .collect();
-    let caller_out_bytes = max_caller_outgoing_stack_bytes(&vinsts);
+    let caller_out_bytes = max_caller_outgoing_stack_bytes(vinsts);
     let frame = FrameLayout::compute(
         &func_abi,
         alloc.spill_count().saturating_add(extra_spill),
@@ -1097,7 +1106,7 @@ pub fn emit_function_bytes(
 
     let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
     ctx.emit_prologue(is_sret, &alloc)?;
-    for v in &vinsts {
+    for v in vinsts {
         ctx.emit_vinst(v, &alloc, is_sret)?;
     }
     ctx.resolve_branch_fixups()?;
@@ -1115,10 +1124,12 @@ pub fn emit_function_bytes(
 /// * `ir` - The LPIR module to emit
 /// * `sig` - Module signatures containing function metadata (for ABI classification)
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
+/// * `alloc_trace` - When true, print allocation trace per function to stderr
 pub fn emit_module_elf(
     ir: &lpir::IrModule,
     sig: &lps_shared::LpsModuleSig,
     float_mode: lpir::FloatMode,
+    alloc_trace: bool,
 ) -> Result<Vec<u8>, NativeError> {
     if ir.functions.is_empty() {
         return Err(NativeError::EmptyModule);
@@ -1151,7 +1162,15 @@ pub fn emit_module_elf(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
-        let emitted = emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, false)?;
+        let emitted = emit_function_bytes(
+            func,
+            ir,
+            &module_abi,
+            fn_sig,
+            float_mode,
+            false,
+            alloc_trace,
+        )?;
         let ctx = emitted;
 
         let func_off = obj.append_section_data(text, &ctx.code, 4);
@@ -1211,7 +1230,7 @@ pub fn emit_module_elf(
 mod tests {
     use super::*;
     use crate::abi::ModuleAbi;
-    use crate::regalloc::GreedyAlloc;
+    use crate::regalloc::LinearScan;
     use alloc::vec;
 
     use lpir::{IrFunction, IrModule, Op};
@@ -1309,14 +1328,14 @@ mod tests {
         let f = leaf_add();
         let ir = ir_single(f.clone());
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
-        let v = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
+        let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
-        let a = GreedyAlloc::new()
-            .allocate_with_func_abi(&f, &v, &func_abi)
+        let a = LinearScan::new()
+            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue(false, &a).expect("prologue");
-        for i in &v {
+        for i in &lowered.vinsts {
             ctx.emit_vinst(i, &a, false).expect("emit");
         }
         ctx.emit_epilogue();
@@ -1329,8 +1348,16 @@ mod tests {
         let f = leaf_add();
         let ir = ir_single(f.clone());
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
-        let e = emit_function_bytes(&f, &ir, &mabi, &leaf_lps_sig(), lpir::FloatMode::Q32, true)
-            .expect("emit");
+        let e = emit_function_bytes(
+            &f,
+            &ir,
+            &mabi,
+            &leaf_lps_sig(),
+            lpir::FloatMode::Q32,
+            true,
+            false,
+        )
+        .expect("emit");
         assert!(
             !e.debug_lines.is_empty(),
             "expected per-instruction debug lines"
@@ -1361,14 +1388,14 @@ mod tests {
         };
         let ir = ir_single(f.clone());
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &call_c_sig_module());
-        let v = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
+        let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
-        let a = GreedyAlloc::new()
-            .allocate_with_func_abi(&f, &v, &func_abi)
+        let a = LinearScan::new()
+            .allocate_with_func_abi(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
             .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue(false, &a).expect("prologue");
-        for i in &v {
+        for i in &lowered.vinsts {
             ctx.emit_vinst(i, &a, false).expect("emit");
         }
         ctx.emit_epilogue();

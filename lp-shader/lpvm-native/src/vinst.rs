@@ -1,5 +1,6 @@
 //! Virtual instructions: post-lowering, pre-regalloc.
 
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -27,6 +28,28 @@ pub enum IcmpCond {
     LeU,
     GtU,
     GeU,
+}
+
+fn icmp_cond_op(cond: IcmpCond) -> &'static str {
+    match cond {
+        IcmpCond::Eq => "==",
+        IcmpCond::Ne => "!=",
+        IcmpCond::LtS => "<",
+        IcmpCond::LeS => "<=",
+        IcmpCond::GtS => ">",
+        IcmpCond::GeS => ">=",
+        IcmpCond::LtU => "<u",
+        IcmpCond::LeU => "<=u",
+        IcmpCond::GtU => ">u",
+        IcmpCond::GeU => ">=u",
+    }
+}
+
+fn vregs_csv(regs: &[VReg]) -> String {
+    regs.iter()
+        .map(|r| format!("v{}", r.0))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -358,5 +381,200 @@ impl VInst {
     /// True if this is a call (clobbers caller-saved registers).
     pub fn is_call(&self) -> bool {
         matches!(self, VInst::Call { .. })
+    }
+
+    /// Short mnemonic for allocation traces and debug listings.
+    pub fn mnemonic(&self) -> &'static str {
+        match self {
+            VInst::Add32 { .. } => "Add32",
+            VInst::Sub32 { .. } => "Sub32",
+            VInst::Neg32 { .. } => "Neg32",
+            VInst::Mul32 { .. } => "Mul32",
+            VInst::And32 { .. } => "And32",
+            VInst::Or32 { .. } => "Or32",
+            VInst::Xor32 { .. } => "Xor32",
+            VInst::Bnot32 { .. } => "Bnot32",
+            VInst::Shl32 { .. } => "Shl32",
+            VInst::ShrS32 { .. } => "ShrS32",
+            VInst::ShrU32 { .. } => "ShrU32",
+            VInst::DivS32 { .. } => "DivS32",
+            VInst::DivU32 { .. } => "DivU32",
+            VInst::RemS32 { .. } => "RemS32",
+            VInst::RemU32 { .. } => "RemU32",
+            VInst::Icmp32 { .. } => "Icmp32",
+            VInst::IeqImm32 { .. } => "IeqImm32",
+            VInst::Select32 { .. } => "Select32",
+            VInst::Br { .. } => "Br",
+            VInst::BrIf { .. } => "BrIf",
+            VInst::Mov32 { .. } => "Mov32",
+            VInst::Load32 { .. } => "Load32",
+            VInst::Store32 { .. } => "Store32",
+            VInst::SlotAddr { .. } => "SlotAddr",
+            VInst::MemcpyWords { .. } => "MemcpyWords",
+            VInst::IConst32 { .. } => "IConst32",
+            VInst::Call { .. } => "Call",
+            VInst::Ret { .. } => "Ret",
+            VInst::Label(..) => "Label",
+        }
+    }
+
+    /// Operand / expression part for allocation traces (mnemonic is separate; see [`Self::mnemonic`]).
+    pub fn format_alloc_trace_detail(&self) -> String {
+        match self {
+            VInst::Add32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} + v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::Sub32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} - v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::Neg32 { dst, src, .. } => {
+                format!("v{} = -v{}", dst.0, src.0)
+            }
+            VInst::Mul32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} * v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::And32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} & v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::Or32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} | v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::Xor32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} ^ v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::Bnot32 { dst, src, .. } => {
+                format!("v{} = ~v{}", dst.0, src.0)
+            }
+            VInst::Shl32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} << v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::ShrS32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} >> v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::ShrU32 {
+                dst, src1, src2, ..
+            } => {
+                format!("v{} = v{} >>u v{}", dst.0, src1.0, src2.0)
+            }
+            VInst::DivS32 { dst, lhs, rhs, .. } => {
+                format!("v{} = v{} / v{}", dst.0, lhs.0, rhs.0)
+            }
+            VInst::DivU32 { dst, lhs, rhs, .. } => {
+                format!("v{} = v{} /u v{}", dst.0, lhs.0, rhs.0)
+            }
+            VInst::RemS32 { dst, lhs, rhs, .. } => {
+                format!("v{} = v{} % v{}", dst.0, lhs.0, rhs.0)
+            }
+            VInst::RemU32 { dst, lhs, rhs, .. } => {
+                format!("v{} = v{} %u v{}", dst.0, lhs.0, rhs.0)
+            }
+            VInst::Icmp32 {
+                dst,
+                lhs,
+                rhs,
+                cond,
+                ..
+            } => {
+                format!("v{} = v{} {} v{}", dst.0, lhs.0, icmp_cond_op(*cond), rhs.0)
+            }
+            VInst::IeqImm32 { dst, src, imm, .. } => {
+                format!("v{} = (v{} == {})", dst.0, src.0, imm)
+            }
+            VInst::Select32 {
+                dst,
+                cond,
+                if_true,
+                if_false,
+                ..
+            } => {
+                format!(
+                    "v{} = v{} ? v{} : v{}",
+                    dst.0, cond.0, if_true.0, if_false.0
+                )
+            }
+            VInst::Br { target, .. } => {
+                format!("Label({})", target)
+            }
+            VInst::BrIf {
+                cond,
+                target,
+                invert,
+                ..
+            } => {
+                if *invert {
+                    format!("!v{}, {}", cond.0, target)
+                } else {
+                    format!("v{}, {}", cond.0, target)
+                }
+            }
+            VInst::Mov32 { dst, src, .. } => {
+                format!("v{} = v{}", dst.0, src.0)
+            }
+            VInst::Load32 {
+                dst, base, offset, ..
+            } => {
+                format!("v{} = [v{}{:+}]", dst.0, base.0, offset)
+            }
+            VInst::Store32 {
+                src, base, offset, ..
+            } => {
+                format!("[v{}{:+}] = v{}", base.0, offset, src.0)
+            }
+            VInst::SlotAddr { dst, slot, .. } => {
+                format!("v{} = &slot({})", dst.0, slot)
+            }
+            VInst::MemcpyWords {
+                dst_base,
+                src_base,
+                size,
+                ..
+            } => {
+                format!(
+                    "memcpy(v{}, v{}, {} words)",
+                    dst_base.0,
+                    src_base.0,
+                    size / 4
+                )
+            }
+            VInst::IConst32 { dst, val, .. } => {
+                format!("v{} = {}", dst.0, val)
+            }
+            VInst::Call {
+                target,
+                args,
+                rets,
+                callee_uses_sret: _,
+                ..
+            } => {
+                let args_s = vregs_csv(args);
+                if rets.is_empty() {
+                    format!("{}({})", target.name, args_s)
+                } else {
+                    format!("{} = {}({})", vregs_csv(rets), target.name, args_s)
+                }
+            }
+            VInst::Ret { vals, .. } => {
+                format!("({})", vregs_csv(vals))
+            }
+            VInst::Label(id, _) => {
+                format!("({})", id)
+            }
+        }
     }
 }

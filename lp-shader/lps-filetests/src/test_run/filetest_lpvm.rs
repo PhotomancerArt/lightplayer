@@ -134,9 +134,11 @@ impl CompiledShader {
                 Ok(Self::Emu(engine.compile(&ir, &meta)?))
             }
             Backend::Rv32lp => {
+                let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
                 let native_opts = NativeCompileOptions {
                     float_mode: fm,
                     emu_trace_instructions: emu_log_level == LogLevel::Instructions,
+                    alloc_trace,
                     ..Default::default()
                 };
                 let engine = NativeEmuEngine::new(native_opts);

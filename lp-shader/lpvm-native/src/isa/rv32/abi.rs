@@ -136,8 +136,8 @@ pub const RET_REGS: [PReg; 2] = [A0, A1];
 pub const SPILL_TEMPS: [PReg; 2] = [T0, T1];
 
 /// Registers the allocator may use for non-parameter values (integers only for now).
-/// Excludes: zero, ra, sp, fp (s0), spill temps (t0–t1), argument registers (a0–a7).
-/// Includes: t2, s1–s11, t3–t6. For sret functions, [`crate::abi::FuncAbi`] removes `s1`.
+/// Excludes: zero, ra, sp, fp (s0), emitter scratch (t0–t2), argument registers (a0–a7).
+/// Includes: s1–s11, t3–t6. For sret functions, [`crate::abi::FuncAbi`] removes `s1`.
 fn int_mask(regs: &[PReg]) -> u64 {
     let mut m = 0u64;
     for r in regs {
@@ -165,16 +165,18 @@ pub fn callee_saved_int() -> PregSet {
 }
 
 /// Always reserved for special roles (not allocatable as general values).
+/// t0–t2 are emitter scratch registers (TEMP0–TEMP2).
 pub fn reserved_always_int() -> PregSet {
     PregSet::from_bits(int_mask(&[
-        ZERO, RA, SP, T0, T1, S0, A0, A1, A2, A3, A4, A5, A6, A7,
+        ZERO, RA, SP, T0, T1, T2, S0, A0, A1, A2, A3, A4, A5, A6, A7,
     ]))
 }
 
 /// Base allocatable int set before sret adjustment.
+/// Excludes: zero, ra, sp, fp (s0), emitter scratch (t0–t2), argument registers (a0–a7).
 pub fn alloca_base_int() -> PregSet {
     PregSet::from_bits(int_mask(&[
-        T2, S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, T3, T4, T5, T6,
+        S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11, T3, T4, T5, T6,
     ]))
 }
 
@@ -442,11 +444,12 @@ mod tests {
     #[test]
     fn alloca_base_excludes_reserved() {
         let a = alloca_base_int();
-        assert!(a.contains(T2));
         assert!(a.contains(S1));
+        assert!(a.contains(T3));
         assert!(!a.contains(ZERO));
         assert!(!a.contains(A0));
         assert!(!a.contains(T0));
+        assert!(!a.contains(T2)); // emitter scratch (TEMP2)
         assert!(!a.contains(S0));
     }
 

@@ -565,6 +565,21 @@ struct LoopFrame {
     exit: LabelId,
 }
 
+/// A loop region in the linearised VInst stream: `[header_idx, backedge_idx]`.
+#[derive(Clone, Debug)]
+pub struct LoopRegion {
+    /// VInst index of the `Label(header)`.
+    pub header_idx: usize,
+    /// VInst index of the `Br { target: header }` back-edge.
+    pub backedge_idx: usize,
+}
+
+/// Result of lowering: the VInst stream plus loop boundary metadata.
+pub struct LoweredFunction {
+    pub vinsts: Vec<VInst>,
+    pub loop_regions: Vec<LoopRegion>,
+}
+
 struct LowerCtx<'a> {
     func: &'a IrFunction,
     ir: &'a IrModule,
@@ -574,6 +589,7 @@ struct LowerCtx<'a> {
     next_label: LabelId,
     loop_stack: Vec<LoopFrame>,
     epilogue_label: LabelId,
+    loop_regions: Vec<LoopRegion>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -642,6 +658,7 @@ impl<'a> LowerCtx<'a> {
                         target: header,
                         src_op: Some(i as u32),
                     });
+                    let header_idx = self.out.len();
                     self.out.push(VInst::Label(header, Some((i + 1) as u32)));
                     self.loop_stack.push(LoopFrame { continuing, exit });
                     let co = *continuing_offset as usize;
@@ -657,9 +674,14 @@ impl<'a> LowerCtx<'a> {
                         self.lower_range(co, eo.saturating_sub(1))?
                     }
                     // Loop-closing End: back-edge to header
+                    let backedge_idx = self.out.len();
                     self.out.push(VInst::Br {
                         target: header,
                         src_op: Some((eo.saturating_sub(1)) as u32),
+                    });
+                    self.loop_regions.push(LoopRegion {
+                        header_idx,
+                        backedge_idx,
                     });
                     self.out.push(VInst::Label(exit, Some(*end_offset)));
                     self.loop_stack.pop();
@@ -746,7 +768,7 @@ pub fn lower_ops(
     ir: &IrModule,
     abi: &ModuleAbi,
     float_mode: FloatMode,
-) -> Result<Vec<VInst>, LowerError> {
+) -> Result<LoweredFunction, LowerError> {
     let mut ctx = LowerCtx {
         func,
         ir,
@@ -756,11 +778,15 @@ pub fn lower_ops(
         next_label: 0,
         loop_stack: Vec::new(),
         epilogue_label: 0,
+        loop_regions: Vec::new(),
     };
     ctx.epilogue_label = ctx.alloc_label();
     ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, None));
-    Ok(ctx.out)
+    Ok(LoweredFunction {
+        vinsts: ctx.out,
+        loop_regions: ctx.loop_regions,
+    })
 }
 
 fn resolve_callee_name(ir: &IrModule, callee: CalleeRef) -> Option<String> {

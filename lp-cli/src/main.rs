@@ -96,6 +96,9 @@ enum Cli {
         float_mode: String,
         #[arg(long)]
         hex: bool,
+        /// Print register allocation trace to stderr (off by default)
+        #[arg(long)]
+        alloc_trace: bool,
     },
 }
 
@@ -141,11 +144,13 @@ fn main() -> Result<()> {
             output,
             float_mode,
             hex,
+            alloc_trace,
         } => shader_rv32::handle_shader_rv32(shader_rv32::ShaderRv32Args {
             path,
             output,
             float_mode,
             hex,
+            alloc_trace,
         }),
     }
 }

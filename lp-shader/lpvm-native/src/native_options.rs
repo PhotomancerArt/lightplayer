@@ -9,6 +9,9 @@ pub struct NativeCompileOptions {
     /// When the `emu` feature is enabled: use per-instruction logging in lp-riscv-emu so failures
     /// can include [`Riscv32Emulator::format_logs`] / execution history in debug dumps.
     pub emu_trace_instructions: bool,
+    /// When true, print register-allocation trace (liveness + assignments) during codegen.
+    /// Off by default for production and normal test runs.
+    pub alloc_trace: bool,
 }
 
 impl Default for NativeCompileOptions {
@@ -17,6 +20,7 @@ impl Default for NativeCompileOptions {
             float_mode: lpir::FloatMode::Q32,
             debug_info: false,
             emu_trace_instructions: false,
+            alloc_trace: false,
         }
     }
 }
