@@ -1,5 +1,6 @@
 //! Mechanical emission for fastalloc [`super::inst::PInst`] (straight-line path).
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -21,9 +22,37 @@ pub struct PhysReloc {
     pub symbol: String,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum BranchKind {
+    Beq,
+    Bne,
+    Blt,
+    Bge,
+}
+
+/// Branch fixup: record location of a branch that needs its offset patched.
+#[derive(Clone, Debug)]
+struct BranchFixup {
+    instr_offset: usize,
+    label_id: u32,
+    src1: u32,
+    src2: u32,
+    kind: BranchKind,
+}
+
+/// Jump fixup: record location of a J instruction that needs its offset patched.
+#[derive(Clone, Debug)]
+struct JalFixup {
+    instr_offset: usize,
+    label_id: u32,
+}
+
 pub struct Rv32Emitter {
     code: Vec<u8>,
     relocs: Vec<PhysReloc>,
+    label_offsets: BTreeMap<u32, usize>, // label id → byte offset
+    branch_fixups: Vec<BranchFixup>,
+    jal_fixups: Vec<JalFixup>,
 }
 
 impl Rv32Emitter {
@@ -31,6 +60,9 @@ impl Rv32Emitter {
         Self {
             code: Vec::new(),
             relocs: Vec::new(),
+            label_offsets: BTreeMap::new(),
+            branch_fixups: Vec::new(),
+            jal_fixups: Vec::new(),
         }
     }
 
@@ -180,38 +212,58 @@ impl Rv32Emitter {
             }
 
             PInst::Beq { src1, src2, target } => {
-                self.push_u32(encode_beq(
-                    *src1 as u32,
-                    *src2 as u32,
-                    (*target << 12) as i32,
-                ));
+                self.emit_branch(BranchKind::Beq, *src1 as u32, *src2 as u32, *target);
             }
             PInst::Bne { src1, src2, target } => {
-                self.push_u32(encode_bne(
-                    *src1 as u32,
-                    *src2 as u32,
-                    (*target << 12) as i32,
-                ));
+                self.emit_branch(BranchKind::Bne, *src1 as u32, *src2 as u32, *target);
             }
             PInst::Blt { src1, src2, target } => {
-                self.push_u32(encode_b_type(
-                    F3_BLT,
-                    *src1 as u32,
-                    *src2 as u32,
-                    (*target << 12) as i32,
-                ));
+                self.emit_branch(BranchKind::Blt, *src1 as u32, *src2 as u32, *target);
             }
             PInst::Bge { src1, src2, target } => {
-                self.push_u32(encode_b_type(
-                    F3_BGE,
-                    *src1 as u32,
-                    *src2 as u32,
-                    (*target << 12) as i32,
-                ));
+                self.emit_branch(BranchKind::Bge, *src1 as u32, *src2 as u32, *target);
             }
             PInst::J { target } => {
-                self.push_u32(encode_jal(0, (*target << 12) as i32));
+                if let Some(&label_off) = self.label_offsets.get(target) {
+                    let imm = label_off as i32 - self.code.len() as i32;
+                    self.push_u32(encode_jal(0, imm));
+                } else {
+                    self.jal_fixups.push(JalFixup {
+                        instr_offset: self.code.len(),
+                        label_id: *target,
+                    });
+                    self.push_u32(0);
+                }
             }
+            PInst::Label { id } => {
+                // Record the byte offset for this label; emit no code
+                self.label_offsets.insert(*id, self.code.len());
+            }
+        }
+    }
+
+    fn encode_branch(kind: BranchKind, src1: u32, src2: u32, imm: i32) -> u32 {
+        match kind {
+            BranchKind::Beq => encode_beq(src1, src2, imm),
+            BranchKind::Bne => encode_bne(src1, src2, imm),
+            BranchKind::Blt => encode_b_type(F3_BLT, src1, src2, imm),
+            BranchKind::Bge => encode_b_type(F3_BGE, src1, src2, imm),
+        }
+    }
+
+    fn emit_branch(&mut self, kind: BranchKind, src1: u32, src2: u32, target: u32) {
+        if let Some(&label_off) = self.label_offsets.get(&target) {
+            let imm = label_off as i32 - self.code.len() as i32;
+            self.push_u32(Self::encode_branch(kind, src1, src2, imm));
+        } else {
+            self.branch_fixups.push(BranchFixup {
+                instr_offset: self.code.len(),
+                label_id: target,
+                src1,
+                src2,
+                kind,
+            });
+            self.push_u32(0);
         }
     }
 
@@ -239,6 +291,40 @@ impl Rv32Emitter {
     }
 
     pub fn finish_with_relocs(self) -> (Vec<u8>, Vec<PhysReloc>) {
+        (self.code, self.relocs)
+    }
+
+    /// Apply branch and jump fixups. Must be called after all PInsts are emitted
+    /// and all label positions are known.
+    pub fn apply_fixups(&mut self) {
+        for fixup in &self.branch_fixups {
+            let Some(&label_off) = self.label_offsets.get(&fixup.label_id) else {
+                continue;
+            };
+            let imm = label_off as i32 - fixup.instr_offset as i32;
+            let encoded = Self::encode_branch(fixup.kind, fixup.src1, fixup.src2, imm);
+            let off = fixup.instr_offset;
+            if off + 4 <= self.code.len() {
+                self.code[off..off + 4].copy_from_slice(&encoded.to_le_bytes());
+            }
+        }
+
+        for fixup in &self.jal_fixups {
+            let Some(&label_off) = self.label_offsets.get(&fixup.label_id) else {
+                continue;
+            };
+            let imm = label_off as i32 - fixup.instr_offset as i32;
+            let encoded = encode_jal(0, imm);
+            let off = fixup.instr_offset;
+            if off + 4 <= self.code.len() {
+                self.code[off..off + 4].copy_from_slice(&encoded.to_le_bytes());
+            }
+        }
+    }
+
+    /// Emit all instructions, apply fixups, and return the final code + relocs.
+    pub fn finish_with_fixups(mut self) -> (Vec<u8>, Vec<PhysReloc>) {
+        self.apply_fixups();
         (self.code, self.relocs)
     }
 }

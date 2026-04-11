@@ -126,6 +126,7 @@ pub fn format(inst: &PInst) -> String {
             format!("bge {}, {}, @{}", reg(*src1), reg(*src2), target)
         }
         PInst::J { target } => format!("j @{}", target),
+        PInst::Label { id } => format!("label @{}:", id),
     }
 }
 

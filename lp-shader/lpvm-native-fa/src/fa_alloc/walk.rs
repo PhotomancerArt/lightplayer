@@ -17,7 +17,8 @@ use super::trace::{AllocTrace, TraceEntry};
 pub enum AllocError {
     UnsupportedControlFlow,
     UnsupportedCall,
-    UnsupportedSelect,
+    TooManyArgs,
+    UnsupportedSret,
 }
 
 impl fmt::Display for AllocError {
@@ -25,7 +26,8 @@ impl fmt::Display for AllocError {
         match self {
             AllocError::UnsupportedControlFlow => write!(f, "branches/jumps not supported"),
             AllocError::UnsupportedCall => write!(f, "calls not supported"),
-            AllocError::UnsupportedSelect => write!(f, "Select32 not supported"),
+            AllocError::TooManyArgs => write!(f, "call with >8 args not supported"),
+            AllocError::UnsupportedSret => write!(f, "sret calls not yet supported"),
         }
     }
 }
@@ -114,20 +116,22 @@ impl RegPool {
 }
 
 /// State threaded through the backward walk.
-pub struct WalkState {
+pub struct WalkState<'a> {
     pub pool: RegPool,
     pub spill: SpillAlloc,
     pub trace: AllocTrace,
     pub pinsts: Vec<PInst>,
+    pub symbols: &'a crate::vinst::ModuleSymbols,
 }
 
-impl WalkState {
-    pub fn new(num_vregs: usize) -> Self {
+impl<'a> WalkState<'a> {
+    pub fn new(num_vregs: usize, symbols: &'a crate::vinst::ModuleSymbols) -> Self {
         Self {
             pool: RegPool::new(),
             spill: SpillAlloc::new(num_vregs),
             trace: AllocTrace::new(),
             pinsts: Vec::new(),
+            symbols,
         }
     }
 }
@@ -135,11 +139,12 @@ impl WalkState {
 /// Walk a region backward with real register allocation.
 /// Returns error for unsupported control flow (IfThenElse/Loop/Call).
 pub fn walk_region(
-    state: &mut WalkState,
+    state: &mut WalkState<'_>,
     tree: &RegionTree,
     region_id: RegionId,
     vinsts: &[VInst],
     vreg_pool: &[VReg],
+    func_abi: &crate::abi::FuncAbi,
 ) -> Result<(), AllocError> {
     if region_id == REGION_ID_NONE {
         return Ok(());
@@ -156,9 +161,8 @@ pub fn walk_region(
         Region::Seq { children_start, child_count } => {
             let start = *children_start as usize;
             let end = start + *child_count as usize;
-            // Walk children in reverse (backward)
             for &child_id in tree.seq_children[start..end].iter().rev() {
-                walk_region(state, tree, child_id, vinsts, vreg_pool)?;
+                walk_region(state, tree, child_id, vinsts, vreg_pool, func_abi)?;
             }
             Ok(())
         }
@@ -174,18 +178,62 @@ fn process_inst(
     vinst: &VInst,
     vreg_pool: &[VReg],
 ) -> Result<(), AllocError> {
-    // Skip labels
-    if matches!(vinst, VInst::Label(..)) {
-        return Ok(());
-    }
-
-    // Reject unsupported instructions
+    // Handle branch and control flow instructions first
     match vinst {
-        VInst::Call { .. } => return Err(AllocError::UnsupportedCall),
-        VInst::Select32 { .. } => return Err(AllocError::UnsupportedSelect),
-        VInst::Br { .. } | VInst::BrIf { .. } => {
-            return Err(AllocError::UnsupportedControlFlow)
+        VInst::Label(id, _) => {
+            state.pinsts.push(crate::rv32::inst::PInst::Label { id: *id });
+            return Ok(());
         }
+        VInst::BrIf { cond, target, invert, .. } => {
+            let mut decision = String::new();
+            // cond is a use — ensure it's in a register
+            let cond_vregs = vec![*cond];
+            let cond_pregs = resolve_uses(state, &cond_vregs, &mut decision)?;
+            let cond_preg = cond_pregs[0];
+
+            // Emit branch: beq/bne with x0 (zero register is always 0)
+            if *invert {
+                // BrIf invert=true means branch when cond is FALSE (== 0)
+                state.pinsts.push(crate::rv32::inst::PInst::Beq {
+                    src1: cond_preg,
+                    src2: 0, // x0 is always zero
+                    target: *target,
+                });
+            } else {
+                // BrIf invert=false means branch when cond is TRUE (!= 0)
+                state.pinsts.push(crate::rv32::inst::PInst::Bne {
+                    src1: cond_preg,
+                    src2: 0,
+                    target: *target,
+                });
+            }
+
+            // Record trace
+            let state_str = format_pool_state(&state.pool);
+            state.trace.push(TraceEntry {
+                vinst_idx: idx,
+                vinst_mnemonic: "BrIf".into(),
+                decision,
+                register_state: state_str,
+            });
+            return Ok(());
+        }
+        VInst::Br { target, .. } => {
+            state.pinsts.push(crate::rv32::inst::PInst::J {
+                target: *target,
+            });
+
+            // Record trace
+            let state_str = format_pool_state(&state.pool);
+            state.trace.push(TraceEntry {
+                vinst_idx: idx,
+                vinst_mnemonic: "Br".into(),
+                decision: String::new(),
+                register_state: state_str,
+            });
+            return Ok(());
+        }
+        VInst::Call { .. } => return Err(AllocError::UnsupportedCall),
         _ => {}
     }
 
@@ -418,6 +466,19 @@ fn emit_vinst(
 
         VInst::Label(..) => Ok(vec![]),
 
+        // Select32: dst = cond ? if_true : if_false
+        // cond is 0 or 1 from Icmp/IeqImm; negate to bitmask (0 or 0xFFFFFFFF)
+        // Uses: [cond, if_true, if_false]
+        VInst::Select32 { .. } => {
+            let (dst_p, cond_p, true_p, false_p) = (dst(), use_pregs[0], use_pregs[1], use_pregs[2]);
+            Ok(vec![
+                PInst::Neg { dst: SCRATCH, src: cond_p },        // 0→0, 1→0xFFFFFFFF
+                PInst::Sub { dst: dst_p, src1: true_p, src2: false_p },
+                PInst::And { dst: dst_p, src1: dst_p, src2: SCRATCH },
+                PInst::Add { dst: dst_p, src1: dst_p, src2: false_p },
+            ])
+        }
+
         VInst::Ret { .. } => {
             let mut out = Vec::new();
             // Move return values to RET_REGS if not already there
@@ -441,10 +502,21 @@ fn emit_vinst(
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{VInst, VReg, SRC_OP_NONE};
-    use super::super::trace::AllocTrace;
+    use crate::vinst::{ModuleSymbols, VInst, VReg, SRC_OP_NONE};
     use crate::rv32::gpr::ALLOC_POOL;
+    use alloc::string::String;
     use alloc::vec::Vec;
+
+    fn test_abi() -> crate::abi::FuncAbi {
+        crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
+        )
+    }
 
     #[test]
     fn regpool_alloc_free() {
@@ -505,7 +577,6 @@ mod tests {
 
     #[test]
     fn walk_region_allocates_simple() {
-        // v0 = IConst32 1; v1 = IConst32 2; v2 = Add v0, v1
         let vinsts = vec![
             VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
             VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
@@ -514,15 +585,14 @@ mod tests {
         let mut tree = RegionTree::new();
         let root = tree.push(Region::Linear { start: 0, end: 3 });
         tree.root = root;
+        let symbols = ModuleSymbols::default();
+        let abi = test_abi();
 
-        let mut state = WalkState::new(4);
-        walk_region(&mut state, &tree, root, &vinsts, &[]).unwrap();
+        let mut state = WalkState::new(4, &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &[], &abi).unwrap();
 
-        // Should have trace entries for 3 instructions
         assert_eq!(state.trace.entries.len(), 3);
-        // Trace should show real decisions (not "STUB")
         assert!(!state.trace.entries[0].decision.contains("STUB"));
-        // Pool state should be tracked
         assert!(state.trace.entries[0].register_state.contains("used"));
     }
 
@@ -536,27 +606,23 @@ mod tests {
         let body = tree.push(Region::Linear { start: 0, end: 0 });
         let root = tree.push(Region::Loop { header, body });
         tree.root = root;
+        let symbols = ModuleSymbols::default();
+        let abi = test_abi();
 
-        let mut state = WalkState::new(4);
-        let result = walk_region(&mut state, &tree, root, &vinsts, &[]);
+        let mut state = WalkState::new(4, &symbols);
+        let result = walk_region(&mut state, &tree, root, &vinsts, &[], &abi);
         assert!(matches!(result, Err(AllocError::UnsupportedControlFlow)));
     }
 
     #[test]
     fn walk_region_handles_spill() {
-        // Create more live values than allocatable registers to force spill
-        // Chain: v0=1; v1=2; v2=Add(v0,v1); v3=Add(v2,v0); v4=Add(v3,v1); ...
-        // This creates a long chain where many vregs are live simultaneously
         let n = ALLOC_POOL.len() + 2;
         let mut vinsts: Vec<VInst> = Vec::new();
 
-        // Create constants
         for i in 0..n {
             vinsts.push(VInst::IConst32 { dst: VReg(i as u16), val: i as i32, src_op: SRC_OP_NONE });
         }
 
-        // Create a use chain that keeps all values live
-        // Each Add uses two previous values, defining a new one
         for i in n..(n + ALLOC_POOL.len()) {
             vinsts.push(VInst::Add32 {
                 dst: VReg(i as u16),
@@ -569,13 +635,13 @@ mod tests {
         let mut tree = RegionTree::new();
         let root = tree.push(Region::Linear { start: 0, end: vinsts.len() as u16 });
         tree.root = root;
+        let symbols = ModuleSymbols::default();
+        let abi = test_abi();
 
-        let mut state = WalkState::new(vinsts.len());
-        walk_region(&mut state, &tree, root, &vinsts, &[]).unwrap();
+        let mut state = WalkState::new(vinsts.len(), &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &[], &abi).unwrap();
 
-        // The trace should have entries for all instructions
         assert_eq!(state.trace.entries.len(), vinsts.len());
-        // Should have some decisions recorded for uses
         let has_alloc = state.trace.entries.iter().any(|e| e.decision.contains('→'));
         assert!(has_alloc, "Expected allocation decisions in trace");
     }

@@ -59,6 +59,9 @@ pub enum PInst {
     Blt { src1: PReg, src2: PReg, target: u32 },
     Bge { src1: PReg, src2: PReg, target: u32 },
     J { target: u32 },
+
+    /// Label marker — records byte offset for branch fixups. Emits no machine code.
+    Label { id: u32 },
 }
 
 impl PInst {
@@ -101,6 +104,7 @@ impl PInst {
             PInst::Blt { .. } => "blt",
             PInst::Bge { .. } => "bge",
             PInst::J { .. } => "j",
+            PInst::Label { .. } => "label",
         }
     }
 }

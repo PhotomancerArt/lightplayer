@@ -23,10 +23,10 @@ pub struct AllocResult {
 }
 
 /// Run the real allocator: backward walk with register allocation.
-pub fn allocate(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
+pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
     let num_vregs = max_vreg_index(&lowered.vinsts, &lowered.vreg_pool);
 
-    let mut state = walk::WalkState::new(num_vregs);
+    let mut state = walk::WalkState::new(num_vregs, &lowered.symbols);
 
     let root = lowered.region_tree.root;
     if root != REGION_ID_NONE {
@@ -36,6 +36,7 @@ pub fn allocate(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> Result<AllocR
             root,
             &lowered.vinsts,
             &lowered.vreg_pool,
+            func_abi,
         )?;
         state.pinsts.reverse();
         state.trace.reverse();

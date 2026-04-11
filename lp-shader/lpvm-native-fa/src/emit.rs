@@ -106,7 +106,8 @@ pub fn emit_pinsts(pinsts: &[PInst]) -> Result<EmittedCode, NativeError> {
         emitter.emit(inst);
     }
 
-    let (code, phys_relocs) = emitter.finish_with_relocs();
+    // Apply branch fixups and get final code + relocs
+    let (code, phys_relocs) = emitter.finish_with_fixups();
 
     // Convert PhysReloc → NativeReloc
     let relocs = phys_relocs
