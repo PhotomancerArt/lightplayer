@@ -2,6 +2,7 @@
 
 pub mod disasm;
 pub mod pinst;
+pub mod region;
 
 use alloc::vec::Vec;
 
