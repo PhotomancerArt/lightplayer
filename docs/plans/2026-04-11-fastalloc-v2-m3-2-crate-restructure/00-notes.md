@@ -151,21 +151,14 @@ bytes encoding.
 
 ### Q5: How should we handle the two parallel pipelines during the restructure?
 
-**Context:** The old pipeline (`emit_function_bytes` + greedy/linear_scan) and
-the new pipeline (`compile_function` + fastalloc) both need to work during M3.2.
-Tests use the old pipeline. The new pipeline is the target.
-
-**Suggested answer:** Phase the work:
-1. First flatten files (move, no behavior change, tests pass)
-2. Then create `compile.rs` calling into the *existing* logic
-3. Then simplify runtimes to use `compile.rs`
-4. Old paths become dead code, deleted last
+**Answer:** Delete all old code. No parallel pipelines. The old `emit.rs`
+(1470 lines), old `regalloc/`, old `isa/mod.rs` traits — all gone.
+We are replacing everything with the new clean pipeline. The old crate
+`lpvm-native` exists for reference if needed.
 
 ### Q6: What types should `compile_function` return?
 
-**Context:** Need to define `CompiledFunction` and `CompiledModule`.
-
-**Suggested answer:**
+**Answer:** Approved as proposed:
 ```rust
 pub struct CompiledFunction {
     pub name: String,

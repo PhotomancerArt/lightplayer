@@ -14,7 +14,7 @@ use crate::abi::classify::{ArgLoc, ReturnMethod};
 /// ABI for one shader function: register roles for params, return, and allocation.
 ///
 /// This is an ISA-neutral data container. Use ISA-specific constructors like
-/// [`crate::isa::rv32::abi::func_abi_rv32`] to build instances.
+/// [`crate::rv32::abi::func_abi_rv32`] to build instances.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncAbi {
     param_locs: Vec<ArgLoc>,
@@ -124,7 +124,7 @@ impl ModuleAbi {
     /// Build from surface signatures and LPIR imports (import return shapes affect caller sret).
     pub fn from_ir_and_sig(ir: &LpirModule, sig: &LpsModuleSig) -> Self {
         use crate::abi::classify::entry_param_scalar_count;
-        use crate::isa::rv32::abi::{self, func_abi_rv32};
+        use crate::rv32::abi::{self, func_abi_rv32};
 
         let mut func_abis = BTreeMap::new();
         let mut max_sret_bytes = 0u32;
@@ -167,7 +167,7 @@ mod tests {
     use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
     use crate::abi::classify::entry_param_scalar_count;
-    use crate::isa::rv32::abi as rv32;
+    use crate::rv32::abi as rv32;
 
     #[test]
     fn direct_allocatable_includes_s1() {

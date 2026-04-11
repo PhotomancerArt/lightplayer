@@ -3,14 +3,14 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::isa::rv32::encode::{
+use crate::rv32::encode::{
     encode_add, encode_addi, encode_and, encode_auipc, encode_b_type, encode_beq, encode_bne,
     encode_div, encode_divu, encode_jal, encode_jalr, encode_lw, encode_mul, encode_or, encode_rem,
     encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
-use crate::isa::rv32::gpr::{RA_REG, SP_REG};
-use crate::isa::rv32::inst::PInst;
+use crate::rv32::gpr::{RA_REG, SP_REG};
+use crate::rv32::inst::PInst;
 const F3_BLT: u32 = 0b100;
 const F3_BGE: u32 = 0b101;
 

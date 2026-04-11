@@ -2,129 +2,97 @@
 
 ## Scope
 
-Implement recursive liveness analysis for the region tree and display format.
+Implement recursive liveness analysis for the region tree using `RegSet` (no-heap bitset).
 
 ## Implementation
 
-### 1. Implement recursive liveness in `liveness.rs`
+### 1. Implement recursive liveness in `alloc/liveness.rs`
 
 ```rust
-use alloc::vec::Vec;
-use alloc::collections::BTreeSet;
-use alloc::format;
-use crate::lower::Region;
+use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
+use crate::regset::RegSet;
 use crate::vinst::{VInst, VReg};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveSet(pub BTreeSet<VReg>);
-
-impl LiveSet {
-    pub fn new() -> Self {
-        Self(BTreeSet::new())
-    }
-    
-    pub fn union(&self, other: &LiveSet) -> LiveSet {
-        LiveSet(self.0.union(&other.0).cloned().collect())
-    }
-    
-    pub fn remove(&mut self, vreg: VReg) {
-        self.0.remove(&vreg);
-    }
-    
-    pub fn insert(&mut self, vreg: VReg) {
-        self.0.insert(vreg);
-    }
-    
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-/// Liveness result for a region.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Liveness {
-    pub live_in: LiveSet,
-    pub live_out: LiveSet,
-}
-
-/// Compute liveness for a single instruction.
-/// Returns (uses, defs) for the instruction.
-fn instruction_liveness(vinst: &VInst) -> (Vec<VReg>, Vec<VReg>) {
-    match vinst {
-        VInst::IConst32 { dst, .. } => (vec![], vec![*dst]),
-        VInst::Add32 { dst, src1, src2, .. } => {
-            (vec![*src1, *src2], vec![*dst])
-        }
-        VInst::Sub32 { dst, src1, src2, .. } => {
-            (vec![*src1, *src2], vec![*dst])
-        }
-        VInst::Mul32 { dst, src1, src2, .. } => {
-            (vec![*src1, *src2], vec![*dst])
-        }
-        VInst::Mov32 { dst, src, .. } => (vec![*src], vec![*dst]),
-        VInst::Ret { vals, .. } => (vals.clone(), vec![]),
-        VInst::Call { dst, args, .. } => {
-            let mut uses = args.clone();
-            if let Some(d) = dst {
-                (uses, vec![*d])
-            } else {
-                (uses, vec![])
-            }
-        }
-        _ => (vec![], vec![]),
-    }
+    pub live_in: RegSet,
+    pub live_out: RegSet,
 }
 
 /// Analyze liveness recursively on region tree.
-/// M4: Single Linear region (straight-line code).
-pub fn analyze_liveness(region: &Region, vinsts: &[VInst]) -> Liveness {
-    match region {
+/// M4: Linear and Seq regions. IfThenElse/Loop are conservative (empty).
+pub fn analyze_liveness(
+    tree: &RegionTree,
+    region_id: RegionId,
+    vinsts: &[VInst],
+    pool: &[VReg],
+) -> Liveness {
+    if region_id == REGION_ID_NONE {
+        return Liveness { live_in: RegSet::new(), live_out: RegSet::new() };
+    }
+
+    match &tree.nodes[region_id as usize] {
         Region::Linear { start, end } => {
-            let mut live = LiveSet::new();
-            
-            // Walk instructions backward
+            let mut live = RegSet::new();
+
             for i in (*start..*end).rev() {
                 let vinst = &vinsts[i as usize];
-                let (uses, defs) = instruction_liveness(vinst);
-                
-                // Remove defs (they're dead before this point)
-                for d in defs {
-                    live.remove(d);
-                }
-                // Add uses (they're live before this point)
-                for u in uses {
-                    live.insert(u);
-                }
+                // Remove defs
+                vinst.for_each_def(pool, |d| { live.remove(d); });
+                // Add uses
+                vinst.for_each_use(pool, |u| { live.insert(u); });
             }
-            
+
             Liveness {
-                live_in: live.clone(),
-                live_out: live,
+                live_in: live,
+                live_out: RegSet::new(),
             }
         }
-        
-        // M4: Only handling Linear regions
-        // M5: Add IfThenElse, Loop, Seq handling
+
+        Region::Seq { children_start, child_count } => {
+            let start = *children_start as usize;
+            let end = start + *child_count as usize;
+            let mut combined = RegSet::new();
+
+            for &child_id in &tree.seq_children[start..end] {
+                let child_liveness = analyze_liveness(tree, child_id, vinsts, pool);
+                combined = combined.union(&child_liveness.live_in);
+            }
+
+            Liveness {
+                live_in: combined,
+                live_out: RegSet::new(),
+            }
+        }
+
+        // M5: IfThenElse, Loop handling
         _ => Liveness {
-            live_in: LiveSet::new(),
-            live_out: LiveSet::new(),
+            live_in: RegSet::new(),
+            live_out: RegSet::new(),
         }
     }
 }
 
 /// Format liveness for debug output.
 pub fn format_liveness(liveness: &Liveness) -> String {
-    let mut lines = vec!["=== Liveness ===".to_string()];
-    
-    let live_in: Vec<_> = liveness.live_in.0.iter().map(|v| format!("v{}", v.0)).collect();
-    lines.push(format!("  live_in: [{}]", live_in.join(", ")));
-    
-    let live_out: Vec<_> = liveness.live_out.0.iter().map(|v| format!("v{}", v.0)).collect();
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push("=== Liveness ===".into());
+
+    let live_in: Vec<String> = liveness.live_in.iter().map(|v| format!("v{}", v.0)).collect();
+    lines.push(format!("  live_in:  [{}]", live_in.join(", ")));
+
+    let live_out: Vec<String> = liveness.live_out.iter().map(|v| format!("v{}", v.0)).collect();
     lines.push(format!("  live_out: [{}]", live_out.join(", ")));
-    
+
     lines.join("\n")
 }
 ```
+
+Key design point: uses `VInst::for_each_def` and `VInst::for_each_use` which already exist on `VInst` and handle all instruction variants correctly, including `VRegSlice`-based `Call`/`Ret` with the `pool` parameter.
 
 ### 2. Add unit tests
 
@@ -132,57 +100,41 @@ pub fn format_liveness(liveness: &Liveness) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower::Region;
-    use crate::vinst::{VInst, VReg};
-    
+    use crate::region::{Region, RegionTree};
+    use crate::vinst::{VInst, VReg, SRC_OP_NONE};
+
     #[test]
-    fn test_liveness_simple() {
+    fn liveness_simple_linear() {
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: None },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: None },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: None },
-            VInst::Ret { vals: vec![VReg(2)], src_op: None },
+            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
+            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
+            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
         ];
-        
-        let region = Region::Linear { start: 0, end: 4 };
-        let liveness = analyze_liveness(&region, &vinsts);
-        
-        // live_in should contain all registers that are used
-        assert!(liveness.live_in.0.contains(&VReg(0)));
-        assert!(liveness.live_in.0.contains(&VReg(1)));
-        assert!(liveness.live_in.0.contains(&VReg(2)));
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 3 });
+        tree.root = root;
+
+        let liveness = analyze_liveness(&tree, root, &vinsts, &[]);
+        // v0, v1 are used by Add32 but defined by IConst32 before that
+        // After backward walk: defs kill, uses add. All defs precede uses → live_in empty
+        assert!(liveness.live_in.is_empty());
     }
-    
+
     #[test]
-    fn test_liveness_defs_killed() {
+    fn liveness_external_use() {
+        // v0 is used but never defined in this region
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: None },
-            VInst::IConst32 { dst: VReg(0), val: 2, src_op: None },  // Redefines v0
-            VInst::Ret { vals: vec![VReg(0)], src_op: None },
+            VInst::Add32 { dst: VReg(1), src1: VReg(0), src2: VReg(0), src_op: SRC_OP_NONE },
         ];
-        
-        let region = Region::Linear { start: 0, end: 3 };
-        let liveness = analyze_liveness(&region, &vinsts);
-        
-        // First IConst32's def is killed by second, so only v0 should be live
-        assert_eq!(liveness.live_in.0.len(), 1);
-        assert!(liveness.live_in.0.contains(&VReg(0)));
-    }
-    
-    #[test]
-    fn test_format_liveness() {
-        let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 42, src_op: None },
-            VInst::Ret { vals: vec![VReg(0)], src_op: None },
-        ];
-        
-        let region = Region::Linear { start: 0, end: 2 };
-        let liveness = analyze_liveness(&region, &vinsts);
-        let output = format_liveness(&liveness);
-        
-        assert!(output.contains("=== Liveness ==="));
-        assert!(output.contains("live_out"));
-        assert!(output.contains("v0"));
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 1 });
+        tree.root = root;
+
+        let liveness = analyze_liveness(&tree, root, &vinsts, &[]);
+        assert!(liveness.live_in.contains(VReg(0)));
+        assert!(!liveness.live_in.contains(VReg(1)));
     }
 }
 ```
@@ -190,5 +142,5 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native --lib -- rv32fa::alloc::liveness
+cargo test -p lpvm-native-fa --lib -- alloc::liveness
 ```

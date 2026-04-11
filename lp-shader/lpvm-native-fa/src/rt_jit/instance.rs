@@ -12,7 +12,7 @@ use lpvm::{
 };
 
 use crate::error::NativeError;
-use crate::isa::rv32::abi::func_abi_rv32;
+use crate::rv32::abi::func_abi_rv32;
 
 use super::call::rv32_jalr_a0_a7;
 use super::module::{NativeJitDirectCall, NativeJitModule};

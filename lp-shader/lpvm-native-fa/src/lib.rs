@@ -12,17 +12,19 @@
 extern crate alloc;
 
 pub mod abi;
+pub mod compile;
 pub mod config;
 pub mod debug;
 pub mod debug_asm;
+pub mod emit;
 pub mod error;
-pub mod isa;
+pub mod link;
 pub mod lower;
 pub mod native_options;
 pub mod peephole;
-pub mod regalloc;
 pub mod region;
 pub mod regset;
+pub mod rv32;
 pub mod types;
 pub mod vinst;
 
@@ -33,13 +35,17 @@ pub mod rt_emu;
 pub mod rt_jit;
 
 pub use abi::ModuleAbi;
+pub use compile::{
+    CompileSession, CompiledFunction, CompiledModule, NativeReloc, compile_function,
+    compile_module,
+};
 pub use debug_asm::compile_module_asm_text;
+pub use emit::{EmittedCode, emit_pinsts, emit_vinsts};
 pub use error::{LowerError, NativeError};
-pub use isa::rv32::emit_function_fastalloc_bytes;
-pub use isa::{CodeBlob, IsaBackend, Rv32Backend};
+pub use link::{LinkedJitImage, link_elf, link_jit};
 pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
 pub use native_options::NativeCompileOptions;
-pub use regalloc::{Allocation, GreedyAlloc, LinearScan, RegAlloc, VRegInfo};
+pub use rv32::emit_function_fastalloc_bytes;
 pub use types::NativeType;
 pub use vinst::{
     IcmpCond, IrVReg, LabelId, ModuleSymbols, SRC_OP_NONE, SymbolId, VInst, VReg, VRegSlice,

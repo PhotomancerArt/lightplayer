@@ -2,107 +2,132 @@
 
 ## Scope
 
-Add integration tests that verify the alloc/ module components work together with the region tree.
+Add integration tests verifying the alloc/ shell components work together with real lowered output.
 
 ## Implementation
 
-### 1. Update `alloc/mod.rs` with integration tests
+### 1. Add integration tests in `alloc/mod.rs`
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vinst::{VInst, VReg};
-    use crate::lower::Region;
-    
-    fn test_vinsts() -> Vec<VInst> {
-        vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: None },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: None },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: None },
-            VInst::Ret { vals: vec![VReg(2)], src_op: None },
-        ]
+    use crate::region::Region;
+    use crate::vinst::{VInst, VReg, SRC_OP_NONE};
+
+    fn make_linear_lowered() -> LoweredFunction {
+        let vinsts = vec![
+            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
+            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
+            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
+        ];
+        let mut tree = crate::region::RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 3 });
+        tree.root = root;
+
+        LoweredFunction {
+            vinsts,
+            vreg_pool: Vec::new(),
+            symbols: crate::vinst::ModuleSymbols::default(),
+            loop_regions: Vec::new(),
+            region_tree: tree,
+        }
     }
-    
+
     #[test]
-    fn test_alloc_shell_integration() {
-        let vinsts = test_vinsts();
-        let region = Region::Linear { start: 0, end: 4 };
-        
-        // Analyze liveness
-        let liveness = liveness::analyze_liveness(&region, &vinsts);
-        assert!(!liveness.live_in.0.is_empty());
-        
-        // Walk and build trace
+    fn shell_produces_trace() {
+        let lowered = make_linear_lowered();
+        let func_abi = /* minimal FuncAbi */;
+        let trace = run_shell(&lowered, &func_abi);
+
+        assert_eq!(trace.entries.len(), 3);
+        // Forward order after reverse
+        assert_eq!(trace.entries[0].vinst_idx, 0);
+        assert_eq!(trace.entries[2].vinst_idx, 2);
+    }
+
+    #[test]
+    fn shell_empty_region() {
+        let mut tree = crate::region::RegionTree::new();
+        // root stays REGION_ID_NONE
+        let lowered = LoweredFunction {
+            vinsts: Vec::new(),
+            vreg_pool: Vec::new(),
+            symbols: crate::vinst::ModuleSymbols::default(),
+            loop_regions: Vec::new(),
+            region_tree: tree,
+        };
+        let func_abi = /* minimal FuncAbi */;
+        let trace = run_shell(&lowered, &func_abi);
+        assert!(trace.is_empty());
+    }
+
+    #[test]
+    fn liveness_and_walk_consistent() {
+        let lowered = make_linear_lowered();
+
+        // Liveness: v0, v1 defined then used → live_in empty for this region
+        let liveness = liveness::analyze_liveness(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+        );
+        assert!(liveness.live_in.is_empty());
+
+        // Walk produces trace for all 3 instructions
         let mut trace = trace::AllocTrace::new();
-        walk::walk_region_stub(&region, &vinsts, &mut trace);
-        assert_eq!(trace.entries.len(), 4);
-        
-        // Reverse and verify
-        trace.reverse();
-        assert!(matches!(&trace.entries[0].vinst, VInst::IConst32 { dst: VReg(0), .. }));
+        walk::walk_region_stub(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &mut trace,
+        );
+        assert_eq!(trace.entries.len(), 3);
     }
-    
+
     #[test]
-    fn test_region_format_includes_vinsts() {
-        use crate::debug::region;
-        
-        let vinsts = test_vinsts();
-        let region = Region::Linear { start: 0, end: 4 };
-        let output = region::format_region(&region, &vinsts, 0);
-        
+    fn region_format_includes_vinsts() {
+        let lowered = make_linear_lowered();
+        let output = crate::rv32::debug::region::format_region_tree(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &lowered.symbols,
+            0,
+        );
+
         assert!(output.contains("Linear"));
-        assert!(output.contains("[0..4]"));
         assert!(output.contains("IConst32"));
         assert!(output.contains("Add32"));
-        assert!(output.contains("Ret"));
     }
-    
-    #[test]
-    fn test_liveness_format() {
-        let vinsts = test_vinsts();
-        let region = Region::Linear { start: 0, end: 4 };
-        let liveness = liveness::analyze_liveness(&region, &vinsts);
-        let output = liveness::format_liveness(&liveness);
-        
-        assert!(output.contains("=== Liveness ==="));
-        assert!(output.contains("live_in"));
-        assert!(output.contains("live_out"));
-        assert!(output.contains("v0") || output.contains("v1") || output.contains("v2"));
-    }
-    
-    #[test]
-    fn test_trace_format_table() {
-        let vinsts = test_vinsts();
-        let region = Region::Linear { start: 0, end: 4 };
-        let mut trace = trace::AllocTrace::new();
-        walk::walk_region_stub(&region, &vinsts, &mut trace);
-        
-        let output = trace.format();
-        assert!(output.contains("=== AllocTrace ==="));
-        assert!(output.contains("STUB") || output.contains("v0"));
-    }
-    
-    #[test]
-    fn test_empty_region() {
-        let vinsts: Vec<VInst> = vec![];
-        let region = Region::Linear { start: 0, end: 0 };
-        
-        let liveness = liveness::analyze_liveness(&region, &vinsts);
-        assert!(liveness.live_in.0.is_empty());
-        assert!(liveness.live_out.0.is_empty());
-        
-        let mut trace = trace::AllocTrace::new();
-        walk::walk_region_stub(&region, &vinsts, &mut trace);
-        assert!(trace.entries.is_empty());
-    }
+}
+```
+
+### 2. End-to-end test with real GLSL lowering
+
+```rust
+#[test]
+fn shell_with_real_lowered_function() {
+    // Use test infrastructure to compile a simple GLSL function
+    // and verify the shell produces a non-empty trace
+    let (ir, sig) = /* compile simple GLSL */;
+    let abi = ModuleAbi::from_ir_and_sig(&ir, &sig);
+    let func = &ir.functions[0];
+    let lowered = lower_ops(func, &ir, &abi, FloatMode::Q32)?;
+
+    assert_ne!(lowered.region_tree.root, crate::region::REGION_ID_NONE);
+
+    let func_abi = crate::rv32::abi::func_abi_rv32(func, &abi.slot_kinds);
+    let trace = run_shell(&lowered, &func_abi);
+    assert!(!trace.is_empty());
 }
 ```
 
 ## Validate
 
 ```bash
-cargo test -p lpvm-native --lib -- rv32fa::alloc
+cargo test -p lpvm-native-fa --lib -- alloc
 ```
-
-All tests should pass, including new integration tests.

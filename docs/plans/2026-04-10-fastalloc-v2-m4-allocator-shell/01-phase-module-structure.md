@@ -1,150 +1,106 @@
-# Phase 1: Create alloc/ Module Structure
+# Phase 1: Create alloc/ Module + Populate RegionTree
 
 ## Scope
 
-Create the `alloc/` directory and module files with placeholder implementations. The region tree is built in the lowerer, not in alloc/.
+Two tasks combined since they're tightly coupled:
+1. Create the `src/alloc/` directory with placeholder modules
+2. Populate the existing `RegionTree` during lowering (currently returns `RegionTree::default()`)
 
 ## Implementation
 
-### 1. Create directory
+### 1. Create `src/alloc/` module structure
 
 ```bash
-mkdir -p lp-shader/lpvm-native/src/isa/rv32fa/alloc
+mkdir -p lp-shader/lpvm-native-fa/src/alloc
 ```
 
-### 2. Create `alloc/mod.rs`
+#### `alloc/mod.rs`
 
 ```rust
-//! Fast allocator shell - liveness, trace, backward walk.
-//! Note: Region tree is built in lower.rs, not here.
+//! Fast allocator shell — liveness, trace, backward walk.
+//! The RegionTree is built in lower.rs; this module consumes it.
 
 pub mod liveness;
 pub mod trace;
 pub mod walk;
 
-use alloc::vec::Vec;
-use lpir::{IrFunction, VReg};
 use crate::abi::FuncAbi;
-use crate::vinst::VInst;
-use crate::lower::Region;
-use crate::isa::rv32fa::inst::PInst;
-use crate::error::NativeError;
+use crate::lower::LoweredFunction;
+use self::trace::AllocTrace;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AllocError {
-    UnsupportedControlFlow,
-    // ... other errors
-}
+/// Run the allocator shell: liveness + backward walk with stubbed decisions.
+/// Returns a trace of what the allocator would do (M4: stubs only).
+pub fn run_shell(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> AllocTrace {
+    let mut trace = AllocTrace::new();
 
-/// FastAlloc shell - uses region tree from lowerer, builds liveness, trace, walks backward with stubs.
-pub struct FastAlloc;
-
-impl FastAlloc {
-    pub fn allocate(
-        vinsts: &[VInst],
-        region: &Region,
-        func_abi: &FuncAbi,
-        func: &IrFunction,
-    ) -> Result<(Vec<PInst>, trace::AllocTrace), AllocError> {
-        // TODO(Phase 2-5): Build liveness, walk, return trace
-        // For now: return empty trace and use simple allocation
-        let trace = trace::AllocTrace::new();
-        let physinsts = simple_allocate(vinsts, func_abi, func)?;
-        Ok((physinsts, trace))
+    let root = lowered.region_tree.root;
+    if root != crate::region::REGION_ID_NONE {
+        walk::walk_region_stub(
+            &lowered.region_tree,
+            root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &mut trace,
+        );
+        trace.reverse();
     }
-}
 
-// Temporary: simple allocation until walk.rs is implemented
-fn simple_allocate(
-    vinsts: &[VInst],
-    func_abi: &FuncAbi,
-    func: &IrFunction,
-) -> Result<Vec<PInst>, AllocError> {
-    // Copy from current alloc.rs
-    todo!()
+    trace
 }
 ```
 
-### 3. Create `alloc/liveness.rs`
+#### `alloc/liveness.rs`
 
 ```rust
 //! Recursive liveness analysis for region tree.
+//! Uses RegSet (fixed-size bitset, no heap).
 
-use alloc::vec::Vec;
-use alloc::collections::BTreeSet;
-use crate::lower::Region;
+use crate::region::{Region, RegionId, RegionTree};
+use crate::regset::RegSet;
 use crate::vinst::{VInst, VReg};
 
+/// Liveness result for a region.
 #[derive(Debug, Clone)]
-pub struct LiveSet(pub BTreeSet<VReg>);
-
-impl LiveSet {
-    pub fn new() -> Self {
-        Self(BTreeSet::new())
-    }
-    
-    pub fn union(&self, other: &LiveSet) -> LiveSet {
-        LiveSet(self.0.union(&other.0).cloned().collect())
-    }
-    
-    pub fn remove(&mut self, vreg: VReg) {
-        self.0.remove(&vreg);
-    }
-    
-    pub fn insert(&mut self, vreg: VReg) {
-        self.0.insert(vreg);
-    }
-}
-
-/// Liveness result per region node.
-#[derive(Debug)]
-pub struct RegionLiveness {
-    pub live_in: LiveSet,
-    pub live_out: LiveSet,
+pub struct Liveness {
+    pub live_in: RegSet,
+    pub live_out: RegSet,
 }
 
 /// Analyze liveness recursively on region tree.
-/// M4: Stub implementation - returns empty liveness.
-pub fn analyze_liveness(region: &Region, vinsts: &[VInst]) -> RegionLiveness {
-    todo!()
-}
-
-/// Format liveness for debug output.
-pub fn format_liveness(liveness: &RegionLiveness) -> String {
-    todo!()
+/// M4: Only handles Linear regions.
+pub fn analyze_liveness(
+    _tree: &RegionTree,
+    _region_id: RegionId,
+    _vinsts: &[VInst],
+    _pool: &[VReg],
+) -> Liveness {
+    // TODO(M4 Phase 3): implement
+    Liveness {
+        live_in: RegSet::new(),
+        live_out: RegSet::new(),
+    }
 }
 ```
 
-### 4. Create `alloc/trace.rs`
+#### `alloc/trace.rs`
 
 ```rust
 //! AllocTrace system for debugging allocator decisions.
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::vinst::VInst;
-use crate::isa::rv32fa::inst::PInst;
 
 #[derive(Debug, Clone)]
 pub struct AllocTrace {
-    entries: Vec<TraceEntry>,
+    pub entries: Vec<TraceEntry>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
     pub vinst_idx: usize,
-    pub vinst: VInst,
-    pub decision: TraceDecision,
-    pub message: String,
-}
-
-#[derive(Debug, Clone)]
-pub enum TraceDecision {
-    StubAssign { vreg: u32, preg: u8 },
-    StubSpill { vreg: u32, slot: u32 },
-    StubReload { vreg: u32, preg: u8 },
-    StubFree { preg: u8 },
-    StubCall { callee: String },
+    pub vinst_mnemonic: String,
+    pub decision: String,
+    pub register_state: String,
 }
 
 impl AllocTrace {
@@ -156,65 +112,94 @@ impl AllocTrace {
         self.entries.push(entry);
     }
 
-    /// Reverse entries (allocator walks backward, trace shown forward).
     pub fn reverse(&mut self) {
         self.entries.reverse();
     }
 
-    /// Format as human-readable table.
     pub fn format(&self) -> String {
-        todo!()
+        // TODO(M4 Phase 4): implement
+        String::new()
     }
 }
 ```
 
-### 5. Create `alloc/walk.rs`
+#### `alloc/walk.rs`
 
 ```rust
 //! Backward walk allocator shell with stubbed decisions.
 
-use alloc::vec::Vec;
-use crate::lower::Region;
-use crate::isa::rv32fa::alloc::trace::{AllocTrace, TraceEntry, TraceDecision};
-use crate::vinst::VInst;
+use crate::region::{Region, RegionId, RegionTree};
+use crate::vinst::{VInst, VReg};
+use super::trace::{AllocTrace, TraceEntry};
 
-/// Walk a region backward, recording stubbed decisions.
-/// M4: Stub implementation.
-pub fn walk_region_stub(region: &Region, vinsts: &[VInst], trace: &mut AllocTrace) {
-    todo!()
+/// Walk a region backward, recording stubbed decisions to trace.
+/// M4: Only handles Linear regions.
+pub fn walk_region_stub(
+    _tree: &RegionTree,
+    _region_id: RegionId,
+    _vinsts: &[VInst],
+    _pool: &[VReg],
+    _trace: &mut AllocTrace,
+) {
+    // TODO(M4 Phase 5): implement
 }
+```
 
-fn stub_process_instruction(vinst_idx: usize, vinst: &VInst) -> TraceEntry {
-    // STUB: Log what we would do, don't actually do it
-    let decision = TraceDecision::StubAssign { vreg: 0, preg: 0 };
-    let message = format!("Would process {:?} at {}", vinst.mnemonic(), vinst_idx);
-    
-    TraceEntry {
-        vinst_idx,
-        vinst: vinst.clone(),
-        decision,
-        message,
+### 2. Register `alloc` module in `lib.rs`
+
+Add `pub mod alloc;` to `src/lib.rs`.
+
+### 3. Populate RegionTree in lowerer
+
+In `lower.rs`, modify `LowerCtx` to carry a `RegionTree` and build regions during `lower_range`:
+
+- Add `region_tree: RegionTree` field to `LowerCtx`
+- `lower_range` returns `Result<RegionId, LowerError>` alongside emitting VInsts
+- For each LPIR op processed:
+  - `IfStart` → creates `Region::IfThenElse { head, then_body, else_body }`
+  - `LoopStart` → creates `Region::Loop { header, body }`
+  - Default → accumulates into current linear region
+- Consecutive linear regions are coalesced via helper
+- `lower_ops` sets `region_tree.root` from the top-level region id
+
+Key helper on `RegionTree`:
+
+```rust
+impl RegionTree {
+    pub fn push(&mut self, region: Region) -> RegionId {
+        let id = self.nodes.len() as RegionId;
+        self.nodes.push(region);
+        id
+    }
+
+    pub fn push_seq(&mut self, children: &[RegionId]) -> RegionId {
+        let start = self.seq_children.len() as u16;
+        self.seq_children.extend_from_slice(children);
+        self.push(Region::Seq {
+            children_start: start,
+            child_count: children.len() as u16,
+        })
     }
 }
 ```
 
-### 6. Update `rv32fa/mod.rs`
+### 4. Return populated `region_tree` in `LoweredFunction`
 
-Change from `pub mod alloc;` to use the new module structure.
-
-### 7. Update `lower.rs` exports
-
-Ensure `Region` is exported from `lower.rs` for use by alloc module:
-
+In `lower_ops()`, change:
 ```rust
-// In lower.rs
-pub use Region;  // Make available to alloc module
+region_tree: RegionTree::default(),
 ```
+to:
+```rust
+region_tree: ctx.region_tree,
+```
+with `ctx.region_tree.root` set to the root region id.
 
 ## Validate
 
 ```bash
-cargo check -p lpvm-native --lib
+cargo check -p lpvm-native-fa --lib
+cargo test -p lpvm-native-fa --lib
 ```
 
-Should compile with `todo!()` placeholders.
+Should compile and all existing tests pass. Region tree is now populated for all lowered functions.

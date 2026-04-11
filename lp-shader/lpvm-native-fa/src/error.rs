@@ -51,7 +51,9 @@ pub enum NativeError {
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
     /// Fastalloc (straight-line PInst pipeline) failed.
-    FastAlloc(crate::isa::rv32::alloc::AllocError),
+    FastAlloc(crate::rv32::alloc::AllocError),
+    /// Internal error (e.g., during restructuring).
+    Internal(String),
 }
 
 impl fmt::Display for NativeError {
@@ -81,6 +83,7 @@ impl fmt::Display for NativeError {
                 write!(f, "branch/jal target out of RV32 immediate range")
             }
             NativeError::FastAlloc(e) => write!(f, "fastalloc: {e}"),
+            NativeError::Internal(s) => write!(f, "internal: {s}"),
             NativeError::MissingSretSlot => {
                 write!(
                     f,

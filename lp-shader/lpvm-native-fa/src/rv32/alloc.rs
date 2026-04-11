@@ -1,4 +1,4 @@
-//! Straight-line allocation: [`VInst`](crate::vinst::VInst) → [`PInst`](super::inst::PInst).
+//! Straight-line allocation: [`VInst`](crate::vinst::VInst) → [`PInst`](super::PInst).
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -555,7 +555,7 @@ pub fn allocate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::rv32::abi::func_abi_rv32;
+    use crate::rv32::abi::func_abi_rv32;
     use crate::vinst::{VInst, VRegSlice};
     use alloc::string::String;
     use lpir::VReg as IrVReg;

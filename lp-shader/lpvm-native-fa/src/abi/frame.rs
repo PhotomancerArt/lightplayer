@@ -167,7 +167,7 @@ mod tests {
 
     use super::*;
     use crate::abi::classify::entry_param_scalar_count;
-    use crate::isa::rv32::abi as rv32;
+    use crate::rv32::abi as rv32;
     use lps_shared::{LpsFnSig, LpsType};
 
     fn abi_float() -> FuncAbi {

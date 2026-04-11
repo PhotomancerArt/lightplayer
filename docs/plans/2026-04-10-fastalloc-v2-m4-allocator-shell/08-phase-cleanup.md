@@ -2,69 +2,66 @@
 
 ## Scope
 
-Final cleanup: remove old `alloc.rs`, fix warnings, verify all tests pass.
+Final cleanup: fix warnings, verify all tests pass, document remaining TODOs.
 
 ## Implementation
 
-### 1. Remove old `alloc.rs`
+### 1. Fix warnings
 
 ```bash
-rm lp-shader/lpvm-native/src/isa/rv32fa/alloc.rs
+cargo clippy -p lpvm-native-fa --lib -- -W clippy::all
 ```
 
-### 2. Verify module structure
+Fix any new unused imports, dead code, redundant casts.
 
-Ensure `rv32fa/mod.rs` exports the new alloc module:
-
-```rust
-pub mod alloc;  // This now points to alloc/ directory
-```
-
-### 3. Fix any warnings
-
-Check for unused imports, dead code, etc:
+### 2. Verify all tests pass
 
 ```bash
-cargo clippy -p lpvm-native --lib
+cargo test -p lpvm-native-fa --lib
 ```
 
-### 4. Verify all rv32fa tests pass
+### 3. Verify existing filetests still pass
 
 ```bash
-cargo test -p lpvm-native --lib -- rv32fa
+cargo test -p lpvm-native-fa
 ```
 
-### 5. Verify CLI works
+### 4. Verify CLI works
 
 ```bash
-# Build
 cargo build -p lp-cli
 
-# Test with actual shader
-./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-cfg --show-liveness
+# Region tree display
+./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-region
+
+# Liveness display
+./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-liveness
 ```
 
-### 6. Check for TODOs
+### 5. Check TODOs
 
 ```bash
-grep -r "TODO" lp-shader/lpvm-native/src/isa/rv32fa/alloc/
+grep -r "TODO" lp-shader/lpvm-native-fa/src/alloc/
 ```
 
-Only acceptable TODOs are ones marking where M5 work begins (real allocation decisions).
+Only acceptable TODOs are ones marking where M5 work begins (IfThenElse/Loop liveness, real allocation decisions).
+
+### 6. Fix link.rs warnings from M3.2
+
+The 4 warnings in `link.rs` (unused fields on `ElfBuilder`/`ElfSection`, redundant `u32 as u32` casts) — fix these while we're cleaning up.
 
 ## Success Criteria
 
-1. Old `alloc.rs` deleted
-2. No compiler warnings
-3. All 17+ rv32fa tests pass
-4. CLI `--show-cfg` and `--show-liveness` work
-5. Trace displays stubbed decisions correctly
+1. No new compiler warnings in `lpvm-native-fa`
+2. All existing tests still pass
+3. New `alloc/` module tests pass
+4. CLI `--show-region` and `--show-liveness` produce output
+5. Region tree is populated for all lowered functions
 6. Code is clean and ready for M5
 
 ## Validate
 
 ```bash
-cargo test -p lpvm-native --lib -- rv32fa
+cargo test -p lpvm-native-fa
 cargo build -p lp-cli
-./target/debug/lp-cli shader-rv32fa file.glsl --show-cfg
 ```

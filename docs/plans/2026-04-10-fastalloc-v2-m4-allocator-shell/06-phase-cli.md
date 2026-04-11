@@ -6,9 +6,9 @@ Wire up `--show-region` and `--show-liveness` flags to display region tree and l
 
 ## Implementation
 
-### 1. Update `args.rs`
+### 1. Update `lp-cli/src/commands/shader_rv32fa/args.rs`
 
-Add new flags to the `Args` struct:
+Add new flags:
 
 ```rust
 /// Show region tree structure on stderr.
@@ -27,71 +27,52 @@ pub struct Verbosity {
     pub vinst: bool,
     pub pinst: bool,
     pub disasm: bool,
-    pub region: bool,       // Changed from cfg
+    pub region: bool,
     pub liveness: bool,
 }
-
-impl Args {
-    pub fn verbosity(&self) -> Verbosity {
-        let q = self.quiet;
-        Verbosity {
-            vinst: !q && !self.no_vinst,
-            pinst: !q && !self.no_pinst,
-            disasm: !q && !self.no_disasm,
-            region: !q && self.show_region,      // Changed from cfg
-            liveness: !q && self.show_liveness,
-        }
-    }
-}
 ```
 
-### 2. Update `pipeline.rs`
+### 2. Update pipeline or handler
 
-Add region and liveness display to the pipeline:
+After lowering, display region tree and liveness when requested:
 
 ```rust
-use lpvm_native::isa::rv32fa::alloc::liveness;
-use lpvm_native::debug::region;
+let lowered = lower_ops(&func, &ir, &abi, float_mode)?;
 
-pub fn compile(
-    glsl: &str,
-    verbosity: Verbosity,
-) -> Result<CompileResult, Error> {
-    // ... existing lowering ...
-    let lowered = lower_ops(&func, &ir, &abi, float_mode)?;
-    
-    // Display region tree if requested
-    if verbosity.region {
-        let region_text = region::format_region(&lowered.region, &lowered.vinsts, 0);
-        eprintln!("{}", region_text);
-    }
-    
-    // Display liveness if requested
-    if verbosity.liveness {
-        let liveness = liveness::analyze_liveness(&lowered.region, &lowered.vinsts);
-        eprintln!("{}", liveness::format_liveness(&liveness));
-    }
-    
-    // ... rest of compilation ...
+if verbosity.region {
+    let text = lpvm_native_fa::rv32::debug::region::format_region_tree(
+        &lowered.region_tree,
+        lowered.region_tree.root,
+        &lowered.vinsts,
+        &lowered.vreg_pool,
+        &lowered.symbols,
+        0,
+    );
+    eprintln!("=== Region Tree ===\n{}", text);
+}
+
+if verbosity.liveness {
+    let liveness = lpvm_native_fa::alloc::liveness::analyze_liveness(
+        &lowered.region_tree,
+        lowered.region_tree.root,
+        &lowered.vinsts,
+        &lowered.vreg_pool,
+    );
+    eprintln!("{}", lpvm_native_fa::alloc::liveness::format_liveness(&liveness));
 }
 ```
-
-### 3. Update `handler.rs`
-
-Pass the new flags through to the pipeline.
 
 ## Validate
 
 ```bash
-# Build CLI
 cargo build -p lp-cli
 
 # Test region tree display
-./target/debug/lp-cli shader-rv32fa file.glsl --show-region
+./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-region
 
 # Test liveness display
-./target/debug/lp-cli shader-rv32fa file.glsl --show-liveness
+./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-liveness
 
 # Test both
-./target/debug/lp-cli shader-rv32fa file.glsl --show-region --show-liveness
+./target/debug/lp-cli shader-rv32fa lp-shader/lps-filetests/filetests/debug/native-rv32-iadd.glsl --show-region --show-liveness
 ```

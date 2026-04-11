@@ -1,12 +1,12 @@
-//! [`PInst`](crate::isa::rv32::inst::PInst) parser and formatter (RISC-V assembly style).
+//! [`PInst`](crate::rv32::inst::PInst) parser and formatter (RISC-V assembly style).
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::isa::rv32::gpr::{self, PReg};
-use crate::isa::rv32::inst::PInst;
-use crate::isa::rv32::inst::SymbolRef;
+use crate::rv32::gpr::{self, PReg};
+use crate::rv32::inst::PInst;
+use crate::rv32::inst::SymbolRef;
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
