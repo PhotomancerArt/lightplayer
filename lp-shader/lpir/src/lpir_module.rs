@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::op::Op;
+use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, VReg, VRegRange};
 
 /// VReg that holds the VMContext pointer for the current function. Always [`VReg`] `(0)`;
@@ -43,7 +43,7 @@ pub struct IrFunction {
     pub return_types: Vec<IrType>,
     pub vreg_types: Vec<IrType>,
     pub slots: Vec<SlotDecl>,
-    pub body: Vec<Op>,
+    pub body: Vec<LpirOp>,
     pub vreg_pool: Vec<VReg>,
 }
 
@@ -78,7 +78,7 @@ impl IrFunction {
             || self.body.iter().any(|op| {
                 matches!(
                     op,
-                    Op::Load { .. } | Op::Store { .. } | Op::SlotAddr { .. } | Op::Memcpy { .. }
+                    LpirOp::Load { .. } | LpirOp::Store { .. } | LpirOp::SlotAddr { .. } | LpirOp::Memcpy { .. }
                 )
             })
     }
@@ -86,12 +86,12 @@ impl IrFunction {
 
 /// Full LPIR module: imports and local functions.
 #[derive(Clone, Debug, Default)]
-pub struct IrModule {
+pub struct LpirModule {
     pub imports: Vec<ImportDecl>,
     pub functions: Vec<IrFunction>,
 }
 
-impl IrModule {
+impl LpirModule {
     pub fn new() -> Self {
         Self::default()
     }

@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{AllocError, LpvmMemory, LpvmModule};
 use lpvm::{DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE};
@@ -15,7 +15,7 @@ use super::host_memory::NativeHostMemory;
 use super::instance::NativeJitInstance;
 
 pub(crate) struct NativeJitModuleInner {
-    pub ir: IrModule,
+    pub ir: LpirModule,
     pub meta: LpsModuleSig,
     pub buffer: JitBuffer,
     pub entry_offsets: alloc::collections::BTreeMap<alloc::string::String, usize>,

@@ -10,7 +10,7 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::FuncId;
 use lpir::FloatMode;
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::compile_options::CompileOptions;
@@ -45,7 +45,7 @@ unsafe impl Send for JitModule {}
 unsafe impl Sync for JitModule {}
 
 impl JitModule {
-    /// Raw finalized code pointer for a function index (same order as source [`IrModule::functions`]).
+    /// Raw finalized code pointer for a function index (same order as source [`LpirModule::functions`]).
     pub fn finalized_ptr_by_index(&self, index: usize) -> *const u8 {
         self.inner.get_finalized_function(self.func_ids[index])
     }
@@ -104,7 +104,7 @@ fn build_isa(flags: settings::Flags) -> Result<OwnedTargetIsa, CompilerError> {
 }
 
 pub(crate) fn build_jit_module(
-    ir: &IrModule,
+    ir: &LpirModule,
     glsl_meta: LpsModuleSig,
     options: CompileOptions,
 ) -> Result<JitModule, CompilerError> {

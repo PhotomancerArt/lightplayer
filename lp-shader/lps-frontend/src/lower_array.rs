@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use smallvec::smallvec;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{
     BinaryOperator, Expression, Function, Handle, Literal, LocalVariable, Module, ScalarKind,
     TypeInner,
@@ -39,7 +39,7 @@ pub(crate) fn emit_row_major_flat_from_operands(
             crate::lower_array_multidim::SubscriptOperand::Const(c) => {
                 let cc = (*c).min(*d - 1);
                 let vreg = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 {
+                ctx.fb.push(LpirOp::IconstI32 {
                     dst: vreg,
                     value: cc as i32,
                 });
@@ -72,19 +72,19 @@ pub(crate) fn emit_row_major_flat_index_vregs(
     for k in 1..dimensions.len() {
         let dk = dimensions[k];
         let dim_v = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::IconstI32 {
+        ctx.fb.push(LpirOp::IconstI32 {
             dst: dim_v,
             value: dk as i32,
         });
         let prod = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Imul {
+        ctx.fb.push(LpirOp::Imul {
             dst: prod,
             lhs: acc,
             rhs: dim_v,
         });
         let ik = clamp_array_index(ctx, index_v[k], dk)?;
         let sum = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Iadd {
+        ctx.fb.push(LpirOp::Iadd {
             dst: sum,
             lhs: prod,
             rhs: ik,
@@ -105,31 +105,31 @@ pub(crate) fn clamp_array_index(
         )));
     }
     let zero = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: zero,
         value: 0,
     });
 
     let len = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: len,
         value: element_count as i32,
     });
 
     let max_idx = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: max_idx,
         value: (element_count - 1) as i32,
     });
 
     let lt0 = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IltS {
+    ctx.fb.push(LpirOp::IltS {
         dst: lt0,
         lhs: index_v,
         rhs: zero,
     });
     let after_low = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Select {
+    ctx.fb.push(LpirOp::Select {
         dst: after_low,
         cond: lt0,
         if_true: zero,
@@ -137,13 +137,13 @@ pub(crate) fn clamp_array_index(
     });
 
     let ge_len = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IgeU {
+    ctx.fb.push(LpirOp::IgeU {
         dst: ge_len,
         lhs: after_low,
         rhs: len,
     });
     let out = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Select {
+    ctx.fb.push(LpirOp::Select {
         dst: out,
         cond: ge_len,
         if_true: max_idx,
@@ -158,7 +158,7 @@ pub(crate) fn array_slot_base(ctx: &mut LowerCtx<'_>, slot: lpir::SlotId) -> VRe
 
 fn array_slot_base_fb(fb: &mut lpir::FunctionBuilder, slot: lpir::SlotId) -> VReg {
     let base = fb.alloc_vreg(IrType::Pointer);
-    fb.push(Op::SlotAddr { dst: base, slot });
+    fb.push(LpirOp::SlotAddr { dst: base, slot });
     base
 }
 
@@ -199,7 +199,7 @@ pub(crate) fn zero_fill_array_slot(
         for (j, ty) in ir_tys.iter().enumerate() {
             let z = fb.alloc_vreg(*ty);
             push_zero_for_ir_type(fb, z, *ty);
-            fb.push(Op::Store {
+            fb.push(LpirOp::Store {
                 base,
                 offset: byte_off + (j as u32) * 4,
                 value: z,
@@ -219,8 +219,8 @@ pub(crate) fn zero_fill_array(
 
 fn push_zero_for_ir_type(fb: &mut lpir::FunctionBuilder, dst: VReg, ty: IrType) {
     match ty {
-        IrType::F32 => fb.push(Op::FconstF32 { dst, value: 0.0 }),
-        IrType::I32 | IrType::Pointer => fb.push(Op::IconstI32 { dst, value: 0 }),
+        IrType::F32 => fb.push(LpirOp::FconstF32 { dst, value: 0.0 }),
+        IrType::I32 | IrType::Pointer => fb.push(LpirOp::IconstI32 { dst, value: 0 }),
     }
 }
 
@@ -245,7 +245,7 @@ pub(crate) fn load_array_element_const(
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
         let dst = ctx.fb.alloc_vreg(*ty);
-        ctx.fb.push(Op::Load {
+        ctx.fb.push(LpirOp::Load {
             dst,
             base,
             offset: byte_off + (j as u32) * 4,
@@ -262,19 +262,19 @@ pub(crate) fn load_array_element_dynamic(
 ) -> Result<VRegVec, LowerError> {
     let clamped = clamp_array_index(ctx, index_v, info.element_count)?;
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: stride_v,
         value: info.leaf_stride as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Imul {
+    ctx.fb.push(LpirOp::Imul {
         dst: byte_off,
         lhs: clamped,
         rhs: stride_v,
     });
     let base = array_storage_base_vreg(ctx, &info.slot)?;
     let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Iadd {
+    ctx.fb.push(LpirOp::Iadd {
         dst: addr,
         lhs: base,
         rhs: byte_off,
@@ -285,7 +285,7 @@ pub(crate) fn load_array_element_dynamic(
     let mut out = VRegVec::new();
     for (j, ty) in ir_tys.iter().enumerate() {
         let dst = ctx.fb.alloc_vreg(*ty);
-        ctx.fb.push(Op::Load {
+        ctx.fb.push(LpirOp::Load {
             dst,
             base: addr,
             offset: (j as u32) * 4,
@@ -323,7 +323,7 @@ pub(crate) fn store_array_element_const(
         .checked_mul(info.leaf_stride)
         .ok_or_else(|| LowerError::Internal(String::from("store_array_element_const: overflow")))?;
     for (j, &src) in srcs.iter().enumerate() {
-        ctx.fb.push(Op::Store {
+        ctx.fb.push(LpirOp::Store {
             base,
             offset: byte_off + (j as u32) * 4,
             value: src,
@@ -340,19 +340,19 @@ pub(crate) fn store_array_element_dynamic(
 ) -> Result<(), LowerError> {
     let clamped = clamp_array_index(ctx, index_v, info.element_count)?;
     let stride_v = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: stride_v,
         value: info.leaf_stride as i32,
     });
     let byte_off = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Imul {
+    ctx.fb.push(LpirOp::Imul {
         dst: byte_off,
         lhs: clamped,
         rhs: stride_v,
     });
     let base = array_storage_base_vreg(ctx, &info.slot)?;
     let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Iadd {
+    ctx.fb.push(LpirOp::Iadd {
         dst: addr,
         lhs: base,
         rhs: byte_off,
@@ -370,7 +370,7 @@ pub(crate) fn store_array_element_dynamic(
         )));
     }
     for (j, &src) in srcs.iter().enumerate() {
-        ctx.fb.push(Op::Store {
+        ctx.fb.push(LpirOp::Store {
             base: addr,
             offset: (j as u32) * 4,
             value: src,
@@ -474,7 +474,7 @@ fn store_element_at_byte_offset(
         )));
     }
     for (j, &src) in srcs.iter().enumerate() {
-        ctx.fb.push(Op::Store {
+        ctx.fb.push(LpirOp::Store {
             base,
             offset: byte_off + (j as u32) * 4,
             value: src,
@@ -494,7 +494,7 @@ fn zero_element_at_byte_offset(
     for (j, ty) in ir_tys.iter().enumerate() {
         let z = ctx.fb.alloc_vreg(*ty);
         push_zero_for_ir_type(&mut ctx.fb, z, *ty);
-        ctx.fb.push(Op::Store {
+        ctx.fb.push(LpirOp::Store {
             base,
             offset: byte_off + (j as u32) * 4,
             value: z,
@@ -612,7 +612,7 @@ pub(crate) fn store_array_from_flat_vregs(
             LowerError::Internal(String::from("store_array_from_flat_vregs: off"))
         })?;
         for j in 0..per_el {
-            ctx.fb.push(Op::Store {
+            ctx.fb.push(LpirOp::Store {
                 base,
                 offset: byte_off + (j as u32) * 4,
                 value: src[flat + j],
@@ -644,7 +644,7 @@ pub(crate) fn load_array_flat_vregs_for_call(
         })?;
         for j in 0..per_el {
             let dst = ctx.fb.alloc_vreg(ir_tys[j]);
-            ctx.fb.push(Op::Load {
+            ctx.fb.push(LpirOp::Load {
                 dst,
                 base,
                 offset: byte_off + (j as u32) * 4,
@@ -681,7 +681,7 @@ pub(crate) fn copy_stack_array_slots(
         .ok_or_else(|| LowerError::Internal(String::from("array copy: size overflow")))?;
     let dst_addr = array_slot_base(ctx, dst_slot);
     let src_addr = array_slot_base(ctx, src_slot);
-    ctx.fb.push(Op::Memcpy {
+    ctx.fb.push(LpirOp::Memcpy {
         dst_addr,
         src_addr,
         size: sz,
@@ -703,7 +703,7 @@ pub(crate) fn lower_array_length(
     })?;
     let len = *info.dimensions.first().expect("array dimensions") as i32;
     let dst = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 { dst, value: len });
+    ctx.fb.push(LpirOp::IconstI32 { dst, value: len });
     Ok(smallvec![dst])
 }
 
@@ -744,7 +744,7 @@ pub(crate) fn lower_array_equality_vec(
             BinaryOperator::NotEqual => 0,
             _ => 0,
         };
-        ctx.fb.push(Op::IconstI32 { dst: v, value: val });
+        ctx.fb.push(LpirOp::IconstI32 { dst: v, value: val });
         return Ok(smallvec![v]);
     }
     let mut acc: Option<VReg> = None;
@@ -766,7 +766,7 @@ pub(crate) fn lower_array_equality_vec(
 
 fn emit_i32_and(ctx: &mut LowerCtx<'_>, a: VReg, b: VReg) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Iand {
+    ctx.fb.push(LpirOp::Iand {
         dst,
         lhs: a,
         rhs: b,
@@ -776,7 +776,7 @@ fn emit_i32_and(ctx: &mut LowerCtx<'_>, a: VReg, b: VReg) -> Result<VReg, LowerE
 
 fn emit_i32_or(ctx: &mut LowerCtx<'_>, a: VReg, b: VReg) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Ior {
+    ctx.fb.push(LpirOp::Ior {
         dst,
         lhs: a,
         rhs: b,
@@ -871,8 +871,8 @@ fn scalar_cmp_vreg(
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     match kind {
         ScalarKind::Float => match op {
-            BinaryOperator::Equal => ctx.fb.push(Op::Feq { dst, lhs, rhs }),
-            BinaryOperator::NotEqual => ctx.fb.push(Op::Fne { dst, lhs, rhs }),
+            BinaryOperator::Equal => ctx.fb.push(LpirOp::Feq { dst, lhs, rhs }),
+            BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Fne { dst, lhs, rhs }),
             _ => {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "scalar_cmp float op",
@@ -880,8 +880,8 @@ fn scalar_cmp_vreg(
             }
         },
         ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => match op {
-            BinaryOperator::Equal => ctx.fb.push(Op::Ieq { dst, lhs, rhs }),
-            BinaryOperator::NotEqual => ctx.fb.push(Op::Ine { dst, lhs, rhs }),
+            BinaryOperator::Equal => ctx.fb.push(LpirOp::Ieq { dst, lhs, rhs }),
+            BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Ine { dst, lhs, rhs }),
             _ => {
                 return Err(LowerError::UnsupportedExpression(String::from(
                     "scalar_cmp int/bool op",

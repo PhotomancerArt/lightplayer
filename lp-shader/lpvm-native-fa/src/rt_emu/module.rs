@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmMemory, LpvmModule};
 use lpvm_emu::{EmuSharedArena, GUEST_VMCTX_BYTES, write_guest_vmctx_header};
@@ -16,7 +16,7 @@ use super::NativeEmuInstance;
 /// Compiled and linked module ready for emulation.
 #[derive(Clone)]
 pub struct NativeEmuModule {
-    pub(crate) ir: IrModule,
+    pub(crate) ir: LpirModule,
     /// Object bytes retained for debugging; not used at runtime.
     pub(crate) _elf: Vec<u8>,
     pub(crate) meta: LpsModuleSig,

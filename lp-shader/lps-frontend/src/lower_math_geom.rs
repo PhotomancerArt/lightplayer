@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{Handle, MathFunction, TypeInner};
 
 use crate::lower_ctx::{LowerCtx, VRegVec, vector_size_usize};
@@ -43,7 +43,7 @@ pub(crate) fn try_lower_special(
             let v = ctx.ensure_expr_vec(arg)?;
             let d = lower_matrix::emit_dot_product(ctx, &v, &v)?;
             let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsqrt { dst: r, src: d });
+            ctx.fb.push(LpirOp::Fsqrt { dst: r, src: d });
             smallvec::smallvec![r]
         }
         MathFunction::Distance => {
@@ -59,7 +59,7 @@ pub(crate) fn try_lower_special(
             let mut diffs = VRegVec::new();
             for i in 0..a.len() {
                 let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
+                ctx.fb.push(LpirOp::Fsub {
                     dst: d,
                     lhs: a[i],
                     rhs: b[i],
@@ -68,7 +68,7 @@ pub(crate) fn try_lower_special(
             }
             let d = lower_matrix::emit_dot_product(ctx, &diffs, &diffs)?;
             let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsqrt { dst: r, src: d });
+            ctx.fb.push(LpirOp::Fsqrt { dst: r, src: d });
             smallvec::smallvec![r]
         }
         MathFunction::Normalize => {
@@ -76,13 +76,13 @@ pub(crate) fn try_lower_special(
             let len = {
                 let d = lower_matrix::emit_dot_product(ctx, &v, &v)?;
                 let r = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsqrt { dst: r, src: d });
+                ctx.fb.push(LpirOp::Fsqrt { dst: r, src: d });
                 r
             };
             let mut out = VRegVec::new();
             for &c in &v {
                 let d = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fdiv {
+                ctx.fb.push(LpirOp::Fdiv {
                     dst: d,
                     lhs: c,
                     rhs: len,
@@ -100,7 +100,7 @@ pub(crate) fn try_lower_special(
             let d = lower_matrix::emit_dot_product(ctx, &nref, &i)?;
             let z = fconst(ctx, 0.0);
             let cmp = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
+            ctx.fb.push(LpirOp::Flt {
                 dst: cmp,
                 lhs: d,
                 rhs: z,
@@ -108,12 +108,12 @@ pub(crate) fn try_lower_special(
             let mut out = VRegVec::new();
             for j in 0..n.len() {
                 let neg = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fneg {
+                ctx.fb.push(LpirOp::Fneg {
                     dst: neg,
                     src: n[j],
                 });
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
+                ctx.fb.push(LpirOp::Select {
                     dst,
                     cond: cmp,
                     if_true: n[j],
@@ -131,7 +131,7 @@ pub(crate) fn try_lower_special(
             let two = fconst(ctx, 2.0);
             let ndi = lower_matrix::emit_dot_product(ctx, &n, &i)?;
             let scale = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: scale,
                 lhs: two,
                 rhs: ndi,
@@ -139,13 +139,13 @@ pub(crate) fn try_lower_special(
             let mut out = VRegVec::new();
             for j in 0..i.len() {
                 let pn = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
+                ctx.fb.push(LpirOp::Fmul {
                     dst: pn,
                     lhs: scale,
                     rhs: n[j],
                 });
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
+                ctx.fb.push(LpirOp::Fsub {
                     dst,
                     lhs: i[j],
                     rhs: pn,
@@ -164,38 +164,38 @@ pub(crate) fn try_lower_special(
             let one = fconst(ctx, 1.0);
             let ndi = lower_matrix::emit_dot_product(ctx, &n, &i)?;
             let ndi2 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: ndi2,
                 lhs: ndi,
                 rhs: ndi,
             });
             let t1 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsub {
+            ctx.fb.push(LpirOp::Fsub {
                 dst: t1,
                 lhs: one,
                 rhs: ndi2,
             });
             let eta2 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: eta2,
                 lhs: eta_v,
                 rhs: eta_v,
             });
             let k_inner = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: k_inner,
                 lhs: eta2,
                 rhs: t1,
             });
             let k = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fsub {
+            ctx.fb.push(LpirOp::Fsub {
                 dst: k,
                 lhs: one,
                 rhs: k_inner,
             });
             let z = fconst(ctx, 0.0);
             let k_neg = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
+            ctx.fb.push(LpirOp::Flt {
                 dst: k_neg,
                 lhs: k,
                 rhs: z,
@@ -203,39 +203,39 @@ pub(crate) fn try_lower_special(
             let mut out = VRegVec::new();
             for j in 0..i.len() {
                 let etai = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
+                ctx.fb.push(LpirOp::Fmul {
                     dst: etai,
                     lhs: eta_v,
                     rhs: i[j],
                 });
                 let root = push_import_call(ctx, "lpir", "sqrt", &[k])?;
                 let eta_ndi = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
+                ctx.fb.push(LpirOp::Fmul {
                     dst: eta_ndi,
                     lhs: eta_v,
                     rhs: ndi,
                 });
                 let sum = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fadd {
+                ctx.fb.push(LpirOp::Fadd {
                     dst: sum,
                     lhs: eta_ndi,
                     rhs: root,
                 });
                 let pn = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fmul {
+                ctx.fb.push(LpirOp::Fmul {
                     dst: pn,
                     lhs: sum,
                     rhs: n[j],
                 });
                 let refr = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Fsub {
+                ctx.fb.push(LpirOp::Fsub {
                     dst: refr,
                     lhs: etai,
                     rhs: pn,
                 });
                 let zero = fconst(ctx, 0.0);
                 let dst = ctx.fb.alloc_vreg(IrType::F32);
-                ctx.fb.push(Op::Select {
+                ctx.fb.push(LpirOp::Select {
                     dst,
                     cond: k_neg,
                     if_true: zero,
@@ -301,7 +301,7 @@ pub(crate) fn try_lower_special(
             for c in 0..b.len() {
                 for r in 0..a.len() {
                     let d = ctx.fb.alloc_vreg(IrType::F32);
-                    ctx.fb.push(Op::Fmul {
+                    ctx.fb.push(LpirOp::Fmul {
                         dst: d,
                         lhs: a[r],
                         rhs: b[c],
@@ -323,19 +323,19 @@ fn emit_fsub_fmul_pair(
     b2: VReg,
 ) -> Result<VReg, LowerError> {
     let p1 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: p1,
         lhs: a1,
         rhs: b1,
     });
     let p2 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: p2,
         lhs: a2,
         rhs: b2,
     });
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: d,
         lhs: p1,
         rhs: p2,

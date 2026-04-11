@@ -1,11 +1,11 @@
-//! Naga module → LPIR [`lpir::IrModule`] lowering entry point.
+//! Naga module → LPIR [`lpir::LpirModule`] lowering entry point.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, ModuleBuilder};
+use lpir::{CalleeRef, ImportDecl, IrFunction, LpirModule, IrType, ModuleBuilder};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use naga::{Function, Handle, Module};
 
@@ -19,7 +19,7 @@ use crate::lower_lpfx;
 /// Registers `@glsl::*`, `@lpir::*`, and `@lpfx::*` imports as needed, then emits one [`lpir::IrFunction`] per
 /// entry in [`NagaModule::functions`]. Fails with [`LowerError`] on unsupported Naga IR outside the
 /// scalar subset.
-pub fn lower(naga_module: &NagaModule) -> Result<(IrModule, LpsModuleSig), LowerError> {
+pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), LowerError> {
     let mut mb = ModuleBuilder::new();
     let import_map = register_math_imports(&mut mb);
     let lpfx_map = lower_lpfx::register_lpfx_imports(&mut mb, naga_module)?;

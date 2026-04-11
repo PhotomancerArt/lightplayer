@@ -2,22 +2,22 @@ use alloc::vec::Vec;
 
 use cranelift_codegen::ir::{ArgumentPurpose, InstBuilder, MemFlags, StackSlotData, StackSlotKind};
 use cranelift_frontend::{FunctionBuilder, Variable};
-use lpir::module::IrFunction;
-use lpir::op::Op;
+use lpir::lpir_module::IrFunction;
+use lpir::lpir_op::LpirOp;
 
 use super::{EmitCtx, def_v, ir_type_for_mode, use_v};
 use crate::builtins::is_import_result_ptr_builtin;
 use crate::error::CompileError;
 
 pub(crate) fn emit_call(
-    op: &Op,
+    op: &LpirOp,
     func: &IrFunction,
     builder: &mut FunctionBuilder,
     vars: &[Variable],
     ctx: &EmitCtx,
 ) -> Result<bool, CompileError> {
     match op {
-        Op::Call {
+        LpirOp::Call {
             callee,
             args,
             results,
@@ -162,7 +162,7 @@ pub(crate) fn emit_call(
             }
             Ok(true)
         }
-        Op::Return { values } => {
+        LpirOp::Return { values } => {
             let slice = func.pool_slice(*values);
             if ctx.uses_struct_return {
                 let base = builder

@@ -1,10 +1,10 @@
-//! LPIR [`Op`] → [`VInst`] lowering (M1 subset).
+//! LPIR [`LpirOp`] → [`VInst`] lowering (M1 subset).
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, FloatMode, IrFunction, IrModule, Op};
+use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
@@ -17,179 +17,179 @@ use crate::vinst::{IcmpCond, LabelId, SymbolRef, VInst};
 
 /// Lower one LPIR op. `src_op` is the index in [`IrFunction::body`].
 pub fn lower_op(
-    op: &Op,
+    op: &LpirOp,
     float_mode: FloatMode,
     src_op: Option<u32>,
     func: &IrFunction,
-    ir: &IrModule,
+    ir: &LpirModule,
     abi: &ModuleAbi,
 ) -> Result<VInst, LowerError> {
     match op {
-        Op::Iadd { dst, lhs, rhs } => Ok(VInst::Add32 {
+        LpirOp::Iadd { dst, lhs, rhs } => Ok(VInst::Add32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Isub { dst, lhs, rhs } => Ok(VInst::Sub32 {
+        LpirOp::Isub { dst, lhs, rhs } => Ok(VInst::Sub32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Imul { dst, lhs, rhs } => Ok(VInst::Mul32 {
+        LpirOp::Imul { dst, lhs, rhs } => Ok(VInst::Mul32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::IdivS { dst, lhs, rhs } => Ok(VInst::DivS32 {
+        LpirOp::IdivS { dst, lhs, rhs } => Ok(VInst::DivS32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             src_op,
         }),
-        Op::IdivU { dst, lhs, rhs } => Ok(VInst::DivU32 {
+        LpirOp::IdivU { dst, lhs, rhs } => Ok(VInst::DivU32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             src_op,
         }),
-        Op::IremS { dst, lhs, rhs } => Ok(VInst::RemS32 {
+        LpirOp::IremS { dst, lhs, rhs } => Ok(VInst::RemS32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             src_op,
         }),
-        Op::IremU { dst, lhs, rhs } => Ok(VInst::RemU32 {
+        LpirOp::IremU { dst, lhs, rhs } => Ok(VInst::RemU32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             src_op,
         }),
-        Op::Ineg { dst, src } => Ok(VInst::Neg32 {
+        LpirOp::Ineg { dst, src } => Ok(VInst::Neg32 {
             dst: *dst,
             src: *src,
             src_op,
         }),
-        Op::Ieq { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::Ieq { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::Eq,
             src_op,
         }),
-        Op::Ine { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::Ine { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::Ne,
             src_op,
         }),
-        Op::IltS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IltS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LtS,
             src_op,
         }),
-        Op::IleS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IleS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LeS,
             src_op,
         }),
-        Op::IgtS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgtS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::GtS,
             src_op,
         }),
-        Op::IgeS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgeS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::GeS,
             src_op,
         }),
-        Op::IltU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IltU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LtU,
             src_op,
         }),
-        Op::IleU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IleU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LeU,
             src_op,
         }),
-        Op::IgtU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgtU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::GtU,
             src_op,
         }),
-        Op::IgeU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgeU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::GeU,
             src_op,
         }),
-        Op::IeqImm { dst, src, imm } => Ok(VInst::IeqImm32 {
+        LpirOp::IeqImm { dst, src, imm } => Ok(VInst::IeqImm32 {
             dst: *dst,
             src: *src,
             imm: *imm,
             src_op,
         }),
-        Op::Iand { dst, lhs, rhs } => Ok(VInst::And32 {
+        LpirOp::Iand { dst, lhs, rhs } => Ok(VInst::And32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Ior { dst, lhs, rhs } => Ok(VInst::Or32 {
+        LpirOp::Ior { dst, lhs, rhs } => Ok(VInst::Or32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Ixor { dst, lhs, rhs } => Ok(VInst::Xor32 {
+        LpirOp::Ixor { dst, lhs, rhs } => Ok(VInst::Xor32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Ibnot { dst, src } => Ok(VInst::Bnot32 {
+        LpirOp::Ibnot { dst, src } => Ok(VInst::Bnot32 {
             dst: *dst,
             src: *src,
             src_op,
         }),
-        Op::Ishl { dst, lhs, rhs } => Ok(VInst::Shl32 {
+        LpirOp::Ishl { dst, lhs, rhs } => Ok(VInst::Shl32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::IshrS { dst, lhs, rhs } => Ok(VInst::ShrS32 {
+        LpirOp::IshrS { dst, lhs, rhs } => Ok(VInst::ShrS32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::IshrU { dst, lhs, rhs } => Ok(VInst::ShrU32 {
+        LpirOp::IshrU { dst, lhs, rhs } => Ok(VInst::ShrU32 {
             dst: *dst,
             src1: *lhs,
             src2: *rhs,
             src_op,
         }),
-        Op::Select {
+        LpirOp::Select {
             dst,
             cond,
             if_true,
@@ -201,18 +201,18 @@ pub fn lower_op(
             if_false: *if_false,
             src_op,
         }),
-        Op::Copy { dst, src } => Ok(VInst::Mov32 {
+        LpirOp::Copy { dst, src } => Ok(VInst::Mov32 {
             dst: *dst,
             src: *src,
             src_op,
         }),
-        Op::IconstI32 { dst, value } => Ok(VInst::IConst32 {
+        LpirOp::IconstI32 { dst, value } => Ok(VInst::IConst32 {
             dst: *dst,
             val: *value,
             src_op,
         }),
 
-        Op::Load { dst, base, offset } => {
+        LpirOp::Load { dst, base, offset } => {
             let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
                 description: String::from("Load: offset does not fit i32"),
             })?;
@@ -223,7 +223,7 @@ pub fn lower_op(
                 src_op,
             })
         }
-        Op::Store {
+        LpirOp::Store {
             base,
             offset,
             value,
@@ -238,12 +238,12 @@ pub fn lower_op(
                 src_op,
             })
         }
-        Op::SlotAddr { dst, slot } => Ok(VInst::SlotAddr {
+        LpirOp::SlotAddr { dst, slot } => Ok(VInst::SlotAddr {
             dst: *dst,
             slot: slot.0,
             src_op,
         }),
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr,
             src_addr,
             size,
@@ -261,7 +261,7 @@ pub fn lower_op(
             })
         }
 
-        Op::Return { values } => {
+        LpirOp::Return { values } => {
             let slice = func.pool_slice(*values);
             if slice.len() != values.count as usize {
                 return Err(LowerError::UnsupportedOp {
@@ -274,7 +274,7 @@ pub fn lower_op(
             })
         }
 
-        Op::Fadd { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fadd { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fadd_q32"),
             },
@@ -283,7 +283,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fsub { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fsub { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fsub_q32"),
             },
@@ -292,7 +292,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fmul { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fmul { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fmul_q32"),
             },
@@ -301,7 +301,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fdiv { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fdiv { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fdiv_q32"),
             },
@@ -310,12 +310,12 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fneg { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Neg32 {
+        LpirOp::Fneg { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Neg32 {
             dst: *dst,
             src: *src,
             src_op,
         }),
-        Op::ItofS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::ItofS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_itof_s_q32"),
             },
@@ -324,7 +324,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::ItofU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::ItofU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_itof_u_q32"),
             },
@@ -334,42 +334,42 @@ pub fn lower_op(
             src_op,
         }),
 
-        Op::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::Eq,
             src_op,
         }),
-        Op::Fne { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fne { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::Ne,
             src_op,
         }),
-        Op::Flt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Flt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LtS,
             src_op,
         }),
-        Op::Fle { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fle { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::LeS,
             src_op,
         }),
-        Op::Fgt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fgt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
             cond: IcmpCond::GtS,
             src_op,
         }),
-        Op::Fge { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fge { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
             dst: *dst,
             lhs: *lhs,
             rhs: *rhs,
@@ -378,7 +378,7 @@ pub fn lower_op(
         }),
 
         // Q32 float constants: convert f32 to Q32 fixed-point (multiply by 65536.0)
-        Op::FconstF32 { dst, value } if float_mode == FloatMode::Q32 => {
+        LpirOp::FconstF32 { dst, value } if float_mode == FloatMode::Q32 => {
             let q32_val = ((*value as f64) * 65536.0) as i32;
             Ok(VInst::IConst32 {
                 dst: *dst,
@@ -387,7 +387,7 @@ pub fn lower_op(
             })
         }
 
-        Op::Fsqrt { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fsqrt { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fsqrt_q32"),
             },
@@ -396,7 +396,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fnearest { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fnearest { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fnearest_q32"),
             },
@@ -405,7 +405,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fabs { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fabs { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fabs_q32"),
             },
@@ -414,7 +414,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fmin { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fmin { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fmin_q32"),
             },
@@ -423,7 +423,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fmax { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fmax { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fmax_q32"),
             },
@@ -432,7 +432,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Ffloor { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Ffloor { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_ffloor_q32"),
             },
@@ -441,7 +441,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Fceil { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Fceil { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_fceil_q32"),
             },
@@ -450,7 +450,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::Ftrunc { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::Ftrunc { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_ftrunc_q32"),
             },
@@ -459,7 +459,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::FtoiSatS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::FtoiSatS { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_ftoi_sat_s_q32"),
             },
@@ -468,7 +468,7 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::FtoiSatU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
+        LpirOp::FtoiSatU { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Call {
             target: SymbolRef {
                 name: String::from("__lp_lpir_ftoi_sat_u_q32"),
             },
@@ -477,54 +477,54 @@ pub fn lower_op(
             callee_uses_sret: false,
             src_op,
         }),
-        Op::FfromI32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov32 {
+        LpirOp::FfromI32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov32 {
             dst: *dst,
             src: *src,
             src_op,
         }),
 
-        Op::Fadd { .. }
-        | Op::Fsub { .. }
-        | Op::Fmul { .. }
-        | Op::Fdiv { .. }
-        | Op::Fneg { .. }
-        | Op::FconstF32 { .. }
-        | Op::Fsqrt { .. }
-        | Op::Fnearest { .. }
-        | Op::Fabs { .. }
-        | Op::Fmin { .. }
-        | Op::Fmax { .. }
-        | Op::Ffloor { .. }
-        | Op::Fceil { .. }
-        | Op::Ftrunc { .. }
-        | Op::Feq { .. }
-        | Op::Fne { .. }
-        | Op::Flt { .. }
-        | Op::Fle { .. }
-        | Op::Fgt { .. }
-        | Op::Fge { .. }
-        | Op::ItofS { .. }
-        | Op::ItofU { .. }
-        | Op::FtoiSatS { .. }
-        | Op::FtoiSatU { .. }
-        | Op::FfromI32Bits { .. } => Err(LowerError::UnsupportedOp {
+        LpirOp::Fadd { .. }
+        | LpirOp::Fsub { .. }
+        | LpirOp::Fmul { .. }
+        | LpirOp::Fdiv { .. }
+        | LpirOp::Fneg { .. }
+        | LpirOp::FconstF32 { .. }
+        | LpirOp::Fsqrt { .. }
+        | LpirOp::Fnearest { .. }
+        | LpirOp::Fabs { .. }
+        | LpirOp::Fmin { .. }
+        | LpirOp::Fmax { .. }
+        | LpirOp::Ffloor { .. }
+        | LpirOp::Fceil { .. }
+        | LpirOp::Ftrunc { .. }
+        | LpirOp::Feq { .. }
+        | LpirOp::Fne { .. }
+        | LpirOp::Flt { .. }
+        | LpirOp::Fle { .. }
+        | LpirOp::Fgt { .. }
+        | LpirOp::Fge { .. }
+        | LpirOp::ItofS { .. }
+        | LpirOp::ItofU { .. }
+        | LpirOp::FtoiSatS { .. }
+        | LpirOp::FtoiSatU { .. }
+        | LpirOp::FfromI32Bits { .. } => Err(LowerError::UnsupportedOp {
             description: String::from("float op requires Q32 mode (F32 not supported on rv32)"),
         }),
 
-        Op::IfStart { .. } | Op::Else | Op::End | Op::LoopStart { .. } => {
+        LpirOp::IfStart { .. } | LpirOp::Else | LpirOp::End | LpirOp::LoopStart { .. } => {
             Err(LowerError::UnsupportedOp {
                 description: String::from(
                     "structural control-flow op must be lowered via lower_ops (IfStart/LoopStart/Else/End)",
                 ),
             })
         }
-        Op::Break | Op::Continue | Op::BrIfNot { .. } => Err(LowerError::UnsupportedOp {
+        LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => Err(LowerError::UnsupportedOp {
             description: String::from(
                 "break/continue/br_if_not must be lowered via lower_ops with loop context",
             ),
         }),
 
-        Op::Call {
+        LpirOp::Call {
             callee,
             args,
             results,
@@ -586,7 +586,7 @@ pub struct LoweredFunction {
 
 struct LowerCtx<'a> {
     func: &'a IrFunction,
-    ir: &'a IrModule,
+    ir: &'a LpirModule,
     abi: &'a ModuleAbi,
     float_mode: FloatMode,
     out: Vec<VInst>,
@@ -607,14 +607,14 @@ impl<'a> LowerCtx<'a> {
         let mut i = start;
         while i < end {
             match &self.func.body[i] {
-                Op::IfStart {
+                LpirOp::IfStart {
                     cond,
                     else_offset,
                     end_offset,
                 } => {
                     let eo = *else_offset as usize;
                     let merge_after = *end_offset as usize;
-                    let else_is_empty = matches!(self.func.body.get(eo), Some(Op::End));
+                    let else_is_empty = matches!(self.func.body.get(eo), Some(LpirOp::End));
                     if else_is_empty {
                         // `else_offset` points at `End` (no `Else` op); false and true paths share one label.
                         let merge = self.alloc_label();
@@ -651,7 +651,7 @@ impl<'a> LowerCtx<'a> {
                     }
                     i = merge_after;
                 }
-                Op::LoopStart {
+                LpirOp::LoopStart {
                     continuing_offset,
                     end_offset,
                 } => {
@@ -691,7 +691,7 @@ impl<'a> LowerCtx<'a> {
                     self.loop_stack.pop();
                     i = eo;
                 }
-                Op::Break => {
+                LpirOp::Break => {
                     let frame =
                         self.loop_stack
                             .last()
@@ -704,7 +704,7 @@ impl<'a> LowerCtx<'a> {
                     });
                     i += 1;
                 }
-                Op::Continue => {
+                LpirOp::Continue => {
                     let frame =
                         self.loop_stack
                             .last()
@@ -717,7 +717,7 @@ impl<'a> LowerCtx<'a> {
                     });
                     i += 1;
                 }
-                Op::BrIfNot { cond } => {
+                LpirOp::BrIfNot { cond } => {
                     let frame =
                         self.loop_stack
                             .last()
@@ -733,17 +733,17 @@ impl<'a> LowerCtx<'a> {
                     });
                     i += 1;
                 }
-                Op::Else | Op::End => {
+                LpirOp::Else | LpirOp::End => {
                     i += 1;
                 }
                 other => {
-                    if let Op::Copy { dst, src } = other {
+                    if let LpirOp::Copy { dst, src } = other {
                         if dst == src {
                             i += 1;
                             continue;
                         }
                     }
-                    let is_return = matches!(other, Op::Return { .. });
+                    let is_return = matches!(other, LpirOp::Return { .. });
                     self.out.push(lower_op(
                         other,
                         self.float_mode,
@@ -769,7 +769,7 @@ impl<'a> LowerCtx<'a> {
 /// Lower full function body (including if/else and loop control flow).
 pub fn lower_ops(
     func: &IrFunction,
-    ir: &IrModule,
+    ir: &LpirModule,
     abi: &ModuleAbi,
     float_mode: FloatMode,
 ) -> Result<LoweredFunction, LowerError> {
@@ -793,7 +793,7 @@ pub fn lower_ops(
     })
 }
 
-fn resolve_callee_name(ir: &IrModule, callee: CalleeRef) -> Option<String> {
+fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<String> {
     let idx = callee.0 as usize;
     let ni = ir.imports.len();
     if idx < ni {
@@ -814,7 +814,7 @@ fn resolve_callee_name(ir: &IrModule, callee: CalleeRef) -> Option<String> {
 
 /// Map an LPIR import declaration to a BuiltinId to get the C ABI symbol name.
 /// Mirrors Cranelift's resolve_import in lpvm-cranelift/src/builtins.rs
-fn resolve_import_to_builtin(decl: &lpir::module::ImportDecl) -> Option<BuiltinId> {
+fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<BuiltinId> {
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
@@ -847,7 +847,7 @@ fn lpfx_strip_suffix(func_name: &str) -> Option<&str> {
 }
 
 /// Get GLSL parameter kinds from lpfx_glsl_params CSV or infer from IR types.
-fn lpfx_glsl_kinds_from_decl(decl: &lpir::module::ImportDecl) -> Vec<GlslParamKind> {
+fn lpfx_glsl_kinds_from_decl(decl: &lpir::lpir_module::ImportDecl) -> Vec<GlslParamKind> {
     if let Some(ref enc) = decl.lpfx_glsl_params {
         parse_lpfx_glsl_params_csv(enc)
             .unwrap_or_else(|_| ir_params_to_glsl_kinds(&decl.param_types))
@@ -895,7 +895,7 @@ fn ir_params_to_glsl_kinds(params: &[lpir::IrType]) -> Vec<GlslParamKind> {
         .collect()
 }
 
-fn callee_return_uses_sret(ir: &IrModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
+fn callee_return_uses_sret(ir: &LpirModule, abi: &ModuleAbi, callee: CalleeRef) -> bool {
     let idx = callee.0 as usize;
     let ni = ir.imports.len();
     if idx < ni {
@@ -920,11 +920,11 @@ mod tests {
     use crate::error::LowerError;
     use crate::vinst::IcmpCond;
     use lpir::types::{SlotId, VRegRange};
-    use lpir::{IrModule, IrType, VReg};
+    use lpir::{LpirModule, IrType, VReg};
     use lps_shared::LpsModuleSig;
 
-    fn empty_ir_abi() -> (IrModule, ModuleAbi) {
-        let ir = IrModule::default();
+    fn empty_ir_abi() -> (LpirModule, ModuleAbi) {
+        let ir = LpirModule::default();
         let abi = ModuleAbi::from_ir_and_sig(&ir, &LpsModuleSig { functions: vec![] });
         (ir, abi)
     }
@@ -949,7 +949,7 @@ mod tests {
 
     #[test]
     fn lower_iadd() {
-        let op = Op::Iadd {
+        let op = LpirOp::Iadd {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -972,7 +972,7 @@ mod tests {
     fn lower_load_store_slot_memcpy() {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let load = Op::Load {
+        let load = LpirOp::Load {
             dst: v(3),
             base: v(2),
             offset: 4,
@@ -986,7 +986,7 @@ mod tests {
                 ..
             }
         ));
-        let store = Op::Store {
+        let store = LpirOp::Store {
             base: v(2),
             offset: 8,
             value: v(3),
@@ -1000,7 +1000,7 @@ mod tests {
                 ..
             }
         ));
-        let sa = Op::SlotAddr {
+        let sa = LpirOp::SlotAddr {
             dst: v(1),
             slot: SlotId(0),
         };
@@ -1012,7 +1012,7 @@ mod tests {
                 ..
             }
         ));
-        let mc = Op::Memcpy {
+        let mc = LpirOp::Memcpy {
             dst_addr: v(4),
             src_addr: v(5),
             size: 12,
@@ -1030,7 +1030,7 @@ mod tests {
 
     #[test]
     fn lower_q32_fadd_to_call() {
-        let op = Op::Fadd {
+        let op = LpirOp::Fadd {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1057,7 +1057,7 @@ mod tests {
 
     #[test]
     fn lower_q32_fdiv_to_call() {
-        let op = Op::Fdiv {
+        let op = LpirOp::Fdiv {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1084,7 +1084,7 @@ mod tests {
 
     #[test]
     fn lower_q32_fneg_to_neg32() {
-        let op = Op::Fneg {
+        let op = LpirOp::Fneg {
             dst: v(1),
             src: v(0),
         };
@@ -1102,7 +1102,7 @@ mod tests {
 
     #[test]
     fn lower_q32_itof_s_to_call() {
-        let op = Op::ItofS {
+        let op = LpirOp::ItofS {
             dst: v(1),
             src: v(0),
         };
@@ -1128,7 +1128,7 @@ mod tests {
 
     #[test]
     fn lower_q32_itof_u_to_call() {
-        let op = Op::ItofU {
+        let op = LpirOp::ItofU {
             dst: v(1),
             src: v(0),
         };
@@ -1154,7 +1154,7 @@ mod tests {
 
     #[test]
     fn lower_q32_fsqrt_to_call() {
-        let op = Op::Fsqrt {
+        let op = LpirOp::Fsqrt {
             dst: v(1),
             src: v(0),
         };
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn lower_q32_ffloor_to_call() {
-        let op = Op::Ffloor {
+        let op = LpirOp::Ffloor {
             dst: v(1),
             src: v(0),
         };
@@ -1200,7 +1200,7 @@ mod tests {
 
     #[test]
     fn lower_q32_ffrom_i32_bits_to_mov32() {
-        let op = Op::FfromI32Bits {
+        let op = LpirOp::FfromI32Bits {
             dst: v(1),
             src: v(0),
         };
@@ -1220,7 +1220,7 @@ mod tests {
     fn lower_q32_float_comparisons_to_signed_icmp() {
         let cases = [
             (
-                Op::Feq {
+                LpirOp::Feq {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1228,7 +1228,7 @@ mod tests {
                 IcmpCond::Eq,
             ),
             (
-                Op::Fne {
+                LpirOp::Fne {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1236,7 +1236,7 @@ mod tests {
                 IcmpCond::Ne,
             ),
             (
-                Op::Flt {
+                LpirOp::Flt {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1244,7 +1244,7 @@ mod tests {
                 IcmpCond::LtS,
             ),
             (
-                Op::Fle {
+                LpirOp::Fle {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1252,7 +1252,7 @@ mod tests {
                 IcmpCond::LeS,
             ),
             (
-                Op::Fgt {
+                LpirOp::Fgt {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1260,7 +1260,7 @@ mod tests {
                 IcmpCond::GtS,
             ),
             (
-                Op::Fge {
+                LpirOp::Fge {
                     dst: v(2),
                     lhs: v(0),
                     rhs: v(1),
@@ -1275,7 +1275,7 @@ mod tests {
 
     #[test]
     fn lower_f32_float_unsupported() {
-        let op = Op::Fadd {
+        let op = LpirOp::Fadd {
             dst: v(0),
             lhs: v(1),
             rhs: v(2),
@@ -1291,7 +1291,7 @@ mod tests {
                 );
             }
         }
-        let div = Op::Fdiv {
+        let div = LpirOp::Fdiv {
             dst: v(0),
             lhs: v(1),
             rhs: v(2),
@@ -1304,7 +1304,7 @@ mod tests {
 
     #[test]
     fn lower_ineg() {
-        let op = Op::Ineg {
+        let op = LpirOp::Ineg {
             dst: v(1),
             src: v(0),
         };
@@ -1323,7 +1323,7 @@ mod tests {
 
     #[test]
     fn lower_ieq_imm() {
-        let op = Op::IeqImm {
+        let op = LpirOp::IeqImm {
             dst: v(1),
             src: v(0),
             imm: 0,
@@ -1343,7 +1343,7 @@ mod tests {
 
     #[test]
     fn lower_iand() {
-        let op = Op::Iand {
+        let op = LpirOp::Iand {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1363,7 +1363,7 @@ mod tests {
 
     #[test]
     fn lower_ibnot() {
-        let op = Op::Ibnot {
+        let op = LpirOp::Ibnot {
             dst: v(1),
             src: v(0),
         };
@@ -1381,7 +1381,7 @@ mod tests {
 
     #[test]
     fn lower_idivs() {
-        let op = Op::IdivS {
+        let op = LpirOp::IdivS {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[test]
     fn lower_ieq_to_icmp() {
-        let op = Op::Ieq {
+        let op = LpirOp::Ieq {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1417,7 +1417,7 @@ mod tests {
 
     #[test]
     fn lower_iltu_to_icmp() {
-        let op = Op::IltU {
+        let op = LpirOp::IltU {
             dst: v(2),
             lhs: v(0),
             rhs: v(1),
@@ -1432,7 +1432,7 @@ mod tests {
 
     #[test]
     fn lower_select() {
-        let op = Op::Select {
+        let op = LpirOp::Select {
             dst: v(3),
             cond: v(0),
             if_true: v(1),
@@ -1471,7 +1471,7 @@ mod tests {
             body: vec![],
             vreg_pool: vec![v(10), v(11)],
         };
-        let op = Op::Return {
+        let op = LpirOp::Return {
             values: VRegRange { start: 0, count: 2 },
         };
         let (ir, abi) = empty_ir_abi();
@@ -1485,7 +1485,7 @@ mod tests {
         }
     }
 
-    fn assert_q32_fcmp(want: IcmpCond, op: Op) {
+    fn assert_q32_fcmp(want: IcmpCond, op: LpirOp) {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         match lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok") {

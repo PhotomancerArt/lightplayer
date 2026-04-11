@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
 use crate::abi::ModuleAbi;
@@ -22,7 +22,7 @@ use crate::isa::rv32::emit::emit_function_bytes;
 /// * `opts` - Disassembly options
 /// * `alloc_trace` - When true, print linear-scan allocation trace to stderr for each function
 pub fn compile_module_asm_text(
-    ir: &IrModule,
+    ir: &LpirModule,
     sig: &LpsModuleSig,
     float_mode: lpir::FloatMode,
     opts: DisasmOptions,
@@ -61,7 +61,7 @@ mod tests {
     use alloc::vec;
 
     use lpir::types::VRegRange;
-    use lpir::{IrFunction, IrModule, IrType, Op, VReg};
+    use lpir::{IrFunction, LpirModule, IrType, LpirOp, VReg};
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, ParamQualifier};
 
     use super::*;
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn compile_module_asm_contains_lpir() {
-        let ir = IrModule {
+        let ir = LpirModule {
             imports: vec![],
             functions: vec![IrFunction {
                 name: String::from("add"),
@@ -80,12 +80,12 @@ mod tests {
                 vreg_types: vec![IrType::I32, IrType::I32, IrType::I32, IrType::I32],
                 slots: vec![],
                 body: vec![
-                    Op::Iadd {
+                    LpirOp::Iadd {
                         dst: VReg(3),
                         lhs: VReg(1),
                         rhs: VReg(2),
                     },
-                    Op::Return {
+                    LpirOp::Return {
                         values: VRegRange { start: 0, count: 1 },
                     },
                 ],

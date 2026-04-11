@@ -63,7 +63,7 @@ pub fn handle_shader_rv32(args: ShaderRv32Args) -> Result<()> {
 }
 
 fn run_fast_pipeline(
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     sig: &lps_frontend::LpsModuleSig,
     float_mode: FloatMode,
     args: &ShaderRv32Args,

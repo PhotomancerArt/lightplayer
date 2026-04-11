@@ -6,7 +6,7 @@
 //! Note: The native backend currently does not support imports (builtin functions).
 //! This test constructs LPIR directly without imports.
 
-use lpir::{FloatMode, IrFunction, IrModule, IrType, Op, VReg, VRegRange};
+use lpir::{FloatMode, IrFunction, LpirModule, IrType, LpirOp, VReg, VRegRange};
 use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine};
@@ -16,7 +16,7 @@ fn v(n: u32) -> VReg {
 }
 
 /// Build a simple LPIR module: returns a + b (integer).
-fn build_iadd_module() -> (IrModule, LpsModuleSig) {
+fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
     let func = IrFunction {
         name: "test_iadd".to_string(),
         is_entry: false,
@@ -26,19 +26,19 @@ fn build_iadd_module() -> (IrModule, LpsModuleSig) {
         vreg_types: vec![IrType::I32, IrType::I32, IrType::I32], // v0 = vmctx, v1/v2 = params
         slots: vec![],
         body: vec![
-            Op::Iadd {
+            LpirOp::Iadd {
                 dst: v(2),
                 lhs: v(1), // first param (a)
                 rhs: v(2), // second param (b), overwritten with result
             },
-            Op::Return {
+            LpirOp::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
         ],
         vreg_pool: vec![v(2)],
     };
 
-    let module = IrModule {
+    let module = LpirModule {
         imports: vec![],
         functions: vec![func],
     };

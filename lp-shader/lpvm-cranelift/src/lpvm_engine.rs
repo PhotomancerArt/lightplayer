@@ -1,6 +1,6 @@
 //! LPVM trait implementation: CraneliftEngine
 
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 
@@ -35,7 +35,7 @@ impl LpvmEngine for CraneliftEngine {
     type Module = CraneliftModule;
     type Error = CompilerError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         CraneliftModule::compile(ir, meta, self.options)
     }
 

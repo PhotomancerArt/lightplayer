@@ -21,12 +21,12 @@ pub struct PhysReloc {
     pub symbol: String,
 }
 
-pub struct PhysEmitter {
+pub struct Rv32Emitter {
     code: Vec<u8>,
     relocs: Vec<PhysReloc>,
 }
 
-impl PhysEmitter {
+impl Rv32Emitter {
     pub fn new() -> Self {
         Self {
             code: Vec::new(),
@@ -243,7 +243,7 @@ impl PhysEmitter {
     }
 }
 
-impl Default for PhysEmitter {
+impl Default for Rv32Emitter {
     fn default() -> Self {
         Self::new()
     }
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_emit_add() {
-        let mut emitter = PhysEmitter::new();
+        let mut emitter = Rv32Emitter::new();
         emitter.emit(&PInst::Add {
             dst: 10,
             src1: 11,
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_emit_li() {
-        let mut emitter = PhysEmitter::new();
+        let mut emitter = Rv32Emitter::new();
         emitter.emit(&PInst::Li { dst: 10, imm: 42 });
         let code = emitter.finish();
         assert_eq!(code, &[0x13, 0x05, 0xA0, 0x02]);
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_emit_ret() {
-        let mut emitter = PhysEmitter::new();
+        let mut emitter = Rv32Emitter::new();
         emitter.emit(&PInst::Ret);
         let code = emitter.finish();
         assert_eq!(code, &[0x67, 0x80, 0x00, 0x00]);

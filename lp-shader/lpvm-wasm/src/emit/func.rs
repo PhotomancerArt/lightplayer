@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{IrFunction, IrModule, IrType, Op};
+use lpir::{IrFunction, LpirModule, IrType, LpirOp};
 use wasm_encoder::{Function, InstructionSink, ValType};
 
 use crate::emit::control::{self, CtrlEntry, WasmOpenDepth};
@@ -28,11 +28,11 @@ fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
     f.body.iter().any(|op| {
         matches!(
             op,
-            Op::Fadd { .. }
-                | Op::Fsub { .. }
-                | Op::Fmul { .. }
-                | Op::ItofS { .. }
-                | Op::ItofU { .. }
+            LpirOp::Fadd { .. }
+                | LpirOp::Fsub { .. }
+                | LpirOp::Fmul { .. }
+                | LpirOp::ItofS { .. }
+                | LpirOp::ItofU { .. }
         )
     })
 }
@@ -62,7 +62,7 @@ pub(crate) fn wasm_function_signature(
 
 /// Encode `f` into a WASM function body (locals + op stream).
 pub(crate) fn encode_ir_function(
-    ir: &IrModule,
+    ir: &LpirModule,
     f: &IrFunction,
     ctx: &EmitCtx<'_>,
     mut func_ctx: FuncEmitCtx<'_>,
@@ -139,7 +139,7 @@ fn emit_function_ops(
     mut sink: InstructionSink<'_>,
     ctrl: &mut Vec<CtrlEntry>,
     fctx: &mut FuncEmitCtx<'_>,
-    ir: &IrModule,
+    ir: &LpirModule,
     f: &IrFunction,
     wasm_open: &mut WasmOpenDepth,
 ) -> Result<(), String> {
@@ -169,7 +169,7 @@ fn emit_function_ops(
         let last_is_return = f
             .body
             .last()
-            .is_some_and(|o| matches!(o, Op::Return { .. }));
+            .is_some_and(|o| matches!(o, LpirOp::Return { .. }));
         if !last_is_return {
             memory::emit_shadow_epilogue(&mut sink, sp, fctx.frame_size);
         }
@@ -177,7 +177,7 @@ fn emit_function_ops(
     // Multi-result functions whose body ends with `end_if` after both branches `return` have no
     // fallthrough values; the implicit function `end` still type-checks the merge. Mark the tail
     // unreachable so validation matches void-only `if`/`else`/`end` behavior.
-    if !f.return_types.is_empty() && f.body.last().is_some_and(|o| matches!(o, Op::End)) {
+    if !f.return_types.is_empty() && f.body.last().is_some_and(|o| matches!(o, LpirOp::End)) {
         sink.unreachable();
     }
     sink.end();

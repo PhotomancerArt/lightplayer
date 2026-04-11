@@ -3,13 +3,13 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpir::{IrFunction, VReg};
+use lpir::IrFunction;
 
 use super::gpr::{self, PReg, RET_REGS, SCRATCH};
 use super::inst::PInst;
 use crate::abi::FuncAbi;
 use crate::abi::classify::ArgLoc;
-use crate::vinst::{IcmpCond, VInst};
+use crate::vinst::{IcmpCond, VInst, VReg};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AllocError {
@@ -34,30 +34,30 @@ impl fmt::Display for AllocError {
     }
 }
 
-fn max_vreg_index(vinsts: &[VInst], func: &IrFunction) -> usize {
+fn max_vreg_index(vinsts: &[VInst], func: &IrFunction, pool: &[VReg]) -> usize {
     let mut m = func.vreg_types.len().max(func.total_param_slots() as usize);
     for inst in vinsts {
-        for u in inst.uses() {
+        inst.for_each_use(pool, |u| {
             m = m.max(u.0 as usize + 1);
-        }
-        for d in inst.defs() {
+        });
+        inst.for_each_def(pool, |d| {
             m = m.max(d.0 as usize + 1);
-        }
+        });
     }
     m.min(256)
 }
 
-fn compute_last_use(vinsts: &[VInst], n_vreg: usize) -> Vec<usize> {
+fn compute_last_use(vinsts: &[VInst], n_vreg: usize, pool: &[VReg]) -> Vec<usize> {
     let mut last = vec![0usize; n_vreg];
     for (i, inst) in vinsts.iter().enumerate() {
-        for u in inst.uses() {
+        inst.for_each_use(pool, |u| {
             let vi = u.0 as usize;
             if vi < n_vreg {
                 last[vi] = i;
             }
-        }
+        });
         if let VInst::Ret { vals, .. } = inst {
-            for v in vals {
+            for v in vals.vregs(pool) {
                 let vi = v.0 as usize;
                 if vi < n_vreg {
                     last[vi] = i;
@@ -72,6 +72,7 @@ pub fn allocate(
     vinsts: &[VInst],
     func_abi: &FuncAbi,
     func: &IrFunction,
+    vreg_pool: &[VReg],
 ) -> Result<Vec<PInst>, AllocError> {
     if func_abi.is_sret() {
         return Err(AllocError::UnsupportedSret);
@@ -93,8 +94,8 @@ pub fn allocate(
         }
     }
 
-    let n = max_vreg_index(vinsts, func);
-    let last_use = compute_last_use(vinsts, n);
+    let n = max_vreg_index(vinsts, func, vreg_pool);
+    let last_use = compute_last_use(vinsts, n, vreg_pool);
     let mut is_param = vec![false; n];
     for i in 0..func.total_param_slots() as usize {
         if i < n {
@@ -143,12 +144,14 @@ pub fn allocate(
             continue;
         }
 
-        let uses: Vec<VReg> = inst.uses().collect();
-        let defs: Vec<VReg> = inst.defs().collect();
+        let mut uses = Vec::new();
+        inst.for_each_use(vreg_pool, |v| uses.push(v));
+        let mut defs = Vec::new();
+        inst.for_each_def(vreg_pool, |d| defs.push(d));
 
         match inst {
             VInst::Ret { vals, .. } => {
-                for (k, v) in vals.iter().enumerate() {
+                for (k, v) in vals.vregs(vreg_pool).iter().enumerate() {
                     let src = get(*v, &mut preg)?;
                     let dst_ret = RET_REGS[k];
                     if src != dst_ret {
@@ -158,10 +161,13 @@ pub fn allocate(
                 out.push(PInst::Ret);
             }
             VInst::IConst32 { dst, val, .. } => {
-                let direct_ret = matches!(
-                    vinsts.get(idx + 1),
-                    Some(VInst::Ret { vals, .. }) if vals.len() == 1 && vals[0] == *dst
-                );
+                let direct_ret = match vinsts.get(idx + 1) {
+                    Some(VInst::Ret { vals, .. }) => {
+                        let vr = vals.vregs(vreg_pool);
+                        vr.len() == 1 && vr[0] == *dst
+                    }
+                    _ => false,
+                };
                 let p = if direct_ret {
                     RET_REGS[0]
                 } else {
@@ -530,7 +536,7 @@ pub fn allocate(
             release(u, &mut preg, &mut free, idx);
         }
         if let VInst::Ret { vals, .. } = inst {
-            for v in vals {
+            for v in vals.vregs(vreg_pool) {
                 release(*v, &mut preg, &mut free, idx);
             }
         }
@@ -550,26 +556,28 @@ pub fn allocate(
 mod tests {
     use super::*;
     use crate::isa::rv32::abi::func_abi_rv32;
-    use crate::vinst::VInst;
+    use crate::vinst::{VInst, VRegSlice};
     use alloc::string::String;
+    use lpir::VReg as IrVReg;
 
     #[test]
     fn test_alloc_simple_iconst() {
+        let pool = vec![VReg(0)];
         let vinsts = vec![
             VInst::IConst32 {
                 dst: VReg(0),
                 val: 42,
-                src_op: None,
+                src_op: crate::vinst::SRC_OP_NONE,
             },
             VInst::Ret {
-                vals: vec![VReg(0)],
-                src_op: None,
+                vals: VRegSlice { start: 0, count: 1 },
+                src_op: crate::vinst::SRC_OP_NONE,
             },
         ];
         let func = IrFunction {
             name: String::from("t"),
             is_entry: true,
-            vmctx_vreg: VReg(0),
+            vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![lpir::IrType::I32],
             vreg_types: vec![lpir::IrType::I32],
@@ -583,7 +591,7 @@ mod tests {
             parameters: vec![],
         };
         let fa = func_abi_rv32(&sig, func.total_param_slots() as usize);
-        let phys = allocate(&vinsts, &fa, &func).unwrap();
+        let phys = allocate(&vinsts, &fa, &func, &pool).unwrap();
         assert!(matches!(phys[0], PInst::FrameSetup { .. }));
         assert!(matches!(phys[1], PInst::Li { dst: 10, imm: 42 }));
         assert!(matches!(phys[2], PInst::Ret));
@@ -592,22 +600,23 @@ mod tests {
 
     #[test]
     fn test_alloc_add_two_params() {
+        let pool = vec![VReg(3)];
         let vinsts = vec![
             VInst::Add32 {
                 dst: VReg(3),
                 src1: VReg(1),
                 src2: VReg(2),
-                src_op: None,
+                src_op: crate::vinst::SRC_OP_NONE,
             },
             VInst::Ret {
-                vals: vec![VReg(3)],
-                src_op: None,
+                vals: VRegSlice { start: 0, count: 1 },
+                src_op: crate::vinst::SRC_OP_NONE,
             },
         ];
         let func = IrFunction {
             name: String::from("add_two_ints"),
             is_entry: true,
-            vmctx_vreg: VReg(0),
+            vmctx_vreg: IrVReg(0),
             param_count: 2,
             return_types: vec![lpir::IrType::I32],
             vreg_types: vec![
@@ -637,7 +646,7 @@ mod tests {
             ],
         };
         let fa = func_abi_rv32(&sig, func.total_param_slots() as usize);
-        let phys = allocate(&vinsts, &fa, &func).unwrap();
+        let phys = allocate(&vinsts, &fa, &func, &pool).unwrap();
         assert!(matches!(phys[0], PInst::FrameSetup { .. }));
         assert!(matches!(phys[phys.len() - 2], PInst::Ret));
         assert!(matches!(phys[phys.len() - 1], PInst::FrameTeardown { .. }));
@@ -645,21 +654,22 @@ mod tests {
 
     #[test]
     fn test_alloc_error_on_branch() {
+        let pool = vec![VReg(0)];
         let vinsts = vec![
             VInst::Br {
                 target: 1,
-                src_op: None,
+                src_op: crate::vinst::SRC_OP_NONE,
             },
-            VInst::Label(1, None),
+            VInst::Label(1, crate::vinst::SRC_OP_NONE),
             VInst::Ret {
-                vals: vec![VReg(0)],
-                src_op: None,
+                vals: VRegSlice { start: 0, count: 1 },
+                src_op: crate::vinst::SRC_OP_NONE,
             },
         ];
         let func = IrFunction {
             name: String::from("t"),
             is_entry: true,
-            vmctx_vreg: VReg(0),
+            vmctx_vreg: IrVReg(0),
             param_count: 0,
             return_types: vec![],
             vreg_types: vec![lpir::IrType::I32],
@@ -673,7 +683,7 @@ mod tests {
             parameters: vec![],
         };
         let fa = func_abi_rv32(&sig, func.total_param_slots() as usize);
-        let result = allocate(&vinsts, &fa, &func);
+        let result = allocate(&vinsts, &fa, &func, &pool);
         assert!(matches!(result, Err(AllocError::UnsupportedControlFlow)));
     }
 }

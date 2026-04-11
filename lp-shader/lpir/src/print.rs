@@ -6,11 +6,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 
-use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
-use crate::op::Op;
+use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
+use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, VReg};
 
-fn callee_needs_vmctx_operand(module: &IrModule, callee: CalleeRef) -> bool {
+fn callee_needs_vmctx_operand(module: &LpirModule, callee: CalleeRef) -> bool {
     let import_count = module.imports.len() as u32;
     if callee.0 >= import_count {
         true
@@ -19,7 +19,7 @@ fn callee_needs_vmctx_operand(module: &IrModule, callee: CalleeRef) -> bool {
     }
 }
 
-fn visible_call_arg_regs<'a>(module: &IrModule, callee: CalleeRef, args: &'a [VReg]) -> &'a [VReg] {
+fn visible_call_arg_regs<'a>(module: &LpirModule, callee: CalleeRef, args: &'a [VReg]) -> &'a [VReg] {
     if callee_needs_vmctx_operand(module, callee) && args.first().copied() == Some(VMCTX_VREG) {
         &args[1..]
     } else {
@@ -36,7 +36,7 @@ enum Block {
 }
 
 /// Print a full module in LPIR text form.
-pub fn print_module(module: &IrModule) -> String {
+pub fn print_module(module: &LpirModule) -> String {
     let mut out = String::new();
     for imp in &module.imports {
         print_import(&mut out, imp);
@@ -89,7 +89,7 @@ fn print_return_types(out: &mut String, types: &[IrType]) {
     }
 }
 
-fn print_function(out: &mut String, func: &IrFunction, module: &IrModule) {
+fn print_function(out: &mut String, func: &IrFunction, module: &LpirModule) {
     if func.is_entry {
         let _ = write!(out, "entry ");
     }
@@ -132,7 +132,7 @@ fn print_function(out: &mut String, func: &IrFunction, module: &IrModule) {
 
 struct PrintState<'a> {
     func: &'a IrFunction,
-    module: &'a IrModule,
+    module: &'a LpirModule,
     defined: Vec<bool>,
 }
 
@@ -162,12 +162,12 @@ fn print_op_at(
     out: &mut String,
     st: &mut PrintState<'_>,
     stack: &mut Vec<Block>,
-    body: &[Op],
+    body: &[LpirOp],
     pc: &mut usize,
     depth: &mut usize,
 ) {
     if let Some(Block::Loop { start_pc }) = stack.last() {
-        if let Op::LoopStart {
+        if let LpirOp::LoopStart {
             continuing_offset, ..
         } = &body[*start_pc]
         {
@@ -179,7 +179,7 @@ fn print_op_at(
     }
     let ind = indent_str(*depth);
     match &body[*pc] {
-        Op::IfStart { cond, .. } => {
+        LpirOp::IfStart { cond, .. } => {
             let _ = write!(out, "{ind}if ");
             fmt_vreg(st, out, *cond);
             let _ = writeln!(out, " {{");
@@ -187,7 +187,7 @@ fn print_op_at(
             *depth += 1;
             *pc += 1;
         }
-        Op::Else => {
+        LpirOp::Else => {
             if matches!(stack.last(), Some(Block::If)) {
                 stack.pop();
                 stack.push(Block::Else);
@@ -195,13 +195,13 @@ fn print_op_at(
             let _ = writeln!(out, "{}}} else {{", indent_str(*depth - 1));
             *pc += 1;
         }
-        Op::LoopStart { .. } => {
+        LpirOp::LoopStart { .. } => {
             let _ = writeln!(out, "{ind}loop {{");
             stack.push(Block::Loop { start_pc: *pc });
             *depth += 1;
             *pc += 1;
         }
-        Op::SwitchStart { selector, .. } => {
+        LpirOp::SwitchStart { selector, .. } => {
             let _ = write!(out, "{ind}switch ");
             fmt_vreg(st, out, *selector);
             let _ = writeln!(out, " {{");
@@ -209,7 +209,7 @@ fn print_op_at(
             *depth += 1;
             *pc += 1;
         }
-        Op::CaseStart { value, .. } => {
+        LpirOp::CaseStart { value, .. } => {
             if matches!(stack.last(), Some(Block::Case)) {
                 stack.pop();
                 let _ = writeln!(out, "{}}}", indent_str(*depth - 1));
@@ -220,7 +220,7 @@ fn print_op_at(
             *depth += 1;
             *pc += 1;
         }
-        Op::DefaultStart { .. } => {
+        LpirOp::DefaultStart { .. } => {
             if matches!(stack.last(), Some(Block::Case)) {
                 stack.pop();
                 let _ = writeln!(out, "{}}}", indent_str(*depth - 1));
@@ -231,27 +231,27 @@ fn print_op_at(
             *depth += 1;
             *pc += 1;
         }
-        Op::End => {
+        LpirOp::End => {
             let _ = writeln!(out, "{}}}", indent_str(*depth - 1));
             *depth -= 1;
             let _ = stack.pop();
             *pc += 1;
         }
-        Op::Break => {
+        LpirOp::Break => {
             let _ = writeln!(out, "{ind}break");
             *pc += 1;
         }
-        Op::Continue => {
+        LpirOp::Continue => {
             let _ = writeln!(out, "{ind}continue");
             *pc += 1;
         }
-        Op::BrIfNot { cond } => {
+        LpirOp::BrIfNot { cond } => {
             let _ = write!(out, "{ind}br_if_not ");
             fmt_vreg(st, out, *cond);
             let _ = writeln!(out);
             *pc += 1;
         }
-        Op::Return { values } => {
+        LpirOp::Return { values } => {
             let _ = write!(out, "{ind}return");
             if !values.is_empty() {
                 let slice = st.func.pool_slice(*values);
@@ -263,7 +263,7 @@ fn print_op_at(
             let _ = writeln!(out);
             *pc += 1;
         }
-        Op::Call {
+        LpirOp::Call {
             callee,
             args,
             results,
@@ -296,7 +296,7 @@ fn print_op_at(
             let _ = writeln!(out, ")");
             *pc += 1;
         }
-        Op::Store {
+        LpirOp::Store {
             base,
             offset,
             value,
@@ -308,7 +308,7 @@ fn print_op_at(
             let _ = writeln!(out);
             *pc += 1;
         }
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr,
             src_addr,
             size,
@@ -327,7 +327,7 @@ fn print_op_at(
     }
 }
 
-fn callee_name(module: &IrModule, callee: crate::types::CalleeRef) -> (&str, &str) {
+fn callee_name(module: &LpirModule, callee: crate::types::CalleeRef) -> (&str, &str) {
     if let Some(i) = module.callee_as_import(callee) {
         let imp = &module.imports[i];
         (imp.module_name.as_str(), imp.func_name.as_str())
@@ -339,9 +339,9 @@ fn callee_name(module: &IrModule, callee: crate::types::CalleeRef) -> (&str, &st
     }
 }
 
-fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op) {
+fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &LpirOp) {
     match op {
-        Op::Fadd { dst, lhs, rhs } => {
+        LpirOp::Fadd { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = fadd ");
@@ -350,7 +350,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Fsub { dst, lhs, rhs } => {
+        LpirOp::Fsub { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = fsub ");
@@ -359,7 +359,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Fmul { dst, lhs, rhs } => {
+        LpirOp::Fmul { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = fmul ");
@@ -368,7 +368,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Fdiv { dst, lhs, rhs } => {
+        LpirOp::Fdiv { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = fdiv ");
@@ -377,16 +377,16 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Fneg { dst, src } => unary(out, st, ind, "fneg", *dst, *src),
-        Op::Fabs { dst, src } => unary(out, st, ind, "fabs", *dst, *src),
-        Op::Fsqrt { dst, src } => unary(out, st, ind, "fsqrt", *dst, *src),
-        Op::Fmin { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmin", *dst, *lhs, *rhs),
-        Op::Fmax { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmax", *dst, *lhs, *rhs),
-        Op::Ffloor { dst, src } => unary(out, st, ind, "ffloor", *dst, *src),
-        Op::Fceil { dst, src } => unary(out, st, ind, "fceil", *dst, *src),
-        Op::Ftrunc { dst, src } => unary(out, st, ind, "ftrunc", *dst, *src),
-        Op::Fnearest { dst, src } => unary(out, st, ind, "fnearest", *dst, *src),
-        Op::Iadd { dst, lhs, rhs } => {
+        LpirOp::Fneg { dst, src } => unary(out, st, ind, "fneg", *dst, *src),
+        LpirOp::Fabs { dst, src } => unary(out, st, ind, "fabs", *dst, *src),
+        LpirOp::Fsqrt { dst, src } => unary(out, st, ind, "fsqrt", *dst, *src),
+        LpirOp::Fmin { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmin", *dst, *lhs, *rhs),
+        LpirOp::Fmax { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fmax", *dst, *lhs, *rhs),
+        LpirOp::Ffloor { dst, src } => unary(out, st, ind, "ffloor", *dst, *src),
+        LpirOp::Fceil { dst, src } => unary(out, st, ind, "fceil", *dst, *src),
+        LpirOp::Ftrunc { dst, src } => unary(out, st, ind, "ftrunc", *dst, *src),
+        LpirOp::Fnearest { dst, src } => unary(out, st, ind, "fnearest", *dst, *src),
+        LpirOp::Iadd { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = iadd ");
@@ -395,7 +395,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Isub { dst, lhs, rhs } => {
+        LpirOp::Isub { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = isub ");
@@ -404,7 +404,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Imul { dst, lhs, rhs } => {
+        LpirOp::Imul { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = imul ");
@@ -413,7 +413,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::IdivS { dst, lhs, rhs } => {
+        LpirOp::IdivS { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = idiv_s ");
@@ -422,7 +422,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::IdivU { dst, lhs, rhs } => {
+        LpirOp::IdivU { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = idiv_u ");
@@ -431,7 +431,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::IremS { dst, lhs, rhs } => {
+        LpirOp::IremS { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = irem_s ");
@@ -440,7 +440,7 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::IremU { dst, lhs, rhs } => {
+        LpirOp::IremU { dst, lhs, rhs } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = irem_u ");
@@ -449,65 +449,65 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *rhs);
             let _ = writeln!(out);
         }
-        Op::Ineg { dst, src } => {
+        LpirOp::Ineg { dst, src } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = ineg ");
             fmt_vreg(st, out, *src);
             let _ = writeln!(out);
         }
-        Op::Feq { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "feq", *dst, *lhs, *rhs),
-        Op::Fne { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fne", *dst, *lhs, *rhs),
-        Op::Flt { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "flt", *dst, *lhs, *rhs),
-        Op::Fle { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fle", *dst, *lhs, *rhs),
-        Op::Fgt { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fgt", *dst, *lhs, *rhs),
-        Op::Fge { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fge", *dst, *lhs, *rhs),
-        Op::Ieq { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ieq", *dst, *lhs, *rhs),
-        Op::Ine { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ine", *dst, *lhs, *rhs),
-        Op::IltS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ilt_s", *dst, *lhs, *rhs),
-        Op::IleS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ile_s", *dst, *lhs, *rhs),
-        Op::IgtS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "igt_s", *dst, *lhs, *rhs),
-        Op::IgeS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ige_s", *dst, *lhs, *rhs),
-        Op::IltU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ilt_u", *dst, *lhs, *rhs),
-        Op::IleU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ile_u", *dst, *lhs, *rhs),
-        Op::IgtU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "igt_u", *dst, *lhs, *rhs),
-        Op::IgeU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ige_u", *dst, *lhs, *rhs),
-        Op::Iand { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "iand", *dst, *lhs, *rhs),
-        Op::Ior { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ior", *dst, *lhs, *rhs),
-        Op::Ixor { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ixor", *dst, *lhs, *rhs),
-        Op::Ibnot { dst, src } => {
+        LpirOp::Feq { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "feq", *dst, *lhs, *rhs),
+        LpirOp::Fne { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fne", *dst, *lhs, *rhs),
+        LpirOp::Flt { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "flt", *dst, *lhs, *rhs),
+        LpirOp::Fle { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fle", *dst, *lhs, *rhs),
+        LpirOp::Fgt { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fgt", *dst, *lhs, *rhs),
+        LpirOp::Fge { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "fge", *dst, *lhs, *rhs),
+        LpirOp::Ieq { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ieq", *dst, *lhs, *rhs),
+        LpirOp::Ine { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ine", *dst, *lhs, *rhs),
+        LpirOp::IltS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ilt_s", *dst, *lhs, *rhs),
+        LpirOp::IleS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ile_s", *dst, *lhs, *rhs),
+        LpirOp::IgtS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "igt_s", *dst, *lhs, *rhs),
+        LpirOp::IgeS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ige_s", *dst, *lhs, *rhs),
+        LpirOp::IltU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ilt_u", *dst, *lhs, *rhs),
+        LpirOp::IleU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ile_u", *dst, *lhs, *rhs),
+        LpirOp::IgtU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "igt_u", *dst, *lhs, *rhs),
+        LpirOp::IgeU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ige_u", *dst, *lhs, *rhs),
+        LpirOp::Iand { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "iand", *dst, *lhs, *rhs),
+        LpirOp::Ior { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ior", *dst, *lhs, *rhs),
+        LpirOp::Ixor { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ixor", *dst, *lhs, *rhs),
+        LpirOp::Ibnot { dst, src } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = ibnot ");
             fmt_vreg(st, out, *src);
             let _ = writeln!(out);
         }
-        Op::Ishl { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishl", *dst, *lhs, *rhs),
-        Op::IshrS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishr_s", *dst, *lhs, *rhs),
-        Op::IshrU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishr_u", *dst, *lhs, *rhs),
-        Op::FconstF32 { dst, value } => {
+        LpirOp::Ishl { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishl", *dst, *lhs, *rhs),
+        LpirOp::IshrS { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishr_s", *dst, *lhs, *rhs),
+        LpirOp::IshrU { dst, lhs, rhs } => bin_int_cmp(out, st, ind, "ishr_u", *dst, *lhs, *rhs),
+        LpirOp::FconstF32 { dst, value } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = writeln!(out, " = fconst.f32 {}", fmt_f32(*value));
         }
-        Op::IconstI32 { dst, value } => {
+        LpirOp::IconstI32 { dst, value } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = writeln!(out, " = iconst.i32 {value}");
         }
-        Op::IaddImm { dst, src, imm } => imm_op(out, st, ind, "iadd_imm", *dst, *src, *imm),
-        Op::IsubImm { dst, src, imm } => imm_op(out, st, ind, "isub_imm", *dst, *src, *imm),
-        Op::ImulImm { dst, src, imm } => imm_op(out, st, ind, "imul_imm", *dst, *src, *imm),
-        Op::IshlImm { dst, src, imm } => imm_op(out, st, ind, "ishl_imm", *dst, *src, *imm),
-        Op::IshrSImm { dst, src, imm } => imm_op(out, st, ind, "ishr_s_imm", *dst, *src, *imm),
-        Op::IshrUImm { dst, src, imm } => imm_op(out, st, ind, "ishr_u_imm", *dst, *src, *imm),
-        Op::IeqImm { dst, src, imm } => imm_op(out, st, ind, "ieq_imm", *dst, *src, *imm),
-        Op::FtoiSatS { dst, src } => unary(out, st, ind, "ftoi_sat_s", *dst, *src),
-        Op::FtoiSatU { dst, src } => unary(out, st, ind, "ftoi_sat_u", *dst, *src),
-        Op::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
-        Op::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
-        Op::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
-        Op::Select {
+        LpirOp::IaddImm { dst, src, imm } => imm_op(out, st, ind, "iadd_imm", *dst, *src, *imm),
+        LpirOp::IsubImm { dst, src, imm } => imm_op(out, st, ind, "isub_imm", *dst, *src, *imm),
+        LpirOp::ImulImm { dst, src, imm } => imm_op(out, st, ind, "imul_imm", *dst, *src, *imm),
+        LpirOp::IshlImm { dst, src, imm } => imm_op(out, st, ind, "ishl_imm", *dst, *src, *imm),
+        LpirOp::IshrSImm { dst, src, imm } => imm_op(out, st, ind, "ishr_s_imm", *dst, *src, *imm),
+        LpirOp::IshrUImm { dst, src, imm } => imm_op(out, st, ind, "ishr_u_imm", *dst, *src, *imm),
+        LpirOp::IeqImm { dst, src, imm } => imm_op(out, st, ind, "ieq_imm", *dst, *src, *imm),
+        LpirOp::FtoiSatS { dst, src } => unary(out, st, ind, "ftoi_sat_s", *dst, *src),
+        LpirOp::FtoiSatU { dst, src } => unary(out, st, ind, "ftoi_sat_u", *dst, *src),
+        LpirOp::ItofS { dst, src } => unary(out, st, ind, "itof_s", *dst, *src),
+        LpirOp::ItofU { dst, src } => unary(out, st, ind, "itof_u", *dst, *src),
+        LpirOp::FfromI32Bits { dst, src } => unary(out, st, ind, "ffrom_i32_bits", *dst, *src),
+        LpirOp::Select {
             dst,
             cond,
             if_true,
@@ -523,19 +523,19 @@ fn print_simple_op(out: &mut String, st: &mut PrintState<'_>, ind: &str, op: &Op
             fmt_vreg(st, out, *if_false);
             let _ = writeln!(out);
         }
-        Op::Copy { dst, src } => {
+        LpirOp::Copy { dst, src } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = copy ");
             fmt_vreg(st, out, *src);
             let _ = writeln!(out);
         }
-        Op::SlotAddr { dst, slot } => {
+        LpirOp::SlotAddr { dst, slot } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = writeln!(out, " = slot_addr {slot}");
         }
-        Op::Load { dst, base, offset } => {
+        LpirOp::Load { dst, base, offset } => {
             let _ = write!(out, "{ind}");
             fmt_vreg(st, out, *dst);
             let _ = write!(out, " = load ");

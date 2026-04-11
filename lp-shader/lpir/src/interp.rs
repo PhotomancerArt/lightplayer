@@ -5,8 +5,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::module::{IrFunction, IrModule};
-use crate::op::Op;
+use crate::lpir_module::{IrFunction, LpirModule};
+use crate::lpir_op::LpirOp;
 use crate::types::IrType;
 
 /// Concrete runtime value.
@@ -68,7 +68,7 @@ const DEFAULT_MAX_DEPTH: usize = 256;
 
 /// Run `func_name` on `module` with `args`.
 pub fn interpret(
-    module: &IrModule,
+    module: &LpirModule,
     func_name: &str,
     args: &[Value],
     imports: &mut dyn ImportHandler,
@@ -77,7 +77,7 @@ pub fn interpret(
 }
 
 pub fn interpret_with_depth(
-    module: &IrModule,
+    module: &LpirModule,
     func_name: &str,
     args: &[Value],
     imports: &mut dyn ImportHandler,
@@ -94,7 +94,7 @@ pub fn interpret_with_depth(
 }
 
 fn exec_func(
-    module: &IrModule,
+    module: &LpirModule,
     func: &IrFunction,
     args: &[Value],
     imports: &mut dyn ImportHandler,
@@ -138,7 +138,7 @@ fn exec_func(
             }
         }
         match &func.body[pc] {
-            Op::IfStart {
+            LpirOp::IfStart {
                 cond,
                 else_offset,
                 end_offset,
@@ -153,7 +153,7 @@ fn exec_func(
                     pc = *else_offset as usize;
                 }
             }
-            Op::Else => {
+            LpirOp::Else => {
                 // False-branch entry jumps here from `IfStart` without pushing `Ctrl::If`.
                 // True-branch fall-through pushes `Ctrl::If` first; `Else` then skips the false arm.
                 if matches!(ctrl.last(), Some(Ctrl::If { .. })) {
@@ -166,7 +166,7 @@ fn exec_func(
                     pc += 1;
                 }
             }
-            Op::LoopStart {
+            LpirOp::LoopStart {
                 continuing_offset,
                 end_offset,
             } => {
@@ -177,7 +177,7 @@ fn exec_func(
                 });
                 pc += 1;
             }
-            Op::End => match ctrl.last() {
+            LpirOp::End => match ctrl.last() {
                 Some(Ctrl::Loop { exit, head, .. }) if *exit == pc + 1 => {
                     pc = *head + 1;
                 }
@@ -189,7 +189,7 @@ fn exec_func(
                     pc += 1;
                 }
             },
-            Op::Break => {
+            LpirOp::Break => {
                 let mut found = false;
                 while let Some(c) = ctrl.pop() {
                     if let Ctrl::Loop { exit, .. } = c {
@@ -202,7 +202,7 @@ fn exec_func(
                     return Err(InterpError::Internal("break outside loop".into()));
                 }
             }
-            Op::Continue => {
+            LpirOp::Continue => {
                 let mut target = None;
                 while let Some(c) = ctrl.last() {
                     if let Ctrl::Loop { continuing, .. } = c {
@@ -213,7 +213,7 @@ fn exec_func(
                 }
                 pc = target.ok_or_else(|| InterpError::Internal("continue".into()))?;
             }
-            Op::BrIfNot { cond } => {
+            LpirOp::BrIfNot { cond } => {
                 let c = get_reg(&regs, *cond)?;
                 if !cond_truthy(c)? {
                     let mut found = false;
@@ -231,7 +231,7 @@ fn exec_func(
                     pc += 1;
                 }
             }
-            Op::SwitchStart {
+            LpirOp::SwitchStart {
                 selector,
                 end_offset,
             } => {
@@ -244,10 +244,10 @@ fn exec_func(
                 }
                 pc = arm_pc;
             }
-            Op::CaseStart { .. } | Op::DefaultStart { .. } => {
+            LpirOp::CaseStart { .. } | LpirOp::DefaultStart { .. } => {
                 pc += 1;
             }
-            Op::Return { values } => {
+            LpirOp::Return { values } => {
                 let slice = func.pool_slice(*values);
                 let mut out = Vec::with_capacity(slice.len());
                 for v in slice {
@@ -255,7 +255,7 @@ fn exec_func(
                 }
                 return Ok(out);
             }
-            Op::Call {
+            LpirOp::Call {
                 callee,
                 args: ar,
                 results: rr,
@@ -348,17 +348,17 @@ fn switch_pick_arm(
     let mut default_arm: Option<(usize, u32)> = None;
     while pc < func.body.len() {
         match &func.body[pc] {
-            Op::CaseStart { value, end_offset } => {
+            LpirOp::CaseStart { value, end_offset } => {
                 if *value == sel {
                     return Some((pc + 1, Some(*end_offset as usize)));
                 }
                 pc = *end_offset as usize;
             }
-            Op::DefaultStart { end_offset } => {
+            LpirOp::DefaultStart { end_offset } => {
                 default_arm = Some((pc + 1, *end_offset));
                 pc = *end_offset as usize;
             }
-            Op::End => {
+            LpirOp::End => {
                 if let Some((start, end)) = default_arm {
                     return Some((start, Some(end as usize)));
                 }
@@ -372,7 +372,7 @@ fn switch_pick_arm(
 
 fn eval_op(
     func: &IrFunction,
-    op: &Op,
+    op: &LpirOp,
     regs: &mut [Option<Value>],
     slot_off: &[u32],
     slot_mem: &mut [u8],
@@ -404,80 +404,80 @@ fn eval_op(
     }
 
     match op {
-        Op::Fadd { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, +),
-        Op::Fsub { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, -),
-        Op::Fmul { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, *),
-        Op::Fdiv { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, /),
-        Op::Fneg { dst, src } => {
+        LpirOp::Fadd { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, +),
+        LpirOp::Fsub { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, -),
+        LpirOp::Fmul { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, *),
+        LpirOp::Fdiv { dst, lhs, rhs } => bin_f!(*dst, *lhs, *rhs, /),
+        LpirOp::Fneg { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(-a))?;
         }
-        Op::Fabs { dst, src } => {
+        LpirOp::Fabs { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(a.abs()))?;
         }
-        Op::Fsqrt { dst, src } => {
+        LpirOp::Fsqrt { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(libm::sqrtf(a)))?;
         }
-        Op::Fmin { dst, lhs, rhs } => {
+        LpirOp::Fmin { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             set_reg(regs, *dst, Value::F32(a.min(b)))?;
         }
-        Op::Fmax { dst, lhs, rhs } => {
+        LpirOp::Fmax { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             set_reg(regs, *dst, Value::F32(a.max(b)))?;
         }
-        Op::Ffloor { dst, src } => {
+        LpirOp::Ffloor { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(libm::floorf(a)))?;
         }
-        Op::Fceil { dst, src } => {
+        LpirOp::Fceil { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(libm::ceilf(a)))?;
         }
-        Op::Ftrunc { dst, src } => {
+        LpirOp::Ftrunc { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(libm::truncf(a)))?;
         }
-        Op::Fnearest { dst, src } => {
+        LpirOp::Fnearest { dst, src } => {
             let a = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(round_even(a)))?;
         }
-        Op::Iadd { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, add),
-        Op::Isub { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, sub),
-        Op::Imul { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, mul),
-        Op::IdivS { dst, lhs, rhs } => {
+        LpirOp::Iadd { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, add),
+        LpirOp::Isub { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, sub),
+        LpirOp::Imul { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, mul),
+        LpirOp::IdivS { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
             let v = if b == 0 { 0 } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IdivU { dst, lhs, rhs } => {
+        LpirOp::IdivU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             let v = if b == 0 { 0 } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
-        Op::IremS { dst, lhs, rhs } => {
+        LpirOp::IremS { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
             let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IremU { dst, lhs, rhs } => {
+        LpirOp::IremU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
-        Op::Ineg { dst, src } => {
+        LpirOp::Ineg { dst, src } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(a.wrapping_neg()))?;
         }
-        Op::Feq { dst, lhs, rhs } => {
+        LpirOp::Feq { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if a.is_nan() || b.is_nan() {
@@ -489,7 +489,7 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Fne { dst, lhs, rhs } => {
+        LpirOp::Fne { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if a != b || a.is_nan() || b.is_nan() {
@@ -499,7 +499,7 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Flt { dst, lhs, rhs } => {
+        LpirOp::Flt { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if !a.is_nan() && !b.is_nan() && a < b {
@@ -509,7 +509,7 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Fle { dst, lhs, rhs } => {
+        LpirOp::Fle { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if !a.is_nan() && !b.is_nan() && a <= b {
@@ -519,7 +519,7 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Fgt { dst, lhs, rhs } => {
+        LpirOp::Fgt { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if !a.is_nan() && !b.is_nan() && a > b {
@@ -529,7 +529,7 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Fge { dst, lhs, rhs } => {
+        LpirOp::Fge { dst, lhs, rhs } => {
             let a = val_f32(get_reg(regs, *lhs)?)?;
             let b = val_f32(get_reg(regs, *rhs)?)?;
             let v = if !a.is_nan() && !b.is_nan() && a >= b {
@@ -539,135 +539,135 @@ fn eval_op(
             };
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ieq { dst, lhs, rhs } => {
+        LpirOp::Ieq { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? == val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ine { dst, lhs, rhs } => {
+        LpirOp::Ine { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? != val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IltS { dst, lhs, rhs } => {
+        LpirOp::IltS { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? < val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IleS { dst, lhs, rhs } => {
+        LpirOp::IleS { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? <= val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IgtS { dst, lhs, rhs } => {
+        LpirOp::IgtS { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? > val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IgeS { dst, lhs, rhs } => {
+        LpirOp::IgeS { dst, lhs, rhs } => {
             let v = (val_i32(get_reg(regs, *lhs)?)? >= val_i32(get_reg(regs, *rhs)?)?) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::IltU { dst, lhs, rhs } => {
+        LpirOp::IltU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             set_reg(regs, *dst, Value::I32((a < b) as i32))?;
         }
-        Op::IleU { dst, lhs, rhs } => {
+        LpirOp::IleU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             set_reg(regs, *dst, Value::I32((a <= b) as i32))?;
         }
-        Op::IgtU { dst, lhs, rhs } => {
+        LpirOp::IgtU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             set_reg(regs, *dst, Value::I32((a > b) as i32))?;
         }
-        Op::IgeU { dst, lhs, rhs } => {
+        LpirOp::IgeU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
             set_reg(regs, *dst, Value::I32((a >= b) as i32))?;
         }
-        Op::Iand { dst, lhs, rhs } => {
+        LpirOp::Iand { dst, lhs, rhs } => {
             let v = val_i32(get_reg(regs, *lhs)?)? & val_i32(get_reg(regs, *rhs)?)?;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ior { dst, lhs, rhs } => {
+        LpirOp::Ior { dst, lhs, rhs } => {
             let v = val_i32(get_reg(regs, *lhs)?)? | val_i32(get_reg(regs, *rhs)?)?;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ixor { dst, lhs, rhs } => {
+        LpirOp::Ixor { dst, lhs, rhs } => {
             let v = val_i32(get_reg(regs, *lhs)?)? ^ val_i32(get_reg(regs, *rhs)?)?;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ibnot { dst, src } => {
+        LpirOp::Ibnot { dst, src } => {
             let v = !val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::Ishl { dst, lhs, rhs } => {
+        LpirOp::Ishl { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32 & 31;
             set_reg(regs, *dst, Value::I32(a.wrapping_shl(b)))?;
         }
-        Op::IshrS { dst, lhs, rhs } => {
+        LpirOp::IshrS { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32 & 31;
             set_reg(regs, *dst, Value::I32(a.wrapping_shr(b)))?;
         }
-        Op::IshrU { dst, lhs, rhs } => {
+        LpirOp::IshrU { dst, lhs, rhs } => {
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32 & 31;
             set_reg(regs, *dst, Value::I32((a >> b) as i32))?;
         }
-        Op::FconstF32 { dst, value } => set_reg(regs, *dst, Value::F32(*value))?,
-        Op::IconstI32 { dst, value } => set_reg(regs, *dst, Value::I32(*value))?,
-        Op::IaddImm { dst, src, imm } => {
+        LpirOp::FconstF32 { dst, value } => set_reg(regs, *dst, Value::F32(*value))?,
+        LpirOp::IconstI32 { dst, value } => set_reg(regs, *dst, Value::I32(*value))?,
+        LpirOp::IaddImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(a.wrapping_add(*imm)))?;
         }
-        Op::IsubImm { dst, src, imm } => {
+        LpirOp::IsubImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(a.wrapping_sub(*imm)))?;
         }
-        Op::ImulImm { dst, src, imm } => {
+        LpirOp::ImulImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(a.wrapping_mul(*imm)))?;
         }
-        Op::IshlImm { dst, src, imm } => {
+        LpirOp::IshlImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             let b = (*imm as u32) & 31;
             set_reg(regs, *dst, Value::I32(a.wrapping_shl(b)))?;
         }
-        Op::IshrSImm { dst, src, imm } => {
+        LpirOp::IshrSImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)?;
             let b = (*imm as u32) & 31;
             set_reg(regs, *dst, Value::I32(a.wrapping_shr(b)))?;
         }
-        Op::IshrUImm { dst, src, imm } => {
+        LpirOp::IshrUImm { dst, src, imm } => {
             let a = val_i32(get_reg(regs, *src)?)? as u32;
             let b = (*imm as u32) & 31;
             set_reg(regs, *dst, Value::I32((a >> b) as i32))?;
         }
-        Op::IeqImm { dst, src, imm } => {
+        LpirOp::IeqImm { dst, src, imm } => {
             let v = (val_i32(get_reg(regs, *src)?)? == *imm) as i32;
             set_reg(regs, *dst, Value::I32(v))?;
         }
-        Op::FtoiSatS { dst, src } => {
+        LpirOp::FtoiSatS { dst, src } => {
             let f = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(ftoi_sat_s(f)))?;
         }
-        Op::FtoiSatU { dst, src } => {
+        LpirOp::FtoiSatU { dst, src } => {
             let f = val_f32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::I32(ftoi_sat_u(f)))?;
         }
-        Op::ItofS { dst, src } => {
+        LpirOp::ItofS { dst, src } => {
             let v = val_i32(get_reg(regs, *src)?)? as f32;
             set_reg(regs, *dst, Value::F32(v))?;
         }
-        Op::ItofU { dst, src } => {
+        LpirOp::ItofU { dst, src } => {
             let v = val_i32(get_reg(regs, *src)?)? as u32 as f32;
             set_reg(regs, *dst, Value::F32(v))?;
         }
-        Op::FfromI32Bits { dst, src } => {
+        LpirOp::FfromI32Bits { dst, src } => {
             let v = val_i32(get_reg(regs, *src)?)?;
             set_reg(regs, *dst, Value::F32(f32::from_bits(v as u32)))?;
         }
-        Op::Select {
+        LpirOp::Select {
             dst,
             cond,
             if_true,
@@ -680,18 +680,18 @@ fn eval_op(
             };
             set_reg(regs, *dst, v)?;
         }
-        Op::Copy { dst, src } => {
+        LpirOp::Copy { dst, src } => {
             let v = get_reg(regs, *src)?;
             set_reg(regs, *dst, v)?;
         }
-        Op::SlotAddr { dst, slot } => {
+        LpirOp::SlotAddr { dst, slot } => {
             let off = slot_off
                 .get(slot.0 as usize)
                 .copied()
                 .ok_or_else(|| InterpError::Internal("slot".into()))?;
             set_reg(regs, *dst, Value::I32(off as i32))?;
         }
-        Op::Load { dst, base, offset } => {
+        LpirOp::Load { dst, base, offset } => {
             let addr = val_i32(get_reg(regs, *base)?)? as usize;
             let addr = addr + *offset as usize;
             let ty = func.vreg_types[dst.0 as usize];
@@ -706,7 +706,7 @@ fn eval_op(
                 }
             }
         }
-        Op::Store {
+        LpirOp::Store {
             base,
             offset,
             value,
@@ -717,7 +717,7 @@ fn eval_op(
                 Value::I32(i) => write_u32(slot_mem, addr, i as u32)?,
             }
         }
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr,
             src_addr,
             size,

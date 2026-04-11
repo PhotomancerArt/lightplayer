@@ -13,7 +13,7 @@ use cranelift_codegen::ir::{Signature, types};
 use cranelift_codegen::isa::CallConv;
 use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
-use lpir::module::{ImportDecl, IrModule};
+use lpir::lpir_module::{ImportDecl, LpirModule};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
@@ -98,7 +98,7 @@ pub(crate) struct LpirBuiltinFuncIds {
 
 pub(crate) fn declare_module_imports(
     module: &mut impl Module,
-    ir: &IrModule,
+    ir: &LpirModule,
     pointer_type: types::Type,
 ) -> Result<Vec<FuncId>, CompileError> {
     let call_conv = module.isa().default_call_conv();

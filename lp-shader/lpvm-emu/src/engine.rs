@@ -1,6 +1,6 @@
 //! [`EmuEngine`]: compile to linked RV32 + shared [`EmuSharedArena`].
 
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 use lpvm_cranelift::CompileOptions;
@@ -33,7 +33,7 @@ impl LpvmEngine for EmuEngine {
     type Module = EmuModule;
     type Error = CompilerError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let object = object_bytes_from_ir(ir, &self.options)?;
         let load = alloc::sync::Arc::new(link_object_with_builtins(&object)?);
         Ok(EmuModule {

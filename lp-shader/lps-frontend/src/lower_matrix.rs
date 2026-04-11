@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use smallvec::SmallVec;
 
 use crate::lower_ctx::{LowerCtx, VRegVec};
@@ -27,7 +27,7 @@ pub(crate) fn emit_dot_product(
     }
     let mut sum = {
         let d = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmul {
+        ctx.fb.push(LpirOp::Fmul {
             dst: d,
             lhs: a[0],
             rhs: b[0],
@@ -36,13 +36,13 @@ pub(crate) fn emit_dot_product(
     };
     for i in 1..a.len() {
         let prod = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fmul {
+        ctx.fb.push(LpirOp::Fmul {
             dst: prod,
             lhs: a[i],
             rhs: b[i],
         });
         let next = ctx.fb.alloc_vreg(IrType::F32);
-        ctx.fb.push(Op::Fadd {
+        ctx.fb.push(LpirOp::Fadd {
             dst: next,
             lhs: sum,
             rhs: prod,
@@ -63,7 +63,7 @@ pub(crate) fn lower_mat_vec_mul(
     for r in 0..rows {
         let mut sum = {
             let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: d,
                 lhs: mat_elem(mat, rows, 0, r),
                 rhs: vec[0],
@@ -72,13 +72,13 @@ pub(crate) fn lower_mat_vec_mul(
         };
         for c in 1..cols {
             let prod = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fmul {
+            ctx.fb.push(LpirOp::Fmul {
                 dst: prod,
                 lhs: mat_elem(mat, rows, c, r),
                 rhs: vec[c],
             });
             let next = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fadd {
+            ctx.fb.push(LpirOp::Fadd {
                 dst: next,
                 lhs: sum,
                 rhs: prod,
@@ -347,42 +347,42 @@ fn cofactor4(
 
 fn fmul(ctx: &mut LowerCtx<'_>, lhs: VReg, rhs: VReg) -> VReg {
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul { dst: d, lhs, rhs });
+    ctx.fb.push(LpirOp::Fmul { dst: d, lhs, rhs });
     d
 }
 
 fn fadd(ctx: &mut LowerCtx<'_>, lhs: VReg, rhs: VReg) -> Result<VReg, LowerError> {
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fadd { dst: d, lhs, rhs });
+    ctx.fb.push(LpirOp::Fadd { dst: d, lhs, rhs });
     Ok(d)
 }
 
 fn fsub(ctx: &mut LowerCtx<'_>, lhs: VReg, rhs: VReg) -> Result<VReg, LowerError> {
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub { dst: d, lhs, rhs });
+    ctx.fb.push(LpirOp::Fsub { dst: d, lhs, rhs });
     Ok(d)
 }
 
 fn fneg(ctx: &mut LowerCtx<'_>, src: VReg) -> Result<VReg, LowerError> {
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fneg { dst: d, src });
+    ctx.fb.push(LpirOp::Fneg { dst: d, src });
     Ok(d)
 }
 
 fn fmul_imm(ctx: &mut LowerCtx<'_>, src: VReg, imm: f32) -> Result<VReg, LowerError> {
     let c = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FconstF32 { dst: c, value: imm });
+    ctx.fb.push(LpirOp::FconstF32 { dst: c, value: imm });
     Ok(fmul(ctx, src, c))
 }
 
 fn fdiv_one(ctx: &mut LowerCtx<'_>, denom: VReg) -> Result<VReg, LowerError> {
     let one = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FconstF32 {
+    ctx.fb.push(LpirOp::FconstF32 {
         dst: one,
         value: 1.0,
     });
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
+    ctx.fb.push(LpirOp::Fdiv {
         dst: d,
         lhs: one,
         rhs: denom,

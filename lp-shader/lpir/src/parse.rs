@@ -1,4 +1,4 @@
-//! Text format parser (`&str` → [`crate::module::IrModule`]).
+//! Text format parser (`&str` → [`crate::lpir_module::LpirModule`]).
 //!
 //! Hand-rolled scanner (balanced braces, line-oriented body). The stage-II plan
 //! mentioned `nom` + `nom_locate`; this implementation keeps the dependency
@@ -10,8 +10,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::builder::{FunctionBuilder, ModuleBuilder};
-use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
-use crate::op::Op;
+use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
+use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, SlotId, VReg};
 
 /// Parse error (line/column best-effort).
@@ -39,7 +39,7 @@ fn err(line: u32, column: usize, msg: impl Into<String>) -> ParseError {
 }
 
 /// Parse a full LPIR module.
-pub fn parse_module(input: &str) -> Result<IrModule, ParseError> {
+pub fn parse_module(input: &str) -> Result<LpirModule, ParseError> {
     let mut mb = ModuleBuilder::new();
     let mut names: Vec<(String, CalleeRef)> = Vec::new();
     let mut s = input;
@@ -465,16 +465,16 @@ fn parse_stmt_line(
     peek_next_line: Option<&str>,
 ) -> Result<(), ParseError> {
     if line == "break" {
-        fb.push(Op::Break);
+        fb.push(LpirOp::Break);
         return Ok(());
     }
     if line == "continue" {
-        fb.push(Op::Continue);
+        fb.push(LpirOp::Continue);
         return Ok(());
     }
     if line.starts_with("br_if_not ") {
         let v = parse_vreg_token(line.strip_prefix("br_if_not ").unwrap().trim())?;
-        fb.push(Op::BrIfNot { cond: v });
+        fb.push(LpirOp::BrIfNot { cond: v });
         return Ok(());
     }
     if line.starts_with("if ") {
@@ -587,7 +587,7 @@ fn parse_store(fb: &mut FunctionBuilder, line: &str) -> Result<(), ParseError> {
     let base = parse_vreg_token(parts[0])?;
     let offset: u32 = parts[1].parse().map_err(|_| err(1, 1, "offset"))?;
     let value = parse_vreg_token(parts[2])?;
-    fb.push(Op::Store {
+    fb.push(LpirOp::Store {
         base,
         offset,
         value,
@@ -604,7 +604,7 @@ fn parse_memcpy(fb: &mut FunctionBuilder, line: &str) -> Result<(), ParseError> 
     let dst = parse_vreg_token(parts[0])?;
     let src = parse_vreg_token(parts[1])?;
     let size: u32 = parts[2].parse().map_err(|_| err(1, 1, "size"))?;
-    fb.push(Op::Memcpy {
+    fb.push(LpirOp::Memcpy {
         dst_addr: dst,
         src_addr: src,
         size,
@@ -719,283 +719,283 @@ fn parse_single_vreg_def(s: &str) -> Result<(VReg, Option<IrType>), ParseError> 
     }
 }
 
-fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<Op, ParseError> {
+fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<LpirOp, ParseError> {
     let parts: Vec<&str> = rhs.split_whitespace().collect();
     if parts.is_empty() {
         return Err(err(1, 1, "empty rhs"));
     }
     match parts[0] {
-        "fadd" => Ok(Op::Fadd {
+        "fadd" => Ok(LpirOp::Fadd {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fsub" => Ok(Op::Fsub {
+        "fsub" => Ok(LpirOp::Fsub {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fmul" => Ok(Op::Fmul {
+        "fmul" => Ok(LpirOp::Fmul {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fdiv" => Ok(Op::Fdiv {
+        "fdiv" => Ok(LpirOp::Fdiv {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fneg" => Ok(Op::Fneg {
+        "fneg" => Ok(LpirOp::Fneg {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "fabs" => Ok(Op::Fabs {
+        "fabs" => Ok(LpirOp::Fabs {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "fsqrt" => Ok(Op::Fsqrt {
+        "fsqrt" => Ok(LpirOp::Fsqrt {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "fmin" => Ok(Op::Fmin {
+        "fmin" => Ok(LpirOp::Fmin {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fmax" => Ok(Op::Fmax {
+        "fmax" => Ok(LpirOp::Fmax {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ffloor" => Ok(Op::Ffloor {
+        "ffloor" => Ok(LpirOp::Ffloor {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "fceil" => Ok(Op::Fceil {
+        "fceil" => Ok(LpirOp::Fceil {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "ftrunc" => Ok(Op::Ftrunc {
+        "ftrunc" => Ok(LpirOp::Ftrunc {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "fnearest" => Ok(Op::Fnearest {
+        "fnearest" => Ok(LpirOp::Fnearest {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "iadd" => Ok(Op::Iadd {
+        "iadd" => Ok(LpirOp::Iadd {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "isub" => Ok(Op::Isub {
+        "isub" => Ok(LpirOp::Isub {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "imul" => Ok(Op::Imul {
+        "imul" => Ok(LpirOp::Imul {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "idiv_s" => Ok(Op::IdivS {
+        "idiv_s" => Ok(LpirOp::IdivS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "idiv_u" => Ok(Op::IdivU {
+        "idiv_u" => Ok(LpirOp::IdivU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "irem_s" => Ok(Op::IremS {
+        "irem_s" => Ok(LpirOp::IremS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "irem_u" => Ok(Op::IremU {
+        "irem_u" => Ok(LpirOp::IremU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ineg" => Ok(Op::Ineg {
+        "ineg" => Ok(LpirOp::Ineg {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "feq" => Ok(Op::Feq {
+        "feq" => Ok(LpirOp::Feq {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fne" => Ok(Op::Fne {
+        "fne" => Ok(LpirOp::Fne {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "flt" => Ok(Op::Flt {
+        "flt" => Ok(LpirOp::Flt {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fle" => Ok(Op::Fle {
+        "fle" => Ok(LpirOp::Fle {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fgt" => Ok(Op::Fgt {
+        "fgt" => Ok(LpirOp::Fgt {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "fge" => Ok(Op::Fge {
+        "fge" => Ok(LpirOp::Fge {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ieq" => Ok(Op::Ieq {
+        "ieq" => Ok(LpirOp::Ieq {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ine" => Ok(Op::Ine {
+        "ine" => Ok(LpirOp::Ine {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ilt_s" => Ok(Op::IltS {
+        "ilt_s" => Ok(LpirOp::IltS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ile_s" => Ok(Op::IleS {
+        "ile_s" => Ok(LpirOp::IleS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "igt_s" => Ok(Op::IgtS {
+        "igt_s" => Ok(LpirOp::IgtS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ige_s" => Ok(Op::IgeS {
+        "ige_s" => Ok(LpirOp::IgeS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ilt_u" => Ok(Op::IltU {
+        "ilt_u" => Ok(LpirOp::IltU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ile_u" => Ok(Op::IleU {
+        "ile_u" => Ok(LpirOp::IleU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "igt_u" => Ok(Op::IgtU {
+        "igt_u" => Ok(LpirOp::IgtU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ige_u" => Ok(Op::IgeU {
+        "ige_u" => Ok(LpirOp::IgeU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "iand" => Ok(Op::Iand {
+        "iand" => Ok(LpirOp::Iand {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ior" => Ok(Op::Ior {
+        "ior" => Ok(LpirOp::Ior {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ixor" => Ok(Op::Ixor {
+        "ixor" => Ok(LpirOp::Ixor {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ibnot" => Ok(Op::Ibnot {
+        "ibnot" => Ok(LpirOp::Ibnot {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "ishl" => Ok(Op::Ishl {
+        "ishl" => Ok(LpirOp::Ishl {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ishr_s" => Ok(Op::IshrS {
+        "ishr_s" => Ok(LpirOp::IshrS {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
-        "ishr_u" => Ok(Op::IshrU {
+        "ishr_u" => Ok(LpirOp::IshrU {
             dst,
             lhs: parse_vreg_token(parts[1].trim_end_matches(','))?,
             rhs: parse_vreg_token(parts[2])?,
         }),
         "fconst.f32" => {
             let v = parse_f32_literal(parts[1])?;
-            Ok(Op::FconstF32 { dst, value: v })
+            Ok(LpirOp::FconstF32 { dst, value: v })
         }
         "iconst.i32" => {
             let v = parse_int_literal(parts[1])?;
-            Ok(Op::IconstI32 { dst, value: v })
+            Ok(LpirOp::IconstI32 { dst, value: v })
         }
-        "iadd_imm" => Ok(Op::IaddImm {
+        "iadd_imm" => Ok(LpirOp::IaddImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "isub_imm" => Ok(Op::IsubImm {
+        "isub_imm" => Ok(LpirOp::IsubImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "imul_imm" => Ok(Op::ImulImm {
+        "imul_imm" => Ok(LpirOp::ImulImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "ishl_imm" => Ok(Op::IshlImm {
+        "ishl_imm" => Ok(LpirOp::IshlImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "ishr_s_imm" => Ok(Op::IshrSImm {
+        "ishr_s_imm" => Ok(LpirOp::IshrSImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "ishr_u_imm" => Ok(Op::IshrUImm {
+        "ishr_u_imm" => Ok(LpirOp::IshrUImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "ieq_imm" => Ok(Op::IeqImm {
+        "ieq_imm" => Ok(LpirOp::IeqImm {
             dst,
             src: parse_vreg_token(parts[1].trim_end_matches(','))?,
             imm: parse_int_literal(parts[2])?,
         }),
-        "ftoi_sat_s" => Ok(Op::FtoiSatS {
+        "ftoi_sat_s" => Ok(LpirOp::FtoiSatS {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "ftoi_sat_u" => Ok(Op::FtoiSatU {
+        "ftoi_sat_u" => Ok(LpirOp::FtoiSatU {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "itof_s" => Ok(Op::ItofS {
+        "itof_s" => Ok(LpirOp::ItofS {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "itof_u" => Ok(Op::ItofU {
+        "itof_u" => Ok(LpirOp::ItofU {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "ffrom_i32_bits" => Ok(Op::FfromI32Bits {
+        "ffrom_i32_bits" => Ok(LpirOp::FfromI32Bits {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
@@ -1006,21 +1006,21 @@ fn parse_rhs_op(dst: VReg, rhs: &str) -> Result<Op, ParseError> {
                 .ok_or_else(|| err(1, 1, "ssN"))?
                 .parse::<u32>()
                 .map_err(|_| err(1, 1, "slot"))?;
-            Ok(Op::SlotAddr {
+            Ok(LpirOp::SlotAddr {
                 dst,
                 slot: SlotId(n),
             })
         }
-        "load" => Ok(Op::Load {
+        "load" => Ok(LpirOp::Load {
             dst,
             base: parse_vreg_token(parts[1].trim_end_matches(','))?,
             offset: parts[2].parse().map_err(|_| err(1, 1, "offset"))?,
         }),
-        "copy" => Ok(Op::Copy {
+        "copy" => Ok(LpirOp::Copy {
             dst,
             src: parse_vreg_token(parts[1])?,
         }),
-        "select" => Ok(Op::Select {
+        "select" => Ok(LpirOp::Select {
             dst,
             cond: parse_vreg_token(parts[1].trim_end_matches(','))?,
             if_true: parse_vreg_token(parts[2].trim_end_matches(','))?,

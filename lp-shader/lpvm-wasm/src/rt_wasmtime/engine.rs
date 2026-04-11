@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::format;
 use std::sync::Arc;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
@@ -86,7 +86,7 @@ impl LpvmEngine for WasmLpvmEngine {
     type Module = WasmLpvmModule;
     type Error = WasmError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let artifact = compile_lpir(ir, meta, &self.compile_options)?;
         let bytes = artifact.wasm_module().bytes.clone();
         WasmLpvmModule::validate_shader(&self.engine, &bytes)?;

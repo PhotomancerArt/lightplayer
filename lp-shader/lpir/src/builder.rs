@@ -1,10 +1,10 @@
-//! Stack-based builders for [`crate::module::IrFunction`] and [`crate::module::IrModule`].
+//! Stack-based builders for [`crate::lpir_module::IrFunction`] and [`crate::lpir_module::LpirModule`].
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::module::{ImportDecl, IrFunction, IrModule, SlotDecl, VMCTX_VREG};
-use crate::op::Op;
+use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
+use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, SlotId, VReg, VRegRange};
 
 /// Build a single function's IR (flat op stream + pools).
@@ -15,7 +15,7 @@ pub struct FunctionBuilder {
     param_count: u16,
     vreg_types: Vec<IrType>,
     slots: Vec<SlotDecl>,
-    body: Vec<Op>,
+    body: Vec<LpirOp>,
     vreg_pool: Vec<VReg>,
     next_vreg: u32,
     next_slot: u32,
@@ -83,13 +83,13 @@ impl FunctionBuilder {
         id
     }
 
-    pub fn push(&mut self, op: Op) {
+    pub fn push(&mut self, op: LpirOp) {
         self.body.push(op);
     }
 
     pub fn push_if(&mut self, cond: VReg) {
         let idx = self.body.len();
-        self.body.push(Op::IfStart {
+        self.body.push(LpirOp::IfStart {
             cond,
             else_offset: 0,
             end_offset: 0,
@@ -105,7 +105,7 @@ impl FunctionBuilder {
         match entry {
             BlockEntry::If { start_idx } => {
                 let else_idx = self.body.len();
-                if let Op::IfStart {
+                if let LpirOp::IfStart {
                     else_offset,
                     end_offset: _,
                     ..
@@ -113,7 +113,7 @@ impl FunctionBuilder {
                 {
                     *else_offset = else_idx as u32;
                 }
-                self.body.push(Op::Else);
+                self.body.push(LpirOp::Else);
                 self.block_stack.push(BlockEntry::Else {
                     if_start_idx: start_idx,
                 });
@@ -124,12 +124,12 @@ impl FunctionBuilder {
 
     pub fn end_if(&mut self) {
         let end_idx = self.body.len();
-        self.body.push(Op::End);
+        self.body.push(LpirOp::End);
         let after = (end_idx + 1) as u32;
         let entry = self.block_stack.pop().expect("end_if without open block");
         match entry {
             BlockEntry::If { start_idx } => {
-                if let Op::IfStart {
+                if let LpirOp::IfStart {
                     else_offset,
                     end_offset,
                     ..
@@ -140,7 +140,7 @@ impl FunctionBuilder {
                 }
             }
             BlockEntry::Else { if_start_idx } => {
-                if let Op::IfStart {
+                if let LpirOp::IfStart {
                     end_offset,
                     else_offset: _,
                     ..
@@ -155,7 +155,7 @@ impl FunctionBuilder {
 
     pub fn push_loop(&mut self) {
         let idx = self.body.len();
-        self.body.push(Op::LoopStart {
+        self.body.push(LpirOp::LoopStart {
             continuing_offset: 0,
             end_offset: 0,
         });
@@ -180,7 +180,7 @@ impl FunctionBuilder {
         };
         assert!(!*continuing_set, "push_continuing called twice");
         *continuing_set = true;
-        if let Op::LoopStart {
+        if let LpirOp::LoopStart {
             continuing_offset, ..
         } = &mut self.body[*start_idx]
         {
@@ -190,12 +190,12 @@ impl FunctionBuilder {
 
     pub fn end_loop(&mut self) {
         let end_idx = self.body.len();
-        self.body.push(Op::End);
+        self.body.push(LpirOp::End);
         let after = (end_idx + 1) as u32;
         let entry = self.block_stack.pop().expect("end_loop without push_loop");
         match entry {
             BlockEntry::Loop { start_idx, .. } => {
-                if let Op::LoopStart {
+                if let LpirOp::LoopStart {
                     continuing_offset,
                     end_offset,
                 } = &mut self.body[start_idx]
@@ -212,7 +212,7 @@ impl FunctionBuilder {
 
     pub fn push_switch(&mut self, selector: VReg) {
         let idx = self.body.len();
-        self.body.push(Op::SwitchStart {
+        self.body.push(LpirOp::SwitchStart {
             selector,
             end_offset: 0,
         });
@@ -233,7 +233,7 @@ impl FunctionBuilder {
         };
         if let Some(pc) = pending_case.take() {
             match &mut self.body[pc] {
-                Op::CaseStart { end_offset, .. } | Op::DefaultStart { end_offset } => {
+                LpirOp::CaseStart { end_offset, .. } | LpirOp::DefaultStart { end_offset } => {
                     *end_offset = cur;
                 }
                 _ => {}
@@ -244,7 +244,7 @@ impl FunctionBuilder {
     pub fn push_case(&mut self, value: i32) {
         self.patch_switch_pending_to_here();
         let case_idx = self.body.len();
-        self.body.push(Op::CaseStart {
+        self.body.push(LpirOp::CaseStart {
             value,
             end_offset: 0,
         });
@@ -261,7 +261,7 @@ impl FunctionBuilder {
     pub fn push_default(&mut self) {
         self.patch_switch_pending_to_here();
         let case_idx = self.body.len();
-        self.body.push(Op::DefaultStart { end_offset: 0 });
+        self.body.push(LpirOp::DefaultStart { end_offset: 0 });
         let top = self
             .block_stack
             .last_mut()
@@ -274,13 +274,13 @@ impl FunctionBuilder {
 
     /// Close a `switch` arm (`case` / `default` body). The following `}` closes the whole `switch`.
     pub fn end_switch_arm(&mut self) {
-        self.body.push(Op::End);
+        self.body.push(LpirOp::End);
     }
 
     pub fn end_switch(&mut self) {
         let end_idx = self.body.len();
         self.patch_switch_pending_to_here();
-        self.body.push(Op::End);
+        self.body.push(LpirOp::End);
         let after = (end_idx + 1) as u32;
         let entry = self
             .block_stack
@@ -288,7 +288,7 @@ impl FunctionBuilder {
             .expect("end_switch without push_switch");
         match entry {
             BlockEntry::Switch { start_idx, .. } => {
-                if let Op::SwitchStart { end_offset, .. } = &mut self.body[start_idx] {
+                if let LpirOp::SwitchStart { end_offset, .. } = &mut self.body[start_idx] {
                     *end_offset = after;
                 }
             }
@@ -358,7 +358,7 @@ impl FunctionBuilder {
         self.vreg_pool.extend_from_slice(args);
         let results_start = self.vreg_pool.len() as u32;
         self.vreg_pool.extend_from_slice(results);
-        self.body.push(Op::Call {
+        self.body.push(LpirOp::Call {
             callee,
             args: VRegRange {
                 start: args_start,
@@ -374,7 +374,7 @@ impl FunctionBuilder {
     pub fn push_return(&mut self, values: &[VReg]) {
         let start = self.vreg_pool.len() as u32;
         self.vreg_pool.extend_from_slice(values);
-        self.body.push(Op::Return {
+        self.body.push(LpirOp::Return {
             values: VRegRange {
                 start,
                 count: values.len() as u16,
@@ -401,7 +401,7 @@ impl FunctionBuilder {
     }
 }
 
-/// Build an [`IrModule`].
+/// Build an [`LpirModule`].
 #[derive(Default)]
 pub struct ModuleBuilder {
     imports: Vec<ImportDecl>,
@@ -436,8 +436,8 @@ impl ModuleBuilder {
         CalleeRef(import_n + (self.functions.len() - 1) as u32)
     }
 
-    pub fn finish(self) -> IrModule {
-        IrModule {
+    pub fn finish(self) -> LpirModule {
+        LpirModule {
             imports: self.imports,
             functions: self.functions,
         }

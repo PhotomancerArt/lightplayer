@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 
 use lp_riscv_elf::ElfLoadInfo;
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::LpvmModule;
 use lpvm_cranelift::CompileOptions;
@@ -14,7 +14,7 @@ use crate::memory::EmuSharedArena;
 /// Compiled RV32 module for the LPVM emulator (immutable after [`lpvm::LpvmEngine::compile`]).
 #[derive(Clone)]
 pub struct EmuModule {
-    pub(crate) ir: IrModule,
+    pub(crate) ir: LpirModule,
     pub(crate) meta: LpsModuleSig,
     pub(crate) load: Arc<ElfLoadInfo>,
     pub(crate) options: CompileOptions,

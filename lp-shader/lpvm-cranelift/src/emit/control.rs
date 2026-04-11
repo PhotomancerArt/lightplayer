@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{Block, InstBuilder};
 use cranelift_frontend::{FunctionBuilder, Variable};
-use lpir::module::IrFunction;
-use lpir::op::Op;
+use lpir::lpir_module::IrFunction;
+use lpir::lpir_op::LpirOp;
 
 use super::{CtrlFrame, switch_to_unreachable_tail, use_v};
 use crate::error::CompileError;
@@ -56,7 +56,7 @@ pub(crate) fn maybe_enter_loop_continue_region(
 }
 
 pub(crate) fn emit_control(
-    op: &Op,
+    op: &LpirOp,
     func: &IrFunction,
     builder: &mut FunctionBuilder,
     vars: &[Variable],
@@ -65,7 +65,7 @@ pub(crate) fn emit_control(
 ) -> Result<bool, CompileError> {
     let _ = func;
     match op {
-        Op::IfStart { cond, .. } => {
+        LpirOp::IfStart { cond, .. } => {
             let cond_val = use_v(builder, vars, *cond);
             let then_block = builder.create_block();
             let else_block = builder.create_block();
@@ -79,7 +79,7 @@ pub(crate) fn emit_control(
             });
             Ok(true)
         }
-        Op::Else => match ctrl_stack.pop() {
+        LpirOp::Else => match ctrl_stack.pop() {
             Some(CtrlFrame::If {
                 else_block,
                 merge_block,
@@ -91,7 +91,7 @@ pub(crate) fn emit_control(
             }
             _ => Err(CompileError::unsupported("else without matching if")),
         },
-        Op::LoopStart {
+        LpirOp::LoopStart {
             continuing_offset, ..
         } => {
             let loop_start_pc = op_idx;
@@ -114,19 +114,19 @@ pub(crate) fn emit_control(
             });
             Ok(true)
         }
-        Op::Break => {
+        LpirOp::Break => {
             let exit = find_innermost_loop_exit(ctrl_stack)?;
             builder.ins().jump(exit, &[]);
             switch_to_unreachable_tail(builder);
             Ok(true)
         }
-        Op::Continue => {
+        LpirOp::Continue => {
             let cont = find_innermost_loop_continue(ctrl_stack)?;
             builder.ins().jump(cont, &[]);
             switch_to_unreachable_tail(builder);
             Ok(true)
         }
-        Op::BrIfNot { cond } => {
+        LpirOp::BrIfNot { cond } => {
             let cond_val = use_v(builder, vars, *cond);
             let exit = find_innermost_loop_exit(ctrl_stack)?;
             let continue_block = builder.create_block();
@@ -135,7 +135,7 @@ pub(crate) fn emit_control(
             builder.switch_to_block(continue_block);
             Ok(true)
         }
-        Op::SwitchStart { selector, .. } => {
+        LpirOp::SwitchStart { selector, .. } => {
             let selector_val = use_v(builder, vars, *selector);
             let merge_block = builder.create_block();
             let first_case_block = builder.create_block();
@@ -147,7 +147,7 @@ pub(crate) fn emit_control(
             });
             Ok(true)
         }
-        Op::CaseStart { value, .. } => {
+        LpirOp::CaseStart { value, .. } => {
             let (selector, merge_block) = find_innermost_switch(ctrl_stack)?;
             let body_block = builder.create_block();
             let next_case_block = builder.create_block();
@@ -164,7 +164,7 @@ pub(crate) fn emit_control(
             });
             Ok(true)
         }
-        Op::DefaultStart { .. } => {
+        LpirOp::DefaultStart { .. } => {
             let (_, merge_block) = find_innermost_switch(ctrl_stack)?;
             if builder.current_block().is_none() {
                 return Err(CompileError::unsupported("default outside block"));
@@ -172,7 +172,7 @@ pub(crate) fn emit_control(
             ctrl_stack.push(CtrlFrame::Default { merge_block });
             Ok(true)
         }
-        Op::End => match ctrl_stack.pop() {
+        LpirOp::End => match ctrl_stack.pop() {
             Some(CtrlFrame::If {
                 else_block,
                 merge_block,

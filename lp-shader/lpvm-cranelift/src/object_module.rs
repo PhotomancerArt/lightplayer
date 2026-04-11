@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use cranelift_codegen::isa::OwnedTargetIsa;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use target_lexicon::{
     Architecture, BinaryFormat, Environment, OperatingSystem, Riscv32Architecture, Triple, Vendor,
 };
@@ -69,7 +69,7 @@ fn riscv32_owned_isa() -> Result<OwnedTargetIsa, CompilerError> {
 
 /// Compile LPIR to a RISC-V32 ELF **relocatable object** (not linked with builtins).
 pub fn object_bytes_from_ir(
-    ir: &IrModule,
+    ir: &LpirModule,
     options: &CompileOptions,
 ) -> Result<Vec<u8>, CompilerError> {
     let _codegen_guard = process_sync::codegen_guard();

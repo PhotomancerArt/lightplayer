@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use crate::isa::rv32::gpr::{self, PReg};
 use crate::isa::rv32::inst::PInst;
-use crate::vinst::SymbolRef;
+use crate::isa::rv32::inst::SymbolRef;
 
 #[derive(Debug, Clone)]
 pub struct ParseError {

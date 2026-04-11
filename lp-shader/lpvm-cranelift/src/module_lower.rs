@@ -9,7 +9,7 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 
 use crate::builtins::{self, LpirBuiltinFuncIds};
 use crate::compile_options::{CompileOptions, MemoryStrategy};
@@ -19,7 +19,7 @@ use crate::error::{CompileError, CompilerError};
 /// Order used when declaring and defining user functions (affects `FuncId` / object symbol order).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LpirFuncEmitOrder {
-    /// Same order as [`IrModule::functions`] (host JIT).
+    /// Same order as [`LpirModule::functions`] (host JIT).
     Source,
     /// Lexicographic by LPIR function name (used for `ObjectModule` symbol order).
     #[cfg_attr(
@@ -49,7 +49,7 @@ pub(crate) struct LoweredLpirModule {
 /// Declare imports, declare user functions, and define bodies. Caller runs `finalize_definitions` or `finish`.
 pub(crate) fn lower_lpir_into_module<M: Module>(
     module: &mut M,
-    ir: &IrModule,
+    ir: &LpirModule,
     options: CompileOptions,
     order: LpirFuncEmitOrder,
 ) -> Result<LoweredLpirModule, CompilerError> {

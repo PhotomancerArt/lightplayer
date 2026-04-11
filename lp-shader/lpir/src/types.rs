@@ -50,7 +50,7 @@ impl fmt::Display for SlotId {
     }
 }
 
-/// Sub-range of [`crate::module::IrFunction::vreg_pool`] for `Call` / `Return` operands.
+/// Sub-range of [`crate::lpir_module::IrFunction::vreg_pool`] for `Call` / `Return` operands.
 #[derive(Clone, Copy, Debug)]
 pub struct VRegRange {
     pub start: u32,

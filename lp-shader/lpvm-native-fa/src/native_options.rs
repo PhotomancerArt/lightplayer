@@ -4,11 +4,14 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeCompileOptions {
     pub float_mode: lpir::FloatMode,
+
     /// When true, emission records LPIR op indices per instruction (for disassembly / future DWARF).
     pub debug_info: bool,
+
     /// When the `emu` feature is enabled: use per-instruction logging in lp-riscv-emu so failures
     /// can include [`Riscv32Emulator::format_logs`] / execution history in debug dumps.
     pub emu_trace_instructions: bool,
+
     /// When true, print register-allocation trace (liveness + assignments) during codegen.
     /// Off by default for production and normal test runs.
     pub alloc_trace: bool,

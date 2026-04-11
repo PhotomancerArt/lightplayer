@@ -12,7 +12,7 @@ use cranelift_codegen::settings::{self, Configurable};
 use lp_riscv_elf::ElfLoadInfo;
 use lp_riscv_emu::{DEFAULT_RAM_START, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
 use lpir::FloatMode;
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::{LpsModuleSig, LpsType};
 use lpvm::DEFAULT_VMCTX_FUEL;
 use lpvm::{CallError, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg};
@@ -72,7 +72,7 @@ fn emulator_with_shared(
 /// Q32 typed call through the linked RV32 image (same marshalling as [`lpvm_cranelift::CraneliftModule::call`]).
 pub fn glsl_q32_call_emulated(
     load: &ElfLoadInfo,
-    ir: &IrModule,
+    ir: &LpirModule,
     glsl_meta: &LpsModuleSig,
     options: &CompileOptions,
     name: &str,
@@ -176,7 +176,7 @@ pub fn glsl_q32_call_emulated(
 
 /// Run `func_name` after object emission, link, and load. Arguments and single `i32` return (Q32 / int).
 pub fn run_lpir_function_i32(
-    ir: &IrModule,
+    ir: &LpirModule,
     options: &CompileOptions,
     func_name: &str,
     args: &[i32],
@@ -189,7 +189,7 @@ pub fn run_lpir_function_i32(
 /// Resolve `func_name` in `load_info` and invoke with the given Cranelift `Signature`.
 pub fn run_loaded_function_i32(
     load_info: &ElfLoadInfo,
-    ir: &IrModule,
+    ir: &LpirModule,
     options: &CompileOptions,
     func_name: &str,
     args: &[i32],

@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 use lpvm_emu::EmuSharedArena;
@@ -33,7 +33,7 @@ impl LpvmEngine for NativeEmuEngine {
     type Module = NativeEmuModule;
     type Error = NativeError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let elf = emit_module_elf(ir, meta, self.options.float_mode, self.options.alloc_trace)?;
         let load = Arc::new(lpvm_cranelift::link_object_with_builtins(&elf)?);
         Ok(NativeEmuModule {

@@ -36,7 +36,7 @@ pub struct FastAllocArtifact {
 }
 
 pub fn run_fastalloc_module(
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     sig: &lps_frontend::LpsModuleSig,
     float_mode: FloatMode,
     verbosity: Verbosity,
@@ -71,14 +71,14 @@ pub fn run_fastalloc_module(
                     debug,
                     "{} {}",
                     inst.mnemonic(),
-                    inst.format_alloc_trace_detail()
+                    inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
                 )?;
             }
         }
 
         let slots = func.total_param_slots() as usize;
         let func_abi = func_abi_rv32(fn_sig, slots);
-        let phys = alloc::allocate(&lowered.vinsts, &func_abi, func)
+        let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
             .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
 
         if verbosity.pinst {

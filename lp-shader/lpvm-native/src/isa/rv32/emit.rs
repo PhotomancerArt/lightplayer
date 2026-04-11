@@ -1039,7 +1039,7 @@ fn allocate_for_emit(
 /// * `alloc_trace` - When [`crate::config::USE_LINEAR_SCAN_REGALLOC`] is true, print allocation trace to stderr
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     module_abi: &ModuleAbi,
     fn_sig: &lps_shared::LpsFnSig,
     float_mode: lpir::FloatMode,
@@ -1137,7 +1137,7 @@ pub fn emit_function_bytes(
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `alloc_trace` - When true, print allocation trace per function to stderr
 pub fn emit_module_elf(
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     sig: &lps_shared::LpsModuleSig,
     float_mode: lpir::FloatMode,
     alloc_trace: bool,
@@ -1244,11 +1244,11 @@ mod tests {
     use crate::abi::ModuleAbi;
     use alloc::vec;
 
-    use lpir::{IrFunction, IrModule, Op};
+    use lpir::{IrFunction, LpirModule, LpirOp};
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
-    fn ir_single(f: IrFunction) -> IrModule {
-        IrModule {
+    fn ir_single(f: IrFunction) -> LpirModule {
+        LpirModule {
             imports: vec![],
             functions: vec![f],
         }
@@ -1321,12 +1321,12 @@ mod tests {
             ],
             slots: vec![],
             body: vec![
-                Op::Iadd {
+                LpirOp::Iadd {
                     dst: VReg(3),
                     lhs: VReg(1),
                     rhs: VReg(2),
                 },
-                Op::Return {
+                LpirOp::Return {
                     values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],
@@ -1385,12 +1385,12 @@ mod tests {
             vreg_types: vec![lpir::IrType::I32; 4],
             slots: vec![],
             body: vec![
-                Op::Fadd {
+                LpirOp::Fadd {
                     dst: VReg(3),
                     lhs: VReg(1),
                     rhs: VReg(2),
                 },
-                Op::Return {
+                LpirOp::Return {
                     values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],

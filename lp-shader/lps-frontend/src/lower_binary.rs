@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{BinaryOperator, Expression, Handle, ScalarKind, TypeInner};
 
 use crate::lower_ctx::VRegVec;
@@ -86,16 +86,16 @@ fn lower_binary_float(
     };
     let dst = ctx.fb.alloc_vreg(dst_ty);
     match op {
-        BinaryOperator::Add => ctx.fb.push(Op::Fadd { dst, lhs, rhs }),
-        BinaryOperator::Subtract => ctx.fb.push(Op::Fsub { dst, lhs, rhs }),
-        BinaryOperator::Multiply => ctx.fb.push(Op::Fmul { dst, lhs, rhs }),
-        BinaryOperator::Divide => ctx.fb.push(Op::Fdiv { dst, lhs, rhs }),
-        BinaryOperator::Equal => ctx.fb.push(Op::Feq { dst, lhs, rhs }),
-        BinaryOperator::NotEqual => ctx.fb.push(Op::Fne { dst, lhs, rhs }),
-        BinaryOperator::Less => ctx.fb.push(Op::Flt { dst, lhs, rhs }),
-        BinaryOperator::LessEqual => ctx.fb.push(Op::Fle { dst, lhs, rhs }),
-        BinaryOperator::Greater => ctx.fb.push(Op::Fgt { dst, lhs, rhs }),
-        BinaryOperator::GreaterEqual => ctx.fb.push(Op::Fge { dst, lhs, rhs }),
+        BinaryOperator::Add => ctx.fb.push(LpirOp::Fadd { dst, lhs, rhs }),
+        BinaryOperator::Subtract => ctx.fb.push(LpirOp::Fsub { dst, lhs, rhs }),
+        BinaryOperator::Multiply => ctx.fb.push(LpirOp::Fmul { dst, lhs, rhs }),
+        BinaryOperator::Divide => ctx.fb.push(LpirOp::Fdiv { dst, lhs, rhs }),
+        BinaryOperator::Equal => ctx.fb.push(LpirOp::Feq { dst, lhs, rhs }),
+        BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Fne { dst, lhs, rhs }),
+        BinaryOperator::Less => ctx.fb.push(LpirOp::Flt { dst, lhs, rhs }),
+        BinaryOperator::LessEqual => ctx.fb.push(LpirOp::Fle { dst, lhs, rhs }),
+        BinaryOperator::Greater => ctx.fb.push(LpirOp::Fgt { dst, lhs, rhs }),
+        BinaryOperator::GreaterEqual => ctx.fb.push(LpirOp::Fge { dst, lhs, rhs }),
         _ => {
             return Err(LowerError::UnsupportedExpression(format!(
                 "unsupported float binary {op:?}"
@@ -111,24 +111,24 @@ fn lower_float_modulo(
     y: VReg,
 ) -> Result<VReg, LowerError> {
     let v_div = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
+    ctx.fb.push(LpirOp::Fdiv {
         dst: v_div,
         lhs: x,
         rhs: y,
     });
     let v_fl = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Ffloor {
+    ctx.fb.push(LpirOp::Ffloor {
         dst: v_fl,
         src: v_div,
     });
     let v_mul = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: v_mul,
         lhs: v_fl,
         rhs: y,
     });
     let dst = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst,
         lhs: x,
         rhs: v_mul,
@@ -144,22 +144,22 @@ fn lower_binary_sint(
 ) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     match op {
-        BinaryOperator::Add => ctx.fb.push(Op::Iadd { dst, lhs, rhs }),
-        BinaryOperator::Subtract => ctx.fb.push(Op::Isub { dst, lhs, rhs }),
-        BinaryOperator::Multiply => ctx.fb.push(Op::Imul { dst, lhs, rhs }),
-        BinaryOperator::Divide => ctx.fb.push(Op::IdivS { dst, lhs, rhs }),
-        BinaryOperator::Modulo => ctx.fb.push(Op::IremS { dst, lhs, rhs }),
-        BinaryOperator::Equal => ctx.fb.push(Op::Ieq { dst, lhs, rhs }),
-        BinaryOperator::NotEqual => ctx.fb.push(Op::Ine { dst, lhs, rhs }),
-        BinaryOperator::Less => ctx.fb.push(Op::IltS { dst, lhs, rhs }),
-        BinaryOperator::LessEqual => ctx.fb.push(Op::IleS { dst, lhs, rhs }),
-        BinaryOperator::Greater => ctx.fb.push(Op::IgtS { dst, lhs, rhs }),
-        BinaryOperator::GreaterEqual => ctx.fb.push(Op::IgeS { dst, lhs, rhs }),
-        BinaryOperator::And => ctx.fb.push(Op::Iand { dst, lhs, rhs }),
-        BinaryOperator::InclusiveOr => ctx.fb.push(Op::Ior { dst, lhs, rhs }),
-        BinaryOperator::ExclusiveOr => ctx.fb.push(Op::Ixor { dst, lhs, rhs }),
-        BinaryOperator::ShiftLeft => ctx.fb.push(Op::Ishl { dst, lhs, rhs }),
-        BinaryOperator::ShiftRight => ctx.fb.push(Op::IshrS { dst, lhs, rhs }),
+        BinaryOperator::Add => ctx.fb.push(LpirOp::Iadd { dst, lhs, rhs }),
+        BinaryOperator::Subtract => ctx.fb.push(LpirOp::Isub { dst, lhs, rhs }),
+        BinaryOperator::Multiply => ctx.fb.push(LpirOp::Imul { dst, lhs, rhs }),
+        BinaryOperator::Divide => ctx.fb.push(LpirOp::IdivS { dst, lhs, rhs }),
+        BinaryOperator::Modulo => ctx.fb.push(LpirOp::IremS { dst, lhs, rhs }),
+        BinaryOperator::Equal => ctx.fb.push(LpirOp::Ieq { dst, lhs, rhs }),
+        BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Ine { dst, lhs, rhs }),
+        BinaryOperator::Less => ctx.fb.push(LpirOp::IltS { dst, lhs, rhs }),
+        BinaryOperator::LessEqual => ctx.fb.push(LpirOp::IleS { dst, lhs, rhs }),
+        BinaryOperator::Greater => ctx.fb.push(LpirOp::IgtS { dst, lhs, rhs }),
+        BinaryOperator::GreaterEqual => ctx.fb.push(LpirOp::IgeS { dst, lhs, rhs }),
+        BinaryOperator::And => ctx.fb.push(LpirOp::Iand { dst, lhs, rhs }),
+        BinaryOperator::InclusiveOr => ctx.fb.push(LpirOp::Ior { dst, lhs, rhs }),
+        BinaryOperator::ExclusiveOr => ctx.fb.push(LpirOp::Ixor { dst, lhs, rhs }),
+        BinaryOperator::ShiftLeft => ctx.fb.push(LpirOp::Ishl { dst, lhs, rhs }),
+        BinaryOperator::ShiftRight => ctx.fb.push(LpirOp::IshrS { dst, lhs, rhs }),
         _ => {
             return Err(LowerError::UnsupportedExpression(format!(
                 "unsupported sint binary {op:?}"
@@ -177,22 +177,22 @@ fn lower_binary_uint(
 ) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     match op {
-        BinaryOperator::Add => ctx.fb.push(Op::Iadd { dst, lhs, rhs }),
-        BinaryOperator::Subtract => ctx.fb.push(Op::Isub { dst, lhs, rhs }),
-        BinaryOperator::Multiply => ctx.fb.push(Op::Imul { dst, lhs, rhs }),
-        BinaryOperator::Divide => ctx.fb.push(Op::IdivU { dst, lhs, rhs }),
-        BinaryOperator::Modulo => ctx.fb.push(Op::IremU { dst, lhs, rhs }),
-        BinaryOperator::Equal => ctx.fb.push(Op::Ieq { dst, lhs, rhs }),
-        BinaryOperator::NotEqual => ctx.fb.push(Op::Ine { dst, lhs, rhs }),
-        BinaryOperator::Less => ctx.fb.push(Op::IltU { dst, lhs, rhs }),
-        BinaryOperator::LessEqual => ctx.fb.push(Op::IleU { dst, lhs, rhs }),
-        BinaryOperator::Greater => ctx.fb.push(Op::IgtU { dst, lhs, rhs }),
-        BinaryOperator::GreaterEqual => ctx.fb.push(Op::IgeU { dst, lhs, rhs }),
-        BinaryOperator::And => ctx.fb.push(Op::Iand { dst, lhs, rhs }),
-        BinaryOperator::InclusiveOr => ctx.fb.push(Op::Ior { dst, lhs, rhs }),
-        BinaryOperator::ExclusiveOr => ctx.fb.push(Op::Ixor { dst, lhs, rhs }),
-        BinaryOperator::ShiftLeft => ctx.fb.push(Op::Ishl { dst, lhs, rhs }),
-        BinaryOperator::ShiftRight => ctx.fb.push(Op::IshrU { dst, lhs, rhs }),
+        BinaryOperator::Add => ctx.fb.push(LpirOp::Iadd { dst, lhs, rhs }),
+        BinaryOperator::Subtract => ctx.fb.push(LpirOp::Isub { dst, lhs, rhs }),
+        BinaryOperator::Multiply => ctx.fb.push(LpirOp::Imul { dst, lhs, rhs }),
+        BinaryOperator::Divide => ctx.fb.push(LpirOp::IdivU { dst, lhs, rhs }),
+        BinaryOperator::Modulo => ctx.fb.push(LpirOp::IremU { dst, lhs, rhs }),
+        BinaryOperator::Equal => ctx.fb.push(LpirOp::Ieq { dst, lhs, rhs }),
+        BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Ine { dst, lhs, rhs }),
+        BinaryOperator::Less => ctx.fb.push(LpirOp::IltU { dst, lhs, rhs }),
+        BinaryOperator::LessEqual => ctx.fb.push(LpirOp::IleU { dst, lhs, rhs }),
+        BinaryOperator::Greater => ctx.fb.push(LpirOp::IgtU { dst, lhs, rhs }),
+        BinaryOperator::GreaterEqual => ctx.fb.push(LpirOp::IgeU { dst, lhs, rhs }),
+        BinaryOperator::And => ctx.fb.push(LpirOp::Iand { dst, lhs, rhs }),
+        BinaryOperator::InclusiveOr => ctx.fb.push(LpirOp::Ior { dst, lhs, rhs }),
+        BinaryOperator::ExclusiveOr => ctx.fb.push(LpirOp::Ixor { dst, lhs, rhs }),
+        BinaryOperator::ShiftLeft => ctx.fb.push(LpirOp::Ishl { dst, lhs, rhs }),
+        BinaryOperator::ShiftRight => ctx.fb.push(LpirOp::IshrU { dst, lhs, rhs }),
         _ => {
             return Err(LowerError::UnsupportedExpression(format!(
                 "unsupported uint binary {op:?}"
@@ -210,13 +210,13 @@ fn lower_binary_bool(
 ) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     match op {
-        BinaryOperator::LogicalAnd | BinaryOperator::And => ctx.fb.push(Op::Iand { dst, lhs, rhs }),
+        BinaryOperator::LogicalAnd | BinaryOperator::And => ctx.fb.push(LpirOp::Iand { dst, lhs, rhs }),
         BinaryOperator::LogicalOr | BinaryOperator::InclusiveOr => {
-            ctx.fb.push(Op::Ior { dst, lhs, rhs })
+            ctx.fb.push(LpirOp::Ior { dst, lhs, rhs })
         }
-        BinaryOperator::ExclusiveOr => ctx.fb.push(Op::Ixor { dst, lhs, rhs }),
-        BinaryOperator::Equal => ctx.fb.push(Op::Ieq { dst, lhs, rhs }),
-        BinaryOperator::NotEqual => ctx.fb.push(Op::Ine { dst, lhs, rhs }),
+        BinaryOperator::ExclusiveOr => ctx.fb.push(LpirOp::Ixor { dst, lhs, rhs }),
+        BinaryOperator::Equal => ctx.fb.push(LpirOp::Ieq { dst, lhs, rhs }),
+        BinaryOperator::NotEqual => ctx.fb.push(LpirOp::Ine { dst, lhs, rhs }),
         _ => {
             return Err(LowerError::UnsupportedExpression(format!(
                 "unsupported bool binary {op:?}"

@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{Expression, Handle, ScalarKind, UnaryOperator};
 
 use crate::lower_ctx::VRegVec;
@@ -60,16 +60,16 @@ fn lower_unary_scalar(
     };
     match op {
         UnaryOperator::Negate => match k {
-            ScalarKind::Float => ctx.fb.push(Op::Fneg { dst, src }),
+            ScalarKind::Float => ctx.fb.push(LpirOp::Fneg { dst, src }),
             ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => {
-                ctx.fb.push(Op::Ineg { dst, src })
+                ctx.fb.push(LpirOp::Ineg { dst, src })
             }
             _ => {}
         },
         UnaryOperator::LogicalNot => {
-            ctx.fb.push(Op::IeqImm { dst, src, imm: 0 });
+            ctx.fb.push(LpirOp::IeqImm { dst, src, imm: 0 });
         }
-        UnaryOperator::BitwiseNot => ctx.fb.push(Op::Ibnot { dst, src }),
+        UnaryOperator::BitwiseNot => ctx.fb.push(LpirOp::Ibnot { dst, src }),
     }
     Ok(dst)
 }

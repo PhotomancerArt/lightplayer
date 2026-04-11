@@ -1,6 +1,6 @@
 //! `LpvmEngine` trait — compilation and shared memory.
 
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::memory::LpvmMemory;
@@ -25,7 +25,7 @@ pub trait LpvmEngine {
     type Error: core::fmt::Display;
 
     /// Compile an LPIR module into a runnable module.
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error>;
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error>;
 
     /// Shared memory allocator for this engine (textures, cross-shader data).
     fn memory(&self) -> &dyn LpvmMemory;

@@ -1,11 +1,11 @@
-//! Map each [`lpir::Op`] to WASM instructions.
+//! Map each [`lpir::LpirOp`] to WASM instructions.
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{IrFunction, IrModule, IrType, Op};
+use lpir::{IrFunction, LpirModule, IrType, LpirOp};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
@@ -45,20 +45,20 @@ pub(crate) fn emit_op(
     sink: &mut InstructionSink<'_>,
     ctrl: &mut Vec<CtrlEntry>,
     fctx: &mut FuncEmitCtx<'_>,
-    ir: &IrModule,
+    ir: &LpirModule,
     func: &IrFunction,
     _pc: usize,
-    op: &Op,
+    op: &LpirOp,
     wasm_open: &mut WasmOpenDepth,
 ) -> Result<(), String> {
     // In unreachable mode, only process structural ops needed for stack balance.
     let is_structural = matches!(
         op,
-        Op::End
-            | Op::Else
-            | Op::SwitchStart { .. }
-            | Op::CaseStart { .. }
-            | Op::DefaultStart { .. }
+        LpirOp::End
+            | LpirOp::Else
+            | LpirOp::SwitchStart { .. }
+            | LpirOp::CaseStart { .. }
+            | LpirOp::DefaultStart { .. }
     );
 
     if fctx.unreachable_mode && !is_structural {
@@ -66,202 +66,202 @@ pub(crate) fn emit_op(
     }
     let fm = fctx.module.options.float_mode;
     match op {
-        Op::Iadd { dst, lhs, rhs } => {
+        LpirOp::Iadd { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_add()
                 .local_set(dst.0);
         }
-        Op::Isub { dst, lhs, rhs } => {
+        LpirOp::Isub { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_sub()
                 .local_set(dst.0);
         }
-        Op::Imul { dst, lhs, rhs } => {
+        LpirOp::Imul { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_mul()
                 .local_set(dst.0);
         }
-        Op::IdivS { dst, lhs, rhs } => {
+        LpirOp::IdivS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_div_s()
                 .local_set(dst.0);
         }
-        Op::IdivU { dst, lhs, rhs } => {
+        LpirOp::IdivU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_div_u()
                 .local_set(dst.0);
         }
-        Op::IremS { dst, lhs, rhs } => {
+        LpirOp::IremS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_rem_s()
                 .local_set(dst.0);
         }
-        Op::IremU { dst, lhs, rhs } => {
+        LpirOp::IremU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_rem_u()
                 .local_set(dst.0);
         }
-        Op::Ineg { dst, src } => {
+        LpirOp::Ineg { dst, src } => {
             sink.i32_const(0)
                 .local_get(src.0)
                 .i32_sub()
                 .local_set(dst.0);
         }
-        Op::Ieq { dst, lhs, rhs } => {
+        LpirOp::Ieq { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_eq()
                 .local_set(dst.0);
         }
-        Op::Ine { dst, lhs, rhs } => {
+        LpirOp::Ine { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_ne()
                 .local_set(dst.0);
         }
-        Op::IltS { dst, lhs, rhs } => {
+        LpirOp::IltS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_lt_s()
                 .local_set(dst.0);
         }
-        Op::IleS { dst, lhs, rhs } => {
+        LpirOp::IleS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_le_s()
                 .local_set(dst.0);
         }
-        Op::IgtS { dst, lhs, rhs } => {
+        LpirOp::IgtS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_gt_s()
                 .local_set(dst.0);
         }
-        Op::IgeS { dst, lhs, rhs } => {
+        LpirOp::IgeS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_ge_s()
                 .local_set(dst.0);
         }
-        Op::IltU { dst, lhs, rhs } => {
+        LpirOp::IltU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_lt_u()
                 .local_set(dst.0);
         }
-        Op::IleU { dst, lhs, rhs } => {
+        LpirOp::IleU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_le_u()
                 .local_set(dst.0);
         }
-        Op::IgtU { dst, lhs, rhs } => {
+        LpirOp::IgtU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_gt_u()
                 .local_set(dst.0);
         }
-        Op::IgeU { dst, lhs, rhs } => {
+        LpirOp::IgeU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_ge_u()
                 .local_set(dst.0);
         }
-        Op::Iand { dst, lhs, rhs } => {
+        LpirOp::Iand { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_and()
                 .local_set(dst.0);
         }
-        Op::Ior { dst, lhs, rhs } => {
+        LpirOp::Ior { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_or()
                 .local_set(dst.0);
         }
-        Op::Ixor { dst, lhs, rhs } => {
+        LpirOp::Ixor { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_xor()
                 .local_set(dst.0);
         }
-        Op::Ibnot { dst, src } => {
+        LpirOp::Ibnot { dst, src } => {
             sink.i32_const(-1)
                 .local_get(src.0)
                 .i32_xor()
                 .local_set(dst.0);
         }
-        Op::Ishl { dst, lhs, rhs } => {
+        LpirOp::Ishl { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_shl()
                 .local_set(dst.0);
         }
-        Op::IshrS { dst, lhs, rhs } => {
+        LpirOp::IshrS { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_shr_s()
                 .local_set(dst.0);
         }
-        Op::IshrU { dst, lhs, rhs } => {
+        LpirOp::IshrU { dst, lhs, rhs } => {
             sink.local_get(lhs.0)
                 .local_get(rhs.0)
                 .i32_shr_u()
                 .local_set(dst.0);
         }
-        Op::IconstI32 { dst, value } => {
+        LpirOp::IconstI32 { dst, value } => {
             sink.i32_const(*value).local_set(dst.0);
         }
-        Op::IaddImm { dst, src, imm } => {
+        LpirOp::IaddImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_add()
                 .local_set(dst.0);
         }
-        Op::IsubImm { dst, src, imm } => {
+        LpirOp::IsubImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_sub()
                 .local_set(dst.0);
         }
-        Op::ImulImm { dst, src, imm } => {
+        LpirOp::ImulImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_mul()
                 .local_set(dst.0);
         }
-        Op::IshlImm { dst, src, imm } => {
+        LpirOp::IshlImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_shl()
                 .local_set(dst.0);
         }
-        Op::IshrSImm { dst, src, imm } => {
+        LpirOp::IshrSImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_shr_s()
                 .local_set(dst.0);
         }
-        Op::IshrUImm { dst, src, imm } => {
+        LpirOp::IshrUImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_shr_u()
                 .local_set(dst.0);
         }
-        Op::IeqImm { dst, src, imm } => {
+        LpirOp::IeqImm { dst, src, imm } => {
             sink.local_get(src.0)
                 .i32_const(*imm)
                 .i32_eq()
                 .local_set(dst.0);
         }
-        Op::Select {
+        LpirOp::Select {
             dst,
             cond,
             if_true,
@@ -273,15 +273,15 @@ pub(crate) fn emit_op(
                 .select()
                 .local_set(dst.0);
         }
-        Op::Copy { dst, src } => {
+        LpirOp::Copy { dst, src } => {
             sink.local_get(src.0).local_set(dst.0);
         }
-        Op::IfStart { cond, .. } => {
+        LpirOp::IfStart { cond, .. } => {
             sink.local_get(cond.0).if_(BlockType::Empty);
             *wasm_open += 1;
             ctrl.push(CtrlEntry::If);
         }
-        Op::Else => {
+        LpirOp::Else => {
             match ctrl.pop() {
                 Some(CtrlEntry::If) => {
                     sink.else_();
@@ -292,7 +292,7 @@ pub(crate) fn emit_op(
                 _ => return Err(String::from("`else` without matching `if`")),
             }
         }
-        Op::End => {
+        LpirOp::End => {
             if ctrl.is_empty() {
                 // `return` may have already emitted matching `end`s via [`unwind_ctrl_after_return`].
                 return Ok(());
@@ -339,7 +339,7 @@ pub(crate) fn emit_op(
                 None => return Err(String::from("unexpected `End` (empty control stack)")),
             }
         }
-        Op::LoopStart {
+        LpirOp::LoopStart {
             continuing_offset, ..
         } => {
             sink.block(BlockType::Empty);
@@ -355,7 +355,7 @@ pub(crate) fn emit_op(
                 outer_open_depth: outer_open + 1,
             });
         }
-        Op::SwitchStart { selector, .. } => {
+        LpirOp::SwitchStart { selector, .. } => {
             sink.block(BlockType::Empty);
             *wasm_open += 1;
             ctrl.push(CtrlEntry::Switch {
@@ -363,7 +363,7 @@ pub(crate) fn emit_op(
                 merge_wasm_open: *wasm_open,
             });
         }
-        Op::CaseStart { value, .. } => {
+        LpirOp::CaseStart { value, .. } => {
             let sel = innermost_switch_selector(ctrl)?;
             sink.local_get(sel)
                 .i32_const(*value)
@@ -372,22 +372,22 @@ pub(crate) fn emit_op(
             *wasm_open += 1;
             ctrl.push(CtrlEntry::SwitchCaseArm);
         }
-        Op::DefaultStart { .. } => {
+        LpirOp::DefaultStart { .. } => {
             ctrl.push(CtrlEntry::SwitchDefaultArm);
         }
-        Op::Break => {
+        LpirOp::Break => {
             let d = innermost_loop_break_depth(ctrl, *wasm_open)?;
             sink.br(d);
         }
-        Op::Continue => {
+        LpirOp::Continue => {
             let d = innermost_loop_continue_depth(ctrl, *wasm_open)?;
             sink.br(d);
         }
-        Op::BrIfNot { cond } => {
+        LpirOp::BrIfNot { cond } => {
             let d = innermost_loop_break_depth(ctrl, *wasm_open)?;
             sink.local_get(cond.0).i32_eqz().br_if(d);
         }
-        Op::Return { values } => {
+        LpirOp::Return { values } => {
             if fctx.frame_size > 0 {
                 let sp = fctx
                     .sp_global
@@ -403,7 +403,7 @@ pub(crate) fn emit_op(
             // drained by subsequent Op::End ops which still run to balance blocks.
             fctx.unreachable_mode = true;
         }
-        Op::Call {
+        LpirOp::Call {
             callee,
             args,
             results,
@@ -460,7 +460,7 @@ pub(crate) fn emit_op(
                 }
             }
         }
-        Op::FconstF32 { dst, value } => match fm {
+        LpirOp::FconstF32 { dst, value } => match fm {
             FloatMode::Q32 => {
                 let q = q32::f32_to_q16_16(*value);
                 sink.i32_const(q).local_set(dst.0);
@@ -469,7 +469,7 @@ pub(crate) fn emit_op(
                 sink.f32_const(Ieee32::from(*value)).local_set(dst.0);
             }
         },
-        Op::Fadd { dst, lhs, rhs } => match fm {
+        LpirOp::Fadd { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 let s = fctx
                     .i64_scratch
@@ -483,7 +483,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fsub { dst, lhs, rhs } => match fm {
+        LpirOp::Fsub { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 let s = fctx
                     .i64_scratch
@@ -497,7 +497,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fmul { dst, lhs, rhs } => match fm {
+        LpirOp::Fmul { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 let s = fctx
                     .i64_scratch
@@ -511,7 +511,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fdiv { dst, lhs, rhs } => match fm {
+        LpirOp::Fdiv { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 q32::emit_q32_fdiv(sink, lhs.0, rhs.0, dst.0);
             }
@@ -522,7 +522,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fneg { dst, src } => match fm {
+        LpirOp::Fneg { dst, src } => match fm {
             FloatMode::Q32 => {
                 sink.i32_const(0)
                     .local_get(src.0)
@@ -533,7 +533,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_neg().local_set(dst.0);
             }
         },
-        Op::Fabs { dst, src } => match fm {
+        LpirOp::Fabs { dst, src } => match fm {
             FloatMode::Q32 => {
                 q32::emit_q32_fabs(sink, src.0, dst.0);
             }
@@ -541,7 +541,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_abs().local_set(dst.0);
             }
         },
-        Op::Fsqrt { dst, src } => match fm {
+        LpirOp::Fsqrt { dst, src } => match fm {
             FloatMode::Q32 => {
                 let callee = imports::import_callee(ir, "lpir", "sqrt")?;
                 let idx = wasm_func_index(fctx, callee)?;
@@ -551,7 +551,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_sqrt().local_set(dst.0);
             }
         },
-        Op::Fmin { dst, lhs, rhs } => match fm {
+        LpirOp::Fmin { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -568,7 +568,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fmax { dst, lhs, rhs } => match fm {
+        LpirOp::Fmax { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -585,7 +585,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Ffloor { dst, src } => match fm {
+        LpirOp::Ffloor { dst, src } => match fm {
             FloatMode::Q32 => {
                 q32::emit_q32_ffloor(sink, src.0, dst.0);
             }
@@ -593,7 +593,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_floor().local_set(dst.0);
             }
         },
-        Op::Fceil { dst, src } => match fm {
+        LpirOp::Fceil { dst, src } => match fm {
             FloatMode::Q32 => {
                 q32::emit_q32_fceil(sink, src.0, dst.0);
             }
@@ -601,7 +601,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_ceil().local_set(dst.0);
             }
         },
-        Op::Ftrunc { dst, src } => match fm {
+        LpirOp::Ftrunc { dst, src } => match fm {
             FloatMode::Q32 => {
                 q32::emit_q32_ftrunc(sink, src.0, dst.0);
             }
@@ -609,7 +609,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_trunc().local_set(dst.0);
             }
         },
-        Op::Fnearest { dst, src } => match fm {
+        LpirOp::Fnearest { dst, src } => match fm {
             FloatMode::Q32 => {
                 let callee = imports::import_callee(ir, "glsl", "round")?;
                 let idx = wasm_func_index(fctx, callee)?;
@@ -619,7 +619,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_nearest().local_set(dst.0);
             }
         },
-        Op::Feq { dst, lhs, rhs } => match fm {
+        LpirOp::Feq { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -633,7 +633,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fne { dst, lhs, rhs } => match fm {
+        LpirOp::Fne { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -647,7 +647,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Flt { dst, lhs, rhs } => match fm {
+        LpirOp::Flt { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -661,7 +661,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fle { dst, lhs, rhs } => match fm {
+        LpirOp::Fle { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -675,7 +675,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fgt { dst, lhs, rhs } => match fm {
+        LpirOp::Fgt { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -689,7 +689,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::Fge { dst, lhs, rhs } => match fm {
+        LpirOp::Fge { dst, lhs, rhs } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -703,7 +703,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
         },
-        Op::FtoiSatS { dst, src } => match fm {
+        LpirOp::FtoiSatS { dst, src } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(src.0)
                     .i32_const(16)
@@ -714,7 +714,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).i32_trunc_sat_f32_s().local_set(dst.0);
             }
         },
-        Op::FtoiSatU { dst, src } => match fm {
+        LpirOp::FtoiSatU { dst, src } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(src.0)
                     .i32_const(16)
@@ -725,7 +725,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).i32_trunc_sat_f32_u().local_set(dst.0);
             }
         },
-        Op::ItofS { dst, src } => match fm {
+        LpirOp::ItofS { dst, src } => match fm {
             FloatMode::Q32 => {
                 let s = fctx
                     .i64_scratch
@@ -736,7 +736,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_convert_i32_s().local_set(dst.0);
             }
         },
-        Op::ItofU { dst, src } => match fm {
+        LpirOp::ItofU { dst, src } => match fm {
             FloatMode::Q32 => {
                 let s = fctx
                     .i64_scratch
@@ -747,7 +747,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_convert_i32_u().local_set(dst.0);
             }
         },
-        Op::FfromI32Bits { dst, src } => match fm {
+        LpirOp::FfromI32Bits { dst, src } => match fm {
             FloatMode::Q32 => {
                 sink.local_get(src.0).local_set(dst.0);
             }
@@ -755,7 +755,7 @@ pub(crate) fn emit_op(
                 sink.local_get(src.0).f32_reinterpret_i32().local_set(dst.0);
             }
         },
-        Op::SlotAddr { dst, slot } => {
+        LpirOp::SlotAddr { dst, slot } => {
             let off = fctx
                 .slot_offsets
                 .get(slot.0 as usize)
@@ -769,7 +769,7 @@ pub(crate) fn emit_op(
                 .i32_add()
                 .local_set(dst.0);
         }
-        Op::Load { dst, base, offset } => {
+        LpirOp::Load { dst, base, offset } => {
             let m = memory::mem_arg0(*offset, 2);
             match vreg_val_ty(func, *dst, fm)? {
                 ValType::I32 => {
@@ -781,7 +781,7 @@ pub(crate) fn emit_op(
                 _ => return Err(String::from("Load: unsupported vreg type")),
             }
         }
-        Op::Store {
+        LpirOp::Store {
             base,
             offset,
             value,
@@ -797,7 +797,7 @@ pub(crate) fn emit_op(
                 _ => return Err(String::from("Store: unsupported vreg type")),
             }
         }
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr,
             src_addr,
             size,

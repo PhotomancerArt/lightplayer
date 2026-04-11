@@ -2,7 +2,7 @@
 
 use alloc::{format, vec::Vec};
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::emit;
@@ -37,7 +37,7 @@ impl WasmArtifact {
 
 /// Compile `ir` using `meta` for export signatures (must match `ir.functions` order and names).
 pub fn compile_lpir(
-    ir: &IrModule,
+    ir: &LpirModule,
     meta: &LpsModuleSig,
     options: &WasmOptions,
 ) -> Result<WasmArtifact, WasmError> {
@@ -56,7 +56,7 @@ pub fn compile_lpir(
     })
 }
 
-fn validate_metadata(ir: &IrModule, meta: &LpsModuleSig) -> Result<(), WasmError> {
+fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmError> {
     if ir.functions.len() != meta.functions.len() {
         return Err(WasmError::metadata_mismatch(format!(
             "IR has {} functions but metadata has {}",
@@ -75,7 +75,7 @@ fn validate_metadata(ir: &IrModule, meta: &LpsModuleSig) -> Result<(), WasmError
     Ok(())
 }
 
-fn collect_exports(ir: &IrModule, meta: &LpsModuleSig, options: &WasmOptions) -> Vec<WasmExport> {
+fn collect_exports(ir: &LpirModule, meta: &LpsModuleSig, options: &WasmOptions) -> Vec<WasmExport> {
     ir.functions
         .iter()
         .zip(meta.functions.iter())

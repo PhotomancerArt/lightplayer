@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::abi::PReg;
@@ -122,7 +122,7 @@ pub struct ModuleAbi {
 
 impl ModuleAbi {
     /// Build from surface signatures and LPIR imports (import return shapes affect caller sret).
-    pub fn from_ir_and_sig(ir: &IrModule, sig: &LpsModuleSig) -> Self {
+    pub fn from_ir_and_sig(ir: &LpirModule, sig: &LpsModuleSig) -> Self {
         use crate::abi::classify::entry_param_scalar_count;
         use crate::isa::rv32::abi::{self, func_abi_rv32};
 
@@ -288,9 +288,9 @@ mod tests {
 
     #[test]
     fn module_abi_empty() {
-        use lpir::IrModule;
+        use lpir::LpirModule;
 
-        let ir = IrModule::default();
+        let ir = LpirModule::default();
         let sig = LpsModuleSig { functions: vec![] };
         let m = super::ModuleAbi::from_ir_and_sig(&ir, &sig);
         assert_eq!(m.max_callee_sret_bytes(), 0);
@@ -299,9 +299,9 @@ mod tests {
 
     #[test]
     fn module_abi_tracks_max_sret() {
-        use lpir::IrModule;
+        use lpir::LpirModule;
 
-        let ir = IrModule::default();
+        let ir = LpirModule::default();
         let sig = LpsModuleSig {
             functions: vec![
                 LpsFnSig {
@@ -326,9 +326,9 @@ mod tests {
     #[test]
     fn module_abi_import_sret_contributes_max() {
         use alloc::string::String;
-        use lpir::{ImportDecl, IrModule, IrType};
+        use lpir::{ImportDecl, LpirModule, IrType};
 
-        let mut ir = IrModule::default();
+        let mut ir = LpirModule::default();
         ir.imports.push(ImportDecl {
             module_name: String::from("b"),
             func_name: String::from("big_ret"),

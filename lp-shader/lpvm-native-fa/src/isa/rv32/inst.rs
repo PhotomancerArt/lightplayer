@@ -1,8 +1,14 @@
 //! Physical-register instructions (`PInst`).
 
-use crate::vinst::SymbolRef;
+use alloc::string::String;
 
 pub use super::gpr::PReg;
+
+/// Callee symbol for relocations (machine layer; distinct from [`crate::vinst::SymbolId`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SymbolRef {
+    pub name: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PInst {

@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{
     ArraySize, BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind,
     TypeInner,
@@ -77,7 +77,7 @@ fn lower_expr_vec_uncached(
                 let mut snapped = VRegVec::new();
                 for (&src, ty) in srcs.iter().zip(ir_tys.iter()) {
                     let dst = ctx.fb.alloc_vreg(*ty);
-                    ctx.fb.push(Op::Copy { dst, src });
+                    ctx.fb.push(LpirOp::Copy { dst, src });
                     snapped.push(dst);
                 }
                 Ok(snapped)
@@ -100,7 +100,7 @@ fn lower_expr_vec_uncached(
                 let mut vregs = VRegVec::new();
                 for (j, ty) in ir_tys.iter().enumerate() {
                     let dst = ctx.fb.alloc_vreg(*ty);
-                    ctx.fb.push(Op::Load {
+                    ctx.fb.push(LpirOp::Load {
                         dst,
                         base: addr,
                         offset: (j * 4) as u32,
@@ -227,7 +227,7 @@ fn lower_expr_vec_uncached(
                                 let t = crate::lower_ctx::naga_scalar_to_ir_type(scalar.kind)?;
                                 let dst = ctx.fb.alloc_vreg(t);
                                 let addr = ctx.arg_vregs_for(*arg_i)?[0];
-                                ctx.fb.push(Op::Load {
+                                ctx.fb.push(LpirOp::Load {
                                     dst,
                                     base: addr,
                                     offset: *index * 4,
@@ -367,7 +367,7 @@ fn lower_expr_vec_uncached(
         Expression::Literal(l) => {
             if let Some(fix) = ctx.array_length_literal_fixes.get(&expr) {
                 let v = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 {
+                ctx.fb.push(LpirOp::IconstI32 {
                     dst: v,
                     value: *fix,
                 });
@@ -562,10 +562,10 @@ fn lower_zero_value_vec(
 fn push_zero_to(ctx: &mut LowerCtx<'_>, dst: VReg, kind: ScalarKind) -> Result<(), LowerError> {
     match kind {
         ScalarKind::Float => {
-            ctx.fb.push(Op::FconstF32 { dst, value: 0.0 });
+            ctx.fb.push(LpirOp::FconstF32 { dst, value: 0.0 });
         }
         ScalarKind::Sint | ScalarKind::Uint | ScalarKind::Bool => {
-            ctx.fb.push(Op::IconstI32 { dst, value: 0 });
+            ctx.fb.push(LpirOp::IconstI32 { dst, value: 0 });
         }
         ScalarKind::AbstractInt | ScalarKind::AbstractFloat => {
             return Err(LowerError::UnsupportedType(String::from(
@@ -602,17 +602,17 @@ fn push_literal(fb: &mut lpir::FunctionBuilder, lit: &Literal) -> Result<VReg, L
     match *lit {
         Literal::F32(v) => {
             let d = fb.alloc_vreg(IrType::F32);
-            fb.push(Op::FconstF32 { dst: d, value: v });
+            fb.push(LpirOp::FconstF32 { dst: d, value: v });
             Ok(d)
         }
         Literal::I32(v) => {
             let d = fb.alloc_vreg(IrType::I32);
-            fb.push(Op::IconstI32 { dst: d, value: v });
+            fb.push(LpirOp::IconstI32 { dst: d, value: v });
             Ok(d)
         }
         Literal::U32(v) => {
             let d = fb.alloc_vreg(IrType::I32);
-            fb.push(Op::IconstI32 {
+            fb.push(LpirOp::IconstI32 {
                 dst: d,
                 value: v as i32,
             });
@@ -620,7 +620,7 @@ fn push_literal(fb: &mut lpir::FunctionBuilder, lit: &Literal) -> Result<VReg, L
         }
         Literal::Bool(b) => {
             let d = fb.alloc_vreg(IrType::I32);
-            fb.push(Op::IconstI32 {
+            fb.push(LpirOp::IconstI32 {
                 dst: d,
                 value: b as i32,
             });
@@ -629,7 +629,7 @@ fn push_literal(fb: &mut lpir::FunctionBuilder, lit: &Literal) -> Result<VReg, L
         Literal::F64(v) => {
             let f = v as f32;
             let d = fb.alloc_vreg(IrType::F32);
-            fb.push(Op::FconstF32 { dst: d, value: f });
+            fb.push(LpirOp::FconstF32 { dst: d, value: f });
             Ok(d)
         }
         _ => Err(LowerError::UnsupportedExpression(format!(
@@ -662,7 +662,7 @@ fn lower_select_vec(
     for i in 0..n {
         let c = cond_vs[i.min(cond_vs.len().saturating_sub(1).max(0))];
         let dst = ctx.fb.alloc_vreg(dst_ty);
-        ctx.fb.push(Op::Select {
+        ctx.fb.push(LpirOp::Select {
             dst,
             cond: c,
             if_true: accept_vs[i],
@@ -745,13 +745,13 @@ fn lower_relational(
                 let next = arg_vs[i];
                 let d = ctx.fb.alloc_vreg(IrType::I32);
                 if fun == RelationalFunction::All {
-                    ctx.fb.push(Op::Iand {
+                    ctx.fb.push(LpirOp::Iand {
                         dst: d,
                         lhs: acc,
                         rhs: next,
                     });
                 } else {
-                    ctx.fb.push(Op::Ior {
+                    ctx.fb.push(LpirOp::Ior {
                         dst: d,
                         lhs: acc,
                         rhs: next,
@@ -772,7 +772,7 @@ fn lower_relational(
             let mut out = VRegVec::new();
             for _ in 0..arg_vs.len() {
                 let b = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::IconstI32 { dst: b, value: 0 });
+                ctx.fb.push(LpirOp::IconstI32 { dst: b, value: 0 });
                 out.push(b);
             }
             Ok(out)
@@ -801,7 +801,7 @@ fn snapshot_load_result_vregs(
     let mut out = VRegVec::new();
     for (&src, ty) in srcs.iter().zip(ir_tys.iter()) {
         let dst = ctx.fb.alloc_vreg(*ty);
-        ctx.fb.push(Op::Copy { dst, src });
+        ctx.fb.push(LpirOp::Copy { dst, src });
         out.push(dst);
     }
     Ok(out)

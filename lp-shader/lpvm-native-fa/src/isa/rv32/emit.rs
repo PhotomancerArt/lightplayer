@@ -16,12 +16,11 @@ use super::encode::{
     encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
+use super::inst::SymbolRef;
 use crate::abi::{FrameLayout, FuncAbi, ModuleAbi, PregSet};
 use crate::error::{LowerError, NativeError};
 use crate::regalloc::{Allocation, GreedyAlloc, LinearScan, PReg};
-use crate::vinst::SymbolRef;
-use crate::vinst::{IcmpCond, LabelId, VInst};
-use lpir::VReg;
+use crate::vinst::{IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
 use lps_shared;
 
 /// Byte offset in `.text` where a relocation applies (at the `auipc` of an auipc+jalr pair).
@@ -109,7 +108,7 @@ fn regs_saved_for_call(alloc: &Allocation, rets: &[VReg], clobber: u32) -> Vec<(
         let Some(p) = po else {
             continue;
         };
-        let v = VReg(vi as u32);
+        let v = VReg(vi as u16);
         if alloc.is_spilled(v) {
             continue;
         }
@@ -129,18 +128,23 @@ fn regs_saved_for_call(alloc: &Allocation, rets: &[VReg], clobber: u32) -> Vec<(
     out
 }
 
-fn max_regs_saved_across_calls(vinsts: &[VInst], alloc: &Allocation, clobber: u32) -> u32 {
+fn max_regs_saved_across_calls(
+    vinsts: &[VInst],
+    alloc: &Allocation,
+    clobber: u32,
+    pool: &[VReg],
+) -> u32 {
     let mut m = 0u32;
     for inst in vinsts {
         if let VInst::Call { rets, .. } = inst {
-            m = m.max(regs_saved_for_call(alloc, rets.as_slice(), clobber).len() as u32);
+            m = m.max(regs_saved_for_call(alloc, rets.vregs(pool), clobber).len() as u32);
         }
     }
     m
 }
 
 /// Max bytes required at `SP+0` for stack-passed arguments across all calls in this function.
-fn max_caller_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
+fn max_caller_outgoing_stack_bytes(vinsts: &[VInst], _pool: &[VReg]) -> u32 {
     let mut max_b = 0u32;
     for inst in vinsts {
         if let VInst::Call {
@@ -278,7 +282,7 @@ impl EmitContext {
             .get(i)
             .copied()
             .flatten()
-            .ok_or_else(|| NativeError::UnassignedVReg(v.0))
+            .ok_or_else(|| NativeError::UnassignedVReg(v.0 as u32))
     }
 
     /// Temporary registers for spill handling and multi-instruction lowering.
@@ -671,6 +675,8 @@ impl EmitContext {
         &mut self,
         inst: &VInst,
         alloc: &Allocation,
+        vreg_pool: &[VReg],
+        symbols: &ModuleSymbols,
         is_sret: bool,
     ) -> Result<(), NativeError> {
         self.current_src_op = inst.src_op();
@@ -967,14 +973,23 @@ impl EmitContext {
                 callee_uses_sret,
                 ..
             } => {
+                let sym = SymbolRef {
+                    name: String::from(symbols.name(*target)),
+                };
                 if *callee_uses_sret {
-                    self.emit_call_sret(alloc, target, args.as_slice(), rets.as_slice(), is_sret)?;
+                    self.emit_call_sret(
+                        alloc,
+                        &sym,
+                        args.vregs(vreg_pool),
+                        rets.vregs(vreg_pool),
+                        is_sret,
+                    )?;
                 } else {
                     self.emit_call_direct(
                         alloc,
-                        target,
-                        args.as_slice(),
-                        rets.as_slice(),
+                        &sym,
+                        args.vregs(vreg_pool),
+                        rets.vregs(vreg_pool),
                         is_sret,
                     )?;
                 }
@@ -985,7 +1000,7 @@ impl EmitContext {
                     // s1 was loaded with the sret buffer address in the prologue
                     // (since a0 may be clobbered during function execution)
                     let base_reg = S1.hw as u32; // s1
-                    for (i, v) in vals.iter().enumerate() {
+                    for (i, v) in vals.vregs(vreg_pool).iter().enumerate() {
                         let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
                         let offset = (i * 4) as i32;
                         // Store each scalar to s1 + offset
@@ -994,7 +1009,7 @@ impl EmitContext {
                     // Return value buffer address is already in a0 per ABI
                 } else {
                     // Direct return: move values to a0-a1
-                    for (i, v) in vals.iter().enumerate() {
+                    for (i, v) in vals.vregs(vreg_pool).iter().enumerate() {
                         let src = self.use_vreg(alloc, *v, Self::TEMP0)? as u32;
                         let dst = RET_REGS[i].hw as u32;
                         if src != dst {
@@ -1015,15 +1030,25 @@ impl EmitContext {
 fn allocate_for_emit(
     func: &lpir::IrFunction,
     vinsts: &[VInst],
+    vreg_pool: &[VReg],
     func_abi: &FuncAbi,
     loop_regions: &[crate::lower::LoopRegion],
     alloc_trace: bool,
+    symbols: &ModuleSymbols,
 ) -> Result<Allocation, NativeError> {
     if crate::config::USE_LINEAR_SCAN_REGALLOC {
-        LinearScan::new().allocate_with_func_abi(func, vinsts, func_abi, loop_regions, alloc_trace)
+        LinearScan::new().allocate_with_func_abi(
+            func,
+            vinsts,
+            func_abi,
+            vreg_pool,
+            loop_regions,
+            alloc_trace,
+            symbols,
+        )
     } else {
         let _ = alloc_trace;
-        GreedyAlloc::new().allocate_with_func_abi(func, vinsts, func_abi)
+        GreedyAlloc::new().allocate_with_func_abi(func, vinsts, func_abi, vreg_pool)
     }
 }
 
@@ -1039,7 +1064,7 @@ fn allocate_for_emit(
 /// * `alloc_trace` - When [`crate::config::USE_LINEAR_SCAN_REGALLOC`] is true, print allocation trace to stderr
 pub fn emit_function_bytes(
     func: &lpir::IrFunction,
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     module_abi: &ModuleAbi,
     fn_sig: &lps_shared::LpsFnSig,
     float_mode: lpir::FloatMode,
@@ -1050,9 +1075,19 @@ pub fn emit_function_bytes(
     let mut lowered = lowered;
     crate::peephole::optimize(&mut lowered.vinsts);
     let vinsts = &lowered.vinsts;
+    let vreg_pool = lowered.vreg_pool.as_slice();
+    let symbols = &lowered.symbols;
     let slots = func.total_param_slots() as usize;
     let func_abi = super::abi::func_abi_rv32(fn_sig, slots);
-    let alloc = allocate_for_emit(func, vinsts, &func_abi, &lowered.loop_regions, alloc_trace)?;
+    let alloc = allocate_for_emit(
+        func,
+        vinsts,
+        vreg_pool,
+        &func_abi,
+        &lowered.loop_regions,
+        alloc_trace,
+        symbols,
+    )?;
     let is_leaf = !vinsts.iter().any(|v| v.is_call());
     let is_sret = func_abi.is_sret();
 
@@ -1075,7 +1110,7 @@ pub fn emit_function_bytes(
     let has_call = vinsts.iter().any(|v| v.is_call());
     let clobber_hw = call_clobber_hw(&func_abi);
     let max_call_saves = if has_call {
-        max_regs_saved_across_calls(vinsts, &alloc, clobber_hw)
+        max_regs_saved_across_calls(vinsts, &alloc, clobber_hw, vreg_pool)
     } else {
         0
     };
@@ -1087,7 +1122,7 @@ pub fn emit_function_bytes(
         .enumerate()
         .map(|(i, s)| (i as u32, s.size))
         .collect();
-    let caller_out_bytes = max_caller_outgoing_stack_bytes(vinsts);
+    let caller_out_bytes = max_caller_outgoing_stack_bytes(vinsts, vreg_pool);
     let frame = FrameLayout::compute(
         &func_abi,
         alloc.spill_count().saturating_add(extra_spill),
@@ -1118,7 +1153,7 @@ pub fn emit_function_bytes(
     let mut ctx = EmitContext::with_frame(frame, debug_info, call_save);
     ctx.emit_prologue(is_sret, &alloc)?;
     for v in vinsts {
-        ctx.emit_vinst(v, &alloc, is_sret)?;
+        ctx.emit_vinst(v, &alloc, vreg_pool, symbols, is_sret)?;
     }
     ctx.resolve_branch_fixups()?;
     ctx.emit_epilogue();
@@ -1137,7 +1172,7 @@ pub fn emit_function_bytes(
 /// * `float_mode` - Floating point mode (Q32 or SoftFloat)
 /// * `alloc_trace` - When true, print allocation trace per function to stderr
 pub fn emit_module_elf(
-    ir: &lpir::IrModule,
+    ir: &lpir::LpirModule,
     sig: &lps_shared::LpsModuleSig,
     float_mode: lpir::FloatMode,
     alloc_trace: bool,
@@ -1239,8 +1274,8 @@ pub fn emit_module_elf(
 }
 
 #[path = "phys_emit.rs"]
-mod phys_emit;
-pub use phys_emit::{PhysEmitter, PhysReloc};
+mod rv32_emit;
+pub use rv32_emit::{PhysEmitter, PhysReloc};
 
 #[cfg(test)]
 mod tests {
@@ -1248,11 +1283,11 @@ mod tests {
     use crate::abi::ModuleAbi;
     use alloc::vec;
 
-    use lpir::{IrFunction, IrModule, Op};
+    use lpir::{IrFunction, LpirModule, LpirOp, VReg};
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
-    fn ir_single(f: IrFunction) -> IrModule {
-        IrModule {
+    fn ir_single(f: IrFunction) -> LpirModule {
+        LpirModule {
             imports: vec![],
             functions: vec![f],
         }
@@ -1325,12 +1360,12 @@ mod tests {
             ],
             slots: vec![],
             body: vec![
-                Op::Iadd {
+                LpirOp::Iadd {
                     dst: VReg(3),
                     lhs: VReg(1),
                     rhs: VReg(2),
                 },
-                Op::Return {
+                LpirOp::Return {
                     values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],
@@ -1345,12 +1380,21 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &leaf_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&leaf_lps_sig(), f.total_param_slots() as usize);
-        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
-            .expect("alloc");
+        let a = allocate_for_emit(
+            &f,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &func_abi,
+            &lowered.loop_regions,
+            false,
+            &lowered.symbols,
+        )
+        .expect("alloc");
         let mut ctx = EmitContext::new(true, false);
         ctx.emit_prologue(false, &a).expect("prologue");
         for i in &lowered.vinsts {
-            ctx.emit_vinst(i, &a, false).expect("emit");
+            ctx.emit_vinst(i, &a, &lowered.vreg_pool, &lowered.symbols, false)
+                .expect("emit");
         }
         ctx.emit_epilogue();
         assert!(ctx.code.len() >= 12);
@@ -1389,12 +1433,12 @@ mod tests {
             vreg_types: vec![lpir::IrType::I32; 4],
             slots: vec![],
             body: vec![
-                Op::Fadd {
+                LpirOp::Fadd {
                     dst: VReg(3),
                     lhs: VReg(1),
                     rhs: VReg(2),
                 },
-                Op::Return {
+                LpirOp::Return {
                     values: lpir::types::VRegRange { start: 0, count: 1 },
                 },
             ],
@@ -1404,12 +1448,21 @@ mod tests {
         let mabi = ModuleAbi::from_ir_and_sig(&ir, &call_c_sig_module());
         let lowered = crate::lower::lower_ops(&f, &ir, &mabi, lpir::FloatMode::Q32).expect("lower");
         let func_abi = func_abi_rv32(&call_test_lps_sig(), f.total_param_slots() as usize);
-        let a = allocate_for_emit(&f, &lowered.vinsts, &func_abi, &lowered.loop_regions, false)
-            .expect("alloc");
+        let a = allocate_for_emit(
+            &f,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &func_abi,
+            &lowered.loop_regions,
+            false,
+            &lowered.symbols,
+        )
+        .expect("alloc");
         let mut ctx = EmitContext::new(false, false);
         ctx.emit_prologue(false, &a).expect("prologue");
         for i in &lowered.vinsts {
-            ctx.emit_vinst(i, &a, false).expect("emit");
+            ctx.emit_vinst(i, &a, &lowered.vreg_pool, &lowered.symbols, false)
+                .expect("emit");
         }
         ctx.emit_epilogue();
         assert_eq!(ctx.relocs.len(), 1);

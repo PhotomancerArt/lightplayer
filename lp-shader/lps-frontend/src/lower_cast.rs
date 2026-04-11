@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{Expression, Handle, ScalarKind, TypeInner};
 
 use crate::lower_ctx::VRegVec;
@@ -54,22 +54,22 @@ pub(crate) fn lower_as_scalar(
     };
     let dst = ctx.fb.alloc_vreg(dst_ty);
     match (src_k, target) {
-        (ScalarKind::Float, ScalarKind::Sint) => ctx.fb.push(Op::FtoiSatS { dst, src: v }),
-        (ScalarKind::Float, ScalarKind::Uint) => ctx.fb.push(Op::FtoiSatU { dst, src: v }),
+        (ScalarKind::Float, ScalarKind::Sint) => ctx.fb.push(LpirOp::FtoiSatS { dst, src: v }),
+        (ScalarKind::Float, ScalarKind::Uint) => ctx.fb.push(LpirOp::FtoiSatU { dst, src: v }),
         (ScalarKind::Sint, ScalarKind::Float) | (ScalarKind::Bool, ScalarKind::Float) => {
-            ctx.fb.push(Op::ItofS { dst, src: v })
+            ctx.fb.push(LpirOp::ItofS { dst, src: v })
         }
-        (ScalarKind::Uint, ScalarKind::Float) => ctx.fb.push(Op::ItofU { dst, src: v }),
+        (ScalarKind::Uint, ScalarKind::Float) => ctx.fb.push(LpirOp::ItofU { dst, src: v }),
         (ScalarKind::Sint, ScalarKind::Uint) | (ScalarKind::Uint, ScalarKind::Sint) => {
-            ctx.fb.push(Op::Copy { dst, src: v })
+            ctx.fb.push(LpirOp::Copy { dst, src: v })
         }
         (ScalarKind::Bool, ScalarKind::Sint) | (ScalarKind::Bool, ScalarKind::Uint) => {
-            ctx.fb.push(Op::Copy { dst, src: v })
+            ctx.fb.push(LpirOp::Copy { dst, src: v })
         }
         (ScalarKind::Sint, ScalarKind::Bool) | (ScalarKind::Uint, ScalarKind::Bool) => {
             let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
-            ctx.fb.push(Op::Ine {
+            ctx.fb.push(LpirOp::IconstI32 { dst: z, value: 0 });
+            ctx.fb.push(LpirOp::Ine {
                 dst,
                 lhs: v,
                 rhs: z,
@@ -77,8 +77,8 @@ pub(crate) fn lower_as_scalar(
         }
         (ScalarKind::Float, ScalarKind::Bool) => {
             let z = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::FconstF32 { dst: z, value: 0.0 });
-            ctx.fb.push(Op::Fne {
+            ctx.fb.push(LpirOp::FconstF32 { dst: z, value: 0.0 });
+            ctx.fb.push(LpirOp::Fne {
                 dst,
                 lhs: v,
                 rhs: z,

@@ -4,7 +4,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{Handle, MathFunction, ScalarKind};
 
 use crate::lower_ctx::{LowerCtx, VRegVec};
@@ -83,13 +83,13 @@ fn lower_math_scalar_impl(
         MathFunction::Floor => {
             let s = ctx.ensure_expr(arg)?;
             let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Ffloor { dst: d, src: s });
+            ctx.fb.push(LpirOp::Ffloor { dst: d, src: s });
             Ok(d)
         }
         MathFunction::Ceil => {
             let s = ctx.ensure_expr(arg)?;
             let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fceil { dst: d, src: s });
+            ctx.fb.push(LpirOp::Fceil { dst: d, src: s });
             Ok(d)
         }
         MathFunction::Round => {
@@ -99,7 +99,7 @@ fn lower_math_scalar_impl(
         MathFunction::Trunc => {
             let s = ctx.ensure_expr(arg)?;
             let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Ftrunc { dst: d, src: s });
+            ctx.fb.push(LpirOp::Ftrunc { dst: d, src: s });
             Ok(d)
         }
         MathFunction::Min => lower_min_max_scalar(ctx, arg, arg1, k0, true),
@@ -174,14 +174,14 @@ fn lower_math_vectorized(
         MathFunction::Abs => map_unary_vregs(ctx, k0, arg, |ctx, k, s| emit_abs(ctx, k, s)),
         MathFunction::Sqrt => std_math_unary_vec(ctx, "lpir", "sqrt", arg),
         MathFunction::Floor => unary_float_op_vec(ctx, arg, |fb, d, s| {
-            fb.push(Op::Ffloor { dst: d, src: s });
+            fb.push(LpirOp::Ffloor { dst: d, src: s });
         }),
         MathFunction::Ceil => unary_float_op_vec(ctx, arg, |fb, d, s| {
-            fb.push(Op::Fceil { dst: d, src: s });
+            fb.push(LpirOp::Fceil { dst: d, src: s });
         }),
         MathFunction::Round => std_math_unary_vec(ctx, "glsl", "round", arg),
         MathFunction::Trunc => unary_float_op_vec(ctx, arg, |fb, d, s| {
-            fb.push(Op::Ftrunc { dst: d, src: s });
+            fb.push(LpirOp::Ftrunc { dst: d, src: s });
         }),
         MathFunction::Min | MathFunction::Max => {
             let is_min = matches!(fun, MathFunction::Min);
@@ -195,8 +195,8 @@ fn lower_math_vectorized(
         MathFunction::Sign => sign_vec(ctx, arg, k0),
         MathFunction::Fract => unary_float_op_vec(ctx, arg, |fb, d, s| {
             let fl = fb.alloc_vreg(IrType::F32);
-            fb.push(Op::Ffloor { dst: fl, src: s });
-            fb.push(Op::Fsub {
+            fb.push(LpirOp::Ffloor { dst: fl, src: s });
+            fb.push(LpirOp::Fsub {
                 dst: d,
                 lhs: s,
                 rhs: fl,
@@ -249,22 +249,22 @@ fn emit_abs(ctx: &mut LowerCtx<'_>, k: ScalarKind, s: VReg) -> Result<VReg, Lowe
     match k {
         ScalarKind::Float => {
             let d = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Fabs { dst: d, src: s });
+            ctx.fb.push(LpirOp::Fabs { dst: d, src: s });
             Ok(d)
         }
         ScalarKind::Sint => {
             let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            ctx.fb.push(LpirOp::IconstI32 { dst: z, value: 0 });
             let neg = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Ineg { dst: neg, src: s });
+            ctx.fb.push(LpirOp::Ineg { dst: neg, src: s });
             let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IltS {
+            ctx.fb.push(LpirOp::IltS {
                 dst: lt,
                 lhs: s,
                 rhs: z,
             });
             let d = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: d,
                 cond: lt,
                 if_true: neg,
@@ -290,21 +290,21 @@ fn emit_min_max_k(
         ScalarKind::Float => {
             let d = ctx.fb.alloc_vreg(IrType::F32);
             if is_min {
-                ctx.fb.push(Op::Fmin { dst: d, lhs, rhs });
+                ctx.fb.push(LpirOp::Fmin { dst: d, lhs, rhs });
             } else {
-                ctx.fb.push(Op::Fmax { dst: d, lhs, rhs });
+                ctx.fb.push(LpirOp::Fmax { dst: d, lhs, rhs });
             }
             Ok(d)
         }
         ScalarKind::Sint => {
             let cmp = ctx.fb.alloc_vreg(IrType::I32);
             if is_min {
-                ctx.fb.push(Op::IltS { dst: cmp, lhs, rhs });
+                ctx.fb.push(LpirOp::IltS { dst: cmp, lhs, rhs });
             } else {
-                ctx.fb.push(Op::IgtS { dst: cmp, lhs, rhs });
+                ctx.fb.push(LpirOp::IgtS { dst: cmp, lhs, rhs });
             }
             let d = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: d,
                 cond: cmp,
                 if_true: lhs,
@@ -315,12 +315,12 @@ fn emit_min_max_k(
         ScalarKind::Uint => {
             let cmp = ctx.fb.alloc_vreg(IrType::I32);
             if is_min {
-                ctx.fb.push(Op::IltU { dst: cmp, lhs, rhs });
+                ctx.fb.push(LpirOp::IltU { dst: cmp, lhs, rhs });
             } else {
-                ctx.fb.push(Op::IgtU { dst: cmp, lhs, rhs });
+                ctx.fb.push(LpirOp::IgtU { dst: cmp, lhs, rhs });
             }
             let d = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: d,
                 cond: cmp,
                 if_true: lhs,
@@ -388,19 +388,19 @@ fn lower_min_max_vec(
 
 fn emit_mix_float(ctx: &mut LowerCtx<'_>, xv: VReg, yv: VReg, tv: VReg) -> VReg {
     let d = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: d,
         lhs: yv,
         rhs: xv,
     });
     let m = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: m,
         lhs: d,
         rhs: tv,
     });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fadd {
+    ctx.fb.push(LpirOp::Fadd {
         dst: r,
         lhs: xv,
         rhs: m,
@@ -474,33 +474,33 @@ fn lower_smoothstep_vregs(
     xv: VReg,
 ) -> Result<VReg, LowerError> {
     let range = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: range,
         lhs: e1v,
         rhs: e0v,
     });
     let raw = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: raw,
         lhs: xv,
         rhs: e0v,
     });
     let div = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
+    ctx.fb.push(LpirOp::Fdiv {
         dst: div,
         lhs: raw,
         rhs: range,
     });
     let z = fconst(ctx, 0.0);
     let lo = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmax {
+    ctx.fb.push(LpirOp::Fmax {
         dst: lo,
         lhs: div,
         rhs: z,
     });
     let one = fconst(ctx, 1.0);
     let t = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmin {
+    ctx.fb.push(LpirOp::Fmin {
         dst: t,
         lhs: lo,
         rhs: one,
@@ -508,25 +508,25 @@ fn lower_smoothstep_vregs(
     let two = fconst(ctx, 2.0);
     let three = fconst(ctx, 3.0);
     let t2 = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: t2,
         lhs: t,
         rhs: t,
     });
     let twot = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: twot,
         lhs: two,
         rhs: t,
     });
     let diff = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: diff,
         lhs: three,
         rhs: twot,
     });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: r,
         lhs: t2,
         rhs: diff,
@@ -547,7 +547,7 @@ fn lower_step_scalar(
 
 fn emit_step_vregs(ctx: &mut LowerCtx<'_>, ev: VReg, xv: VReg) -> VReg {
     let cmp = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Fge {
+    ctx.fb.push(LpirOp::Fge {
         dst: cmp,
         lhs: xv,
         rhs: ev,
@@ -555,7 +555,7 @@ fn emit_step_vregs(ctx: &mut LowerCtx<'_>, ev: VReg, xv: VReg) -> VReg {
     let one = fconst(ctx, 1.0);
     let zero = fconst(ctx, 0.0);
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Select {
+    ctx.fb.push(LpirOp::Select {
         dst: r,
         cond: cmp,
         if_true: one,
@@ -580,13 +580,13 @@ fn lower_fma_scalar(
 
 fn emit_fma_vregs(ctx: &mut LowerCtx<'_>, av: VReg, bv: VReg, cv: VReg) -> VReg {
     let m = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: m,
         lhs: av,
         rhs: bv,
     });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fadd {
+    ctx.fb.push(LpirOp::Fadd {
         dst: r,
         lhs: m,
         rhs: cv,
@@ -630,13 +630,13 @@ fn lower_clamp_scalar(
 
 fn emit_clamp_float(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg) -> VReg {
     let t = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmax {
+    ctx.fb.push(LpirOp::Fmax {
         dst: t,
         lhs: xv,
         rhs: lov,
     });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmin {
+    ctx.fb.push(LpirOp::Fmin {
         dst: r,
         lhs: t,
         rhs: hiv,
@@ -647,20 +647,20 @@ fn emit_clamp_float(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg) -> V
 fn emit_clamp_int(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg, signed: bool) -> VReg {
     let lt = ctx.fb.alloc_vreg(IrType::I32);
     if signed {
-        ctx.fb.push(Op::IltS {
+        ctx.fb.push(LpirOp::IltS {
             dst: lt,
             lhs: xv,
             rhs: lov,
         });
     } else {
-        ctx.fb.push(Op::IltU {
+        ctx.fb.push(LpirOp::IltU {
             dst: lt,
             lhs: xv,
             rhs: lov,
         });
     }
     let t = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Select {
+    ctx.fb.push(LpirOp::Select {
         dst: t,
         cond: lt,
         if_true: lov,
@@ -668,20 +668,20 @@ fn emit_clamp_int(ctx: &mut LowerCtx<'_>, xv: VReg, lov: VReg, hiv: VReg, signed
     });
     let gt = ctx.fb.alloc_vreg(IrType::I32);
     if signed {
-        ctx.fb.push(Op::IgtS {
+        ctx.fb.push(LpirOp::IgtS {
             dst: gt,
             lhs: t,
             rhs: hiv,
         });
     } else {
-        ctx.fb.push(Op::IgtU {
+        ctx.fb.push(LpirOp::IgtU {
             dst: gt,
             lhs: t,
             rhs: hiv,
         });
     }
     let r = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Select {
+    ctx.fb.push(LpirOp::Select {
         dst: r,
         cond: gt,
         if_true: hiv,
@@ -697,27 +697,27 @@ fn emit_sign(ctx: &mut LowerCtx<'_>, k: ScalarKind, x: VReg) -> Result<VReg, Low
             let one = fconst(ctx, 1.0);
             let neg1 = fconst(ctx, -1.0);
             let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Fgt {
+            ctx.fb.push(LpirOp::Fgt {
                 dst: gt,
                 lhs: x,
                 rhs: zero,
             });
             let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Flt {
+            ctx.fb.push(LpirOp::Flt {
                 dst: lt,
                 lhs: x,
                 rhs: zero,
             });
             let z = fconst(ctx, 0.0);
             let r1 = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: r1,
                 cond: gt,
                 if_true: one,
                 if_false: z,
             });
             let r = ctx.fb.alloc_vreg(IrType::F32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: r,
                 cond: lt,
                 if_true: neg1,
@@ -727,35 +727,35 @@ fn emit_sign(ctx: &mut LowerCtx<'_>, k: ScalarKind, x: VReg) -> Result<VReg, Low
         }
         ScalarKind::Sint => {
             let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            ctx.fb.push(LpirOp::IconstI32 { dst: z, value: 0 });
             let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtS {
+            ctx.fb.push(LpirOp::IgtS {
                 dst: gt,
                 lhs: x,
                 rhs: z,
             });
             let lt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IltS {
+            ctx.fb.push(LpirOp::IltS {
                 dst: lt,
                 lhs: x,
                 rhs: z,
             });
             let one = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
+            ctx.fb.push(LpirOp::IconstI32 { dst: one, value: 1 });
             let neg1 = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 {
+            ctx.fb.push(LpirOp::IconstI32 {
                 dst: neg1,
                 value: -1,
             });
             let r1 = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: r1,
                 cond: gt,
                 if_true: one,
                 if_false: z,
             });
             let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: r,
                 cond: lt,
                 if_true: neg1,
@@ -765,17 +765,17 @@ fn emit_sign(ctx: &mut LowerCtx<'_>, k: ScalarKind, x: VReg) -> Result<VReg, Low
         }
         ScalarKind::Uint => {
             let z = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: z, value: 0 });
+            ctx.fb.push(LpirOp::IconstI32 { dst: z, value: 0 });
             let gt = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IgtU {
+            ctx.fb.push(LpirOp::IgtU {
                 dst: gt,
                 lhs: x,
                 rhs: z,
             });
             let one = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::IconstI32 { dst: one, value: 1 });
+            ctx.fb.push(LpirOp::IconstI32 { dst: one, value: 1 });
             let r = ctx.fb.alloc_vreg(IrType::I32);
-            ctx.fb.push(Op::Select {
+            ctx.fb.push(LpirOp::Select {
                 dst: r,
                 cond: gt,
                 if_true: one,
@@ -791,9 +791,9 @@ fn emit_sign(ctx: &mut LowerCtx<'_>, k: ScalarKind, x: VReg) -> Result<VReg, Low
 
 fn emit_fract_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError> {
     let fl = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Ffloor { dst: fl, src: x });
+    ctx.fb.push(LpirOp::Ffloor { dst: fl, src: x });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fsub {
+    ctx.fb.push(LpirOp::Fsub {
         dst: r,
         lhs: x,
         rhs: fl,
@@ -805,7 +805,7 @@ fn emit_inverse_sqrt_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerE
     let sq = push_import_call(ctx, "lpir", "sqrt", &[x])?;
     let one = fconst(ctx, 1.0);
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fdiv {
+    ctx.fb.push(LpirOp::Fdiv {
         dst: r,
         lhs: one,
         rhs: sq,
@@ -817,13 +817,13 @@ fn emit_saturate_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError
     let z = fconst(ctx, 0.0);
     let one = fconst(ctx, 1.0);
     let t = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmax {
+    ctx.fb.push(LpirOp::Fmax {
         dst: t,
         lhs: x,
         rhs: z,
     });
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmin {
+    ctx.fb.push(LpirOp::Fmin {
         dst: r,
         lhs: t,
         rhs: one,
@@ -834,7 +834,7 @@ fn emit_saturate_f32(ctx: &mut LowerCtx<'_>, x: VReg) -> Result<VReg, LowerError
 fn emit_scale_f32(ctx: &mut LowerCtx<'_>, x: VReg, factor: f32) -> Result<VReg, LowerError> {
     let fac = fconst(ctx, factor);
     let r = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::Fmul {
+    ctx.fb.push(LpirOp::Fmul {
         dst: r,
         lhs: x,
         rhs: fac,

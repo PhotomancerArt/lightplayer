@@ -4,7 +4,7 @@ use crate::types::{CalleeRef, SlotId, VReg, VRegRange};
 
 /// One instruction in the flat per-function op stream.
 #[derive(Clone, Debug)]
-pub enum Op {
+pub enum LpirOp {
     // --- Float arithmetic ---
     Fadd {
         dst: VReg,

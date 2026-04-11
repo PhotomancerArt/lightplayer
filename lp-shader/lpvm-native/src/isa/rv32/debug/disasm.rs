@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::String;
 
 use lp_riscv_inst::format_instruction;
-use lpir::{IrFunction, Op, VRegRange};
+use lpir::{IrFunction, LpirOp, VRegRange};
 
 use super::LineTable;
 
@@ -18,27 +18,27 @@ pub struct DisasmOptions {
     pub show_hex_offset: bool,
 }
 
-fn format_lpir_op(op: &Op, func: &IrFunction) -> String {
+fn format_lpir_op(op: &LpirOp, func: &IrFunction) -> String {
     match op {
-        Op::Iadd { dst, lhs, rhs } => {
+        LpirOp::Iadd { dst, lhs, rhs } => {
             format!("v{} = iadd v{}, v{}", dst.0, lhs.0, rhs.0)
         }
-        Op::Isub { dst, lhs, rhs } => {
+        LpirOp::Isub { dst, lhs, rhs } => {
             format!("v{} = isub v{}, v{}", dst.0, lhs.0, rhs.0)
         }
-        Op::Imul { dst, lhs, rhs } => {
+        LpirOp::Imul { dst, lhs, rhs } => {
             format!("v{} = imul v{}, v{}", dst.0, lhs.0, rhs.0)
         }
-        Op::IconstI32 { dst, value } => format!("v{} = iconst {}", dst.0, value),
-        Op::Copy { dst, src } => format!("v{} = copy v{}", dst.0, src.0),
-        Op::Return { values } => format_return(*values, func),
-        Op::Fadd { dst, lhs, rhs } => {
+        LpirOp::IconstI32 { dst, value } => format!("v{} = iconst {}", dst.0, value),
+        LpirOp::Copy { dst, src } => format!("v{} = copy v{}", dst.0, src.0),
+        LpirOp::Return { values } => format_return(*values, func),
+        LpirOp::Fadd { dst, lhs, rhs } => {
             format!("v{} = fadd v{}, v{}", dst.0, lhs.0, rhs.0)
         }
-        Op::Fsub { dst, lhs, rhs } => {
+        LpirOp::Fsub { dst, lhs, rhs } => {
             format!("v{} = fsub v{}, v{}", dst.0, lhs.0, rhs.0)
         }
-        Op::Fmul { dst, lhs, rhs } => {
+        LpirOp::Fmul { dst, lhs, rhs } => {
             format!("v{} = fmul v{}, v{}", dst.0, lhs.0, rhs.0)
         }
         _ => format!("{op:?}"),
@@ -132,7 +132,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec;
     use lpir::types::VRegRange;
-    use lpir::{IrFunction, IrType, Op, VReg};
+    use lpir::{IrFunction, IrType, LpirOp, VReg};
 
     #[test]
     fn disassemble_shows_lpir_comment() {
@@ -145,12 +145,12 @@ mod tests {
             vreg_types: vec![IrType::I32; 4],
             slots: vec![],
             body: vec![
-                Op::Iadd {
+                LpirOp::Iadd {
                     dst: VReg(3),
                     lhs: VReg(1),
                     rhs: VReg(2),
                 },
-                Op::Return {
+                LpirOp::Return {
                     values: VRegRange { start: 3, count: 1 },
                 },
             ],

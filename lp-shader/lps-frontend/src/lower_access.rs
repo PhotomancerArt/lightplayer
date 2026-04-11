@@ -2,7 +2,7 @@
 
 use alloc::format;
 use alloc::string::String;
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{Expression, Handle, Scalar, TypeInner, VectorSize};
 
 use crate::lower_ctx::{LowerCtx, VRegVec, naga_scalar_to_ir_type, vector_size_usize};
@@ -28,18 +28,18 @@ pub(crate) fn select_lane_dynamic(
     let mut acc = lanes[n - 1];
     for j in (0..n - 1).rev() {
         let j_imm = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::IconstI32 {
+        ctx.fb.push(LpirOp::IconstI32 {
             dst: j_imm,
             value: j as i32,
         });
         let eq = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Ieq {
+        ctx.fb.push(LpirOp::Ieq {
             dst: eq,
             lhs: index_i32,
             rhs: j_imm,
         });
         let out = ctx.fb.alloc_vreg(lane_ty);
-        ctx.fb.push(Op::Select {
+        ctx.fb.push(LpirOp::Select {
             dst: out,
             cond: eq,
             if_true: lanes[j],
@@ -60,19 +60,19 @@ fn merge_flat_index_store(
 ) -> Result<(), LowerError> {
     for k in 0..cells.len() {
         let eq = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::IeqImm {
+        ctx.fb.push(LpirOp::IeqImm {
             dst: eq,
             src: flat_v,
             imm: k as i32,
         });
         let merged = ctx.fb.alloc_vreg(lane_ty);
-        ctx.fb.push(Op::Select {
+        ctx.fb.push(LpirOp::Select {
             dst: merged,
             cond: eq,
             if_true: new_val,
             if_false: cells[k],
         });
-        ctx.fb.push(Op::Copy {
+        ctx.fb.push(LpirOp::Copy {
             dst: cells[k],
             src: merged,
         });
@@ -110,18 +110,18 @@ fn matrix_column_pick_row(
     for c in (0..ncols - 1).rev() {
         let flat_i = c * nrows + row;
         let c_imm = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::IconstI32 {
+        ctx.fb.push(LpirOp::IconstI32 {
             dst: c_imm,
             value: c as i32,
         });
         let eq = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Ieq {
+        ctx.fb.push(LpirOp::Ieq {
             dst: eq,
             lhs: col_v,
             rhs: c_imm,
         });
         let out = ctx.fb.alloc_vreg(lane_ty);
-        ctx.fb.push(Op::Select {
+        ctx.fb.push(LpirOp::Select {
             dst: out,
             cond: eq,
             if_true: flat[flat_i],
@@ -168,24 +168,24 @@ fn store_matrix_column_dynamic(
         )));
     }
     let nrows_imm = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: nrows_imm,
         value: nrows as i32,
     });
     for r in 0..nrows {
         let mul = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Imul {
+        ctx.fb.push(LpirOp::Imul {
             dst: mul,
             lhs: col_v,
             rhs: nrows_imm,
         });
         let r_imm = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::IconstI32 {
+        ctx.fb.push(LpirOp::IconstI32 {
             dst: r_imm,
             value: r as i32,
         });
         let flat_v = ctx.fb.alloc_vreg(IrType::I32);
-        ctx.fb.push(Op::Iadd {
+        ctx.fb.push(LpirOp::Iadd {
             dst: flat_v,
             lhs: mul,
             rhs: r_imm,
@@ -206,18 +206,18 @@ fn store_matrix_element_dynamic(
     lane_ty: IrType,
 ) -> Result<(), LowerError> {
     let nrows_imm = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::IconstI32 {
+    ctx.fb.push(LpirOp::IconstI32 {
         dst: nrows_imm,
         value: nrows as i32,
     });
     let mul = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Imul {
+    ctx.fb.push(LpirOp::Imul {
         dst: mul,
         lhs: col_v,
         rhs: nrows_imm,
     });
     let flat_v = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(Op::Iadd {
+    ctx.fb.push(LpirOp::Iadd {
         dst: flat_v,
         lhs: mul,
         rhs: row_v,
@@ -236,7 +236,7 @@ fn load_inout_vector_lanes(
     let mut v = VRegVec::new();
     for j in 0..n {
         let dst = ctx.fb.alloc_vreg(lane_ty);
-        ctx.fb.push(Op::Load {
+        ctx.fb.push(LpirOp::Load {
             dst,
             base: addr,
             offset: (j * 4) as u32,
@@ -253,7 +253,7 @@ fn store_inout_vector_lanes(
 ) -> Result<(), LowerError> {
     let addr = ctx.arg_vregs_for(arg_i)?[0];
     for (j, &val) in lanes.iter().enumerate() {
-        ctx.fb.push(Op::Store {
+        ctx.fb.push(LpirOp::Store {
             base: addr,
             offset: (j * 4) as u32,
             value: val,

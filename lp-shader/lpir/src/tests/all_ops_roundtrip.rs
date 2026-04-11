@@ -1,11 +1,11 @@
-//! Module that exercises every [`crate::op::Op`] variant for print/parse round-trip tests.
+//! Module that exercises every [`crate::lpir_op::LpirOp`] variant for print/parse round-trip tests.
 
 use crate::builder::{FunctionBuilder, ModuleBuilder};
-use crate::module::{IrModule, VMCTX_VREG};
-use crate::op::Op;
+use crate::lpir_module::{LpirModule, VMCTX_VREG};
+use crate::lpir_op::LpirOp;
 use crate::types::IrType;
 
-pub(crate) fn module_all_ops() -> IrModule {
+pub(crate) fn module_all_ops() -> LpirModule {
     let mut mb = ModuleBuilder::new();
     let mut id_b = FunctionBuilder::new("id_i32", &[IrType::I32]);
     let id_arg = id_b.add_param(IrType::I32);
@@ -15,26 +15,26 @@ pub(crate) fn module_all_ops() -> IrModule {
     let mut b = FunctionBuilder::new("all_ops", &[IrType::F32]);
 
     let f1 = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: f1,
         value: 1.0,
     });
     let f2 = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: f2,
         value: 2.0,
     });
 
     let i0 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: i0, value: 0 });
+    b.push(LpirOp::IconstI32 { dst: i0, value: 0 });
     let i1 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: i1, value: 1 });
+    b.push(LpirOp::IconstI32 { dst: i1, value: 1 });
     let i2 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: i2, value: 2 });
+    b.push(LpirOp::IconstI32 { dst: i2, value: 2 });
     let i3 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: i3, value: 3 });
+    b.push(LpirOp::IconstI32 { dst: i3, value: 3 });
     let im1 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 {
+    b.push(LpirOp::IconstI32 {
         dst: im1,
         value: -1,
     });
@@ -42,7 +42,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     macro_rules! fop {
         ($op:ident) => {{
             let d = b.alloc_vreg(IrType::F32);
-            b.push(Op::$op {
+            b.push(LpirOp::$op {
                 dst: d,
                 lhs: f1,
                 rhs: f2,
@@ -54,7 +54,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     fop!(Fmul);
     fop!(Fdiv);
     let fneg_d = b.alloc_vreg(IrType::F32);
-    b.push(Op::Fneg {
+    b.push(LpirOp::Fneg {
         dst: fneg_d,
         src: f1,
     });
@@ -62,7 +62,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     macro_rules! unary_f {
         ($op:ident, $src:expr) => {{
             let d = b.alloc_vreg(IrType::F32);
-            b.push(Op::$op { dst: d, src: $src });
+            b.push(LpirOp::$op { dst: d, src: $src });
         }};
     }
     unary_f!(Fabs, f1);
@@ -77,7 +77,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     macro_rules! icmp {
         ($op:ident) => {{
             let d = b.alloc_vreg(IrType::I32);
-            b.push(Op::$op {
+            b.push(LpirOp::$op {
                 dst: d,
                 lhs: i1,
                 rhs: i2,
@@ -94,7 +94,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     macro_rules! iop {
         ($op:ident) => {{
             let d = b.alloc_vreg(IrType::I32);
-            b.push(Op::$op {
+            b.push(LpirOp::$op {
                 dst: d,
                 lhs: i2,
                 rhs: i3,
@@ -109,7 +109,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     iop!(IremS);
     iop!(IremU);
     let ineg_d = b.alloc_vreg(IrType::I32);
-    b.push(Op::Ineg {
+    b.push(LpirOp::Ineg {
         dst: ineg_d,
         src: i1,
     });
@@ -129,7 +129,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     iop!(Ior);
     iop!(Ixor);
     let ibnot_d = b.alloc_vreg(IrType::I32);
-    b.push(Op::Ibnot {
+    b.push(LpirOp::Ibnot {
         dst: ibnot_d,
         src: i1,
     });
@@ -140,7 +140,7 @@ pub(crate) fn module_all_ops() -> IrModule {
     macro_rules! imm {
         ($op:ident, $imm:expr) => {{
             let d = b.alloc_vreg(IrType::I32);
-            b.push(Op::$op {
+            b.push(LpirOp::$op {
                 dst: d,
                 src: i2,
                 imm: $imm,
@@ -156,36 +156,36 @@ pub(crate) fn module_all_ops() -> IrModule {
     imm!(IeqImm, 2);
 
     let fts = b.alloc_vreg(IrType::I32);
-    b.push(Op::FtoiSatS { dst: fts, src: f1 });
+    b.push(LpirOp::FtoiSatS { dst: fts, src: f1 });
     let ftu = b.alloc_vreg(IrType::I32);
-    b.push(Op::FtoiSatU { dst: ftu, src: f2 });
+    b.push(LpirOp::FtoiSatU { dst: ftu, src: f2 });
     let itfs = b.alloc_vreg(IrType::F32);
-    b.push(Op::ItofS { dst: itfs, src: i1 });
+    b.push(LpirOp::ItofS { dst: itfs, src: i1 });
     let itfu = b.alloc_vreg(IrType::F32);
-    b.push(Op::ItofU { dst: itfu, src: i2 });
+    b.push(LpirOp::ItofU { dst: itfu, src: i2 });
     let fbits_d = b.alloc_vreg(IrType::F32);
-    b.push(Op::FfromI32Bits {
+    b.push(LpirOp::FfromI32Bits {
         dst: fbits_d,
         src: i1,
     });
 
     let sel_c = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 {
+    b.push(LpirOp::IconstI32 {
         dst: sel_c,
         value: 1,
     });
     let sel_t = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: sel_t,
         value: 5.0,
     });
     let sel_f = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: sel_f,
         value: 6.0,
     });
     let sel_d = b.alloc_vreg(IrType::F32);
-    b.push(Op::Select {
+    b.push(LpirOp::Select {
         dst: sel_d,
         cond: sel_c,
         if_true: sel_t,
@@ -193,28 +193,28 @@ pub(crate) fn module_all_ops() -> IrModule {
     });
 
     let cpy_d = b.alloc_vreg(IrType::F32);
-    b.push(Op::Copy {
+    b.push(LpirOp::Copy {
         dst: cpy_d,
         src: f1,
     });
 
     let slot = b.alloc_slot(16);
     let base = b.alloc_vreg(IrType::I32);
-    b.push(Op::SlotAddr { dst: base, slot });
-    b.push(Op::Store {
+    b.push(LpirOp::SlotAddr { dst: base, slot });
+    b.push(LpirOp::Store {
         base,
         offset: 0,
         value: f1,
     });
     let loaded = b.alloc_vreg(IrType::F32);
-    b.push(Op::Load {
+    b.push(LpirOp::Load {
         dst: loaded,
         base,
         offset: 0,
     });
     let base2 = b.alloc_vreg(IrType::I32);
-    b.push(Op::SlotAddr { dst: base2, slot });
-    b.push(Op::Memcpy {
+    b.push(LpirOp::SlotAddr { dst: base2, slot });
+    b.push(LpirOp::Memcpy {
         dst_addr: base2,
         src_addr: base,
         size: 16,
@@ -222,39 +222,39 @@ pub(crate) fn module_all_ops() -> IrModule {
 
     b.push_if(sel_c);
     let ifv = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: ifv,
         value: 7.0,
     });
     b.push_else();
     let elsv = b.alloc_vreg(IrType::F32);
-    b.push(Op::FconstF32 {
+    b.push(LpirOp::FconstF32 {
         dst: elsv,
         value: 8.0,
     });
     b.end_if();
 
     b.push_loop();
-    b.push(Op::BrIfNot { cond: i0 });
-    b.push(Op::Continue);
+    b.push(LpirOp::BrIfNot { cond: i0 });
+    b.push(LpirOp::Continue);
     b.end_loop();
 
     b.push_loop();
-    b.push(Op::Break);
+    b.push(LpirOp::Break);
     b.end_loop();
 
     b.push_switch(i1);
     b.push_case(0);
     let z0 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: z0, value: 0 });
+    b.push(LpirOp::IconstI32 { dst: z0, value: 0 });
     b.end_switch_arm();
     b.push_case(1);
     let z1 = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: z1, value: 42 });
+    b.push(LpirOp::IconstI32 { dst: z1, value: 42 });
     b.end_switch_arm();
     b.push_default();
     let zd = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: zd, value: -1 });
+    b.push(LpirOp::IconstI32 { dst: zd, value: -1 });
     b.end_switch_arm();
     b.end_switch();
 

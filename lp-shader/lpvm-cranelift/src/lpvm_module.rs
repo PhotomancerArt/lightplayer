@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use cranelift_codegen::ir::Signature;
 use lpir::FloatMode;
-use lpir::module::IrModule;
+use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::compile_options::CompileOptions;
@@ -29,7 +29,7 @@ unsafe impl Sync for CraneliftModule {}
 impl CraneliftModule {
     /// Compile an LPIR module into a Cranelift JIT module.
     pub(crate) fn compile(
-        ir: &IrModule,
+        ir: &LpirModule,
         meta: &LpsModuleSig,
         options: CompileOptions,
     ) -> Result<Self, CompilerError> {
@@ -62,7 +62,7 @@ impl CraneliftModule {
         self.0.finalized_ptr(name)
     }
 
-    /// Raw finalized code pointer for a function index (same order as source [`IrModule::functions`]).
+    /// Raw finalized code pointer for a function index (same order as source [`LpirModule::functions`]).
     pub fn finalized_ptr_by_index(&self, index: usize) -> *const u8 {
         self.0.finalized_ptr_by_index(index)
     }

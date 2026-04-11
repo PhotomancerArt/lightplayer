@@ -5,7 +5,7 @@ use alloc::string::String;
 
 use alloc::vec::Vec;
 
-use lpir::{IrType, Op, SlotId, VMCTX_VREG};
+use lpir::{IrType, LpirOp, SlotId, VMCTX_VREG};
 use naga::{Block, Expression, Handle, LocalVariable, Statement, SwitchValue, TypeInner};
 
 use crate::lower_access;
@@ -74,22 +74,22 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
             if let Some(cond) = break_if {
                 let c = ctx.ensure_expr(*cond)?;
                 let neg = ctx.fb.alloc_vreg(lpir::IrType::I32);
-                ctx.fb.push(Op::IeqImm {
+                ctx.fb.push(LpirOp::IeqImm {
                     dst: neg,
                     src: c,
                     imm: 0,
                 });
-                ctx.fb.push(Op::BrIfNot { cond: neg });
+                ctx.fb.push(LpirOp::BrIfNot { cond: neg });
             }
             ctx.fb.end_loop();
             Ok(())
         }
         Statement::Break => {
-            ctx.fb.push(Op::Break);
+            ctx.fb.push(LpirOp::Break);
             Ok(())
         }
         Statement::Continue => {
-            ctx.fb.push(Op::Continue);
+            ctx.fb.push(LpirOp::Continue);
             Ok(())
         }
         Statement::Return { value } => match value {
@@ -180,7 +180,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                         srcs.len()
                                     )));
                                 }
-                                ctx.fb.push(Op::Copy {
+                                ctx.fb.push(LpirOp::Copy {
                                     dst: dsts[comp],
                                     src: srcs[0],
                                 });
@@ -208,7 +208,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                     coerce_assignment_vregs(ctx, None, &col_ty, *value, raw)?;
                                 for r in 0..nrows {
                                     let flat_i = col * nrows + r;
-                                    ctx.fb.push(Op::Copy {
+                                    ctx.fb.push(LpirOp::Copy {
                                         dst: dsts[flat_i],
                                         src: srcs[r],
                                     });
@@ -242,7 +242,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 srcs.len()
                             )));
                         }
-                        ctx.fb.push(Op::Store {
+                        ctx.fb.push(LpirOp::Store {
                             base: addr,
                             offset: *index * 4,
                             value: srcs[0],
@@ -295,7 +295,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                                 srcs.len()
                             )));
                         }
-                        ctx.fb.push(Op::Copy {
+                        ctx.fb.push(LpirOp::Copy {
                             dst: dsts[flat_i],
                             src: srcs[0],
                         });
@@ -355,7 +355,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                     )));
                 }
                 for (d, s) in dsts.iter().zip(srcs.iter()) {
-                    ctx.fb.push(Op::Copy { dst: *d, src: *s });
+                    ctx.fb.push(LpirOp::Copy { dst: *d, src: *s });
                 }
                 Ok(())
             }
@@ -373,7 +373,7 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                     )));
                 }
                 for (j, src) in srcs.iter().enumerate() {
-                    ctx.fb.push(Op::Store {
+                    ctx.fb.push(LpirOp::Store {
                         base: addr,
                         offset: (j * 4) as u32,
                         value: *src,
@@ -529,9 +529,9 @@ fn lower_user_call(
                 let ir_tys = naga_type_to_ir_types(base_inner)?;
                 let slot = ctx.fb.alloc_slot(ir_tys.len() as u32 * 4);
                 let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-                ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+                ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
                 for (j, &src) in local_vregs.iter().enumerate() {
-                    ctx.fb.push(Op::Store {
+                    ctx.fb.push(LpirOp::Store {
                         base: addr,
                         offset: (j * 4) as u32,
                         value: src,
@@ -583,12 +583,12 @@ fn lower_user_call(
     for (lv, slot) in &inout_copybacks {
         let local_vregs = ctx.resolve_local(*lv)?;
         let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-        ctx.fb.push(Op::SlotAddr {
+        ctx.fb.push(LpirOp::SlotAddr {
             dst: addr,
             slot: *slot,
         });
         for (j, dst_v) in local_vregs.iter().enumerate() {
-            ctx.fb.push(Op::Load {
+            ctx.fb.push(LpirOp::Load {
                 dst: *dst_v,
                 base: addr,
                 offset: (j * 4) as u32,

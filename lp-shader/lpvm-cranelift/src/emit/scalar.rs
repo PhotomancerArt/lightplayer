@@ -4,8 +4,8 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{InstBuilder, StackSlotData, StackSlotKind, types};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use lpir::FloatMode;
-use lpir::module::IrFunction;
-use lpir::op::Op;
+use lpir::lpir_module::IrFunction;
+use lpir::lpir_op::LpirOp;
 use lpir::types::IrType;
 
 fn q32_lpir_refs<'a>(ctx: &'a EmitCtx<'_>) -> Result<&'a super::LpirBuiltinRefs, CompileError> {
@@ -15,14 +15,14 @@ fn q32_lpir_refs<'a>(ctx: &'a EmitCtx<'_>) -> Result<&'a super::LpirBuiltinRefs,
 }
 
 pub(crate) fn emit_scalar(
-    op: &Op,
+    op: &LpirOp,
     func: &IrFunction,
     builder: &mut FunctionBuilder,
     vars: &[Variable],
     ctx: &EmitCtx,
 ) -> Result<bool, CompileError> {
     match op {
-        Op::Fadd { dst, lhs, rhs } => {
+        LpirOp::Fadd { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -35,7 +35,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fsub { dst, lhs, rhs } => {
+        LpirOp::Fsub { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -48,7 +48,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fmul { dst, lhs, rhs } => {
+        LpirOp::Fmul { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -61,7 +61,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fdiv { dst, lhs, rhs } => {
+        LpirOp::Fdiv { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -74,7 +74,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fneg { dst, src } => {
+        LpirOp::Fneg { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fneg(a)),
@@ -84,7 +84,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fabs { dst, src } => {
+        LpirOp::Fabs { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().fabs(a)),
@@ -94,7 +94,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fsqrt { dst, src } => {
+        LpirOp::Fsqrt { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().sqrt(a)),
@@ -106,7 +106,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fmin { dst, lhs, rhs } => {
+        LpirOp::Fmin { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -117,7 +117,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fmax { dst, lhs, rhs } => {
+        LpirOp::Fmax { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -128,7 +128,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Ffloor { dst, src } => {
+        LpirOp::Ffloor { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().floor(a)),
@@ -138,7 +138,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fceil { dst, src } => {
+        LpirOp::Fceil { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().ceil(a)),
@@ -148,7 +148,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Ftrunc { dst, src } => {
+        LpirOp::Ftrunc { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().trunc(a)),
@@ -158,7 +158,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fnearest { dst, src } => {
+        LpirOp::Fnearest { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| bd.ins().nearest(a)),
@@ -170,7 +170,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Iadd { dst, lhs, rhs } => {
+        LpirOp::Iadd { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| {
@@ -186,75 +186,75 @@ pub(crate) fn emit_scalar(
                 bd.ins().iadd(a, b)
             });
         }
-        Op::Isub { dst, lhs, rhs } => {
+        LpirOp::Isub { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().isub(a, b));
         }
-        Op::Imul { dst, lhs, rhs } => {
+        LpirOp::Imul { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().imul(a, b));
         }
-        Op::IdivS { dst, lhs, rhs } => {
+        LpirOp::IdivS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().sdiv(a, b));
         }
-        Op::IdivU { dst, lhs, rhs } => {
+        LpirOp::IdivU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().udiv(a, b));
         }
-        Op::IremS { dst, lhs, rhs } => {
+        LpirOp::IremS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().srem(a, b));
         }
-        Op::IremU { dst, lhs, rhs } => {
+        LpirOp::IremU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().urem(a, b));
         }
-        Op::Ineg { dst, src } => {
+        LpirOp::Ineg { dst, src } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().ineg(a));
         }
-        Op::Iand { dst, lhs, rhs } => {
+        LpirOp::Iand { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().band(a, b));
         }
-        Op::Ior { dst, lhs, rhs } => {
+        LpirOp::Ior { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().bor(a, b));
         }
-        Op::Ixor { dst, lhs, rhs } => {
+        LpirOp::Ixor { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().bxor(a, b));
         }
-        Op::Ibnot { dst, src } => {
+        LpirOp::Ibnot { dst, src } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().bnot(a));
         }
-        Op::Ishl { dst, lhs, rhs } => {
+        LpirOp::Ishl { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().ishl(a, b));
         }
-        Op::IshrS { dst, lhs, rhs } => {
+        LpirOp::IshrS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().sshr(a, b));
         }
-        Op::IshrU { dst, lhs, rhs } => {
+        LpirOp::IshrU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().ushr(a, b));
         }
-        Op::FconstF32 { dst, value } => match ctx.float_mode {
+        LpirOp::FconstF32 { dst, value } => match ctx.float_mode {
             FloatMode::F32 => {
                 def_v_expr(builder, vars, *dst, |bd| bd.ins().f32const(*value));
             }
@@ -265,112 +265,112 @@ pub(crate) fn emit_scalar(
                 });
             }
         },
-        Op::IconstI32 { dst, value } => {
+        LpirOp::IconstI32 { dst, value } => {
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().iconst(types::I32, i64::from(*value))
             });
         }
-        Op::IaddImm { dst, src, imm } => {
+        LpirOp::IaddImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().iadd_imm(a, i64::from(*imm))
             });
         }
-        Op::IsubImm { dst, src, imm } => {
+        LpirOp::IsubImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             let immv = builder.ins().iconst(types::I32, i64::from(*imm));
             def_v_expr(builder, vars, *dst, |bd| bd.ins().isub(a, immv));
         }
-        Op::ImulImm { dst, src, imm } => {
+        LpirOp::ImulImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().imul_imm(a, i64::from(*imm))
             });
         }
-        Op::IshlImm { dst, src, imm } => {
+        LpirOp::IshlImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().ishl_imm(a, i64::from(*imm))
             });
         }
-        Op::IshrSImm { dst, src, imm } => {
+        LpirOp::IshrSImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().sshr_imm(a, i64::from(*imm))
             });
         }
-        Op::IshrUImm { dst, src, imm } => {
+        LpirOp::IshrUImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             def_v_expr(builder, vars, *dst, |bd| {
                 bd.ins().ushr_imm(a, i64::from(*imm))
             });
         }
-        Op::IeqImm { dst, src, imm } => {
+        LpirOp::IeqImm { dst, src, imm } => {
             let a = use_v(builder, vars, *src);
             let cmp = builder.ins().icmp_imm(IntCC::Equal, a, i64::from(*imm));
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::Ieq { dst, lhs, rhs } => {
+        LpirOp::Ieq { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::Equal, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::Ine { dst, lhs, rhs } => {
+        LpirOp::Ine { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::NotEqual, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IltS { dst, lhs, rhs } => {
+        LpirOp::IltS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IleS { dst, lhs, rhs } => {
+        LpirOp::IleS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IgtS { dst, lhs, rhs } => {
+        LpirOp::IgtS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IgeS { dst, lhs, rhs } => {
+        LpirOp::IgeS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IltU { dst, lhs, rhs } => {
+        LpirOp::IltU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::UnsignedLessThan, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IleU { dst, lhs, rhs } => {
+        LpirOp::IleU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::UnsignedLessThanOrEqual, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IgtU { dst, lhs, rhs } => {
+        LpirOp::IgtU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThan, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::IgeU { dst, lhs, rhs } => {
+        LpirOp::IgeU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             let cmp = builder.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, a, b);
             def_v_expr(builder, vars, *dst, |bd| bool_to_i32(bd, cmp));
         }
-        Op::Feq { dst, lhs, rhs } => {
+        LpirOp::Feq { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -384,7 +384,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fne { dst, lhs, rhs } => {
+        LpirOp::Fne { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -398,7 +398,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Flt { dst, lhs, rhs } => {
+        LpirOp::Flt { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -412,7 +412,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fle { dst, lhs, rhs } => {
+        LpirOp::Fle { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -426,7 +426,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fgt { dst, lhs, rhs } => {
+        LpirOp::Fgt { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -440,7 +440,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Fge { dst, lhs, rhs } => {
+        LpirOp::Fge { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
             match ctx.float_mode {
@@ -454,7 +454,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::FtoiSatS { dst, src } => {
+        LpirOp::FtoiSatS { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
@@ -466,7 +466,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::FtoiSatU { dst, src } => {
+        LpirOp::FtoiSatU { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
@@ -478,7 +478,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::ItofS { dst, src } => {
+        LpirOp::ItofS { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
@@ -490,7 +490,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::ItofU { dst, src } => {
+        LpirOp::ItofU { dst, src } => {
             let a = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::F32 => def_v_expr(builder, vars, *dst, |bd| {
@@ -502,7 +502,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::FfromI32Bits { dst, src } => {
+        LpirOp::FfromI32Bits { dst, src } => {
             let bits = use_v(builder, vars, *src);
             match ctx.float_mode {
                 FloatMode::Q32 => {
@@ -520,7 +520,7 @@ pub(crate) fn emit_scalar(
                 }
             }
         }
-        Op::Select {
+        LpirOp::Select {
             dst,
             cond,
             if_true,
@@ -555,7 +555,7 @@ pub(crate) fn emit_scalar(
             let pred = builder.ins().icmp_imm(IntCC::NotEqual, c, 0);
             def_v_expr(builder, vars, *dst, |bd| bd.ins().select(pred, t, f_v));
         }
-        Op::Copy { dst, src } => {
+        LpirOp::Copy { dst, src } => {
             let a = use_v(builder, vars, *src);
             let dst_ir = func.vreg_types[dst.0 as usize];
             let src_ir = func.vreg_types[src.0 as usize];

@@ -2,7 +2,7 @@
 
 use alloc::sync::Arc;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 
@@ -41,7 +41,7 @@ impl LpvmEngine for NativeJitEngine {
     type Module = NativeJitModule;
     type Error = NativeError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let (buffer, entry_offsets) = compile_module_jit(
             ir,
             meta,

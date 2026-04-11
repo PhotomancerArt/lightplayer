@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::abi::ModuleAbi;
@@ -37,7 +37,7 @@ impl<'a> JitEmitContext<'a> {
     pub fn emit_function(
         &mut self,
         func: &lpir::IrFunction,
-        ir: &IrModule,
+        ir: &LpirModule,
         module_abi: &ModuleAbi,
         fn_sig: &lps_shared::LpsFnSig,
         float_mode: lpir::FloatMode,
@@ -122,7 +122,7 @@ fn patch_call_plt(
 
 /// Emit and link a full module.
 pub fn compile_module_jit(
-    ir: &IrModule,
+    ir: &LpirModule,
     sig: &LpsModuleSig,
     builtin_table: &BuiltinTable,
     float_mode: lpir::FloatMode,

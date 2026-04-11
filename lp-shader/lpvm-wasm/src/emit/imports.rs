@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{CalleeRef, ImportDecl, IrFunction, IrModule, IrType, Op};
+use lpir::{CalleeRef, ImportDecl, IrFunction, LpirModule, IrType, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,
@@ -21,7 +21,7 @@ pub(crate) struct FilteredImports {
     pub full_count: u32,
 }
 
-fn collect_used_import_indices(ir: &IrModule) -> BTreeSet<u32> {
+fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
     let n = ir.imports.len() as u32;
     let mut used = BTreeSet::new();
     let mut needs_lpir_sqrt = false;
@@ -29,16 +29,16 @@ fn collect_used_import_indices(ir: &IrModule) -> BTreeSet<u32> {
 
     for f in &ir.functions {
         for op in &f.body {
-            if let Op::Call { callee, .. } = op {
+            if let LpirOp::Call { callee, .. } = op {
                 if callee.0 < n {
                     used.insert(callee.0);
                 }
             }
             // Track LPIR ops that resolve to builtin calls at emit time (Q32 mode)
-            if matches!(op, Op::Fsqrt { .. }) {
+            if matches!(op, LpirOp::Fsqrt { .. }) {
                 needs_lpir_sqrt = true;
             }
-            if matches!(op, Op::Fnearest { .. }) {
+            if matches!(op, LpirOp::Fnearest { .. }) {
                 needs_glsl_round = true;
             }
         }
@@ -59,7 +59,7 @@ fn collect_used_import_indices(ir: &IrModule) -> BTreeSet<u32> {
     used
 }
 
-fn find_import_index(ir: &IrModule, module: &str, func_name: &str) -> Option<u32> {
+fn find_import_index(ir: &LpirModule, module: &str, func_name: &str) -> Option<u32> {
     ir.imports
         .iter()
         .enumerate()
@@ -164,7 +164,7 @@ fn lpfx_strip_suffix(func_name: &str) -> Result<&str, String> {
     Ok(base)
 }
 
-pub(crate) fn build_filtered_imports(ir: &IrModule) -> Result<FilteredImports, String> {
+pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports, String> {
     let used = collect_used_import_indices(ir);
     let full_count = ir.imports.len() as u32;
     let mut remap = vec![None; ir.imports.len()];
@@ -188,11 +188,11 @@ pub(crate) fn build_filtered_imports(ir: &IrModule) -> Result<FilteredImports, S
 
 /// True if any user function calls an import that uses the result-pointer WASM ABI
 /// (non-scalar return via hidden pointer; callee has zero WASM results).
-pub(crate) fn module_needs_result_ptr_calls(ir: &IrModule) -> bool {
+pub(crate) fn module_needs_result_ptr_calls(ir: &LpirModule) -> bool {
     let n = ir.imports.len() as u32;
     for f in &ir.functions {
         for op in &f.body {
-            if let Op::Call { callee, .. } = op {
+            if let LpirOp::Call { callee, .. } = op {
                 if callee.0 < n && import_uses_result_pointer_abi(ir, callee.0 as usize) {
                     return true;
                 }
@@ -203,7 +203,7 @@ pub(crate) fn module_needs_result_ptr_calls(ir: &IrModule) -> bool {
 }
 
 /// Whether `ir.imports[import_idx]` uses result-pointer calling convention in WASM.
-pub(crate) fn import_uses_result_pointer_abi(ir: &IrModule, import_idx: usize) -> bool {
+pub(crate) fn import_uses_result_pointer_abi(ir: &LpirModule, import_idx: usize) -> bool {
     let decl = match ir.imports.get(import_idx) {
         Some(d) => d,
         None => return false,
@@ -219,11 +219,11 @@ pub(crate) fn import_uses_result_pointer_abi(ir: &IrModule, import_idx: usize) -
 }
 
 /// Max byte size of temporary result buffer needed for result-pointer builtin calls in `f`.
-pub(crate) fn max_result_ptr_buffer_bytes(ir: &IrModule, f: &IrFunction) -> u32 {
+pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction) -> u32 {
     let n = ir.imports.len() as u32;
     let mut max_b = 0u32;
     for op in &f.body {
-        if let Op::Call {
+        if let LpirOp::Call {
             callee, results, ..
         } = op
         {
@@ -249,7 +249,7 @@ pub(crate) fn builtins_wasm_name(decl: &ImportDecl) -> Result<&'static str, Stri
 }
 
 pub(crate) fn import_callee(
-    ir: &IrModule,
+    ir: &LpirModule,
     module: &str,
     func_name: &str,
 ) -> Result<CalleeRef, String> {

@@ -12,7 +12,7 @@ mod validate;
 use alloc::string::{String, ToString};
 use core::mem::size_of;
 
-use crate::op::Op;
+use crate::lpir_op::LpirOp;
 use crate::parse::{ParseError, parse_module};
 use crate::print::print_module;
 use crate::validate::validate_module;
@@ -183,9 +183,9 @@ fn op_enum_payload_reasonable_size() {
     // Design note (stage II): ~20 bytes per op was an initial target; on 64-bit the
     // enum is larger. Keep a loose bound so size regressions are visible.
     assert!(
-        size_of::<Op>() <= 32,
+        size_of::<LpirOp>() <= 32,
         "Op size {} exceeds 32-byte sanity bound",
-        size_of::<Op>()
+        size_of::<LpirOp>()
     );
 }
 

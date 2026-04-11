@@ -1,4 +1,4 @@
-//! Well-formedness checks for [`IrModule`] and [`IrFunction`].
+//! Well-formedness checks for [`LpirModule`] and [`IrFunction`].
 
 use alloc::collections::BTreeSet;
 use alloc::format;
@@ -7,8 +7,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::module::{IrFunction, IrModule};
-use crate::op::Op;
+use crate::lpir_module::{IrFunction, LpirModule};
+use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, IrType, VReg, VRegRange};
 
 /// Validation issue.
@@ -54,7 +54,7 @@ fn err_module(msg: impl Into<String>) -> ValidationError {
 }
 
 /// Validate a full module (imports, functions, calls between them).
-pub fn validate_module(module: &IrModule) -> Result<(), Vec<ValidationError>> {
+pub fn validate_module(module: &LpirModule) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     validate_imports(module, &mut errs);
     let mut entry = 0u32;
@@ -80,13 +80,13 @@ pub fn validate_module(module: &IrModule) -> Result<(), Vec<ValidationError>> {
 }
 
 /// Validate one function in the context of its module (calls, etc.).
-pub fn validate_function(func: &IrFunction, module: &IrModule) -> Result<(), Vec<ValidationError>> {
+pub fn validate_function(func: &IrFunction, module: &LpirModule) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     validate_function_inner(func, module, &mut errs);
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
 
-fn validate_imports(module: &IrModule, errs: &mut Vec<ValidationError>) {
+fn validate_imports(module: &LpirModule, errs: &mut Vec<ValidationError>) {
     let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     for imp in &module.imports {
         let key = (imp.module_name.as_str(), imp.func_name.as_str());
@@ -113,7 +113,7 @@ enum StackEntry {
     Arm,
 }
 
-fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<ValidationError>) {
+fn validate_function_inner(func: &IrFunction, module: &LpirModule, errs: &mut Vec<ValidationError>) {
     let fname = func.name.as_str();
     pool_bounds(func, fname, errs);
 
@@ -148,7 +148,7 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
         let op_i = Some(i);
 
         match op {
-            Op::Break | Op::Continue | Op::BrIfNot { .. } => {
+            LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
                 let innermost_loop = stack
                     .iter()
                     .rev()
@@ -159,7 +159,7 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                         op_i,
                         "break/continue/br_if_not outside loop",
                     ));
-                } else if matches!(op, Op::Continue) {
+                } else if matches!(op, LpirOp::Continue) {
                     if let Some(StackEntry::Loop {
                         loop_start,
                         continuing_offset,
@@ -184,12 +184,12 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
         check_opcode_dst_types(func, fname, op_i, op, errs);
 
         match op {
-            Op::IfStart { .. } => stack.push(StackEntry::If),
-            Op::Else => match stack.pop() {
+            LpirOp::IfStart { .. } => stack.push(StackEntry::If),
+            LpirOp::Else => match stack.pop() {
                 Some(StackEntry::If) => stack.push(StackEntry::Else),
                 _ => errs.push(err_in_func(fname, op_i, "`else` without matching `if`")),
             },
-            Op::LoopStart {
+            LpirOp::LoopStart {
                 continuing_offset,
                 end_offset,
             } => {
@@ -213,11 +213,11 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                     continuing_offset: *continuing_offset,
                 });
             }
-            Op::SwitchStart { .. } => stack.push(StackEntry::Switch {
+            LpirOp::SwitchStart { .. } => stack.push(StackEntry::Switch {
                 cases: BTreeSet::new(),
                 default_arm: false,
             }),
-            Op::CaseStart { value, .. } => {
+            LpirOp::CaseStart { value, .. } => {
                 match stack.last_mut() {
                     Some(StackEntry::Switch {
                         cases,
@@ -235,7 +235,7 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                 }
                 stack.push(StackEntry::Arm);
             }
-            Op::DefaultStart { .. } => {
+            LpirOp::DefaultStart { .. } => {
                 let ok = match stack.last_mut() {
                     Some(StackEntry::Switch {
                         cases: _,
@@ -262,7 +262,7 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                     stack.push(StackEntry::Arm);
                 }
             }
-            Op::End => {
+            LpirOp::End => {
                 if stack.pop().is_none() {
                     errs.push(err_in_func(
                         fname,
@@ -271,14 +271,14 @@ fn validate_function_inner(func: &IrFunction, module: &IrModule, errs: &mut Vec<
                     ));
                 }
             }
-            Op::Call {
+            LpirOp::Call {
                 callee,
                 args,
                 results,
             } => {
                 validate_call(func, module, fname, op_i, *callee, *args, *results, errs);
             }
-            Op::Return { values } => {
+            LpirOp::Return { values } => {
                 check_return_value_types(func, fname, op_i, *values, errs);
             }
             _ => {}
@@ -326,7 +326,7 @@ fn check_return_value_types(
 
 fn validate_call(
     func: &IrFunction,
-    module: &IrModule,
+    module: &LpirModule,
     fname: &str,
     op_i: Option<usize>,
     callee: CalleeRef,
@@ -442,7 +442,7 @@ fn check_op_operands_defined(
     func: &IrFunction,
     fname: &str,
     op_i: Option<usize>,
-    op: &Op,
+    op: &LpirOp,
     defined: &[bool],
     errs: &mut Vec<ValidationError>,
 ) {
@@ -464,72 +464,72 @@ fn check_op_operands_defined(
     };
 
     match op {
-        Op::Fadd { lhs, rhs, .. }
-        | Op::Fsub { lhs, rhs, .. }
-        | Op::Fmul { lhs, rhs, .. }
-        | Op::Fdiv { lhs, rhs, .. }
-        | Op::Fmin { lhs, rhs, .. }
-        | Op::Fmax { lhs, rhs, .. } => {
+        LpirOp::Fadd { lhs, rhs, .. }
+        | LpirOp::Fsub { lhs, rhs, .. }
+        | LpirOp::Fmul { lhs, rhs, .. }
+        | LpirOp::Fdiv { lhs, rhs, .. }
+        | LpirOp::Fmin { lhs, rhs, .. }
+        | LpirOp::Fmax { lhs, rhs, .. } => {
             check(*lhs, "lhs");
             check(*rhs, "rhs");
         }
-        Op::Fneg { src, .. }
-        | Op::Fabs { src, .. }
-        | Op::Fsqrt { src, .. }
-        | Op::Ffloor { src, .. }
-        | Op::Fceil { src, .. }
-        | Op::Ftrunc { src, .. }
-        | Op::Fnearest { src, .. }
-        | Op::Ineg { src, .. }
-        | Op::Ibnot { src, .. } => check(*src, "src"),
-        Op::Iadd { lhs, rhs, .. }
-        | Op::Isub { lhs, rhs, .. }
-        | Op::Imul { lhs, rhs, .. }
-        | Op::IdivS { lhs, rhs, .. }
-        | Op::IdivU { lhs, rhs, .. }
-        | Op::IremS { lhs, rhs, .. }
-        | Op::IremU { lhs, rhs, .. } => {
+        LpirOp::Fneg { src, .. }
+        | LpirOp::Fabs { src, .. }
+        | LpirOp::Fsqrt { src, .. }
+        | LpirOp::Ffloor { src, .. }
+        | LpirOp::Fceil { src, .. }
+        | LpirOp::Ftrunc { src, .. }
+        | LpirOp::Fnearest { src, .. }
+        | LpirOp::Ineg { src, .. }
+        | LpirOp::Ibnot { src, .. } => check(*src, "src"),
+        LpirOp::Iadd { lhs, rhs, .. }
+        | LpirOp::Isub { lhs, rhs, .. }
+        | LpirOp::Imul { lhs, rhs, .. }
+        | LpirOp::IdivS { lhs, rhs, .. }
+        | LpirOp::IdivU { lhs, rhs, .. }
+        | LpirOp::IremS { lhs, rhs, .. }
+        | LpirOp::IremU { lhs, rhs, .. } => {
             check(*lhs, "lhs");
             check(*rhs, "rhs");
         }
-        Op::Feq { lhs, rhs, .. }
-        | Op::Fne { lhs, rhs, .. }
-        | Op::Flt { lhs, rhs, .. }
-        | Op::Fle { lhs, rhs, .. }
-        | Op::Fgt { lhs, rhs, .. }
-        | Op::Fge { lhs, rhs, .. }
-        | Op::Ieq { lhs, rhs, .. }
-        | Op::Ine { lhs, rhs, .. }
-        | Op::IltS { lhs, rhs, .. }
-        | Op::IleS { lhs, rhs, .. }
-        | Op::IgtS { lhs, rhs, .. }
-        | Op::IgeS { lhs, rhs, .. }
-        | Op::IltU { lhs, rhs, .. }
-        | Op::IleU { lhs, rhs, .. }
-        | Op::IgtU { lhs, rhs, .. }
-        | Op::IgeU { lhs, rhs, .. }
-        | Op::Iand { lhs, rhs, .. }
-        | Op::Ior { lhs, rhs, .. }
-        | Op::Ixor { lhs, rhs, .. }
-        | Op::Ishl { lhs, rhs, .. }
-        | Op::IshrS { lhs, rhs, .. }
-        | Op::IshrU { lhs, rhs, .. } => {
+        LpirOp::Feq { lhs, rhs, .. }
+        | LpirOp::Fne { lhs, rhs, .. }
+        | LpirOp::Flt { lhs, rhs, .. }
+        | LpirOp::Fle { lhs, rhs, .. }
+        | LpirOp::Fgt { lhs, rhs, .. }
+        | LpirOp::Fge { lhs, rhs, .. }
+        | LpirOp::Ieq { lhs, rhs, .. }
+        | LpirOp::Ine { lhs, rhs, .. }
+        | LpirOp::IltS { lhs, rhs, .. }
+        | LpirOp::IleS { lhs, rhs, .. }
+        | LpirOp::IgtS { lhs, rhs, .. }
+        | LpirOp::IgeS { lhs, rhs, .. }
+        | LpirOp::IltU { lhs, rhs, .. }
+        | LpirOp::IleU { lhs, rhs, .. }
+        | LpirOp::IgtU { lhs, rhs, .. }
+        | LpirOp::IgeU { lhs, rhs, .. }
+        | LpirOp::Iand { lhs, rhs, .. }
+        | LpirOp::Ior { lhs, rhs, .. }
+        | LpirOp::Ixor { lhs, rhs, .. }
+        | LpirOp::Ishl { lhs, rhs, .. }
+        | LpirOp::IshrS { lhs, rhs, .. }
+        | LpirOp::IshrU { lhs, rhs, .. } => {
             check(*lhs, "lhs");
             check(*rhs, "rhs");
         }
-        Op::IaddImm { src, .. }
-        | Op::IsubImm { src, .. }
-        | Op::ImulImm { src, .. }
-        | Op::IshlImm { src, .. }
-        | Op::IshrSImm { src, .. }
-        | Op::IshrUImm { src, .. }
-        | Op::IeqImm { src, .. } => check(*src, "src"),
-        Op::FtoiSatS { src, .. }
-        | Op::FtoiSatU { src, .. }
-        | Op::ItofS { src, .. }
-        | Op::ItofU { src, .. }
-        | Op::FfromI32Bits { src, .. } => check(*src, "src"),
-        Op::Select {
+        LpirOp::IaddImm { src, .. }
+        | LpirOp::IsubImm { src, .. }
+        | LpirOp::ImulImm { src, .. }
+        | LpirOp::IshlImm { src, .. }
+        | LpirOp::IshrSImm { src, .. }
+        | LpirOp::IshrUImm { src, .. }
+        | LpirOp::IeqImm { src, .. } => check(*src, "src"),
+        LpirOp::FtoiSatS { src, .. }
+        | LpirOp::FtoiSatU { src, .. }
+        | LpirOp::ItofS { src, .. }
+        | LpirOp::ItofU { src, .. }
+        | LpirOp::FfromI32Bits { src, .. } => check(*src, "src"),
+        LpirOp::Select {
             cond,
             if_true,
             if_false,
@@ -539,41 +539,41 @@ fn check_op_operands_defined(
             check(*if_true, "select if_true");
             check(*if_false, "select if_false");
         }
-        Op::Copy { src, .. } => check(*src, "copy src"),
-        Op::Load { base, .. } => check(*base, "load base"),
-        Op::Store { base, value, .. } => {
+        LpirOp::Copy { src, .. } => check(*src, "copy src"),
+        LpirOp::Load { base, .. } => check(*base, "load base"),
+        LpirOp::Store { base, value, .. } => {
             check(*base, "store base");
             check(*value, "store value");
         }
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr, src_addr, ..
         } => {
             check(*dst_addr, "memcpy dst");
             check(*src_addr, "memcpy src");
         }
-        Op::IfStart { cond, .. } => check(*cond, "if cond"),
-        Op::SwitchStart { selector, .. } => check(*selector, "switch selector"),
-        Op::BrIfNot { cond } => check(*cond, "br_if_not cond"),
-        Op::Call { args, .. } => {
+        LpirOp::IfStart { cond, .. } => check(*cond, "if cond"),
+        LpirOp::SwitchStart { selector, .. } => check(*selector, "switch selector"),
+        LpirOp::BrIfNot { cond } => check(*cond, "br_if_not cond"),
+        LpirOp::Call { args, .. } => {
             for v in func.pool_slice(*args) {
                 check(*v, "call arg");
             }
         }
-        Op::Return { values } => {
+        LpirOp::Return { values } => {
             for v in func.pool_slice(*values) {
                 check(*v, "return");
             }
         }
-        Op::SlotAddr { .. }
-        | Op::FconstF32 { .. }
-        | Op::IconstI32 { .. }
-        | Op::Else
-        | Op::LoopStart { .. }
-        | Op::CaseStart { .. }
-        | Op::DefaultStart { .. }
-        | Op::End
-        | Op::Break
-        | Op::Continue => {}
+        LpirOp::SlotAddr { .. }
+        | LpirOp::FconstF32 { .. }
+        | LpirOp::IconstI32 { .. }
+        | LpirOp::Else
+        | LpirOp::LoopStart { .. }
+        | LpirOp::CaseStart { .. }
+        | LpirOp::DefaultStart { .. }
+        | LpirOp::End
+        | LpirOp::Break
+        | LpirOp::Continue => {}
     }
 }
 
@@ -581,10 +581,10 @@ fn check_slot_memory_ops(
     func: &IrFunction,
     fname: &str,
     op_i: Option<usize>,
-    op: &Op,
+    op: &LpirOp,
     errs: &mut Vec<ValidationError>,
 ) {
-    if let Op::SlotAddr { slot, .. } = op {
+    if let LpirOp::SlotAddr { slot, .. } = op {
         if slot.0 as usize >= func.slots.len() {
             errs.push(err_in_func(
                 fname,
@@ -599,7 +599,7 @@ fn check_opcode_dst_types(
     func: &IrFunction,
     fname: &str,
     op_i: Option<usize>,
-    op: &Op,
+    op: &LpirOp,
     errs: &mut Vec<ValidationError>,
 ) {
     let mut expect = |dst: VReg, ty: IrType, ctx: &str| {
@@ -620,67 +620,67 @@ fn check_opcode_dst_types(
     };
 
     match op {
-        Op::Fadd { dst, .. }
-        | Op::Fsub { dst, .. }
-        | Op::Fmul { dst, .. }
-        | Op::Fdiv { dst, .. }
-        | Op::Fneg { dst, .. }
-        | Op::Fabs { dst, .. }
-        | Op::Fsqrt { dst, .. }
-        | Op::Fmin { dst, .. }
-        | Op::Fmax { dst, .. }
-        | Op::Ffloor { dst, .. }
-        | Op::Fceil { dst, .. }
-        | Op::Ftrunc { dst, .. }
-        | Op::Fnearest { dst, .. }
-        | Op::FconstF32 { dst, .. }
-        | Op::ItofS { dst, .. }
-        | Op::ItofU { dst, .. }
-        | Op::FfromI32Bits { dst, .. } => expect(*dst, IrType::F32, "float op result"),
+        LpirOp::Fadd { dst, .. }
+        | LpirOp::Fsub { dst, .. }
+        | LpirOp::Fmul { dst, .. }
+        | LpirOp::Fdiv { dst, .. }
+        | LpirOp::Fneg { dst, .. }
+        | LpirOp::Fabs { dst, .. }
+        | LpirOp::Fsqrt { dst, .. }
+        | LpirOp::Fmin { dst, .. }
+        | LpirOp::Fmax { dst, .. }
+        | LpirOp::Ffloor { dst, .. }
+        | LpirOp::Fceil { dst, .. }
+        | LpirOp::Ftrunc { dst, .. }
+        | LpirOp::Fnearest { dst, .. }
+        | LpirOp::FconstF32 { dst, .. }
+        | LpirOp::ItofS { dst, .. }
+        | LpirOp::ItofU { dst, .. }
+        | LpirOp::FfromI32Bits { dst, .. } => expect(*dst, IrType::F32, "float op result"),
 
-        Op::Iadd { dst, .. }
-        | Op::Isub { dst, .. }
-        | Op::Imul { dst, .. }
-        | Op::IdivS { dst, .. }
-        | Op::IdivU { dst, .. }
-        | Op::IremS { dst, .. }
-        | Op::IremU { dst, .. }
-        | Op::Ineg { dst, .. }
-        | Op::Feq { dst, .. }
-        | Op::Fne { dst, .. }
-        | Op::Flt { dst, .. }
-        | Op::Fle { dst, .. }
-        | Op::Fgt { dst, .. }
-        | Op::Fge { dst, .. }
-        | Op::Ieq { dst, .. }
-        | Op::Ine { dst, .. }
-        | Op::IltS { dst, .. }
-        | Op::IleS { dst, .. }
-        | Op::IgtS { dst, .. }
-        | Op::IgeS { dst, .. }
-        | Op::IltU { dst, .. }
-        | Op::IleU { dst, .. }
-        | Op::IgtU { dst, .. }
-        | Op::IgeU { dst, .. }
-        | Op::Iand { dst, .. }
-        | Op::Ior { dst, .. }
-        | Op::Ixor { dst, .. }
-        | Op::Ibnot { dst, .. }
-        | Op::Ishl { dst, .. }
-        | Op::IshrS { dst, .. }
-        | Op::IshrU { dst, .. }
-        | Op::IconstI32 { dst, .. }
-        | Op::IaddImm { dst, .. }
-        | Op::IsubImm { dst, .. }
-        | Op::ImulImm { dst, .. }
-        | Op::IshlImm { dst, .. }
-        | Op::IshrSImm { dst, .. }
-        | Op::IshrUImm { dst, .. }
-        | Op::IeqImm { dst, .. }
-        | Op::FtoiSatS { dst, .. }
-        | Op::FtoiSatU { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
+        LpirOp::Iadd { dst, .. }
+        | LpirOp::Isub { dst, .. }
+        | LpirOp::Imul { dst, .. }
+        | LpirOp::IdivS { dst, .. }
+        | LpirOp::IdivU { dst, .. }
+        | LpirOp::IremS { dst, .. }
+        | LpirOp::IremU { dst, .. }
+        | LpirOp::Ineg { dst, .. }
+        | LpirOp::Feq { dst, .. }
+        | LpirOp::Fne { dst, .. }
+        | LpirOp::Flt { dst, .. }
+        | LpirOp::Fle { dst, .. }
+        | LpirOp::Fgt { dst, .. }
+        | LpirOp::Fge { dst, .. }
+        | LpirOp::Ieq { dst, .. }
+        | LpirOp::Ine { dst, .. }
+        | LpirOp::IltS { dst, .. }
+        | LpirOp::IleS { dst, .. }
+        | LpirOp::IgtS { dst, .. }
+        | LpirOp::IgeS { dst, .. }
+        | LpirOp::IltU { dst, .. }
+        | LpirOp::IleU { dst, .. }
+        | LpirOp::IgtU { dst, .. }
+        | LpirOp::IgeU { dst, .. }
+        | LpirOp::Iand { dst, .. }
+        | LpirOp::Ior { dst, .. }
+        | LpirOp::Ixor { dst, .. }
+        | LpirOp::Ibnot { dst, .. }
+        | LpirOp::Ishl { dst, .. }
+        | LpirOp::IshrS { dst, .. }
+        | LpirOp::IshrU { dst, .. }
+        | LpirOp::IconstI32 { dst, .. }
+        | LpirOp::IaddImm { dst, .. }
+        | LpirOp::IsubImm { dst, .. }
+        | LpirOp::ImulImm { dst, .. }
+        | LpirOp::IshlImm { dst, .. }
+        | LpirOp::IshrSImm { dst, .. }
+        | LpirOp::IshrUImm { dst, .. }
+        | LpirOp::IeqImm { dst, .. }
+        | LpirOp::FtoiSatS { dst, .. }
+        | LpirOp::FtoiSatU { dst, .. } => expect(*dst, IrType::I32, "integer op result"),
 
-        Op::Select {
+        LpirOp::Select {
             dst,
             if_true,
             if_false,
@@ -705,7 +705,7 @@ fn check_opcode_dst_types(
                 }
             }
         }
-        Op::Copy { dst, src } => {
+        LpirOp::Copy { dst, src } => {
             let j = dst.0 as usize;
             let s = src.0 as usize;
             if j < func.vreg_types.len()
@@ -719,26 +719,26 @@ fn check_opcode_dst_types(
                 ));
             }
         }
-        Op::SlotAddr { dst, .. } => expect(*dst, IrType::I32, "slot_addr"),
-        Op::Load { .. }
-        | Op::Store { .. }
-        | Op::Memcpy { .. }
-        | Op::IfStart { .. }
-        | Op::Else
-        | Op::LoopStart { .. }
-        | Op::SwitchStart { .. }
-        | Op::CaseStart { .. }
-        | Op::DefaultStart { .. }
-        | Op::End
-        | Op::Break
-        | Op::Continue
-        | Op::BrIfNot { .. }
-        | Op::Call { .. }
-        | Op::Return { .. } => {}
+        LpirOp::SlotAddr { dst, .. } => expect(*dst, IrType::I32, "slot_addr"),
+        LpirOp::Load { .. }
+        | LpirOp::Store { .. }
+        | LpirOp::Memcpy { .. }
+        | LpirOp::IfStart { .. }
+        | LpirOp::Else
+        | LpirOp::LoopStart { .. }
+        | LpirOp::SwitchStart { .. }
+        | LpirOp::CaseStart { .. }
+        | LpirOp::DefaultStart { .. }
+        | LpirOp::End
+        | LpirOp::Break
+        | LpirOp::Continue
+        | LpirOp::BrIfNot { .. }
+        | LpirOp::Call { .. }
+        | LpirOp::Return { .. } => {}
     }
 }
 
-fn mark_op_defs(func: &IrFunction, op: &Op, defined: &mut [bool]) {
+fn mark_op_defs(func: &IrFunction, op: &LpirOp, defined: &mut [bool]) {
     let mark = |v: VReg, d: &mut [bool]| {
         let j = v.0 as usize;
         if j < d.len() {
@@ -747,90 +747,90 @@ fn mark_op_defs(func: &IrFunction, op: &Op, defined: &mut [bool]) {
     };
 
     match op {
-        Op::Fadd { dst, .. }
-        | Op::Fsub { dst, .. }
-        | Op::Fmul { dst, .. }
-        | Op::Fdiv { dst, .. }
-        | Op::Fneg { dst, .. }
-        | Op::Fabs { dst, .. }
-        | Op::Fsqrt { dst, .. }
-        | Op::Fmin { dst, .. }
-        | Op::Fmax { dst, .. }
-        | Op::Ffloor { dst, .. }
-        | Op::Fceil { dst, .. }
-        | Op::Ftrunc { dst, .. }
-        | Op::Fnearest { dst, .. } => mark(*dst, defined),
-        Op::Iadd { dst, .. }
-        | Op::Isub { dst, .. }
-        | Op::Imul { dst, .. }
-        | Op::IdivS { dst, .. }
-        | Op::IdivU { dst, .. }
-        | Op::IremS { dst, .. }
-        | Op::IremU { dst, .. }
-        | Op::Ineg { dst, .. } => mark(*dst, defined),
-        Op::Feq { dst, .. }
-        | Op::Fne { dst, .. }
-        | Op::Flt { dst, .. }
-        | Op::Fle { dst, .. }
-        | Op::Fgt { dst, .. }
-        | Op::Fge { dst, .. }
-        | Op::Ieq { dst, .. }
-        | Op::Ine { dst, .. }
-        | Op::IltS { dst, .. }
-        | Op::IleS { dst, .. }
-        | Op::IgtS { dst, .. }
-        | Op::IgeS { dst, .. }
-        | Op::IltU { dst, .. }
-        | Op::IleU { dst, .. }
-        | Op::IgtU { dst, .. }
-        | Op::IgeU { dst, .. }
-        | Op::Iand { dst, .. }
-        | Op::Ior { dst, .. }
-        | Op::Ixor { dst, .. }
-        | Op::Ibnot { dst, .. }
-        | Op::Ishl { dst, .. }
-        | Op::IshrS { dst, .. }
-        | Op::IshrU { dst, .. } => mark(*dst, defined),
-        Op::FconstF32 { dst, .. } | Op::IconstI32 { dst, .. } => mark(*dst, defined),
-        Op::IaddImm { dst, .. }
-        | Op::IsubImm { dst, .. }
-        | Op::ImulImm { dst, .. }
-        | Op::IshlImm { dst, .. }
-        | Op::IshrSImm { dst, .. }
-        | Op::IshrUImm { dst, .. }
-        | Op::IeqImm { dst, .. } => mark(*dst, defined),
-        Op::FtoiSatS { dst, .. }
-        | Op::FtoiSatU { dst, .. }
-        | Op::ItofS { dst, .. }
-        | Op::ItofU { dst, .. }
-        | Op::FfromI32Bits { dst, .. } => mark(*dst, defined),
-        Op::Select { dst, .. } | Op::Copy { dst, .. } => mark(*dst, defined),
-        Op::SlotAddr { dst, .. } | Op::Load { dst, .. } => mark(*dst, defined),
-        Op::Call { results, .. } => {
+        LpirOp::Fadd { dst, .. }
+        | LpirOp::Fsub { dst, .. }
+        | LpirOp::Fmul { dst, .. }
+        | LpirOp::Fdiv { dst, .. }
+        | LpirOp::Fneg { dst, .. }
+        | LpirOp::Fabs { dst, .. }
+        | LpirOp::Fsqrt { dst, .. }
+        | LpirOp::Fmin { dst, .. }
+        | LpirOp::Fmax { dst, .. }
+        | LpirOp::Ffloor { dst, .. }
+        | LpirOp::Fceil { dst, .. }
+        | LpirOp::Ftrunc { dst, .. }
+        | LpirOp::Fnearest { dst, .. } => mark(*dst, defined),
+        LpirOp::Iadd { dst, .. }
+        | LpirOp::Isub { dst, .. }
+        | LpirOp::Imul { dst, .. }
+        | LpirOp::IdivS { dst, .. }
+        | LpirOp::IdivU { dst, .. }
+        | LpirOp::IremS { dst, .. }
+        | LpirOp::IremU { dst, .. }
+        | LpirOp::Ineg { dst, .. } => mark(*dst, defined),
+        LpirOp::Feq { dst, .. }
+        | LpirOp::Fne { dst, .. }
+        | LpirOp::Flt { dst, .. }
+        | LpirOp::Fle { dst, .. }
+        | LpirOp::Fgt { dst, .. }
+        | LpirOp::Fge { dst, .. }
+        | LpirOp::Ieq { dst, .. }
+        | LpirOp::Ine { dst, .. }
+        | LpirOp::IltS { dst, .. }
+        | LpirOp::IleS { dst, .. }
+        | LpirOp::IgtS { dst, .. }
+        | LpirOp::IgeS { dst, .. }
+        | LpirOp::IltU { dst, .. }
+        | LpirOp::IleU { dst, .. }
+        | LpirOp::IgtU { dst, .. }
+        | LpirOp::IgeU { dst, .. }
+        | LpirOp::Iand { dst, .. }
+        | LpirOp::Ior { dst, .. }
+        | LpirOp::Ixor { dst, .. }
+        | LpirOp::Ibnot { dst, .. }
+        | LpirOp::Ishl { dst, .. }
+        | LpirOp::IshrS { dst, .. }
+        | LpirOp::IshrU { dst, .. } => mark(*dst, defined),
+        LpirOp::FconstF32 { dst, .. } | LpirOp::IconstI32 { dst, .. } => mark(*dst, defined),
+        LpirOp::IaddImm { dst, .. }
+        | LpirOp::IsubImm { dst, .. }
+        | LpirOp::ImulImm { dst, .. }
+        | LpirOp::IshlImm { dst, .. }
+        | LpirOp::IshrSImm { dst, .. }
+        | LpirOp::IshrUImm { dst, .. }
+        | LpirOp::IeqImm { dst, .. } => mark(*dst, defined),
+        LpirOp::FtoiSatS { dst, .. }
+        | LpirOp::FtoiSatU { dst, .. }
+        | LpirOp::ItofS { dst, .. }
+        | LpirOp::ItofU { dst, .. }
+        | LpirOp::FfromI32Bits { dst, .. } => mark(*dst, defined),
+        LpirOp::Select { dst, .. } | LpirOp::Copy { dst, .. } => mark(*dst, defined),
+        LpirOp::SlotAddr { dst, .. } | LpirOp::Load { dst, .. } => mark(*dst, defined),
+        LpirOp::Call { results, .. } => {
             for v in func.pool_slice(*results) {
                 mark(*v, defined);
             }
         }
-        Op::Store { .. }
-        | Op::Memcpy { .. }
-        | Op::IfStart { .. }
-        | Op::Else
-        | Op::LoopStart { .. }
-        | Op::SwitchStart { .. }
-        | Op::CaseStart { .. }
-        | Op::DefaultStart { .. }
-        | Op::End
-        | Op::Break
-        | Op::Continue
-        | Op::BrIfNot { .. }
-        | Op::Return { .. } => {}
+        LpirOp::Store { .. }
+        | LpirOp::Memcpy { .. }
+        | LpirOp::IfStart { .. }
+        | LpirOp::Else
+        | LpirOp::LoopStart { .. }
+        | LpirOp::SwitchStart { .. }
+        | LpirOp::CaseStart { .. }
+        | LpirOp::DefaultStart { .. }
+        | LpirOp::End
+        | LpirOp::Break
+        | LpirOp::Continue
+        | LpirOp::BrIfNot { .. }
+        | LpirOp::Return { .. } => {}
     }
 }
 
 fn pool_bounds(func: &IrFunction, fname: &str, errs: &mut Vec<ValidationError>) {
     let n = func.vreg_pool.len();
     for (i, op) in func.body.iter().enumerate() {
-        if let Op::Call { args, results, .. } = op {
+        if let LpirOp::Call { args, results, .. } = op {
             if args.start as usize + args.count as usize > n {
                 errs.push(err_in_func(
                     fname,
@@ -846,7 +846,7 @@ fn pool_bounds(func: &IrFunction, fname: &str, errs: &mut Vec<ValidationError>) 
                 ));
             }
         }
-        if let Op::Return { values } = op {
+        if let LpirOp::Return { values } = op {
             if values.start as usize + values.count as usize > n {
                 errs.push(err_in_func(
                     fname,

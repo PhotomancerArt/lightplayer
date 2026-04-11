@@ -1,7 +1,7 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
 use lp_riscv_emu::LogLevel;
-use lpir::{FloatMode as LpirFloatMode, IrModule};
+use lpir::{FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
@@ -104,7 +104,7 @@ impl FiletestInstance {
     }
 }
 
-fn lower_glsl(source: &str) -> anyhow::Result<(IrModule, LpsModuleSig)> {
+fn lower_glsl(source: &str) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
     let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
     lps_frontend::lower(&naga).map_err(|e| anyhow::anyhow!("{e}"))
 }

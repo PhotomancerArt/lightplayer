@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
@@ -69,7 +69,7 @@ impl LpvmEngine for BrowserLpvmEngine {
     type Module = BrowserLpvmModule;
     type Error = WasmError;
 
-    fn compile(&self, ir: &IrModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
+    fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let artifact = compile_lpir(ir, meta, &self.compile_options)?;
         let wm = artifact.wasm_module();
         if let Some(spec) = &wm.env_memory {

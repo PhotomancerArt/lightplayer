@@ -1,6 +1,6 @@
 //! GLSL → Naga → LPIR → JIT pipeline (GLSL front-end: enable crate feature `glsl`).
 
-use lpir::IrModule;
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::compile_options::CompileOptions;
@@ -26,7 +26,7 @@ pub fn jit(source: &str, options: &CompileOptions) -> Result<CraneliftModule, Co
 /// Build JIT from borrowed LPIR. [`LpsModuleSig::default`] is used; [`CraneliftModule::call`] needs
 /// metadata from [`jit`] or [`jit_from_ir_owned`].
 pub fn jit_from_ir(
-    ir: &IrModule,
+    ir: &LpirModule,
     options: &CompileOptions,
 ) -> Result<CraneliftModule, CompilerError> {
     CraneliftModule::compile(ir, &LpsModuleSig::default(), *options)
@@ -34,7 +34,7 @@ pub fn jit_from_ir(
 
 /// Owned LPIR + metadata (e.g. from [`lps_frontend::lower`]) for a full [`CraneliftModule::call`] surface.
 pub fn jit_from_ir_owned(
-    ir: IrModule,
+    ir: LpirModule,
     meta: LpsModuleSig,
     options: &CompileOptions,
 ) -> Result<CraneliftModule, CompilerError> {

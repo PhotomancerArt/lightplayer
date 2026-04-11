@@ -98,6 +98,20 @@ runtime.
 | `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
+## Native RV32 backends (`lpvm-native` and `lpvm-native-fa`)
+
+There are **two** optional crates that lower LPIR to custom RV32 machine code
+outside Cranelift. Both stay in the workspace until the new path is complete.
+
+| Crate             | Role |
+|-------------------|------|
+| **`lpvm-native`** | Established backend: linear-scan regalloc, ELF-style emission, `rt_jit` / `rt_emu`. Used by **`native-jit`** on device, `shader-rv32` linear pipeline, and filetests for `rv32lp`. |
+| **`lpvm-native-fa`** | Fastalloc / straight-line PInst pipeline under active development. Used by **`shader-rv32fa`** and the `shader-rv32 --pipeline fast` path. |
+
+Do **not** delete `lpvm-native` while `lpvm-native-fa` is still incomplete. When
+FA is fully functional and wired everywhere you care about, **then** remove the
+old crate and consolidate on `lpvm-native-fa`.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:

@@ -2,7 +2,7 @@
 
 use alloc::format;
 
-use lpir::{IrType, Op, VReg};
+use lpir::{IrType, LpirOp, VReg};
 use naga::{BinaryOperator, Expression, Function, Handle, Module};
 
 use crate::lower_ctx::{LowerCtx, naga_type_width};
@@ -28,7 +28,7 @@ pub(crate) fn push_import_call(
 
 pub(crate) fn fconst(ctx: &mut LowerCtx<'_>, value: f32) -> VReg {
     let v = ctx.fb.alloc_vreg(IrType::F32);
-    ctx.fb.push(Op::FconstF32 { dst: v, value });
+    ctx.fb.push(LpirOp::FconstF32 { dst: v, value });
     v
 }
 

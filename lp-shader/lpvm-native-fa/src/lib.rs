@@ -21,6 +21,8 @@ pub mod lower;
 pub mod native_options;
 pub mod peephole;
 pub mod regalloc;
+pub mod region;
+pub mod regset;
 pub mod types;
 pub mod vinst;
 
@@ -35,11 +37,14 @@ pub use debug_asm::compile_module_asm_text;
 pub use error::{LowerError, NativeError};
 pub use isa::rv32::emit_function_fastalloc_bytes;
 pub use isa::{CodeBlob, IsaBackend, Rv32Backend};
-pub use lower::{LoopRegion, LoweredFunction, lower_op, lower_ops};
+pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
 pub use native_options::NativeCompileOptions;
 pub use regalloc::{Allocation, GreedyAlloc, LinearScan, RegAlloc, VRegInfo};
 pub use types::NativeType;
-pub use vinst::{IcmpCond, SymbolRef, VInst};
+pub use vinst::{
+    IcmpCond, IrVReg, LabelId, ModuleSymbols, SRC_OP_NONE, SymbolId, VInst, VReg, VRegSlice,
+    pack_src_op, unpack_src_op,
+};
 
 #[cfg(feature = "emu")]
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};

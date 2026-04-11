@@ -6,7 +6,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, FunctionBuilder, IrModule, IrType, Op, SlotId, VReg};
+use lpir::{CalleeRef, FunctionBuilder, LpirModule, IrType, LpirOp, SlotId, VReg};
 use naga::{
     AddressSpace, Expression, Function, Handle, LocalVariable, Module, Statement, Type, TypeInner,
 };
@@ -50,7 +50,7 @@ pub(crate) struct LowerCtx<'a> {
     pub fb: FunctionBuilder,
     pub module: &'a Module,
     pub func: &'a Function,
-    pub ir_module: Option<&'a IrModule>,
+    pub ir_module: Option<&'a LpirModule>,
     pub expr_cache: Vec<Option<VRegVec>>,
     pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
     pub array_map: BTreeMap<Handle<LocalVariable>, ArrayInfo>,
@@ -224,7 +224,7 @@ impl<'a> LowerCtx<'a> {
                 )));
             }
             for (d, s) in dsts.iter().zip(srcs.iter()) {
-                ctx.fb.push(Op::Copy { dst: *d, src: *s });
+                ctx.fb.push(LpirOp::Copy { dst: *d, src: *s });
             }
         }
 

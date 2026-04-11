@@ -41,20 +41,20 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::vinst::VInst;
+    use crate::vinst::{SRC_OP_NONE, VInst, VReg, pack_src_op};
 
     #[test]
     fn removes_br_before_matching_label() {
         let mut v = vec![
             VInst::Br {
                 target: 1,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             },
-            VInst::Label(1, None),
+            VInst::Label(1, SRC_OP_NONE),
         ];
         optimize(&mut v);
         assert_eq!(v.len(), 1);
-        assert!(matches!(v[0], VInst::Label(1, None)));
+        assert!(matches!(v[0], VInst::Label(1, SRC_OP_NONE)));
     }
 
     #[test]
@@ -62,9 +62,9 @@ mod tests {
         let mut v = vec![
             VInst::Br {
                 target: 1,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             },
-            VInst::Label(2, None),
+            VInst::Label(2, SRC_OP_NONE),
         ];
         optimize(&mut v);
         assert_eq!(v.len(), 2);
@@ -74,25 +74,25 @@ mod tests {
     fn removes_br_in_middle_of_stream() {
         let mut v = vec![
             VInst::IConst32 {
-                dst: lpir::VReg(0),
+                dst: VReg(0),
                 val: 0,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             },
             VInst::Br {
                 target: 7,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             },
-            VInst::Label(7, Some(0)),
+            VInst::Label(7, pack_src_op(Some(0))),
             VInst::IConst32 {
-                dst: lpir::VReg(1),
+                dst: VReg(1),
                 val: 1,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             },
         ];
         optimize(&mut v);
         assert_eq!(v.len(), 3);
         assert!(matches!(v[0], VInst::IConst32 { .. }));
-        assert!(matches!(v[1], VInst::Label(7, Some(0))));
+        assert!(matches!(v[1], VInst::Label(7, po) if po == pack_src_op(Some(0))));
         assert!(matches!(v[2], VInst::IConst32 { .. }));
     }
 
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn single_instruction_unchanged() {
-        let mut v = vec![VInst::Label(0, None)];
+        let mut v = vec![VInst::Label(0, SRC_OP_NONE)];
         optimize(&mut v);
         assert_eq!(v.len(), 1);
     }

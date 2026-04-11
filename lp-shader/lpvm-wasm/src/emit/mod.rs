@@ -12,7 +12,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::IrModule;
+use lpir::LpirModule;
 
 use crate::module::EnvMemorySpec;
 use wasm_encoder::{
@@ -47,7 +47,7 @@ pub(crate) struct FuncEmitCtx<'a> {
 }
 
 pub(crate) fn emit_module(
-    ir: &IrModule,
+    ir: &LpirModule,
     options: &crate::options::WasmOptions,
 ) -> Result<(Vec<u8>, Option<i32>, Option<EnvMemorySpec>), String> {
     let filtered = imports::build_filtered_imports(ir)?;
@@ -211,7 +211,7 @@ pub(crate) fn emit_module(
 // ---------------------------------------------------------------------------
 
 /// Match `vec4 render(vec2, vec2, float)` — WASM `(vmctx, 5×i32) -> 4×i32` in Q32.
-fn find_render_entry(ir: &IrModule, mode: FloatMode) -> Option<(usize, u32)> {
+fn find_render_entry(ir: &LpirModule, mode: FloatMode) -> Option<(usize, u32)> {
     for (i, f) in ir.functions.iter().enumerate() {
         if f.name != "render" {
             continue;

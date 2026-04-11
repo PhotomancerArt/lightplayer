@@ -13,24 +13,44 @@
 //!   BrIf i0, @1                // branch if i0 != 0
 //!   @0:                        // label definition
 
-use crate::vinst::{IcmpCond, SymbolRef, VInst, VReg};
+use crate::vinst::{IcmpCond, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+fn push_vregs(pool: &mut Vec<VReg>, regs: &[VReg]) -> Result<VRegSlice, ParseError> {
+    if regs.len() > u8::MAX as usize {
+        return Err(ParseError {
+            line: 0,
+            message: String::from("too many vregs in slice"),
+        });
+    }
+    let start = u16::try_from(pool.len()).map_err(|_| ParseError {
+        line: 0,
+        message: String::from("vreg pool exhausted"),
+    })?;
+    pool.extend_from_slice(regs);
+    Ok(VRegSlice {
+        start,
+        count: regs.len() as u8,
+    })
+}
+
 /// Parse VInsts from text representation.
-pub fn parse(input: &str) -> Result<Vec<VInst>, ParseError> {
+pub fn parse(input: &str) -> Result<(Vec<VInst>, ModuleSymbols, Vec<VReg>), ParseError> {
     let mut vinsts = Vec::new();
+    let mut symbols = ModuleSymbols::default();
+    let mut pool = Vec::new();
     for (line_num, line) in input.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with("//") {
             continue;
         }
-        let inst = parse_line(line, line_num)?;
+        let inst = parse_line(line, line_num, &mut symbols, &mut pool)?;
         vinsts.push(inst);
     }
-    Ok(vinsts)
+    Ok((vinsts, symbols, pool))
 }
 
 #[derive(Debug)]
@@ -39,7 +59,12 @@ pub struct ParseError {
     pub message: String,
 }
 
-fn parse_line(line: &str, line_num: usize) -> Result<VInst, ParseError> {
+fn parse_line(
+    line: &str,
+    line_num: usize,
+    symbols: &mut ModuleSymbols,
+    pool: &mut Vec<VReg>,
+) -> Result<VInst, ParseError> {
     // Label definition: @0:
     if line.starts_with("@") && line.ends_with(":") {
         let id_str = &line[1..line.len() - 1];
@@ -47,17 +72,17 @@ fn parse_line(line: &str, line_num: usize) -> Result<VInst, ParseError> {
             line: line_num,
             message: format!("Invalid label id: {}", id_str),
         })?;
-        return Ok(VInst::Label(id, None));
+        return Ok(VInst::Label(id, SRC_OP_NONE));
     }
 
     // Assignment: i2 = Add32 i0, i1
     if let Some((lhs, rhs)) = line.split_once(" = ") {
         let dsts = parse_rets(lhs.trim())?;
-        return parse_def_instruction(dsts, rhs.trim(), line_num);
+        return parse_def_instruction(dsts, rhs.trim(), line_num, symbols, pool);
     }
 
     // No assignment: Store32, Br, BrIf, Ret, Call without ret
-    parse_nodef_instruction(line, line_num)
+    parse_nodef_instruction(line, line_num, symbols, pool)
 }
 
 /// Parse return register(s), e.g., "i2" or "(i2, i3)"
@@ -88,7 +113,7 @@ fn parse_ireg(s: &str) -> Result<VReg, ParseError> {
         line: 0,
         message: format!("Invalid ireg number in '{}'", s),
     })?;
-    Ok(VReg(num))
+    Ok(VReg(num as u16))
 }
 
 /// Parse comma-separated argument list: i0, i1 or i0
@@ -125,7 +150,13 @@ fn parse_label(s: &str) -> Result<u32, ParseError> {
     })
 }
 
-fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<VInst, ParseError> {
+fn parse_def_instruction(
+    dsts: Vec<VReg>,
+    rhs: &str,
+    line_num: usize,
+    symbols: &mut ModuleSymbols,
+    pool: &mut Vec<VReg>,
+) -> Result<VInst, ParseError> {
     let parts: Vec<&str> = rhs.split_whitespace().collect();
     if parts.is_empty() {
         return Err(ParseError {
@@ -156,7 +187,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
             Ok(VInst::IConst32 {
                 dst: dsts[0],
                 val,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -181,55 +212,55 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Sub32" => Ok(VInst::Sub32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Mul32" => Ok(VInst::Mul32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "And32" => Ok(VInst::And32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Or32" => Ok(VInst::Or32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Xor32" => Ok(VInst::Xor32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Shl32" => Ok(VInst::Shl32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "ShrS32" => Ok(VInst::ShrS32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "ShrU32" => Ok(VInst::ShrU32 {
                     dst: dsts[0],
                     src1,
                     src2,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 _ => unreachable!(),
             }
@@ -255,25 +286,25 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                     dst: dsts[0],
                     lhs,
                     rhs,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "DivU32" => Ok(VInst::DivU32 {
                     dst: dsts[0],
                     lhs,
                     rhs,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "RemS32" => Ok(VInst::RemS32 {
                     dst: dsts[0],
                     lhs,
                     rhs,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "RemU32" => Ok(VInst::RemU32 {
                     dst: dsts[0],
                     lhs,
                     rhs,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 _ => unreachable!(),
             }
@@ -291,17 +322,17 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                 "Neg32" => Ok(VInst::Neg32 {
                     dst: dsts[0],
                     src,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Bnot32" => Ok(VInst::Bnot32 {
                     dst: dsts[0],
                     src,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 "Mov32" => Ok(VInst::Mov32 {
                     dst: dsts[0],
                     src,
-                    src_op: None,
+                    src_op: SRC_OP_NONE,
                 }),
                 _ => unreachable!(),
             }
@@ -330,7 +361,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                 lhs,
                 rhs,
                 cond,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -357,7 +388,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                 dst: dsts[0],
                 src,
                 imm,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -380,7 +411,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                 cond: args[0],
                 if_true: args[1],
                 if_false: args[2],
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -405,7 +436,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
                 dst: dsts[0],
                 base,
                 offset,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -423,7 +454,7 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
             Ok(VInst::SlotAddr {
                 dst: dsts[0],
                 slot,
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -436,14 +467,15 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
             } else {
                 vec![]
             };
+            let target = symbols.intern(target_name);
+            let args_slice = push_vregs(pool, &args)?;
+            let rets_slice = push_vregs(pool, &dsts)?;
             Ok(VInst::Call {
-                target: SymbolRef {
-                    name: target_name.into(),
-                },
-                args,
-                rets: dsts,
+                target,
+                args: args_slice,
+                rets: rets_slice,
                 callee_uses_sret: false, // TODO: detect from rets.len()
-                src_op: None,
+                src_op: SRC_OP_NONE,
             })
         }
 
@@ -454,7 +486,12 @@ fn parse_def_instruction(dsts: Vec<VReg>, rhs: &str, line_num: usize) -> Result<
     }
 }
 
-fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseError> {
+fn parse_nodef_instruction(
+    line: &str,
+    line_num: usize,
+    symbols: &mut ModuleSymbols,
+    pool: &mut Vec<VReg>,
+) -> Result<VInst, ParseError> {
     // Ret i0 or Ret (i0, i1) or Ret
     if line.starts_with("Ret ") || line == "Ret" {
         let rest = if line.starts_with("Ret ") {
@@ -469,7 +506,11 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
         } else {
             vec![parse_ireg(rest.trim())?]
         };
-        return Ok(VInst::Ret { vals, src_op: None });
+        let vals_slice = push_vregs(pool, &vals)?;
+        return Ok(VInst::Ret {
+            vals: vals_slice,
+            src_op: SRC_OP_NONE,
+        });
     }
 
     // Store32 i1, i0, 4
@@ -496,7 +537,7 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
             src,
             base,
             offset,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         });
     }
 
@@ -520,7 +561,7 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
             dst_base,
             src_base,
             size,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         });
     }
 
@@ -530,7 +571,7 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
         let target = parse_label(rest.trim())?;
         return Ok(VInst::Br {
             target,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         });
     }
 
@@ -550,7 +591,7 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
             cond,
             target,
             invert: false,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         });
     }
 
@@ -564,14 +605,15 @@ fn parse_nodef_instruction(line: &str, line_num: usize) -> Result<VInst, ParseEr
         } else {
             vec![]
         };
+        let target = symbols.intern(target_name);
+        let args_slice = push_vregs(pool, &args)?;
+        let rets_slice = push_vregs(pool, &[])?;
         return Ok(VInst::Call {
-            target: SymbolRef {
-                name: target_name.into(),
-            },
-            args,
-            rets: vec![],
+            target,
+            args: args_slice,
+            rets: rets_slice,
             callee_uses_sret: false,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         });
     }
 
@@ -601,15 +643,15 @@ fn parse_icmp_cond(s: &str) -> Result<IcmpCond, ParseError> {
 }
 
 /// Format VInsts for human-readable output.
-pub fn format(vinsts: &[VInst]) -> String {
+pub fn format(vinsts: &[VInst], pool: &[VReg], symbols: &ModuleSymbols) -> String {
     vinsts
         .iter()
-        .map(format_vinst)
+        .map(|i| format_vinst(i, pool, symbols))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_vinst(inst: &VInst) -> String {
+fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String {
     match inst {
         VInst::Label(id, _) => format!("@{}:", id),
 
@@ -758,19 +800,21 @@ fn format_vinst(inst: &VInst) -> String {
         VInst::Call {
             target, args, rets, ..
         } => {
-            let target_str = target.name.as_str();
-            let args_str = format_args(args);
-            if rets.is_empty() {
+            let target_str = symbols.name(*target);
+            let args_str = format_args(args.vregs(pool));
+            let rets_v = rets.vregs(pool);
+            if rets_v.is_empty() {
                 format!("Call {} {}", target_str, args_str)
-            } else if rets.len() == 1 {
-                format!("{} = Call {} {}", ireg(&rets[0]), target_str, args_str)
+            } else if rets_v.len() == 1 {
+                format!("{} = Call {} {}", ireg(&rets_v[0]), target_str, args_str)
             } else {
-                let rets_str = format_rets(rets);
+                let rets_str = format_rets(rets_v);
                 format!("{} = Call {} {}", rets_str, target_str, args_str)
             }
         }
 
         VInst::Ret { vals, .. } => {
+            let vals = vals.vregs(pool);
             if vals.is_empty() {
                 "Ret".into()
             } else if vals.len() == 1 {
@@ -825,7 +869,7 @@ mod tests {
     #[test]
     fn test_parse_iconst() {
         let input = "i0 = IConst32 42";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(matches!(&vinsts[0], VInst::IConst32 { dst, val, .. } if dst.0 == 0 && *val == 42));
     }
@@ -833,7 +877,7 @@ mod tests {
     #[test]
     fn test_parse_add() {
         let input = "i2 = Add32 i0, i1";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(
             matches!(&vinsts[0], VInst::Add32 { dst, src1, src2, .. } if dst.0 == 2 && src1.0 == 0 && src2.0 == 1)
@@ -843,7 +887,7 @@ mod tests {
     #[test]
     fn test_parse_icmp() {
         let input = "i3 = Icmp32 Eq, i0, i1";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(
             matches!(&vinsts[0], VInst::Icmp32 { dst, cond, .. } if dst.0 == 3 && *cond == IcmpCond::Eq)
@@ -853,12 +897,12 @@ mod tests {
     #[test]
     fn test_parse_call() {
         let input = "(i2, i3) = Call mod (i0, i1)";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, pool) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         match &vinsts[0] {
             VInst::Call { rets, args, .. } => {
-                assert_eq!(rets.len(), 2);
-                assert_eq!(args.len(), 2);
+                assert_eq!(rets.vregs(&pool).len(), 2);
+                assert_eq!(args.vregs(&pool).len(), 2);
             }
             _ => panic!("Expected Call"),
         }
@@ -867,12 +911,13 @@ mod tests {
     #[test]
     fn test_parse_ret() {
         let input = "Ret i0";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, pool) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         match &vinsts[0] {
             VInst::Ret { vals, .. } => {
-                assert_eq!(vals.len(), 1);
-                assert_eq!(vals[0].0, 0);
+                let vr = vals.vregs(&pool);
+                assert_eq!(vr.len(), 1);
+                assert_eq!(vr[0].0, 0);
             }
             _ => panic!("Expected Ret"),
         }
@@ -881,15 +926,15 @@ mod tests {
     #[test]
     fn test_parse_label() {
         let input = "@0:";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
-        assert!(matches!(vinsts[0], VInst::Label(0, None)));
+        assert!(matches!(vinsts[0], VInst::Label(0, SRC_OP_NONE)));
     }
 
     #[test]
     fn test_parse_br() {
         let input = "Br @0";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(matches!(vinsts[0], VInst::Br { target: 0, .. }));
     }
@@ -897,7 +942,7 @@ mod tests {
     #[test]
     fn test_parse_brif() {
         let input = "BrIf i0, @1";
-        let vinsts = parse(input).unwrap();
+        let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(matches!(&vinsts[0], VInst::BrIf { cond, target: 1, .. } if cond.0 == 0));
     }
@@ -907,9 +952,9 @@ mod tests {
         let inst = VInst::IConst32 {
             dst: VReg(0),
             val: 42,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         };
-        let s = format_vinst(&inst);
+        let s = format_vinst(&inst, &[], &ModuleSymbols::default());
         assert_eq!(s, "i0 = IConst32 42");
     }
 
@@ -919,9 +964,9 @@ mod tests {
             dst: VReg(2),
             src1: VReg(0),
             src2: VReg(1),
-            src_op: None,
+            src_op: SRC_OP_NONE,
         };
-        let s = format_vinst(&inst);
+        let s = format_vinst(&inst, &[], &ModuleSymbols::default());
         assert_eq!(s, "i2 = Add32 i0, i1");
     }
 
@@ -932,9 +977,9 @@ mod tests {
             lhs: VReg(0),
             rhs: VReg(1),
             cond: IcmpCond::Eq,
-            src_op: None,
+            src_op: SRC_OP_NONE,
         };
-        let s = format_vinst(&inst);
+        let s = format_vinst(&inst, &[], &ModuleSymbols::default());
         assert_eq!(s, "i3 = Icmp32 Eq, i0, i1");
     }
 
@@ -946,9 +991,9 @@ i1 = IConst32 2
 i2 = Add32 i0, i1
 Ret i2
 "#;
-        let vinsts = parse(input).unwrap();
-        let output = format(&vinsts);
-        let reparsed = parse(&output).unwrap();
+        let (vinsts, syms, pool) = parse(input).unwrap();
+        let output = format(&vinsts, &pool, &syms);
+        let (reparsed, _, _) = parse(&output).unwrap();
         assert_eq!(vinsts.len(), reparsed.len());
     }
 }

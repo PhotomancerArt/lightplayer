@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, ImportDecl, IrType, ModuleBuilder, Op, VReg};
+use lpir::{CalleeRef, ImportDecl, IrType, ModuleBuilder, LpirOp, VReg};
 use naga::{
     AddressSpace, Block, Expression, Function, Handle, LocalVariable, Module, ScalarKind,
     Statement, TypeInner, VectorSize,
@@ -325,7 +325,7 @@ pub(crate) fn lower_lpfx_call(
                 let slot = ctx.fb.alloc_slot(4);
                 // Use I32 (not Pointer) to match import ABI param type
                 let addr = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+                ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
                 arg_vs.push(addr);
                 outs.push((addr, dst, *ir));
             }
@@ -342,7 +342,7 @@ pub(crate) fn lower_lpfx_call(
                 let slot = ctx.fb.alloc_slot(n as u32 * 4);
                 // Use I32 (not Pointer) to match import ABI param type
                 let addr = ctx.fb.alloc_vreg(IrType::I32);
-                ctx.fb.push(Op::SlotAddr { dst: addr, slot });
+                ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
                 arg_vs.push(addr);
                 vec_outs.push((addr, dsts, *ir_ty, n));
             }
@@ -376,23 +376,23 @@ pub(crate) fn lower_lpfx_call(
 
     for (addr, dst, ir_ty) in outs {
         let tmp = ctx.fb.alloc_vreg(ir_ty);
-        ctx.fb.push(Op::Load {
+        ctx.fb.push(LpirOp::Load {
             dst: tmp,
             base: addr,
             offset: 0,
         });
-        ctx.fb.push(Op::Copy { dst, src: tmp });
+        ctx.fb.push(LpirOp::Copy { dst, src: tmp });
     }
 
     for (addr, dsts, ir_ty, n) in vec_outs {
         for i in 0..n {
             let tmp = ctx.fb.alloc_vreg(ir_ty);
-            ctx.fb.push(Op::Load {
+            ctx.fb.push(LpirOp::Load {
                 dst: tmp,
                 base: addr,
                 offset: (i as u32) * 4,
             });
-            ctx.fb.push(Op::Copy {
+            ctx.fb.push(LpirOp::Copy {
                 dst: dsts[i],
                 src: tmp,
             });

@@ -1,21 +1,21 @@
 use cranelift_codegen::ir::{InstBuilder, MemFlags, Value, types};
 use cranelift_frontend::{FunctionBuilder, Variable};
-use lpir::module::IrFunction;
-use lpir::op::Op;
+use lpir::lpir_module::IrFunction;
+use lpir::lpir_op::LpirOp;
 use lpir::types::VReg;
 
 use super::{EmitCtx, def_v, ir_type_for_mode, use_v};
 use crate::error::CompileError;
 
 pub(crate) fn emit_memory(
-    op: &Op,
+    op: &LpirOp,
     func: &IrFunction,
     builder: &mut FunctionBuilder,
     vars: &[Variable],
     ctx: &EmitCtx,
 ) -> Result<bool, CompileError> {
     match op {
-        Op::SlotAddr { dst, slot } => {
+        LpirOp::SlotAddr { dst, slot } => {
             let ss = *ctx
                 .slots
                 .get(slot.0 as usize)
@@ -23,7 +23,7 @@ pub(crate) fn emit_memory(
             let addr = builder.ins().stack_addr(ctx.pointer_type, ss, 0);
             def_v(builder, vars, *dst, addr);
         }
-        Op::Load { dst, base, offset } => {
+        LpirOp::Load { dst, base, offset } => {
             let ptr = operand_as_ptr(builder, vars, ctx, *base);
             let ty = ir_type_for_mode(
                 func.vreg_types[dst.0 as usize],
@@ -39,7 +39,7 @@ pub(crate) fn emit_memory(
             );
             def_v(builder, vars, *dst, val);
         }
-        Op::Store {
+        LpirOp::Store {
             base,
             offset,
             value,
@@ -54,7 +54,7 @@ pub(crate) fn emit_memory(
                     .map_err(|_| CompileError::unsupported("store offset does not fit in i32"))?,
             );
         }
-        Op::Memcpy {
+        LpirOp::Memcpy {
             dst_addr,
             src_addr,
             size,

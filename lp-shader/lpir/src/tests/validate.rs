@@ -5,8 +5,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::builder::FunctionBuilder;
-use crate::module::{ImportDecl, IrFunction, IrModule, VMCTX_VREG};
-use crate::op::Op;
+use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
+use crate::lpir_op::LpirOp;
 use crate::parse::parse_module;
 use crate::types::{CalleeRef, IrType, VReg, VRegRange};
 use crate::validate::{validate_function, validate_module};
@@ -65,10 +65,10 @@ fn validate_err_break_outside_loop() {
         return_types: Vec::new(),
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![Op::Break],
+        body: vec![LpirOp::Break],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -114,14 +114,14 @@ fn validate_err_undefined_vreg() {
         return_types: vec![IrType::F32],
         vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32],
         slots: Vec::new(),
-        body: vec![Op::Fadd {
+        body: vec![LpirOp::Fadd {
             dst: VReg(2),
             lhs: VReg(1),
             rhs: VReg(1),
         }],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -139,13 +139,13 @@ fn validate_err_copy_type_mismatch() {
         return_types: Vec::new(),
         vreg_types: vec![IrType::Pointer, IrType::F32, IrType::I32],
         slots: Vec::new(),
-        body: vec![Op::Copy {
+        body: vec![LpirOp::Copy {
             dst: VReg(2),
             src: VReg(1),
         }],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -157,13 +157,13 @@ fn validate_err_copy_type_mismatch() {
 fn validate_err_call_arity() {
     let mut fb = FunctionBuilder::new("c", &[]);
     let v0 = fb.alloc_vreg(IrType::F32);
-    fb.push(Op::FconstF32 {
+    fb.push(LpirOp::FconstF32 {
         dst: v0,
         value: 1.0,
     });
     fb.push_call(CalleeRef(0), &[], &[]);
     let func = fb.finish();
-    let m = IrModule {
+    let m = LpirModule {
         imports: vec![ImportDecl {
             module_name: String::from("m"),
             func_name: String::from("g"),
@@ -188,14 +188,14 @@ fn validate_err_callee_oob() {
         return_types: Vec::new(),
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![Op::Call {
+        body: vec![LpirOp::Call {
             callee: CalleeRef(3),
             args: VRegRange { start: 0, count: 0 },
             results: VRegRange { start: 0, count: 0 },
         }],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -213,10 +213,10 @@ fn validate_err_continue_outside_loop() {
         return_types: Vec::new(),
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![Op::Continue],
+        body: vec![LpirOp::Continue],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -245,7 +245,7 @@ func @x() {
 fn validate_err_duplicate_switch_case() {
     let mut b = FunctionBuilder::new("sw", &[]);
     let sel = b.alloc_vreg(IrType::I32);
-    b.push(Op::IconstI32 { dst: sel, value: 0 });
+    b.push(LpirOp::IconstI32 { dst: sel, value: 0 });
     b.push_switch(sel);
     b.push_case(0);
     b.end_switch_arm();
@@ -255,7 +255,7 @@ fn validate_err_duplicate_switch_case() {
     b.end_switch_arm();
     b.end_switch();
     let f = b.finish();
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -277,17 +277,17 @@ fn validate_err_return_value_type() {
         vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
         body: vec![
-            Op::IconstI32 {
+            LpirOp::IconstI32 {
                 dst: VReg(1),
                 value: 1,
             },
-            Op::Return {
+            LpirOp::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
         ],
         vreg_pool: vec![VReg(1)],
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -305,12 +305,12 @@ fn validate_err_vreg_pool_oob() {
         return_types: Vec::new(),
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![Op::Return {
+        body: vec![LpirOp::Return {
             values: VRegRange { start: 0, count: 1 },
         }],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
@@ -404,13 +404,13 @@ fn validate_err_slot_addr_oob() {
         return_types: Vec::new(),
         vreg_types: vec![IrType::Pointer, IrType::I32],
         slots: Vec::new(),
-        body: vec![Op::SlotAddr {
+        body: vec![LpirOp::SlotAddr {
             dst: VReg(1),
             slot: crate::types::SlotId(0),
         }],
         vreg_pool: Vec::new(),
     };
-    let m = IrModule {
+    let m = LpirModule {
         imports: Vec::new(),
         functions: vec![f],
     };
