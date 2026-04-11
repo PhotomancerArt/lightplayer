@@ -60,16 +60,6 @@ impl AllocTrace {
     }
 }
 
-/// Create a trace entry for a stubbed decision.
-pub fn stub_entry(vinst_idx: usize, mnemonic: &str, detail: &str) -> TraceEntry {
-    TraceEntry {
-        vinst_idx,
-        vinst_mnemonic: String::from(mnemonic),
-        decision: format!("STUB: {}", detail),
-        register_state: "(stub)".into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,15 +69,30 @@ mod tests {
         let mut trace = AllocTrace::new();
         assert!(trace.is_empty());
 
-        trace.push(stub_entry(0, "Add32", "alloc v2"));
+        trace.push(TraceEntry {
+            vinst_idx: 0,
+            vinst_mnemonic: String::from("Add32"),
+            decision: String::from("alloc v2"),
+            register_state: String::from("v2→a0"),
+        });
         assert_eq!(trace.entries.len(), 1);
     }
 
     #[test]
     fn trace_reverse() {
         let mut trace = AllocTrace::new();
-        trace.push(stub_entry(0, "IConst32", "def v0"));
-        trace.push(stub_entry(1, "Ret", "use v0"));
+        trace.push(TraceEntry {
+            vinst_idx: 0,
+            vinst_mnemonic: String::from("IConst32"),
+            decision: String::from("def v0"),
+            register_state: String::from("v0→a0"),
+        });
+        trace.push(TraceEntry {
+            vinst_idx: 1,
+            vinst_mnemonic: String::from("Ret"),
+            decision: String::from("use v0"),
+            register_state: String::from("v0→a0"),
+        });
 
         trace.reverse();
         assert_eq!(trace.entries[0].vinst_idx, 1);
@@ -97,11 +102,16 @@ mod tests {
     #[test]
     fn trace_format_contains_header() {
         let mut trace = AllocTrace::new();
-        trace.push(stub_entry(0, "Add32", "alloc"));
+        trace.push(TraceEntry {
+            vinst_idx: 0,
+            vinst_mnemonic: String::from("Add32"),
+            decision: String::from("alloc"),
+            register_state: String::from("v2→a0"),
+        });
 
         let output = trace.format();
         assert!(output.contains("=== AllocTrace ==="));
         assert!(output.contains("Add32"));
-        assert!(output.contains("STUB"));
+        assert!(output.contains("alloc"));
     }
 }

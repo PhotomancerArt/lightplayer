@@ -13,6 +13,8 @@ pub enum Backend {
     Rv32,
     /// LPIR → RV32 via native backend + linked builtins + emulator.
     Rv32lp,
+    /// LPIR → RV32 via fastalloc native backend + linked builtins + emulator.
+    Rv32fa,
     /// WebAssembly via wasmtime.
     Wasm,
 }
@@ -60,7 +62,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32, rv32lp — used for error messages and CLI.
+/// Order: wasm, jit, rv32, rv32lp, rv32fa — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         backend: Backend::Wasm,
@@ -82,6 +84,12 @@ pub const ALL_TARGETS: &[Target] = &[
     },
     Target {
         backend: Backend::Rv32lp,
+        float_mode: FloatMode::Q32,
+        isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        backend: Backend::Rv32fa,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,

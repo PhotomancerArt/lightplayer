@@ -3937,6 +3937,7 @@ dependencies = [
  "lpvm-cranelift",
  "lpvm-emu",
  "lpvm-native",
+ "lpvm-native-fa",
  "lpvm-wasm",
  "num_cpus",
  "regex",

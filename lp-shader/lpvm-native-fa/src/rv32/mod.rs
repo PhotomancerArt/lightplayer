@@ -1,7 +1,6 @@
-//! RV32 ISA-specific code: encoding, GPR, ABI, allocation, PInst emission.
+//! RV32 ISA-specific code: encoding, GPR, ABI, PInst emission.
 
 pub mod abi;
-pub mod alloc;
 pub mod debug;
 pub mod encode;
 pub mod gpr;
@@ -27,10 +26,10 @@ pub fn emit_function_fastalloc_bytes(
     let mut lowered = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
     crate::peephole::optimize(&mut lowered.vinsts);
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
-    let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
+    let alloc_result = crate::fa_alloc::allocate(&lowered, &func_abi)
         .map_err(NativeError::FastAlloc)?;
     let mut emitter = rv32_emit::Rv32Emitter::new();
-    for p in &phys {
+    for p in &alloc_result.pinsts {
         emitter.emit(p);
     }
     Ok(emitter.finish())

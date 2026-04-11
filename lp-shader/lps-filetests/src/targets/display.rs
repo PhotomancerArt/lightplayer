@@ -10,6 +10,7 @@ impl fmt::Display for Backend {
             Backend::Jit => write!(f, "jit"),
             Backend::Rv32 => write!(f, "rv32"),
             Backend::Rv32lp => write!(f, "rv32lp"),
+            Backend::Rv32fa => write!(f, "rv32fa"),
             Backend::Wasm => write!(f, "wasm"),
         }
     }
@@ -77,7 +78,7 @@ pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> 
         }
         if !any {
             let valid: Vec<String> = ALL_TARGETS.iter().map(|t| t.name()).collect();
-            let backends = "jit, wasm, rv32, rv32lp (shorthand) or full names like jit.q32";
+            let backends = "jit, wasm, rv32, rv32lp, rv32fa (shorthand) or full names like jit.q32";
             return Err(format!(
                 "unknown target '{token}'. Try {backends}. Known targets: {}",
                 valid.join(", ")
@@ -121,6 +122,12 @@ mod tests {
     }
 
     #[test]
+    fn test_target_name_rv32fa_q32() {
+        let target = &ALL_TARGETS[4];
+        assert_eq!(target.name(), "rv32fa.q32");
+    }
+
+    #[test]
     fn test_target_from_name_valid() {
         let t = Target::from_name("jit.q32").unwrap();
         assert_eq!(t.name(), "jit.q32");
@@ -130,6 +137,8 @@ mod tests {
         assert_eq!(t.name(), "rv32.q32");
         let t = Target::from_name("rv32lp.q32").unwrap();
         assert_eq!(t.name(), "rv32lp.q32");
+        let t = Target::from_name("rv32fa.q32").unwrap();
+        assert_eq!(t.name(), "rv32fa.q32");
     }
 
     #[test]
@@ -140,6 +149,7 @@ mod tests {
         assert!(err.contains("wasm.q32"));
         assert!(err.contains("rv32.q32"));
         assert!(err.contains("rv32lp.q32"));
+        assert!(err.contains("rv32fa.q32"));
     }
 
     #[test]
@@ -162,6 +172,13 @@ mod tests {
         let v = parse_target_filters("rv32lp").expect("parse");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].name(), "rv32lp.q32");
+    }
+
+    #[test]
+    fn test_parse_target_filters_rv32fa_shorthand() {
+        let v = parse_target_filters("rv32fa").expect("parse");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].name(), "rv32fa.q32");
     }
 
     #[test]

@@ -5,9 +5,9 @@ use std::io::Write;
 use anyhow::Result;
 use lpir::FloatMode;
 use lpvm_native_fa::abi::ModuleAbi;
+use lpvm_native_fa::fa_alloc;
 use lpvm_native_fa::fa_alloc::liveness::{analyze_liveness, format_liveness};
 use lpvm_native_fa::rv32::abi::func_abi_rv32;
-use lpvm_native_fa::rv32::alloc;
 use lpvm_native_fa::rv32::debug::pinst;
 use lpvm_native_fa::rv32::debug::region::format_region_tree;
 use lpvm_native_fa::rv32::rv32_emit::Rv32Emitter;
@@ -108,8 +108,14 @@ pub fn run_fastalloc_module(
 
         let slots = func.total_param_slots() as usize;
         let func_abi = func_abi_rv32(fn_sig, slots);
-        let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
+        let alloc_result = fa_alloc::allocate(&lowered, &func_abi)
             .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
+        let phys = alloc_result.pinsts;
+
+        // Print alloc trace if requested via env var
+        if std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1" && !alloc_result.trace.is_empty() {
+            writeln!(debug, "{}", alloc_result.trace.format())?;
+        }
 
         if verbosity.pinst {
             writeln!(debug, "=== PInst {} ===", func.name)?;

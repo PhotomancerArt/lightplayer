@@ -50,8 +50,8 @@ pub enum NativeError {
     /// JIT relocation or symbol resolution failure (RISC-V firmware path).
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
-    /// Fastalloc (straight-line PInst pipeline) failed.
-    FastAlloc(crate::rv32::alloc::AllocError),
+    /// Fastalloc (backward-walk register allocation) failed.
+    FastAlloc(crate::fa_alloc::AllocError),
     /// Internal error (e.g., during restructuring).
     Internal(String),
 }

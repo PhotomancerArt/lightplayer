@@ -85,8 +85,9 @@ pub fn compile_function(
 
     // 3. Allocate registers (fastalloc)
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
-    let pinsts = crate::rv32::alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
+    let alloc_result = crate::fa_alloc::allocate(&lowered, &func_abi)
         .map_err(NativeError::FastAlloc)?;
+    let pinsts = alloc_result.pinsts;
 
     // 4. Emit PInst → bytes
     let mut emitter = crate::rv32::rv32_emit::Rv32Emitter::new();

@@ -55,26 +55,6 @@ pub fn allocate(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> Result<AllocR
     })
 }
 
-/// Run the allocator shell: liveness + backward walk with stubbed decisions.
-/// DEPRECATED: Use `allocate` for real allocation.
-pub fn run_shell(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> AllocTrace {
-    let mut trace = AllocTrace::new();
-
-    let root = lowered.region_tree.root;
-    if root != REGION_ID_NONE {
-        walk::walk_region_stub(
-            &lowered.region_tree,
-            root,
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &mut trace,
-        );
-        trace.reverse();
-    }
-
-    trace
-}
-
 fn max_vreg_index(vinsts: &[crate::vinst::VInst], pool: &[crate::vinst::VReg]) -> usize {
     let mut m = 0usize;
     for inst in vinsts {
@@ -122,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_empty_region_produces_empty_trace() {
+    fn empty_region_produces_empty_result() {
         let tree = RegionTree::new();
         // root stays REGION_ID_NONE
         let lowered = LoweredFunction {
@@ -133,16 +113,19 @@ mod tests {
             region_tree: tree,
         };
 
-        // With REGION_ID_NONE root, walk_region_stub returns early without adding entries
-        let mut trace = AllocTrace::new();
-        walk::walk_region_stub(
-            &lowered.region_tree,
-            lowered.region_tree.root,
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &mut trace,
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
         );
-        assert!(trace.is_empty());
+
+        // With REGION_ID_NONE root, allocate returns early with just frame setup/teardown
+        let result = allocate(&lowered, &abi).unwrap();
+        // FrameSetup + FrameTeardown
+        assert_eq!(result.pinsts.len(), 2);
     }
 
     #[test]
@@ -158,22 +141,18 @@ mod tests {
         );
         assert!(liveness.live_in.is_empty());
 
-        // Walk produces trace for all 3 instructions
-        let mut trace = trace::AllocTrace::new();
-        walk::walk_region_stub(
-            &lowered.region_tree,
-            lowered.region_tree.root,
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &mut trace,
+        // allocate produces pinsts for all 3 instructions plus frame setup/teardown
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
         );
-        assert_eq!(trace.entries.len(), 3);
-
-        // After reverse, forward order
-        trace.reverse();
-        assert_eq!(trace.entries[0].vinst_idx, 0);
-        assert_eq!(trace.entries[1].vinst_idx, 1);
-        assert_eq!(trace.entries[2].vinst_idx, 2);
+        let result = allocate(&lowered, &abi).unwrap();
+        // Should have: FrameSetup + 3 instructions + FrameTeardown
+        assert!(result.pinsts.len() >= 5);
     }
 
     #[test]

@@ -32,18 +32,61 @@ pub struct EmittedCode {
 ///
 /// # Returns
 /// Emitted machine code with relocations and debug info.
-pub fn emit_vinsts(
-    vinsts: &[VInst],
+/// Emit a LoweredFunction to machine code.
+///
+/// This function orchestrates the allocation and emission pipeline:
+/// 1. Allocate registers (VInst → PInst) via fa_alloc
+/// 2. Encode PInst to bytes
+///
+/// # Arguments
+/// * `lowered` - Lowered function with vinsts, region tree, vreg pool
+/// * `func_abi` - Function ABI for register allocation
+///
+/// # Returns
+/// Emitted machine code with relocations and debug info.
+pub fn emit_lowered(
+    lowered: &crate::lower::LoweredFunction,
     func_abi: &crate::abi::FuncAbi,
-    func: &lpir::IrFunction,
-    vreg_pool: &[crate::vinst::VReg],
 ) -> Result<EmittedCode, NativeError> {
     // 1. Allocate registers: VInst → PInst
-    let pinsts = crate::rv32::alloc::allocate(vinsts, func_abi, func, vreg_pool)
+    let alloc_result = crate::fa_alloc::allocate(lowered, func_abi)
         .map_err(NativeError::FastAlloc)?;
 
     // 2. Emit PInst → bytes
-    emit_pinsts(&pinsts)
+    emit_pinsts(&alloc_result.pinsts)
+}
+
+/// Emit a sequence of VInsts to machine code.
+///
+/// This function is DEPRECATED - use `emit_lowered` instead.
+/// It constructs a minimal LoweredFunction wrapper for the given VInsts.
+pub fn emit_vinsts(
+    vinsts: &[VInst],
+    func_abi: &crate::abi::FuncAbi,
+    _func: &lpir::IrFunction,
+    vreg_pool: &[crate::vinst::VReg],
+) -> Result<EmittedCode, NativeError> {
+    // Build a minimal LoweredFunction for the new allocator
+    // Note: This is a transitional path - the new allocator needs a full
+    // region tree. This function will be removed after full migration.
+    let mut lowered = crate::lower::LoweredFunction {
+        vinsts: vinsts.to_vec(),
+        vreg_pool: vreg_pool.to_vec(),
+        symbols: crate::vinst::ModuleSymbols::default(),
+        loop_regions: Vec::new(),
+        region_tree: crate::region::RegionTree::new(),
+    };
+
+    // Build a Linear region covering all instructions
+    if !vinsts.is_empty() {
+        let root = lowered.region_tree.push(crate::region::Region::Linear {
+            start: 0,
+            end: vinsts.len() as u16,
+        });
+        lowered.region_tree.root = root;
+    }
+
+    emit_lowered(&lowered, func_abi)
 }
 
 /// Emit pre-allocated physical instructions to machine code.
