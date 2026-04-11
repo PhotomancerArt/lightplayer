@@ -67,6 +67,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lps-q32/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-emu/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-shader/lpvm-native-fa/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

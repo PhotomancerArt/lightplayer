@@ -2,7 +2,7 @@
 
 ## Scope
 
-Wire up `--show-cfg` and `--show-liveness` flags to display CFG and liveness analysis.
+Wire up `--show-region` and `--show-liveness` flags to display region tree and liveness analysis.
 
 ## Implementation
 
@@ -11,9 +11,9 @@ Wire up `--show-cfg` and `--show-liveness` flags to display CFG and liveness ana
 Add new flags to the `Args` struct:
 
 ```rust
-/// Show CFG on stderr.
+/// Show region tree structure on stderr.
 #[arg(long, action = clap::ArgAction::SetTrue)]
-pub show_cfg: bool,
+pub show_region: bool,
 
 /// Show liveness analysis on stderr.
 #[arg(long, action = clap::ArgAction::SetTrue)]
@@ -27,7 +27,7 @@ pub struct Verbosity {
     pub vinst: bool,
     pub pinst: bool,
     pub disasm: bool,
-    pub cfg: bool,
+    pub region: bool,       // Changed from cfg
     pub liveness: bool,
 }
 
@@ -38,7 +38,7 @@ impl Args {
             vinst: !q && !self.no_vinst,
             pinst: !q && !self.no_pinst,
             disasm: !q && !self.no_disasm,
-            cfg: !q && self.show_cfg,
+            region: !q && self.show_region,      // Changed from cfg
             liveness: !q && self.show_liveness,
         }
     }
@@ -47,45 +47,32 @@ impl Args {
 
 ### 2. Update `pipeline.rs`
 
-Add CFG and liveness display to the pipeline:
+Add region and liveness display to the pipeline:
 
 ```rust
-use lpvm_native::isa::rv32fa::alloc::{cfg, liveness};
+use lpvm_native::isa::rv32fa::alloc::liveness;
+use lpvm_native::debug::region;
 
 pub fn compile(
     glsl: &str,
     verbosity: Verbosity,
 ) -> Result<CompileResult, Error> {
     // ... existing lowering ...
+    let lowered = lower_ops(&func, &ir, &abi, float_mode)?;
     
-    // Build CFG if requested
-    if verbosity.cfg {
-        let cfg = cfg::build_cfg(&lowered.vinsts);
-        eprintln!("{}", cfg::format_cfg(&cfg));
+    // Display region tree if requested
+    if verbosity.region {
+        let region_text = region::format_region(&lowered.region, &lowered.vinsts, 0);
+        eprintln!("{}", region_text);
     }
     
-    // Build liveness if requested
+    // Display liveness if requested
     if verbosity.liveness {
-        let cfg = cfg::build_cfg(&lowered.vinsts);
-        let num_vregs = max_vreg_index(&lowered.vinsts);
-        let live = liveness::analyze_liveness(&cfg, num_vregs);
-        eprintln!("{}", liveness::format_liveness(&live));
+        let liveness = liveness::analyze_liveness(&lowered.region, &lowered.vinsts);
+        eprintln!("{}", liveness::format_liveness(&liveness));
     }
     
     // ... rest of compilation ...
-}
-
-fn max_vreg_index(vinsts: &[VInst]) -> usize {
-    let mut max = 0;
-    for v in vinsts {
-        for u in v.uses() {
-            max = max.max(u.0 as usize + 1);
-        }
-        for d in v.defs() {
-            max = max.max(d.0 as usize + 1);
-        }
-    }
-    max
 }
 ```
 
@@ -99,12 +86,12 @@ Pass the new flags through to the pipeline.
 # Build CLI
 cargo build -p lp-cli
 
-# Test CFG display
-./target/debug/lp-cli shader-rv32fa file.glsl --show-cfg
+# Test region tree display
+./target/debug/lp-cli shader-rv32fa file.glsl --show-region
 
 # Test liveness display
 ./target/debug/lp-cli shader-rv32fa file.glsl --show-liveness
 
 # Test both
-./target/debug/lp-cli shader-rv32fa file.glsl --show-cfg --show-liveness
+./target/debug/lp-cli shader-rv32fa file.glsl --show-region --show-liveness
 ```

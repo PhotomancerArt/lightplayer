@@ -1,18 +1,20 @@
-//! [`PInst`](super::inst::PInst) → RISC-V machine code (mechanical encoding).
+//! Mechanical emission for fastalloc [`super::inst::PInst`] (straight-line path).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::abi::{PReg, RA_REG, SP_REG};
-use super::inst::PInst;
-use crate::isa::rv32::inst::{
+use crate::isa::rv32::encode::{
     encode_add, encode_addi, encode_and, encode_auipc, encode_b_type, encode_beq, encode_bne,
     encode_div, encode_divu, encode_jal, encode_jalr, encode_lw, encode_mul, encode_or, encode_rem,
     encode_remu, encode_ret, encode_sll, encode_slt, encode_sltiu, encode_sltu, encode_sra,
     encode_srl, encode_sub, encode_sw, encode_xor, encode_xori, iconst32_sequence,
 };
+use crate::isa::rv32::gpr::{RA_REG, SP_REG};
+use crate::isa::rv32::inst::PInst;
+const F3_BLT: u32 = 0b100;
+const F3_BGE: u32 = 0b101;
 
-/// Relocation at the `auipc` of an auipc+jalr pair (same as [`crate::isa::rv32::emit::NativeReloc`]).
+/// Relocation at the `auipc` of an auipc+jalr pair.
 #[derive(Clone, Debug)]
 pub struct PhysReloc {
     pub offset: usize,
@@ -129,73 +131,87 @@ impl PhysEmitter {
             }
 
             PInst::SlotAddr { dst, slot } => {
-                let off = (*slot as i32).saturating_mul(4);
-                self.push_u32(encode_addi(*dst as u32, SP_REG as u32, off));
+                self.push_u32(encode_addi(
+                    *dst as u32,
+                    SP_REG as u32,
+                    (*slot as i32).saturating_mul(4),
+                ));
             }
 
-            PInst::MemcpyWords { dst, src, size } => self.emit_memcpy_words(*dst, *src, *size),
+            PInst::MemcpyWords { dst, src, size } => {
+                let t_data = 5u32;
+                let p_src = 6u32;
+                let p_dst = 7u32;
+                self.push_u32(encode_addi(p_src, *src as u32, 0));
+                self.push_u32(encode_addi(p_dst, *dst as u32, 0));
+                let mut remaining = *size as i32;
+                while remaining > 0 {
+                    let mut local_off = 0i32;
+                    while local_off + 4 <= remaining && local_off <= 2047 - 3 {
+                        self.push_u32(encode_lw(t_data, p_src, local_off));
+                        self.push_u32(encode_sw(t_data, p_dst, local_off));
+                        local_off += 4;
+                    }
+                    if local_off == 0 {
+                        panic!("MemcpyWords: could not emit chunk (size alignment?)");
+                    }
+                    if local_off < remaining {
+                        self.push_u32(encode_addi(p_src, p_src, local_off));
+                        self.push_u32(encode_addi(p_dst, p_dst, local_off));
+                    }
+                    remaining -= local_off;
+                }
+            }
 
             PInst::Call { target } => {
-                let auipc_off = self.code.len();
-                self.push_u32(encode_auipc(RA_REG as u32, 0));
-                self.push_u32(encode_jalr(RA_REG as u32, RA_REG as u32, 0));
+                let name = target.name.clone();
+                let hi = self.relocs.len();
                 self.relocs.push(PhysReloc {
-                    offset: auipc_off,
-                    symbol: target.name.clone(),
+                    offset: self.code.len(),
+                    symbol: name,
                 });
+                self.push_u32(encode_auipc(6, 0));
+                self.relocs[hi].offset = self.code.len() - 4;
+                self.push_u32(encode_jalr(1, 6, 0));
             }
+
             PInst::Ret => {
                 self.push_u32(encode_ret());
             }
 
-            PInst::Beq {
-                src1,
-                src2,
-                target: _,
-            } => {
-                self.push_u32(encode_beq(*src1 as u32, *src2 as u32, 0));
+            PInst::Beq { src1, src2, target } => {
+                self.push_u32(encode_beq(
+                    *src1 as u32,
+                    *src2 as u32,
+                    (*target << 12) as i32,
+                ));
             }
-            PInst::Bne {
-                src1,
-                src2,
-                target: _,
-            } => {
-                self.push_u32(encode_bne(*src1 as u32, *src2 as u32, 0));
+            PInst::Bne { src1, src2, target } => {
+                self.push_u32(encode_bne(
+                    *src1 as u32,
+                    *src2 as u32,
+                    (*target << 12) as i32,
+                ));
             }
-            PInst::Blt {
-                src1,
-                src2,
-                target: _,
-            } => {
-                self.push_u32(encode_b_type(0b100, *src1 as u32, *src2 as u32, 0));
+            PInst::Blt { src1, src2, target } => {
+                self.push_u32(encode_b_type(
+                    F3_BLT,
+                    *src1 as u32,
+                    *src2 as u32,
+                    (*target << 12) as i32,
+                ));
             }
-            PInst::Bge {
-                src1,
-                src2,
-                target: _,
-            } => {
-                self.push_u32(encode_b_type(0b101, *src1 as u32, *src2 as u32, 0));
+            PInst::Bge { src1, src2, target } => {
+                self.push_u32(encode_b_type(
+                    F3_BGE,
+                    *src1 as u32,
+                    *src2 as u32,
+                    (*target << 12) as i32,
+                ));
             }
-            PInst::J { target: _ } => {
-                self.push_u32(encode_jal(0, 0));
+            PInst::J { target } => {
+                self.push_u32(encode_jal(0, (*target << 12) as i32));
             }
-        }
-    }
-
-    fn emit_memcpy_words(&mut self, dst: PReg, src: PReg, size: u32) {
-        let mut data_temp: u32 = 29;
-        if dst as u32 == data_temp || src as u32 == data_temp {
-            data_temp = 30;
-        }
-        let r_dst = dst as u32;
-        let r_src = src as u32;
-        let mut off = 0i32;
-        let mut left = size;
-        while left > 0 {
-            self.push_u32(encode_lw(data_temp, r_src, off));
-            self.push_u32(encode_sw(data_temp, r_dst, off));
-            off = off.saturating_add(4);
-            left = left.saturating_sub(4);
         }
     }
 

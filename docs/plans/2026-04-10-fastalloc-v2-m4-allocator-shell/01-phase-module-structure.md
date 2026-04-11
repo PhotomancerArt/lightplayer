@@ -2,7 +2,7 @@
 
 ## Scope
 
-Create the `alloc/` directory and module files with placeholder implementations.
+Create the `alloc/` directory and module files with placeholder implementations. The region tree is built in the lowerer, not in alloc/.
 
 ## Implementation
 
@@ -15,9 +15,9 @@ mkdir -p lp-shader/lpvm-native/src/isa/rv32fa/alloc
 ### 2. Create `alloc/mod.rs`
 
 ```rust
-//! Fast allocator shell - CFG, liveness, trace, backward walk.
+//! Fast allocator shell - liveness, trace, backward walk.
+//! Note: Region tree is built in lower.rs, not here.
 
-pub mod cfg;
 pub mod liveness;
 pub mod trace;
 pub mod walk;
@@ -26,6 +26,7 @@ use alloc::vec::Vec;
 use lpir::{IrFunction, VReg};
 use crate::abi::FuncAbi;
 use crate::vinst::VInst;
+use crate::lower::Region;
 use crate::isa::rv32fa::inst::PInst;
 use crate::error::NativeError;
 
@@ -35,16 +36,17 @@ pub enum AllocError {
     // ... other errors
 }
 
-/// FastAlloc shell - builds CFG, liveness, trace, walks backward with stubs.
+/// FastAlloc shell - uses region tree from lowerer, builds liveness, trace, walks backward with stubs.
 pub struct FastAlloc;
 
 impl FastAlloc {
     pub fn allocate(
         vinsts: &[VInst],
+        region: &Region,
         func_abi: &FuncAbi,
         func: &IrFunction,
     ) -> Result<(Vec<PInst>, trace::AllocTrace), AllocError> {
-        // TODO(Phase 2-5): Build CFG, liveness, walk, return trace
+        // TODO(Phase 2-5): Build liveness, walk, return trace
         // For now: return empty trace and use simple allocation
         let trace = trace::AllocTrace::new();
         let physinsts = simple_allocate(vinsts, func_abi, func)?;
@@ -63,72 +65,57 @@ fn simple_allocate(
 }
 ```
 
-### 3. Create `alloc/cfg.rs`
+### 3. Create `alloc/liveness.rs`
 
 ```rust
-//! Control Flow Graph for VInst sequences.
+//! Recursive liveness analysis for region tree.
 
 use alloc::vec::Vec;
-use crate::vinst::{VInst, LabelId};
+use alloc::collections::BTreeSet;
+use crate::lower::Region;
+use crate::vinst::{VInst, VReg};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BlockId(pub usize);
+#[derive(Debug, Clone)]
+pub struct LiveSet(pub BTreeSet<VReg>);
 
+impl LiveSet {
+    pub fn new() -> Self {
+        Self(BTreeSet::new())
+    }
+    
+    pub fn union(&self, other: &LiveSet) -> LiveSet {
+        LiveSet(self.0.union(&other.0).cloned().collect())
+    }
+    
+    pub fn remove(&mut self, vreg: VReg) {
+        self.0.remove(&vreg);
+    }
+    
+    pub fn insert(&mut self, vreg: VReg) {
+        self.0.insert(vreg);
+    }
+}
+
+/// Liveness result per region node.
 #[derive(Debug)]
-pub struct BasicBlock {
-    pub id: BlockId,
-    pub start: usize,
-    pub end: usize,
-    pub vinsts: Vec<VInst>,
-    pub preds: Vec<BlockId>,
-    pub succs: Vec<BlockId>,
+pub struct RegionLiveness {
+    pub live_in: LiveSet,
+    pub live_out: LiveSet,
 }
 
-#[derive(Debug)]
-pub struct CFG {
-    pub blocks: Vec<BasicBlock>,
-    pub entry: BlockId,
-}
-
-/// Build CFG from VInsts.
-/// M4: Single block for straight-line code.
-pub fn build_cfg(vinsts: &[VInst]) -> CFG {
-    todo!()
-}
-
-/// Format CFG for debug output.
-pub fn format_cfg(cfg: &CFG) -> String {
-    todo!()
-}
-```
-
-### 4. Create `alloc/liveness.rs`
-
-```rust
-//! Liveness analysis.
-
-use alloc::vec::Vec;
-use crate::isa::rv32fa::alloc::cfg::{CFG, BlockId};
-use crate::vinst::VReg;
-
-#[derive(Debug)]
-pub struct Liveness {
-    pub live_in: Vec<Vec<VReg>>,   // per block
-    pub live_out: Vec<Vec<VReg>>, // per block
-}
-
-/// Analyze liveness per block.
-pub fn analyze_liveness(cfg: &CFG, num_vregs: usize) -> Liveness {
+/// Analyze liveness recursively on region tree.
+/// M4: Stub implementation - returns empty liveness.
+pub fn analyze_liveness(region: &Region, vinsts: &[VInst]) -> RegionLiveness {
     todo!()
 }
 
 /// Format liveness for debug output.
-pub fn format_liveness(liveness: &Liveness) -> String {
+pub fn format_liveness(liveness: &RegionLiveness) -> String {
     todo!()
 }
 ```
 
-### 5. Create `alloc/trace.rs`
+### 4. Create `alloc/trace.rs`
 
 ```rust
 //! AllocTrace system for debugging allocator decisions.
@@ -169,7 +156,7 @@ impl AllocTrace {
         self.entries.push(entry);
     }
 
-    /// Reverse entries (allocator walks backward, display forward).
+    /// Reverse entries (allocator walks backward, trace shown forward).
     pub fn reverse(&mut self) {
         self.entries.reverse();
     }
@@ -181,31 +168,29 @@ impl AllocTrace {
 }
 ```
 
-### 6. Create `alloc/walk.rs`
+### 5. Create `alloc/walk.rs`
 
 ```rust
 //! Backward walk allocator shell with stubbed decisions.
 
 use alloc::vec::Vec;
-use crate::isa::rv32fa::alloc::cfg::BasicBlock;
+use crate::lower::Region;
 use crate::isa::rv32fa::alloc::trace::{AllocTrace, TraceEntry, TraceDecision};
 use crate::vinst::VInst;
 
-/// Walk a block backward, recording stubbed decisions.
-pub fn walk_block_stub(block: &BasicBlock, trace: &mut AllocTrace) {
-    for (pos, vinst) in block.vinsts.iter().enumerate().rev() {
-        let entry = stub_process_instruction(pos, vinst);
-        trace.push(entry);
-    }
+/// Walk a region backward, recording stubbed decisions.
+/// M4: Stub implementation.
+pub fn walk_region_stub(region: &Region, vinsts: &[VInst], trace: &mut AllocTrace) {
+    todo!()
 }
 
-fn stub_process_instruction(pos: usize, vinst: &VInst) -> TraceEntry {
+fn stub_process_instruction(vinst_idx: usize, vinst: &VInst) -> TraceEntry {
     // STUB: Log what we would do, don't actually do it
     let decision = TraceDecision::StubAssign { vreg: 0, preg: 0 };
-    let message = format!("Would process {:?} at {}", vinst.mnemonic(), pos);
+    let message = format!("Would process {:?} at {}", vinst.mnemonic(), vinst_idx);
     
     TraceEntry {
-        vinst_idx: pos,
+        vinst_idx,
         vinst: vinst.clone(),
         decision,
         message,
@@ -213,9 +198,18 @@ fn stub_process_instruction(pos: usize, vinst: &VInst) -> TraceEntry {
 }
 ```
 
-### 7. Update `rv32fa/mod.rs`
+### 6. Update `rv32fa/mod.rs`
 
 Change from `pub mod alloc;` to use the new module structure.
+
+### 7. Update `lower.rs` exports
+
+Ensure `Region` is exported from `lower.rs` for use by alloc module:
+
+```rust
+// In lower.rs
+pub use Region;  // Make available to alloc module
+```
 
 ## Validate
 

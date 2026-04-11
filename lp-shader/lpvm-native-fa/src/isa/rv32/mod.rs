@@ -7,6 +7,8 @@ pub mod abi;
 pub mod alloc;
 pub mod debug;
 pub mod emit;
+pub mod encode;
+pub mod gpr;
 pub mod inst;
 
 use ::alloc::vec::Vec;

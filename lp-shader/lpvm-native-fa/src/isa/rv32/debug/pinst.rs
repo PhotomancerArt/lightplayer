@@ -1,11 +1,11 @@
-//! [`PInst`](crate::isa::rv32fa::inst::PInst) parser and formatter (RISC-V assembly style).
+//! [`PInst`](crate::isa::rv32::inst::PInst) parser and formatter (RISC-V assembly style).
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use crate::isa::rv32fa::abi::{self, PReg};
-use crate::isa::rv32fa::inst::PInst;
+use crate::isa::rv32::gpr::{self, PReg};
+use crate::isa::rv32::inst::PInst;
 use crate::vinst::SymbolRef;
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ impl core::fmt::Display for ParseError {
 }
 
 fn reg(r: PReg) -> &'static str {
-    abi::reg_name(r)
+    gpr::reg_name(r)
 }
 
 pub fn format(inst: &PInst) -> String {
@@ -153,7 +153,7 @@ fn parse_mem_operand(s: &str) -> Result<(i32, PReg), ()> {
         return Err(());
     }
     let off = parse_i32(&s[..open])?;
-    let base = abi::parse_reg(s[open + 1..close].trim())?;
+    let base = gpr::parse_reg(s[open + 1..close].trim())?;
     Ok((off, base))
 }
 
@@ -199,7 +199,7 @@ pub fn parse_line(line: &str, line_no: usize) -> Result<PInst, ParseError> {
     let r = |i: usize| -> Result<PReg, ParseError> {
         ops.get(i)
             .ok_or_else(|| ParseError::new(line_no, "missing operand"))
-            .and_then(|s| abi::parse_reg(s).map_err(|_| ParseError::new(line_no, "bad register")))
+            .and_then(|s| gpr::parse_reg(s).map_err(|_| ParseError::new(line_no, "bad register")))
     };
 
     match mn {

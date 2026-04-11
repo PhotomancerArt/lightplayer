@@ -1,4 +1,4 @@
-//! Integer ABI names and register helpers for the fastalloc RV32 path (`PReg` = `u8`).
+//! GPR index helpers for fastalloc PInst (`PReg` = `u8` x0–x31).
 
 /// Physical GPR index (x0–x31).
 pub type PReg = u8;

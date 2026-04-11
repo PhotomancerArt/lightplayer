@@ -5,7 +5,7 @@ use core::fmt;
 
 use lpir::{IrFunction, VReg};
 
-use super::abi::{self, PReg, RET_REGS, SCRATCH};
+use super::gpr::{self, PReg, RET_REGS, SCRATCH};
 use super::inst::PInst;
 use crate::abi::FuncAbi;
 use crate::abi::classify::ArgLoc;
@@ -109,7 +109,7 @@ pub fn allocate(
         }
     }
 
-    let mut free: Vec<PReg> = abi::ALLOC_POOL.iter().rev().copied().collect();
+    let mut free: Vec<PReg> = gpr::ALLOC_POOL.iter().rev().copied().collect();
     let mut out: Vec<PInst> = Vec::new();
     let alloc_reg = |free: &mut Vec<PReg>| -> Result<PReg, AllocError> {
         free.pop().ok_or(AllocError::PoolExhausted)
@@ -127,7 +127,7 @@ pub fn allocate(
             return;
         }
         if let Some(p) = preg[vi].take() {
-            if abi::pool_contains(p) {
+            if gpr::pool_contains(p) {
                 free.push(p);
             }
         }

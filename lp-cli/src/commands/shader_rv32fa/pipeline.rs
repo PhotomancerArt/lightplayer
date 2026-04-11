@@ -4,12 +4,12 @@ use std::io::Write;
 
 use anyhow::Result;
 use lpir::FloatMode;
-use lpvm_native::abi::ModuleAbi;
-use lpvm_native::isa::rv32::abi::func_abi_rv32;
-use lpvm_native::isa::rv32fa;
-use lpvm_native::isa::rv32fa::debug::pinst;
-use lpvm_native::isa::rv32fa::emit::PhysEmitter;
-use lpvm_native::{lower_ops, peephole};
+use lpvm_native_fa::abi::ModuleAbi;
+use lpvm_native_fa::isa::rv32::abi::func_abi_rv32;
+use lpvm_native_fa::isa::rv32::alloc;
+use lpvm_native_fa::isa::rv32::debug::pinst;
+use lpvm_native_fa::isa::rv32::emit::PhysEmitter;
+use lpvm_native_fa::{lower_ops, peephole};
 
 /// Which stderr debug sections to print.
 #[derive(Clone, Copy, Debug)]
@@ -78,7 +78,7 @@ pub fn run_fastalloc_module(
 
         let slots = func.total_param_slots() as usize;
         let func_abi = func_abi_rv32(fn_sig, slots);
-        let phys = rv32fa::alloc::allocate(&lowered.vinsts, &func_abi, func)
+        let phys = alloc::allocate(&lowered.vinsts, &func_abi, func)
             .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
 
         if verbosity.pinst {

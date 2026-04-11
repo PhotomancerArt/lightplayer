@@ -7,7 +7,6 @@
 
 #![no_std]
 
-#[macro_use]
 extern crate alloc;
 
 pub mod abi;
@@ -32,7 +31,6 @@ pub mod rt_jit;
 pub use abi::ModuleAbi;
 pub use debug_asm::compile_module_asm_text;
 pub use error::{LowerError, NativeError};
-pub use isa::rv32fa::emit_function_fastalloc_bytes;
 pub use isa::{CodeBlob, IsaBackend, Rv32Backend};
 pub use lower::{LoopRegion, LoweredFunction, lower_op, lower_ops};
 pub use native_options::NativeCompileOptions;
