@@ -140,4 +140,60 @@ mod tests {
         walk_region_stub(&tree, root, &[], &[], &mut trace);
         assert!(trace.is_empty());
     }
+
+    #[test]
+    fn walk_if_then_else() {
+        // Structure: BrIf (head), then block, else block
+        let vinsts = vec![
+            VInst::BrIf { cond: VReg(0), target: 1, invert: false, src_op: SRC_OP_NONE }, // 0: head
+            VInst::IConst32 { dst: VReg(1), val: 1, src_op: SRC_OP_NONE },              // 1: then
+            VInst::Br { target: 2, src_op: SRC_OP_NONE },                                // 2: branch to merge
+            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },              // 3: else
+        ];
+
+        let mut tree = RegionTree::new();
+        let head = tree.push(Region::Linear { start: 0, end: 1 });
+        let then_body = tree.push(Region::Linear { start: 1, end: 3 });
+        let else_body = tree.push(Region::Linear { start: 3, end: 4 });
+        let root = tree.push(Region::IfThenElse { head, then_body, else_body });
+        tree.root = root;
+
+        let mut trace = AllocTrace::new();
+        walk_region_stub(&tree, root, &vinsts, &[], &mut trace);
+
+        // Walk order: else (backward) -> then (backward) -> head (backward)
+        // else: [3] (backward)
+        // then: [2, 1] (backward)
+        // head: [0] (backward)
+        // Total: [3, 2, 1, 0]
+        assert_eq!(trace.entries.len(), 4);
+        assert_eq!(trace.entries[0].vinst_idx, 3); // else
+        assert_eq!(trace.entries[1].vinst_idx, 2); // then end
+        assert_eq!(trace.entries[2].vinst_idx, 1); // then start
+        assert_eq!(trace.entries[3].vinst_idx, 0); // head
+    }
+
+    #[test]
+    fn walk_loop() {
+        // Structure: header label, body
+        let vinsts = vec![
+            VInst::Label(0, SRC_OP_NONE),                                               // 0: header
+            VInst::IConst32 { dst: VReg(0), val: 0, src_op: SRC_OP_NONE },              // 1: body start
+            VInst::Add32 { dst: VReg(0), src1: VReg(0), src2: VReg(0), src_op: SRC_OP_NONE }, // 2: body end
+        ];
+
+        let mut tree = RegionTree::new();
+        let header = tree.push(Region::Linear { start: 0, end: 1 });
+        let body = tree.push(Region::Linear { start: 1, end: 3 });
+        let root = tree.push(Region::Loop { header, body });
+        tree.root = root;
+
+        let mut trace = AllocTrace::new();
+        walk_region_stub(&tree, root, &vinsts, &[], &mut trace);
+
+        // Walk order: body -> header (reverse of execution)
+        assert_eq!(trace.entries.len(), 3);
+        assert_eq!(trace.entries[0].vinst_idx, 2); // body end
+        assert_eq!(trace.entries[2].vinst_idx, 0); // header
+    }
 }
