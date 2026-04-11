@@ -54,4 +54,23 @@ impl RegionTree {
             root: REGION_ID_NONE,
         }
     }
+
+    /// Push a region into the arena, returning its [`RegionId`].
+    #[must_use]
+    pub fn push(&mut self, region: Region) -> RegionId {
+        let id = self.nodes.len() as RegionId;
+        self.nodes.push(region);
+        id
+    }
+
+    /// Push a [`Region::Seq`] with the given children.
+    #[must_use]
+    pub fn push_seq(&mut self, children: &[RegionId]) -> RegionId {
+        let start = self.seq_children.len() as u16;
+        self.seq_children.extend_from_slice(children);
+        self.push(Region::Seq {
+            children_start: start,
+            child_count: children.len() as u16,
+        })
+    }
 }

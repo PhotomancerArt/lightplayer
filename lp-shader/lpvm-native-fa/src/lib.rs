@@ -12,6 +12,7 @@
 extern crate alloc;
 
 pub mod abi;
+pub mod fa_alloc;
 pub mod compile;
 pub mod config;
 pub mod debug;
