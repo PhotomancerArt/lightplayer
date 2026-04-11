@@ -54,7 +54,23 @@ pub fn analyze_liveness(
             }
         }
 
-        // M5: Implement IfThenElse, Loop, Seq
+        Region::Seq { children_start, child_count } => {
+            let start = *children_start as usize;
+            let end = start + *child_count as usize;
+            let mut combined = RegSet::new();
+
+            for &child_id in &tree.seq_children[start..end] {
+                let child_liveness = analyze_liveness(tree, child_id, vinsts, pool);
+                combined = combined.union(&child_liveness.live_in);
+            }
+
+            Liveness {
+                live_in: combined,
+                live_out: RegSet::new(),
+            }
+        }
+
+        // M5: IfThenElse, Loop handling
         _ => Liveness {
             live_in: RegSet::new(),
             live_out: RegSet::new(),
@@ -137,5 +153,27 @@ mod tests {
 
         assert!(output.contains("=== Liveness ==="));
         assert!(output.contains("live_in"));
+    }
+
+    #[test]
+    fn liveness_seq_combines_children() {
+        // Region 0: defines v0
+        // Region 1: uses v0
+        let vinsts = vec![
+            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
+            VInst::Neg32 { dst: VReg(1), src: VReg(0), src_op: SRC_OP_NONE },
+        ];
+
+        let mut tree = RegionTree::new();
+        let r1 = tree.push(Region::Linear { start: 0, end: 1 }); // defines v0
+        let r2 = tree.push(Region::Linear { start: 1, end: 2 }); // uses v0
+        let root = tree.push_seq(&[r1, r2]);
+        tree.root = root;
+
+        let liveness = analyze_liveness(&tree, root, &vinsts, &[]);
+        // r1 live_in = {} (IConst32 defines v0, no uses)
+        // r2 live_in = {v0} (Neg32 uses v0)
+        // Combined = {} ∪ {v0} = {v0}
+        assert!(liveness.live_in.contains(VReg(0)));
     }
 }
