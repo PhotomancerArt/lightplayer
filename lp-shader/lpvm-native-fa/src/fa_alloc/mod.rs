@@ -2,16 +2,61 @@
 //! The RegionTree is built in lower.rs; this module consumes it.
 
 pub mod liveness;
+pub mod spill;
 pub mod trace;
 pub mod walk;
 
+use alloc::vec::Vec;
 use crate::abi::FuncAbi;
 use crate::lower::LoweredFunction;
 use crate::region::REGION_ID_NONE;
+use crate::rv32::inst::PInst;
 use self::trace::AllocTrace;
 
+pub use walk::AllocError;
+
+/// Result of register allocation.
+pub struct AllocResult {
+    pub pinsts: Vec<PInst>,
+    pub trace: AllocTrace,
+    pub spill_slots: u32,
+}
+
+/// Run the real allocator: backward walk with register allocation.
+pub fn allocate(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
+    let num_vregs = max_vreg_index(&lowered.vinsts, &lowered.vreg_pool);
+
+    let mut state = walk::WalkState::new(num_vregs);
+
+    let root = lowered.region_tree.root;
+    if root != REGION_ID_NONE {
+        walk::walk_region(
+            &mut state,
+            &lowered.region_tree,
+            root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+        )?;
+        state.pinsts.reverse();
+        state.trace.reverse();
+    }
+
+    // Wrap with frame setup/teardown
+    let spill_slots = state.spill.total_slots();
+    let mut pinsts = Vec::with_capacity(state.pinsts.len() + 2);
+    pinsts.push(PInst::FrameSetup { spill_slots });
+    pinsts.extend(state.pinsts);
+    pinsts.push(PInst::FrameTeardown { spill_slots });
+
+    Ok(AllocResult {
+        pinsts,
+        trace: state.trace,
+        spill_slots,
+    })
+}
+
 /// Run the allocator shell: liveness + backward walk with stubbed decisions.
-/// Returns a trace of what the allocator would do (M4: stubs only).
+/// DEPRECATED: Use `allocate` for real allocation.
 pub fn run_shell(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> AllocTrace {
     let mut trace = AllocTrace::new();
 
@@ -30,11 +75,21 @@ pub fn run_shell(lowered: &LoweredFunction, _func_abi: &FuncAbi) -> AllocTrace {
     trace
 }
 
+fn max_vreg_index(vinsts: &[crate::vinst::VInst], pool: &[crate::vinst::VReg]) -> usize {
+    let mut m = 0usize;
+    for inst in vinsts {
+        inst.for_each_use(pool, |u| m = m.max(u.0 as usize + 1));
+        inst.for_each_def(pool, |d| m = m.max(d.0 as usize + 1));
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
     use crate::vinst::{ModuleSymbols, VInst, VReg, SRC_OP_NONE};
+    use alloc::string::String;
     use alloc::vec::Vec;
 
     fn make_linear_lowered() -> LoweredFunction {
@@ -136,5 +191,118 @@ mod tests {
         assert!(output.contains("Linear [0..3)"));
         assert!(output.contains("IConst32"));
         assert!(output.contains("Add32"));
+    }
+
+    #[test]
+    fn allocate_produces_frame_wrapped_output() {
+        let lowered = make_linear_lowered();
+        // Use a simple ABI with no params/returns
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
+        );
+
+        let result = allocate(&lowered, &abi).unwrap();
+
+        // Should have FrameSetup at start and FrameTeardown at end
+        assert!(matches!(result.pinsts[0], PInst::FrameSetup { .. }));
+        assert!(matches!(result.pinsts.last(), Some(PInst::FrameTeardown { .. })));
+        // Trace should have entries
+        assert!(!result.trace.is_empty());
+    }
+
+    #[test]
+    fn allocate_rejects_control_flow() {
+        // Create a LoweredFunction with IfThenElse region
+        let vinsts = vec![VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE }];
+        let mut tree = RegionTree::new();
+        let then_body = tree.push(Region::Linear { start: 0, end: 1 });
+        let root = tree.push(Region::IfThenElse { head: REGION_ID_NONE, then_body, else_body: REGION_ID_NONE });
+        tree.root = root;
+        let lowered = LoweredFunction {
+            vinsts,
+            vreg_pool: Vec::new(),
+            symbols: ModuleSymbols::default(),
+            loop_regions: Vec::new(),
+            region_tree: tree,
+        };
+
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
+        );
+
+        let result = allocate(&lowered, &abi);
+        assert!(matches!(result, Err(AllocError::UnsupportedControlFlow)));
+    }
+
+    #[test]
+    fn allocate_iconst_add_chain() {
+        // v0 = 1; v1 = 2; v2 = Add(v0, v1); Ret v2
+        let vinsts = vec![
+            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
+            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
+            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
+            VInst::Ret { vals: crate::vinst::VRegSlice { start: 0, count: 1 }, src_op: SRC_OP_NONE },
+        ];
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 4 });
+        tree.root = root;
+        let lowered = LoweredFunction {
+            vinsts,
+            vreg_pool: vec![VReg(2)], // Return value
+            symbols: ModuleSymbols::default(),
+            loop_regions: Vec::new(),
+            region_tree: tree,
+        };
+
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Int,
+                parameters: vec![],
+            },
+            0,
+        );
+
+        let result = allocate(&lowered, &abi).unwrap();
+
+        // Should have: FrameSetup, Li, Li, Add, Ret, FrameTeardown
+        assert!(matches!(result.pinsts[0], PInst::FrameSetup { .. }));
+        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Li { imm: 1, .. })));
+        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Li { imm: 2, .. })));
+        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Add { .. })));
+        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Ret)));
+        assert!(matches!(result.pinsts.last(), Some(PInst::FrameTeardown { .. })));
+    }
+
+    #[test]
+    fn allocate_trace_shows_real_decisions() {
+        let lowered = make_linear_lowered();
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
+            },
+            0,
+        );
+
+        let result = allocate(&lowered, &abi).unwrap();
+
+        // Trace should show register assignments (vX→regY pattern)
+        let has_assignment = result.trace.entries.iter().any(|e| e.decision.contains('→'));
+        assert!(has_assignment, "Trace should show register assignments: {:?}", result.trace.entries);
+        // Should NOT contain "STUB"
+        let has_stub = result.trace.entries.iter().any(|e| e.decision.contains("STUB"));
+        assert!(!has_stub, "Trace should not contain STUB decisions");
     }
 }

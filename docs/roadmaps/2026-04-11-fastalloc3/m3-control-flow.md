@@ -59,6 +59,51 @@ filetests pass under `rv32fa`, including control flow and builtin calls.
 
 - M2 (integration): `rv32fa` filetest target exists and straight-line tests pass
 
+## Design Notes (from M1 planning)
+
+### Calls in the backward walk
+
+When the backward walk encounters `Call`:
+- **Return values** (defs): call defines results in `RET_REGS`. Going backward,
+  these are "born" here — free those PRegs.
+- **Arguments** (uses): must be in `ARG_REGS`. Ensure vregs are in correct ABI
+  registers; emit `Mv` if they're elsewhere.
+- **Clobbers**: all caller-saved regs (a0-a7, t0-t6) are clobbered. Any live
+  vreg in a caller-saved reg must be spilled before the call and reloaded after.
+  In backward walk terms: emit reload (Lw) first (later in execution), then
+  spill (Sw). The instruction stream reversal at the end puts them in the right
+  order.
+
+`RegPool` needs: "which caller-saved PRegs are currently occupied by live
+vregs?" — filter `preg_vreg` against `FuncAbi::call_clobbers()`.
+
+### Callee-saved registers
+
+If the allocator assigns a vreg to a callee-saved register (s2-s11), that reg
+must be saved in the prologue and restored in the epilogue. The allocator should:
+- Track which callee-saved PRegs were actually used
+- Report them in `AllocResult` (e.g. `callee_saved_used: Vec<PReg>`)
+- FrameSetup/FrameTeardown emit save/restore only for used callee-saved regs
+
+For straight-line no-call functions, callee-saved regs don't technically need
+saving (no caller to preserve for). But the tracking should be in place from M1.
+
+### Incoming args: register reuse
+
+Params arrive in ARG_REGS. Once a param vreg is dead (no more uses), its ARG_REG
+should be freed for reuse. In the backward walk, params are the last defs
+encountered. When we first encounter a use of a param vreg, we ideally allocate
+it to its ARG_REG directly (avoiding a fixup Mv). This is an optimization — M1
+can do the naive thing (allocate from free list, fixup at end) and optimize
+later by adding a "preferred register" hint.
+
+### Caller-saved registers around calls
+
+When `Call` clobbers caller-saved regs:
+- Any live vreg in those regs → spill before call, reload on demand after
+- `RegPool` clobber method: evict all caller-saved occupants, emit Sw for each
+- Reloads happen lazily when the vreg is next used
+
 ## Estimated Scope
 
 ~600-1000 lines of new/modified code. This is the most complex milestone —
