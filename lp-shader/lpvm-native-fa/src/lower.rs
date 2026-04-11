@@ -13,7 +13,7 @@ use lps_builtin_ids::{
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
 use crate::rv32::abi::SRET_SCALAR_THRESHOLD;
-use crate::region::RegionTree;
+use crate::region::{RegionId, RegionTree, REGION_ID_NONE};
 use crate::vinst::{
     IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice, pack_src_op,
 };
@@ -629,6 +629,7 @@ struct LowerCtx<'a> {
     loop_stack: Vec<LoopFrame>,
     epilogue_label: LabelId,
     loop_regions: Vec<LoopRegion>,
+    region_tree: RegionTree,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -638,100 +639,184 @@ impl<'a> LowerCtx<'a> {
         id
     }
 
-    fn lower_range(&mut self, start: usize, end: usize) -> Result<(), LowerError> {
+    /// Lower a range of LPIR ops, building VInsts and returning a RegionId.
+    /// The returned region covers all VInsts emitted during this call.
+    fn lower_range(&mut self, start: usize, end: usize) -> Result<RegionId, LowerError> {
+        use crate::region::Region;
+        use alloc::vec::Vec;
+
         let mut i = start;
+        let mut seq: Vec<RegionId> = Vec::new();
+        let mut current_linear_start: Option<u16> = None;
+
         while i < end {
+            // Record start position before processing this op
+            let vinst_start = self.out.len() as u16;
+
+            // Helper: flush current linear region
+            let flush_linear = |seq: &mut Vec<RegionId>, tree: &mut RegionTree, start: &mut Option<u16>, force_end: u16| {
+                if let Some(s) = start.take() {
+                    let e = force_end;
+                    if s < e {
+                        let id = tree.push(Region::Linear { start: s, end: e });
+                        seq.push(id);
+                    }
+                }
+            };
+
             match &self.func.body[i] {
                 LpirOp::IfStart {
                     cond,
                     else_offset,
                     end_offset,
                 } => {
+                    // Flush any accumulated linear region before the if
+                    flush_linear(&mut seq, &mut self.region_tree, &mut current_linear_start, vinst_start);
+
                     let eo = *else_offset as usize;
                     let merge_after = *end_offset as usize;
                     let else_is_empty = matches!(self.func.body.get(eo), Some(LpirOp::End));
+
                     if else_is_empty {
-                        // `else_offset` points at `End` (no `Else` op); false and true paths share one label.
+                        // if (cond) { then } ; merge label
                         let merge = self.alloc_label();
+                        let head_start = self.out.len() as u16;
                         self.out.push(VInst::BrIf {
                             cond: fa_vreg(*cond),
                             target: merge,
                             invert: true,
                             src_op: pack_src_op(Some(i as u32)),
                         });
-                        self.lower_range(i + 1, eo)?;
+                        let head_end = self.out.len() as u16;
+                        let head = self.region_tree.push(Region::Linear { start: head_start, end: head_end });
+
+                        let then_body = self.lower_range(i + 1, eo)?;
+
+                        let br_start = self.out.len() as u16;
                         self.out.push(VInst::Br {
                             target: merge,
                             src_op: pack_src_op(Some(i as u32)),
                         });
-                        self.out
-                            .push(VInst::Label(merge, pack_src_op(Some(eo as u32))));
+                        let br_end = self.out.len() as u16;
+                        let br_region = self.region_tree.push(Region::Linear { start: br_start, end: br_end });
+
+                        let else_body = self.region_tree.push_seq(&[br_region]);
+
+                        self.out.push(VInst::Label(merge, pack_src_op(Some(eo as u32))));
+
+                        let if_region = self.region_tree.push(Region::IfThenElse { head, then_body, else_body });
+                        seq.push(if_region);
                     } else {
+                        // if (cond) { then } else { else } ; end label
                         let else_label = self.alloc_label();
                         let end_label = self.alloc_label();
+
+                        let head_start = self.out.len() as u16;
                         self.out.push(VInst::BrIf {
                             cond: fa_vreg(*cond),
                             target: else_label,
                             invert: true,
                             src_op: pack_src_op(Some(i as u32)),
                         });
-                        self.lower_range(i + 1, eo)?;
+                        let head_end = self.out.len() as u16;
+                        let head = self.region_tree.push(Region::Linear { start: head_start, end: head_end });
+
+                        let then_body = self.lower_range(i + 1, eo)?;
+
+                        let br_start = self.out.len() as u16;
                         self.out.push(VInst::Br {
                             target: end_label,
                             src_op: pack_src_op(Some(i as u32)),
                         });
-                        self.out
-                            .push(VInst::Label(else_label, pack_src_op(Some(*else_offset))));
-                        self.lower_range(eo + 1, merge_after)?;
+                        let br_end = self.out.len() as u16;
+                        let br_region = self.region_tree.push(Region::Linear { start: br_start, end: br_end });
+
+                        self.out.push(VInst::Label(else_label, pack_src_op(Some(*else_offset))));
+
+                        let else_body = self.lower_range(eo + 1, merge_after)?;
+
+                        // Merge br_region and else_body into a Seq for else
+                        let else_seq = if else_body == REGION_ID_NONE {
+                            br_region
+                        } else {
+                            self.region_tree.push_seq(&[br_region, else_body])
+                        };
+
                         let end_idx = merge_after.saturating_sub(1);
-                        self.out
-                            .push(VInst::Label(end_label, pack_src_op(Some(end_idx as u32))));
+                        self.out.push(VInst::Label(end_label, pack_src_op(Some(end_idx as u32))));
+
+                        let if_region = self.region_tree.push(Region::IfThenElse { head, then_body, else_body: else_seq });
+                        seq.push(if_region);
                     }
                     i = merge_after;
+                    current_linear_start = Some(self.out.len() as u16);
                 }
                 LpirOp::LoopStart {
                     continuing_offset,
                     end_offset,
                 } => {
-                    let header = self.alloc_label();
+                    // Flush any accumulated linear region before the loop
+                    flush_linear(&mut seq, &mut self.region_tree, &mut current_linear_start, vinst_start);
+
+                    let header_label = self.alloc_label();
                     let continuing = self.alloc_label();
                     let exit = self.alloc_label();
+
+                    // Entry branch to header
+                    let entry_start = self.out.len() as u16;
                     self.out.push(VInst::Br {
-                        target: header,
+                        target: header_label,
                         src_op: pack_src_op(Some(i as u32)),
                     });
+                    let entry_end = self.out.len() as u16;
+                    let entry_region = self.region_tree.push(Region::Linear { start: entry_start, end: entry_end });
+
+                    // Header label
                     let header_idx = self.out.len();
-                    self.out
-                        .push(VInst::Label(header, pack_src_op(Some((i + 1) as u32))));
+                    self.out.push(VInst::Label(header_label, pack_src_op(Some((i + 1) as u32))));
+                    let header_start = header_idx as u16;
+                    let header_end = (header_idx + 1) as u16;
+                    let header = self.region_tree.push(Region::Linear { start: header_start, end: header_end });
+
                     self.loop_stack.push(LoopFrame { continuing, exit });
                     let co = *continuing_offset as usize;
                     let eo = *end_offset as usize;
-                    // Body: from after LoopStart to continuing_offset
-                    self.lower_range(i + 1, co)?;
-                    // Continuing ops (increment, br_if_not, …) when `co < end`. When `co == i + 1`
-                    // the body is empty but continuing still starts at the first op after LoopStart;
-                    // we must emit it (otherwise the loop back-edge never hits BrIfNot).
+
+                    // Body
+                    let body = self.lower_range(i + 1, co)?;
+
+                    // Continuing (if exists)
                     if co < eo {
                         self.out.push(VInst::Label(
                             continuing,
                             pack_src_op(Some(*continuing_offset)),
                         ));
-                        self.lower_range(co, eo.saturating_sub(1))?
+                        self.lower_range(co, eo.saturating_sub(1))?;
                     }
-                    // Loop-closing End: back-edge to header
+
+                    // Back-edge
                     let backedge_idx = self.out.len();
                     self.out.push(VInst::Br {
-                        target: header,
+                        target: header_label,
                         src_op: pack_src_op(Some((eo.saturating_sub(1)) as u32)),
                     });
+
                     self.loop_regions.push(LoopRegion {
                         header_idx,
                         backedge_idx,
                     });
-                    self.out
-                        .push(VInst::Label(exit, pack_src_op(Some(*end_offset))));
+
+                    self.out.push(VInst::Label(exit, pack_src_op(Some(*end_offset))));
                     self.loop_stack.pop();
+
+                    // Create Loop region: entry + header + body
+                    // For M4, we represent the whole loop structure simply
+                    let loop_region = self.region_tree.push(Region::Loop { header, body });
+                    seq.push(loop_region);
+                    seq.push(entry_region); // Entry before loop
+
                     i = eo;
+                    current_linear_start = Some(self.out.len() as u16);
                 }
                 LpirOp::Break => {
                     let frame =
@@ -766,7 +851,6 @@ impl<'a> LowerCtx<'a> {
                             .ok_or_else(|| LowerError::UnsupportedOp {
                                 description: String::from("br_if_not outside loop"),
                             })?;
-                    // If cond is false, exit the loop; if true, fall through (continue loop)
                     self.out.push(VInst::BrIf {
                         cond: fa_vreg(*cond),
                         target: frame.exit,
@@ -785,6 +869,12 @@ impl<'a> LowerCtx<'a> {
                             continue;
                         }
                     }
+
+                    // Start a linear region if not already tracking
+                    if current_linear_start.is_none() {
+                        current_linear_start = Some(self.out.len() as u16);
+                    }
+
                     let is_return = matches!(other, LpirOp::Return { .. });
                     self.out.push(lower_lpir_op(
                         other,
@@ -806,7 +896,24 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
-        Ok(())
+
+        // Flush final linear region
+        if let Some(start) = current_linear_start.take() {
+            let end = self.out.len() as u16;
+            if start < end {
+                let id = self.region_tree.push(Region::Linear { start, end });
+                seq.push(id);
+            }
+        }
+
+        // Return result
+        if seq.is_empty() {
+            Ok(REGION_ID_NONE)
+        } else if seq.len() == 1 {
+            Ok(seq[0])
+        } else {
+            Ok(self.region_tree.push_seq(&seq))
+        }
     }
 }
 
@@ -829,16 +936,18 @@ pub fn lower_ops(
         loop_stack: Vec::new(),
         epilogue_label: 0,
         loop_regions: Vec::new(),
+        region_tree: RegionTree::new(),
     };
     ctx.epilogue_label = ctx.alloc_label();
-    ctx.lower_range(0, func.body.len())?;
+    let root = ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, SRC_OP_NONE));
+    ctx.region_tree.root = root;
     Ok(LoweredFunction {
         vinsts: ctx.out,
         vreg_pool: ctx.vreg_pool,
         symbols: ctx.symbols,
         loop_regions: ctx.loop_regions,
-        region_tree: RegionTree::default(),
+        region_tree: ctx.region_tree,
     })
 }
 
@@ -1591,6 +1700,62 @@ mod tests {
                 ..
             } => assert_eq!(cond, want),
             other => panic!("expected Icmp32, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_ops_populates_region_tree() {
+        use crate::region::{Region, REGION_ID_NONE};
+        use lpir::types::VRegRange;
+
+        // Build a simple function: return 42
+        // v0 = vmctx
+        // v1 = iconst 42
+        // ret v1
+        let func = IrFunction {
+            name: String::from("test"),
+            is_entry: true,
+            vmctx_vreg: IrVReg(0),
+            param_count: 0,
+            return_types: vec![IrType::I32],
+            vreg_types: vec![IrType::I32, IrType::I32], // v0=vmctx, v1=our value
+            slots: vec![],
+            body: vec![
+                LpirOp::IconstI32 { dst: v(1), value: 42 },
+                LpirOp::Return { values: VRegRange { start: 1, count: 1 } },
+            ],
+            vreg_pool: vec![v(0), v(1)], // vreg_pool must contain the vregs being returned
+        };
+
+        let ir = LpirModule {
+            functions: vec![func.clone()],
+            imports: vec![],
+        };
+        let sig = LpsModuleSig { functions: vec![] };
+        let abi = ModuleAbi::from_ir_and_sig(&ir, &sig);
+
+        let lowered = lower_ops(&func, &ir, &abi, FloatMode::Q32).expect("lower ok");
+
+        // Verify region tree is populated
+        assert_ne!(lowered.region_tree.root, REGION_ID_NONE);
+        assert!(!lowered.region_tree.nodes.is_empty());
+
+        // For a simple function, we should have a Linear region
+        let root_id = lowered.region_tree.root;
+        let root_node = &lowered.region_tree.nodes[root_id as usize];
+        assert!(
+            matches!(root_node, Region::Linear { .. }),
+            "Expected Linear region for simple function, got {:?}",
+            root_node
+        );
+
+        // The linear region should cover the main VInsts (IConst32 + Ret + Br)
+        // Note: The epilogue Label is added after lower_range returns, so end might
+        // be less than vinsts.len() (which includes the final label)
+        if let Region::Linear { start, end } = root_node {
+            assert!(*start < *end, "Linear region should have non-empty range");
+            // Region covers instructions up to but not including the final epilogue label
+            assert!(*end as usize <= lowered.vinsts.len(), "Linear end should not exceed vinsts len");
         }
     }
 }
