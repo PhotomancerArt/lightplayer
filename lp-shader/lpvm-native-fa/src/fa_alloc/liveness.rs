@@ -97,7 +97,6 @@ mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
     use crate::vinst::{VInst, VReg, SRC_OP_NONE};
-    use alloc::vec::Vec;
 
     #[test]
     fn liveness_simple_linear() {

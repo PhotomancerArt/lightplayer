@@ -134,15 +134,19 @@ const R_RISCV_CALL_PLT: u32 = 18;
 
 /// Minimal ELF writer state.
 struct ElfWriter {
+    #[allow(dead_code)]
     data: Vec<u8>,
     shstrtab: Vec<u8>,
     strtab: Vec<u8>,
     symtab: Vec<u8>,
+    #[allow(dead_code)]
     sections: Vec<ElfSection>,
+    #[allow(dead_code)]
     relocs: Vec<ElfReloc>,
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct ElfSection {
     name_idx: u32,
     sh_type: u32,
@@ -198,7 +202,7 @@ impl ElfWriter {
         let idx = self.symtab.len() / 16; // Each symtab entry is 16 bytes for 32-bit
 
         // Symbol table entry (Elf32_Sym)
-        self.symtab.extend_from_slice(&(name_idx as u32).to_le_bytes()); // st_name
+        self.symtab.extend_from_slice(&name_idx.to_le_bytes()); // st_name
         self.symtab.extend_from_slice(&value.to_le_bytes()); // st_value
         self.symtab.extend_from_slice(&size.to_le_bytes()); // st_size
         self.symtab.push(info); // st_info
@@ -263,7 +267,7 @@ pub fn link_elf(module: &CompiledModule) -> Result<Vec<u8>, NativeError> {
                 .functions
                 .iter()
                 .position(|f| f.name == reloc.symbol)
-                .map(|idx| func_sym_indices[idx] as u32)
+                .map(|idx| func_sym_indices[idx])
                 .unwrap_or(0); // External symbol (TODO: handle builtins)
 
             relocs.push(ElfReloc {

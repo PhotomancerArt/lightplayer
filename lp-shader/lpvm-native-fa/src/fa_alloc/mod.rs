@@ -89,4 +89,52 @@ mod tests {
         );
         assert!(trace.is_empty());
     }
+
+    #[test]
+    fn liveness_and_walk_consistent() {
+        let lowered = make_linear_lowered();
+
+        // Liveness: v0, v1 defined then used → live_in empty for this region
+        let liveness = liveness::analyze_liveness(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+        );
+        assert!(liveness.live_in.is_empty());
+
+        // Walk produces trace for all 3 instructions
+        let mut trace = trace::AllocTrace::new();
+        walk::walk_region_stub(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &mut trace,
+        );
+        assert_eq!(trace.entries.len(), 3);
+
+        // After reverse, forward order
+        trace.reverse();
+        assert_eq!(trace.entries[0].vinst_idx, 0);
+        assert_eq!(trace.entries[1].vinst_idx, 1);
+        assert_eq!(trace.entries[2].vinst_idx, 2);
+    }
+
+    #[test]
+    fn region_format_includes_vinsts() {
+        let lowered = make_linear_lowered();
+        let output = crate::rv32::debug::region::format_region_tree(
+            &lowered.region_tree,
+            lowered.region_tree.root,
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &lowered.symbols,
+            0,
+        );
+
+        assert!(output.contains("Linear [0..3)"));
+        assert!(output.contains("IConst32"));
+        assert!(output.contains("Add32"));
+    }
 }
