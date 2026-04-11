@@ -122,12 +122,12 @@ Two paths:
 
 | Milestone | Goal | Document |
 |-----------|------|----------|
-| M1 | ABI: sret, multi-return, out-params, stack spills | [m1-abi](./m1-abi.md) |
-| M2 | Expanded lowering for rainbow LPIR | [m2-lowering](./m2-lowering.md) |
-| M3 | Linear scan regalloc + spills | [m3-linear-scan](./m3-linear-scan.md) |
-| M4 | rt_jit JIT buffer path | [m4-rt-jit](./m4-rt-jit.md) |
-| M5 | lp-engine wiring, fw-emu + fw-esp32 integration | [m5-integration](./m5-integration.md) |
-| M6 | Cleanup, validation, performance comparison | [m6-validation](./m6-validation.md) |
+| M1 | ABI: sret, multi-return, out-params, stack spills | [m1-abi](m1-abi.md) |
+| M2 | Expanded lowering for rainbow LPIR | [m2-lowering](m2-lowering.md) |
+| M3 | Linear scan regalloc + spills | [m3-linear-scan](m3-linear-scan.md) |
+| M4 | rt_jit JIT buffer path | [m4-rt-jit](m4-rt-jit.md) |
+| M5 | lp-engine wiring, fw-emu + fw-esp32 integration | [m5-integration](m5-integration.md) |
+| M6 | Cleanup, validation, performance comparison | [m6-validation](m6-validation.md) |
 
 ## Scope Estimate
 

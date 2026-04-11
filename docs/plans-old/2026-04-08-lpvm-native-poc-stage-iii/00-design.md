@@ -1,6 +1,6 @@
 # M3 — `lpvm-native` integration (link, load, run)
 
-Roadmap: [`docs/roadmaps/2026-04-07-lpvm-native-poc/m3-integration.md`](../../roadmaps/2026-04-07-lpvm-native-poc/m3-integration.md).
+Roadmap: [`docs/roadmaps/2026-04-07-lpvm-native-poc/m3-integration.md`](../../roadmaps-old/2026-04-07-lpvm-native-poc/m3-integration.md).
 
 ## Scope of work
 
