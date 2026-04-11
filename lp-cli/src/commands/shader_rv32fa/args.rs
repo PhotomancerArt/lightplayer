@@ -48,6 +48,14 @@ pub struct Args {
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub no_disasm: bool,
 
+    /// Show region tree structure on stderr.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub show_region: bool,
+
+    /// Show liveness analysis on stderr.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub show_liveness: bool,
+
     /// Hide all stderr listings (same as every `--no-*` above).
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub quiet: bool,
@@ -60,6 +68,8 @@ impl Args {
             vinst: !q && !self.no_vinst,
             pinst: !q && !self.no_pinst,
             disasm: !q && !self.no_disasm,
+            region: self.show_region,
+            liveness: self.show_liveness,
         }
     }
 

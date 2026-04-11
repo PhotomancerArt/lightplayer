@@ -5,10 +5,12 @@ use std::io::Write;
 use anyhow::Result;
 use lpir::FloatMode;
 use lpvm_native_fa::abi::ModuleAbi;
-use lpvm_native_fa::isa::rv32::abi::func_abi_rv32;
-use lpvm_native_fa::isa::rv32::alloc;
-use lpvm_native_fa::isa::rv32::debug::pinst;
-use lpvm_native_fa::isa::rv32::emit::PhysEmitter;
+use lpvm_native_fa::fa_alloc::liveness::{analyze_liveness, format_liveness};
+use lpvm_native_fa::rv32::abi::func_abi_rv32;
+use lpvm_native_fa::rv32::alloc;
+use lpvm_native_fa::rv32::debug::pinst;
+use lpvm_native_fa::rv32::debug::region::format_region_tree;
+use lpvm_native_fa::rv32::rv32_emit::Rv32Emitter;
 use lpvm_native_fa::{lower_ops, peephole};
 
 /// Which stderr debug sections to print.
@@ -17,6 +19,8 @@ pub struct Verbosity {
     pub vinst: bool,
     pub pinst: bool,
     pub disasm: bool,
+    pub region: bool,
+    pub liveness: bool,
 }
 
 impl Verbosity {
@@ -26,6 +30,8 @@ impl Verbosity {
             vinst: show_vinst,
             pinst: show_pinst,
             disasm: disassemble,
+            region: false,
+            liveness: false,
         }
     }
 }
@@ -76,6 +82,30 @@ pub fn run_fastalloc_module(
             }
         }
 
+        if verbosity.region {
+            writeln!(debug, "=== Region Tree {} ===", func.name)?;
+            let text = format_region_tree(
+                &lowered.region_tree,
+                lowered.region_tree.root,
+                &lowered.vinsts,
+                &lowered.vreg_pool,
+                &lowered.symbols,
+                0,
+            );
+            writeln!(debug, "{}", text)?;
+        }
+
+        if verbosity.liveness {
+            writeln!(debug, "=== Liveness {} ===", func.name)?;
+            let liveness = analyze_liveness(
+                &lowered.region_tree,
+                lowered.region_tree.root,
+                &lowered.vinsts,
+                &lowered.vreg_pool,
+            );
+            writeln!(debug, "{}", format_liveness(&liveness))?;
+        }
+
         let slots = func.total_param_slots() as usize;
         let func_abi = func_abi_rv32(fn_sig, slots);
         let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
@@ -89,7 +119,7 @@ pub fn run_fastalloc_module(
         }
 
         let code = {
-            let mut emitter = PhysEmitter::new();
+            let mut emitter = Rv32Emitter::new();
             for p in &phys {
                 emitter.emit(p);
             }
