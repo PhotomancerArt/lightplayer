@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, ImportDecl, IrType, ModuleBuilder, LpirOp, VReg};
+use lpir::{CalleeRef, ImportDecl, IrType, LpirOp, ModuleBuilder, VReg};
 use naga::{
     AddressSpace, Block, Expression, Function, Handle, LocalVariable, Module, ScalarKind,
     Statement, TypeInner, VectorSize,

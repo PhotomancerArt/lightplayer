@@ -5,7 +5,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{CalleeRef, ImportDecl, IrFunction, LpirModule, IrType, ModuleBuilder};
+use lpir::{CalleeRef, ImportDecl, IrFunction, IrType, LpirModule, ModuleBuilder};
 use lps_shared::{LpsFnSig, LpsModuleSig};
 use naga::{Function, Handle, Module};
 

@@ -78,7 +78,10 @@ impl IrFunction {
             || self.body.iter().any(|op| {
                 matches!(
                     op,
-                    LpirOp::Load { .. } | LpirOp::Store { .. } | LpirOp::SlotAddr { .. } | LpirOp::Memcpy { .. }
+                    LpirOp::Load { .. }
+                        | LpirOp::Store { .. }
+                        | LpirOp::SlotAddr { .. }
+                        | LpirOp::Memcpy { .. }
                 )
             })
     }

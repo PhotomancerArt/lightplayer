@@ -210,7 +210,9 @@ fn lower_binary_bool(
 ) -> Result<VReg, LowerError> {
     let dst = ctx.fb.alloc_vreg(IrType::I32);
     match op {
-        BinaryOperator::LogicalAnd | BinaryOperator::And => ctx.fb.push(LpirOp::Iand { dst, lhs, rhs }),
+        BinaryOperator::LogicalAnd | BinaryOperator::And => {
+            ctx.fb.push(LpirOp::Iand { dst, lhs, rhs })
+        }
         BinaryOperator::LogicalOr | BinaryOperator::InclusiveOr => {
             ctx.fb.push(LpirOp::Ior { dst, lhs, rhs })
         }

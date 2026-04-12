@@ -7,7 +7,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{CalleeRef, ImportDecl, IrFunction, LpirModule, IrType, LpirOp};
+use lpir::{CalleeRef, ImportDecl, IrFunction, IrType, LpirModule, LpirOp};
 use lps_builtin_ids::{
     BuiltinId, GlslParamKind, glsl_lpfx_q32_builtin_id, glsl_q32_math_builtin_id,
     lpir_q32_builtin_id, vm_q32_builtin_id,

@@ -6,7 +6,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpir::{CalleeRef, FunctionBuilder, LpirModule, IrType, LpirOp, SlotId, VReg};
+use lpir::{CalleeRef, FunctionBuilder, IrType, LpirModule, LpirOp, SlotId, VReg};
 use naga::{
     AddressSpace, Expression, Function, Handle, LocalVariable, Module, Statement, Type, TypeInner,
 };

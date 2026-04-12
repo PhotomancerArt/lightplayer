@@ -19,7 +19,11 @@ fn callee_needs_vmctx_operand(module: &LpirModule, callee: CalleeRef) -> bool {
     }
 }
 
-fn visible_call_arg_regs<'a>(module: &LpirModule, callee: CalleeRef, args: &'a [VReg]) -> &'a [VReg] {
+fn visible_call_arg_regs<'a>(
+    module: &LpirModule,
+    callee: CalleeRef,
+    args: &'a [VReg],
+) -> &'a [VReg] {
     if callee_needs_vmctx_operand(module, callee) && args.first().copied() == Some(VMCTX_VREG) {
         &args[1..]
     } else {

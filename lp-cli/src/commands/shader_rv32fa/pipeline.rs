@@ -113,7 +113,9 @@ pub fn run_fastalloc_module(
         let phys = alloc_result.pinsts;
 
         // Print alloc trace if requested via env var
-        if std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1" && !alloc_result.trace.is_empty() {
+        if std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1"
+            && !alloc_result.trace.is_empty()
+        {
             writeln!(debug, "{}", alloc_result.trace.format())?;
         }
 

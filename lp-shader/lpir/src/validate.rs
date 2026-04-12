@@ -80,7 +80,10 @@ pub fn validate_module(module: &LpirModule) -> Result<(), Vec<ValidationError>> 
 }
 
 /// Validate one function in the context of its module (calls, etc.).
-pub fn validate_function(func: &IrFunction, module: &LpirModule) -> Result<(), Vec<ValidationError>> {
+pub fn validate_function(
+    func: &IrFunction,
+    module: &LpirModule,
+) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     validate_function_inner(func, module, &mut errs);
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -113,7 +116,11 @@ enum StackEntry {
     Arm,
 }
 
-fn validate_function_inner(func: &IrFunction, module: &LpirModule, errs: &mut Vec<ValidationError>) {
+fn validate_function_inner(
+    func: &IrFunction,
+    module: &LpirModule,
+    errs: &mut Vec<ValidationError>,
+) {
     let fname = func.name.as_str();
     pool_bounds(func, fname, errs);
 

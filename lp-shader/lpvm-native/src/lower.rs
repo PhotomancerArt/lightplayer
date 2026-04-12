@@ -518,11 +518,13 @@ pub fn lower_op(
                 ),
             })
         }
-        LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from(
-                "break/continue/br_if_not must be lowered via lower_ops with loop context",
-            ),
-        }),
+        LpirOp::Break | LpirOp::Continue | LpirOp::BrIfNot { .. } => {
+            Err(LowerError::UnsupportedOp {
+                description: String::from(
+                    "break/continue/br_if_not must be lowered via lower_ops with loop context",
+                ),
+            })
+        }
 
         LpirOp::Call {
             callee,
@@ -920,7 +922,7 @@ mod tests {
     use crate::error::LowerError;
     use crate::vinst::IcmpCond;
     use lpir::types::{SlotId, VRegRange};
-    use lpir::{LpirModule, IrType, VReg};
+    use lpir::{IrType, LpirModule, VReg};
     use lps_shared::LpsModuleSig;
 
     fn empty_ir_abi() -> (LpirModule, ModuleAbi) {

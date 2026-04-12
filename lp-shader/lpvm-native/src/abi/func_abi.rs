@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn module_abi_import_sret_contributes_max() {
         use alloc::string::String;
-        use lpir::{ImportDecl, LpirModule, IrType};
+        use lpir::{ImportDecl, IrType, LpirModule};
 
         let mut ir = LpirModule::default();
         ir.imports.push(ImportDecl {

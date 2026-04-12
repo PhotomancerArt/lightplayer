@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
-use lpir::{IrFunction, LpirModule, IrType, LpirOp};
+use lpir::{IrFunction, IrType, LpirModule, LpirOp};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
