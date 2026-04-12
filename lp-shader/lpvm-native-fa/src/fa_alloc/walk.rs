@@ -541,8 +541,11 @@ fn process_inst(
     let resolved_uses = resolve_uses(state, &use_vregs, &mut decision)?;
 
     // 3. Emit PInst
+    // emit_vinst returns forward-order sequences. Since we're building a
+    // backward list (reversed at the end), push in reverse so multi-instruction
+    // sequences end up in correct forward order after the final reversal.
     let emitted = emit_vinst(vinst, &def_pregs, &resolved_uses)?;
-    state.pinsts.extend(emitted);
+    state.pinsts.extend(emitted.into_iter().rev());
 
     // Free registers allocated for dead values
     for (vreg, preg) in &def_pregs {
@@ -1140,16 +1143,13 @@ fn emit_vinst(
 
         VInst::Ret { .. } => {
             let mut out = Vec::new();
-            // Emit in reverse order: backward walk will reverse the final list.
-            // We want: Mv (to move result to return reg), then Ret.
-            // So emit: Ret first, then Mv (so after reverse: Mv, Ret).
-            out.push(PInst::Ret);
             for (k, &src) in use_pregs.iter().enumerate() {
                 let dst_ret = crate::rv32::gpr::RET_REGS[k];
                 if src != dst_ret {
                     out.push(PInst::Mv { dst: dst_ret, src });
                 }
             }
+            out.push(PInst::Ret);
             Ok(out)
         }
 
