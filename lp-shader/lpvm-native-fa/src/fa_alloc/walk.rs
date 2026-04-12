@@ -207,6 +207,17 @@ impl<'a> WalkState<'a> {
     pub fn seed_pool(&mut self, saved: &[(PReg, VReg)]) {
         self.pool.seed(saved);
     }
+
+    /// Seed pool with a full RegSet of vregs, allocating fresh registers.
+    /// Used for loop boundaries where the set of live vregs is larger than
+    /// what any single predecessor provides.
+    pub fn seed_pool_from_regset(&mut self, vregs: &crate::regset::RegSet) {
+        self.pool.clear();
+        for vreg in vregs.iter() {
+            self.spill.get_or_assign(vreg);
+            let (_preg, _evicted) = self.pool.alloc(vreg);
+        }
+    }
 }
 
 /// Walk a region backward with real register allocation.
@@ -370,12 +381,27 @@ fn walk_loop(
     vreg_pool: &[VReg],
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<(), AllocError> {
+    use crate::fa_alloc::liveness::analyze_liveness;
     use crate::region::REGION_ID_NONE;
     use crate::rv32::inst::PInst;
 
-    // At this point, 'state.pool' has vregs live after the loop (in "rest").
+    // Compute the full set of vregs that must be spilled at every loop boundary.
+    // This is the union of:
+    //   - vregs live after the loop (post_loop)
+    //   - vregs used in the header (live_in of header)
+    //   - vregs used in the body (live_in of body)
+    // Without this, loop-carried values (like a loop counter) that aren't live
+    // after the loop would never be spilled at the body exit, causing the header
+    // to always reload stale initial values.
+    let header_liveness = analyze_liveness(tree, header, vinsts, vreg_pool);
+    let body_liveness = analyze_liveness(tree, body, vinsts, vreg_pool);
+    let mut loop_boundary = header_liveness.live_in.union(&body_liveness.live_in);
+    for (_preg, vreg) in state.pool.iter_occupied() {
+        loop_boundary.insert(vreg);
+    }
+
     // 1. Flush to spill slots for the post-loop boundary.
-    let post_loop_live = state.flush_to_slots();
+    let _post_loop_live = state.flush_to_slots();
 
     // 2. Emit exit label.
     state.pinsts.push(PInst::Label { id: exit_label });
@@ -389,7 +415,7 @@ fn walk_loop(
     //    In forward: Lw body entry, body comp, Sw body exit, J header.
     //    In backward push: J header, Sw body exit, body comp, Lw body entry.
     if body != REGION_ID_NONE {
-        state.seed_pool(&post_loop_live);
+        state.seed_pool_from_regset(&loop_boundary);
         state.emit_exit_spills();
         walk_region(state, tree, body, vinsts, vreg_pool, func_abi)?;
         let _body_entry_live = state.flush_to_slots();
@@ -399,7 +425,7 @@ fn walk_loop(
     //    In forward: header_label, Lw header entry, header comp, Sw header exit.
     //    In backward push: Sw header exit, header comp, Lw header entry, header_label.
     if header != REGION_ID_NONE {
-        state.seed_pool(&post_loop_live);
+        state.seed_pool_from_regset(&loop_boundary);
         state.emit_exit_spills();
         walk_region(state, tree, header, vinsts, vreg_pool, func_abi)?;
         let _header_entry_live = state.flush_to_slots();
