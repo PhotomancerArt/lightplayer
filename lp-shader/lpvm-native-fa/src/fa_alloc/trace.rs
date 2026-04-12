@@ -19,7 +19,9 @@ pub struct TraceEntry {
 
 impl AllocTrace {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, entry: TraceEntry) {
@@ -43,10 +45,7 @@ impl AllocTrace {
                 "{:>4} | {:>10} | {:>20} | {}",
                 "Idx", "VInst", "Decision", "State"
             ),
-            format!(
-                "{:->4}-+-{:->10}-+-{:->20}-+-{:->20}",
-                "", "", "", ""
-            ),
+            format!("{:->4}-+-{:->10}-+-{:->20}-+-{:->20}", "", "", "", ""),
         ];
 
         for entry in &self.entries {

@@ -6,12 +6,12 @@ pub mod spill;
 pub mod trace;
 pub mod walk;
 
-use alloc::vec::Vec;
+use self::trace::AllocTrace;
 use crate::abi::FuncAbi;
 use crate::lower::LoweredFunction;
 use crate::region::REGION_ID_NONE;
 use crate::rv32::inst::PInst;
-use self::trace::AllocTrace;
+use alloc::vec::Vec;
 
 pub use walk::AllocError;
 
@@ -27,6 +27,12 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
     let num_vregs = max_vreg_index(&lowered.vinsts, &lowered.vreg_pool);
 
     let mut state = walk::WalkState::new(num_vregs, &lowered.symbols);
+
+    // Pre-seed pool with param vregs in their ABI registers
+    for (vreg_idx, preg) in func_abi.precolors() {
+        let vreg = crate::vinst::VReg(*vreg_idx as u16);
+        state.pool.alloc_fixed(preg.hw, vreg);
+    }
 
     let root = lowered.region_tree.root;
     if root != REGION_ID_NONE {
@@ -69,15 +75,28 @@ fn max_vreg_index(vinsts: &[crate::vinst::VInst], pool: &[crate::vinst::VReg]) -
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{ModuleSymbols, VInst, VReg, SRC_OP_NONE};
+    use crate::vinst::{ModuleSymbols, SRC_OP_NONE, VInst, VReg};
     use alloc::string::String;
     use alloc::vec::Vec;
 
     fn make_linear_lowered() -> LoweredFunction {
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Add32 {
+                dst: VReg(2),
+                src1: VReg(0),
+                src2: VReg(1),
+                src_op: SRC_OP_NONE,
+            },
         ];
         let mut tree = RegionTree::new();
         let root = tree.push(Region::Linear { start: 0, end: 3 });
@@ -190,18 +209,31 @@ mod tests {
 
         // Should have FrameSetup at start and FrameTeardown at end
         assert!(matches!(result.pinsts[0], PInst::FrameSetup { .. }));
-        assert!(matches!(result.pinsts.last(), Some(PInst::FrameTeardown { .. })));
+        assert!(matches!(
+            result.pinsts.last(),
+            Some(PInst::FrameTeardown { .. })
+        ));
         // Trace should have entries
         assert!(!result.trace.is_empty());
     }
 
     #[test]
-    fn allocate_rejects_control_flow() {
-        // Create a LoweredFunction with IfThenElse region
-        let vinsts = vec![VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE }];
+    fn allocate_handles_loop_control_flow() {
+        // Create a LoweredFunction with Loop region (now supported)
+        let vinsts = vec![VInst::IConst32 {
+            dst: VReg(0),
+            val: 1,
+            src_op: SRC_OP_NONE,
+        }];
         let mut tree = RegionTree::new();
-        let then_body = tree.push(Region::Linear { start: 0, end: 1 });
-        let root = tree.push(Region::IfThenElse { head: REGION_ID_NONE, then_body, else_body: REGION_ID_NONE });
+        let header = tree.push(Region::Linear { start: 0, end: 1 });
+        let body = tree.push(Region::Linear { start: 0, end: 0 });
+        let root = tree.push(Region::Loop {
+            header,
+            body,
+            header_label: 0,
+            exit_label: 1,
+        });
         tree.root = root;
         let lowered = LoweredFunction {
             vinsts,
@@ -220,18 +252,35 @@ mod tests {
             0,
         );
 
+        // Loop now works (returns Ok, not Err)
         let result = allocate(&lowered, &abi);
-        assert!(matches!(result, Err(AllocError::UnsupportedControlFlow)));
+        assert!(result.is_ok());
     }
 
     #[test]
     fn allocate_iconst_add_chain() {
         // v0 = 1; v1 = 2; v2 = Add(v0, v1); Ret v2
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
-            VInst::Ret { vals: crate::vinst::VRegSlice { start: 0, count: 1 }, src_op: SRC_OP_NONE },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Add32 {
+                dst: VReg(2),
+                src1: VReg(0),
+                src2: VReg(1),
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Ret {
+                vals: crate::vinst::VRegSlice { start: 0, count: 1 },
+                src_op: SRC_OP_NONE,
+            },
         ];
         let mut tree = RegionTree::new();
         let root = tree.push(Region::Linear { start: 0, end: 4 });
@@ -257,11 +306,24 @@ mod tests {
 
         // Should have: FrameSetup, Li, Li, Add, Ret, FrameTeardown
         assert!(matches!(result.pinsts[0], PInst::FrameSetup { .. }));
-        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Li { imm: 1, .. })));
-        assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Li { imm: 2, .. })));
+        assert!(
+            result
+                .pinsts
+                .iter()
+                .any(|p| matches!(p, PInst::Li { imm: 1, .. }))
+        );
+        assert!(
+            result
+                .pinsts
+                .iter()
+                .any(|p| matches!(p, PInst::Li { imm: 2, .. }))
+        );
         assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Add { .. })));
         assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Ret)));
-        assert!(matches!(result.pinsts.last(), Some(PInst::FrameTeardown { .. })));
+        assert!(matches!(
+            result.pinsts.last(),
+            Some(PInst::FrameTeardown { .. })
+        ));
     }
 
     #[test]
@@ -279,10 +341,22 @@ mod tests {
         let result = allocate(&lowered, &abi).unwrap();
 
         // Trace should show register assignments (vX→regY pattern)
-        let has_assignment = result.trace.entries.iter().any(|e| e.decision.contains('→'));
-        assert!(has_assignment, "Trace should show register assignments: {:?}", result.trace.entries);
+        let has_assignment = result
+            .trace
+            .entries
+            .iter()
+            .any(|e| e.decision.contains('→'));
+        assert!(
+            has_assignment,
+            "Trace should show register assignments: {:?}",
+            result.trace.entries
+        );
         // Should NOT contain "STUB"
-        let has_stub = result.trace.entries.iter().any(|e| e.decision.contains("STUB"));
+        let has_stub = result
+            .trace
+            .entries
+            .iter()
+            .any(|e| e.decision.contains("STUB"));
         assert!(!has_stub, "Trace should not contain STUB decisions");
     }
 }

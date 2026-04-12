@@ -12,56 +12,185 @@ pub struct SymbolRef {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PInst {
-    FrameSetup { spill_slots: u32 },
-    FrameTeardown { spill_slots: u32 },
+    FrameSetup {
+        spill_slots: u32,
+    },
+    FrameTeardown {
+        spill_slots: u32,
+    },
 
-    Add { dst: PReg, src1: PReg, src2: PReg },
-    Sub { dst: PReg, src1: PReg, src2: PReg },
-    Mul { dst: PReg, src1: PReg, src2: PReg },
-    Div { dst: PReg, src1: PReg, src2: PReg },
-    Divu { dst: PReg, src1: PReg, src2: PReg },
-    Rem { dst: PReg, src1: PReg, src2: PReg },
-    Remu { dst: PReg, src1: PReg, src2: PReg },
+    Add {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Sub {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Mul {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Div {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Divu {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Rem {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Remu {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
 
-    And { dst: PReg, src1: PReg, src2: PReg },
-    Or { dst: PReg, src1: PReg, src2: PReg },
-    Xor { dst: PReg, src1: PReg, src2: PReg },
+    And {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Or {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Xor {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
 
-    Sll { dst: PReg, src1: PReg, src2: PReg },
-    Srl { dst: PReg, src1: PReg, src2: PReg },
-    Sra { dst: PReg, src1: PReg, src2: PReg },
+    Sll {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Srl {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Sra {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
 
-    Neg { dst: PReg, src: PReg },
-    Not { dst: PReg, src: PReg },
-    Mv { dst: PReg, src: PReg },
+    Neg {
+        dst: PReg,
+        src: PReg,
+    },
+    Not {
+        dst: PReg,
+        src: PReg,
+    },
+    Mv {
+        dst: PReg,
+        src: PReg,
+    },
 
-    Slt { dst: PReg, src1: PReg, src2: PReg },
-    Sltu { dst: PReg, src1: PReg, src2: PReg },
-    Seqz { dst: PReg, src: PReg },
-    Snez { dst: PReg, src: PReg },
-    Sltz { dst: PReg, src: PReg },
-    Sgtz { dst: PReg, src: PReg },
+    Slt {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Sltu {
+        dst: PReg,
+        src1: PReg,
+        src2: PReg,
+    },
+    Seqz {
+        dst: PReg,
+        src: PReg,
+    },
+    Snez {
+        dst: PReg,
+        src: PReg,
+    },
+    Sltz {
+        dst: PReg,
+        src: PReg,
+    },
+    Sgtz {
+        dst: PReg,
+        src: PReg,
+    },
 
-    Li { dst: PReg, imm: i32 },
-    Addi { dst: PReg, src: PReg, imm: i32 },
+    Li {
+        dst: PReg,
+        imm: i32,
+    },
+    Addi {
+        dst: PReg,
+        src: PReg,
+        imm: i32,
+    },
 
-    Lw { dst: PReg, base: PReg, offset: i32 },
-    Sw { src: PReg, base: PReg, offset: i32 },
+    Lw {
+        dst: PReg,
+        base: PReg,
+        offset: i32,
+    },
+    Sw {
+        src: PReg,
+        base: PReg,
+        offset: i32,
+    },
 
-    SlotAddr { dst: PReg, slot: u32 },
-    MemcpyWords { dst: PReg, src: PReg, size: u32 },
+    SlotAddr {
+        dst: PReg,
+        slot: u32,
+    },
+    MemcpyWords {
+        dst: PReg,
+        src: PReg,
+        size: u32,
+    },
 
-    Call { target: SymbolRef },
+    Call {
+        target: SymbolRef,
+    },
     Ret,
 
-    Beq { src1: PReg, src2: PReg, target: u32 },
-    Bne { src1: PReg, src2: PReg, target: u32 },
-    Blt { src1: PReg, src2: PReg, target: u32 },
-    Bge { src1: PReg, src2: PReg, target: u32 },
-    J { target: u32 },
+    Beq {
+        src1: PReg,
+        src2: PReg,
+        target: u32,
+    },
+    Bne {
+        src1: PReg,
+        src2: PReg,
+        target: u32,
+    },
+    Blt {
+        src1: PReg,
+        src2: PReg,
+        target: u32,
+    },
+    Bge {
+        src1: PReg,
+        src2: PReg,
+        target: u32,
+    },
+    J {
+        target: u32,
+    },
 
     /// Label marker — records byte offset for branch fixups. Emits no machine code.
-    Label { id: u32 },
+    Label {
+        id: u32,
+    },
 }
 
 impl PInst {

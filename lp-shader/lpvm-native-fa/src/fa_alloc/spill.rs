@@ -3,8 +3,8 @@
 //! Assigns frame-pointer-relative spill slots on demand. Uses u8 slot
 //! indices — sufficient for shaders (< 256 spills).
 
-use alloc::vec::Vec;
 use crate::vinst::VReg;
+use alloc::vec::Vec;
 
 /// Spill slot allocator.
 pub struct SpillAlloc {

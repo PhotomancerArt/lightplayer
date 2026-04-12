@@ -430,14 +430,12 @@ mod tests {
 
     fn simple_compiled_module() -> CompiledModule {
         CompiledModule {
-            functions: vec![
-                crate::compile::CompiledFunction {
-                    name: String::from("test"),
-                    code: vec![0x13, 0x00, 0x00, 0x00], // nop
-                    relocs: vec![],
-                    debug_lines: vec![],
-                },
-            ],
+            functions: vec![crate::compile::CompiledFunction {
+                name: String::from("test"),
+                code: vec![0x13, 0x00, 0x00, 0x00], // nop
+                relocs: vec![],
+                debug_lines: vec![],
+            }],
             symbols: crate::vinst::ModuleSymbols::default(),
         }
     }

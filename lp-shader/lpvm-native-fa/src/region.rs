@@ -12,18 +12,19 @@ pub const REGION_ID_NONE: RegionId = u16::MAX;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Region {
     /// Linear range `[start, end)` (half-open).
-    Linear {
-        start: u16,
-        end: u16,
-    },
+    Linear { start: u16, end: u16 },
     IfThenElse {
         head: RegionId,
         then_body: RegionId,
         else_body: RegionId,
+        else_label: crate::vinst::LabelId,
+        merge_label: crate::vinst::LabelId,
     },
     Loop {
         header: RegionId,
         body: RegionId,
+        header_label: crate::vinst::LabelId,
+        exit_label: crate::vinst::LabelId,
     },
     Seq {
         children_start: u16,

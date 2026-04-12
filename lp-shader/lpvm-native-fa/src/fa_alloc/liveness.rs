@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
+use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::regset::RegSet;
 use crate::vinst::{VInst, VReg};
 
@@ -54,7 +54,10 @@ pub fn analyze_liveness(
             }
         }
 
-        Region::Seq { children_start, child_count } => {
+        Region::Seq {
+            children_start,
+            child_count,
+        } => {
             let start = *children_start as usize;
             let end = start + *child_count as usize;
             let mut combined = RegSet::new();
@@ -70,10 +73,47 @@ pub fn analyze_liveness(
             }
         }
 
-        // M5: IfThenElse, Loop handling
-        _ => Liveness {
-            live_in: RegSet::new(),
-            live_out: RegSet::new(),
+        Region::IfThenElse {
+            head,
+            then_body,
+            else_body,
+            ..
+        } => {
+            // live_in = head_live_in ∪ then_live_in ∪ else_live_in
+            let head_liveness = analyze_liveness(tree, *head, vinsts, pool);
+            let then_liveness = analyze_liveness(tree, *then_body, vinsts, pool);
+            let else_liveness = if *else_body != REGION_ID_NONE {
+                analyze_liveness(tree, *else_body, vinsts, pool)
+            } else {
+                Liveness {
+                    live_in: RegSet::new(),
+                    live_out: RegSet::new(),
+                }
+            };
+
+            let mut combined = head_liveness.live_in;
+            combined = combined.union(&then_liveness.live_in);
+            combined = combined.union(&else_liveness.live_in);
+
+            Liveness {
+                live_in: combined,
+                live_out: RegSet::new(),
+            }
+        }
+
+        Region::Loop { header, body, .. } => {
+            // Simple approximation: union of header and body live_in
+            // With spill-at-boundary, over-approximation is safe (just more spills)
+            let header_liveness = analyze_liveness(tree, *header, vinsts, pool);
+            let body_liveness = analyze_liveness(tree, *body, vinsts, pool);
+
+            let mut combined = header_liveness.live_in;
+            combined = combined.union(&body_liveness.live_in);
+
+            Liveness {
+                live_in: combined,
+                live_out: RegSet::new(),
+            }
         }
     }
 }
@@ -83,10 +123,18 @@ pub fn format_liveness(liveness: &Liveness) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push("=== Liveness ===".into());
 
-    let live_in: Vec<String> = liveness.live_in.iter().map(|v| format!("v{}", v.0)).collect();
+    let live_in: Vec<String> = liveness
+        .live_in
+        .iter()
+        .map(|v| format!("v{}", v.0))
+        .collect();
     lines.push(format!("  live_in:  [{}]", live_in.join(", ")));
 
-    let live_out: Vec<String> = liveness.live_out.iter().map(|v| format!("v{}", v.0)).collect();
+    let live_out: Vec<String> = liveness
+        .live_out
+        .iter()
+        .map(|v| format!("v{}", v.0))
+        .collect();
     lines.push(format!("  live_out: [{}]", live_out.join(", ")));
 
     lines.join("\n")
@@ -96,14 +144,27 @@ pub fn format_liveness(liveness: &Liveness) -> String {
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{VInst, VReg, SRC_OP_NONE};
+    use crate::vinst::{SRC_OP_NONE, VInst, VReg};
 
     #[test]
     fn liveness_simple_linear() {
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Add32 {
+                dst: VReg(2),
+                src1: VReg(0),
+                src2: VReg(1),
+                src_op: SRC_OP_NONE,
+            },
         ];
 
         let mut tree = RegionTree::new();
@@ -159,8 +220,16 @@ mod tests {
         // Region 0: defines v0
         // Region 1: uses v0
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-            VInst::Neg32 { dst: VReg(1), src: VReg(0), src_op: SRC_OP_NONE },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Neg32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: SRC_OP_NONE,
+            },
         ];
 
         let mut tree = RegionTree::new();

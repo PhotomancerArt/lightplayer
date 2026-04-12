@@ -85,8 +85,8 @@ pub fn compile_function(
 
     // 3. Allocate registers (fastalloc)
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
-    let alloc_result = crate::fa_alloc::allocate(&lowered, &func_abi)
-        .map_err(NativeError::FastAlloc)?;
+    let alloc_result =
+        crate::fa_alloc::allocate(&lowered, &func_abi).map_err(NativeError::FastAlloc)?;
     let pinsts = alloc_result.pinsts;
 
     // 4. Emit PInst → bytes
@@ -159,7 +159,10 @@ mod tests {
     #[test]
     fn test_compile_session_new() {
         let abi = ModuleAbi::from_ir_and_sig(
-            &LpirModule { imports: vec![], functions: vec![] },
+            &LpirModule {
+                imports: vec![],
+                functions: vec![],
+            },
             &LpsModuleSig { functions: vec![] },
         );
         let session = CompileSession::new(abi, lpir::FloatMode::Q32, Default::default());

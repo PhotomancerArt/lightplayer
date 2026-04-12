@@ -26,8 +26,8 @@ pub fn emit_function_fastalloc_bytes(
     let mut lowered = crate::lower::lower_ops(func, ir, module_abi, float_mode)?;
     crate::peephole::optimize(&mut lowered.vinsts);
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
-    let alloc_result = crate::fa_alloc::allocate(&lowered, &func_abi)
-        .map_err(NativeError::FastAlloc)?;
+    let alloc_result =
+        crate::fa_alloc::allocate(&lowered, &func_abi).map_err(NativeError::FastAlloc)?;
     let mut emitter = rv32_emit::Rv32Emitter::new();
     for p in &alloc_result.pinsts {
         emitter.emit(p);

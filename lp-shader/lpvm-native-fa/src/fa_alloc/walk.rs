@@ -4,8 +4,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
-use crate::rv32::gpr::{self, PReg, ALLOC_POOL, FP_REG};
+use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
+use crate::rv32::gpr::{self, ALLOC_POOL, FP_REG, PReg};
 use crate::rv32::inst::PInst;
 use crate::vinst::{VInst, VReg};
 
@@ -104,14 +104,45 @@ impl RegPool {
 
     /// Count occupied allocatable registers.
     pub fn occupied_count(&self) -> usize {
-        ALLOC_POOL.iter().filter(|&&p| self.preg_vreg[p as usize].is_some()).count()
+        ALLOC_POOL
+            .iter()
+            .filter(|&&p| self.preg_vreg[p as usize].is_some())
+            .count()
     }
 
     /// Iterate over occupied (preg, vreg) pairs for allocatable registers.
     pub fn iter_occupied(&self) -> impl Iterator<Item = (PReg, VReg)> + '_ {
-        ALLOC_POOL.iter().copied().filter_map(|p| {
-            self.preg_vreg[p as usize].map(|v| (p, v))
-        })
+        ALLOC_POOL
+            .iter()
+            .copied()
+            .filter_map(|p| self.preg_vreg[p as usize].map(|v| (p, v)))
+    }
+
+    /// Get a snapshot of current occupied (preg, vreg) pairs.
+    /// Used for saving register state at region boundaries.
+    pub fn snapshot_occupied(&self) -> Vec<(PReg, VReg)> {
+        self.iter_occupied().collect()
+    }
+
+    /// Clear the pool (free all registers).
+    /// Resets to initial state with empty LRU.
+    pub fn clear(&mut self) {
+        for p in ALLOC_POOL.iter() {
+            self.preg_vreg[*p as usize] = None;
+        }
+        // Reset LRU to initial state (all regs available, in order)
+        self.lru.clear();
+        self.lru.extend(ALLOC_POOL.iter().copied());
+    }
+
+    /// Seed the pool with vreg assignments from saved state.
+    /// Clears existing state first, then populates with saved assignments.
+    pub fn seed(&mut self, assignments: &[(PReg, VReg)]) {
+        self.clear();
+        for &(preg, vreg) in assignments {
+            self.preg_vreg[preg as usize] = Some(vreg);
+            self.touch(preg);
+        }
     }
 }
 
@@ -134,6 +165,48 @@ impl<'a> WalkState<'a> {
             symbols,
         }
     }
+
+    /// Flush all occupied registers to spill slots.
+    /// Emits Lw instructions (reloads in forward order) for each occupied vreg.
+    /// Returns the saved (preg, vreg) assignments for later seeding.
+    pub fn flush_to_slots(&mut self) -> Vec<(PReg, VReg)> {
+        let occupied = self.pool.snapshot_occupied();
+        let saved = occupied.clone();
+
+        for (preg, vreg) in occupied {
+            let slot = self.spill.get_or_assign(vreg);
+            let offset = -((slot as i32 + 1) * 4);
+            self.pinsts.push(crate::rv32::inst::PInst::Lw {
+                dst: preg,
+                base: crate::rv32::gpr::FP_REG,
+                offset,
+            });
+        }
+
+        self.pool.clear();
+        saved
+    }
+
+    /// Emit Sw (spill) for all occupied registers.
+    /// These become exit spills in forward order.
+    /// Pool is NOT cleared — backward walk needs vregs registered so defs can free them.
+    pub fn emit_exit_spills(&mut self) {
+        let occupied: Vec<_> = self.pool.iter_occupied().collect();
+        for (preg, vreg) in occupied {
+            let slot = self.spill.get_or_assign(vreg);
+            let offset = -((slot as i32 + 1) * 4);
+            self.pinsts.push(crate::rv32::inst::PInst::Sw {
+                src: preg,
+                base: crate::rv32::gpr::FP_REG,
+                offset,
+            });
+        }
+    }
+
+    /// Seed pool with vreg assignments from saved state.
+    pub fn seed_pool(&mut self, saved: &[(PReg, VReg)]) {
+        self.pool.seed(saved);
+    }
 }
 
 /// Walk a region backward with real register allocation.
@@ -154,11 +227,14 @@ pub fn walk_region(
     match region {
         Region::Linear { start, end } => {
             for i in (*start..*end).rev() {
-                process_inst(state, i as usize, &vinsts[i as usize], vreg_pool)?;
+                process_inst(state, i as usize, &vinsts[i as usize], vreg_pool, func_abi)?;
             }
             Ok(())
         }
-        Region::Seq { children_start, child_count } => {
+        Region::Seq {
+            children_start,
+            child_count,
+        } => {
             let start = *children_start as usize;
             let end = start + *child_count as usize;
             for &child_id in tree.seq_children[start..end].iter().rev() {
@@ -166,41 +242,209 @@ pub fn walk_region(
             }
             Ok(())
         }
-        Region::IfThenElse { .. } => Err(AllocError::UnsupportedControlFlow),
-        Region::Loop { .. } => Err(AllocError::UnsupportedControlFlow),
+        Region::IfThenElse {
+            head,
+            then_body,
+            else_body,
+            else_label,
+            merge_label,
+        } => walk_ite(
+            state,
+            tree,
+            *head,
+            *then_body,
+            *else_body,
+            *else_label,
+            *merge_label,
+            vinsts,
+            vreg_pool,
+            func_abi,
+        ),
+        Region::Loop {
+            header,
+            body,
+            header_label,
+            exit_label,
+        } => walk_loop(
+            state,
+            tree,
+            *header,
+            *body,
+            *header_label,
+            *exit_label,
+            vinsts,
+            vreg_pool,
+            func_abi,
+        ),
     }
+}
+
+/// Walk an IfThenElse region backward with spill-at-boundary.
+///
+/// Forward execution order after reversal:
+///   [head] [Sw head exit] [Lw then entry] [then] [Sw then exit] [J merge]
+///   [Label else] [Lw else entry] [else] [Sw else exit]
+///   [Label merge] [Lw merge] [rest...]
+fn walk_ite(
+    state: &mut WalkState<'_>,
+    tree: &RegionTree,
+    head: RegionId,
+    then_body: RegionId,
+    else_body: RegionId,
+    else_label: crate::vinst::LabelId,
+    merge_label: crate::vinst::LabelId,
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    func_abi: &crate::abi::FuncAbi,
+) -> Result<(), AllocError> {
+    use crate::region::REGION_ID_NONE;
+    use crate::rv32::inst::PInst;
+
+    // At this point, 'state.pool' has vregs live after the if/else (in "rest").
+    // 1. Flush to spill slots for the merge boundary.
+    //    This emits Lw instructions which become reloads at merge in forward order.
+    let merge_live = state.flush_to_slots();
+
+    // 2. Emit merge label (appears at merge point in forward).
+    state.pinsts.push(PInst::Label { id: merge_label });
+
+    // 3. Process else body (if non-empty).
+    //    In forward: else_label, Lw entry, else comp, Sw exit.
+    //    In backward push: Sw exit, else comp, Lw entry, else_label.
+    if else_body != REGION_ID_NONE {
+        // Seed pool with merge_live state (vregs in regs for else uses).
+        state.seed_pool(&merge_live);
+        // Emit Sw at else exit (values go to slots before merge).
+        state.emit_exit_spills();
+        // Walk else computation.
+        walk_region(state, tree, else_body, vinsts, vreg_pool, func_abi)?;
+        // Flush to slots at else entry (emits Lw, clears pool).
+        let _else_entry_live = state.flush_to_slots();
+    }
+
+    // 4. Emit else label.
+    //    For empty else, this is the same as merge_label (handled by walker).
+    if else_body != REGION_ID_NONE {
+        state.pinsts.push(PInst::Label { id: else_label });
+    }
+
+    // 5. Emit J to merge (at end of then in forward).
+    state.pinsts.push(PInst::J {
+        target: merge_label,
+    });
+
+    // 6. Process then body.
+    //    In forward: Lw entry, then comp, Sw exit, J merge.
+    //    In backward push: J merge, Sw exit, then comp, Lw entry.
+    state.seed_pool(&merge_live);
+    state.emit_exit_spills();
+    walk_region(state, tree, then_body, vinsts, vreg_pool, func_abi)?;
+    let _then_entry_live = state.flush_to_slots();
+
+    // 7. Process head.
+    //    In forward: head comp, BrIf, Sw exit.
+    //    In backward push: Sw exit, BrIf, head comp.
+    state.seed_pool(&merge_live);
+    state.emit_exit_spills();
+    walk_region(state, tree, head, vinsts, vreg_pool, func_abi)?;
+    // After head walk, pool has state at head entry.
+    // The caller continues walking from here.
+
+    Ok(())
+}
+
+/// Walk a Loop region backward with spill-at-boundary.
+///
+/// Forward execution order after reversal:
+///   [header_label] [Lw header entry] [header] [Sw header exit]
+///   [Lw body entry] [body] [Sw body exit] [J header]
+///   [exit_label] [Lw post-loop] [rest...]
+fn walk_loop(
+    state: &mut WalkState<'_>,
+    tree: &RegionTree,
+    header: RegionId,
+    body: RegionId,
+    header_label: crate::vinst::LabelId,
+    exit_label: crate::vinst::LabelId,
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    func_abi: &crate::abi::FuncAbi,
+) -> Result<(), AllocError> {
+    use crate::region::REGION_ID_NONE;
+    use crate::rv32::inst::PInst;
+
+    // At this point, 'state.pool' has vregs live after the loop (in "rest").
+    // 1. Flush to spill slots for the post-loop boundary.
+    let post_loop_live = state.flush_to_slots();
+
+    // 2. Emit exit label.
+    state.pinsts.push(PInst::Label { id: exit_label });
+
+    // 3. Emit back-edge J to header.
+    state.pinsts.push(PInst::J {
+        target: header_label,
+    });
+
+    // 4. Process body.
+    //    In forward: Lw body entry, body comp, Sw body exit, J header.
+    //    In backward push: J header, Sw body exit, body comp, Lw body entry.
+    if body != REGION_ID_NONE {
+        state.seed_pool(&post_loop_live);
+        state.emit_exit_spills();
+        walk_region(state, tree, body, vinsts, vreg_pool, func_abi)?;
+        let _body_entry_live = state.flush_to_slots();
+    }
+
+    // 5. Process header.
+    //    In forward: header_label, Lw header entry, header comp, Sw header exit.
+    //    In backward push: Sw header exit, header comp, Lw header entry, header_label.
+    if header != REGION_ID_NONE {
+        state.seed_pool(&post_loop_live);
+        state.emit_exit_spills();
+        walk_region(state, tree, header, vinsts, vreg_pool, func_abi)?;
+        let _header_entry_live = state.flush_to_slots();
+    }
+
+    // 6. Emit header label.
+    state.pinsts.push(PInst::Label { id: header_label });
+
+    Ok(())
 }
 
 /// Process a single instruction in the backward walk.
 fn process_inst(
-    state: &mut WalkState,
+    state: &mut WalkState<'_>,
     idx: usize,
     vinst: &VInst,
     vreg_pool: &[VReg],
+    func_abi: &crate::abi::FuncAbi,
 ) -> Result<(), AllocError> {
     // Handle branch and control flow instructions first
     match vinst {
         VInst::Label(id, _) => {
-            state.pinsts.push(crate::rv32::inst::PInst::Label { id: *id });
+            state
+                .pinsts
+                .push(crate::rv32::inst::PInst::Label { id: *id });
             return Ok(());
         }
-        VInst::BrIf { cond, target, invert, .. } => {
+        VInst::BrIf {
+            cond,
+            target,
+            invert,
+            ..
+        } => {
             let mut decision = String::new();
-            // cond is a use — ensure it's in a register
             let cond_vregs = vec![*cond];
             let cond_pregs = resolve_uses(state, &cond_vregs, &mut decision)?;
             let cond_preg = cond_pregs[0];
 
-            // Emit branch: beq/bne with x0 (zero register is always 0)
             if *invert {
-                // BrIf invert=true means branch when cond is FALSE (== 0)
                 state.pinsts.push(crate::rv32::inst::PInst::Beq {
                     src1: cond_preg,
-                    src2: 0, // x0 is always zero
+                    src2: 0,
                     target: *target,
                 });
             } else {
-                // BrIf invert=false means branch when cond is TRUE (!= 0)
                 state.pinsts.push(crate::rv32::inst::PInst::Bne {
                     src1: cond_preg,
                     src2: 0,
@@ -208,7 +452,6 @@ fn process_inst(
                 });
             }
 
-            // Record trace
             let state_str = format_pool_state(&state.pool);
             state.trace.push(TraceEntry {
                 vinst_idx: idx,
@@ -219,11 +462,10 @@ fn process_inst(
             return Ok(());
         }
         VInst::Br { target, .. } => {
-            state.pinsts.push(crate::rv32::inst::PInst::J {
-                target: *target,
-            });
+            state
+                .pinsts
+                .push(crate::rv32::inst::PInst::J { target: *target });
 
-            // Record trace
             let state_str = format_pool_state(&state.pool);
             state.trace.push(TraceEntry {
                 vinst_idx: idx,
@@ -233,7 +475,7 @@ fn process_inst(
             });
             return Ok(());
         }
-        VInst::Call { .. } => return Err(AllocError::UnsupportedCall),
+        VInst::Call { .. } => return process_call(state, idx, vinst, vreg_pool, func_abi),
         _ => {}
     }
 
@@ -288,6 +530,216 @@ fn process_inst(
     state.trace.push(TraceEntry {
         vinst_idx: idx,
         vinst_mnemonic: vinst.mnemonic().into(),
+        decision,
+        register_state: state_str,
+    });
+
+    Ok(())
+}
+
+/// Process a Call instruction in the backward walk.
+fn process_call(
+    state: &mut WalkState<'_>,
+    idx: usize,
+    vinst: &VInst,
+    vreg_pool: &[VReg],
+    func_abi: &crate::abi::FuncAbi,
+) -> Result<(), AllocError> {
+    use crate::rv32::abi::{ARG_REGS, RET_REGS};
+    use crate::rv32::inst::SymbolRef;
+    use alloc::format;
+
+    let (target, args, rets, callee_uses_sret) = match vinst {
+        VInst::Call {
+            target,
+            args,
+            rets,
+            callee_uses_sret,
+            ..
+        } => (*target, *args, *rets, *callee_uses_sret),
+        _ => unreachable!(),
+    };
+
+    if args.count as usize > ARG_REGS.len() {
+        return Err(AllocError::TooManyArgs);
+    }
+
+    // For sret: args are shifted by one (a1, a2, ... instead of a0, a1, ...)
+    let effective_arg_count = if callee_uses_sret {
+        args.count as usize + 1
+    } else {
+        args.count as usize
+    };
+    if effective_arg_count > ARG_REGS.len() {
+        return Err(AllocError::TooManyArgs);
+    }
+
+    let mut decision = String::new();
+
+    // Step 1: Process defs (return values) — free their registers
+    // Track which returns were originally live (in the pool)
+    let ret_vregs: Vec<VReg> = rets.vregs(vreg_pool).to_vec();
+    let mut ret_pregs = Vec::new();
+    let mut ret_was_live = Vec::new();
+    for (i, &rv) in ret_vregs.iter().enumerate() {
+        if let Some(preg) = state.pool.home(rv) {
+            state.pool.free(preg);
+            ret_pregs.push((rv, preg));
+            ret_was_live.push(true);
+        } else {
+            let ret_preg = RET_REGS[i].hw;
+            ret_pregs.push((rv, ret_preg));
+            ret_was_live.push(false);
+        }
+    }
+
+    // Step 2: Emit reloads for live vregs in caller-saved regs (post-call)
+    let clobber = func_abi.call_clobbers();
+    let mut clobbered_vregs: Vec<(VReg, PReg)> = Vec::new();
+    for (preg, vreg) in state.pool.iter_occupied().collect::<Vec<_>>() {
+        let abi_preg = crate::abi::PReg::int(preg);
+        if clobber.contains(abi_preg) {
+            let slot = state.spill.get_or_assign(vreg);
+            let offset = -((slot as i32 + 1) * 4);
+            state.pinsts.push(PInst::Lw {
+                dst: preg,
+                base: FP_REG,
+                offset,
+            });
+            clobbered_vregs.push((vreg, preg));
+            decision.push_str(&format!(" reload v{}←[fp-{}]", vreg.0, (slot + 1) * 4));
+        }
+    }
+
+    // Step 3: Emit reloads from sret buffer (post-call in forward order)
+    // For sret: load return values from the sret buffer into their assigned regs
+    if callee_uses_sret {
+        for (i, &(rv, preg)) in ret_pregs.iter().enumerate() {
+            if ret_was_live[i] {
+                // Load from sret buffer at offset i*4
+                // TODO: get actual sret buffer offset from func_abi
+                // For now, use a placeholder offset
+                let sret_offset = -((func_abi.sret_word_count().unwrap_or(4) * 4 + 16) as i32);
+                let offset = sret_offset + (i as i32 * 4);
+                state.pinsts.push(PInst::Lw {
+                    dst: preg,
+                    base: FP_REG,
+                    offset,
+                });
+                decision.push_str(&format!(" sret_load v{}←[sret+{}]", rv.0, i * 4));
+            }
+        }
+    }
+
+    // Step 4: Emit PInst::Call
+    let sym_name = String::from(state.symbols.name(target));
+    state.pinsts.push(PInst::Call {
+        target: SymbolRef { name: sym_name },
+    });
+
+    // Step 5: Move return values to their assigned regs (non-sret only)
+    // For sret: returns were loaded from buffer in Step 3, just allocate here
+    if !callee_uses_sret {
+        for (i, &(rv, preg)) in ret_pregs.iter().enumerate() {
+            let ret_reg = RET_REGS[i].hw;
+            if preg != ret_reg {
+                state.pinsts.push(PInst::Mv {
+                    dst: preg,
+                    src: ret_reg,
+                });
+            }
+            // Only allocate if the return was originally live
+            if ret_was_live[i] {
+                state.pool.alloc_fixed(preg, rv);
+            }
+        }
+    } else {
+        // For sret: just allocate the registers (values already loaded)
+        for (i, &(rv, preg)) in ret_pregs.iter().enumerate() {
+            if ret_was_live[i] {
+                state.pool.alloc_fixed(preg, rv);
+            }
+        }
+    }
+
+    // Step 6: Resolve args and move to ARG_REGS
+    // For sret: args start at a1 (index 1) instead of a0 (index 0)
+    let arg_start_idx = if callee_uses_sret { 1 } else { 0 };
+    let arg_vregs: Vec<VReg> = args.vregs(vreg_pool).to_vec();
+    for (i, &av) in arg_vregs.iter().enumerate() {
+        let arg_reg = ARG_REGS[arg_start_idx + i].hw;
+        let src = if let Some(p) = state.pool.home(av) {
+            state.pool.touch(p);
+            p
+        } else if let Some(slot) = state.spill.has_slot(av) {
+            let (p, evicted) = state.pool.alloc(av);
+            if let Some(ev) = evicted {
+                let ev_slot = state.spill.get_or_assign(ev);
+                let offset = -((ev_slot as i32 + 1) * 4);
+                state.pinsts.push(PInst::Sw {
+                    src: p,
+                    base: FP_REG,
+                    offset,
+                });
+            }
+            let offset = -((slot as i32 + 1) * 4);
+            state.pinsts.push(PInst::Lw {
+                dst: p,
+                base: FP_REG,
+                offset,
+            });
+            p
+        } else {
+            let (p, evicted) = state.pool.alloc(av);
+            if let Some(ev) = evicted {
+                let ev_slot = state.spill.get_or_assign(ev);
+                let offset = -((ev_slot as i32 + 1) * 4);
+                state.pinsts.push(PInst::Sw {
+                    src: p,
+                    base: FP_REG,
+                    offset,
+                });
+            }
+            p
+        };
+        if src != arg_reg {
+            state.pinsts.push(PInst::Mv { dst: arg_reg, src });
+        }
+    }
+
+    // Step 7: For sret, set up a0 with sret buffer pointer
+    // In forward: addi a0, fp, sret_offset (pre-call)
+    // In backward: this is done after args, before clobber spills
+    if callee_uses_sret {
+        // TODO: get actual sret buffer offset from func_abi/frame
+        // For now, use a placeholder offset
+        let sret_offset = -((func_abi.sret_word_count().unwrap_or(4) * 4 + 16) as i32);
+        state.pinsts.push(crate::rv32::inst::PInst::Addi {
+            dst: 10, // a0
+            src: FP_REG,
+            imm: sret_offset,
+        });
+        decision.push_str(&format!(" sret_ptr a0=fp[{}]", sret_offset));
+    }
+
+    // Step 8: Spill clobbered vregs (pre-call in execution)
+    for &(vreg, preg) in &clobbered_vregs {
+        let slot = state.spill.get_or_assign(vreg);
+        let offset = -((slot as i32 + 1) * 4);
+        state.pinsts.push(PInst::Sw {
+            src: preg,
+            base: FP_REG,
+            offset,
+        });
+        state.pool.free(preg);
+        decision.push_str(&format!(" spill v{}→[fp-{}]", vreg.0, (slot + 1) * 4));
+    }
+
+    // Record trace
+    let state_str = format_pool_state(&state.pool);
+    state.trace.push(TraceEntry {
+        vinst_idx: idx,
+        vinst_mnemonic: "Call".into(),
         decision,
         register_state: state_str,
     });
@@ -377,80 +829,211 @@ fn emit_vinst(
 
     match vinst {
         // Arithmetic: dst = op(src1, src2)
-        VInst::Add32 { .. } => Ok(vec![PInst::Add { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::Sub32 { .. } => Ok(vec![PInst::Sub { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::Mul32 { .. } => Ok(vec![PInst::Mul { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::And32 { .. } => Ok(vec![PInst::And { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::Or32 { .. } => Ok(vec![PInst::Or { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::Xor32 { .. } => Ok(vec![PInst::Xor { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::Shl32 { .. } => Ok(vec![PInst::Sll { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::ShrS32 { .. } => Ok(vec![PInst::Sra { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::ShrU32 { .. } => Ok(vec![PInst::Srl { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::DivS32 { .. } => Ok(vec![PInst::Div { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::DivU32 { .. } => Ok(vec![PInst::Divu { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::RemS32 { .. } => Ok(vec![PInst::Rem { dst: dst(), src1: src1(), src2: src2() }]),
-        VInst::RemU32 { .. } => Ok(vec![PInst::Remu { dst: dst(), src1: src1(), src2: src2() }]),
+        VInst::Add32 { .. } => Ok(vec![PInst::Add {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::Sub32 { .. } => Ok(vec![PInst::Sub {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::Mul32 { .. } => Ok(vec![PInst::Mul {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::And32 { .. } => Ok(vec![PInst::And {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::Or32 { .. } => Ok(vec![PInst::Or {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::Xor32 { .. } => Ok(vec![PInst::Xor {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::Shl32 { .. } => Ok(vec![PInst::Sll {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::ShrS32 { .. } => Ok(vec![PInst::Sra {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::ShrU32 { .. } => Ok(vec![PInst::Srl {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::DivS32 { .. } => Ok(vec![PInst::Div {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::DivU32 { .. } => Ok(vec![PInst::Divu {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::RemS32 { .. } => Ok(vec![PInst::Rem {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
+        VInst::RemU32 { .. } => Ok(vec![PInst::Remu {
+            dst: dst(),
+            src1: src1(),
+            src2: src2(),
+        }]),
 
         // Unary: dst = op(src)
-        VInst::Neg32 { .. } => Ok(vec![PInst::Neg { dst: dst(), src: src1() }]),
-        VInst::Bnot32 { .. } => Ok(vec![PInst::Not { dst: dst(), src: src1() }]),
+        VInst::Neg32 { .. } => Ok(vec![PInst::Neg {
+            dst: dst(),
+            src: src1(),
+        }]),
+        VInst::Bnot32 { .. } => Ok(vec![PInst::Not {
+            dst: dst(),
+            src: src1(),
+        }]),
         VInst::Mov32 { .. } => {
             if dst() != src1() {
-                Ok(vec![PInst::Mv { dst: dst(), src: src1() }])
+                Ok(vec![PInst::Mv {
+                    dst: dst(),
+                    src: src1(),
+                }])
             } else {
                 Ok(vec![])
             }
         }
 
         // Immediate
-        VInst::IConst32 { val, .. } => Ok(vec![PInst::Li { dst: dst(), imm: *val }]),
+        VInst::IConst32 { val, .. } => Ok(vec![PInst::Li {
+            dst: dst(),
+            imm: *val,
+        }]),
 
         // Memory
-        VInst::Load32 { offset, .. } => {
-            Ok(vec![PInst::Lw { dst: dst(), base: src1(), offset: *offset }])
-        }
+        VInst::Load32 { offset, .. } => Ok(vec![PInst::Lw {
+            dst: dst(),
+            base: src1(),
+            offset: *offset,
+        }]),
         VInst::Store32 { offset, .. } => {
             // Store: src=use[0], base=use[1]
-            Ok(vec![PInst::Sw { src: src1(), base: src2(), offset: *offset }])
+            Ok(vec![PInst::Sw {
+                src: src1(),
+                base: src2(),
+                offset: *offset,
+            }])
         }
-        VInst::SlotAddr { slot, .. } => {
-            Ok(vec![PInst::SlotAddr { dst: dst(), slot: *slot }])
-        }
-        VInst::MemcpyWords { size, .. } => {
-            Ok(vec![PInst::MemcpyWords { dst: src1(), src: src2(), size: *size }])
-        }
+        VInst::SlotAddr { slot, .. } => Ok(vec![PInst::SlotAddr {
+            dst: dst(),
+            slot: *slot,
+        }]),
+        VInst::MemcpyWords { size, .. } => Ok(vec![PInst::MemcpyWords {
+            dst: src1(),
+            src: src2(),
+            size: *size,
+        }]),
 
         // Compare — multi-instruction sequences using SCRATCH
         VInst::Icmp32 { cond, .. } => {
             let (dst_p, l, r) = (dst(), src1(), src2());
             match cond {
                 IcmpCond::Eq => Ok(vec![
-                    PInst::Xor { dst: SCRATCH, src1: l, src2: r },
-                    PInst::Seqz { dst: dst_p, src: SCRATCH },
+                    PInst::Xor {
+                        dst: SCRATCH,
+                        src1: l,
+                        src2: r,
+                    },
+                    PInst::Seqz {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
                 IcmpCond::Ne => Ok(vec![
-                    PInst::Xor { dst: SCRATCH, src1: l, src2: r },
-                    PInst::Snez { dst: dst_p, src: SCRATCH },
+                    PInst::Xor {
+                        dst: SCRATCH,
+                        src1: l,
+                        src2: r,
+                    },
+                    PInst::Snez {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
-                IcmpCond::LtS => Ok(vec![PInst::Slt { dst: dst_p, src1: l, src2: r }]),
+                IcmpCond::LtS => Ok(vec![PInst::Slt {
+                    dst: dst_p,
+                    src1: l,
+                    src2: r,
+                }]),
                 IcmpCond::LeS => Ok(vec![
-                    PInst::Slt { dst: SCRATCH, src1: r, src2: l },
-                    PInst::Seqz { dst: dst_p, src: SCRATCH },
+                    PInst::Slt {
+                        dst: SCRATCH,
+                        src1: r,
+                        src2: l,
+                    },
+                    PInst::Seqz {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
-                IcmpCond::GtS => Ok(vec![PInst::Slt { dst: dst_p, src1: r, src2: l }]),
+                IcmpCond::GtS => Ok(vec![PInst::Slt {
+                    dst: dst_p,
+                    src1: r,
+                    src2: l,
+                }]),
                 IcmpCond::GeS => Ok(vec![
-                    PInst::Slt { dst: SCRATCH, src1: l, src2: r },
-                    PInst::Seqz { dst: dst_p, src: SCRATCH },
+                    PInst::Slt {
+                        dst: SCRATCH,
+                        src1: l,
+                        src2: r,
+                    },
+                    PInst::Seqz {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
-                IcmpCond::LtU => Ok(vec![PInst::Sltu { dst: dst_p, src1: l, src2: r }]),
+                IcmpCond::LtU => Ok(vec![PInst::Sltu {
+                    dst: dst_p,
+                    src1: l,
+                    src2: r,
+                }]),
                 IcmpCond::LeU => Ok(vec![
-                    PInst::Sltu { dst: SCRATCH, src1: r, src2: l },
-                    PInst::Seqz { dst: dst_p, src: SCRATCH },
+                    PInst::Sltu {
+                        dst: SCRATCH,
+                        src1: r,
+                        src2: l,
+                    },
+                    PInst::Seqz {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
-                IcmpCond::GtU => Ok(vec![PInst::Sltu { dst: dst_p, src1: r, src2: l }]),
+                IcmpCond::GtU => Ok(vec![PInst::Sltu {
+                    dst: dst_p,
+                    src1: r,
+                    src2: l,
+                }]),
                 IcmpCond::GeU => Ok(vec![
-                    PInst::Sltu { dst: SCRATCH, src1: l, src2: r },
-                    PInst::Seqz { dst: dst_p, src: SCRATCH },
+                    PInst::Sltu {
+                        dst: SCRATCH,
+                        src1: l,
+                        src2: r,
+                    },
+                    PInst::Seqz {
+                        dst: dst_p,
+                        src: SCRATCH,
+                    },
                 ]),
             }
         }
@@ -458,9 +1041,19 @@ fn emit_vinst(
         VInst::IeqImm32 { imm, .. } => {
             let (dst_p, s) = (dst(), src1());
             Ok(vec![
-                PInst::Li { dst: SCRATCH, imm: *imm },
-                PInst::Xor { dst: SCRATCH, src1: s, src2: SCRATCH },
-                PInst::Seqz { dst: dst_p, src: SCRATCH },
+                PInst::Li {
+                    dst: SCRATCH,
+                    imm: *imm,
+                },
+                PInst::Xor {
+                    dst: SCRATCH,
+                    src1: s,
+                    src2: SCRATCH,
+                },
+                PInst::Seqz {
+                    dst: dst_p,
+                    src: SCRATCH,
+                },
             ])
         }
 
@@ -470,12 +1063,28 @@ fn emit_vinst(
         // cond is 0 or 1 from Icmp/IeqImm; negate to bitmask (0 or 0xFFFFFFFF)
         // Uses: [cond, if_true, if_false]
         VInst::Select32 { .. } => {
-            let (dst_p, cond_p, true_p, false_p) = (dst(), use_pregs[0], use_pregs[1], use_pregs[2]);
+            let (dst_p, cond_p, true_p, false_p) =
+                (dst(), use_pregs[0], use_pregs[1], use_pregs[2]);
             Ok(vec![
-                PInst::Neg { dst: SCRATCH, src: cond_p },        // 0→0, 1→0xFFFFFFFF
-                PInst::Sub { dst: dst_p, src1: true_p, src2: false_p },
-                PInst::And { dst: dst_p, src1: dst_p, src2: SCRATCH },
-                PInst::Add { dst: dst_p, src1: dst_p, src2: false_p },
+                PInst::Neg {
+                    dst: SCRATCH,
+                    src: cond_p,
+                }, // 0→0, 1→0xFFFFFFFF
+                PInst::Sub {
+                    dst: dst_p,
+                    src1: true_p,
+                    src2: false_p,
+                },
+                PInst::And {
+                    dst: dst_p,
+                    src1: dst_p,
+                    src2: SCRATCH,
+                },
+                PInst::Add {
+                    dst: dst_p,
+                    src1: dst_p,
+                    src2: false_p,
+                },
             ])
         }
 
@@ -502,8 +1111,8 @@ fn emit_vinst(
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{ModuleSymbols, VInst, VReg, SRC_OP_NONE};
     use crate::rv32::gpr::ALLOC_POOL;
+    use crate::vinst::{ModuleSymbols, SRC_OP_NONE, VInst, VReg};
     use alloc::string::String;
     use alloc::vec::Vec;
 
@@ -578,9 +1187,22 @@ mod tests {
     #[test]
     fn walk_region_allocates_simple() {
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: SRC_OP_NONE },
-            VInst::Add32 { dst: VReg(2), src1: VReg(0), src2: VReg(1), src_op: SRC_OP_NONE },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Add32 {
+                dst: VReg(2),
+                src1: VReg(0),
+                src2: VReg(1),
+                src_op: SRC_OP_NONE,
+            },
         ];
         let mut tree = RegionTree::new();
         let root = tree.push(Region::Linear { start: 0, end: 3 });
@@ -597,21 +1219,29 @@ mod tests {
     }
 
     #[test]
-    fn walk_region_rejects_control_flow() {
-        let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: SRC_OP_NONE },
-        ];
+    fn walk_region_handles_loop_control_flow() {
+        // Loop now works
+        let vinsts = vec![VInst::IConst32 {
+            dst: VReg(0),
+            val: 1,
+            src_op: SRC_OP_NONE,
+        }];
         let mut tree = RegionTree::new();
         let header = tree.push(Region::Linear { start: 0, end: 1 });
         let body = tree.push(Region::Linear { start: 0, end: 0 });
-        let root = tree.push(Region::Loop { header, body });
+        let root = tree.push(Region::Loop {
+            header,
+            body,
+            header_label: 0,
+            exit_label: 1,
+        });
         tree.root = root;
         let symbols = ModuleSymbols::default();
         let abi = test_abi();
 
         let mut state = WalkState::new(4, &symbols);
         let result = walk_region(&mut state, &tree, root, &vinsts, &[], &abi);
-        assert!(matches!(result, Err(AllocError::UnsupportedControlFlow)));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -620,7 +1250,11 @@ mod tests {
         let mut vinsts: Vec<VInst> = Vec::new();
 
         for i in 0..n {
-            vinsts.push(VInst::IConst32 { dst: VReg(i as u16), val: i as i32, src_op: SRC_OP_NONE });
+            vinsts.push(VInst::IConst32 {
+                dst: VReg(i as u16),
+                val: i as i32,
+                src_op: SRC_OP_NONE,
+            });
         }
 
         for i in n..(n + ALLOC_POOL.len()) {
@@ -633,7 +1267,10 @@ mod tests {
         }
 
         let mut tree = RegionTree::new();
-        let root = tree.push(Region::Linear { start: 0, end: vinsts.len() as u16 });
+        let root = tree.push(Region::Linear {
+            start: 0,
+            end: vinsts.len() as u16,
+        });
         tree.root = root;
         let symbols = ModuleSymbols::default();
         let abi = test_abi();
@@ -644,5 +1281,287 @@ mod tests {
         assert_eq!(state.trace.entries.len(), vinsts.len());
         let has_alloc = state.trace.entries.iter().any(|e| e.decision.contains('→'));
         assert!(has_alloc, "Expected allocation decisions in trace");
+    }
+
+    #[test]
+    fn process_call_dead_return_not_allocated() {
+        // Call with a dead return value (ret v0 is not used anywhere)
+        // The dead return should not occupy a register after the call
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        // vreg_pool: [v0, v1] where v0 is the dead return, v1 is the arg
+        let vreg_pool = vec![VReg(0), VReg(1)];
+
+        let vinsts = vec![
+            // IConst defines v1, which is used as the call argument
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 42,
+                src_op: SRC_OP_NONE,
+            },
+            // Call returns v0 (dead), takes v1 as arg (vreg_pool index 1)
+            VInst::Call {
+                target: SymbolId(0),
+                args: VRegSlice { start: 1, count: 1 },
+                rets: VRegSlice { start: 0, count: 1 }, // v0 is the return
+                callee_uses_sret: false,
+                src_op: SRC_OP_NONE,
+            },
+        ];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 2 });
+        tree.root = root;
+
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("helper");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(4, &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &vreg_pool, &abi).unwrap();
+
+        // After processing:
+        // - v0 (dead return) should NOT be in the pool
+        // - v1 (arg) was freed after use, so also not in pool
+        // The key point: v0 was never allocated even though it was a return
+        assert!(
+            state.pool.home(VReg(0)).is_none(),
+            "Dead return value v0 should not occupy a register after call"
+        );
+
+        // Count occupied registers to ensure dead return didn't waste a slot
+        let occupied = state.pool.occupied_count();
+        assert_eq!(
+            occupied, 0,
+            "No registers should be occupied after call with dead return"
+        );
+    }
+
+    #[test]
+    fn process_call_live_return_and_args() {
+        // v0 = IConst(1); v1 = IConst(2); v2 = Call(helper, args=[v0,v1]); v3 = Add(v2, v0)
+        // v2 is a live return (used by Add), v0 is live across the call
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        let vreg_pool = vec![VReg(0), VReg(1), VReg(2)];
+        let vinsts = vec![
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Call {
+                target: SymbolId(0),
+                args: VRegSlice { start: 0, count: 2 }, // v0, v1
+                rets: VRegSlice { start: 2, count: 1 }, // v2
+                callee_uses_sret: false,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Add32 {
+                dst: VReg(3),
+                src1: VReg(2),
+                src2: VReg(0),
+                src_op: SRC_OP_NONE,
+            },
+        ];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 4 });
+        tree.root = root;
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("helper");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(8, &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &vreg_pool, &abi).unwrap();
+        state.pinsts.reverse();
+
+        // Should contain a call instruction
+        assert!(state.pinsts.iter().any(|p| matches!(p, PInst::Call { .. })));
+        // Should contain Mv instructions for arg placement (a0, a1)
+        let has_mv = state.pinsts.iter().any(|p| matches!(p, PInst::Mv { .. }));
+        assert!(has_mv, "Expected Mv for arg or ret placement");
+        // v0 is live across the call (used in Add), so it should be spilled/reloaded.
+        // ALLOC_POOL starts with t0,t1,t2 (caller-saved), so v0 WILL get clobbered.
+        let has_sw = state.pinsts.iter().any(|p| matches!(p, PInst::Sw { .. }));
+        let has_lw = state.pinsts.iter().any(|p| matches!(p, PInst::Lw { .. }));
+        assert!(has_sw, "Expected Sw for caller-saved spill around call");
+        assert!(has_lw, "Expected Lw for caller-saved reload around call");
+    }
+
+    #[test]
+    fn process_call_no_args_no_returns() {
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        let vinsts = vec![VInst::Call {
+            target: SymbolId(0),
+            args: VRegSlice { start: 0, count: 0 },
+            rets: VRegSlice { start: 0, count: 0 },
+            callee_uses_sret: false,
+            src_op: SRC_OP_NONE,
+        }];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 1 });
+        tree.root = root;
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("void_fn");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(1, &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &[], &abi).unwrap();
+        state.pinsts.reverse();
+
+        // Just a call instruction, no moves needed
+        assert_eq!(
+            state
+                .pinsts
+                .iter()
+                .filter(|p| matches!(p, PInst::Call { .. }))
+                .count(),
+            1,
+        );
+        assert_eq!(state.pool.occupied_count(), 0);
+    }
+
+    #[test]
+    fn process_call_sret_handled() {
+        // Sret calls are now supported
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        let vinsts = vec![VInst::Call {
+            target: SymbolId(0),
+            args: VRegSlice { start: 0, count: 0 },
+            rets: VRegSlice { start: 0, count: 0 },
+            callee_uses_sret: true,
+            src_op: SRC_OP_NONE,
+        }];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 1 });
+        tree.root = root;
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("sret_fn");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(1, &symbols);
+        let result = walk_region(&mut state, &tree, root, &vinsts, &[], &abi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn process_call_too_many_args_rejected() {
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        // 9 args — exceeds the 8-register limit
+        let vreg_pool: Vec<VReg> = (0..9).map(|i| VReg(i)).collect();
+        let vinsts = vec![VInst::Call {
+            target: SymbolId(0),
+            args: VRegSlice { start: 0, count: 9 },
+            rets: VRegSlice { start: 0, count: 0 },
+            callee_uses_sret: false,
+            src_op: SRC_OP_NONE,
+        }];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 1 });
+        tree.root = root;
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("many_args");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(10, &symbols);
+        let result = walk_region(&mut state, &tree, root, &vinsts, &vreg_pool, &abi);
+        assert!(matches!(result, Err(AllocError::TooManyArgs)));
+    }
+
+    #[test]
+    fn process_call_clobber_spill_reload() {
+        // v0 = IConst(10); Call(helper); v1 = Mov(v0)
+        // v0 is live across the call, and ALLOC_POOL[0] = t0 (caller-saved).
+        // So v0 must be spilled before and reloaded after the call.
+        use crate::vinst::{SymbolId, VRegSlice};
+
+        let vinsts = vec![
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 10,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Call {
+                target: SymbolId(0),
+                args: VRegSlice { start: 0, count: 0 },
+                rets: VRegSlice { start: 0, count: 0 },
+                callee_uses_sret: false,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Mov32 {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: SRC_OP_NONE,
+            },
+        ];
+
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 3 });
+        tree.root = root;
+        let mut symbols = ModuleSymbols::default();
+        symbols.intern("helper");
+        let abi = test_abi();
+
+        let mut state = WalkState::new(4, &symbols);
+        walk_region(&mut state, &tree, root, &vinsts, &[], &abi).unwrap();
+        state.pinsts.reverse();
+
+        // v0 allocated to ALLOC_POOL[0] = t0 (caller-saved).
+        // Must have Sw (spill) before call and Lw (reload) after call.
+        let call_idx = state
+            .pinsts
+            .iter()
+            .position(|p| matches!(p, PInst::Call { .. }))
+            .unwrap();
+
+        // There should be a Sw before the call
+        let has_spill_before = state.pinsts[..call_idx]
+            .iter()
+            .any(|p| matches!(p, PInst::Sw { .. }));
+        assert!(
+            has_spill_before,
+            "Expected spill (Sw) before call in pinsts: {:?}",
+            &state.pinsts
+        );
+
+        // There should be a Lw after the call
+        let has_reload_after = state.pinsts[call_idx + 1..]
+            .iter()
+            .any(|p| matches!(p, PInst::Lw { .. }));
+        assert!(
+            has_reload_after,
+            "Expected reload (Lw) after call in pinsts: {:?}",
+            &state.pinsts
+        );
+
+        // The trace for Call should mention spill and reload
+        let call_trace = state
+            .trace
+            .entries
+            .iter()
+            .find(|e| e.vinst_mnemonic == "Call")
+            .unwrap();
+        assert!(
+            call_trace.decision.contains("spill"),
+            "Call trace should mention spill: {}",
+            call_trace.decision
+        );
+        assert!(
+            call_trace.decision.contains("reload"),
+            "Call trace should mention reload: {}",
+            call_trace.decision
+        );
     }
 }

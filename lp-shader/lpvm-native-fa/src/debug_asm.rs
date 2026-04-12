@@ -67,7 +67,7 @@ mod tests {
     use alloc::vec;
 
     use lpir::types::VRegRange;
-    use lpir::{IrFunction, LpirModule, IrType, LpirOp, VReg};
+    use lpir::{IrFunction, IrType, LpirModule, LpirOp, VReg};
     use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 
     use super::*;

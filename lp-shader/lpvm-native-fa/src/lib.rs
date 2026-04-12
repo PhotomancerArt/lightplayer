@@ -12,13 +12,13 @@
 extern crate alloc;
 
 pub mod abi;
-pub mod fa_alloc;
 pub mod compile;
 pub mod config;
 pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
+pub mod fa_alloc;
 pub mod link;
 pub mod lower;
 pub mod native_options;
@@ -37,8 +37,7 @@ pub mod rt_jit;
 
 pub use abi::ModuleAbi;
 pub use compile::{
-    CompileSession, CompiledFunction, CompiledModule, NativeReloc, compile_function,
-    compile_module,
+    CompileSession, CompiledFunction, CompiledModule, NativeReloc, compile_function, compile_module,
 };
 pub use debug_asm::compile_module_asm_text;
 pub use emit::{EmittedCode, emit_pinsts, emit_vinsts};

@@ -49,8 +49,8 @@ pub fn emit_lowered(
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<EmittedCode, NativeError> {
     // 1. Allocate registers: VInst → PInst
-    let alloc_result = crate::fa_alloc::allocate(lowered, func_abi)
-        .map_err(NativeError::FastAlloc)?;
+    let alloc_result =
+        crate::fa_alloc::allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
 
     // 2. Emit PInst → bytes
     emit_pinsts(&alloc_result.pinsts)
@@ -128,12 +128,15 @@ pub fn emit_pinsts(pinsts: &[PInst]) -> Result<EmittedCode, NativeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rv32::inst::{PInst, SymbolRef};
     use crate::rv32::gpr;
+    use crate::rv32::inst::{PInst, SymbolRef};
 
     #[test]
     fn test_emit_pinsts_single_li() {
-        let pinsts = vec![PInst::Li { dst: gpr::RET_REGS[0], imm: 42 }];
+        let pinsts = vec![PInst::Li {
+            dst: gpr::RET_REGS[0],
+            imm: 42,
+        }];
         let emitted = emit_pinsts(&pinsts).unwrap();
         assert!(!emitted.code.is_empty());
         assert!(emitted.relocs.is_empty());

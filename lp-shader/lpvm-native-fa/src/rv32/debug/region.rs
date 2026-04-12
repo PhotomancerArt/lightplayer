@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::region::{Region, RegionId, RegionTree, REGION_ID_NONE};
+use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 
 /// Format the region tree as indented text.
@@ -31,37 +31,100 @@ pub fn format_region_tree(
                 let v = &vinsts[i as usize];
                 lines.push(format!(
                     "{}  {}: {} {}",
-                    prefix, i,
+                    prefix,
+                    i,
                     v.mnemonic(),
                     v.format_alloc_trace_detail(pool, symbols),
                 ));
             }
         }
 
-        Region::IfThenElse { head, then_body, else_body } => {
-            lines.push(format!("{}IfThenElse", prefix));
+        Region::IfThenElse {
+            head,
+            then_body,
+            else_body,
+            else_label,
+            merge_label,
+        } => {
+            lines.push(format!(
+                "{}IfThenElse (else={} merge={})",
+                prefix, else_label, merge_label
+            ));
             lines.push(format!("{}  head:", prefix));
-            lines.push(format_region_tree(tree, *head, vinsts, pool, symbols, indent + 2));
+            lines.push(format_region_tree(
+                tree,
+                *head,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
             lines.push(format!("{}  then:", prefix));
-            lines.push(format_region_tree(tree, *then_body, vinsts, pool, symbols, indent + 2));
+            lines.push(format_region_tree(
+                tree,
+                *then_body,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
             lines.push(format!("{}  else:", prefix));
-            lines.push(format_region_tree(tree, *else_body, vinsts, pool, symbols, indent + 2));
+            lines.push(format_region_tree(
+                tree,
+                *else_body,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
         }
 
-        Region::Loop { header, body } => {
-            lines.push(format!("{}Loop", prefix));
+        Region::Loop {
+            header,
+            body,
+            header_label,
+            exit_label,
+        } => {
+            lines.push(format!(
+                "{}Loop (header={} exit={})",
+                prefix, header_label, exit_label
+            ));
             lines.push(format!("{}  header:", prefix));
-            lines.push(format_region_tree(tree, *header, vinsts, pool, symbols, indent + 2));
+            lines.push(format_region_tree(
+                tree,
+                *header,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
             lines.push(format!("{}  body:", prefix));
-            lines.push(format_region_tree(tree, *body, vinsts, pool, symbols, indent + 2));
+            lines.push(format_region_tree(
+                tree,
+                *body,
+                vinsts,
+                pool,
+                symbols,
+                indent + 2,
+            ));
         }
 
-        Region::Seq { children_start, child_count } => {
+        Region::Seq {
+            children_start,
+            child_count,
+        } => {
             lines.push(format!("{}Seq ({})", prefix, child_count));
             let start = *children_start as usize;
             let end = start + *child_count as usize;
             for &child_id in &tree.seq_children[start..end] {
-                lines.push(format_region_tree(tree, child_id, vinsts, pool, symbols, indent + 1));
+                lines.push(format_region_tree(
+                    tree,
+                    child_id,
+                    vinsts,
+                    pool,
+                    symbols,
+                    indent + 1,
+                ));
             }
         }
     }
@@ -78,9 +141,11 @@ mod tests {
     #[test]
     fn format_linear_region() {
         let mut tree = RegionTree::new();
-        let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 42, src_op: 0xFFFF },
-        ];
+        let vinsts = vec![VInst::IConst32 {
+            dst: VReg(0),
+            val: 42,
+            src_op: 0xFFFF,
+        }];
         let root = tree.push(Region::Linear { start: 0, end: 1 });
         tree.root = root;
 
@@ -94,7 +159,14 @@ mod tests {
         let tree = RegionTree::new();
         let vinsts: Vec<VInst> = vec![];
 
-        let output = format_region_tree(&tree, REGION_ID_NONE, &vinsts, &[], &ModuleSymbols::default(), 0);
+        let output = format_region_tree(
+            &tree,
+            REGION_ID_NONE,
+            &vinsts,
+            &[],
+            &ModuleSymbols::default(),
+            0,
+        );
         assert_eq!(output, "(empty)");
     }
 
@@ -102,8 +174,16 @@ mod tests {
     fn format_nested_regions() {
         let mut tree = RegionTree::new();
         let vinsts = vec![
-            VInst::IConst32 { dst: VReg(0), val: 1, src_op: 0 },
-            VInst::IConst32 { dst: VReg(1), val: 2, src_op: 1 },
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: 0,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: 1,
+            },
         ];
 
         let inner1 = tree.push(Region::Linear { start: 0, end: 1 });
