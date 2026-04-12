@@ -826,6 +826,9 @@ impl<'a> LowerCtx<'a> {
                             .ok_or_else(|| LowerError::UnsupportedOp {
                                 description: String::from("break outside loop"),
                             })?;
+                    if current_linear_start.is_none() {
+                        current_linear_start = Some(self.out.len() as u16);
+                    }
                     self.out.push(VInst::Br {
                         target: frame.exit,
                         src_op: pack_src_op(Some(i as u32)),
@@ -839,6 +842,9 @@ impl<'a> LowerCtx<'a> {
                             .ok_or_else(|| LowerError::UnsupportedOp {
                                 description: String::from("continue outside loop"),
                             })?;
+                    if current_linear_start.is_none() {
+                        current_linear_start = Some(self.out.len() as u16);
+                    }
                     self.out.push(VInst::Br {
                         target: frame.continuing,
                         src_op: pack_src_op(Some(i as u32)),
@@ -852,6 +858,9 @@ impl<'a> LowerCtx<'a> {
                             .ok_or_else(|| LowerError::UnsupportedOp {
                                 description: String::from("br_if_not outside loop"),
                             })?;
+                    if current_linear_start.is_none() {
+                        current_linear_start = Some(self.out.len() as u16);
+                    }
                     self.out.push(VInst::BrIf {
                         cond: fa_vreg(*cond),
                         target: frame.exit,
