@@ -1,5 +1,6 @@
 //! Compilation orchestration: LPIR → VInst → PInst → bytes.
 
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -30,6 +31,8 @@ pub struct CompiledFunction {
     pub relocs: Vec<NativeReloc>,
     /// Debug info: (code_offset, optional_src_op).
     pub debug_lines: Vec<(u32, Option<u32>)>,
+    /// Debug assembly text (VInsts, PInsts, disassembly) for debugging.
+    pub debug_asm: String,
 }
 
 /// Output of a full module compilation.
@@ -76,6 +79,8 @@ pub fn compile_function(
     ir: &LpirModule,
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
+    use crate::rv32::debug::pinst;
+
     // 1. Lower LPIR → VInst
     let mut lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
         .map_err(NativeError::Lower)?;
@@ -94,7 +99,7 @@ pub fn compile_function(
     for p in &pinsts {
         emitter.emit(p);
     }
-    let (code, phys_relocs) = emitter.finish_with_relocs();
+    let (code, phys_relocs) = emitter.finish_with_fixups();
 
     // Convert PhysReloc → NativeReloc
     let relocs = phys_relocs
@@ -105,12 +110,53 @@ pub fn compile_function(
         })
         .collect();
 
+    // Build debug assembly text
+    let mut debug_asm = String::new();
+
+    // Allocator trace section
+    if !alloc_result.trace.is_empty() {
+        debug_asm.push_str(&format!("=== AllocTrace {} ===\n", func.name));
+        debug_asm.push_str(&alloc_result.trace.format());
+        debug_asm.push('\n');
+    }
+
+    // VInst section
+    debug_asm.push_str(&format!("\n=== VInst {} ===\n", func.name));
+    for inst in &lowered.vinsts {
+        debug_asm.push_str(&format!(
+            "{} {}\n",
+            inst.mnemonic(),
+            inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
+        ));
+    }
+
+    // PInst section
+    debug_asm.push_str(&format!("\n=== PInst {} ===\n", func.name));
+    for inst in &pinsts {
+        debug_asm.push_str(&format!("{}\n", pinst::format(inst)));
+    }
+
+    // Disasm section with hex
+    debug_asm.push_str(&format!("\n=== Disasm {} ===\n", func.name));
+    let mut off = 0usize;
+    while off + 4 <= code.len() {
+        let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
+        debug_asm.push_str(&format!(
+            "{:04x}\t{:08x}\t{}\n",
+            off,
+            w,
+            lp_riscv_inst::format_instruction(w)
+        ));
+        off += 4;
+    }
+
     // lowered + pinsts + func_abi dropped here
     Ok(CompiledFunction {
         name: func.name.clone(),
         code,
         relocs,
         debug_lines: Vec::new(), // TODO: wire up debug_lines from lowered.vinsts src_op mapping
+        debug_asm,
     })
 }
 

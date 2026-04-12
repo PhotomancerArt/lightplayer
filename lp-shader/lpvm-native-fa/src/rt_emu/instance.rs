@@ -27,6 +27,8 @@ pub struct NativeEmuInstance {
     pub(crate) vmctx_guest: u32,
     pub(crate) last_debug: Option<String>,
     pub(crate) last_guest_instruction_count: Option<u64>,
+    /// Name of the last called function (for looking up debug info).
+    pub(crate) last_called_func: Option<String>,
 }
 
 impl NativeEmuInstance {
@@ -48,6 +50,7 @@ impl NativeEmuInstance {
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
         self.last_guest_instruction_count = None;
+        self.last_called_func = Some(name.to_string());
         self.refresh_vmctx_header();
 
         let idx = self
@@ -296,7 +299,26 @@ impl LpvmInstance for NativeEmuInstance {
     }
 
     fn debug_state(&self) -> Option<String> {
-        self.last_debug.clone()
+        let mut result = String::new();
+
+        // Include compilation debug info for the last called function
+        if let Some(ref func_name) = self.last_called_func {
+            if let Some(debug_asm) = self.module.debug_asm.get(func_name) {
+                result.push_str(debug_asm);
+                result.push_str("\n\n");
+            }
+        }
+
+        // Include emulator state
+        if let Some(ref debug) = self.last_debug {
+            result.push_str(debug);
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     fn last_guest_instruction_count(&self) -> Option<u64> {

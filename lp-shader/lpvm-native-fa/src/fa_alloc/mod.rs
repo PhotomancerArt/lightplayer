@@ -49,11 +49,32 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
     }
 
     // Wrap with frame setup/teardown
+    // FrameTeardown must come BEFORE Ret, not after it
     let spill_slots = state.spill.total_slots();
     let mut pinsts = Vec::with_capacity(state.pinsts.len() + 2);
     pinsts.push(PInst::FrameSetup { spill_slots });
-    pinsts.extend(state.pinsts);
-    pinsts.push(PInst::FrameTeardown { spill_slots });
+
+    // Find Ret (if any) and insert FrameTeardown before it
+    let mut ret_idx = None;
+    for (i, p) in state.pinsts.iter().enumerate() {
+        if matches!(p, PInst::Ret) {
+            ret_idx = Some(i);
+            break;
+        }
+    }
+
+    if let Some(idx) = ret_idx {
+        // Add everything before Ret
+        pinsts.extend_from_slice(&state.pinsts[..idx]);
+        // Add FrameTeardown before Ret
+        pinsts.push(PInst::FrameTeardown { spill_slots });
+        // Add Ret and everything after
+        pinsts.extend_from_slice(&state.pinsts[idx..]);
+    } else {
+        // No Ret found, just add everything and FrameTeardown at end
+        pinsts.extend(state.pinsts);
+        pinsts.push(PInst::FrameTeardown { spill_slots });
+    }
 
     Ok(AllocResult {
         pinsts,
@@ -304,7 +325,8 @@ mod tests {
 
         let result = allocate(&lowered, &abi).unwrap();
 
-        // Should have: FrameSetup, Li, Li, Add, Ret, FrameTeardown
+        // Should have: FrameSetup, Li, Li, Add, FrameTeardown, Ret
+        // FrameTeardown comes before Ret so the stack is restored before returning
         assert!(matches!(result.pinsts[0], PInst::FrameSetup { .. }));
         assert!(
             result
@@ -320,10 +342,12 @@ mod tests {
         );
         assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Add { .. })));
         assert!(result.pinsts.iter().any(|p| matches!(p, PInst::Ret)));
-        assert!(matches!(
-            result.pinsts.last(),
-            Some(PInst::FrameTeardown { .. })
-        ));
+        assert!(
+            result
+                .pinsts
+                .iter()
+                .any(|p| matches!(p, PInst::FrameTeardown { .. }))
+        );
     }
 
     #[test]

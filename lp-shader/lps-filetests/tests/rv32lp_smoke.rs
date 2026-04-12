@@ -6,7 +6,7 @@
 //! Note: The native backend currently does not support imports (builtin functions).
 //! This test constructs LPIR directly without imports.
 
-use lpir::{FloatMode, IrFunction, LpirModule, IrType, LpirOp, VReg, VRegRange};
+use lpir::{FloatMode, IrFunction, IrType, LpirModule, LpirOp, VReg, VRegRange};
 use lps_shared::{FnParam, LpsFnSig, LpsModuleSig, LpsType};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine};

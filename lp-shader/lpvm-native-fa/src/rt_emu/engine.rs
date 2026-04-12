@@ -1,5 +1,6 @@
 //! [`LpvmEngine`] implementation for native RV32 → linked → emulated execution.
 
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 
 use lpir::LpirModule;
@@ -38,6 +39,14 @@ impl LpvmEngine for NativeEmuEngine {
         // 1. Compile module
         let compiled = compile_module(ir, meta, self.options.float_mode, self.options.clone())?;
 
+        // Extract debug assembly from compiled functions
+        let mut debug_asm = BTreeMap::new();
+        for func in &compiled.functions {
+            if !func.debug_asm.is_empty() {
+                debug_asm.insert(func.name.clone(), func.debug_asm.clone());
+            }
+        }
+
         // 2. Link to ELF
         let elf = link_elf(&compiled)
             .map_err(|e| NativeError::Internal(format!("ELF link failed: {e}")))?;
@@ -52,6 +61,7 @@ impl LpvmEngine for NativeEmuEngine {
             load,
             arena: self.arena.clone(),
             options: self.options.clone(),
+            debug_asm,
         })
     }
 

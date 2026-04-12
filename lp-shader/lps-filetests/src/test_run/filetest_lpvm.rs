@@ -7,7 +7,10 @@ use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
-use lpvm_native_fa::{NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine, NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule};
+use lpvm_native_fa::{
+    NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
+    NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule,
+};
 use lpvm_wasm::{
     WasmOptions as LpvmWasmOptions,
     rt_wasmtime::{WasmLpvmEngine, WasmLpvmInstance, WasmLpvmModule},

@@ -1151,15 +1151,15 @@ pub fn run(
             };
             if colors::should_color() {
                 println!(
-                    "scripts/glsl-filetests.sh {}{}{} --target {}",
+                    "scripts/glsl-filetests.sh --target {} {}{}{}",
+                    failed_test.target,
                     colors::DIM,
                     test_path,
                     colors::RESET,
-                    failed_test.target
                 );
             } else {
                 println!(
-                    "scripts/glsl-filetests.sh {test_path} --target {}",
+                    "scripts/glsl-filetests.sh --target {} {test_path}",
                     failed_test.target
                 );
             }

@@ -1,5 +1,7 @@
 //! [`LpvmModule`] implementation for linked + emulated native RV32.
 
+use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -23,6 +25,8 @@ pub struct NativeEmuModule {
     pub(crate) load: Arc<lp_riscv_elf::ElfLoadInfo>,
     pub(crate) arena: EmuSharedArena,
     pub(crate) options: NativeCompileOptions,
+    /// Debug assembly text per function (function name → debug asm).
+    pub(crate) debug_asm: BTreeMap<String, String>,
 }
 
 impl LpvmModule for NativeEmuModule {
@@ -51,6 +55,7 @@ impl LpvmModule for NativeEmuModule {
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
+            last_called_func: None,
         })
     }
 }

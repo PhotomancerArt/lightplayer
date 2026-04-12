@@ -631,14 +631,11 @@ fn process_call(
         }
     }
 
-    // Step 4: Emit PInst::Call
-    let sym_name = String::from(state.symbols.name(target));
-    state.pinsts.push(PInst::Call {
-        target: SymbolRef { name: sym_name },
-    });
-
-    // Step 5: Move return values to their assigned regs (non-sret only)
-    // For sret: returns were loaded from buffer in Step 3, just allocate here
+    // Step 4+5: Return value moves, then Call
+    // Backward walk: push order is reversed. We want forward order:
+    //   Call → Mv(ret_reg → assigned_reg)
+    // So in backward list we push: Mv first, then Call
+    // (last pushed = first after reversal)
     if !callee_uses_sret {
         for (i, &(rv, preg)) in ret_pregs.iter().enumerate() {
             let ret_reg = RET_REGS[i].hw;
@@ -648,19 +645,22 @@ fn process_call(
                     src: ret_reg,
                 });
             }
-            // Only allocate if the return was originally live
             if ret_was_live[i] {
                 state.pool.alloc_fixed(preg, rv);
             }
         }
     } else {
-        // For sret: just allocate the registers (values already loaded)
         for (i, &(rv, preg)) in ret_pregs.iter().enumerate() {
             if ret_was_live[i] {
                 state.pool.alloc_fixed(preg, rv);
             }
         }
     }
+
+    let sym_name = String::from(state.symbols.name(target));
+    state.pinsts.push(PInst::Call {
+        target: SymbolRef { name: sym_name },
+    });
 
     // Step 6: Resolve args and move to ARG_REGS
     // For sret: args start at a1 (index 1) instead of a0 (index 0)
@@ -703,7 +703,15 @@ fn process_call(
             p
         };
         if src != arg_reg {
+            decision.push_str(&format!(
+                " mv v{}: {}→{}",
+                av.0,
+                gpr::reg_name(src),
+                gpr::reg_name(arg_reg)
+            ));
             state.pinsts.push(PInst::Mv { dst: arg_reg, src });
+        } else {
+            decision.push_str(&format!(" v{} already in {}", av.0, gpr::reg_name(arg_reg)));
         }
     }
 
@@ -808,7 +816,23 @@ fn resolve_uses(
 fn format_pool_state(pool: &RegPool) -> String {
     use alloc::format;
     let occupied = pool.occupied_count();
-    format!("{}/{} used", occupied, ALLOC_POOL.len())
+    let mut parts = Vec::new();
+    // Show vreg->preg mappings for all 32 registers
+    for i in 0..32u16 {
+        if let Some(preg) = pool.home(crate::vinst::VReg(i)) {
+            parts.push(format!("v{}→{}", i, gpr::reg_name(preg)));
+        }
+    }
+    if parts.is_empty() {
+        format!("{}/{} used, empty", occupied, ALLOC_POOL.len())
+    } else {
+        format!(
+            "{}/{} used: {}",
+            occupied,
+            ALLOC_POOL.len(),
+            parts.join(", ")
+        )
+    }
 }
 
 /// Emit physical instructions for a VInst.
@@ -1090,15 +1114,16 @@ fn emit_vinst(
 
         VInst::Ret { .. } => {
             let mut out = Vec::new();
-            // Move return values to RET_REGS if not already there
-            // use_pregs contains the resolved PRegs for each return value
+            // Emit in reverse order: backward walk will reverse the final list.
+            // We want: Mv (to move result to return reg), then Ret.
+            // So emit: Ret first, then Mv (so after reverse: Mv, Ret).
+            out.push(PInst::Ret);
             for (k, &src) in use_pregs.iter().enumerate() {
                 let dst_ret = crate::rv32::gpr::RET_REGS[k];
                 if src != dst_ret {
                     out.push(PInst::Mv { dst: dst_ret, src });
                 }
             }
-            out.push(PInst::Ret);
             Ok(out)
         }
 
