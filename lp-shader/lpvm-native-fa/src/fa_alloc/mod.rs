@@ -44,6 +44,23 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
             &lowered.vreg_pool,
             func_abi,
         )?;
+
+        // After the backward walk, vregs that were never DEF'd (function
+        // params) may be in ALLOC_POOL registers instead of their precolored
+        // ABI registers.  Emit moves so the function prologue bridges the gap,
+        // e.g. `mv t0, a0` for vmctx when a loop re-assigned v0 to t0.
+        for (vreg_idx, preg) in func_abi.precolors() {
+            let vreg = crate::vinst::VReg(*vreg_idx as u16);
+            if let Some(pool_preg) = state.pool.home(vreg) {
+                if pool_preg != preg.hw {
+                    state.pinsts.push(PInst::Mv {
+                        dst: pool_preg,
+                        src: preg.hw,
+                    });
+                }
+            }
+        }
+
         state.pinsts.reverse();
         state.trace.reverse();
     }

@@ -12,6 +12,13 @@ use crate::vinst::{VInst, VReg};
 use super::spill::SpillAlloc;
 use super::trace::{AllocTrace, TraceEntry};
 
+/// FP-relative byte offset for spill slot `slot`. Slots 0,1,… live below the
+/// saved RA (at FP-4) and saved FP (at FP-8), so the first usable spill is at
+/// FP-12.
+fn spill_fp_offset(slot: u8) -> i32 {
+    -((slot as i32 + 1) * 4 + 8)
+}
+
 /// Allocation error types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AllocError {
@@ -124,15 +131,29 @@ impl RegPool {
         self.iter_occupied().collect()
     }
 
-    /// Clear the pool (free all registers).
-    /// Resets to initial state with empty LRU.
+    /// Clear allocatable registers only (preserves precolored mappings).
     pub fn clear(&mut self) {
         for p in ALLOC_POOL.iter() {
             self.preg_vreg[*p as usize] = None;
         }
-        // Reset LRU to initial state (all regs available, in order)
         self.lru.clear();
         self.lru.extend(ALLOC_POOL.iter().copied());
+    }
+
+    /// Clear ALL registers including precolored ones outside ALLOC_POOL.
+    pub fn clear_all(&mut self) {
+        self.preg_vreg = [None; 32];
+        self.lru.clear();
+        self.lru.extend(ALLOC_POOL.iter().copied());
+    }
+
+    /// Iterate ALL occupied registers, including precolored ones
+    /// outside ALLOC_POOL (e.g. a0 for vmctx).
+    pub fn iter_all_occupied(&self) -> impl Iterator<Item = (PReg, VReg)> + '_ {
+        self.preg_vreg
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| v.map(|vreg| (i as PReg, vreg)))
     }
 
     /// Seed the pool with vreg assignments from saved state.
@@ -175,7 +196,7 @@ impl<'a> WalkState<'a> {
 
         for (preg, vreg) in occupied {
             let slot = self.spill.get_or_assign(vreg);
-            let offset = -((slot as i32 + 1) * 4);
+            let offset = spill_fp_offset(slot);
             self.pinsts.push(crate::rv32::inst::PInst::Lw {
                 dst: preg,
                 base: crate::rv32::gpr::FP_REG,
@@ -194,7 +215,7 @@ impl<'a> WalkState<'a> {
         let occupied: Vec<_> = self.pool.iter_occupied().collect();
         for (preg, vreg) in occupied {
             let slot = self.spill.get_or_assign(vreg);
-            let offset = -((slot as i32 + 1) * 4);
+            let offset = spill_fp_offset(slot);
             self.pinsts.push(crate::rv32::inst::PInst::Sw {
                 src: preg,
                 base: crate::rv32::gpr::FP_REG,
@@ -212,7 +233,7 @@ impl<'a> WalkState<'a> {
     /// Used for loop boundaries where the set of live vregs is larger than
     /// what any single predecessor provides.
     pub fn seed_pool_from_regset(&mut self, vregs: &crate::regset::RegSet) {
-        self.pool.clear();
+        self.pool.clear_all();
         for vreg in vregs.iter() {
             self.spill.get_or_assign(vreg);
             let (_preg, _evicted) = self.pool.alloc(vreg);
@@ -396,7 +417,9 @@ fn walk_loop(
     let header_liveness = analyze_liveness(tree, header, vinsts, vreg_pool);
     let body_liveness = analyze_liveness(tree, body, vinsts, vreg_pool);
     let mut loop_boundary = header_liveness.live_in.union(&body_liveness.live_in);
-    for (_preg, vreg) in state.pool.iter_occupied() {
+    // Include precolored registers (like a0→v0 for vmctx) in the loop
+    // boundary set.  iter_occupied only returns ALLOC_POOL; we need all regs.
+    for (_preg, vreg) in state.pool.iter_all_occupied() {
         loop_boundary.insert(vreg);
     }
 
@@ -412,8 +435,6 @@ fn walk_loop(
     });
 
     // 4. Process body.
-    //    In forward: Lw body entry, body comp, Sw body exit, J header.
-    //    In backward push: J header, Sw body exit, body comp, Lw body entry.
     if body != REGION_ID_NONE {
         state.seed_pool_from_regset(&loop_boundary);
         state.emit_exit_spills();
@@ -422,8 +443,6 @@ fn walk_loop(
     }
 
     // 5. Process header.
-    //    In forward: header_label, Lw header entry, header comp, Sw header exit.
-    //    In backward push: Sw header exit, header comp, Lw header entry, header_label.
     if header != REGION_ID_NONE {
         state.seed_pool_from_regset(&loop_boundary);
         state.emit_exit_spills();
@@ -433,6 +452,12 @@ fn walk_loop(
 
     // 6. Emit header label.
     state.pinsts.push(PInst::Label { id: header_label });
+
+    // 7. Pre-loop entry bridge: seed pool with loop_boundary vregs and emit
+    //    stores so the pre-loop code's register assignments flow into the
+    //    loop's spill-slot convention.
+    state.seed_pool_from_regset(&loop_boundary);
+    state.emit_exit_spills();
 
     Ok(())
 }
@@ -521,7 +546,7 @@ fn process_inst(
             if let Some(ev) = evicted {
                 // Spill the evicted vreg
                 let ev_slot = state.spill.get_or_assign(ev);
-                let offset = -((ev_slot as i32 + 1) * 4);
+                let offset = spill_fp_offset(ev_slot);
                 state.pinsts.push(PInst::Sw {
                     src: preg,
                     base: FP_REG,
@@ -629,14 +654,14 @@ fn process_call(
         let abi_preg = crate::abi::PReg::int(preg);
         if clobber.contains(abi_preg) {
             let slot = state.spill.get_or_assign(vreg);
-            let offset = -((slot as i32 + 1) * 4);
+            let offset = spill_fp_offset(slot);
             state.pinsts.push(PInst::Lw {
                 dst: preg,
                 base: FP_REG,
                 offset,
             });
             clobbered_vregs.push((vreg, preg));
-            decision.push_str(&format!(" reload v{}←[fp-{}]", vreg.0, (slot + 1) * 4));
+            decision.push_str(&format!(" reload v{}←[fp{}]", vreg.0, spill_fp_offset(slot)));
         }
     }
 
@@ -704,14 +729,14 @@ fn process_call(
             let (p, evicted) = state.pool.alloc(av);
             if let Some(ev) = evicted {
                 let ev_slot = state.spill.get_or_assign(ev);
-                let offset = -((ev_slot as i32 + 1) * 4);
+                let offset = spill_fp_offset(ev_slot);
                 state.pinsts.push(PInst::Sw {
                     src: p,
                     base: FP_REG,
                     offset,
                 });
             }
-            let offset = -((slot as i32 + 1) * 4);
+            let offset = spill_fp_offset(slot);
             state.pinsts.push(PInst::Lw {
                 dst: p,
                 base: FP_REG,
@@ -722,7 +747,7 @@ fn process_call(
             let (p, evicted) = state.pool.alloc(av);
             if let Some(ev) = evicted {
                 let ev_slot = state.spill.get_or_assign(ev);
-                let offset = -((ev_slot as i32 + 1) * 4);
+                let offset = spill_fp_offset(ev_slot);
                 state.pinsts.push(PInst::Sw {
                     src: p,
                     base: FP_REG,
@@ -762,14 +787,14 @@ fn process_call(
     // Step 8: Spill clobbered vregs (pre-call in execution)
     for &(vreg, preg) in &clobbered_vregs {
         let slot = state.spill.get_or_assign(vreg);
-        let offset = -((slot as i32 + 1) * 4);
+        let offset = spill_fp_offset(slot);
         state.pinsts.push(PInst::Sw {
             src: preg,
             base: FP_REG,
             offset,
         });
         state.pool.free(preg);
-        decision.push_str(&format!(" spill v{}→[fp-{}]", vreg.0, (slot + 1) * 4));
+        decision.push_str(&format!(" spill v{}→[fp{}]", vreg.0, spill_fp_offset(slot)));
     }
 
     // Record trace
@@ -804,15 +829,15 @@ fn resolve_uses(
             if let Some(ev) = evicted {
                 // Spill the evicted vreg
                 let ev_slot = state.spill.get_or_assign(ev);
-                let offset = -((ev_slot as i32 + 1) * 4);
+                let offset = spill_fp_offset(ev_slot);
                 state.pinsts.push(PInst::Sw {
                     src: p,
                     base: FP_REG,
                     offset,
                 });
-                decision.push_str(&format!(" spill v{} to [fp-{}]", ev.0, (ev_slot + 1) * 4));
+                decision.push_str(&format!(" spill v{} to [fp{}]", ev.0, spill_fp_offset(ev_slot)));
             }
-            let offset = -((slot as i32 + 1) * 4);
+            let offset = spill_fp_offset(slot);
             state.pinsts.push(PInst::Lw {
                 dst: p,
                 base: crate::rv32::gpr::FP_REG,
@@ -826,13 +851,13 @@ fn resolve_uses(
             if let Some(ev) = evicted {
                 // Spill the evicted vreg
                 let ev_slot = state.spill.get_or_assign(ev);
-                let offset = -((ev_slot as i32 + 1) * 4);
+                let offset = spill_fp_offset(ev_slot);
                 state.pinsts.push(PInst::Sw {
                     src: p,
                     base: FP_REG,
                     offset,
                 });
-                decision.push_str(&format!(" spill v{} to [fp-{}]", ev.0, (ev_slot + 1) * 4));
+                decision.push_str(&format!(" spill v{} to [fp{}]", ev.0, spill_fp_offset(ev_slot)));
             }
             decision.push_str(&format!(" v{}→{}", vreg.0, gpr::reg_name(p)));
             p
