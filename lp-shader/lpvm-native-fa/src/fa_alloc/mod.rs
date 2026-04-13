@@ -1,26 +1,28 @@
-//! Fast allocator shell — liveness, trace, backward walk.
-//! The RegionTree is built in lower.rs; this module consumes it.
+//! Register allocation for fastalloc.
+//!
+//! This module provides a straight-line register allocator using backward walk
+//! with edit-list emission (regalloc2-style approach adapted for LPIR).
 
-pub mod liveness;
-pub mod spill;
-pub mod trace;
-pub mod pool;
-
-use self::trace::AllocTrace;
 use crate::abi::FuncAbi;
+use crate::fa_alloc::trace::AllocTrace;
 use crate::lower::LoweredFunction;
 use alloc::vec::Vec;
 
-pub use pool::RegPool;
+pub mod liveness;
+pub mod pool;
+pub mod render;
+pub mod spill;
+pub mod trace;
+pub mod walk;
 
-/// Where an operand lives: physical register, spill slot, or unassigned.
+/// Allocation location for a virtual register operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alloc {
-    /// Assigned to this physical register.
+    /// Allocated to a physical register.
     Reg(crate::rv32::gpr::PReg),
-    /// Spilled to this slot (0-based, FP-relative).
+    /// Spilled to stack slot.
     Stack(u8),
-    /// Unassigned (shouldn't happen after successful allocation).
+    /// No allocation (dead, or never used).
     None,
 }
 
@@ -28,15 +30,18 @@ impl Alloc {
     pub fn is_reg(self) -> bool {
         matches!(self, Alloc::Reg(_))
     }
+
     pub fn is_stack(self) -> bool {
         matches!(self, Alloc::Stack(_))
     }
+
     pub fn reg(self) -> Option<crate::rv32::gpr::PReg> {
         match self {
             Alloc::Reg(r) => Some(r),
             _ => None,
         }
     }
+
     pub fn stack_slot(self) -> Option<u8> {
         match self {
             Alloc::Stack(s) => Some(s),
@@ -45,22 +50,17 @@ impl Alloc {
     }
 }
 
-/// Position relative to a VInst where an edit is inserted.
-/// Sorts by instruction index first, then by position (Before < After).
+/// Edit point relative to a VInst (instruction index in block).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditPoint {
-    Before(u16),  // VInst index
+    /// Before the instruction executes.
+    Before(u16),
+    /// After the instruction executes.
     After(u16),
 }
 
-impl EditPoint {
-    pub fn inst(self) -> u16 {
-        match self {
-            EditPoint::Before(i) | EditPoint::After(i) => i,
-        }
-    }
-}
-
+/// Manual Ord implementation for correct sorting order.
+/// Sorts by instruction index first, then by position (Before < After).
 impl PartialOrd for EditPoint {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -69,68 +69,67 @@ impl PartialOrd for EditPoint {
 
 impl Ord for EditPoint {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // Compare by instruction index first
-        let self_idx = self.inst();
-        let other_idx = other.inst();
-        match self_idx.cmp(&other_idx) {
-            core::cmp::Ordering::Equal => {
-                // At same index, Before comes before After
-                match (self, other) {
-                    (EditPoint::Before(_), EditPoint::Before(_)) => core::cmp::Ordering::Equal,
-                    (EditPoint::Before(_), EditPoint::After(_)) => core::cmp::Ordering::Less,
-                    (EditPoint::After(_), EditPoint::Before(_)) => core::cmp::Ordering::Greater,
-                    (EditPoint::After(_), EditPoint::After(_)) => core::cmp::Ordering::Equal,
+        match (self, other) {
+            (EditPoint::Before(a), EditPoint::Before(b))
+            | (EditPoint::After(a), EditPoint::After(b)) => a.cmp(b),
+            (EditPoint::Before(a), EditPoint::After(b)) => {
+                // Same instruction: Before comes before After
+                // Different instruction: compare instruction indices
+                match a.cmp(b) {
+                    core::cmp::Ordering::Equal => core::cmp::Ordering::Less,
+                    other => other,
                 }
             }
-            ord => ord,
+            (EditPoint::After(a), EditPoint::Before(b)) => {
+                // Same instruction: After comes after Before
+                // Different instruction: compare instruction indices
+                match a.cmp(b) {
+                    core::cmp::Ordering::Equal => core::cmp::Ordering::Greater,
+                    other => other,
+                }
+            }
         }
     }
 }
 
-/// An edit: move value from one allocation to another.
-/// Covers spill (reg → stack), reload (stack → reg), and reg-reg moves.
+/// A single allocation edit (insertion) to be applied during emission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edit {
+    /// Move value between allocations.
     Move { from: Alloc, to: Alloc },
 }
 
-/// Allocator output: per-operand assignments and edits to insert.
-/// Following regalloc2's `Output` structure.
+/// Complete output of the allocator: per-operand allocs + edit list.
+#[derive(Clone, Debug)]
 pub struct AllocOutput {
-    /// Flat array of allocations: allocs[(inst_idx, operand_idx)].
-    /// Use `inst_alloc_offsets` to find the start for each instruction.
+    /// Flat table of per-operand allocations.
+    /// Indexed by `inst_alloc_offsets[inst] + operand_index`.
     pub allocs: Vec<Alloc>,
 
-    /// Offset into `allocs` for each instruction's operands.
-    /// `inst_alloc_offsets[i]` is the index where instruction i's allocations start.
+    /// Per-instruction operand count offsets into `allocs`.
     pub inst_alloc_offsets: Vec<u16>,
 
-    /// Edits to insert between instructions, sorted by EditPoint.
+    /// Edits to apply during emission.
+    /// Sorted by EditPoint (Before < After at same instruction).
     pub edits: Vec<(EditPoint, Edit)>,
 
-    /// Total spill slots needed for this function.
+    /// Number of spill slots needed.
     pub num_spill_slots: u32,
 
-    /// Allocator trace for debugging.
+    /// Debug trace of allocator decisions.
     pub trace: AllocTrace,
 }
 
 impl AllocOutput {
-    /// Get the allocation for a specific operand of an instruction.
-    pub fn operand_alloc(&self, inst: u16, operand_idx: u16) -> Alloc {
-        let offset = self.inst_alloc_offsets[inst as usize];
-        self.allocs[offset as usize + operand_idx as usize]
-    }
-
-    /// Set the allocation for a specific operand.
-    pub fn set_operand_alloc(&mut self, inst: u16, operand_idx: u16, alloc: Alloc) {
-        let offset = self.inst_alloc_offsets[inst as usize];
-        self.allocs[offset as usize + operand_idx as usize] = alloc;
+    /// Get the allocation for a specific operand.
+    pub fn operand_alloc(&self, inst_idx: u16, operand_idx: u16) -> Alloc {
+        let offset = self.inst_alloc_offsets[inst_idx as usize] as usize;
+        self.allocs[offset + operand_idx as usize]
     }
 }
 
-/// Allocation error types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Allocator errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllocError {
     NotImplemented,
     TooManyVRegs,
@@ -141,26 +140,58 @@ pub enum AllocError {
 impl core::fmt::Display for AllocError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            AllocError::NotImplemented => write!(f, "allocator not yet implemented (M1)"),
+            AllocError::NotImplemented => write!(f, "allocator not implemented"),
             AllocError::TooManyVRegs => write!(f, "too many virtual registers"),
             AllocError::UnsupportedControlFlow => write!(f, "unsupported control flow"),
-            AllocError::OutOfRegisters => write!(f, "out of registers"),
+            AllocError::OutOfRegisters => write!(f, "out of physical registers"),
         }
     }
 }
 
 impl core::error::Error for AllocError {}
 
-/// Result of register allocation (placeholder for M1).
+/// Result of register allocation.
+#[derive(Debug, Clone)]
 pub struct AllocResult {
-    pub trace: AllocTrace,
+    pub output: AllocOutput,
     pub spill_slots: u32,
 }
 
-/// Stub allocator: returns NotImplemented error.
-/// TODO(M2): Implement real backward walk allocator.
-pub fn allocate(_lowered: &LoweredFunction, _func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
-    Err(AllocError::NotImplemented)
+/// Allocate registers for a lowered function.
+///
+/// Currently only supports Linear regions (straight-line code).
+/// Returns AllocError::UnsupportedControlFlow for other region types.
+pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
+    use crate::region::Region;
+
+    // Get the root region
+    let root_id = lowered.region_tree.root as usize;
+    if root_id >= lowered.region_tree.nodes.len() {
+        return Err(AllocError::UnsupportedControlFlow);
+    }
+    let root_region = &lowered.region_tree.nodes[root_id];
+
+    match root_region {
+        Region::Linear { start, end } => {
+            // Extract the linear block of instructions
+            let start_idx = *start as usize;
+            let end_idx = *end as usize;
+            let block_vinsts = &lowered.vinsts[start_idx..end_idx];
+
+            // Run the backward walk allocator
+            let output = walk::walk_linear(block_vinsts, &lowered.vreg_pool, func_abi)?;
+            let spill_slots = output.num_spill_slots;
+
+            Ok(AllocResult {
+                output,
+                spill_slots,
+            })
+        }
+        _ => {
+            // Non-linear regions not yet supported
+            Err(AllocError::UnsupportedControlFlow)
+        }
+    }
 }
 
 fn max_vreg_index(vinsts: &[crate::vinst::VInst], pool: &[crate::vinst::VReg]) -> usize {
@@ -233,53 +264,43 @@ mod tests {
 
     #[test]
     fn edit_point_ordering() {
-        let p1 = EditPoint::Before(1);
-        let p2 = EditPoint::After(1);
-        let p3 = EditPoint::Before(2);
+        // Same instruction: Before < After
+        let before_5 = EditPoint::Before(5);
+        let after_5 = EditPoint::After(5);
+        assert!(before_5 < after_5);
+        assert!(after_5 > before_5);
 
-        assert!(p1 < p2);
-        assert!(p2 < p3);
+        // Different instructions: compare by instruction index
+        let before_3 = EditPoint::Before(3);
+        let before_7 = EditPoint::Before(7);
+        assert!(before_3 < before_7);
+
+        let after_2 = EditPoint::After(2);
+        let before_5 = EditPoint::Before(5);
+        assert!(after_2 < before_5);
     }
 
     #[test]
-    fn stub_allocator_returns_not_implemented() {
-        // M1: allocator is stubbed and returns NotImplemented
+    fn allocator_works_for_linear_regions() {
         let lowered = make_linear_lowered();
-        let abi = crate::rv32::abi::func_abi_rv32(
+        let func_abi = crate::rv32::abi::func_abi_rv32(
             &lps_shared::LpsFnSig {
                 name: String::from("test"),
                 return_type: lps_shared::LpsType::Void,
-                parameters: vec![],
+                parameters: Vec::new(),
             },
             0,
         );
-
-        let result = allocate(&lowered, &abi);
-        assert!(matches!(result, Err(AllocError::NotImplemented)));
+        let result = allocate(&lowered, &func_abi);
+        assert!(result.is_ok(), "allocator should work for Linear regions");
+        let alloc_result = result.unwrap();
+        // 3 vregs (0, 1, 2) but no spills needed for simple linear
+        assert_eq!(alloc_result.spill_slots, 0);
     }
 
     #[test]
-    fn region_format_includes_vinsts() {
+    fn liveness_runs_on_lowered() {
         let lowered = make_linear_lowered();
-        let output = crate::rv32::debug::region::format_region_tree(
-            &lowered.region_tree,
-            lowered.region_tree.root,
-            &lowered.vinsts,
-            &lowered.vreg_pool,
-            &lowered.symbols,
-            0,
-        );
-
-        assert!(output.contains("Linear [0..3)"));
-        assert!(output.contains("IConst32"));
-        assert!(output.contains("Add32"));
-    }
-
-    #[test]
-    fn liveness_analysis_works() {
-        let lowered = make_linear_lowered();
-
-        // Liveness: v0, v1 defined then used → live_in empty for this region
         let liveness = liveness::analyze_liveness(
             &lowered.region_tree,
             lowered.region_tree.root,
@@ -287,5 +308,71 @@ mod tests {
             &lowered.vreg_pool,
         );
         assert!(liveness.live_in.is_empty());
+    }
+
+    // Snapshot test helpers for allocator
+    fn expect_alloc(input: &str, expected: &str) {
+        use crate::debug::vinst;
+        use crate::fa_alloc::render::render_alloc_output;
+        use crate::fa_alloc::walk::walk_linear;
+        use crate::rv32::abi;
+        use lps_shared::{LpsFnSig, LpsType};
+
+        let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
+
+        // Create a simple ABI with no params
+        let func_abi = abi::func_abi_rv32(
+            &LpsFnSig {
+                name: String::from("test"),
+                return_type: LpsType::Void,
+                parameters: Vec::new(),
+            },
+            0,
+        );
+
+        let output = walk_linear(&vinsts, &pool, &func_abi).unwrap();
+        let rendered = render_alloc_output(&vinsts, &pool, &output);
+
+        // Normalize whitespace for comparison
+        let expected_normalized = expected.trim().replace("\r\n", "\n");
+        let actual_normalized = rendered.trim().replace("\r\n", "\n");
+
+        assert_eq!(
+            actual_normalized, expected_normalized,
+            "Allocation output mismatch\nInput:\n{}\nActual:\n{}",
+            input, actual_normalized
+        );
+    }
+
+    #[test]
+    fn snapshot_simple_iconst_ret() {
+        expect_alloc(
+            "i0 = IConst32 10\nRet i0",
+            "i0 = IConst32 10
+; write: i0 -> t0
+; ---------------------------
+; read: i0 <- t0
+Ret ...",
+        );
+    }
+
+    #[test]
+    fn snapshot_binary_add() {
+        expect_alloc(
+            "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2",
+            "i0 = IConst32 10
+; write: i0 -> t1
+; ---------------------------
+i1 = IConst32 20
+; write: i1 -> t2
+; ---------------------------
+; read: i0 <- t1
+; read: i1 <- t2
+i2 = Add32 i0, i1
+; write: i2 -> t0
+; ---------------------------
+; read: i2 <- t0
+Ret ...",
+        );
     }
 }

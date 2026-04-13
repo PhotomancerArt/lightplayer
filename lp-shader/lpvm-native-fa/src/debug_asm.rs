@@ -127,7 +127,9 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(NativeError::FastAlloc(crate::fa_alloc::AllocError::NotImplemented))
+                Err(NativeError::FastAlloc(
+                    crate::fa_alloc::AllocError::NotImplemented
+                ))
             ),
             "M1: expected NotImplemented error, got: {:?}",
             result

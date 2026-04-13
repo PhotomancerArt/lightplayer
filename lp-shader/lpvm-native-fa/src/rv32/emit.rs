@@ -2,11 +2,11 @@
 //!
 //! Ported from lpvm-native/src/isa/rv32/emit.rs, adapted for FA crate VInst types.
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::abi::FrameLayout;
-use crate::fa_alloc::{Alloc, AllocOutput, AllocError};
+use crate::fa_alloc::{Alloc, AllocError, AllocOutput};
 use crate::rv32::encode::*;
 use crate::rv32::gpr::{FP_REG, PReg, RA_REG, SP_REG};
 use crate::vinst::{LabelId, ModuleSymbols, VInst, VReg};
@@ -60,11 +60,7 @@ struct JalFixup {
 
 impl<'a> EmitContext<'a> {
     /// Create new emit context.
-    pub fn new(
-        frame: FrameLayout,
-        symbols: &'a ModuleSymbols,
-        vreg_pool: &'a [VReg],
-    ) -> Self {
+    pub fn new(frame: FrameLayout, symbols: &'a ModuleSymbols, vreg_pool: &'a [VReg]) -> Self {
         Self {
             code: Vec::new(),
             relocs: Vec::new(),
@@ -112,7 +108,9 @@ impl<'a> EmitContext<'a> {
             Alloc::Reg(preg) => Ok(preg),
             Alloc::Stack(slot) => {
                 // Load from spill slot into temp
-                let offset = self.frame.spill_offset_from_fp(slot as u32)
+                let offset = self
+                    .frame
+                    .spill_offset_from_fp(slot as u32)
                     .ok_or(AllocError::NotImplemented)?;
                 let temp_u32 = temp as u32;
                 let fp_u32 = FP_REG as u32;
@@ -152,7 +150,9 @@ impl<'a> EmitContext<'a> {
         let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
 
         if let Alloc::Stack(slot) = alloc {
-            let offset = self.frame.spill_offset_from_fp(slot as u32)
+            let offset = self
+                .frame
+                .spill_offset_from_fp(slot as u32)
                 .ok_or(AllocError::NotImplemented)?;
             let temp_u32 = temp as u32;
             let fp_u32 = FP_REG as u32;
@@ -201,7 +201,13 @@ impl<'a> EmitContext<'a> {
         let frame_size = self.frame.total_size as i32;
 
         // Restore callee-saved (in reverse order)
-        let callee_saves: Vec<_> = self.frame.callee_save_offsets.iter().rev().cloned().collect();
+        let callee_saves: Vec<_> = self
+            .frame
+            .callee_save_offsets
+            .iter()
+            .rev()
+            .cloned()
+            .collect();
         for (preg, off) in callee_saves {
             self.push_u32(encode_lw(preg.hw as u32, sp, off), None);
         }

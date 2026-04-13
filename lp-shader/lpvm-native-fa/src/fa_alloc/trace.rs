@@ -4,12 +4,12 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AllocTrace {
     pub entries: Vec<TraceEntry>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraceEntry {
     pub vinst_idx: usize,
     pub vinst_mnemonic: String,

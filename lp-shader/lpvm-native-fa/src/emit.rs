@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::abi::FrameLayout;
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::fa_alloc::{allocate, AllocOutput};
+use crate::fa_alloc::{AllocOutput, allocate};
 use crate::rv32::emit::{EmittedCode as Rv32EmittedCode, emit_function};
 use crate::vinst::VInst;
 
@@ -24,10 +24,14 @@ impl From<Rv32EmittedCode> for EmittedCode {
     fn from(code: Rv32EmittedCode) -> Self {
         Self {
             code: code.code,
-            relocs: code.relocs.into_iter().map(|r| NativeReloc {
-                offset: r.offset,
-                symbol: r.symbol,
-            }).collect(),
+            relocs: code
+                .relocs
+                .into_iter()
+                .map(|r| NativeReloc {
+                    offset: r.offset,
+                    symbol: r.symbol,
+                })
+                .collect(),
             debug_lines: code.debug_lines,
         }
     }
@@ -50,39 +54,29 @@ pub fn emit_lowered(
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<EmittedCode, NativeError> {
     // 1. Allocate registers: VInst → AllocOutput
-    // TODO(M2): This currently returns NotImplemented error
-    let _alloc_result = allocate(lowered, func_abi)
-        .map_err(NativeError::FastAlloc)?;
+    let alloc_result = allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
 
-    // 2. Build frame layout
+    // 2. Build frame layout using actual spill slots from allocator
     let frame = FrameLayout::compute(
         func_abi,
-        0, // spill_slots - will come from alloc_result
+        alloc_result.spill_slots,
         crate::abi::PregSet::EMPTY,
         &[],
-        false, // is_leaf: false = save RA (conservative for M1)
+        false, // is_leaf: false = save RA (conservative)
         0,
         0,
     );
 
     // 3. Emit: VInst + AllocOutput → bytes
-    // TODO(M2): Wire up real AllocOutput from allocator
-    let stub_output = AllocOutput {
-        allocs: Vec::new(),
-        inst_alloc_offsets: Vec::new(),
-        edits: Vec::new(),
-        num_spill_slots: 0,
-        trace: crate::fa_alloc::trace::AllocTrace::new(),
-    };
-
     let emitted = emit_function(
         &lowered.vinsts,
         &lowered.vreg_pool,
-        &stub_output,
+        &alloc_result.output,
         frame,
         &lowered.symbols,
         func_abi.is_sret(),
-    ).map_err(NativeError::FastAlloc)?;
+    )
+    .map_err(NativeError::FastAlloc)?;
 
     Ok(emitted.into())
 }
@@ -146,6 +140,9 @@ mod tests {
         );
 
         let result = emit_lowered(&lowered, &abi);
-        assert!(matches!(result, Err(NativeError::FastAlloc(AllocError::NotImplemented))));
+        assert!(matches!(
+            result,
+            Err(NativeError::FastAlloc(AllocError::NotImplemented))
+        ));
     }
 }

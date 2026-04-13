@@ -235,7 +235,12 @@ mod tests {
         // M1: allocator returns NotImplemented, so compilation fails
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
         assert!(
-            matches!(result, Err(NativeError::FastAlloc(crate::fa_alloc::AllocError::NotImplemented))),
+            matches!(
+                result,
+                Err(NativeError::FastAlloc(
+                    crate::fa_alloc::AllocError::NotImplemented
+                ))
+            ),
             "M1: expected NotImplemented error, got: {:?}",
             result
         );
