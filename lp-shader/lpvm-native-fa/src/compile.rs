@@ -72,15 +72,14 @@ impl CompileSession {
     }
 }
 
-/// Compile one function: LPIR → VInst → (peephole) → PInst → bytes.
+/// Compile one function: LPIR → VInst → (peephole) → AllocOutput → bytes.
+/// TODO(M2): Currently returns NotImplemented error from stub allocator.
 pub fn compile_function(
     session: &mut CompileSession,
     func: &IrFunction,
     ir: &LpirModule,
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
-    use crate::rv32::debug::pinst;
-
     // 1. Lower LPIR → VInst
     let mut lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
         .map_err(NativeError::Lower)?;
@@ -88,37 +87,18 @@ pub fn compile_function(
     // 2. Peephole optimize
     crate::peephole::optimize(&mut lowered.vinsts);
 
-    // 3. Allocate registers (fastalloc)
+    // 3. Build function ABI
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
-    let alloc_result =
-        crate::fa_alloc::allocate(&lowered, &func_abi).map_err(NativeError::FastAlloc)?;
-    let pinsts = alloc_result.pinsts;
 
-    // 4. Emit PInst → bytes
-    let mut emitter = crate::rv32::rv32_emit::Rv32Emitter::new();
-    for p in &pinsts {
-        emitter.emit(p);
-    }
-    let (code, phys_relocs) = emitter.finish_with_fixups();
+    // 4. Allocate and emit
+    // TODO(M2): This currently returns NotImplemented error
+    let emitted = crate::emit::emit_lowered(&lowered, &func_abi)?;
 
-    // Convert PhysReloc → NativeReloc
-    let relocs = phys_relocs
-        .into_iter()
-        .map(|r| NativeReloc {
-            offset: r.offset,
-            symbol: r.symbol,
-        })
-        .collect();
+    let code = emitted.code;
+    let relocs = emitted.relocs;
 
-    // Build debug assembly text
+    // Build debug assembly text (minimal for M1)
     let mut debug_asm = String::new();
-
-    // Allocator trace section
-    if !alloc_result.trace.is_empty() {
-        debug_asm.push_str(&format!("=== AllocTrace {} ===\n", func.name));
-        debug_asm.push_str(&alloc_result.trace.format());
-        debug_asm.push('\n');
-    }
 
     // VInst section
     debug_asm.push_str(&format!("\n=== VInst {} ===\n", func.name));
@@ -128,12 +108,6 @@ pub fn compile_function(
             inst.mnemonic(),
             inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
         ));
-    }
-
-    // PInst section
-    debug_asm.push_str(&format!("\n=== PInst {} ===\n", func.name));
-    for inst in &pinsts {
-        debug_asm.push_str(&format!("{}\n", pinst::format(inst)));
     }
 
     // Disasm section with hex
@@ -150,12 +124,11 @@ pub fn compile_function(
         off += 4;
     }
 
-    // lowered + pinsts + func_abi dropped here
     Ok(CompiledFunction {
         name: func.name.clone(),
         code,
         relocs,
-        debug_lines: Vec::new(), // TODO: wire up debug_lines from lowered.vinsts src_op mapping
+        debug_lines: emitted.debug_lines,
         debug_asm,
     })
 }
@@ -259,10 +232,12 @@ mod tests {
                 parameters: vec![],
             }],
         };
+        // M1: allocator returns NotImplemented, so compilation fails
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
-        assert!(result.is_ok(), "compile failed: {:?}", result.err());
-        let compiled = result.unwrap();
-        assert_eq!(compiled.functions.len(), 1);
-        assert!(!compiled.functions[0].code.is_empty());
+        assert!(
+            matches!(result, Err(NativeError::FastAlloc(crate::fa_alloc::AllocError::NotImplemented))),
+            "M1: expected NotImplemented error, got: {:?}",
+            result
+        );
     }
 }

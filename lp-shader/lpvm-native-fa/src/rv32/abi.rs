@@ -186,6 +186,7 @@ pub const SRET_SCALAR_THRESHOLD: usize = 2;
 pub const STACK_ALIGNMENT: u32 = 16;
 
 /// Flattened parameter locations: vmctx word first, then each scalar of each `FnParam` in order.
+/// All LPIR functions (entry and non-entry) receive vmctx as the first argument.
 pub fn classify_params(sig: &LpsFnSig, is_sret: bool) -> Vec<ArgLoc> {
     let mut out = Vec::new();
     let mut reg_idx = if is_sret { 1usize } else { 0usize };

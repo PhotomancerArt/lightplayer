@@ -116,16 +116,21 @@ mod tests {
             }],
         };
 
-        let s = compile_module_asm_text(
+        // M1: allocator returns NotImplemented, so compilation fails
+        let result = compile_module_asm_text(
             &ir,
             &sig,
             lpir::FloatMode::Q32,
             DisasmOptions::default(),
             false,
-        )
-        .expect("asm");
-
-        assert!(s.contains(".globl"));
-        assert!(s.contains("add:"));
+        );
+        assert!(
+            matches!(
+                result,
+                Err(NativeError::FastAlloc(crate::fa_alloc::AllocError::NotImplemented))
+            ),
+            "M1: expected NotImplemented error, got: {:?}",
+            result
+        );
     }
 }

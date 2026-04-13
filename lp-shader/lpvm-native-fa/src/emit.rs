@@ -1,11 +1,12 @@
-//! Shared emission orchestrator: VInst → bytes via alloc + rv32_emit.
+//! Shared emission orchestrator: VInst → bytes via allocator + emitter.
 
 use alloc::vec::Vec;
 
+use crate::abi::FrameLayout;
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::rv32::inst::PInst;
-use crate::rv32::rv32_emit::Rv32Emitter;
+use crate::fa_alloc::{allocate, AllocOutput};
+use crate::rv32::emit::{EmittedCode as Rv32EmittedCode, emit_function};
 use crate::vinst::VInst;
 
 /// Emission result containing machine code and metadata.
@@ -19,24 +20,24 @@ pub struct EmittedCode {
     pub debug_lines: Vec<(u32, Option<u32>)>,
 }
 
-/// Emit a sequence of VInsts to machine code.
-///
-/// This function orchestrates the allocation and emission pipeline:
-/// 1. Allocate registers (VInst → PInst)
-/// 2. Encode PInst to bytes
-///
-/// # Arguments
-/// * `vinsts` - Virtual instructions to emit
-/// * `func_abi` - Function ABI for register allocation
-/// * `vreg_pool` - Pool for VRegSlice resolution
-///
-/// # Returns
-/// Emitted machine code with relocations and debug info.
+impl From<Rv32EmittedCode> for EmittedCode {
+    fn from(code: Rv32EmittedCode) -> Self {
+        Self {
+            code: code.code,
+            relocs: code.relocs.into_iter().map(|r| NativeReloc {
+                offset: r.offset,
+                symbol: r.symbol,
+            }).collect(),
+            debug_lines: code.debug_lines,
+        }
+    }
+}
+
 /// Emit a LoweredFunction to machine code.
 ///
 /// This function orchestrates the allocation and emission pipeline:
-/// 1. Allocate registers (VInst → PInst) via fa_alloc
-/// 2. Encode PInst to bytes
+/// 1. Allocate registers (VInst → AllocOutput) via fa_alloc
+/// 2. Emit VInst + AllocOutput → bytes via rv32::emit
 ///
 /// # Arguments
 /// * `lowered` - Lowered function with vinsts, region tree, vreg pool
@@ -48,12 +49,42 @@ pub fn emit_lowered(
     lowered: &crate::lower::LoweredFunction,
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<EmittedCode, NativeError> {
-    // 1. Allocate registers: VInst → PInst
-    let alloc_result =
-        crate::fa_alloc::allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
+    // 1. Allocate registers: VInst → AllocOutput
+    // TODO(M2): This currently returns NotImplemented error
+    let _alloc_result = allocate(lowered, func_abi)
+        .map_err(NativeError::FastAlloc)?;
 
-    // 2. Emit PInst → bytes
-    emit_pinsts(&alloc_result.pinsts)
+    // 2. Build frame layout
+    let frame = FrameLayout::compute(
+        func_abi,
+        0, // spill_slots - will come from alloc_result
+        crate::abi::PregSet::EMPTY,
+        &[],
+        false, // is_leaf: false = save RA (conservative for M1)
+        0,
+        0,
+    );
+
+    // 3. Emit: VInst + AllocOutput → bytes
+    // TODO(M2): Wire up real AllocOutput from allocator
+    let stub_output = AllocOutput {
+        allocs: Vec::new(),
+        inst_alloc_offsets: Vec::new(),
+        edits: Vec::new(),
+        num_spill_slots: 0,
+        trace: crate::fa_alloc::trace::AllocTrace::new(),
+    };
+
+    let emitted = emit_function(
+        &lowered.vinsts,
+        &lowered.vreg_pool,
+        &stub_output,
+        frame,
+        &lowered.symbols,
+        func_abi.is_sret(),
+    ).map_err(NativeError::FastAlloc)?;
+
+    Ok(emitted.into())
 }
 
 /// Emit a sequence of VInsts to machine code.
@@ -67,8 +98,6 @@ pub fn emit_vinsts(
     vreg_pool: &[crate::vinst::VReg],
 ) -> Result<EmittedCode, NativeError> {
     // Build a minimal LoweredFunction for the new allocator
-    // Note: This is a transitional path - the new allocator needs a full
-    // region tree. This function will be removed after full migration.
     let mut lowered = crate::lower::LoweredFunction {
         vinsts: vinsts.to_vec(),
         vreg_pool: vreg_pool.to_vec(),
@@ -89,92 +118,34 @@ pub fn emit_vinsts(
     emit_lowered(&lowered, func_abi)
 }
 
-/// Emit pre-allocated physical instructions to machine code.
-///
-/// This is a lower-level entry point for when you already have PInsts
-/// (e.g., from a custom allocator or for testing).
-///
-/// # Arguments
-/// * `pinsts` - Physical instructions to encode
-///
-/// # Returns
-/// Emitted machine code with relocations and debug info.
-pub fn emit_pinsts(pinsts: &[PInst]) -> Result<EmittedCode, NativeError> {
-    let mut emitter = Rv32Emitter::new();
-
-    for inst in pinsts {
-        emitter.emit(inst);
-    }
-
-    // Apply branch fixups and get final code + relocs
-    let (code, phys_relocs) = emitter.finish_with_fixups();
-
-    // Convert PhysReloc → NativeReloc
-    let relocs = phys_relocs
-        .into_iter()
-        .map(|r| NativeReloc {
-            offset: r.offset,
-            symbol: r.symbol,
-        })
-        .collect();
-
-    Ok(EmittedCode {
-        code,
-        relocs,
-        debug_lines: Vec::new(), // TODO: wire up debug_lines from src_op mapping
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rv32::gpr;
-    use crate::rv32::inst::{PInst, SymbolRef};
+    use crate::fa_alloc::AllocError;
 
     #[test]
-    fn test_emit_pinsts_single_li() {
-        let pinsts = vec![PInst::Li {
-            dst: gpr::RET_REGS[0],
-            imm: 42,
-        }];
-        let emitted = emit_pinsts(&pinsts).unwrap();
-        assert!(!emitted.code.is_empty());
-        assert!(emitted.relocs.is_empty());
-    }
+    fn emit_lowered_returns_not_implemented() {
+        // M1: allocator returns NotImplemented
+        let vinsts = vec![];
+        let vreg_pool = vec![];
+        let mut lowered = crate::lower::LoweredFunction {
+            vinsts,
+            vreg_pool,
+            symbols: crate::vinst::ModuleSymbols::default(),
+            loop_regions: Vec::new(),
+            region_tree: crate::region::RegionTree::new(),
+        };
 
-    #[test]
-    fn test_emit_pinsts_call_has_reloc() {
-        let pinsts = vec![
-            PInst::Call {
-                target: SymbolRef {
-                    name: alloc::string::String::from("foo"),
-                },
+        let abi = crate::rv32::abi::func_abi_rv32(
+            &lps_shared::LpsFnSig {
+                name: alloc::string::String::from("test"),
+                return_type: lps_shared::LpsType::Void,
+                parameters: vec![],
             },
-            PInst::Ret,
-        ];
-        let emitted = emit_pinsts(&pinsts).unwrap();
-        assert!(!emitted.code.is_empty());
-        assert_eq!(emitted.relocs.len(), 1);
-        assert_eq!(emitted.relocs[0].symbol, "foo");
-    }
+            0,
+        );
 
-    #[test]
-    fn test_emit_pinsts_add_sub_sequence() {
-        let pinsts = vec![
-            PInst::Add {
-                dst: 10,
-                src1: 11,
-                src2: 12,
-            },
-            PInst::Sub {
-                dst: 10,
-                src1: 10,
-                src2: 11,
-            },
-            PInst::Ret,
-        ];
-        let emitted = emit_pinsts(&pinsts).unwrap();
-        // 3 instructions * 4 bytes = 12 bytes minimum
-        assert!(emitted.code.len() >= 12);
+        let result = emit_lowered(&lowered, &abi);
+        assert!(matches!(result, Err(NativeError::FastAlloc(AllocError::NotImplemented))));
     }
 }

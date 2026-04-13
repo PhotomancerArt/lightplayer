@@ -1,7 +1,6 @@
-//! Debug line table, annotated disassembly, and fastalloc PInst text.
+//! Debug line table, annotated disassembly, and region tree display.
 
 pub mod disasm;
-pub mod pinst;
 pub mod region;
 
 use alloc::vec::Vec;
