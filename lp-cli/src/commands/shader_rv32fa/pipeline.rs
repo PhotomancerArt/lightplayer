@@ -5,12 +5,12 @@ use std::io::Write;
 use anyhow::Result;
 use lpir::FloatMode;
 use lpvm_native_fa::abi::ModuleAbi;
+use lpvm_native_fa::emit::emit_lowered_with_alloc;
 use lpvm_native_fa::fa_alloc;
 use lpvm_native_fa::fa_alloc::liveness::{analyze_liveness, format_liveness};
+use lpvm_native_fa::fa_alloc::render::render_alloc_output;
 use lpvm_native_fa::rv32::abi::func_abi_rv32;
-use lpvm_native_fa::rv32::debug::pinst;
 use lpvm_native_fa::rv32::debug::region::format_region_tree;
-use lpvm_native_fa::rv32::rv32_emit::Rv32Emitter;
 use lpvm_native_fa::{lower_ops, peephole};
 
 /// Which stderr debug sections to print.
@@ -110,29 +110,28 @@ pub fn run_fastalloc_module(
         let func_abi = func_abi_rv32(fn_sig, slots);
         let alloc_result = fa_alloc::allocate(&lowered, &func_abi)
             .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
-        let phys = alloc_result.pinsts;
 
         // Print alloc trace if requested via env var
         if std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1"
-            && !alloc_result.trace.is_empty()
+            && !alloc_result.output.trace.is_empty()
         {
-            writeln!(debug, "{}", alloc_result.trace.format())?;
+            writeln!(debug, "{}", alloc_result.output.trace.format())?;
         }
 
         if verbosity.pinst {
-            writeln!(debug, "=== PInst {} ===", func.name)?;
-            for inst in &phys {
-                writeln!(debug, "{}", pinst::format(inst))?;
-            }
+            writeln!(debug, "=== Alloc snapshot {} ===", func.name)?;
+            let text = render_alloc_output(
+                &lowered.vinsts,
+                &lowered.vreg_pool,
+                &alloc_result.output,
+                Some(&lowered.symbols),
+            );
+            writeln!(debug, "{}", text)?;
         }
 
-        let code = {
-            let mut emitter = Rv32Emitter::new();
-            for p in &phys {
-                emitter.emit(p);
-            }
-            emitter.finish()
-        };
+        let emitted = emit_lowered_with_alloc(&lowered, &func_abi, alloc_result)
+            .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
+        let code = emitted.code;
 
         if verbosity.disasm {
             writeln!(debug, "=== Disasm {} ===", func.name)?;
@@ -150,7 +149,16 @@ pub fn run_fastalloc_module(
         }
 
         text_assembly.push_str(&format!(".globl\t{}\n", func.name));
-        text_assembly.push_str(&format!("{}\n", pinst::format_block(&phys)));
+        let mut off = 0usize;
+        while off + 4 <= code.len() {
+            let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
+            text_assembly.push_str(&format!(
+                "\t{:08x}\t{}\n",
+                w,
+                lp_riscv_inst::format_instruction(w)
+            ));
+            off += 4;
+        }
         text_assembly.push('\n');
 
         machine_code.extend_from_slice(&code);

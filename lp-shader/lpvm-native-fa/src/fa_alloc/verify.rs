@@ -59,14 +59,14 @@ fn verify_no_double_reg_assignment(vinsts: &[VInst], vreg_pool: &[VReg], output:
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
         let inst_idx_u16 = inst_idx as u16;
 
-        // If there are Before-edits, the allocator is sequencing moves so
-        // sharing a register across operands is expected.
-        let has_before_edits = output
-            .edits
-            .iter()
-            .any(|(pt, _)| *pt == EditPoint::Before(inst_idx_u16));
-        if has_before_edits {
-            return;
+        // If there are Before- or After-edits for this instruction, the
+        // allocator is sequencing moves so sharing a register across
+        // operands is expected.
+        let has_edits = output.edits.iter().any(|(pt, _)| {
+            *pt == EditPoint::Before(inst_idx_u16) || *pt == EditPoint::After(inst_idx_u16)
+        });
+        if has_edits {
+            continue;
         }
 
         let mut num_defs: usize = 0;

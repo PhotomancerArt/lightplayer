@@ -159,6 +159,37 @@ impl core::error::Error for AllocError {}
 pub struct AllocResult {
     pub output: AllocOutput,
     pub spill_slots: u32,
+    /// Callee-saved GPRs (s2–s11) referenced by allocations or edits; for [`FrameLayout::compute`].
+    pub used_callee_saved: crate::abi::PregSet,
+}
+
+/// Collect callee-saved pool GPRs (x18–x27) used in `output` for prologue/epilogue.
+fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
+    use crate::abi::PReg as AbiPReg;
+    use crate::rv32::gpr;
+
+    let mut set = crate::abi::PregSet::EMPTY;
+    let mut insert = |r: crate::rv32::gpr::PReg| {
+        if gpr::is_callee_saved_pool_gpr(r) {
+            set.insert(AbiPReg::int(r));
+        }
+    };
+
+    for a in &output.allocs {
+        if let Alloc::Reg(r) = a {
+            insert(*r);
+        }
+    }
+    for (_, edit) in &output.edits {
+        let Edit::Move { from, to } = edit;
+        if let Alloc::Reg(r) = from {
+            insert(*r);
+        }
+        if let Alloc::Reg(r) = to {
+            insert(*r);
+        }
+    }
+    set
 }
 
 /// Allocate registers for a lowered function.
@@ -185,10 +216,12 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
             // Run the backward walk allocator
             let output = walk::walk_linear(block_vinsts, &lowered.vreg_pool, func_abi)?;
             let spill_slots = output.num_spill_slots;
+            let used_callee_saved = used_callee_saved_from_output(&output);
 
             Ok(AllocResult {
                 output,
                 spill_slots,
+                used_callee_saved,
             })
         }
         _ => {
@@ -196,15 +229,6 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
             Err(AllocError::UnsupportedControlFlow)
         }
     }
-}
-
-fn max_vreg_index(vinsts: &[crate::vinst::VInst], pool: &[crate::vinst::VReg]) -> usize {
-    let mut m = 0usize;
-    for inst in vinsts {
-        inst.for_each_use(pool, |u| m = m.max(u.0 as usize + 1));
-        inst.for_each_def(pool, |d| m = m.max(d.0 as usize + 1));
-    }
-    m
 }
 
 #[cfg(test)]
@@ -353,11 +377,11 @@ mod tests {
         expect_alloc(
             "i0 = IConst32 10\nRet i0",
             "i0 = IConst32 10
-; write: i0 -> t0
+; write: i0 -> t4
 ; ---------------------------
-; read: i0 <- t0
+; read: i0 <- t4
 Ret i0
-; trace: alloc: v0 -> t5",
+; trace: alloc: v0 -> t29",
         );
     }
 
@@ -366,21 +390,21 @@ Ret i0
         expect_alloc(
             "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2",
             "i0 = IConst32 10
-; write: i0 -> t1
+; write: i0 -> t5
 ; ---------------------------
 i1 = IConst32 20
-; write: i1 -> t2
+; write: i1 -> t6
 ; ---------------------------
-; read: i0 <- t1
-; read: i1 <- t2
+; read: i0 <- t5
+; read: i1 <- t6
 i2 = Add32 i0, i1
-; write: i2 -> t0
-; trace: alloc: v0 -> t6
-; trace: alloc: v1 -> t7
+; write: i2 -> t4
+; trace: alloc: v0 -> t30
+; trace: alloc: v1 -> t31
 ; ---------------------------
-; read: i2 <- t0
+; read: i2 <- t4
 Ret i2
-; trace: alloc: v2 -> t5",
+; trace: alloc: v2 -> t29",
         );
     }
 }

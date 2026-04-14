@@ -16,24 +16,24 @@ func @test(v1: i32, v2: i32) -> i32 {
 ;     ; arg v2: a2
 ;     ; ret: a0
 ;     ; entry_spill: x11 -> slot0
-;     ; entry_move: x12 -> x5
+;     ; entry_move: x12 -> x29
 ;
 ;     v3:i32 = iadd v1, v2
 ;         ; move: a1 -> slot0
-;         ; move: a2 -> t0
-;         ; move: t0 -> slot0
-;         ; read: i1 <- t0
-;         ; read: i2 <- t0
+;         ; move: a2 -> t4
+;         ; read: i1 <- t4
+;         ; read: i2 <- t4
 ;         i3 = Add32 i1, i2
-;         ; write: i3 -> t0
-;         ; trace: alloc: v1 -> t5
-;         ; trace: evict: t5 -> slot0
-;         ; trace: alloc: v2 -> t5
+;         ; write: i3 -> t4
+;         ; trace: alloc: v1 -> t29
+;         ; trace: evict: slot0 -> t29
+;         ; trace: alloc: v2 -> t29
+;         ; move: slot0 -> t4
 ;
 ;     return v3:i32
-;         ; read: i3 <- t0
+;         ; read: i3 <- t4
 ;         Ret i3
-;         ; trace: alloc: v3 -> t5
+;         ; trace: alloc: v3 -> t29
 ;         Br L0
 ; }
 ;     Label L0

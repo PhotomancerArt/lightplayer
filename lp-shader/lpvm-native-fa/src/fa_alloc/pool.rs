@@ -168,7 +168,7 @@ mod tests {
 
         // Fill all allocatable registers
         for i in 0..ALLOC_POOL.len() {
-            let (preg, evicted) = pool.alloc(VReg(i as u16));
+            let (_preg, evicted) = pool.alloc(VReg(i as u16));
             assert!(evicted.is_none(), "should not evict on {}th alloc", i);
         }
 
@@ -206,7 +206,7 @@ mod tests {
 
         // Allocate two registers
         let (preg1, _) = pool.alloc(VReg(0));
-        let (preg2, _) = pool.alloc(VReg(1));
+        let (_preg2, _) = pool.alloc(VReg(1));
 
         // Touch first one, making it MRU
         pool.touch(preg1);

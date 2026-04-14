@@ -93,8 +93,10 @@ pub fn walk_linear_with_pool(
         }
     }
 
-    // Reverse edits (recorded in backward order, need forward order)
+    // Reverse edits (recorded in backward order, need forward order),
+    // then stable-sort so Before(n) < After(n) < Before(n+1) holds.
     edits.reverse();
+    edits.sort_by_key(|(pt, _)| *pt);
 
     // Generate entry moves: ABI register → pool register (or spill slot).
     // Since params are NOT pre-seeded, every used param needs an entry move.
@@ -259,17 +261,21 @@ fn handle_eviction(
 ) {
     if let Some(evicted_vreg) = evicted {
         let slot = spill.get_or_assign(evicted_vreg);
+        // Emit a reload-after (regalloc2 style): the evicted vreg's DEF will
+        // write directly to its spill slot.  After the current instruction
+        // finishes, we reload the spilled value back into the register so it
+        // is available for subsequent uses.
         edits.push((
-            EditPoint::Before(inst_idx_u16),
+            EditPoint::After(inst_idx_u16),
             Edit::Move {
-                from: Alloc::Reg(preg),
-                to: Alloc::Stack(slot),
+                from: Alloc::Stack(slot),
+                to: Alloc::Reg(preg),
             },
         ));
         trace.push(TraceEntry {
             vinst_idx: inst_idx,
             vinst_mnemonic: String::from("evict"),
-            decision: alloc::format!("t{} -> slot{}", preg, slot),
+            decision: alloc::format!("slot{} -> t{}", slot, preg),
             register_state: String::new(),
         });
     }
@@ -562,5 +568,69 @@ mod tests {
 
         // Should not need spill for this simple case
         assert_eq!(output.num_spill_slots, 0);
+    }
+
+    /// Pool size 2, three live values → one must spill.
+    ///
+    /// ```text
+    /// i0 = IConst32 1   ; v0
+    /// i1 = IConst32 2   ; v1
+    /// i2 = IConst32 3   ; v2
+    /// i3 = Add32 i0, i1 ; v3 = v0+v1  (evicts v2)
+    /// i4 = Add32 i3, i2 ; v4 = v3+v2  (v2 must reload from spill)
+    /// Ret i4
+    /// ```
+    ///
+    /// Correct result: (1+2)+(3) = 6.
+    /// Before the fix, the eviction emitted a save-before instead of a
+    /// reload-after, which stored the wrong register contents to the spill
+    /// slot.
+    #[test]
+    fn walk_spill_pool2_eviction_reload() {
+        let input = "\
+            i0 = IConst32 1\n\
+            i1 = IConst32 2\n\
+            i2 = IConst32 3\n\
+            i3 = Add32 i0, i1\n\
+            i4 = Add32 i3, i2\n\
+            Ret i4";
+        let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
+        let output =
+            walk_linear_with_pool(&vinsts, &pool, &make_abi(), RegPool::with_capacity(2)).unwrap();
+
+        // v2 must be spilled (only 2 regs, 3 live values at inst 3)
+        assert!(output.num_spill_slots >= 1, "expected at least 1 spill slot");
+
+        // v2's def (inst 2) must go to Stack (because it was evicted)
+        let v2_def_alloc = output.operand_alloc(2, 0);
+        assert!(
+            v2_def_alloc.is_stack(),
+            "v2 def should be Stack, got {:?}",
+            v2_def_alloc
+        );
+
+        // There must be an After(3) reload edit: Stack → Reg
+        let has_after3_reload = output.edits.iter().any(|(pt, edit)| {
+            *pt == EditPoint::After(3)
+                && matches!(edit, Edit::Move { from: Alloc::Stack(_), to: Alloc::Reg(_) })
+        });
+        assert!(
+            has_after3_reload,
+            "expected After(3) reload edit (stack→reg), got edits: {:?}",
+            output.edits
+        );
+
+        // v2's use at inst 4 must be Reg (reloaded)
+        let v2_use_at_4 = output.operand_alloc(4, 2); // def=0, use0=1, use1=2
+        assert!(
+            v2_use_at_4.is_reg(),
+            "v2 use at inst 4 should be Reg, got {:?}",
+            v2_use_at_4
+        );
+
+        // Edits must be sorted
+        for w in output.edits.windows(2) {
+            assert!(w[0].0 <= w[1].0, "edits not sorted: {:?} > {:?}", w[0], w[1]);
+        }
     }
 }

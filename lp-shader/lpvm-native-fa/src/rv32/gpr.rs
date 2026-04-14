@@ -15,11 +15,12 @@ pub const RET_REGS: [PReg; 2] = [10, 11];
 pub const SCRATCH: PReg = 28;
 
 /// Registers available for temporaries (excludes zero, ra, sp, fp, a0–a7, [`SCRATCH`]).
-pub const ALLOC_POOL: &[PReg] = &[5, 6, 7, 29, 30, 31, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
+/// Excludes t0–t2: those are reserved for emitter scratch (`rv32::emit::EmitContext::TEMP0–2`).
+pub const ALLOC_POOL: &[PReg] = &[29, 30, 31, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
 
 /// Caller-saved registers within [`ALLOC_POOL`] (the t-regs).
 /// A call clobbers these; live vregs must be saved/restored.
-pub const CALLER_SAVED_POOL: &[PReg] = &[5, 6, 7, 29, 30, 31]; // t0, t1, t2, t4, t5, t6
+pub const CALLER_SAVED_POOL: &[PReg] = &[29, 30, 31]; // t4, t5, t6
 
 pub fn is_caller_saved_pool(r: PReg) -> bool {
     CALLER_SAVED_POOL.iter().any(|&x| x == r)
@@ -27,6 +28,12 @@ pub fn is_caller_saved_pool(r: PReg) -> bool {
 
 pub fn is_arg_reg(r: PReg) -> bool {
     (10..=17).contains(&r)
+}
+
+/// Callee-saved GPRs that may appear in [`ALLOC_POOL`] (s2–s11, x18–x27).
+#[inline]
+pub fn is_callee_saved_pool_gpr(r: PReg) -> bool {
+    (18..=27).contains(&r)
 }
 
 /// Parse register name to physical register number (standard RISC-V ABI names).

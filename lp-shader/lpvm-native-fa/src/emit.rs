@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::abi::FrameLayout;
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::fa_alloc::allocate;
+use crate::fa_alloc::{AllocResult, allocate};
 use crate::rv32::emit::{EmittedCode as Rv32EmittedCode, emit_function};
 use crate::vinst::VInst;
 
@@ -53,21 +53,26 @@ pub fn emit_lowered(
     lowered: &crate::lower::LoweredFunction,
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<EmittedCode, NativeError> {
-    // 1. Allocate registers: VInst → AllocOutput
     let alloc_result = allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
+    emit_lowered_with_alloc(lowered, func_abi, alloc_result)
+}
 
-    // 2. Build frame layout using actual spill slots from allocator
+/// Emit using an existing [`AllocResult`] (avoids running the allocator twice).
+pub fn emit_lowered_with_alloc(
+    lowered: &crate::lower::LoweredFunction,
+    func_abi: &crate::abi::FuncAbi,
+    alloc_result: AllocResult,
+) -> Result<EmittedCode, NativeError> {
     let frame = FrameLayout::compute(
         func_abi,
         alloc_result.spill_slots,
-        crate::abi::PregSet::EMPTY,
+        alloc_result.used_callee_saved,
         &[],
         false, // is_leaf: false = save RA (conservative)
         0,
         0,
     );
 
-    // 3. Emit: VInst + AllocOutput → bytes
     let emitted = emit_function(
         &lowered.vinsts,
         &lowered.vreg_pool,

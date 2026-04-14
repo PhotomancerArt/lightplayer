@@ -21,12 +21,12 @@ func @test() -> i32 {
 ;
 ;     v2:i32 = iconst.i32 20
 ;         i2 = IConst32 20
-;         ; write: i2 -> t0
+;         ; write: i2 -> t4
 ;
 ;     return v2:i32
-;         ; read: i2 <- t0
+;         ; read: i2 <- t4
 ;         Ret i2
-;         ; trace: alloc: v2 -> t5
+;         ; trace: alloc: v2 -> t29
 ;         Br L0
 ; }
 ;     Label L0
