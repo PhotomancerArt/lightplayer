@@ -6,10 +6,23 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::abi::FrameLayout;
-use crate::fa_alloc::{Alloc, AllocError, AllocOutput};
+use crate::fa_alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::rv32::encode::*;
-use crate::rv32::gpr::{FP_REG, PReg, RA_REG, SP_REG};
-use crate::vinst::{LabelId, ModuleSymbols, VInst, VReg};
+use crate::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
+use crate::vinst::{IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
+
+/// Callee sret buffer pointer (saved from incoming a0).
+const S1_REG: PReg = 9;
+
+#[inline]
+fn branch_offset_valid(imm: i32) -> bool {
+    imm % 2 == 0 && (-4096..=4094).contains(&imm)
+}
+
+#[inline]
+fn jal_offset_valid(imm: i32) -> bool {
+    imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
+}
 
 /// Byte offset in `.text` where a relocation applies.
 #[derive(Clone, Debug)]
@@ -36,6 +49,8 @@ pub struct EmitContext<'a> {
     debug_lines: Vec<(u32, Option<u32>)>,
     frame: FrameLayout,
     symbols: &'a ModuleSymbols,
+    /// Kept for API parity with [`emit_function`] (e.g. future pool-indexed lowering).
+    #[allow(dead_code)]
     vreg_pool: &'a [VReg],
     label_offsets: Vec<Option<usize>>,
     branch_fixups: Vec<BranchFixup>,
@@ -93,6 +108,13 @@ impl<'a> EmitContext<'a> {
         output.operand_alloc(inst_idx as u16, operand_idx as u16)
     }
 
+    fn is_dead_def(output: &AllocOutput, inst_idx: usize, def_op_idx: usize) -> bool {
+        matches!(
+            Self::operand_alloc(output, inst_idx, def_op_idx),
+            Alloc::None
+        )
+    }
+
     /// Use a vreg: return its physical register, loading from spill if needed.
     fn use_vreg(
         &mut self,
@@ -107,7 +129,6 @@ impl<'a> EmitContext<'a> {
         match alloc {
             Alloc::Reg(preg) => Ok(preg),
             Alloc::Stack(slot) => {
-                // Load from spill slot into temp
                 let offset = self
                     .frame
                     .spill_offset_from_fp(slot as u32)
@@ -161,8 +182,54 @@ impl<'a> EmitContext<'a> {
         Ok(())
     }
 
+    /// Emit an allocator edit (reload/spill/reg move) as concrete instructions.
+    fn emit_edit(&mut self, edit: &Edit, src_op: Option<u32>) -> Result<(), AllocError> {
+        match edit {
+            Edit::Move { from, to } => match (*from, *to) {
+                (Alloc::None, _) | (_, Alloc::None) => return Err(AllocError::NotImplemented),
+                (Alloc::Reg(src), Alloc::Reg(dst)) => {
+                    if src != dst {
+                        self.push_u32(encode_addi(dst as u32, src as u32, 0), src_op);
+                    }
+                }
+                (Alloc::Stack(slot), Alloc::Reg(dst)) => {
+                    let offset = self
+                        .frame
+                        .spill_offset_from_fp(slot as u32)
+                        .ok_or(AllocError::NotImplemented)?;
+                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, offset), src_op);
+                }
+                (Alloc::Reg(src), Alloc::Stack(slot)) => {
+                    let offset = self
+                        .frame
+                        .spill_offset_from_fp(slot as u32)
+                        .ok_or(AllocError::NotImplemented)?;
+                    self.push_u32(encode_sw(src as u32, FP_REG as u32, offset), src_op);
+                }
+                (Alloc::Stack(s_from), Alloc::Stack(s_to)) => {
+                    let o_from = self
+                        .frame
+                        .spill_offset_from_fp(s_from as u32)
+                        .ok_or(AllocError::NotImplemented)?;
+                    let o_to = self
+                        .frame
+                        .spill_offset_from_fp(s_to as u32)
+                        .ok_or(AllocError::NotImplemented)?;
+                    let t = Self::TEMP0 as u32;
+                    self.push_u32(encode_lw(t, FP_REG as u32, o_from), src_op);
+                    self.push_u32(encode_sw(t, FP_REG as u32, o_to), src_op);
+                }
+            },
+        }
+        Ok(())
+    }
+
+    fn label_offset_get(&self, id: LabelId) -> Option<usize> {
+        self.label_offsets.get(id as usize).copied().flatten()
+    }
+
     /// Emit prologue.
-    pub fn emit_prologue(&mut self, _is_sret: bool) -> Result<(), AllocError> {
+    pub fn emit_prologue(&mut self, is_sret: bool) -> Result<(), AllocError> {
         let sp = SP_REG as u32;
         let frame_size = self.frame.total_size as i32;
 
@@ -190,7 +257,10 @@ impl<'a> EmitContext<'a> {
             self.push_u32(encode_addi(FP_REG as u32, sp, frame_size), None);
         }
 
-        // TODO(M3): For sret: save sret pointer (a0) to s1
+        // sret: preserve incoming struct-return pointer (a0) in s1 for Ret stores / callee
+        if is_sret {
+            self.push_u32(encode_addi(S1_REG as u32, ARG_REGS[0] as u32, 0), None);
+        }
 
         Ok(())
     }
@@ -247,22 +317,498 @@ impl<'a> EmitContext<'a> {
         Ok(())
     }
 
+    fn emit_icmp(
+        &mut self,
+        output: &AllocOutput,
+        inst_idx: usize,
+        cond: IcmpCond,
+        src_op: Option<u32>,
+    ) -> Result<(), AllocError> {
+        if Self::is_dead_def(output, inst_idx, 0) {
+            return Ok(());
+        }
+        let rs_l = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+        let rs_r = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+        let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+        let scratch = Self::TEMP2 as u32;
+
+        match cond {
+            IcmpCond::LtS => self.push_u32(encode_slt(rd, rs_l, rs_r), src_op),
+            IcmpCond::LtU => self.push_u32(encode_sltu(rd, rs_l, rs_r), src_op),
+            IcmpCond::GtS => self.push_u32(encode_slt(rd, rs_r, rs_l), src_op),
+            IcmpCond::GtU => self.push_u32(encode_sltu(rd, rs_r, rs_l), src_op),
+            IcmpCond::Eq => {
+                self.push_u32(encode_xor(scratch, rs_l, rs_r), src_op);
+                self.push_u32(encode_sltiu(rd, scratch, 1), src_op);
+            }
+            IcmpCond::Ne => {
+                self.push_u32(encode_xor(scratch, rs_l, rs_r), src_op);
+                self.push_u32(encode_sltu(rd, 0, scratch), src_op);
+            }
+            IcmpCond::LeS => {
+                self.push_u32(encode_slt(scratch, rs_r, rs_l), src_op);
+                self.push_u32(encode_xori(rd, scratch, 1), src_op);
+            }
+            IcmpCond::LeU => {
+                self.push_u32(encode_sltu(scratch, rs_r, rs_l), src_op);
+                self.push_u32(encode_xori(rd, scratch, 1), src_op);
+            }
+            IcmpCond::GeS => {
+                self.push_u32(encode_slt(scratch, rs_l, rs_r), src_op);
+                self.push_u32(encode_xori(rd, scratch, 1), src_op);
+            }
+            IcmpCond::GeU => {
+                self.push_u32(encode_sltu(scratch, rs_l, rs_r), src_op);
+                self.push_u32(encode_xori(rd, scratch, 1), src_op);
+            }
+        }
+
+        self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)
+    }
+
+    fn emit_ieq_imm(
+        &mut self,
+        output: &AllocOutput,
+        inst_idx: usize,
+        imm: i32,
+        src_op: Option<u32>,
+    ) -> Result<(), AllocError> {
+        if Self::is_dead_def(output, inst_idx, 0) {
+            return Ok(());
+        }
+        let mut rs = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+        let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+        const IMM12: core::ops::RangeInclusive<i32> = -2048_i32..=2047_i32;
+
+        if IMM12.contains(&imm) {
+            let scratch = Self::TEMP2 as u32;
+            self.push_u32(encode_xori(scratch, rs, imm), src_op);
+            self.push_u32(encode_sltiu(rd, scratch, 1), src_op);
+        } else {
+            if rs == Self::TEMP1 as u32 {
+                self.push_u32(encode_addi(Self::TEMP0 as u32, rs, 0), src_op);
+                rs = Self::TEMP0 as u32;
+            }
+            for w in iconst32_sequence(Self::TEMP1 as u32, imm) {
+                self.push_u32(w, src_op);
+            }
+            self.push_u32(
+                encode_xor(Self::TEMP2 as u32, rs, Self::TEMP1 as u32),
+                src_op,
+            );
+            self.push_u32(encode_sltiu(rd, Self::TEMP2 as u32, 1), src_op);
+        }
+        self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)
+    }
+
+    fn emit_select32(
+        &mut self,
+        output: &AllocOutput,
+        inst_idx: usize,
+        src_op: Option<u32>,
+    ) -> Result<(), AllocError> {
+        if Self::is_dead_def(output, inst_idx, 0) {
+            return Ok(());
+        }
+        let p_true = self.use_vreg(output, inst_idx, 2, Self::TEMP0, src_op)? as u32;
+        let p_false = self.use_vreg(output, inst_idx, 3, Self::TEMP1, src_op)? as u32;
+        let p_cond = self.use_vreg(output, inst_idx, 1, Self::TEMP2, src_op)? as u32;
+
+        self.push_u32(encode_sub(Self::TEMP0 as u32, p_true, p_false), src_op);
+        self.push_u32(
+            encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, p_cond),
+            src_op,
+        );
+
+        let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+        self.push_u32(encode_add(rd, Self::TEMP0 as u32, p_false), src_op);
+        self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)
+    }
+
     /// Emit a single VInst.
-    /// TODO(M2): Implement full VInst emission.
     fn emit_vinst(
         &mut self,
-        _vinst: &VInst,
-        _output: &AllocOutput,
-        _inst_idx: usize,
+        vinst: &VInst,
+        output: &AllocOutput,
+        inst_idx: usize,
+        is_sret: bool,
     ) -> Result<(), AllocError> {
-        // Stub for M1 - full implementation in M2
+        let src_op = vinst.src_op();
+        match vinst {
+            VInst::Add32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_add(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Sub32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_sub(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Neg32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_sub(rd, 0, rs), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Mul32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_mul(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::And32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_and(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Or32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_or(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Xor32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_xor(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Bnot32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_xori(rd, rs, -1), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Shl32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_sll(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::ShrS32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_sra(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::ShrU32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_srl(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::DivS32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_div(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::DivU32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_divu(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::RemS32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_rem(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::RemU32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_remu(rd, rs1, rs2), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Icmp32 { cond, .. } => {
+                self.emit_icmp(output, inst_idx, *cond, src_op)?;
+            }
+            VInst::IeqImm32 { imm, .. } => {
+                self.emit_ieq_imm(output, inst_idx, *imm, src_op)?;
+            }
+            VInst::Select32 { .. } => {
+                self.emit_select32(output, inst_idx, src_op)?;
+            }
+            VInst::Br { target, .. } => {
+                let instr_off = self.code.len();
+                if let Some(tgt) = self.label_offset_get(*target) {
+                    let imm = tgt as i32 - instr_off as i32;
+                    if !jal_offset_valid(imm) {
+                        return Err(AllocError::NotImplemented);
+                    }
+                    self.push_u32(encode_jal(0, imm), src_op);
+                } else {
+                    self.push_u32(0, src_op);
+                    self.jal_fixups.push(JalFixup {
+                        instr_offset: instr_off,
+                        target: *target,
+                        rd: 0,
+                    });
+                }
+            }
+            VInst::BrIf {
+                cond: _,
+                target,
+                invert,
+                ..
+            } => {
+                let rs1 = self.use_vreg(output, inst_idx, 0, Self::TEMP0, src_op)? as u32;
+                let instr_off = self.code.len();
+                if let Some(tgt) = self.label_offset_get(*target) {
+                    let imm = tgt as i32 - instr_off as i32;
+                    if !branch_offset_valid(imm) {
+                        return Err(AllocError::NotImplemented);
+                    }
+                    let w = if *invert {
+                        encode_beq(rs1, 0, imm)
+                    } else {
+                        encode_bne(rs1, 0, imm)
+                    };
+                    self.push_u32(w, src_op);
+                } else {
+                    self.push_u32(0, src_op);
+                    self.branch_fixups.push(BranchFixup {
+                        instr_offset: instr_off,
+                        target: *target,
+                        rs1,
+                        rs2: 0,
+                        is_beq: *invert,
+                    });
+                }
+            }
+            VInst::Mov32 { .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                if rd != rs {
+                    self.push_u32(encode_addi(rd, rs, 0), src_op);
+                }
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Load32 { offset, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                self.push_u32(encode_lw(rd, rs1, *offset), src_op);
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::Store32 { offset, .. } => {
+                let rs2 = self.use_vreg(output, inst_idx, 0, Self::TEMP0, src_op)? as u32;
+                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                self.push_u32(encode_sw(rs2, rs1, *offset), src_op);
+            }
+            VInst::IConst32 { val, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                for w in iconst32_sequence(rd, *val) {
+                    self.push_u32(w, src_op);
+                }
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::SlotAddr { slot, .. } => {
+                if Self::is_dead_def(output, inst_idx, 0) {
+                    return Ok(());
+                }
+                let off = self
+                    .frame
+                    .lpir_offset_from_sp(*slot)
+                    .ok_or(AllocError::NotImplemented)?;
+                let sp_reg = SP_REG as u32;
+                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                if (-2048..2048).contains(&off) {
+                    self.push_u32(encode_addi(rd, sp_reg, off), src_op);
+                } else {
+                    let t_off = Self::TEMP1 as u32;
+                    let t_alt = Self::TEMP2 as u32;
+                    let scratch = if rd == t_off { t_alt } else { t_off };
+                    for w in iconst32_sequence(scratch, off) {
+                        self.push_u32(w, src_op);
+                    }
+                    self.push_u32(encode_add(rd, sp_reg, scratch), src_op);
+                }
+                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
+            }
+            VInst::MemcpyWords { size, .. } => {
+                let t_data = Self::TEMP0 as u32;
+                let p_src = Self::TEMP1 as u32;
+                let p_dst = Self::TEMP2 as u32;
+                let r_src = self.use_vreg(output, inst_idx, 1, Self::TEMP1, src_op)? as u32;
+                let r_dst = self.use_vreg(output, inst_idx, 0, Self::TEMP2, src_op)? as u32;
+                if r_src != p_src {
+                    self.push_u32(encode_addi(p_src, r_src, 0), src_op);
+                }
+                if r_dst != p_dst {
+                    self.push_u32(encode_addi(p_dst, r_dst, 0), src_op);
+                }
+                let mut remaining = *size as i32;
+                while remaining > 0 {
+                    let mut local_off = 0i32;
+                    while local_off + 4 <= remaining && local_off <= 2047 - 3 {
+                        self.push_u32(encode_lw(t_data, p_src, local_off), src_op);
+                        self.push_u32(encode_sw(t_data, p_dst, local_off), src_op);
+                        local_off += 4;
+                    }
+                    if local_off == 0 {
+                        return Err(AllocError::NotImplemented);
+                    }
+                    if local_off < remaining {
+                        self.push_u32(encode_addi(p_src, p_src, local_off), src_op);
+                        self.push_u32(encode_addi(p_dst, p_dst, local_off), src_op);
+                    }
+                    remaining -= local_off;
+                }
+            }
+            VInst::Call {
+                target,
+                args,
+                callee_uses_sret,
+                ..
+            } => {
+                let cap = if *callee_uses_sret {
+                    ARG_REGS.len() - 1
+                } else {
+                    ARG_REGS.len()
+                };
+                if args.len() > cap {
+                    return Err(AllocError::NotImplemented);
+                }
+                let auipc_off = self.code.len();
+                let ra = RA_REG as u32;
+                self.push_u32(encode_auipc(ra, 0), src_op);
+                self.push_u32(encode_jalr(ra, ra, 0), src_op);
+                self.relocs.push(NativeReloc {
+                    offset: auipc_off,
+                    symbol: String::from(self.symbols.name(*target)),
+                });
+            }
+            VInst::Ret { vals, .. } => {
+                let n = vals.len();
+                let base_reg = S1_REG as u32;
+                for i in 0..n {
+                    let src = self.use_vreg(output, inst_idx, i, Self::TEMP0, src_op)? as u32;
+                    if is_sret {
+                        let offset = (i * 4) as i32;
+                        self.push_u32(encode_sw(src, base_reg, offset), src_op);
+                    } else if i < RET_REGS.len() {
+                        let dst = RET_REGS[i] as u32;
+                        if src != dst {
+                            self.push_u32(encode_addi(dst, src, 0), src_op);
+                        }
+                    } else {
+                        return Err(AllocError::NotImplemented);
+                    }
+                }
+            }
+            VInst::Label(id, _) => {
+                self.record_label(*id)?;
+            }
+        }
         Ok(())
     }
 
-    /// Resolve branch fixups.
-    /// TODO(M4): Implement branch fixup resolution.
+    /// Patch [`BranchFixup`] / [`JalFixup`] placeholders after all labels are known.
     fn resolve_branch_fixups(&mut self) -> Result<(), AllocError> {
-        // Stub for M1
+        for f in &self.branch_fixups {
+            let target = self
+                .label_offsets
+                .get(f.target as usize)
+                .copied()
+                .flatten()
+                .ok_or(AllocError::NotImplemented)?;
+            let pc_rel = target as i32 - f.instr_offset as i32;
+            if !branch_offset_valid(pc_rel) {
+                return Err(AllocError::NotImplemented);
+            }
+            let w = if f.is_beq {
+                encode_beq(f.rs1, f.rs2, pc_rel)
+            } else {
+                encode_bne(f.rs1, f.rs2, pc_rel)
+            };
+            self.code[f.instr_offset..f.instr_offset + 4].copy_from_slice(&w.to_le_bytes());
+        }
+        for f in &self.jal_fixups {
+            let target = self
+                .label_offsets
+                .get(f.target as usize)
+                .copied()
+                .flatten()
+                .ok_or(AllocError::NotImplemented)?;
+            let pc_rel = target as i32 - f.instr_offset as i32;
+            if !jal_offset_valid(pc_rel) {
+                return Err(AllocError::NotImplemented);
+            }
+            let w = encode_jal(f.rd, pc_rel);
+            self.code[f.instr_offset..f.instr_offset + 4].copy_from_slice(&w.to_le_bytes());
+        }
         Ok(())
     }
 
@@ -278,24 +824,99 @@ impl<'a> EmitContext<'a> {
 }
 
 /// Emit a function to machine code.
-/// TODO(M2): This is a stub that just emits prologue/epilogue.
 pub fn emit_function(
-    _vinsts: &[VInst],
-    _vreg_pool: &[VReg],
-    _output: &AllocOutput,
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    output: &AllocOutput,
     frame: FrameLayout,
     symbols: &ModuleSymbols,
     is_sret: bool,
 ) -> Result<EmittedCode, AllocError> {
-    let mut ctx = EmitContext::new(frame, symbols, &[]);
+    let mut ctx = EmitContext::new(frame, symbols, vreg_pool);
 
-    // Emit prologue
     ctx.emit_prologue(is_sret)?;
 
-    // TODO(M2): Apply edits and emit instructions
+    let mut edit_cursor = 0usize;
 
-    // Emit epilogue
+    if vinsts.is_empty() {
+        while edit_cursor < output.edits.len() {
+            let (point, edit) = &output.edits[edit_cursor];
+            if *point != EditPoint::Before(0) {
+                break;
+            }
+            ctx.emit_edit(edit, None)?;
+            edit_cursor += 1;
+        }
+    } else {
+        for (inst_idx, vinst) in vinsts.iter().enumerate() {
+            let src_op = vinst.src_op();
+            while edit_cursor < output.edits.len() {
+                let (point, edit) = &output.edits[edit_cursor];
+                if *point != EditPoint::Before(inst_idx as u16) {
+                    break;
+                }
+                ctx.emit_edit(edit, src_op)?;
+                edit_cursor += 1;
+            }
+            ctx.emit_vinst(vinst, output, inst_idx, is_sret)?;
+            while edit_cursor < output.edits.len() {
+                let (point, edit) = &output.edits[edit_cursor];
+                if *point != EditPoint::After(inst_idx as u16) {
+                    break;
+                }
+                ctx.emit_edit(edit, src_op)?;
+                edit_cursor += 1;
+            }
+        }
+    }
+
+    if edit_cursor != output.edits.len() {
+        return Err(AllocError::NotImplemented);
+    }
+
     ctx.emit_epilogue();
 
     ctx.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::debug::vinst;
+    use crate::rv32::abi;
+    use lps_shared::{LpsFnSig, LpsType};
+
+    #[test]
+    fn emit_iconst_ret_non_empty_machine_code() {
+        let input = "i0 = IConst32 42\nRet i0";
+        let (vinsts, symbols, pool) = vinst::parse(input).unwrap();
+        let mut lowered = crate::lower::LoweredFunction {
+            vinsts,
+            vreg_pool: pool,
+            symbols,
+            loop_regions: Vec::new(),
+            region_tree: crate::region::RegionTree::new(),
+        };
+        let root = lowered.region_tree.push(crate::region::Region::Linear {
+            start: 0,
+            end: lowered.vinsts.len() as u16,
+        });
+        lowered.region_tree.root = root;
+
+        let abi = abi::func_abi_rv32(
+            &LpsFnSig {
+                name: alloc::string::String::from("t"),
+                return_type: LpsType::Int,
+                parameters: vec![],
+            },
+            0,
+        );
+
+        let result = crate::emit::emit_lowered(&lowered, &abi).expect("emit_lowered");
+        assert!(
+            result.code.len() > 32,
+            "expected substantial code, got {}",
+            result.code.len()
+        );
+    }
 }
