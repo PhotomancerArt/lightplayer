@@ -121,7 +121,12 @@ fn verify_allocs_within_pool(
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
-        let is_call = inst.is_call();
+        let (is_call, callee_uses_sret) = match inst {
+            VInst::Call {
+                callee_uses_sret, ..
+            } => (true, *callee_uses_sret),
+            _ => (false, false),
+        };
 
         let mut op_idx: usize = 0;
         let mut def_idx: usize = 0;
@@ -130,7 +135,7 @@ fn verify_allocs_within_pool(
             if let Alloc::Reg(preg) = alloc {
                 let allowed = gpr::pool_contains(preg)
                     || is_precolored_reg(preg)
-                    || (is_call && def_idx < gpr::RET_REGS.len());
+                    || (is_call && !callee_uses_sret && def_idx < gpr::RET_REGS.len());
                 assert!(
                     allowed,
                     "inst {}: def allocated to non-allocatable register x{}",
@@ -140,13 +145,14 @@ fn verify_allocs_within_pool(
             op_idx += 1;
             def_idx += 1;
         });
+        let arg_base = if callee_uses_sret { 1 } else { 0 };
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
                 let allowed = gpr::pool_contains(preg)
                     || is_precolored_reg(preg)
-                    || (is_call && use_idx < gpr::ARG_REGS.len());
+                    || (is_call && arg_base + use_idx < gpr::ARG_REGS.len());
                 assert!(
                     allowed,
                     "inst {}: use allocated to non-allocatable register x{}",
@@ -160,35 +166,45 @@ fn verify_allocs_within_pool(
 }
 
 /// Call-specific ABI checks: ret operands in RET_REGS, arg operands in ARG_REGS.
+/// For sret calls: rets are generic (not constrained to RET_REGS), args shifted by 1.
 fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
     for (inst_idx, inst) in vinsts.iter().enumerate() {
-        if !inst.is_call() {
-            continue;
-        }
+        let callee_uses_sret = match inst {
+            VInst::Call {
+                callee_uses_sret, ..
+            } => *callee_uses_sret,
+            _ => continue,
+        };
+
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
 
-        let mut def_idx: usize = 0;
-        inst.for_each_def(vreg_pool, |_def_vreg| {
-            if def_idx < gpr::RET_REGS.len() {
-                let expected = gpr::RET_REGS[def_idx];
-                let actual = output.allocs[offset + def_idx];
-                assert!(
-                    actual == Alloc::Reg(expected),
-                    "inst {} (Call): ret[{}] should be x{}, got {:?}",
-                    inst_idx,
-                    def_idx,
-                    expected,
-                    actual
-                );
-            }
-            def_idx += 1;
-        });
+        if !callee_uses_sret {
+            let mut def_idx: usize = 0;
+            inst.for_each_def(vreg_pool, |_def_vreg| {
+                if def_idx < gpr::RET_REGS.len() {
+                    let expected = gpr::RET_REGS[def_idx];
+                    let actual = output.allocs[offset + def_idx];
+                    assert!(
+                        actual == Alloc::Reg(expected),
+                        "inst {} (Call): ret[{}] should be x{}, got {:?}",
+                        inst_idx,
+                        def_idx,
+                        expected,
+                        actual
+                    );
+                }
+                def_idx += 1;
+            });
+        }
 
-        let num_defs = def_idx;
+        let mut num_defs: usize = 0;
+        inst.for_each_def(vreg_pool, |_| num_defs += 1);
+
+        let arg_base = if callee_uses_sret { 1 } else { 0 };
         let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
-            if use_idx < gpr::ARG_REGS.len() {
-                let expected = gpr::ARG_REGS[use_idx];
+            if arg_base + use_idx < gpr::ARG_REGS.len() {
+                let expected = gpr::ARG_REGS[arg_base + use_idx];
                 let actual = output.allocs[offset + num_defs + use_idx];
                 assert!(
                     actual == Alloc::Reg(expected),

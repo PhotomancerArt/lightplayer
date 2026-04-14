@@ -134,6 +134,42 @@ pub fn walk_linear_with_pool(
         // If param not in pool and not spilled, it was never used
     }
 
+    // Generate entry loads for stack-passed parameters (above the frame, at FP + offset).
+    for (vreg_idx, loc) in func_abi.param_locs().iter().enumerate() {
+        if let crate::abi::classify::ArgLoc::Stack { offset, .. } = loc {
+            let vreg = VReg(vreg_idx as u16);
+            if let Some(final_preg) = pool.home(vreg) {
+                entry_edits.push((
+                    EditPoint::Before(0),
+                    Edit::LoadIncomingArg {
+                        fp_offset: *offset,
+                        to: Alloc::Reg(final_preg),
+                    },
+                ));
+                trace.push(TraceEntry {
+                    vinst_idx: 0,
+                    vinst_mnemonic: String::from("entry_load_stack_arg"),
+                    decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
+                    register_state: String::new(),
+                });
+            } else if let Some(slot) = spill.has_slot(vreg) {
+                entry_edits.push((
+                    EditPoint::Before(0),
+                    Edit::LoadIncomingArg {
+                        fp_offset: *offset,
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+                trace.push(TraceEntry {
+                    vinst_idx: 0,
+                    vinst_mnemonic: String::from("entry_load_stack_arg"),
+                    decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
+                    register_state: String::new(),
+                });
+            }
+        }
+    }
+
     // Entry edits go first (they're at Before(0))
     entry_edits.extend(edits);
     let final_edits = entry_edits;
@@ -302,8 +338,13 @@ fn process_call(
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut AllocTrace,
 ) {
-    let (args_slice, rets_slice) = match inst {
-        VInst::Call { args, rets, .. } => (*args, *rets),
+    let (args_slice, rets_slice, callee_uses_sret) = match inst {
+        VInst::Call {
+            args,
+            rets,
+            callee_uses_sret,
+            ..
+        } => (*args, *rets, *callee_uses_sret),
         _ => unreachable!(),
     };
 
@@ -322,9 +363,10 @@ fn process_call(
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        if i >= gpr::RET_REGS.len() {
-            // Extra rets beyond register return slots — process generically.
-            // (sret will handle these in Phase 3.)
+        if callee_uses_sret || i >= gpr::RET_REGS.len() {
+            // Sret call: all rets come from the sret buffer (emitter loads them).
+            // Non-sret: extra rets beyond register return slots.
+            // In both cases process generically — no RET_REG constraint.
             let alloc = if let Some(preg) = pool.home(ret_vreg) {
                 Alloc::Reg(preg)
             } else if let Some(slot) = spill.has_slot(ret_vreg) {
@@ -413,18 +455,19 @@ fn process_call(
     }
 
     // ── Step 4: Uses (arguments) ──
+    let arg_base = if callee_uses_sret { 1 } else { 0 };
     for (i, &arg_vreg) in args.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        if i >= gpr::ARG_REGS.len() {
+        if arg_base + i >= gpr::ARG_REGS.len() {
             // Stack-passed arg: process as normal use (emitter handles)
             let alloc = alloc_use(arg_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace);
             allocs[alloc_idx] = alloc;
             continue;
         }
 
-        let target = gpr::ARG_REGS[i]; // base=0, sret shift is Phase 3
+        let target = gpr::ARG_REGS[arg_base + i];
 
         if let Some(pool_reg) = pool.home(arg_vreg) {
             pool.touch(pool_reg);
@@ -599,7 +642,10 @@ mod tests {
             walk_linear_with_pool(&vinsts, &pool, &make_abi(), RegPool::with_capacity(2)).unwrap();
 
         // v2 must be spilled (only 2 regs, 3 live values at inst 3)
-        assert!(output.num_spill_slots >= 1, "expected at least 1 spill slot");
+        assert!(
+            output.num_spill_slots >= 1,
+            "expected at least 1 spill slot"
+        );
 
         // v2's def (inst 2) must go to Stack (because it was evicted)
         let v2_def_alloc = output.operand_alloc(2, 0);
@@ -612,7 +658,13 @@ mod tests {
         // There must be an After(3) reload edit: Stack → Reg
         let has_after3_reload = output.edits.iter().any(|(pt, edit)| {
             *pt == EditPoint::After(3)
-                && matches!(edit, Edit::Move { from: Alloc::Stack(_), to: Alloc::Reg(_) })
+                && matches!(
+                    edit,
+                    Edit::Move {
+                        from: Alloc::Stack(_),
+                        to: Alloc::Reg(_)
+                    }
+                )
         });
         assert!(
             has_after3_reload,
@@ -630,7 +682,12 @@ mod tests {
 
         // Edits must be sorted
         for w in output.edits.windows(2) {
-            assert!(w[0].0 <= w[1].0, "edits not sorted: {:?} > {:?}", w[0], w[1]);
+            assert!(
+                w[0].0 <= w[1].0,
+                "edits not sorted: {:?} > {:?}",
+                w[0],
+                w[1]
+            );
         }
     }
 }

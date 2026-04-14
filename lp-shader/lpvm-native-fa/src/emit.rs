@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::abi::FrameLayout;
+use crate::abi::{FrameLayout, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
 use crate::fa_alloc::{AllocResult, allocate};
@@ -53,8 +53,17 @@ pub fn emit_lowered(
     lowered: &crate::lower::LoweredFunction,
     func_abi: &crate::abi::FuncAbi,
 ) -> Result<EmittedCode, NativeError> {
+    emit_lowered_ex(lowered, func_abi, 0)
+}
+
+/// Emit with caller-side sret buffer size.
+pub fn emit_lowered_ex(
+    lowered: &crate::lower::LoweredFunction,
+    func_abi: &crate::abi::FuncAbi,
+    caller_sret_bytes: u32,
+) -> Result<EmittedCode, NativeError> {
     let alloc_result = allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
-    emit_lowered_with_alloc(lowered, func_abi, alloc_result)
+    emit_lowered_with_alloc(lowered, func_abi, alloc_result, caller_sret_bytes)
 }
 
 /// Emit using an existing [`AllocResult`] (avoids running the allocator twice).
@@ -62,14 +71,21 @@ pub fn emit_lowered_with_alloc(
     lowered: &crate::lower::LoweredFunction,
     func_abi: &crate::abi::FuncAbi,
     alloc_result: AllocResult,
+    caller_sret_bytes: u32,
 ) -> Result<EmittedCode, NativeError> {
+    let mut used_callee_saved = alloc_result.used_callee_saved;
+    if func_abi.is_sret() {
+        // sret functions overwrite s1 in the prologue (mv s1, a0) so it must be
+        // saved/restored even though the allocator never assigns it.
+        used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::rv32::abi::S1));
+    }
     let frame = FrameLayout::compute(
         func_abi,
         alloc_result.spill_slots,
-        alloc_result.used_callee_saved,
+        used_callee_saved,
         &[],
         false, // is_leaf: false = save RA (conservative)
-        0,
+        caller_sret_bytes,
         0,
     );
 

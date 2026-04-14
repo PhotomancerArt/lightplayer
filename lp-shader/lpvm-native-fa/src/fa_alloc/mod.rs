@@ -101,6 +101,9 @@ impl Ord for EditPoint {
 pub enum Edit {
     /// Move value between allocations.
     Move { from: Alloc, to: Alloc },
+    /// Load an incoming stack-passed parameter from the caller's frame.
+    /// `fp_offset` is the byte offset from FP (positive, in the caller's area).
+    LoadIncomingArg { fp_offset: i32, to: Alloc },
 }
 
 /// Complete output of the allocator: per-operand allocs + edit list.
@@ -181,12 +184,20 @@ fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
         }
     }
     for (_, edit) in &output.edits {
-        let Edit::Move { from, to } = edit;
-        if let Alloc::Reg(r) = from {
-            insert(*r);
-        }
-        if let Alloc::Reg(r) = to {
-            insert(*r);
+        match edit {
+            Edit::Move { from, to } => {
+                if let Alloc::Reg(r) = from {
+                    insert(*r);
+                }
+                if let Alloc::Reg(r) = to {
+                    insert(*r);
+                }
+            }
+            Edit::LoadIncomingArg { to, .. } => {
+                if let Alloc::Reg(r) = to {
+                    insert(*r);
+                }
+            }
         }
     }
     set

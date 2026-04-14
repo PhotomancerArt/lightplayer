@@ -220,6 +220,21 @@ impl<'a> EmitContext<'a> {
                     self.push_u32(encode_sw(t, FP_REG as u32, o_to), src_op);
                 }
             },
+            Edit::LoadIncomingArg { fp_offset, to } => match *to {
+                Alloc::Reg(dst) => {
+                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, *fp_offset), src_op);
+                }
+                Alloc::Stack(slot) => {
+                    let spill_off = self
+                        .frame
+                        .spill_offset_from_fp(slot as u32)
+                        .ok_or(AllocError::NotImplemented)?;
+                    let t = Self::TEMP0 as u32;
+                    self.push_u32(encode_lw(t, FP_REG as u32, *fp_offset), src_op);
+                    self.push_u32(encode_sw(t, FP_REG as u32, spill_off), src_op);
+                }
+                Alloc::None => return Err(AllocError::NotImplemented),
+            },
         }
         Ok(())
     }
@@ -730,6 +745,7 @@ impl<'a> EmitContext<'a> {
             VInst::Call {
                 target,
                 args,
+                rets,
                 callee_uses_sret,
                 ..
             } => {
@@ -741,6 +757,18 @@ impl<'a> EmitContext<'a> {
                 if args.len() > cap {
                     return Err(AllocError::NotImplemented);
                 }
+
+                if *callee_uses_sret {
+                    let sret_off = self
+                        .frame
+                        .sret_slot_offset_from_fp()
+                        .ok_or(AllocError::NotImplemented)?;
+                    self.push_u32(
+                        encode_addi(ARG_REGS[0] as u32, FP_REG as u32, sret_off),
+                        src_op,
+                    );
+                }
+
                 let auipc_off = self.code.len();
                 let ra = RA_REG as u32;
                 self.push_u32(encode_auipc(ra, 0), src_op);
@@ -749,6 +777,35 @@ impl<'a> EmitContext<'a> {
                     offset: auipc_off,
                     symbol: String::from(self.symbols.name(*target)),
                 });
+
+                if *callee_uses_sret {
+                    let sret_off = self
+                        .frame
+                        .sret_slot_offset_from_fp()
+                        .ok_or(AllocError::NotImplemented)?;
+                    for i in 0..rets.len() {
+                        let alloc = Self::operand_alloc(output, inst_idx, i);
+                        let buf_off = sret_off + (i as i32) * 4;
+                        match alloc {
+                            Alloc::Reg(dst) => {
+                                self.push_u32(
+                                    encode_lw(dst as u32, FP_REG as u32, buf_off),
+                                    src_op,
+                                );
+                            }
+                            Alloc::Stack(slot) => {
+                                let spill_off = self
+                                    .frame
+                                    .spill_offset_from_fp(slot as u32)
+                                    .ok_or(AllocError::NotImplemented)?;
+                                let t = Self::TEMP0 as u32;
+                                self.push_u32(encode_lw(t, FP_REG as u32, buf_off), src_op);
+                                self.push_u32(encode_sw(t, FP_REG as u32, spill_off), src_op);
+                            }
+                            Alloc::None => {}
+                        }
+                    }
+                }
             }
             VInst::Ret { vals, .. } => {
                 let n = vals.len();

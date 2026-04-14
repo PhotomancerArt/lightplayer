@@ -534,6 +534,9 @@ fn format_edit(edit: &Edit) -> String {
         Edit::Move { from, to } => {
             format!("move: {} -> {}", format_alloc(*from), format_alloc(*to))
         }
+        Edit::LoadIncomingArg { fp_offset, to } => {
+            format!("load_arg: [fp+{}] -> {}", fp_offset, format_alloc(*to))
+        }
     }
 }
 

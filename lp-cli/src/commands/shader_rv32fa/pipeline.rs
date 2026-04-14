@@ -129,8 +129,13 @@ pub fn run_fastalloc_module(
             writeln!(debug, "{}", text)?;
         }
 
-        let emitted = emit_lowered_with_alloc(&lowered, &func_abi, alloc_result)
-            .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
+        let emitted = emit_lowered_with_alloc(
+            &lowered,
+            &func_abi,
+            alloc_result,
+            module_abi.max_callee_sret_bytes(),
+        )
+        .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
         let code = emitted.code;
 
         if verbosity.disasm {

@@ -91,8 +91,8 @@ pub fn compile_function(
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
 
     // 4. Allocate and emit
-    // TODO(M2): This currently returns NotImplemented error
-    let emitted = crate::emit::emit_lowered(&lowered, &func_abi)?;
+    let emitted =
+        crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
 
     let code = emitted.code;
     let relocs = emitted.relocs;

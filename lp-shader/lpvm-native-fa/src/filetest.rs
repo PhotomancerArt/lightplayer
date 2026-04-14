@@ -24,7 +24,7 @@ pub struct FileTest {
     pub name: String,
     pub pool_size: Option<usize>,
     pub abi_params: usize,
-    /// Return type for ABI: "void", "i32", or "f32" (default "void").
+    /// Return type for ABI: "void", "i32", "f32", "vec3", "vec4", "mat4" (default "void").
     pub abi_return: String,
     /// `import:` directive bodies, e.g. `helper(i32, i32) -> i32` → prepended as
     /// `import @filetest::helper(i32, i32) -> i32`.
@@ -225,6 +225,9 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
     let return_type = match test.abi_return.as_str() {
         "i32" => LpsType::Int,
         "f32" => LpsType::Float,
+        "vec3" => LpsType::Vec3,
+        "vec4" => LpsType::Vec4,
+        "mat4" => LpsType::Mat4,
         _ => LpsType::Void,
     };
 
