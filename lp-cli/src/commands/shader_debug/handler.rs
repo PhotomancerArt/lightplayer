@@ -229,7 +229,7 @@ fn print_fa_debug(
         println!("────────────────────────────────────────");
         println!("To show a specific function:");
         for func in &ir.functions {
-            println!("  lp-cli shader-debug -t rv32fa {} --fn {}", file_path_str, func.name);
+            println!("  scripts/shader-debug.sh -t rv32fa {} --fn {}", file_path_str, func.name);
         }
         println!();
         print!("Available functions: ");
@@ -332,7 +332,7 @@ fn print_linear_debug(
         println!("────────────────────────────────────────");
         println!("To show a specific function:");
         for func in &ir.functions {
-            println!("  lp-cli shader-debug -t rv32lp {} --fn {}", file_path_str, func.name);
+            println!("  scripts/shader-debug.sh -t rv32lp {} --fn {}", file_path_str, func.name);
         }
         println!();
         print!("Available functions: ");
@@ -503,7 +503,7 @@ fn print_cranelift_debug(
         println!("────────────────────────────────────────");
         println!("To show a specific function:");
         for func in &ir.functions {
-            println!("  lp-cli shader-debug -t {} {} --fn {}", target, file_path_str, func.name);
+            println!("  scripts/shader-debug.sh -t {} {} --fn {}", target, file_path_str, func.name);
         }
         println!();
         print!("Available functions: ");
