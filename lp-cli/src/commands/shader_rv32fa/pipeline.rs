@@ -9,9 +9,9 @@ use lpvm_native_fa::emit::emit_lowered_with_alloc;
 use lpvm_native_fa::fa_alloc;
 use lpvm_native_fa::fa_alloc::liveness::{analyze_liveness, format_liveness};
 use lpvm_native_fa::fa_alloc::render::render_alloc_output;
+use lpvm_native_fa::lower_ops;
 use lpvm_native_fa::rv32::abi::func_abi_rv32;
 use lpvm_native_fa::rv32::debug::region::format_region_tree;
-use lpvm_native_fa::{lower_ops, peephole};
 
 /// Which stderr debug sections to print.
 #[derive(Clone, Copy, Debug)]
@@ -66,9 +66,9 @@ pub fn run_fastalloc_module(
             .copied()
             .unwrap_or(&default_sig);
 
-        let mut lowered = lower_ops(func, ir, &module_abi, float_mode)
+        let lowered = lower_ops(func, ir, &module_abi, float_mode)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
-        peephole::optimize(&mut lowered.vinsts);
+        // peephole disabled — removing VInsts invalidates region tree indices.
 
         if verbosity.vinst {
             writeln!(debug, "=== VInst {} ===", func.name)?;

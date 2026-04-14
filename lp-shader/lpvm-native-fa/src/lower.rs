@@ -690,8 +690,7 @@ impl<'a> LowerCtx<'a> {
                     let else_is_empty = matches!(self.func.body.get(eo), Some(LpirOp::End));
 
                     if else_is_empty {
-                        // if (cond) { then } ; merge label
-                        // The walker emits: BrIf, J to merge, Label(merge)
+                        // if (cond) { then } ; merge label (same VInst order as lpvm-native)
                         let merge = self.alloc_label();
 
                         let head_start = self.out.len() as u16;
@@ -707,23 +706,40 @@ impl<'a> LowerCtx<'a> {
                             end: head_end,
                         });
 
-                        let then_body = self.lower_range(i + 1, eo)?;
-                        // else_body is empty; walker emits J to merge
+                        let then_inner = self.lower_range(i + 1, eo)?;
+                        let br_merge_s = self.out.len() as u16;
+                        self.out.push(VInst::Br {
+                            target: merge,
+                            src_op: pack_src_op(Some(i as u32)),
+                        });
+                        let br_merge_e = self.out.len() as u16;
+                        let br_merge = self.region_tree.push(Region::Linear {
+                            start: br_merge_s,
+                            end: br_merge_e,
+                        });
+                        let merge_lbl_s = self.out.len() as u16;
+                        self.out
+                            .push(VInst::Label(merge, pack_src_op(Some(eo as u32))));
+                        let merge_lbl_e = self.out.len() as u16;
+                        let merge_lbl = self.region_tree.push(Region::Linear {
+                            start: merge_lbl_s,
+                            end: merge_lbl_e,
+                        });
+                        let then_body = self
+                            .region_tree
+                            .push_seq(&[then_inner, br_merge, merge_lbl]);
                         let else_body = REGION_ID_NONE;
-
-                        // Note: Label(merge) is emitted by walker, not as VInst
 
                         let if_region = self.region_tree.push(Region::IfThenElse {
                             head,
                             then_body,
                             else_body,
-                            else_label: merge, // unused for empty else, but stored for consistency
+                            else_label: merge,
                             merge_label: merge,
                         });
                         seq.push(if_region);
                     } else {
                         // if (cond) { then } else { else } ; end label
-                        // The walker emits: BrIf to else, J to end, Label(else), Label(end)
                         let else_label = self.alloc_label();
                         let end_label = self.alloc_label();
 
@@ -740,12 +756,38 @@ impl<'a> LowerCtx<'a> {
                             end: head_end,
                         });
 
-                        let then_body = self.lower_range(i + 1, eo)?;
+                        let then_inner = self.lower_range(i + 1, eo)?;
+                        let br_end_s = self.out.len() as u16;
+                        self.out.push(VInst::Br {
+                            target: end_label,
+                            src_op: pack_src_op(Some(i as u32)),
+                        });
+                        let br_end_e = self.out.len() as u16;
+                        let br_end = self.region_tree.push(Region::Linear {
+                            start: br_end_s,
+                            end: br_end_e,
+                        });
+                        let then_body = self.region_tree.push_seq(&[then_inner, br_end]);
 
-                        // else_body is just the computation; walker emits control flow
-                        let else_body = self.lower_range(eo + 1, merge_after)?;
-
-                        // Note: Labels and J are emitted by walker, not as VInsts
+                        let else_lbl_s = self.out.len() as u16;
+                        self.out
+                            .push(VInst::Label(else_label, pack_src_op(Some(*else_offset))));
+                        let else_lbl_e = self.out.len() as u16;
+                        let else_lbl = self.region_tree.push(Region::Linear {
+                            start: else_lbl_s,
+                            end: else_lbl_e,
+                        });
+                        let else_inner = self.lower_range(eo + 1, merge_after)?;
+                        let end_lbl_s = self.out.len() as u16;
+                        let end_idx = merge_after.saturating_sub(1);
+                        self.out
+                            .push(VInst::Label(end_label, pack_src_op(Some(end_idx as u32))));
+                        let end_lbl_e = self.out.len() as u16;
+                        let end_lbl = self.region_tree.push(Region::Linear {
+                            start: end_lbl_s,
+                            end: end_lbl_e,
+                        });
+                        let else_body = self.region_tree.push_seq(&[else_lbl, else_inner, end_lbl]);
 
                         let if_region = self.region_tree.push(Region::IfThenElse {
                             head,
@@ -771,45 +813,89 @@ impl<'a> LowerCtx<'a> {
                         vinst_start,
                     );
 
-                    // Allocate labels; walker emits all control flow
+                    // Same VInst / label layout as lpvm-native (emitter resolves branches).
                     let header_label = self.alloc_label();
                     let continuing = self.alloc_label();
                     let exit = self.alloc_label();
 
-                    // Note: entry Br, header Label, back-edge Br, exit Label
-                    // are all emitted by the walker, not as VInsts
-
-                    // The header contains the loop condition (e.g., BrIf exit)
-                    // It's walked like a normal region
-                    let header_start = self.out.len() as u16;
-                    // TODO: In a future refactor, the header condition should be
-                    // in the body, not as a separate VInst. For now, keep the
-                    // existing pattern but walker will handle it.
-                    let header_end = self.out.len() as u16;
-                    let header = if header_start < header_end {
-                        self.region_tree.push(Region::Linear {
-                            start: header_start,
-                            end: header_end,
-                        })
-                    } else {
-                        REGION_ID_NONE
-                    };
-
-                    self.loop_stack.push(LoopFrame { continuing, exit });
-                    let _co = *continuing_offset as usize; // Used for continuing block, walker handles it
-                    let eo = *end_offset as usize;
-
-                    // Body contains the loop computation and continuing block
-                    let body = self.lower_range(i + 1, eo)?;
-
-                    self.loop_regions.push(LoopRegion {
-                        header_idx: 0, // TODO: remove after walker refactor
-                        backedge_idx: 0,
+                    let pre_start = self.out.len() as u16;
+                    self.out.push(VInst::Br {
+                        target: header_label,
+                        src_op: pack_src_op(Some(i as u32)),
+                    });
+                    let header_lbl_idx = self.out.len() as u16;
+                    self.out.push(VInst::Label(
+                        header_label,
+                        pack_src_op(Some((i + 1) as u32)),
+                    ));
+                    let pre_end = self.out.len() as u16;
+                    let header = self.region_tree.push(Region::Linear {
+                        start: pre_start,
+                        end: pre_end,
                     });
 
+                    self.loop_stack.push(LoopFrame { continuing, exit });
+                    let co = *continuing_offset as usize;
+                    let eo = *end_offset as usize;
+
+                    let main_body = self.lower_range(i + 1, co)?;
+
+                    let cont_seq = if co < eo {
+                        let ls = self.out.len() as u16;
+                        self.out.push(VInst::Label(
+                            continuing,
+                            pack_src_op(Some(*continuing_offset)),
+                        ));
+                        let le = self.out.len() as u16;
+                        let label_r = self.region_tree.push(Region::Linear { start: ls, end: le });
+                        let cont_inner = self.lower_range(co, eo.saturating_sub(1))?;
+                        Some(self.region_tree.push_seq(&[label_r, cont_inner]))
+                    } else {
+                        None
+                    };
+
+                    let backedge_idx = self.out.len() as u16;
+                    self.out.push(VInst::Br {
+                        target: header_label,
+                        src_op: pack_src_op(Some((eo.saturating_sub(1)) as u32)),
+                    });
+                    let backedge_end = self.out.len() as u16;
+                    let backedge = self.region_tree.push(Region::Linear {
+                        start: backedge_idx,
+                        end: backedge_end,
+                    });
+
+                    let exit_ls = self.out.len() as u16;
+                    self.out
+                        .push(VInst::Label(exit, pack_src_op(Some(*end_offset))));
+                    let exit_le = self.out.len() as u16;
+                    let exit_lin = self.region_tree.push(Region::Linear {
+                        start: exit_ls,
+                        end: exit_le,
+                    });
+
+                    self.loop_regions.push(LoopRegion {
+                        header_idx: header_lbl_idx as usize,
+                        backedge_idx: backedge_idx as usize,
+                    });
                     self.loop_stack.pop();
 
-                    // Create Loop region with labels for walker
+                    let mut inner: Vec<RegionId> = Vec::new();
+                    if main_body != REGION_ID_NONE {
+                        inner.push(main_body);
+                    }
+                    if let Some(c) = cont_seq {
+                        inner.push(c);
+                    }
+                    inner.push(backedge);
+                    let body = if inner.is_empty() {
+                        backedge
+                    } else if inner.len() == 1 {
+                        inner[0]
+                    } else {
+                        self.region_tree.push_seq(&inner)
+                    };
+
                     let loop_region = self.region_tree.push(Region::Loop {
                         header,
                         body,
@@ -817,6 +903,7 @@ impl<'a> LowerCtx<'a> {
                         exit_label: exit,
                     });
                     seq.push(loop_region);
+                    seq.push(exit_lin);
 
                     i = eo;
                     current_linear_start = Some(self.out.len() as u16);

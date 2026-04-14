@@ -1,4 +1,4 @@
-//! Backward walk allocator for Linear regions.
+//! Backward walk allocator: [`RegionTree`] dispatch with spill-at-boundary.
 //!
 //! Walks instructions in reverse order, allocating registers for uses,
 //! freeing registers for defs, and recording spill/reload edits.
@@ -8,12 +8,346 @@ use crate::fa_alloc::pool::RegPool;
 use crate::fa_alloc::spill::SpillAlloc;
 use crate::fa_alloc::trace::{AllocTrace, TraceEntry};
 use crate::fa_alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
+use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
+use crate::regset::RegSet;
 use crate::rv32::gpr::{self, PReg};
 use crate::vinst::{VInst, VReg};
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Walk a Linear region backward, producing AllocOutput.
+/// Per-instruction operand offsets into the flat `allocs` table (global indices).
+pub(crate) fn build_operand_layout(vinsts: &[VInst], vreg_pool: &[VReg]) -> (Vec<u16>, usize) {
+    let mut inst_alloc_offsets = Vec::with_capacity(vinsts.len());
+    let mut total_operands: usize = 0;
+    for inst in vinsts {
+        inst_alloc_offsets.push(total_operands as u16);
+        let mut num_operands: usize = 0;
+        inst.for_each_def(vreg_pool, |_def| num_operands += 1);
+        inst.for_each_use(vreg_pool, |_use| num_operands += 1);
+        total_operands += num_operands;
+    }
+    (inst_alloc_offsets, total_operands)
+}
+
+/// First VInst index in `vinsts` covered by this region (for boundary edit anchors).
+fn region_first_vinst(tree: &RegionTree, id: RegionId) -> Option<u16> {
+    if id == REGION_ID_NONE {
+        return None;
+    }
+    match &tree.nodes[id as usize] {
+        Region::Linear { start, end } => {
+            if start < end {
+                Some(*start)
+            } else {
+                None
+            }
+        }
+        Region::Seq {
+            children_start,
+            child_count,
+        } => {
+            let s = *children_start as usize;
+            let e = s + *child_count as usize;
+            tree.seq_children[s..e]
+                .iter()
+                .find_map(|&c| region_first_vinst(tree, c))
+        }
+        Region::IfThenElse { head, .. } => region_first_vinst(tree, *head),
+        Region::Loop { header, body, .. } => {
+            region_first_vinst(tree, *header).or_else(|| region_first_vinst(tree, *body))
+        }
+    }
+}
+
+/// Register allocation over the full `vinsts` slice using a region tree root.
+pub fn allocate_from_tree(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    tree: &RegionTree,
+    root: RegionId,
+    func_abi: &FuncAbi,
+    pool: RegPool,
+) -> Result<AllocOutput, AllocError> {
+    let (inst_alloc_offsets, total_operands) = build_operand_layout(vinsts, vreg_pool);
+    let max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize + 32;
+    let mut state = WalkState {
+        vinsts,
+        vreg_pool,
+        func_abi,
+        tree,
+        inst_alloc_offsets,
+        pool,
+        spill: SpillAlloc::new(max_vreg_idx + 16),
+        allocs: vec![Alloc::None; total_operands],
+        edits: Vec::new(),
+        trace: AllocTrace::new(),
+        loop_carried: RegSet::new(),
+    };
+    state.walk_region(root)?;
+    state.finish()
+}
+
+struct WalkState<'a> {
+    vinsts: &'a [VInst],
+    vreg_pool: &'a [VReg],
+    func_abi: &'a FuncAbi,
+    tree: &'a RegionTree,
+    inst_alloc_offsets: Vec<u16>,
+    pool: RegPool,
+    spill: SpillAlloc,
+    allocs: Vec<Alloc>,
+    edits: Vec<(EditPoint, Edit)>,
+    trace: AllocTrace,
+    /// VRegs that are loop-carried: defs to registers get a store-after-def
+    /// edit so the spill slot always has the latest value at sub-boundaries.
+    loop_carried: RegSet,
+}
+
+impl<'a> WalkState<'a> {
+    fn walk_region(&mut self, id: RegionId) -> Result<(), AllocError> {
+        if id == REGION_ID_NONE {
+            return Ok(());
+        }
+        match &self.tree.nodes[id as usize] {
+            Region::Linear { start, end } => self.walk_linear_range(*start as usize, *end as usize),
+            Region::Seq {
+                children_start,
+                child_count,
+            } => {
+                let s = *children_start as usize;
+                let e = s + *child_count as usize;
+                let children: Vec<RegionId> = self.tree.seq_children[s..e].to_vec();
+                for idx in (0..children.len()).rev() {
+                    let child = children[idx];
+                    self.walk_region(child)?;
+                    if idx > 0 {
+                        if let Some(anchor) = region_first_vinst(self.tree, child) {
+                            self.boundary_reload_before(anchor);
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Region::IfThenElse {
+                head,
+                then_body,
+                else_body,
+                ..
+            } => {
+                if *else_body != REGION_ID_NONE {
+                    self.walk_region(*else_body)?;
+                    if let Some(anchor) = region_first_vinst(self.tree, *then_body) {
+                        self.boundary_reload_before(anchor);
+                    }
+                }
+                self.walk_region(*then_body)?;
+                if let Some(anchor) = region_first_vinst(self.tree, *head) {
+                    self.boundary_reload_before(anchor);
+                }
+                self.walk_region(*head)?;
+                Ok(())
+            }
+            Region::Loop { header, body, .. } => {
+                if *body != REGION_ID_NONE {
+                    // Pre-assign spill slots for loop-carried values so that
+                    // defs inside the body write directly to the slot. The
+                    // back-edge Br is a no-op; without pre-assignment the
+                    // updated value would never reach the spill slot and the
+                    // next iteration's header reload would read stale data.
+                    let body_live = crate::fa_alloc::liveness::analyze_liveness(
+                        self.tree,
+                        *body,
+                        self.vinsts,
+                        self.vreg_pool,
+                    );
+                    for vreg in body_live.live_in.iter() {
+                        self.spill.get_or_assign(vreg);
+                        self.loop_carried.insert(vreg);
+                    }
+
+                    self.walk_region(*body)?;
+                    if let Some(anchor) = region_first_vinst(self.tree, *body) {
+                        self.boundary_reload_before(anchor);
+                    }
+                }
+                self.walk_region(*header)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn walk_linear_range(&mut self, start: usize, end: usize) -> Result<(), AllocError> {
+        for inst_idx in (start..end).rev() {
+            let inst = &self.vinsts[inst_idx];
+            let inst_idx_u16 = inst_idx as u16;
+            let offset = self.inst_alloc_offsets[inst_idx] as usize;
+
+            if inst.is_call() {
+                process_call(
+                    inst,
+                    inst_idx,
+                    inst_idx_u16,
+                    offset,
+                    self.vreg_pool,
+                    &mut self.pool,
+                    &mut self.spill,
+                    &mut self.allocs,
+                    &mut self.edits,
+                    &mut self.trace,
+                );
+            } else {
+                process_generic(
+                    inst,
+                    inst_idx,
+                    inst_idx_u16,
+                    offset,
+                    self.vreg_pool,
+                    &mut self.pool,
+                    &mut self.spill,
+                    &mut self.allocs,
+                    &mut self.edits,
+                    &mut self.trace,
+                );
+            }
+
+            // For loop-carried defs allocated to a register, insert a store
+            // so the spill slot always holds the latest value. Without this,
+            // values modified inside a loop body but not used in a later
+            // sub-region (e.g. the continuing block) would never reach the
+            // slot, and the next iteration's header reload would read stale
+            // data.
+            if !self.loop_carried.is_empty() {
+                let mut def_idx = offset;
+                self.vinsts[inst_idx].for_each_def(self.vreg_pool, |def_vreg| {
+                    if self.loop_carried.contains(def_vreg) {
+                        if let Alloc::Reg(preg) = self.allocs[def_idx] {
+                            if let Some(slot) = self.spill.has_slot(def_vreg) {
+                                self.edits.push((
+                                    EditPoint::After(inst_idx_u16),
+                                    Edit::Move {
+                                        from: Alloc::Reg(preg),
+                                        to: Alloc::Stack(slot),
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    def_idx += 1;
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// At a region boundary, ensure every pool-resident value has a spill slot
+    /// and insert a RELOAD edit (slot → reg) before `anchor`. The preceding
+    /// region's backward walk will see the spill slot and direct its def there;
+    /// the reload fills the register expected by the following region.
+    fn boundary_reload_before(&mut self, anchor: u16) {
+        let occupied: Vec<(PReg, VReg)> = self.pool.iter_occupied().collect();
+        for (preg, vreg) in occupied {
+            let slot = self.spill.get_or_assign(vreg);
+            self.edits.push((
+                EditPoint::Before(anchor),
+                Edit::Move {
+                    from: Alloc::Stack(slot),
+                    to: Alloc::Reg(preg),
+                },
+            ));
+            self.pool.free(preg);
+        }
+    }
+
+    fn finish(mut self) -> Result<AllocOutput, AllocError> {
+        self.edits.reverse();
+        self.edits.sort_by_key(|(pt, _)| *pt);
+
+        let mut entry_precolors: Vec<(VReg, PReg)> = Vec::new();
+        for (vreg_idx, preg) in self.func_abi.precolors() {
+            let vreg = VReg(*vreg_idx as u16);
+            entry_precolors.push((vreg, preg.hw));
+        }
+
+        let mut entry_edits: Vec<(EditPoint, Edit)> = Vec::new();
+        for (vreg, abi_reg) in entry_precolors {
+            if let Some(final_preg) = self.pool.home(vreg) {
+                entry_edits.push((
+                    EditPoint::Before(0),
+                    Edit::Move {
+                        from: Alloc::Reg(abi_reg),
+                        to: Alloc::Reg(final_preg),
+                    },
+                ));
+                self.trace.push(TraceEntry {
+                    vinst_idx: 0,
+                    vinst_mnemonic: String::from("entry_move"),
+                    decision: alloc::format!("x{} -> x{}", abi_reg, final_preg),
+                    register_state: String::new(),
+                });
+            } else if let Some(slot) = self.spill.has_slot(vreg) {
+                entry_edits.push((
+                    EditPoint::Before(0),
+                    Edit::Move {
+                        from: Alloc::Reg(abi_reg),
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+                self.trace.push(TraceEntry {
+                    vinst_idx: 0,
+                    vinst_mnemonic: String::from("entry_spill"),
+                    decision: alloc::format!("x{} -> slot{}", abi_reg, slot),
+                    register_state: String::new(),
+                });
+            }
+        }
+
+        for (vreg_idx, loc) in self.func_abi.param_locs().iter().enumerate() {
+            if let crate::abi::classify::ArgLoc::Stack { offset, .. } = loc {
+                let vreg = VReg(vreg_idx as u16);
+                if let Some(final_preg) = self.pool.home(vreg) {
+                    entry_edits.push((
+                        EditPoint::Before(0),
+                        Edit::LoadIncomingArg {
+                            fp_offset: *offset,
+                            to: Alloc::Reg(final_preg),
+                        },
+                    ));
+                    self.trace.push(TraceEntry {
+                        vinst_idx: 0,
+                        vinst_mnemonic: String::from("entry_load_stack_arg"),
+                        decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
+                        register_state: String::new(),
+                    });
+                } else if let Some(slot) = self.spill.has_slot(vreg) {
+                    entry_edits.push((
+                        EditPoint::Before(0),
+                        Edit::LoadIncomingArg {
+                            fp_offset: *offset,
+                            to: Alloc::Stack(slot),
+                        },
+                    ));
+                    self.trace.push(TraceEntry {
+                        vinst_idx: 0,
+                        vinst_mnemonic: String::from("entry_load_stack_arg"),
+                        decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
+                        register_state: String::new(),
+                    });
+                }
+            }
+        }
+
+        entry_edits.extend(self.edits);
+        Ok(AllocOutput {
+            allocs: self.allocs,
+            inst_alloc_offsets: self.inst_alloc_offsets,
+            edits: entry_edits,
+            num_spill_slots: self.spill.total_slots(),
+            trace: self.trace,
+        })
+    }
+}
+
+/// Walk a Linear region backward, producing AllocOutput (whole slice = one Linear root).
 pub fn walk_linear(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
@@ -27,160 +361,19 @@ pub fn walk_linear_with_pool(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
     func_abi: &FuncAbi,
-    mut pool: RegPool,
+    pool: RegPool,
 ) -> Result<AllocOutput, AllocError> {
-    // Count total operands and build offset table
-    let mut inst_alloc_offsets = Vec::with_capacity(vinsts.len());
-    let mut total_operands: usize = 0;
-
-    for inst in vinsts {
-        let mut num_operands: usize = 0;
-        inst.for_each_def(vreg_pool, |_def| num_operands += 1);
-        inst.for_each_use(vreg_pool, |_use| num_operands += 1);
-        inst_alloc_offsets.push(total_operands as u16);
-        total_operands += num_operands;
-    }
-
-    // Allocate the flat allocation table
-    let mut allocs: Vec<Alloc> = vec![Alloc::None; total_operands];
-    let max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize + 32;
-    let mut spill = SpillAlloc::new(max_vreg_idx + 16);
-    let mut trace = AllocTrace::new();
-    let mut edits: Vec<(EditPoint, Edit)> = Vec::new();
-
-    // Record entry precolors (ABI reg → vreg) for generating entry moves later.
-    // We do NOT seed these into the pool — params get pool regs lazily when
-    // the backward walk encounters their uses. This avoids stale allocations
-    // when a call clobbers the ABI registers.
-    let mut entry_precolors: Vec<(VReg, PReg)> = Vec::new();
-    for (vreg_idx, preg) in func_abi.precolors() {
-        let vreg = VReg(*vreg_idx as u16);
-        let abi_reg = preg.hw;
-        entry_precolors.push((vreg, abi_reg));
-    }
-
-    // Walk instructions backward
-    for (inst_idx, inst) in vinsts.iter().enumerate().rev() {
-        let inst_idx_u16 = inst_idx as u16;
-        let offset = inst_alloc_offsets[inst_idx] as usize;
-
-        if inst.is_call() {
-            process_call(
-                inst,
-                inst_idx,
-                inst_idx_u16,
-                offset,
-                vreg_pool,
-                &mut pool,
-                &mut spill,
-                &mut allocs,
-                &mut edits,
-                &mut trace,
-            );
-        } else {
-            process_generic(
-                inst,
-                inst_idx,
-                inst_idx_u16,
-                offset,
-                vreg_pool,
-                &mut pool,
-                &mut spill,
-                &mut allocs,
-                &mut edits,
-                &mut trace,
-            );
-        }
-    }
-
-    // Reverse edits (recorded in backward order, need forward order),
-    // then stable-sort so Before(n) < After(n) < Before(n+1) holds.
-    edits.reverse();
-    edits.sort_by_key(|(pt, _)| *pt);
-
-    // Generate entry moves: ABI register → pool register (or spill slot).
-    // Since params are NOT pre-seeded, every used param needs an entry move.
-    let mut entry_edits: Vec<(EditPoint, Edit)> = Vec::new();
-    for (vreg, abi_reg) in entry_precolors {
-        if let Some(final_preg) = pool.home(vreg) {
-            entry_edits.push((
-                EditPoint::Before(0),
-                Edit::Move {
-                    from: Alloc::Reg(abi_reg),
-                    to: Alloc::Reg(final_preg),
-                },
-            ));
-            trace.push(TraceEntry {
-                vinst_idx: 0,
-                vinst_mnemonic: String::from("entry_move"),
-                decision: alloc::format!("x{} -> x{}", abi_reg, final_preg),
-                register_state: String::new(),
-            });
-        } else if let Some(slot) = spill.has_slot(vreg) {
-            entry_edits.push((
-                EditPoint::Before(0),
-                Edit::Move {
-                    from: Alloc::Reg(abi_reg),
-                    to: Alloc::Stack(slot),
-                },
-            ));
-            trace.push(TraceEntry {
-                vinst_idx: 0,
-                vinst_mnemonic: String::from("entry_spill"),
-                decision: alloc::format!("x{} -> slot{}", abi_reg, slot),
-                register_state: String::new(),
-            });
-        }
-        // If param not in pool and not spilled, it was never used
-    }
-
-    // Generate entry loads for stack-passed parameters (above the frame, at FP + offset).
-    for (vreg_idx, loc) in func_abi.param_locs().iter().enumerate() {
-        if let crate::abi::classify::ArgLoc::Stack { offset, .. } = loc {
-            let vreg = VReg(vreg_idx as u16);
-            if let Some(final_preg) = pool.home(vreg) {
-                entry_edits.push((
-                    EditPoint::Before(0),
-                    Edit::LoadIncomingArg {
-                        fp_offset: *offset,
-                        to: Alloc::Reg(final_preg),
-                    },
-                ));
-                trace.push(TraceEntry {
-                    vinst_idx: 0,
-                    vinst_mnemonic: String::from("entry_load_stack_arg"),
-                    decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
-                    register_state: String::new(),
-                });
-            } else if let Some(slot) = spill.has_slot(vreg) {
-                entry_edits.push((
-                    EditPoint::Before(0),
-                    Edit::LoadIncomingArg {
-                        fp_offset: *offset,
-                        to: Alloc::Stack(slot),
-                    },
-                ));
-                trace.push(TraceEntry {
-                    vinst_idx: 0,
-                    vinst_mnemonic: String::from("entry_load_stack_arg"),
-                    decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
-                    register_state: String::new(),
-                });
-            }
-        }
-    }
-
-    // Entry edits go first (they're at Before(0))
-    entry_edits.extend(edits);
-    let final_edits = entry_edits;
-
-    Ok(AllocOutput {
-        allocs,
-        inst_alloc_offsets,
-        edits: final_edits,
-        num_spill_slots: spill.total_slots(),
-        trace,
-    })
+    let mut tree = RegionTree::new();
+    let root = if vinsts.is_empty() {
+        REGION_ID_NONE
+    } else {
+        tree.push(Region::Linear {
+            start: 0,
+            end: vinsts.len() as u16,
+        })
+    };
+    tree.root = root;
+    allocate_from_tree(vinsts, vreg_pool, &tree, root, func_abi, pool)
 }
 
 /// Generic (non-call) instruction processing.
@@ -237,12 +430,7 @@ fn process_generic(
                     trace.push(TraceEntry {
                         vinst_idx: inst_idx,
                         vinst_mnemonic: String::from("coalesce_evict"),
-                        decision: alloc::format!(
-                            "slot{} -> t{} (v{})",
-                            slot,
-                            preg,
-                            evicted_vreg.0
-                        ),
+                        decision: alloc::format!("slot{} -> t{} (v{})", slot, preg, evicted_vreg.0),
                         register_state: String::new(),
                     });
                 }

@@ -227,43 +227,42 @@ fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
     set
 }
 
-/// Allocate registers for a lowered function.
-///
-/// Currently only supports Linear regions (straight-line code).
-/// Returns AllocError::UnsupportedControlFlow for other region types.
+/// Allocate registers for a lowered function (full region tree).
 pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
-    use crate::region::Region;
+    use crate::fa_alloc::pool::RegPool;
+    use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 
-    // Get the root region
-    let root_id = lowered.region_tree.root as usize;
-    if root_id >= lowered.region_tree.nodes.len() {
-        return Err(AllocError::UnsupportedControlFlow);
-    }
-    let root_region = &lowered.region_tree.nodes[root_id];
+    let synthetic_root = lowered.region_tree.root == REGION_ID_NONE && !lowered.vinsts.is_empty();
+    let owned_tree;
+    let (tree, root): (&RegionTree, RegionId) = if synthetic_root {
+        let mut t = RegionTree::new();
+        let r = t.push(Region::Linear {
+            start: 0,
+            end: lowered.vinsts.len() as u16,
+        });
+        t.root = r;
+        owned_tree = t;
+        (&owned_tree, r)
+    } else {
+        (&lowered.region_tree, lowered.region_tree.root)
+    };
 
-    match root_region {
-        Region::Linear { start, end } => {
-            // Extract the linear block of instructions
-            let start_idx = *start as usize;
-            let end_idx = *end as usize;
-            let block_vinsts = &lowered.vinsts[start_idx..end_idx];
+    let output = walk::allocate_from_tree(
+        &lowered.vinsts,
+        &lowered.vreg_pool,
+        tree,
+        root,
+        func_abi,
+        RegPool::new(),
+    )?;
+    let spill_slots = output.num_spill_slots;
+    let used_callee_saved = used_callee_saved_from_output(&output);
 
-            // Run the backward walk allocator
-            let output = walk::walk_linear(block_vinsts, &lowered.vreg_pool, func_abi)?;
-            let spill_slots = output.num_spill_slots;
-            let used_callee_saved = used_callee_saved_from_output(&output);
-
-            Ok(AllocResult {
-                output,
-                spill_slots,
-                used_callee_saved,
-            })
-        }
-        _ => {
-            // Non-linear regions not yet supported
-            Err(AllocError::UnsupportedControlFlow)
-        }
-    }
+    Ok(AllocResult {
+        output,
+        spill_slots,
+        used_callee_saved,
+    })
 }
 
 #[cfg(test)]

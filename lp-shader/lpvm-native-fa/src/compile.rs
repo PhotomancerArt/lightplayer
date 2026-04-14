@@ -81,11 +81,11 @@ pub fn compile_function(
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
     // 1. Lower LPIR → VInst
-    let mut lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
+    let lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
         .map_err(NativeError::Lower)?;
 
-    // 2. Peephole optimize
-    crate::peephole::optimize(&mut lowered.vinsts);
+    // 2. Peephole: disabled — removing VInsts invalidates region tree indices.
+    // TODO: either update region tree after peephole, or avoid emitting redundant Br+Label pairs.
 
     // 3. Build function ABI
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);

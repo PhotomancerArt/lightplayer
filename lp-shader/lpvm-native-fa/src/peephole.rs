@@ -4,10 +4,30 @@ use alloc::vec::Vec;
 
 use crate::vinst::VInst;
 
-/// Apply local peephole optimizations in place.
+/// Apply local peephole optimizations to a lowered function.
 ///
-/// Currently removes redundant unconditional branches whose target is the next instruction:
+/// Only runs when the region tree is a single Linear root (or empty); otherwise
+/// removing VInsts would invalidate the region indices.
+pub fn optimize_lowered(lowered: &mut crate::lower::LoweredFunction) {
+    let is_linear_only = lowered.region_tree.nodes.len() <= 1;
+    if !is_linear_only {
+        return;
+    }
+    optimize(&mut lowered.vinsts);
+    if let Some(root) = lowered.region_tree.nodes.first_mut() {
+        if let crate::region::Region::Linear { end, .. } = root {
+            *end = lowered.vinsts.len() as u16;
+        }
+    }
+}
+
+/// Apply local peephole optimizations in place (raw VInst vec).
+///
+/// Removes redundant unconditional branches whose target is the next instruction:
 /// `Br { target: X }` followed by `Label(X, _)` -> keep only `Label(X, _)` (fall-through).
+///
+/// **Caution**: This invalidates any region tree indices. Use [`optimize_lowered`] instead
+/// when a region tree exists.
 pub fn optimize(vinsts: &mut Vec<VInst>) {
     let len = vinsts.len();
     let mut write = 0usize;
