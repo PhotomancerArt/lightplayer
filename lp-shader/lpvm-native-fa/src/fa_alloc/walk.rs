@@ -218,21 +218,21 @@ fn process_generic(
     });
 
     // Uses (backward: allocated)
-    // For Ret with sret: spilled values stay on stack to avoid register collisions
-    // when there are more use operands than pool registers. The emitter handles
-    // Alloc::Stack for Ret operands by loading into TEMP0 on demand.
-    let is_ret = matches!(inst, VInst::Ret { .. });
+    // Sret Ret: force ALL operands to Alloc::Stack (regalloc2-style Stack constraint).
+    // The emitter loads each into TEMP0 and stores to the sret buffer sequentially,
+    // so no register conflicts are possible. This eliminates the entire class of
+    // Ret operand collisions where later operands evict earlier ones.
+    let is_sret_ret = matches!(inst, VInst::Ret { vals, .. } if (vals.count as usize) > crate::rv32::abi::SRET_SCALAR_THRESHOLD);
     inst.for_each_use(vreg_pool, |use_vreg| {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let alloc = if is_ret {
-            // For Ret, spilled values stay on stack; unspilled use normal alloc_use
-            if let Some(slot) = spill.has_slot(use_vreg) {
-                Alloc::Stack(slot)
-            } else {
-                alloc_use(use_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace)
+        let alloc = if is_sret_ret {
+            let slot = spill.get_or_assign(use_vreg);
+            if let Some(preg) = pool.home(use_vreg) {
+                pool.free(preg);
             }
+            Alloc::Stack(slot)
         } else {
             alloc_use(use_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace)
         };
