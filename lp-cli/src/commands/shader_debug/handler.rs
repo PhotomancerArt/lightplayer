@@ -70,6 +70,68 @@ fn print_fa_debug(
 
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
 
+    // Collect stats for summary table first
+    let mut stats: Vec<(String, usize, usize)> = Vec::new();
+    for func in &ir.functions {
+        if let Some(name) = func_filter {
+            if func.name != name {
+                continue;
+            }
+        }
+
+        let lpir_count = func.body.len();
+
+        let default_sig = lps_frontend::LpsFnSig {
+            name: func.name.clone(),
+            return_type: lps_frontend::LpsType::Void,
+            parameters: Vec::new(),
+        };
+        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
+
+        // Compile to get instruction count
+        let slots = func.total_param_slots() as usize;
+        let func_abi = func_abi_rv32(fn_sig, slots);
+
+        let lowered = lower_ops(func, ir, &module_abi, float_mode)
+            .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;
+        let alloc_result = allocate(&lowered, &func_abi)
+            .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
+
+        let mut used_callee_saved = alloc_result.used_callee_saved;
+        if func_abi.is_sret() {
+            use lpvm_native_fa::abi::PregSet;
+            use lpvm_native_fa::rv32::abi::S1;
+            used_callee_saved = used_callee_saved.union(PregSet::singleton(S1));
+        }
+        let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
+        let is_leaf = !contains_call(&lowered.vinsts);
+        let frame = lpvm_native_fa::abi::FrameLayout::compute(
+            &func_abi,
+            alloc_result.spill_slots,
+            used_callee_saved,
+            &lowered.lpir_slots,
+            is_leaf,
+            module_abi.max_callee_sret_bytes(),
+            caller_outgoing_stack_bytes,
+        );
+
+        let emitted = emit_function(
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &alloc_result.output,
+            frame,
+            &lowered.symbols,
+            func_abi.is_sret(),
+        )
+        .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
+
+        let disasm_count = emitted.code.len() / 4;
+        stats.push((func.name.clone(), lpir_count, disasm_count));
+    }
+
+    // Print summary table
+    print_summary_table(&stats, "rv32fa");
+
     let mut first = true;
     for func in &ir.functions {
         // Filter if specified
@@ -194,6 +256,35 @@ fn print_linear_debug(
 
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
 
+    // Collect stats for summary table
+    let mut stats: Vec<(String, usize, usize)> = Vec::new();
+    for func in &ir.functions {
+        if let Some(name) = func_filter {
+            if func.name != name {
+                continue;
+            }
+        }
+
+        let lpir_count = func.body.len();
+
+        let default_sig = lps_frontend::LpsFnSig {
+            name: func.name.clone(),
+            return_type: lps_frontend::LpsType::Void,
+            parameters: Vec::new(),
+        };
+        let fn_sig = sig_map.get(func.name.as_str()).copied().unwrap_or(&default_sig);
+
+        // Compile to get instruction count
+        let emitted =
+            emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true, false)
+                .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
+
+        let disasm_count = emitted.code.len() / 4;
+        stats.push((func.name.clone(), lpir_count, disasm_count));
+    }
+
+    print_summary_table(&stats, "rv32lp");
+
     let mut first = true;
     for func in &ir.functions {
         // Filter if specified
@@ -308,8 +399,50 @@ fn print_cranelift_debug(
     let elf_info = link_object_with_builtins(&object_bytes)
         .map_err(|e| anyhow::anyhow!("cranelift link: {e}"))?;
 
-    let mut first = true;
+    // Collect stats for summary table
+    let mut stats: Vec<(String, usize, usize)> = Vec::new();
+    for func in &ir.functions {
+        if let Some(name) = func_filter {
+            if func.name != name {
+                continue;
+            }
+        }
 
+        let lpir_count = func.body.len();
+
+        // Look up function address in symbol map
+        let addr = elf_info.symbol_map.get(&func.name).copied();
+        let disasm_count = match addr {
+            Some(addr) => {
+                // Find function size by looking at next symbol
+                let mut end_addr = elf_info.code.len() as u32;
+                for (sym_name, sym_addr) in &elf_info.symbol_map {
+                    if *sym_addr > addr && *sym_addr < end_addr && sym_name != &func.name {
+                        end_addr = *sym_addr;
+                    }
+                }
+
+                let start = addr as usize;
+                let end = end_addr as usize;
+                let func_code = if start < elf_info.code.len() {
+                    let actual_end = end.min(elf_info.code.len());
+                    &elf_info.code[start..actual_end]
+                } else {
+                    &[] as &[u8]
+                };
+
+                func_code.len() / 4
+            }
+            None => 0,
+        };
+
+        stats.push((func.name.clone(), lpir_count, disasm_count));
+    }
+
+    let target_name = if _is_emu { "emu" } else { "rv32" };
+    print_summary_table(&stats, target_name);
+
+    let mut first = true;
     for func in &ir.functions {
         // Filter if specified
         if let Some(name) = func_filter {
@@ -338,7 +471,6 @@ fn print_cranelift_debug(
         let disasm = match addr {
             Some(addr) => {
                 // Find function size by looking at next symbol
-                // Symbols are virtual addresses; code starts at address 0
                 let mut end_addr = elf_info.code.len() as u32;
                 for (sym_name, sym_addr) in &elf_info.symbol_map {
                     if *sym_addr > addr && *sym_addr < end_addr && sym_name != &func.name {
@@ -346,7 +478,6 @@ fn print_cranelift_debug(
                     }
                 }
 
-                // Extract function code (addr is virtual address, code starts at 0)
                 let start = addr as usize;
                 let end = end_addr as usize;
                 let func_code = if start < elf_info.code.len() {
@@ -356,7 +487,6 @@ fn print_cranelift_debug(
                     &[] as &[u8]
                 };
 
-                // Disassemble
                 disassemble_raw(func_code)
             }
             None => format!("; Function {} not found in symbol map", func.name),
@@ -404,4 +534,37 @@ fn disassemble_raw(code: &[u8]) -> String {
     }
 
     out
+}
+
+/// Print summary table of function instruction counts.
+fn print_summary_table(stats: &[(String, usize, usize)], backend: &str) {
+    if stats.is_empty() {
+        return;
+    }
+
+    println!("=== Summary: {} functions ===", backend);
+    println!();
+
+    // Find max name length for alignment
+    let max_name_len = stats.iter().map(|(name, _, _)| name.len()).max().unwrap_or(20);
+    let name_width = max_name_len.max(20);
+
+    // Header
+    println!("{:<name_width$}  {:>12}  {:>12}", "Function", "LPIR", "Disasm");
+    println!("{}", "-".repeat(name_width + 12 + 12 + 4));
+
+    // Rows
+    let mut total_lpir = 0;
+    let mut total_disasm = 0;
+    for (name, lpir, disasm) in stats {
+        println!("{:<name_width$}  {:>12}  {:>12}", name, lpir, disasm);
+        total_lpir += lpir;
+        total_disasm += disasm;
+    }
+
+    // Total row
+    println!("{}", "-".repeat(name_width + 12 + 12 + 4));
+    println!("{:<name_width$}  {:>12}  {:>12}", "TOTAL", total_lpir, total_disasm);
+    println!();
+    println!();
 }
