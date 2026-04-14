@@ -19,6 +19,16 @@ pub fn walk_linear(
     vreg_pool: &[VReg],
     func_abi: &FuncAbi,
 ) -> Result<AllocOutput, AllocError> {
+    walk_linear_with_pool(vinsts, vreg_pool, func_abi, RegPool::new())
+}
+
+/// Walk a Linear region backward with a configured pool.
+pub fn walk_linear_with_pool(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    func_abi: &FuncAbi,
+    mut pool: RegPool,
+) -> Result<AllocOutput, AllocError> {
     // Count total operands and build offset table
     let mut inst_alloc_offsets = Vec::with_capacity(vinsts.len());
     let mut total_operands: usize = 0;
@@ -33,9 +43,6 @@ pub fn walk_linear(
 
     // Allocate the flat allocation table
     let mut allocs: Vec<Alloc> = vec![Alloc::None; total_operands];
-
-    // Initialize state
-    let mut pool = RegPool::new();
     let max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize + 32;
     let mut spill = SpillAlloc::new(max_vreg_idx + 16);
     let mut trace = AllocTrace::new();

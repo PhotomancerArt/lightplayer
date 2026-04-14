@@ -21,6 +21,15 @@ impl RegPool {
         }
     }
 
+    /// Create pool with limited capacity (for testing spill logic).
+    pub fn with_capacity(n: usize) -> Self {
+        let lru: Vec<PReg> = ALLOC_POOL.iter().copied().take(n).collect();
+        Self {
+            preg_vreg: [None; 32],
+            lru,
+        }
+    }
+
     /// Find the PReg currently holding this vreg, if any.
     pub fn home(&self, vreg: VReg) -> Option<PReg> {
         for (i, v) in self.preg_vreg.iter().enumerate() {

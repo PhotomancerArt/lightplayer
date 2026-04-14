@@ -10,7 +10,7 @@ workspace = true
 
 [features]
 default = []
-# Host / filetests: link with builtins ELF and run in lp-riscv-emu (pulls std).
+# Host: link with builtins ELF and run in lp-riscv-emu (pulls std).
 emu = [
     "dep:cranelift-codegen",
     "dep:lpvm-cranelift",
@@ -40,6 +40,9 @@ lpvm-cranelift = { path = "../lpvm-cranelift", optional = true, default-features
 ] }
 lpvm-emu = { path = "../lpvm-emu", optional = true, default-features = false, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
+
+[dev-dependencies]
+rstest = "0.25"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 lps-builtins = { path = "../lps-builtins", default-features = false }

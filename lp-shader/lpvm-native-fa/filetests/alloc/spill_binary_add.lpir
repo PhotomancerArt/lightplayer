@@ -1,0 +1,38 @@
+; pool_size: 2
+; abi_params: 0
+; abi_return: i32
+; name: binary_add_no_spill
+
+func @test() -> i32 {
+    v1:i32 = iconst.i32 10
+    v2:i32 = iconst.i32 20
+    v3:i32 = iadd v1, v2
+    return v3
+}
+
+; ==================================================================================================
+;
+; func @test() -> i32 {
+;     ; spill_slots: 0
+;     ; ret: a0
+;
+;     v1:i32 = iconst.i32 10
+;         i1 = IConst32 10
+;         ; write: i1 -> t1
+;
+;     v2:i32 = iconst.i32 20
+;         i2 = IConst32 20
+;         ; write: i2 -> t0
+;
+;     v3:i32 = iadd v1:i32, v2:i32
+;         ; read: i1 <- t1
+;         ; read: i2 <- t0
+;         i3 = Add32 i1, i2
+;         ; write: i3 -> t0
+;
+;     return v3:i32
+;         ; read: i3 <- t0
+;         Ret i3
+;         Br L0
+; }
+;     Label L0

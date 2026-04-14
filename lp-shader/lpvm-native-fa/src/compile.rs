@@ -232,17 +232,13 @@ mod tests {
                 parameters: vec![],
             }],
         };
-        // M1: allocator returns NotImplemented, so compilation fails
         let result = compile_module(&ir, &sig, lpir::FloatMode::Q32, Default::default());
         assert!(
-            matches!(
-                result,
-                Err(NativeError::FastAlloc(
-                    crate::fa_alloc::AllocError::NotImplemented
-                ))
-            ),
-            "M1: expected NotImplemented error, got: {:?}",
+            result.is_ok(),
+            "expected successful compilation, got: {:?}",
             result
         );
+        let module = result.unwrap();
+        assert_eq!(module.functions.len(), 1, "expected 1 compiled function");
     }
 }

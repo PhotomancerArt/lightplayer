@@ -6,7 +6,7 @@
 //! Enable feature **`emu`** for host-side linking with builtins and emulation via
 //! `lp-riscv-emu` (requires `std`).
 
-#![no_std]
+#![cfg_attr(not(feature = "emu"), no_std)]
 
 #[macro_use]
 extern crate alloc;
@@ -34,6 +34,9 @@ pub mod rt_emu;
 
 #[cfg(target_arch = "riscv32")]
 pub mod rt_jit;
+
+/// Allocator snapshot filetests (parse + compare only; `std::fs` lives in `tests/filetests.rs`).
+pub mod filetest;
 
 pub use abi::ModuleAbi;
 pub use compile::{

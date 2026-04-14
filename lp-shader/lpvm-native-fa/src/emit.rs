@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::abi::FrameLayout;
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::fa_alloc::{AllocOutput, allocate};
+use crate::fa_alloc::allocate;
 use crate::rv32::emit::{EmittedCode as Rv32EmittedCode, emit_function};
 use crate::vinst::VInst;
 
@@ -115,11 +115,10 @@ pub fn emit_vinsts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fa_alloc::AllocError;
 
     #[test]
-    fn emit_lowered_returns_not_implemented() {
-        // M1: allocator returns NotImplemented
+    fn emit_lowered_returns_success() {
+        // After M1-M3: allocator should succeed for simple cases
         let vinsts = vec![];
         let vreg_pool = vec![];
         let mut lowered = crate::lower::LoweredFunction {
@@ -129,6 +128,12 @@ mod tests {
             loop_regions: Vec::new(),
             region_tree: crate::region::RegionTree::new(),
         };
+
+        // Set up a proper Linear region (required by allocator)
+        let root = lowered
+            .region_tree
+            .push(crate::region::Region::Linear { start: 0, end: 0 });
+        lowered.region_tree.root = root;
 
         let abi = crate::rv32::abi::func_abi_rv32(
             &lps_shared::LpsFnSig {
@@ -140,9 +145,6 @@ mod tests {
         );
 
         let result = emit_lowered(&lowered, &abi);
-        assert!(matches!(
-            result,
-            Err(NativeError::FastAlloc(AllocError::NotImplemented))
-        ));
+        assert!(result.is_ok(), "emit_lowered should succeed: {:?}", result);
     }
 }

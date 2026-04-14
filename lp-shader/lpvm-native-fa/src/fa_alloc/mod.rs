@@ -13,7 +13,11 @@ pub mod pool;
 pub mod render;
 pub mod spill;
 pub mod trace;
+pub mod verify;
 pub mod walk;
+
+#[cfg(test)]
+pub mod test;
 
 /// Allocation location for a virtual register operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,7 +356,7 @@ mod tests {
 ; write: i0 -> t0
 ; ---------------------------
 ; read: i0 <- t0
-Ret ...",
+Ret i0",
         );
     }
 
@@ -372,7 +376,7 @@ i2 = Add32 i0, i1
 ; write: i2 -> t0
 ; ---------------------------
 ; read: i2 <- t0
-Ret ...",
+Ret i2",
         );
     }
 }

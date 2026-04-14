@@ -116,7 +116,6 @@ mod tests {
             }],
         };
 
-        // M1: allocator returns NotImplemented, so compilation fails
         let result = compile_module_asm_text(
             &ir,
             &sig,
@@ -125,14 +124,11 @@ mod tests {
             false,
         );
         assert!(
-            matches!(
-                result,
-                Err(NativeError::FastAlloc(
-                    crate::fa_alloc::AllocError::NotImplemented
-                ))
-            ),
-            "M1: expected NotImplemented error, got: {:?}",
+            result.is_ok(),
+            "expected successful compilation, got: {:?}",
             result
         );
+        let asm_text = result.unwrap();
+        assert!(!asm_text.is_empty(), "expected non-empty assembly text");
     }
 }

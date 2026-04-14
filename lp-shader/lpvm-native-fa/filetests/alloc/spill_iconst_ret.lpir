@@ -1,0 +1,26 @@
+; pool_size: 16
+; abi_params: 0
+; abi_return: i32
+; name: iconst_ret
+
+func @test() -> i32 {
+    v1:i32 = iconst.i32 10
+    return v1
+}
+
+; ==================================================================================================
+;
+; func @test() -> i32 {
+;     ; spill_slots: 0
+;     ; ret: a0
+;
+;     v1:i32 = iconst.i32 10
+;         i1 = IConst32 10
+;         ; write: i1 -> t0
+;
+;     return v1:i32
+;         ; read: i1 <- t0
+;         Ret i1
+;         Br L0
+; }
+;     Label L0
