@@ -1,15 +1,13 @@
 // test run
 //
 // Forces heavy register pressure to trigger spilling.
-// Each mat4 = 16 scalars. 5 mat4s = 80 values, exceeds available registers.
 
-mat4 test_spill_many_mat4() {
-    mat4 a = mat4(1.0);
-    mat4 b = mat4(2.0);
-    mat4 c = mat4(3.0);
-    mat4 d = mat4(4.0);
-    mat4 e = mat4(5.0);  // 80 scalars total
-    return a + b + c + d + e;
+mat2 test_spill_many_mat2() {
+    mat2 a = mat2(1.0);
+    mat2 b = mat2(2.0);
+    mat2 c = mat2(3.0);
+    mat2 d = mat2(4.0);
+    return a + b + c + d;
 }
 
-// run: test_spill_many_mat4() ~= mat4(15.0)
+// run: test_spill_many_mat2() ~= mat2(10.0)

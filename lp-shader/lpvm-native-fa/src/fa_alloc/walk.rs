@@ -455,7 +455,12 @@ fn process_call(
     }
 
     // ── Step 4: Uses (arguments) ──
+    // Evictions during arg allocation: (preg, spill_slot).
+    // The evicted vreg's value is already in its spill slot from its def, so no
+    // save is needed. But we must restore the value after the call so that
+    // forward-time instructions see the correct register contents.
     let arg_base = if callee_uses_sret { 1 } else { 0 };
+    let mut arg_evictions: Vec<(PReg, u8)> = Vec::new();
     for (i, &arg_vreg) in args.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
@@ -505,13 +510,7 @@ fn process_call(
             let (new_preg, evicted) = pool.alloc(arg_vreg);
             if let Some(ev) = evicted {
                 let slot = spill.get_or_assign(ev);
-                before_saves.push((
-                    EditPoint::Before(inst_idx_u16),
-                    Edit::Move {
-                        from: Alloc::Reg(new_preg),
-                        to: Alloc::Stack(slot),
-                    },
-                ));
+                arg_evictions.push((new_preg, slot));
                 trace.push(TraceEntry {
                     vinst_idx: inst_idx,
                     vinst_mnemonic: String::from("evict"),
@@ -537,6 +536,34 @@ fn process_call(
         }
 
         allocs[alloc_idx] = Alloc::Reg(target);
+    }
+
+    // Fix up evictions during arg processing. The evicted vreg's value is
+    // already in its spill slot (from the def), so no save is needed.  But
+    // after the call the register must be restored to its pre-eviction value so
+    // that forward-time instructions see the correct contents.
+    //
+    // For caller-saved regs: a clobber save/restore pair already exists.
+    //   - Remove the SAVE (it would overwrite the slot with the wrong value).
+    //   - Keep the RESTORE (it reloads the correct value from the spill slot).
+    //
+    // For callee-saved regs: no clobber pair exists, but the call doesn't
+    //   clobber the register either — the register retains the NEW arg value
+    //   after the call. We must add an explicit RESTORE.
+    for &(preg, slot) in &arg_evictions {
+        if gpr::is_caller_saved_pool(preg) {
+            before_saves.retain(|(_, e)| {
+                !matches!(e, Edit::Move { from: Alloc::Reg(r), .. } if *r == preg)
+            });
+        } else {
+            after_restores.push((
+                EditPoint::After(inst_idx_u16),
+                Edit::Move {
+                    from: Alloc::Stack(slot),
+                    to: Alloc::Reg(preg),
+                },
+            ));
+        }
     }
 
     // Push edits in reverse-forward order (global reverse will restore forward order).
