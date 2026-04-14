@@ -754,8 +754,27 @@ impl<'a> EmitContext<'a> {
                 } else {
                     ARG_REGS.len()
                 };
-                if args.len() > cap {
-                    return Err(AllocError::NotImplemented);
+
+                // Store overflow args to the outgoing stack area at [SP + offset].
+                for i in cap..args.len() {
+                    let operand_idx = rets.len() + i;
+                    let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
+                    let stack_off = ((i - cap) * 4) as i32;
+                    match alloc {
+                        Alloc::Reg(src) => {
+                            self.push_u32(encode_sw(src as u32, SP_REG as u32, stack_off), src_op);
+                        }
+                        Alloc::Stack(slot) => {
+                            let spill_off = self
+                                .frame
+                                .spill_offset_from_fp(slot as u32)
+                                .ok_or(AllocError::NotImplemented)?;
+                            let t = Self::TEMP0 as u32;
+                            self.push_u32(encode_lw(t, FP_REG as u32, spill_off), src_op);
+                            self.push_u32(encode_sw(t, SP_REG as u32, stack_off), src_op);
+                        }
+                        Alloc::None => {}
+                    }
                 }
 
                 if *callee_uses_sret {

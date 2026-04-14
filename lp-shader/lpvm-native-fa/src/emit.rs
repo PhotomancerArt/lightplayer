@@ -79,6 +79,7 @@ pub fn emit_lowered_with_alloc(
         // saved/restored even though the allocator never assigns it.
         used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::rv32::abi::S1));
     }
+    let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
     let frame = FrameLayout::compute(
         func_abi,
         alloc_result.spill_slots,
@@ -86,7 +87,7 @@ pub fn emit_lowered_with_alloc(
         &[],
         false, // is_leaf: false = save RA (conservative)
         caller_sret_bytes,
-        0,
+        caller_outgoing_stack_bytes,
     );
 
     let emitted = emit_function(
@@ -131,6 +132,32 @@ pub fn emit_vinsts(
     }
 
     emit_lowered(&lowered, func_abi)
+}
+
+/// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
+fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
+    use crate::rv32::abi::ARG_REGS;
+    let mut max_bytes = 0u32;
+    for inst in vinsts {
+        if let VInst::Call {
+            args,
+            callee_uses_sret,
+            ..
+        } = inst
+        {
+            let cap = if *callee_uses_sret {
+                ARG_REGS.len() - 1
+            } else {
+                ARG_REGS.len()
+            };
+            let n = args.len();
+            if n > cap {
+                let stack_words = (n - cap) as u32;
+                max_bytes = max_bytes.max(stack_words * 4);
+            }
+        }
+    }
+    max_bytes
 }
 
 #[cfg(test)]
