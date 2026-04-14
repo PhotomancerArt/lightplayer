@@ -5,11 +5,10 @@
 
 mod args;
 mod collect;
-mod comparison_table;
 mod display;
 mod handler;
 mod types;
 
 pub use args::Args;
 pub use handler::handle_shader_debug;
-pub use types::{BackendDebugData, BackendTarget, DebugReport, FunctionDebugData, SectionFilter};
+pub use types::{BackendTarget, DebugReport, FunctionDebugData, BackendDebugData, SectionFilter};

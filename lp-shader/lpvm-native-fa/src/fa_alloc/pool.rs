@@ -71,8 +71,17 @@ impl RegPool {
     }
 
     /// Free a PReg (vreg is no longer in a register).
+    ///
+    /// Moves the register to the front of the LRU so it will be reused
+    /// before untouched callee-saved registers. This minimises the total
+    /// number of distinct registers used and keeps values in caller-saved
+    /// t-regs when possible, shrinking the prologue/epilogue.
     pub fn free(&mut self, preg: PReg) {
         self.preg_vreg[preg as usize] = None;
+        if let Some(pos) = self.lru.iter().position(|&p| p == preg) {
+            self.lru.remove(pos);
+            self.lru.insert(0, preg);
+        }
     }
 
     /// Mark PReg as most recently used.

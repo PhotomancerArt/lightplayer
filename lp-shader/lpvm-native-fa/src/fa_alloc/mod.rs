@@ -425,17 +425,17 @@ Ret i0
         expect_alloc(
             "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2",
             "i0 = IConst32 10
-; write: i0 -> t5
+; write: i0 -> t4
 ; ---------------------------
 i1 = IConst32 20
-; write: i1 -> t6
+; write: i1 -> t5
 ; ---------------------------
-; read: i0 <- t5
-; read: i1 <- t6
+; read: i0 <- t4
+; read: i1 <- t5
 i2 = Add32 i0, i1
 ; write: i2 -> t4
-; trace: alloc: v0 -> t30
-; trace: alloc: v1 -> t31
+; trace: alloc: v0 -> t29
+; trace: alloc: v1 -> t30
 ; ---------------------------
 ; read: i2 <- t4
 Ret i2

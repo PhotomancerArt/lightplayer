@@ -12,7 +12,7 @@
   the forward direction when an eviction replaces the occupant. We patched this
   (remove save for evicted caller-saved regs, add explicit restore for evicted
   callee-saved regs), but regalloc2's fastalloc avoids the problem entirely by
-  evicting all clobbered-reg occupants from the pool *before* arg allocation.
+  evicting all clobbered-reg occupants from the pool _before_ arg allocation.
   The backward-walk equivalent: at a call, remove occupants from the pool and
   emit only a post-call reload (After: slot -> reg). No save needed — the
   eviction forces the def (reached later in the backward walk) to write to the

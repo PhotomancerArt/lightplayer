@@ -40,14 +40,21 @@ USAGE:
 
 OPTIONS:
     -h, --help          Show this help message
-    -t, --target        Backend target (rv32fa, rv32lp, rv32, emu)
-                        [default: rv32fa]
-    --fn <NAME>        Show only specific function (default: all functions)
+    -t, --target        Comma-separated list of backend targets
+                        (rv32fa, rv32lp, rv32, emu) [default: rv32fa]
+    --fn <NAME>         Show only specific function (default: all functions)
     --float-mode <MODE> Floating point mode (q32, f32) [default: q32]
+    --lpir              Show LPIR section
+    --vinst            Show VInst/interleaved section
+    --asm              Show assembly/disasm section
+    --summary          Summary only (no detailed function output)
 
 EXAMPLES:
     # Show debug output for all functions (rv32fa backend)
     shader-debug.sh file.glsl
+
+    # Compare multiple backends with comparison table
+    shader-debug.sh -t rv32,rv32fa file.glsl
 
     # Show debug output for rv32lp backend
     shader-debug.sh -t rv32lp file.glsl
@@ -55,12 +62,15 @@ EXAMPLES:
     # Show only specific function
     shader-debug.sh file.glsl --fn myFunction
 
+    # Show only assembly (no interleaved LPIR)
+    shader-debug.sh -t rv32fa file.glsl --asm
+
     # Full example with all options
-    shader-debug.sh -t rv32fa --float-mode q32 file.glsl --fn main
+    shader-debug.sh -t rv32,rv32fa --float-mode q32 file.glsl --fn main
 
 NOTE:
-    After running with multiple functions, copy-pasteable commands are
-    displayed to show individual functions.
+    When multiple targets are specified, a comparison table is shown
+    with instruction counts and performance ratios (color-coded).
 
 EOF
   exit 0

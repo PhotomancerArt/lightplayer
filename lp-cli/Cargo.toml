@@ -38,6 +38,7 @@ lps-frontend = { path = "../lp-shader/lps-frontend" }
 lpvm-native = { path = "../lp-shader/lpvm-native" }
 lpvm-native-fa = { path = "../lp-shader/lpvm-native-fa" }
 lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-object"] }
+unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

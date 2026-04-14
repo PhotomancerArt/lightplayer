@@ -9,9 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{
-    create, dev, heap_summary, mem_profile, serve, shader_debug, shader_lpir, upload,
-};
+use commands::{create, dev, heap_summary, mem_profile, serve, shader_debug, shader_lpir, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
