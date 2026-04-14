@@ -1,7 +1,7 @@
 //! Allocator filetests for fastalloc.
 //!
-//! Discovers `.lpir` files in `filetests/alloc/`. Filesystem I/O stays here so the library
-//! stays `no_std`; only this integration test binary needs `std`.
+//! Discovers `.lpir` files in `filetests/` recursively (e.g. `alloc/`, `param/`).
+//! Filesystem I/O stays here so the library stays `no_std`.
 //!
 //! Run: `cargo test -p lpvm-native-fa --test filetests`
 //!
@@ -60,8 +60,7 @@ fn filetest_alloc_snapshot() {
     let mut failures: Vec<String> = Vec::new();
 
     let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("filetests")
-        .join("alloc");
+        .join("filetests");
 
     let tests = discover_filetests(&test_dir);
 
@@ -104,8 +103,7 @@ fn filetest_alloc_snapshot() {
 #[test]
 fn list_filetests() {
     let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("filetests")
-        .join("alloc");
+        .join("filetests");
 
     let tests = discover_filetests(&test_dir);
 
@@ -115,6 +113,6 @@ fn list_filetests() {
     }
 
     if tests.is_empty() {
-        println!("  (none found - create .lpir files in filetests/alloc/)");
+        println!("  (none found - create .lpir files in filetests/alloc/ or filetests/param/)");
     }
 }

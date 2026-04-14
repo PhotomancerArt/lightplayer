@@ -79,7 +79,7 @@ impl AllocTestBuilder {
             .unwrap_or_else(|e| panic!("Allocation failed: {:?}", e));
 
         // Structural invariants checked on every allocation
-        crate::fa_alloc::verify::verify_alloc(&vinsts, &vreg_pool, &output);
+        crate::fa_alloc::verify::verify_alloc(&vinsts, &vreg_pool, &output, &func_abi);
 
         let rendered = render_alloc_output(&vinsts, &vreg_pool, &output);
 

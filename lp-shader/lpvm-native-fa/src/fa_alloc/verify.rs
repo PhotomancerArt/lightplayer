@@ -3,6 +3,7 @@
 //! These run on every allocation result to catch bugs that snapshot tests miss.
 //! They verify the output is *self-consistent*, independent of register choice.
 
+use crate::abi::FuncAbi;
 use crate::fa_alloc::{Alloc, AllocOutput};
 use crate::rv32::gpr;
 use crate::vinst::{VInst, VReg};
@@ -10,11 +11,11 @@ use alloc::vec::Vec;
 
 /// Verify all structural invariants of an AllocOutput.
 /// Panics with a descriptive message on violation.
-pub fn verify_alloc(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
+pub fn verify_alloc(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput, func_abi: &FuncAbi) {
     verify_every_use_allocated(vinsts, vreg_pool, output);
     verify_no_double_reg_assignment(vinsts, vreg_pool, output);
     verify_edits_sorted(output);
-    verify_allocs_within_pool(vinsts, vreg_pool, output);
+    verify_allocs_within_pool(vinsts, vreg_pool, output, func_abi);
 }
 
 /// Every use operand must be allocated to Reg or Stack, never None.
@@ -97,8 +98,21 @@ fn verify_edits_sorted(output: &AllocOutput) {
     }
 }
 
-/// Every Reg allocation must be within the allocatable pool.
-fn verify_allocs_within_pool(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
+/// Every Reg allocation must be within the allocatable pool, OR be a precolored ABI register.
+fn verify_allocs_within_pool(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    output: &AllocOutput,
+    func_abi: &FuncAbi,
+) {
+    // Build set of precolored registers (these are allowed even if not in ALLOC_POOL)
+    let mut precolored_regs: Vec<u8> = Vec::new();
+    for (_vreg_idx, preg) in func_abi.precolors() {
+        precolored_regs.push(preg.hw);
+    }
+
+    let is_precolored_reg = |preg: u8| precolored_regs.iter().any(|&p| p == preg);
+
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
 
@@ -107,7 +121,7 @@ fn verify_allocs_within_pool(vinsts: &[VInst], vreg_pool: &[VReg], output: &Allo
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
                 assert!(
-                    gpr::pool_contains(preg),
+                    gpr::pool_contains(preg) || is_precolored_reg(preg),
                     "inst {}: def allocated to non-allocatable register x{}",
                     inst_idx,
                     preg
@@ -119,7 +133,7 @@ fn verify_allocs_within_pool(vinsts: &[VInst], vreg_pool: &[VReg], output: &Allo
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
                 assert!(
-                    gpr::pool_contains(preg),
+                    gpr::pool_contains(preg) || is_precolored_reg(preg),
                     "inst {}: use allocated to non-allocatable register x{}",
                     inst_idx,
                     preg

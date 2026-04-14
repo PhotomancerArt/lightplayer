@@ -142,6 +142,39 @@ fn binary_add() {
 4. Write test cases from simple to complex
 5. Run tests, bless expected output as needed
 
+## Future API Extensions (M3+)
+
+When testing control flow from LPIR:
+
+```rust
+// Single function from LPIR
+expect_alloc_fn_from_lpir("
+    fn test() -> i32 { return 10 + 20; }
+", "
+    i0 = IConst32 10
+    ; write: i0 -> t1
+    ...
+");
+
+// Module with multiple functions
+expect_alloc_mod_from_lpir("
+    fn foo() -> i32 { return 10; }
+    fn bar() -> i32 { return 20; }
+", "
+fn_foo:
+    i0 = IConst32 10
+    ; write: i0 -> t1
+    Ret i0
+    
+fn_bar:
+    i0 = IConst32 20
+    ; write: i0 -> t2
+    Ret i0
+");
+```
+
+The `fn_` prefix in expected output serves as a section marker for multi-function tests.
+
 ## Validate
 
 ```bash

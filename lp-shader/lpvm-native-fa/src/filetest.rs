@@ -123,10 +123,19 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
     let module =
         parse_module(&test.lpir_input).map_err(|e| format!("Failed to parse LPIR: {:?}", e))?;
 
-    let func = module
+    let mut func = module
         .functions
         .first()
+        .cloned()
         .ok_or_else(|| String::from("No functions in LPIR module"))?;
+
+    // Ensure vreg_types covers ABI params (vmctx + user params) for rendering
+    let total_abi_slots = 1 + test.abi_params; // vmctx + user params
+    if func.vreg_types.len() < total_abi_slots {
+        while func.vreg_types.len() < total_abi_slots {
+            func.vreg_types.push(lpir::IrType::I32);
+        }
+    }
     let abi = ModuleAbi::from_ir_and_sig(
         &module,
         &LpsModuleSig {
@@ -134,7 +143,7 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
         },
     );
 
-    let lowered = lower_ops(func, &module, &abi, FloatMode::Q32)
+    let lowered = lower_ops(&func, &module, &abi, FloatMode::Q32)
         .map_err(|e| format!("Failed to lower LPIR: {:?}", e))?;
 
     let vinsts = &lowered.vinsts;
@@ -156,13 +165,14 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
         })
         .collect();
 
+    let total_param_slots = 1 + test.abi_params; // vmctx + user params
     let func_abi = abi::func_abi_rv32(
         &LpsFnSig {
             name: String::from("test"),
             return_type,
             parameters: params,
         },
-        test.abi_params,
+        total_param_slots,
     );
 
     use crate::fa_alloc::walk::walk_linear_with_pool;
@@ -183,9 +193,9 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
         }
     };
 
-    verify_alloc(vinsts, vreg_pool, &output);
+    verify_alloc(vinsts, vreg_pool, &output, &func_abi);
 
-    let rendered = render_interleaved(func, &module, vinsts, vreg_pool, &output, &func_abi);
+    let rendered = render_interleaved(&func, &module, vinsts, vreg_pool, &output, &func_abi);
 
     let mut actual_lines = vec![FILETEST_SEPARATOR.to_string()];
     actual_lines.push(";".to_string());

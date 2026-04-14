@@ -16,10 +16,19 @@ const IND_LP: &str = "    ";
 const IND_VI: &str = "        ";
 
 /// First line of [`print_module`] for a copy of `func` with empty body (header only).
-fn format_func_header_line(func: &IrFunction, module: &LpirModule) -> String {
+fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &FuncAbi) -> String {
     let mut f = func.clone();
     f.body.clear();
     f.slots.clear();
+    // Ensure vreg_types covers ABI params for proper printing
+    let total_abi_slots = func_abi.param_locs().len(); // vmctx + user params
+    if f.vreg_types.len() < total_abi_slots {
+        while f.vreg_types.len() < total_abi_slots {
+            f.vreg_types.push(lpir::IrType::I32);
+        }
+    }
+    // Also update param_count to match ABI for printing
+    f.param_count = (total_abi_slots.saturating_sub(1)) as u16; // exclude vmctx
     let m = LpirModule {
         imports: module.imports.clone(),
         functions: alloc::vec![f],
@@ -113,7 +122,7 @@ pub fn render_interleaved(
 
     let mut rendered_vinsts = alloc::collections::BTreeSet::new();
 
-    lines.push(format_func_header_line(func, module));
+    lines.push(format_func_header_line(func, module, func_abi));
     push_alloc_metadata_lines(&mut lines, func, output, func_abi);
     lines.push(String::new());
 
@@ -417,15 +426,19 @@ fn format_return_method(rm: &ReturnMethod) -> String {
 
 fn push_alloc_metadata_lines(
     lines: &mut Vec<String>,
-    func: &IrFunction,
+    _func: &IrFunction,
     output: &AllocOutput,
     func_abi: &FuncAbi,
 ) {
     lines.push(format!("{IND_LP}; spill_slots: {}", output.num_spill_slots));
-    for i in 0..func.param_count as usize {
-        let v = func.user_param_vreg(i as u16);
-        if let Some(loc) = func_abi.param_loc(i) {
-            lines.push(format!("{IND_LP}; arg v{}: {}", v.0, format_arg_loc(&loc)));
+    // param_locs[0] is vmctx; user params start at index 1
+    let user_param_count = func_abi.param_locs().len().saturating_sub(1);
+    for i in 0..user_param_count {
+        // VRegs for params: v0=vmctx, v1=param0, v2=param1, ...
+        let vreg_num = 1 + i;
+        if let Some(loc) = func_abi.param_loc(i + 1) {
+            // +1 to skip vmctx
+            lines.push(format!("{IND_LP}; arg v{}: {}", vreg_num, format_arg_loc(&loc)));
         }
     }
     lines.push(format!(
