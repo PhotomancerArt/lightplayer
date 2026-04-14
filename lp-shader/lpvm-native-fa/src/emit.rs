@@ -80,12 +80,13 @@ pub fn emit_lowered_with_alloc(
         used_callee_saved = used_callee_saved.union(PregSet::singleton(crate::rv32::abi::S1));
     }
     let caller_outgoing_stack_bytes = max_outgoing_stack_bytes(&lowered.vinsts);
+    let is_leaf = !contains_call(&lowered.vinsts);
     let frame = FrameLayout::compute(
         func_abi,
         alloc_result.spill_slots,
         used_callee_saved,
         &lowered.lpir_slots,
-        false, // is_leaf: false = save RA (conservative)
+        is_leaf,
         caller_sret_bytes,
         caller_outgoing_stack_bytes,
     );
@@ -141,6 +142,11 @@ pub fn emit_vinsts(
     emit_lowered(&lowered, func_abi)
 }
 
+/// Returns true if the function contains any call instructions.
+fn contains_call(vinsts: &[VInst]) -> bool {
+    vinsts.iter().any(|inst| matches!(inst, VInst::Call { .. }))
+}
+
 /// Max bytes needed at `[SP+0]` for outgoing stack-passed call arguments.
 fn max_outgoing_stack_bytes(vinsts: &[VInst]) -> u32 {
     use crate::rv32::abi::ARG_REGS;
@@ -182,6 +188,7 @@ mod tests {
             symbols: crate::vinst::ModuleSymbols::default(),
             loop_regions: Vec::new(),
             region_tree: crate::region::RegionTree::new(),
+            lpir_slots: Vec::new(),
         };
 
         // Set up a proper Linear region (required by allocator)

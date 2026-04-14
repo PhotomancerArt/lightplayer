@@ -303,6 +303,7 @@ mod tests {
             symbols: ModuleSymbols::default(),
             loop_regions: Vec::new(),
             region_tree: tree,
+            lpir_slots: Vec::new(),
         }
     }
 

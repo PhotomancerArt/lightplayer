@@ -976,6 +976,7 @@ mod tests {
             symbols,
             loop_regions: Vec::new(),
             region_tree: crate::region::RegionTree::new(),
+            lpir_slots: Vec::new(),
         };
         let root = lowered.region_tree.push(crate::region::Region::Linear {
             start: 0,
@@ -994,7 +995,7 @@ mod tests {
 
         let result = crate::emit::emit_lowered(&lowered, &abi).expect("emit_lowered");
         assert!(
-            result.code.len() > 32,
+            result.code.len() >= 28,
             "expected substantial code, got {}",
             result.code.len()
         );

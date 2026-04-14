@@ -196,6 +196,71 @@ fn process_generic(
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut AllocTrace,
 ) {
+    // Special case: Mov32 is a copy. Coalesce src and dst to the same register
+    // to eliminate the move at emission time (emitter skips addi rd, rs, 0 when rd==rs).
+    if let VInst::Mov32 { dst, src, .. } = inst {
+        let def_idx = offset;
+        let use_idx = offset + 1;
+
+        // Def side: determine dst's allocation (already assigned earlier in backward walk)
+        let dst_alloc = if let Some(preg) = pool.home(*dst) {
+            Alloc::Reg(preg)
+        } else if let Some(slot) = spill.has_slot(*dst) {
+            Alloc::Stack(slot)
+        } else {
+            Alloc::None
+        };
+        allocs[def_idx] = dst_alloc;
+
+        // If dst is in a register, free it and try to coalesce with src.
+        // Only coalesce when src does NOT already have a home register --
+        // if src is already live in another register (from later uses processed
+        // earlier in the backward walk), forcing it into dst's register would
+        // create duplicate pool entries and corrupt allocation state.
+        if let Some(preg) = pool.home(*dst) {
+            let src_has_home = pool.home(*src).is_some();
+            pool.free(preg);
+            if src_has_home {
+                allocs[use_idx] =
+                    alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
+            } else {
+                let evicted = pool.alloc_fixed(preg, *src);
+                if let Some(evicted_vreg) = evicted {
+                    let slot = spill.get_or_assign(evicted_vreg);
+                    edits.push((
+                        EditPoint::After(inst_idx_u16),
+                        Edit::Move {
+                            from: Alloc::Stack(slot),
+                            to: Alloc::Reg(preg),
+                        },
+                    ));
+                    trace.push(TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("coalesce_evict"),
+                        decision: alloc::format!(
+                            "slot{} -> t{} (v{})",
+                            slot,
+                            preg,
+                            evicted_vreg.0
+                        ),
+                        register_state: String::new(),
+                    });
+                }
+                allocs[use_idx] = Alloc::Reg(preg);
+                trace.push(TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("coalesce"),
+                    decision: alloc::format!("v{} -> t{} (shared)", src.0, preg),
+                    register_state: String::new(),
+                });
+            }
+        } else {
+            // Dst is spilled or dead: use normal allocation path for src
+            allocs[use_idx] = alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
+        }
+        return;
+    }
+
     let mut operand_idx: usize = 0;
 
     // Defs (backward: freed)
