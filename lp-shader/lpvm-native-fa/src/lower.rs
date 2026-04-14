@@ -617,6 +617,8 @@ pub struct LoweredFunction {
     pub symbols: ModuleSymbols,
     pub loop_regions: Vec<LoopRegion>,
     pub region_tree: RegionTree,
+    /// LPIR slot sizes: `(slot_id, size_in_bytes)` for frame layout.
+    pub lpir_slots: Vec<(u32, u32)>,
 }
 
 struct LowerCtx<'a> {
@@ -952,12 +954,22 @@ pub fn lower_ops(
     let root = ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, SRC_OP_NONE));
     ctx.region_tree.root = root;
+    // Collect LPIR slot sizes for frame layout
+    let lpir_slots: Vec<(u32, u32)> = ctx
+        .func
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(id, decl)| (id as u32, decl.size))
+        .collect();
+
     Ok(LoweredFunction {
         vinsts: ctx.out,
         vreg_pool: ctx.vreg_pool,
         symbols: ctx.symbols,
         loop_regions: ctx.loop_regions,
         region_tree: ctx.region_tree,
+        lpir_slots,
     })
 }
 

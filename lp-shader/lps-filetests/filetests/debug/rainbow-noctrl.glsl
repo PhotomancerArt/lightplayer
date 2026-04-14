@@ -1,0 +1,75 @@
+// test run
+//
+// Integration-style checks mirroring examples/basic/src/rainbow.shader/main.glsl.
+// Expectations are blessed from jit.q32; wasm.q32 must match within tolerance.
+
+const bool CYCLE_PALETTE = true;
+
+vec3 paletteWarm(float t) {
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.0, 0.1, 0.2);
+    return clamp(a + b * cos(6.28318530718 * (c * t + d)), 0.0, 1.0);
+}
+
+vec3 applyPalette(float t, float palette) {
+    float p = floor(palette + 0.001);
+//    if (p < 0.5) return paletteHeatmap(t);
+//    if (p < 1.5) return paletteRainbow(t);
+//    if (p < 2.5) return paletteFire(t);
+//    if (p < 3.5) return paletteCool(t);
+    return paletteWarm(t);
+}
+
+vec2 prsd_demo(vec2 scaledCoord, float time) {
+    vec2 gradient;
+    float noiseValue = lpfx_psrdnoise(
+        scaledCoord,
+        vec2(0.0),
+        time,
+        gradient,
+        0u
+    );
+
+    float hue = (cos(noiseValue * 3.1415 + time) + 1.0) * 0.5;
+    float gradientAngle = atan(gradient.y, gradient.x) / (2.0 * 3.14159) + 0.5;
+    float t = mod(time * 0.1 + hue / 3.0, 1.0);
+    float v = mix(0.5, 1.0, gradientAngle);
+    return vec2(t, v);
+}
+
+vec4 rainbow_main(vec2 fragCoord, vec2 outputSize, float time) {
+    float cyclePhase = mod(time, 5.0);
+    float palette = min(floor(mod(time * 0.2, 5.0)), 4.0);
+    float nextPalette = mod(palette + 1.0, 5.0);
+    float blend = smoothstep(4.0, 5.0, cyclePhase);
+
+    float panSpeed = .3;
+    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
+
+    float scaleSpeed = .7;
+    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
+
+    vec2 center = outputSize * 0.5;
+    vec2 dir = fragCoord - center;
+    vec2 scaledCoord = center + dir * scale;
+
+    vec2 tv = prsd_demo(scaledCoord, time);
+
+//    if (CYCLE_PALETTE) {
+        return vec4(mix(
+            applyPalette(tv.x, palette),
+            applyPalette(tv.x, nextPalette),
+            blend
+        ) * tv.y, 1.0);
+//    } else {
+//        return vec4(applyPalette(tv.x, 0) * tv.y, 1.0);
+//    }
+}
+
+vec4 test_rainbow_main_corner_t5() {
+    return rainbow_main(vec2(0.0, 0.0), vec2(64.0, 64.0), 5.0);
+}
+
+// run: test_rainbow_main_corner_t5() ~= vec4(0.024429321, 0.15220642, 0.34309387, 1.0) (tolerance: 0.002)

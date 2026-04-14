@@ -397,4 +397,83 @@ mod tests {
         // Verifier checks pass (via run_vinst_inner).
         let _ = r;
     }
+
+    /// Sret Ret with 4+ return values under a small pool.
+    /// Tests that spilled operands do not collide on the same register.
+    /// Regression test for: two Ret operands sharing t4 with different values.
+    #[rstest]
+    fn sret_ret_many_uses(#[values(1, 2, 3)] pool: usize) {
+        // 4 iconsts then Ret with 4 values -- pool < 4 means some must spill.
+        // The key invariant: no two Ret operands share a register with different values.
+        alloc_test().pool_size(pool).abi_return("vec4").run_vinst(
+            "i0 = IConst32 1
+                 i1 = IConst32 2
+                 i2 = IConst32 3
+                 i3 = IConst32 4
+                 Ret (i0, i1, i2, i3)",
+        );
+    }
+
+    /// Sret Ret with spilled values: many Call results that must spill (clobbered),
+    /// then returned together. This triggers register collision when Ret uses > pool size.
+    /// Regression: backward walk could assign same t-reg to two different Ret operands.
+    #[rstest]
+    fn sret_ret_spilled_collision(#[values(1, 2, 3)] pool: usize) {
+        // 4 Calls producing values, each call clobbers t-regs forcing results to spill.
+        // Then Ret uses all 4 values -- pool < 4 means some must stay spilled.
+        // Bug: allocator could assign same t-reg to two different Ret operands.
+        alloc_test().pool_size(pool).abi_return("vec4").run_vinst(
+            "i0 = IConst32 1
+                 i1 = Call helper (i0)
+                 i2 = Call helper (i0)
+                 i3 = Call helper (i0)
+                 i4 = Call helper (i0)
+                 Ret (i1, i2, i3, i4)",
+        );
+    }
+
+    /// Sret Ret with 8 spilled values (mat2/mat3 size). Tests larger spill sets.
+    #[rstest]
+    fn sret_ret_eight_spilled(#[values(1, 2, 3, 4)] pool: usize) {
+        // 8 Calls producing values, pool < 8 forces some to stay spilled.
+        alloc_test().pool_size(pool).abi_return("mat2").run_vinst(
+            "i0 = IConst32 1
+                 i1 = Call helper (i0)
+                 i2 = Call helper (i0)
+                 i3 = Call helper (i0)
+                 i4 = Call helper (i0)
+                 i5 = Call helper (i0)
+                 i6 = Call helper (i0)
+                 i7 = Call helper (i0)
+                 i8 = Call helper (i0)
+                 Ret (i1, i2, i3, i4, i5, i6, i7, i8)",
+        );
+    }
+
+    /// Sret Ret with 16 spilled values (mat4 size). Maximum pressure test.
+    #[rstest]
+    fn sret_ret_sixteen_spilled(#[values(1, 2, 3, 4, 5)] pool: usize) {
+        // 16 Calls producing values, pool < 16 forces many to stay spilled.
+        // This is the exact scenario from test_spill_call_mat4.
+        alloc_test().pool_size(pool).abi_return("mat4").run_vinst(
+            "i0 = IConst32 1
+                 i1 = Call helper (i0)
+                 i2 = Call helper (i0)
+                 i3 = Call helper (i0)
+                 i4 = Call helper (i0)
+                 i5 = Call helper (i0)
+                 i6 = Call helper (i0)
+                 i7 = Call helper (i0)
+                 i8 = Call helper (i0)
+                 i9 = Call helper (i0)
+                 i10 = Call helper (i0)
+                 i11 = Call helper (i0)
+                 i12 = Call helper (i0)
+                 i13 = Call helper (i0)
+                 i14 = Call helper (i0)
+                 i15 = Call helper (i0)
+                 i16 = Call helper (i0)
+                 Ret (i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11, i12, i13, i14, i15, i16)",
+        );
+    }
 }

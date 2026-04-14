@@ -135,19 +135,43 @@ impl AllocOutput {
     }
 }
 
+use alloc::string::String;
+
 /// Allocator errors.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AllocError {
-    NotImplemented,
+    /// Internal error with file:line context and optional message.
+    Internal(&'static str, u32, Option<String>),
     TooManyVRegs,
     UnsupportedControlFlow,
     OutOfRegisters,
 }
 
+/// Build an [`AllocError::Internal`] capturing the call site.
+/// Usage: `emit_err!()` or `emit_err!("slot {} not found", slot_id)`
+#[macro_export]
+macro_rules! emit_err {
+    () => {
+        $crate::fa_alloc::AllocError::Internal(file!(), line!(), None)
+    };
+    ($($arg:tt)*) => {
+        $crate::fa_alloc::AllocError::Internal(
+            file!(),
+            line!(),
+            Some(alloc::format!($($arg)*))
+        )
+    };
+}
+
 impl core::fmt::Display for AllocError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            AllocError::NotImplemented => write!(f, "allocator not implemented"),
+            AllocError::Internal(file, line, None) => {
+                write!(f, "internal error at {file}:{line}")
+            }
+            AllocError::Internal(file, line, Some(msg)) => {
+                write!(f, "internal error at {file}:{line}: {msg}")
+            }
             AllocError::TooManyVRegs => write!(f, "too many virtual registers"),
             AllocError::UnsupportedControlFlow => write!(f, "unsupported control flow"),
             AllocError::OutOfRegisters => write!(f, "out of physical registers"),

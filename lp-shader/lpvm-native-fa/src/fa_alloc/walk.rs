@@ -218,11 +218,24 @@ fn process_generic(
     });
 
     // Uses (backward: allocated)
+    // For Ret with sret: spilled values stay on stack to avoid register collisions
+    // when there are more use operands than pool registers. The emitter handles
+    // Alloc::Stack for Ret operands by loading into TEMP0 on demand.
+    let is_ret = matches!(inst, VInst::Ret { .. });
     inst.for_each_use(vreg_pool, |use_vreg| {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let alloc = alloc_use(use_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace);
+        let alloc = if is_ret {
+            // For Ret, spilled values stay on stack; unspilled use normal alloc_use
+            if let Some(slot) = spill.has_slot(use_vreg) {
+                Alloc::Stack(slot)
+            } else {
+                alloc_use(use_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace)
+            }
+        } else {
+            alloc_use(use_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace)
+        };
         allocs[alloc_idx] = alloc;
     });
 }
@@ -552,9 +565,9 @@ fn process_call(
     //   after the call. We must add an explicit RESTORE.
     for &(preg, slot) in &arg_evictions {
         if gpr::is_caller_saved_pool(preg) {
-            before_saves.retain(|(_, e)| {
-                !matches!(e, Edit::Move { from: Alloc::Reg(r), .. } if *r == preg)
-            });
+            before_saves.retain(
+                |(_, e)| !matches!(e, Edit::Move { from: Alloc::Reg(r), .. } if *r == preg),
+            );
         } else {
             after_restores.push((
                 EditPoint::After(inst_idx_u16),

@@ -18,16 +18,6 @@
   eviction forces the def (reached later in the backward walk) to write to the
   spill slot. Eliminates the fixup logic and the whole class of ordering bugs.
 
-- Adopt regalloc2-style operand constraints for cleaner sret/Ret handling.
-  regalloc2 uses an `OperandConstraint` system (Any, Reg, FixedReg, Stack, etc.)
-  where operands declare their requirements. When an operand has a `Stack`
-  constraint and the value is already spilled, regalloc2 keeps it on the stack
-  without reloading. Our current fix for the Ret operand collision (keeping
-  spilled sret values on stack) achieves the same outcome but through
-  special-case handling in `process_generic`. A constraint system would be more
-  general and cleaner, allowing any instruction to declare which operands can
-  stay spilled rather than hardcoding sret detection.
-
 ## Memory Improvements
 
 pub clobbered: BTreeSet<PhysReg>, // todo: PRegSet??

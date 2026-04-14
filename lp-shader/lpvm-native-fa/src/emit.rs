@@ -84,7 +84,7 @@ pub fn emit_lowered_with_alloc(
         func_abi,
         alloc_result.spill_slots,
         used_callee_saved,
-        &[],
+        &lowered.lpir_slots,
         false, // is_leaf: false = save RA (conservative)
         caller_sret_bytes,
         caller_outgoing_stack_bytes,
@@ -110,16 +110,23 @@ pub fn emit_lowered_with_alloc(
 pub fn emit_vinsts(
     vinsts: &[VInst],
     func_abi: &crate::abi::FuncAbi,
-    _func: &lpir::IrFunction,
+    func: &lpir::IrFunction,
     vreg_pool: &[crate::vinst::VReg],
 ) -> Result<EmittedCode, NativeError> {
     // Build a minimal LoweredFunction for the new allocator
+    let lpir_slots: Vec<(u32, u32)> = func
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(id, decl)| (id as u32, decl.size))
+        .collect();
     let mut lowered = crate::lower::LoweredFunction {
         vinsts: vinsts.to_vec(),
         vreg_pool: vreg_pool.to_vec(),
         symbols: crate::vinst::ModuleSymbols::default(),
         loop_regions: Vec::new(),
         region_tree: crate::region::RegionTree::new(),
+        lpir_slots,
     };
 
     // Build a Linear region covering all instructions

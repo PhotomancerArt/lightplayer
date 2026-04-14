@@ -132,13 +132,13 @@ impl<'a> EmitContext<'a> {
                 let offset = self
                     .frame
                     .spill_offset_from_fp(slot as u32)
-                    .ok_or(AllocError::NotImplemented)?;
+                    .ok_or(crate::emit_err!())?;
                 let temp_u32 = temp as u32;
                 let fp_u32 = FP_REG as u32;
                 self.push_u32(encode_lw(temp_u32, fp_u32, offset), src_op);
                 Ok(temp)
             }
-            Alloc::None => Err(AllocError::NotImplemented),
+            Alloc::None => Err(crate::emit_err!()),
         }
     }
 
@@ -155,7 +155,7 @@ impl<'a> EmitContext<'a> {
         match alloc {
             Alloc::Reg(preg) => Ok(preg),
             Alloc::Stack(_) => Ok(temp), // Caller must store after
-            Alloc::None => Err(AllocError::NotImplemented),
+            Alloc::None => Err(crate::emit_err!()),
         }
     }
 
@@ -174,7 +174,7 @@ impl<'a> EmitContext<'a> {
             let offset = self
                 .frame
                 .spill_offset_from_fp(slot as u32)
-                .ok_or(AllocError::NotImplemented)?;
+                .ok_or(crate::emit_err!())?;
             let temp_u32 = temp as u32;
             let fp_u32 = FP_REG as u32;
             self.push_u32(encode_sw(temp_u32, fp_u32, offset), src_op);
@@ -186,7 +186,7 @@ impl<'a> EmitContext<'a> {
     fn emit_edit(&mut self, edit: &Edit, src_op: Option<u32>) -> Result<(), AllocError> {
         match edit {
             Edit::Move { from, to } => match (*from, *to) {
-                (Alloc::None, _) | (_, Alloc::None) => return Err(AllocError::NotImplemented),
+                (Alloc::None, _) | (_, Alloc::None) => return Err(crate::emit_err!()),
                 (Alloc::Reg(src), Alloc::Reg(dst)) => {
                     if src != dst {
                         self.push_u32(encode_addi(dst as u32, src as u32, 0), src_op);
@@ -196,25 +196,25 @@ impl<'a> EmitContext<'a> {
                     let offset = self
                         .frame
                         .spill_offset_from_fp(slot as u32)
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     self.push_u32(encode_lw(dst as u32, FP_REG as u32, offset), src_op);
                 }
                 (Alloc::Reg(src), Alloc::Stack(slot)) => {
                     let offset = self
                         .frame
                         .spill_offset_from_fp(slot as u32)
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     self.push_u32(encode_sw(src as u32, FP_REG as u32, offset), src_op);
                 }
                 (Alloc::Stack(s_from), Alloc::Stack(s_to)) => {
                     let o_from = self
                         .frame
                         .spill_offset_from_fp(s_from as u32)
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     let o_to = self
                         .frame
                         .spill_offset_from_fp(s_to as u32)
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     let t = Self::TEMP0 as u32;
                     self.push_u32(encode_lw(t, FP_REG as u32, o_from), src_op);
                     self.push_u32(encode_sw(t, FP_REG as u32, o_to), src_op);
@@ -228,12 +228,12 @@ impl<'a> EmitContext<'a> {
                     let spill_off = self
                         .frame
                         .spill_offset_from_fp(slot as u32)
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     let t = Self::TEMP0 as u32;
                     self.push_u32(encode_lw(t, FP_REG as u32, *fp_offset), src_op);
                     self.push_u32(encode_sw(t, FP_REG as u32, spill_off), src_op);
                 }
-                Alloc::None => return Err(AllocError::NotImplemented),
+                Alloc::None => return Err(crate::emit_err!()),
             },
         }
         Ok(())
@@ -326,7 +326,7 @@ impl<'a> EmitContext<'a> {
     fn record_label(&mut self, id: LabelId) -> Result<(), AllocError> {
         self.ensure_label_slot(id);
         if self.label_offsets[id as usize].is_some() {
-            return Err(AllocError::NotImplemented);
+            return Err(crate::emit_err!());
         }
         self.label_offsets[id as usize] = Some(self.code.len());
         Ok(())
@@ -612,7 +612,7 @@ impl<'a> EmitContext<'a> {
                 if let Some(tgt) = self.label_offset_get(*target) {
                     let imm = tgt as i32 - instr_off as i32;
                     if !jal_offset_valid(imm) {
-                        return Err(AllocError::NotImplemented);
+                        return Err(crate::emit_err!());
                     }
                     self.push_u32(encode_jal(0, imm), src_op);
                 } else {
@@ -635,7 +635,7 @@ impl<'a> EmitContext<'a> {
                 if let Some(tgt) = self.label_offset_get(*target) {
                     let imm = tgt as i32 - instr_off as i32;
                     if !branch_offset_valid(imm) {
-                        return Err(AllocError::NotImplemented);
+                        return Err(crate::emit_err!());
                     }
                     let w = if *invert {
                         encode_beq(rs1, 0, imm)
@@ -696,7 +696,11 @@ impl<'a> EmitContext<'a> {
                 let off = self
                     .frame
                     .lpir_offset_from_sp(*slot)
-                    .ok_or(AllocError::NotImplemented)?;
+                    .ok_or(crate::emit_err!(
+                        "lpir slot {} not in frame layout (have: {:?})",
+                        slot,
+                        self.frame.lpir_slot_offsets
+                    ))?;
                 let sp_reg = SP_REG as u32;
                 let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
                 if (-2048..2048).contains(&off) {
@@ -733,7 +737,7 @@ impl<'a> EmitContext<'a> {
                         local_off += 4;
                     }
                     if local_off == 0 {
-                        return Err(AllocError::NotImplemented);
+                        return Err(crate::emit_err!());
                     }
                     if local_off < remaining {
                         self.push_u32(encode_addi(p_src, p_src, local_off), src_op);
@@ -768,7 +772,7 @@ impl<'a> EmitContext<'a> {
                             let spill_off = self
                                 .frame
                                 .spill_offset_from_fp(slot as u32)
-                                .ok_or(AllocError::NotImplemented)?;
+                                .ok_or(crate::emit_err!())?;
                             let t = Self::TEMP0 as u32;
                             self.push_u32(encode_lw(t, FP_REG as u32, spill_off), src_op);
                             self.push_u32(encode_sw(t, SP_REG as u32, stack_off), src_op);
@@ -781,7 +785,7 @@ impl<'a> EmitContext<'a> {
                     let sret_off = self
                         .frame
                         .sret_slot_offset_from_fp()
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     self.push_u32(
                         encode_addi(ARG_REGS[0] as u32, FP_REG as u32, sret_off),
                         src_op,
@@ -801,7 +805,7 @@ impl<'a> EmitContext<'a> {
                     let sret_off = self
                         .frame
                         .sret_slot_offset_from_fp()
-                        .ok_or(AllocError::NotImplemented)?;
+                        .ok_or(crate::emit_err!())?;
                     for i in 0..rets.len() {
                         let alloc = Self::operand_alloc(output, inst_idx, i);
                         let buf_off = sret_off + (i as i32) * 4;
@@ -816,7 +820,7 @@ impl<'a> EmitContext<'a> {
                                 let spill_off = self
                                     .frame
                                     .spill_offset_from_fp(slot as u32)
-                                    .ok_or(AllocError::NotImplemented)?;
+                                    .ok_or(crate::emit_err!())?;
                                 let t = Self::TEMP0 as u32;
                                 self.push_u32(encode_lw(t, FP_REG as u32, buf_off), src_op);
                                 self.push_u32(encode_sw(t, FP_REG as u32, spill_off), src_op);
@@ -840,7 +844,7 @@ impl<'a> EmitContext<'a> {
                             self.push_u32(encode_addi(dst, src, 0), src_op);
                         }
                     } else {
-                        return Err(AllocError::NotImplemented);
+                        return Err(crate::emit_err!());
                     }
                 }
             }
@@ -859,10 +863,10 @@ impl<'a> EmitContext<'a> {
                 .get(f.target as usize)
                 .copied()
                 .flatten()
-                .ok_or(AllocError::NotImplemented)?;
+                .ok_or(crate::emit_err!())?;
             let pc_rel = target as i32 - f.instr_offset as i32;
             if !branch_offset_valid(pc_rel) {
-                return Err(AllocError::NotImplemented);
+                return Err(crate::emit_err!());
             }
             let w = if f.is_beq {
                 encode_beq(f.rs1, f.rs2, pc_rel)
@@ -877,10 +881,10 @@ impl<'a> EmitContext<'a> {
                 .get(f.target as usize)
                 .copied()
                 .flatten()
-                .ok_or(AllocError::NotImplemented)?;
+                .ok_or(crate::emit_err!())?;
             let pc_rel = target as i32 - f.instr_offset as i32;
             if !jal_offset_valid(pc_rel) {
-                return Err(AllocError::NotImplemented);
+                return Err(crate::emit_err!());
             }
             let w = encode_jal(f.rd, pc_rel);
             self.code[f.instr_offset..f.instr_offset + 4].copy_from_slice(&w.to_le_bytes());
@@ -947,7 +951,7 @@ pub fn emit_function(
     }
 
     if edit_cursor != output.edits.len() {
-        return Err(AllocError::NotImplemented);
+        return Err(crate::emit_err!());
     }
 
     ctx.emit_epilogue();

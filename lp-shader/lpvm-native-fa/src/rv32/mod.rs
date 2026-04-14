@@ -27,7 +27,5 @@ pub fn emit_function_fastalloc_bytes(
     _float_mode: FloatMode,
 ) -> Result<Vec<u8>, NativeError> {
     // TODO(M2): Implement using new allocator and emitter
-    Err(NativeError::FastAlloc(
-        crate::fa_alloc::AllocError::NotImplemented,
-    ))
+    Err(NativeError::FastAlloc(crate::emit_err!()))
 }
