@@ -2,7 +2,7 @@
 
 use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmEngine, LpvmMemory};
+use lpvm::{LpvmEngine, LpvmMemory, ModuleDebugInfo};
 use lpvm_cranelift::CompileOptions;
 use lpvm_cranelift::link_object_with_builtins;
 use lpvm_cranelift::{CompilerError, object_bytes_from_ir};
@@ -42,6 +42,9 @@ impl LpvmEngine for EmuEngine {
             load,
             options: self.options,
             arena: self.arena.clone(),
+            // Cranelift-based backends don't generate interleaved debug info;
+            // disasm available via external tools
+            debug_info: ModuleDebugInfo::new(),
         })
     }
 

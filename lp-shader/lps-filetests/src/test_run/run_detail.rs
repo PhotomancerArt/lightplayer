@@ -95,7 +95,19 @@ pub fn run(
         &relative_path,
         log_level,
     ) {
-        Ok(c) => c,
+        Ok(c) => {
+            // Print debug info sections when in Debug mode
+            if output_mode.show_debug_sections() {
+                if let Some(debug_info) = c.debug_info() {
+                    let output = debug_info.render(None);
+                    if !output.is_empty() {
+                        eprintln!("{}", output);
+                        eprintln!("────────────────────────────────────────");
+                    }
+                }
+            }
+            c
+        }
         Err(e) => {
             let mut compile_failed_lines = Vec::new();
             let mut unimplemented_count = 0;

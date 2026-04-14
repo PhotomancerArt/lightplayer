@@ -10,6 +10,7 @@ use crate::compile::compile_module;
 use crate::error::NativeError;
 use crate::link::link_jit;
 use crate::native_options::NativeCompileOptions;
+use lpvm::ModuleDebugInfo;
 
 use super::buffer::JitBuffer;
 use super::builtins::BuiltinTable;
@@ -29,14 +30,14 @@ use super::builtins::BuiltinTable;
 /// * `alloc_trace` - Enable allocation tracing (TODO)
 ///
 /// # Returns
-/// (JitBuffer with executable code, entry offset map)
+/// (JitBuffer with executable code, entry offset map, debug info)
 pub fn compile_module_jit(
     ir: &LpirModule,
     sig: &LpsModuleSig,
     builtin_table: &BuiltinTable,
     float_mode: lpir::FloatMode,
     _alloc_trace: bool,
-) -> Result<(JitBuffer, BTreeMap<String, usize>), NativeError> {
+) -> Result<(JitBuffer, BTreeMap<String, usize>, ModuleDebugInfo), NativeError> {
     let options = NativeCompileOptions {
         float_mode,
         debug_info: false,
@@ -47,7 +48,13 @@ pub fn compile_module_jit(
     // 1. Compile module
     let compiled = compile_module(ir, sig, float_mode, options)?;
 
-    // 2. Link JIT image with builtin resolution
+    // 2. Build ModuleDebugInfo from compiled functions
+    let mut debug_info = ModuleDebugInfo::new();
+    for func in &compiled.functions {
+        debug_info.add_function(func.debug_info.clone());
+    }
+
+    // 3. Link JIT image with builtin resolution
     let linked = link_jit(&compiled, |sym| {
         // First check builtins
         if let Some(addr) = builtin_table.lookup(sym) {
@@ -58,8 +65,8 @@ pub fn compile_module_jit(
     })
     .map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
 
-    // 3. Create JitBuffer from linked code
+    // 4. Create JitBuffer from linked code
     let buffer = JitBuffer::from_code(linked.code);
 
-    Ok((buffer, linked.entries))
+    Ok((buffer, linked.entries, debug_info))
 }

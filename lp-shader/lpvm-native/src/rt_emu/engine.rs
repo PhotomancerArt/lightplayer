@@ -7,7 +7,9 @@ use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
 use lpvm_emu::EmuSharedArena;
 
+use crate::debug_asm::compile_module_debug_info;
 use crate::error::NativeError;
+use crate::isa::rv32::debug::disasm::DisasmOptions;
 use crate::isa::rv32::emit::emit_module_elf;
 use crate::native_options::NativeCompileOptions;
 
@@ -36,6 +38,16 @@ impl LpvmEngine for NativeEmuEngine {
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let elf = emit_module_elf(ir, meta, self.options.float_mode, self.options.alloc_trace)?;
         let load = Arc::new(lpvm_cranelift::link_object_with_builtins(&elf)?);
+
+        // Generate debug info with disassembly
+        let debug_info = compile_module_debug_info(
+            ir,
+            meta,
+            self.options.float_mode,
+            DisasmOptions::default(),
+            self.options.alloc_trace,
+        )?;
+
         Ok(NativeEmuModule {
             ir: ir.clone(),
             _elf: elf,
@@ -43,6 +55,7 @@ impl LpvmEngine for NativeEmuEngine {
             load,
             arena: self.arena.clone(),
             options: self.options,
+            debug_info,
         })
     }
 

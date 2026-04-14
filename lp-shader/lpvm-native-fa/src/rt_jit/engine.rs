@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmEngine, LpvmMemory};
+use lpvm::{LpvmEngine, LpvmMemory, ModuleDebugInfo};
 
 use crate::error::NativeError;
 use crate::native_options::NativeCompileOptions;
@@ -42,7 +42,7 @@ impl LpvmEngine for NativeJitEngine {
     type Error = NativeError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        let (buffer, entry_offsets) = compile_module_jit(
+        let (buffer, entry_offsets, debug_info) = compile_module_jit(
             ir,
             meta,
             &self.builtin_table,
@@ -57,6 +57,7 @@ impl LpvmEngine for NativeJitEngine {
                 entry_offsets,
                 options: self.options,
             }),
+            debug_info,
         })
     }
 

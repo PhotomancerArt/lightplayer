@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use lp_riscv_elf::ElfLoadInfo;
 use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::LpvmModule;
+use lpvm::{LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::CompileOptions;
 
 use crate::instance::{EmuInstance, InstanceError};
@@ -19,6 +19,8 @@ pub struct EmuModule {
     pub(crate) load: Arc<ElfLoadInfo>,
     pub(crate) options: CompileOptions,
     pub(crate) arena: EmuSharedArena,
+    /// Debug info with disasm sections.
+    pub(crate) debug_info: ModuleDebugInfo,
 }
 
 impl LpvmModule for EmuModule {
@@ -31,5 +33,9 @@ impl LpvmModule for EmuModule {
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         EmuInstance::new(self.clone())
+    }
+
+    fn debug_info(&self) -> Option<&ModuleDebugInfo> {
+        Some(&self.debug_info)
     }
 }

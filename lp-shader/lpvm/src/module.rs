@@ -2,6 +2,7 @@
 
 use lps_shared::LpsModuleSig;
 
+use crate::debug::ModuleDebugInfo;
 use crate::instance::LpvmInstance;
 
 /// A compiled shader module that can be instantiated for execution.
@@ -25,4 +26,9 @@ pub trait LpvmModule {
     /// The instance has independent VM state (fuel, globals, uniforms).
     /// Multiple instances can execute concurrently (subject to `Send` bounds).
     fn instantiate(&self) -> Result<Self::Instance, Self::Error>;
+
+    /// Compilation debug info. Returns None if not available for this backend.
+    fn debug_info(&self) -> Option<&ModuleDebugInfo> {
+        None
+    }
 }

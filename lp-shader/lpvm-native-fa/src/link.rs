@@ -228,7 +228,7 @@ mod tests {
                 code: vec![0x13, 0x00, 0x00, 0x00], // nop
                 relocs: vec![],
                 debug_lines: vec![],
-                debug_asm: String::new(),
+                debug_info: lpvm::FunctionDebugInfo::new("test"),
             }],
             symbols: crate::vinst::ModuleSymbols::default(),
         }
@@ -280,14 +280,14 @@ mod tests {
                         symbol: String::from("callee"),
                     }],
                     debug_lines: vec![],
-                    debug_asm: String::new(),
+                    debug_info: lpvm::FunctionDebugInfo::new("caller"),
                 },
                 crate::compile::CompiledFunction {
                     name: String::from("callee"),
                     code: vec![0x67, 0x80, 0x00, 0x00], // ret
                     relocs: vec![],
                     debug_lines: vec![],
-                    debug_asm: String::new(),
+                    debug_info: lpvm::FunctionDebugInfo::new("callee"),
                 },
             ],
             symbols: crate::vinst::ModuleSymbols::default(),

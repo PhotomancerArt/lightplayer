@@ -64,13 +64,23 @@ fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &Fu
 }
 
 /// One body line for `op` using the canonical LPIR printer (matches `lpir::print`).
-fn format_lpir_op_line(func: &IrFunction, module: &LpirModule, op: &LpirOp) -> String {
+fn format_lpir_op_line(func: &IrFunction, module: &LpirModule, _op_idx: usize, op: &LpirOp) -> String {
     let mut f = func.clone();
     f.body = alloc::vec![op.clone()];
     f.slots.clear();
+    // Replace the function in the module while preserving all other functions
+    // so that CalleeRef indices remain valid.
+    let mut functions = module.functions.clone();
+    // Find which function we're replacing by name
+    if let Some(pos) = functions.iter().position(|mf| mf.name == func.name) {
+        functions[pos] = f;
+    } else {
+        // If not found (shouldn't happen), append it
+        functions.push(f);
+    }
     let m = LpirModule {
         imports: module.imports.clone(),
-        functions: alloc::vec![f],
+        functions,
     };
     let s = print_module(&m);
     let mut in_body = false;
@@ -156,7 +166,7 @@ pub fn render_interleaved(
             lines.push(String::new());
         }
 
-        let lpir_line = format_lpir_op_line(func, module, op);
+        let lpir_line = format_lpir_op_line(func, module, i, op);
         lines.push(format!("{IND_LP}{}", lpir_line));
 
         if let Some(vinst_list) = vinsts_by_src_op.get(&(i as u32)) {

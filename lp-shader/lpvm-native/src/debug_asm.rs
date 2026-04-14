@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 
 use lpir::LpirModule;
 use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
+use lpvm::{FunctionDebugInfo, ModuleDebugInfo};
 
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
@@ -28,13 +29,28 @@ pub fn compile_module_asm_text(
     opts: DisasmOptions,
     alloc_trace: bool,
 ) -> Result<String, NativeError> {
+    let debug_info = compile_module_debug_info(ir, sig, float_mode, opts, alloc_trace)?;
+    Ok(debug_info.render(None))
+}
+
+/// Compile and return structured debug info for all functions.
+///
+/// Populates `disasm` section for each function (interleaved not available).
+pub fn compile_module_debug_info(
+    ir: &LpirModule,
+    sig: &LpsModuleSig,
+    float_mode: lpir::FloatMode,
+    opts: DisasmOptions,
+    alloc_trace: bool,
+) -> Result<ModuleDebugInfo, NativeError> {
     // Build a map from function name to signature
     let sig_map: BTreeMap<&str, &LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
 
-    let mut out = String::new();
+    let mut debug_info = ModuleDebugInfo::new();
+
     for func in &ir.functions {
         // Get signature or use default (void -> void)
         let default_sig = LpsFnSig {
@@ -46,13 +62,22 @@ pub fn compile_module_asm_text(
             .get(func.name.as_str())
             .copied()
             .unwrap_or(&default_sig);
+
         let emitted =
             emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true, alloc_trace)?;
+
         let table = LineTable::from_debug_lines(&emitted.debug_lines);
-        out.push_str(&disassemble_function(&emitted.code, &table, func, opts));
-        out.push('\n');
+        let disasm = disassemble_function(&emitted.code, &table, func, opts);
+        let inst_count = emitted.code.len() / 4;
+
+        let func_info = FunctionDebugInfo::new(&func.name)
+            .with_inst_count(inst_count)
+            .with_section("disasm", disasm);
+
+        debug_info.add_function(func_info);
     }
-    Ok(out)
+
+    Ok(debug_info)
 }
 
 #[cfg(test)]

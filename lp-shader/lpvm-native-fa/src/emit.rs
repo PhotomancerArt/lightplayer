@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 use crate::abi::{FrameLayout, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::fa_alloc::{AllocResult, allocate};
-use crate::rv32::emit::{EmittedCode as Rv32EmittedCode, emit_function};
+use crate::fa_alloc::{AllocOutput, AllocResult, allocate};
+use crate::rv32::emit::emit_function;
 use crate::vinst::VInst;
 
 /// Emission result containing machine code and metadata.
@@ -18,23 +18,8 @@ pub struct EmittedCode {
     pub relocs: Vec<NativeReloc>,
     /// Debug line table: (code_offset, optional_src_op).
     pub debug_lines: Vec<(u32, Option<u32>)>,
-}
-
-impl From<Rv32EmittedCode> for EmittedCode {
-    fn from(code: Rv32EmittedCode) -> Self {
-        Self {
-            code: code.code,
-            relocs: code
-                .relocs
-                .into_iter()
-                .map(|r| NativeReloc {
-                    offset: r.offset,
-                    symbol: r.symbol,
-                })
-                .collect(),
-            debug_lines: code.debug_lines,
-        }
-    }
+    /// Allocation output for debug rendering.
+    pub alloc_output: AllocOutput,
 }
 
 /// Emit a LoweredFunction to machine code.
@@ -101,7 +86,20 @@ pub fn emit_lowered_with_alloc(
     )
     .map_err(NativeError::FastAlloc)?;
 
-    Ok(emitted.into())
+    // Build EmittedCode with allocation output for debug rendering
+    Ok(EmittedCode {
+        code: emitted.code,
+        relocs: emitted
+            .relocs
+            .into_iter()
+            .map(|r| NativeReloc {
+                offset: r.offset,
+                symbol: r.symbol,
+            })
+            .collect(),
+        debug_lines: emitted.debug_lines,
+        alloc_output: alloc_result.output,
+    })
 }
 
 /// Emit a sequence of VInsts to machine code.

@@ -1,11 +1,10 @@
 //! [`LpvmEngine`] implementation for native RV32 → linked → emulated execution.
 
-use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmEngine, LpvmMemory};
+use lpvm::{LpvmEngine, LpvmMemory, ModuleDebugInfo};
 use lpvm_emu::EmuSharedArena;
 
 use crate::compile::compile_module;
@@ -39,19 +38,17 @@ impl LpvmEngine for NativeEmuEngine {
         // 1. Compile module
         let compiled = compile_module(ir, meta, self.options.float_mode, self.options.clone())?;
 
-        // Extract debug assembly from compiled functions
-        let mut debug_asm = BTreeMap::new();
+        // 2. Build ModuleDebugInfo from compiled functions
+        let mut debug_info = ModuleDebugInfo::new();
         for func in &compiled.functions {
-            if !func.debug_asm.is_empty() {
-                debug_asm.insert(func.name.clone(), func.debug_asm.clone());
-            }
+            debug_info.add_function(func.debug_info.clone());
         }
 
-        // 2. Link to ELF
+        // 3. Link to ELF
         let elf = link_elf(&compiled)
             .map_err(|e| NativeError::Internal(format!("ELF link failed: {e}")))?;
 
-        // 3. Link with cranelift builtins
+        // 4. Link with cranelift builtins
         let load = Arc::new(lpvm_cranelift::link_object_with_builtins(&elf)?);
 
         Ok(NativeEmuModule {
@@ -61,7 +58,7 @@ impl LpvmEngine for NativeEmuEngine {
             load,
             arena: self.arena.clone(),
             options: self.options.clone(),
-            debug_asm,
+            debug_info,
         })
     }
 

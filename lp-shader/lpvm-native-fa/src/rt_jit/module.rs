@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{AllocError, LpvmMemory, LpvmModule};
+use lpvm::{AllocError, LpvmMemory, LpvmModule, ModuleDebugInfo};
 use lpvm::{DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE};
 
 use crate::error::NativeError;
@@ -38,6 +38,8 @@ pub struct NativeJitDirectCall {
 #[derive(Clone)]
 pub struct NativeJitModule {
     pub(crate) inner: Arc<NativeJitModuleInner>,
+    /// Debug info with sections per function.
+    pub(crate) debug_info: ModuleDebugInfo,
 }
 
 impl NativeJitModule {
@@ -101,6 +103,10 @@ impl LpvmModule for NativeJitModule {
             module: self.clone(),
             vmctx_guest: buf.guest_base() as u32,
         })
+    }
+
+    fn debug_info(&self) -> Option<&ModuleDebugInfo> {
+        Some(&self.debug_info)
     }
 }
 

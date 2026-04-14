@@ -303,8 +303,14 @@ impl LpvmInstance for NativeEmuInstance {
 
         // Include compilation debug info for the last called function
         if let Some(ref func_name) = self.last_called_func {
-            if let Some(debug_asm) = self.module.debug_asm.get(func_name) {
-                result.push_str(debug_asm);
+            if let Some(func_info) = self.module.debug_info.functions.get(func_name) {
+                // Get the interleaved section if available, otherwise disasm
+                if let Some(content) = func_info.sections.get("interleaved") {
+                    result.push_str(content);
+                } else if let Some(content) = func_info.sections.get("disasm") {
+                    result.push_str("--- disasm ---\n");
+                    result.push_str(content);
+                }
                 result.push_str("\n\n");
             }
         }

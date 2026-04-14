@@ -3,7 +3,7 @@
 use lp_riscv_emu::LogLevel;
 use lpir::{FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig};
-use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
+use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
@@ -184,5 +184,17 @@ impl CompiledShader {
 impl CompiledShader {
     pub(crate) fn get_function_signature(&self, name: &str) -> Option<&LpsFnSig> {
         self.module_sig().functions.iter().find(|f| f.name == name)
+    }
+
+    /// Get structured debug info for the compiled module.
+    /// Returns None if the backend doesn't provide debug info.
+    pub(crate) fn debug_info(&self) -> Option<&ModuleDebugInfo> {
+        match self {
+            Self::Jit(_) => None,
+            Self::Emu(m) => m.debug_info(),
+            Self::Native(m) => m.debug_info(),
+            Self::NativeFa(m) => m.debug_info(),
+            Self::Wasm(_) => None,
+        }
     }
 }

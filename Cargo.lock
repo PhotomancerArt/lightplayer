@@ -3694,6 +3694,7 @@ dependencies = [
  "lp-shared",
  "lpir",
  "lps-frontend",
+ "lpvm-cranelift",
  "lpvm-native",
  "lpvm-native-fa",
  "notify",

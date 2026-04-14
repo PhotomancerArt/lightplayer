@@ -10,7 +10,7 @@ mod messages;
 mod server;
 
 use commands::{
-    create, dev, heap_summary, mem_profile, serve, shader_lpir, shader_rv32, shader_rv32fa, upload,
+    create, dev, heap_summary, mem_profile, serve, shader_debug, shader_lpir, upload,
 };
 
 #[derive(Parser)]
@@ -89,35 +89,10 @@ enum Cli {
         #[arg(long)]
         skip_validate: bool,
     },
-    /// Compile a GLSL file to annotated RV32 assembly (`lpvm-native`, stdout).
-    ShaderRv32 {
-        path: std::path::PathBuf,
-        #[arg(short, long)]
-        output: Option<std::path::PathBuf>,
-        #[arg(long, default_value = "q32")]
-        float_mode: String,
-        #[arg(long)]
-        hex: bool,
-        /// Print register allocation trace to stderr (off by default)
-        #[arg(long)]
-        alloc_trace: bool,
-        /// Codegen pipeline: `linear` (default) or `fast` (straight-line PInst fastalloc).
-        #[arg(long, default_value = "linear")]
-        pipeline: String,
-        /// With `--pipeline fast`, print VInst listing to stderr.
-        #[arg(long)]
-        show_vinst: bool,
-        /// With `--pipeline fast`, print PInst listing to stderr.
-        #[arg(long)]
-        show_pinst: bool,
-        /// With `--pipeline fast`, print raw instruction disassembly to stderr.
-        #[arg(long)]
-        disassemble: bool,
-    },
-    /// Fastalloc RV32FA pipeline with verbose stderr (see `--help`).
-    ShaderRv32fa {
+    /// Unified debug output for shader compilation (replaces shader-rv32, shader-rv32fa).
+    ShaderDebug {
         #[command(flatten)]
-        args: shader_rv32fa::Args,
+        args: shader_debug::Args,
     },
 }
 
@@ -158,27 +133,6 @@ fn main() -> Result<()> {
             stats,
             skip_validate,
         }),
-        Cli::ShaderRv32 {
-            path,
-            output,
-            float_mode,
-            hex,
-            alloc_trace,
-            pipeline,
-            show_vinst,
-            show_pinst,
-            disassemble,
-        } => shader_rv32::handle_shader_rv32(shader_rv32::ShaderRv32Args {
-            path,
-            output,
-            float_mode,
-            hex,
-            alloc_trace,
-            pipeline,
-            show_vinst,
-            show_pinst,
-            disassemble,
-        }),
-        Cli::ShaderRv32fa { args } => shader_rv32fa::handle_shader_rv32fa(args),
+        Cli::ShaderDebug { args } => shader_debug::handle_shader_debug(args),
     }
 }

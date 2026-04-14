@@ -1,11 +1,13 @@
 //! Compilation orchestration: LPIR → VInst → PInst → bytes.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::{FloatMode, IrFunction, LpirModule};
 use lps_shared::LpsFnSig;
+use lpvm::FunctionDebugInfo;
 
 use crate::abi::ModuleAbi;
 use crate::error::NativeError;
@@ -31,8 +33,8 @@ pub struct CompiledFunction {
     pub relocs: Vec<NativeReloc>,
     /// Debug info: (code_offset, optional_src_op).
     pub debug_lines: Vec<(u32, Option<u32>)>,
-    /// Debug assembly text (VInsts, PInsts, disassembly) for debugging.
-    pub debug_asm: String,
+    /// Structured debug info with sections.
+    pub debug_info: FunctionDebugInfo,
 }
 
 /// Output of a full module compilation.
@@ -73,7 +75,6 @@ impl CompileSession {
 }
 
 /// Compile one function: LPIR → VInst → (peephole) → AllocOutput → bytes.
-/// TODO(M2): Currently returns NotImplemented error from stub allocator.
 pub fn compile_function(
     session: &mut CompileSession,
     func: &IrFunction,
@@ -84,38 +85,37 @@ pub fn compile_function(
     let lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
         .map_err(NativeError::Lower)?;
 
-    // 2. Peephole: disabled — removing VInsts invalidates region tree indices.
-    // TODO: either update region tree after peephole, or avoid emitting redundant Br+Label pairs.
-
-    // 3. Build function ABI
+    // 2. Build function ABI
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
 
-    // 4. Allocate and emit
+    // 3. Allocate and emit
     let emitted =
         crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
 
     let code = emitted.code;
     let relocs = emitted.relocs;
 
-    // Build debug assembly text (minimal for M1)
-    let mut debug_asm = String::new();
+    // 4. Build structured debug info
+    let mut sections = BTreeMap::new();
 
-    // VInst section
-    debug_asm.push_str(&format!("\n=== VInst {} ===\n", func.name));
-    for inst in &lowered.vinsts {
-        debug_asm.push_str(&format!(
-            "{} {}\n",
-            inst.mnemonic(),
-            inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
-        ));
-    }
+    // Interleaved LPIR + VInst + allocations
+    let interleaved = crate::fa_alloc::render::render_interleaved(
+        func,
+        ir,
+        &lowered.vinsts,
+        &lowered.vreg_pool,
+        &emitted.alloc_output,
+        &func_abi,
+        &lowered.symbols,
+    );
+    sections.insert("interleaved".into(), interleaved);
 
     // Disasm section with hex
-    debug_asm.push_str(&format!("\n=== Disasm {} ===\n", func.name));
+    let mut disasm = String::new();
     let mut off = 0usize;
     while off + 4 <= code.len() {
         let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
-        debug_asm.push_str(&format!(
+        disasm.push_str(&format!(
             "{:04x}\t{:08x}\t{}\n",
             off,
             w,
@@ -123,13 +123,29 @@ pub fn compile_function(
         ));
         off += 4;
     }
+    sections.insert("disasm".into(), disasm);
+
+    // Optional: VInst listing
+    let mut vinst_text = String::new();
+    for inst in &lowered.vinsts {
+        vinst_text.push_str(&format!(
+            "{} {}\n",
+            inst.mnemonic(),
+            inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
+        ));
+    }
+    sections.insert("vinst".into(), vinst_text);
+
+    let debug_info = FunctionDebugInfo::new(&func.name)
+        .with_inst_count(code.len() / 4)
+        .with_sections(sections);
 
     Ok(CompiledFunction {
         name: func.name.clone(),
         code,
         relocs,
         debug_lines: emitted.debug_lines,
-        debug_asm,
+        debug_info,
     })
 }
 

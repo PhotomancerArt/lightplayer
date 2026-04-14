@@ -16,6 +16,7 @@ extern crate alloc;
 
 mod buffer;
 mod data_error;
+mod debug;
 mod engine;
 mod instance;
 mod lpvm_abi;
@@ -26,6 +27,7 @@ mod vmcontext;
 
 pub use buffer::{LpvmBuffer, LpvmPtr};
 pub use data_error::DataError;
+pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
 pub use engine::LpvmEngine;
 pub use instance::LpvmInstance;
 pub use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
