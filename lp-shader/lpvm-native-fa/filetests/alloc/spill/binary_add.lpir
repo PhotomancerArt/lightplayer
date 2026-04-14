@@ -18,19 +18,19 @@ func @test() -> i32 {
 ;
 ;     v1:i32 = iconst.i32 10
 ;         i1 = IConst32 10
-;         ; write: i1 -> t5
+;         ; write: i1 -> t4
 ;
 ;     v2:i32 = iconst.i32 20
 ;         i2 = IConst32 20
-;         ; write: i2 -> t4
+;         ; write: i2 -> t5
 ;
 ;     v3:i32 = iadd v1:i32, v2:i32
-;         ; read: i1 <- t5
-;         ; read: i2 <- t4
+;         ; read: i1 <- t4
+;         ; read: i2 <- t5
 ;         i3 = Add32 i1, i2
 ;         ; write: i3 -> t4
-;         ; trace: alloc: v1 -> t30
-;         ; trace: alloc: v2 -> t29
+;         ; trace: alloc: v1 -> t29
+;         ; trace: alloc: v2 -> t30
 ;
 ;     return v3:i32
 ;         ; read: i3 <- t4

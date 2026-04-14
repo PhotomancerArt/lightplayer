@@ -58,7 +58,10 @@ impl FrameLayout {
         caller_outgoing_stack_bytes: u32,
     ) -> Self {
         let save_ra = !is_leaf;
-        let save_fp = true;
+        // Frame pointer is only needed when we have spills (for addressing) or
+        // callee-saved registers to restore. Leaf functions with neither can
+        // skip fp entirely, saving 4 instructions (save/setup/restore).
+        let save_fp = spill_count > 0 || used_callee_saved != PregSet::EMPTY || !is_leaf;
 
         let mut callee_list: Vec<PReg> = used_callee_saved.iter().collect();
         callee_list.sort_by_key(|p| (p.class as u8, p.hw));
@@ -180,12 +183,35 @@ mod tests {
     }
 
     #[test]
-    fn leaf_skips_ra_save_flag() {
+    fn leaf_without_spills_or_callee_saved_omits_fp() {
         let abi = abi_float();
+        // Leaf function with no spills and no callee-saved registers
+        // should omit frame pointer entirely to save 4 instructions.
         let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], true, 0, 0);
         assert!(!frame.save_ra);
-        assert!(frame.save_fp);
+        assert!(!frame.save_fp, "leaf without spills/callee-saved should skip fp");
         assert!(frame.ra_offset_from_sp.is_none());
+        assert!(frame.fp_offset_from_sp.is_none());
+    }
+
+    #[test]
+    fn leaf_with_callee_saved_keeps_fp() {
+        let abi = abi_float();
+        // Leaf function using callee-saved regs needs fp for restoring them.
+        let used = PregSet::singleton(rv32::S2);
+        let frame = FrameLayout::compute(&abi, 0, used, &[], true, 0, 0);
+        assert!(!frame.save_ra);
+        assert!(frame.save_fp, "leaf with callee-saved needs fp");
+        assert!(frame.fp_offset_from_sp.is_some());
+    }
+
+    #[test]
+    fn leaf_with_spills_keeps_fp() {
+        let abi = abi_float();
+        // Leaf function with spills needs fp for addressing.
+        let frame = FrameLayout::compute(&abi, 2, PregSet::EMPTY, &[], true, 0, 0);
+        assert!(!frame.save_ra);
+        assert!(frame.save_fp, "leaf with spills needs fp");
         assert!(frame.fp_offset_from_sp.is_some());
     }
 

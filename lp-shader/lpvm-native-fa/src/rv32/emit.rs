@@ -248,8 +248,10 @@ impl<'a> EmitContext<'a> {
         let sp = SP_REG as u32;
         let frame_size = self.frame.total_size as i32;
 
-        // addi sp, sp, -frame_size
-        self.push_u32(encode_addi(sp, sp, -frame_size), None);
+        // addi sp, sp, -frame_size (skip if frame_size is 0)
+        if frame_size != 0 {
+            self.push_u32(encode_addi(sp, sp, -frame_size), None);
+        }
 
         // Save FP if needed
         if let Some(fp_off) = self.frame.fp_offset_from_sp {
@@ -307,8 +309,10 @@ impl<'a> EmitContext<'a> {
             self.push_u32(encode_lw(FP_REG as u32, sp, fp_off), None);
         }
 
-        // Restore SP
-        self.push_u32(encode_addi(sp, sp, frame_size), None);
+        // Restore SP (skip if frame_size is 0)
+        if frame_size != 0 {
+            self.push_u32(encode_addi(sp, sp, frame_size), None);
+        }
 
         // Return
         self.push_u32(encode_ret(), None);
@@ -994,9 +998,11 @@ mod tests {
         );
 
         let result = crate::emit::emit_lowered(&lowered, &abi).expect("emit_lowered");
+        // With frame pointer omission for leaf functions, simple IConst+Ret
+        // compiles to ~5 instructions (20 bytes). Ensure we got valid code.
         assert!(
-            result.code.len() >= 28,
-            "expected substantial code, got {}",
+            result.code.len() >= 12,
+            "expected at least 3 instructions, got {} bytes",
             result.code.len()
         );
     }

@@ -76,15 +76,12 @@ EOF
   exit 0
 fi
 
-# Build lp-cli if needed (silent check)
-if [ ! -f "$WORKSPACE_ROOT/target/debug/lp-cli" ]; then
-  echo "Building lp-cli..."
-  cargo build -p lp-cli -q || {
-    echo "Error: Failed to build lp-cli" >&2
-    exit 1
-  }
-fi
+# Change to workspace root for cargo
+cd "$WORKSPACE_ROOT" || {
+  echo "Error: Failed to change to workspace root: $WORKSPACE_ROOT" >&2
+  exit 1
+}
 
-# Run shader-debug command
+# Run shader-debug command using cargo run to ensure automatic rebuilds
 # All arguments are passed through to lp-cli
-exec "$WORKSPACE_ROOT/target/debug/lp-cli" shader-debug "$@"
+exec cargo run -p lp-cli -q -- shader-debug "$@"
