@@ -17,6 +17,18 @@ pub const SCRATCH: PReg = 28;
 /// Registers available for temporaries (excludes zero, ra, sp, fp, a0–a7, [`SCRATCH`]).
 pub const ALLOC_POOL: &[PReg] = &[5, 6, 7, 29, 30, 31, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
 
+/// Caller-saved registers within [`ALLOC_POOL`] (the t-regs).
+/// A call clobbers these; live vregs must be saved/restored.
+pub const CALLER_SAVED_POOL: &[PReg] = &[5, 6, 7, 29, 30, 31]; // t0, t1, t2, t4, t5, t6
+
+pub fn is_caller_saved_pool(r: PReg) -> bool {
+    CALLER_SAVED_POOL.iter().any(|&x| x == r)
+}
+
+pub fn is_arg_reg(r: PReg) -> bool {
+    (10..=17).contains(&r)
+}
+
 /// Parse register name to physical register number (standard RISC-V ABI names).
 pub fn parse_reg(name: &str) -> Result<PReg, ()> {
     match name {

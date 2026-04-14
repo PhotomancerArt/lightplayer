@@ -40,6 +40,9 @@ arguments. Call-related filetests pass.
   - Multi-arg call: 4-8 args
   - Sret call: callee returns vec2/vec4 via pointer
   - Stack args: call with >8 args
+  - Entry parameter moves: params that start in ABI regs (a1-a7) but must move
+    when a call clobbers them. This is the first scenario where entry moves
+    (`; entry_move: xN -> tM`) actually appear in trace output.
 
 - **Filetest validation:** call-related filetests pass:
   - `native-call-simple.glsl`

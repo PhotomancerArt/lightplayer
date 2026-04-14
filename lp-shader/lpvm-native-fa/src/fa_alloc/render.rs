@@ -2,9 +2,10 @@
 
 use crate::abi::FuncAbi;
 use crate::abi::classify::{ArgLoc, ReturnMethod};
+use crate::fa_alloc::trace::TraceEntry;
 use crate::fa_alloc::{Alloc, AllocOutput, Edit, EditPoint};
 use crate::rv32::gpr::reg_name;
-use crate::vinst::{VInst, VReg};
+use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -14,6 +15,27 @@ use lpir::{IrFunction, LpirModule, LpirOp, print_module};
 const IND_LP: &str = "    ";
 /// Indentation for VInst lines, read, and write annotations.
 const IND_VI: &str = "        ";
+
+fn is_entry_trace_mnemonic(m: &str) -> bool {
+    m == "entry" || m == "entry_move" || m == "entry_spill"
+}
+
+/// Non-entry trace rows grouped by VInst index, in forward program / operand order.
+fn build_trace_by_vinst(
+    trace: &crate::fa_alloc::trace::AllocTrace,
+) -> alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> {
+    let mut map: alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> =
+        alloc::collections::BTreeMap::new();
+    for entry in trace.entries.iter().rev() {
+        if !is_entry_trace_mnemonic(&entry.vinst_mnemonic) {
+            map.entry(entry.vinst_idx).or_default().push(entry);
+        }
+    }
+    for v in map.values_mut() {
+        v.reverse();
+    }
+    map
+}
 
 /// First line of [`print_module`] for a copy of `func` with empty body (header only).
 fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &FuncAbi) -> String {
@@ -105,6 +127,7 @@ pub fn render_interleaved(
     vreg_pool: &[VReg],
     output: &AllocOutput,
     func_abi: &FuncAbi,
+    symbols: &ModuleSymbols,
 ) -> String {
     let mut lines = Vec::new();
 
@@ -122,6 +145,8 @@ pub fn render_interleaved(
 
     let mut rendered_vinsts = alloc::collections::BTreeSet::new();
 
+    let trace_by_vinst = build_trace_by_vinst(&output.trace);
+
     lines.push(format_func_header_line(func, module, func_abi));
     push_alloc_metadata_lines(&mut lines, func, output, func_abi);
     lines.push(String::new());
@@ -137,7 +162,16 @@ pub fn render_interleaved(
         if let Some(vinst_list) = vinsts_by_src_op.get(&(i as u32)) {
             for (vinst_idx, inst) in vinst_list.iter() {
                 rendered_vinsts.insert(*vinst_idx);
-                push_vinst_snapshot_block(&mut lines, *vinst_idx, inst, vinsts, vreg_pool, output);
+                push_vinst_snapshot_block(
+                    &mut lines,
+                    *vinst_idx,
+                    inst,
+                    vinsts,
+                    vreg_pool,
+                    output,
+                    &trace_by_vinst,
+                    symbols,
+                );
             }
         }
     }
@@ -156,7 +190,15 @@ pub fn render_interleaved(
         // Epilogue (e.g. Label): align with body LPIR lines, not nested under an op.
         // For epilogue (Label etc): use body indent for edits/reads/VInst, LP indent for writes
         push_vinst_snapshot_block_raw(
-            &mut lines, inst_idx, inst, vreg_pool, output, IND_LP, IND_VI,
+            &mut lines,
+            inst_idx,
+            inst,
+            vreg_pool,
+            output,
+            &trace_by_vinst,
+            symbols,
+            IND_LP,
+            IND_VI,
         );
     }
 
@@ -170,8 +212,20 @@ fn push_vinst_snapshot_block(
     _vinsts: &[VInst],
     vreg_pool: &[VReg],
     output: &AllocOutput,
+    trace_by_vinst: &alloc::collections::BTreeMap<usize, Vec<&TraceEntry>>,
+    symbols: &ModuleSymbols,
 ) {
-    push_vinst_snapshot_block_raw(lines, vinst_idx, inst, vreg_pool, output, IND_VI, IND_VI);
+    push_vinst_snapshot_block_raw(
+        lines,
+        vinst_idx,
+        inst,
+        vreg_pool,
+        output,
+        trace_by_vinst,
+        symbols,
+        IND_VI,
+        IND_VI,
+    );
 }
 
 fn push_vinst_snapshot_block_raw(
@@ -180,6 +234,8 @@ fn push_vinst_snapshot_block_raw(
     inst: &VInst,
     vreg_pool: &[VReg],
     output: &AllocOutput,
+    trace_by_vinst: &alloc::collections::BTreeMap<usize, Vec<&TraceEntry>>,
+    symbols: &ModuleSymbols,
     indent_vinst: &str,
     _indent_edit_read: &str,
 ) {
@@ -205,6 +261,13 @@ fn push_vinst_snapshot_block_raw(
         .map(|(_, edit)| edit)
         .collect();
 
+    let after_edits: Vec<_> = output
+        .edits
+        .iter()
+        .filter(|(pt, _)| *pt == EditPoint::After(inst_idx_u16))
+        .map(|(_, edit)| edit)
+        .collect();
+
     // Before-edits, reads, VInst, and writes all at same indentation (part of one op)
     for edit in &before_edits {
         lines.push(format!("{indent_vinst}; {}", format_edit(edit)));
@@ -216,7 +279,10 @@ fn push_vinst_snapshot_block_raw(
             format_alloc(*alloc)
         ));
     }
-    lines.push(format!("{indent_vinst}{}", format_inst(inst, vreg_pool)));
+    lines.push(format!(
+        "{indent_vinst}{}",
+        format_inst(inst, vreg_pool, Some(symbols))
+    ));
     for (vreg, alloc) in def_vregs.iter().zip(def_allocs.iter()) {
         lines.push(format!(
             "{indent_vinst}; write: i{} -> {}",
@@ -224,11 +290,29 @@ fn push_vinst_snapshot_block_raw(
             format_alloc(*alloc)
         ));
     }
+    if let Some(entries) = trace_by_vinst.get(&vinst_idx) {
+        for entry in entries {
+            lines.push(format!(
+                "{indent_vinst}; trace: {}: {}",
+                entry.vinst_mnemonic, entry.decision
+            ));
+        }
+    }
+    for edit in &after_edits {
+        lines.push(format!("{indent_vinst}; {}", format_edit(edit)));
+    }
 }
 
 /// Render AllocOutput as human-readable text for snapshot tests.
-pub fn render_alloc_output(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) -> String {
+pub fn render_alloc_output(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    output: &AllocOutput,
+    symbols: Option<&ModuleSymbols>,
+) -> String {
     let mut lines = Vec::new();
+
+    let trace_by_vinst = build_trace_by_vinst(&output.trace);
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let inst_idx_u16 = inst_idx as u16;
@@ -280,11 +364,30 @@ pub fn render_alloc_output(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocO
         }
 
         // Render the instruction
-        lines.push(format_inst(inst, vreg_pool));
+        lines.push(format_inst(inst, vreg_pool, symbols));
 
         // Render write (def) allocations
         for (_i, (vreg, alloc)) in def_vregs.iter().zip(def_allocs.iter()).enumerate() {
             lines.push(format!("; write: i{} -> {}", vreg.0, format_alloc(*alloc)));
+        }
+
+        if let Some(entries) = trace_by_vinst.get(&inst_idx) {
+            for entry in entries {
+                lines.push(format!(
+                    "; trace: {}: {}",
+                    entry.vinst_mnemonic, entry.decision
+                ));
+            }
+        }
+
+        let after_edits: Vec<_> = output
+            .edits
+            .iter()
+            .filter(|(pt, _)| *pt == EditPoint::After(inst_idx_u16))
+            .map(|(_, edit)| edit)
+            .collect();
+        for edit in &after_edits {
+            lines.push(format!("; {}", format_edit(edit)));
         }
     }
 
@@ -292,7 +395,7 @@ pub fn render_alloc_output(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocO
 }
 
 /// Format an instruction as text (matches `debug::vinst` ireg style: `i0`, `i1`, …).
-fn format_inst(inst: &VInst, vreg_pool: &[VReg]) -> String {
+fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>) -> String {
     match inst {
         VInst::IConst32 { dst, val, .. } => {
             format!("i{} = IConst32 {}", dst.0, val)
@@ -335,6 +438,48 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg]) -> String {
         }
         VInst::Label(id, _) => {
             format!("Label L{}", id)
+        }
+        VInst::Call {
+            target,
+            args,
+            rets,
+            callee_uses_sret,
+            ..
+        } => {
+            let name = symbols
+                .map(|s| s.name(*target).to_string())
+                .unwrap_or_else(|| format!("sym{}", target.0));
+            let args_s = args
+                .vregs(vreg_pool)
+                .iter()
+                .map(|v| format!("i{}", v.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rets_v = rets.vregs(vreg_pool);
+            let mut s = String::new();
+            if !rets_v.is_empty() {
+                if rets_v.len() == 1 {
+                    s.push_str(&format!("i{} = ", rets_v[0].0));
+                } else {
+                    s.push('(');
+                    for (i, v) in rets_v.iter().enumerate() {
+                        if i > 0 {
+                            s.push_str(", ");
+                        }
+                        s.push_str(&format!("i{}", v.0));
+                    }
+                    s.push_str(") = ");
+                }
+            }
+            s.push_str("Call ");
+            s.push_str(&name);
+            if *callee_uses_sret {
+                s.push_str(" sret");
+            }
+            s.push_str(" (");
+            s.push_str(&args_s);
+            s.push(')');
+            s
         }
         _ => {
             format!("{} (unformatted)", inst.mnemonic())
@@ -438,13 +583,25 @@ fn push_alloc_metadata_lines(
         let vreg_num = 1 + i;
         if let Some(loc) = func_abi.param_loc(i + 1) {
             // +1 to skip vmctx
-            lines.push(format!("{IND_LP}; arg v{}: {}", vreg_num, format_arg_loc(&loc)));
+            lines.push(format!(
+                "{IND_LP}; arg v{}: {}",
+                vreg_num,
+                format_arg_loc(&loc)
+            ));
         }
     }
     lines.push(format!(
         "{IND_LP}; ret: {}",
         format_return_method(func_abi.return_method())
     ));
+    for entry in &output.trace.entries {
+        if is_entry_trace_mnemonic(&entry.vinst_mnemonic) {
+            lines.push(format!(
+                "{IND_LP}; {}: {}",
+                entry.vinst_mnemonic, entry.decision
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -472,7 +629,7 @@ mod tests {
         let input = "i0 = IConst32 10\nRet i0";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
         let output = walk::walk_linear(&vinsts, &pool, &make_abi()).unwrap();
-        let rendered = render_alloc_output(&vinsts, &pool, &output);
+        let rendered = render_alloc_output(&vinsts, &pool, &output, None);
 
         // Just check it doesn't panic and contains expected text
         assert!(rendered.contains("IConst32"));

@@ -38,16 +38,22 @@ func @test() -> i32 {
 ;         ; read: i2 <- t1
 ;         i4 = Sub32 i1, i2
 ;         ; write: i4 -> t0
+;         ; trace: alloc: v1 -> t5
+;         ; trace: evict: t6 -> slot0
+;         ; trace: alloc: v2 -> t6
 ;
 ;     v5:i32 = iadd v3:i32, v4:i32
 ;         ; read: i3 <- t1
 ;         ; read: i4 <- t0
 ;         i5 = Add32 i3, i4
 ;         ; write: i5 -> t0
+;         ; trace: alloc: v3 -> t6
+;         ; trace: alloc: v4 -> t5
 ;
 ;     return v5:i32
 ;         ; read: i5 <- t0
 ;         Ret i5
+;         ; trace: alloc: v5 -> t5
 ;         Br L0
 ; }
 ;     Label L0

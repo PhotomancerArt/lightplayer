@@ -59,8 +59,7 @@ fn filetest_alloc_snapshot() {
     let bless = env::var("BLESS").is_ok();
     let mut failures: Vec<String> = Vec::new();
 
-    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("filetests");
+    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
 
     let tests = discover_filetests(&test_dir);
 
@@ -102,8 +101,7 @@ fn filetest_alloc_snapshot() {
 
 #[test]
 fn list_filetests() {
-    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("filetests");
+    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
 
     let tests = discover_filetests(&test_dir);
 

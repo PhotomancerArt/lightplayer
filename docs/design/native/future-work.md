@@ -1,13 +1,9 @@
 ## Register Allocation Improvements
 
-### Interval Representation
-
-Currently using simple (start, end) intervals in linear scan. Future improvements:
-
-- **Segmented intervals**: Support holes in live ranges for better allocation
-- **Use positions**: Track specific use points for better spill heuristics
-- **Interval splitting**: Split at call boundaries to use callee-saved registers for second half
-- **Coalescing**: Eliminate redundant moves between intervals
+- Verifier: liveness-aware clobber safety check. Verify that every vreg live in
+  a caller-saved pool reg across a VInst::Call has a matching save/restore edit
+  pair (Move(reg→stack) at Before(call), Move(stack→reg) at After(call)). Deferred
+  from M3.2 because it requires tracking per-instruction liveness in the verifier.
 
 ## Memory Improvements
 

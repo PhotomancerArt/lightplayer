@@ -322,7 +322,7 @@ mod tests {
         use crate::rv32::abi;
         use lps_shared::{LpsFnSig, LpsType};
 
-        let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
+        let (vinsts, symbols, pool) = vinst::parse(input).unwrap();
 
         // Create a simple ABI with no params
         let func_abi = abi::func_abi_rv32(
@@ -335,7 +335,7 @@ mod tests {
         );
 
         let output = walk_linear(&vinsts, &pool, &func_abi).unwrap();
-        let rendered = render_alloc_output(&vinsts, &pool, &output);
+        let rendered = render_alloc_output(&vinsts, &pool, &output, Some(&symbols));
 
         // Normalize whitespace for comparison
         let expected_normalized = expected.trim().replace("\r\n", "\n");
@@ -356,7 +356,8 @@ mod tests {
 ; write: i0 -> t0
 ; ---------------------------
 ; read: i0 <- t0
-Ret i0",
+Ret i0
+; trace: alloc: v0 -> t5",
         );
     }
 
@@ -374,9 +375,12 @@ i1 = IConst32 20
 ; read: i1 <- t2
 i2 = Add32 i0, i1
 ; write: i2 -> t0
+; trace: alloc: v0 -> t6
+; trace: alloc: v1 -> t7
 ; ---------------------------
 ; read: i2 <- t0
-Ret i2",
+Ret i2
+; trace: alloc: v2 -> t5",
         );
     }
 }

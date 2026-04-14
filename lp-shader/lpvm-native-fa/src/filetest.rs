@@ -26,6 +26,9 @@ pub struct FileTest {
     pub abi_params: usize,
     /// Return type for ABI: "void", "i32", or "f32" (default "void").
     pub abi_return: String,
+    /// `import:` directive bodies, e.g. `helper(i32, i32) -> i32` → prepended as
+    /// `import @filetest::helper(i32, i32) -> i32`.
+    pub import_directives: Vec<String>,
     /// Raw LPIR input as string (for parsing)
     pub lpir_input: String,
     pub expected: String,
@@ -39,6 +42,7 @@ pub fn parse_filetest(path: &str, content: &str) -> FileTest {
     let mut abi_params: usize = 0;
     let mut abi_return = String::from("void");
     let mut name: Option<String> = None;
+    let mut import_directives: Vec<String> = Vec::new();
 
     while let Some(line) = lines.peek() {
         let t = line.trim_start();
@@ -62,6 +66,9 @@ pub fn parse_filetest(path: &str, content: &str) -> FileTest {
                     }
                     "name" => {
                         name = Some(value.to_string());
+                    }
+                    "import" => {
+                        import_directives.push(value.to_string());
                     }
                     _ => {}
                 }
@@ -110,8 +117,60 @@ pub fn parse_filetest(path: &str, content: &str) -> FileTest {
         pool_size,
         abi_params,
         abi_return,
+        import_directives,
         lpir_input,
         expected,
+    }
+}
+
+/// Turn `helper(i32, i32) -> i32` into a full LPIR import line (`import @filetest::…`).
+pub fn filetest_import_to_lpir_line(directive_body: &str) -> Result<String, String> {
+    let s = directive_body.trim();
+    let open = s
+        .find('(')
+        .ok_or_else(|| String::from("import: expected '(' after name"))?;
+    let name = s[..open].trim();
+    if name.is_empty() {
+        return Err(String::from("import: empty callee name"));
+    }
+    let mut depth = 0i32;
+    let mut close_rel: Option<usize> = None;
+    for (i, c) in s[open..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close_rel = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close_rel = close_rel.ok_or_else(|| String::from("import: unclosed '('"))?;
+    let close = open + close_rel;
+    let params = &s[open..=close];
+    let tail = s[close + 1..].trim();
+    let ret = if let Some(r) = tail.strip_prefix("->") {
+        r.trim()
+    } else if tail.is_empty() {
+        ""
+    } else {
+        return Err(alloc::format!(
+            "import: expected '->' or end after ')', got {:?}",
+            tail
+        ));
+    };
+    if ret.is_empty() {
+        Ok(alloc::format!("import @filetest::{}{}\n", name, params))
+    } else {
+        Ok(alloc::format!(
+            "import @filetest::{}{} -> {}\n",
+            name,
+            params,
+            ret
+        ))
     }
 }
 
@@ -120,8 +179,20 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
     use crate::abi::ModuleAbi;
     use lps_shared::LpsModuleSig;
 
-    let module =
-        parse_module(&test.lpir_input).map_err(|e| format!("Failed to parse LPIR: {:?}", e))?;
+    let mut lpir_full = String::new();
+    for d in &test.import_directives {
+        lpir_full.push_str(&filetest_import_to_lpir_line(d)?);
+    }
+    lpir_full.push_str(&test.lpir_input);
+
+    let mut module =
+        parse_module(&lpir_full).map_err(|e| format!("Failed to parse LPIR: {:?}", e))?;
+
+    for imp in &mut module.imports {
+        if imp.module_name == "filetest" {
+            imp.needs_vmctx = true;
+        }
+    }
 
     let mut func = module
         .functions
@@ -195,7 +266,15 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
 
     verify_alloc(vinsts, vreg_pool, &output, &func_abi);
 
-    let rendered = render_interleaved(&func, &module, vinsts, vreg_pool, &output, &func_abi);
+    let rendered = render_interleaved(
+        &func,
+        &module,
+        vinsts,
+        vreg_pool,
+        &output,
+        &func_abi,
+        &lowered.symbols,
+    );
 
     let mut actual_lines = vec![FILETEST_SEPARATOR.to_string()];
     actual_lines.push(";".to_string());
@@ -207,6 +286,27 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
         }
     }
     Ok(actual_lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filetest_import_to_lpir_line;
+
+    #[test]
+    fn import_directive_to_lpir_scalar() {
+        assert_eq!(
+            filetest_import_to_lpir_line("helper(i32, i32) -> i32").unwrap(),
+            "import @filetest::helper(i32, i32) -> i32\n"
+        );
+    }
+
+    #[test]
+    fn import_directive_void_return() {
+        assert_eq!(
+            filetest_import_to_lpir_line("noop()").unwrap(),
+            "import @filetest::noop()\n"
+        );
+    }
 }
 
 /// Compare [`FileTest::expected`] with a fresh snapshot.

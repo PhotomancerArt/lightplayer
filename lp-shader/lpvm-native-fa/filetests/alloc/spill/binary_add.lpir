@@ -29,10 +29,13 @@ func @test() -> i32 {
 ;         ; read: i2 <- t0
 ;         i3 = Add32 i1, i2
 ;         ; write: i3 -> t0
+;         ; trace: alloc: v1 -> t6
+;         ; trace: alloc: v2 -> t5
 ;
 ;     return v3:i32
 ;         ; read: i3 <- t0
 ;         Ret i3
+;         ; trace: alloc: v3 -> t5
 ;         Br L0
 ; }
 ;     Label L0

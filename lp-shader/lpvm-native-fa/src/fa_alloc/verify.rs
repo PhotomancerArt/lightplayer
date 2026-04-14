@@ -11,11 +11,17 @@ use alloc::vec::Vec;
 
 /// Verify all structural invariants of an AllocOutput.
 /// Panics with a descriptive message on violation.
-pub fn verify_alloc(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput, func_abi: &FuncAbi) {
+pub fn verify_alloc(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    output: &AllocOutput,
+    func_abi: &FuncAbi,
+) {
     verify_every_use_allocated(vinsts, vreg_pool, output);
     verify_no_double_reg_assignment(vinsts, vreg_pool, output);
     verify_edits_sorted(output);
     verify_allocs_within_pool(vinsts, vreg_pool, output, func_abi);
+    verify_call_abi(vinsts, vreg_pool, output);
 }
 
 /// Every use operand must be allocated to Reg or Stack, never None.
@@ -98,14 +104,14 @@ fn verify_edits_sorted(output: &AllocOutput) {
     }
 }
 
-/// Every Reg allocation must be within the allocatable pool, OR be a precolored ABI register.
+/// Every Reg allocation must be within the allocatable pool, OR be a precolored ABI register,
+/// OR be an ARG/RET register on a Call instruction.
 fn verify_allocs_within_pool(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
     output: &AllocOutput,
     func_abi: &FuncAbi,
 ) {
-    // Build set of precolored registers (these are allowed even if not in ALLOC_POOL)
     let mut precolored_regs: Vec<u8> = Vec::new();
     for (_vreg_idx, preg) in func_abi.precolors() {
         precolored_regs.push(preg.hw);
@@ -115,31 +121,85 @@ fn verify_allocs_within_pool(
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;
+        let is_call = inst.is_call();
 
         let mut op_idx: usize = 0;
+        let mut def_idx: usize = 0;
         inst.for_each_def(vreg_pool, |_def_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
+                let allowed = gpr::pool_contains(preg)
+                    || is_precolored_reg(preg)
+                    || (is_call && def_idx < gpr::RET_REGS.len());
                 assert!(
-                    gpr::pool_contains(preg) || is_precolored_reg(preg),
+                    allowed,
                     "inst {}: def allocated to non-allocatable register x{}",
-                    inst_idx,
-                    preg
+                    inst_idx, preg
                 );
             }
             op_idx += 1;
+            def_idx += 1;
         });
+        let mut use_idx: usize = 0;
         inst.for_each_use(vreg_pool, |_use_vreg| {
             let alloc = output.allocs[offset + op_idx];
             if let Alloc::Reg(preg) = alloc {
+                let allowed = gpr::pool_contains(preg)
+                    || is_precolored_reg(preg)
+                    || (is_call && use_idx < gpr::ARG_REGS.len());
                 assert!(
-                    gpr::pool_contains(preg) || is_precolored_reg(preg),
+                    allowed,
                     "inst {}: use allocated to non-allocatable register x{}",
-                    inst_idx,
-                    preg
+                    inst_idx, preg
                 );
             }
             op_idx += 1;
+            use_idx += 1;
+        });
+    }
+}
+
+/// Call-specific ABI checks: ret operands in RET_REGS, arg operands in ARG_REGS.
+fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
+    for (inst_idx, inst) in vinsts.iter().enumerate() {
+        if !inst.is_call() {
+            continue;
+        }
+        let offset = output.inst_alloc_offsets[inst_idx] as usize;
+
+        let mut def_idx: usize = 0;
+        inst.for_each_def(vreg_pool, |_def_vreg| {
+            if def_idx < gpr::RET_REGS.len() {
+                let expected = gpr::RET_REGS[def_idx];
+                let actual = output.allocs[offset + def_idx];
+                assert!(
+                    actual == Alloc::Reg(expected),
+                    "inst {} (Call): ret[{}] should be x{}, got {:?}",
+                    inst_idx,
+                    def_idx,
+                    expected,
+                    actual
+                );
+            }
+            def_idx += 1;
+        });
+
+        let num_defs = def_idx;
+        let mut use_idx: usize = 0;
+        inst.for_each_use(vreg_pool, |_use_vreg| {
+            if use_idx < gpr::ARG_REGS.len() {
+                let expected = gpr::ARG_REGS[use_idx];
+                let actual = output.allocs[offset + num_defs + use_idx];
+                assert!(
+                    actual == Alloc::Reg(expected),
+                    "inst {} (Call): arg[{}] should be x{}, got {:?}",
+                    inst_idx,
+                    use_idx,
+                    expected,
+                    actual
+                );
+            }
+            use_idx += 1;
         });
     }
 }

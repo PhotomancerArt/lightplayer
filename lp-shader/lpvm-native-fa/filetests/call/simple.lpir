@@ -1,0 +1,41 @@
+; abi_params: 2
+; abi_return: i32
+; import: f(i32, i32) -> i32
+; name: call_simple
+
+func @test(v1: i32, v2: i32) -> i32 {
+    v3:i32 = call @filetest::f(v1, v2)
+    return v3
+}
+
+; ==================================================================================================
+;
+; import @filetest::f(i32, i32) -> i32
+;     ; spill_slots: 0
+;     ; arg v1: a1
+;     ; arg v2: a2
+;     ; ret: a0
+;     ; entry_move: x11 -> x6
+;     ; entry_move: x12 -> x7
+;
+;     v3:i32 = call @filetest::f(v1, v2)
+;         ; move: a1 -> t1
+;         ; move: a2 -> t2
+;         ; move: t1 -> a0
+;         ; move: t2 -> a1
+;         ; read: i1 <- a0
+;         ; read: i2 <- a1
+;         i3 = Call f (i1, i2)
+;         ; write: i3 -> a0
+;         ; trace: call_ret: x10 -> x5 (v3)
+;         ; trace: call_arg: v1: x6 -> x10
+;         ; trace: call_arg: v2: x7 -> x11
+;         ; move: a0 -> t0
+;
+;     return v3:i32
+;         ; read: i3 <- t0
+;         Ret i3
+;         ; trace: alloc: v3 -> t5
+;         Br L0
+; }
+;     Label L0

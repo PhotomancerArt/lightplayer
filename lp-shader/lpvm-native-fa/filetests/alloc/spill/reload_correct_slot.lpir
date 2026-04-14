@@ -34,10 +34,13 @@ func @test() -> i32 {
 ;         ; read: i3 <- t0
 ;         i4 = Add32 i1, i3
 ;         ; write: i4 -> t0
+;         ; trace: alloc: v1 -> t6
+;         ; trace: alloc: v3 -> t5
 ;
 ;     return v4:i32
 ;         ; read: i4 <- t0
 ;         Ret i4
+;         ; trace: alloc: v4 -> t5
 ;         Br L0
 ; }
 ;     Label L0

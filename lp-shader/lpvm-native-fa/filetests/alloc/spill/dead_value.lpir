@@ -26,6 +26,7 @@ func @test() -> i32 {
 ;     return v2:i32
 ;         ; read: i2 <- t0
 ;         Ret i2
+;         ; trace: alloc: v2 -> t5
 ;         Br L0
 ; }
 ;     Label L0
