@@ -4,8 +4,8 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 use lpir::{FloatMode, validate_module};
-use lpvm_native::compile_module_asm_text;
-use lpvm_native::isa::rv32::debug::disasm::DisasmOptions;
+use lpvm_native_fa::compile_module_asm_text;
+use lpvm_native_fa::rv32::debug::disasm::DisasmOptions;
 
 use super::args::ShaderRv32Args;
 use crate::commands::shader_rv32fa::pipeline;
@@ -50,7 +50,7 @@ pub fn handle_shader_rv32(args: ShaderRv32Args) -> Result<()> {
         },
         args.alloc_trace,
     )
-    .map_err(|e| anyhow::anyhow!("lpvm-native: {e:?}"))?;
+    .map_err(|e| anyhow::anyhow!("lpvm-native-fa: {e:?}"))?;
 
     if let Some(out) = args.output {
         std::fs::write(&out, asm.as_bytes()).with_context(|| format!("write {}", out.display()))?;

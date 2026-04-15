@@ -11,8 +11,6 @@ pub enum Backend {
     Jit,
     /// LPIR → RV32 via Cranelift + linked builtins + emulator.
     Rv32,
-    /// LPIR → RV32 via native backend + linked builtins + emulator.
-    Rv32lp,
     /// LPIR → RV32 via fastalloc native backend + linked builtins + emulator.
     Rv32fa,
     /// WebAssembly via wasmtime.
@@ -62,7 +60,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32, rv32lp, rv32fa — used for error messages and CLI.
+/// Order: wasm, jit, rv32, rv32fa — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         backend: Backend::Wasm,
@@ -83,12 +81,6 @@ pub const ALL_TARGETS: &[Target] = &[
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        backend: Backend::Rv32lp,
-        float_mode: FloatMode::Q32,
-        isa: Isa::Riscv32,
-        exec_mode: ExecMode::Emulator,
-    },
-    Target {
         backend: Backend::Rv32fa,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
@@ -96,7 +88,7 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: rv32lp, rv32 (Cranelift), wasm (Q32).
+/// Default targets for local `cargo test` / app runs: rv32fa, rv32 (Cranelift), wasm (Q32).
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
 pub const DEFAULT_TARGETS: &[Target] = &[ALL_TARGETS[3], ALL_TARGETS[2], ALL_TARGETS[0]];
 
@@ -204,7 +196,7 @@ mod tests {
     #[test]
     fn test_default_targets_order_matches_const() {
         assert_eq!(DEFAULT_TARGETS.len(), 3);
-        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32lp.q32");
+        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32fa.q32");
         assert_eq!(DEFAULT_TARGETS[1].name(), "rv32.q32");
         assert_eq!(DEFAULT_TARGETS[2].name(), "wasm.q32");
     }

@@ -126,64 +126,6 @@ pub fn collect_fa_data(
     Ok(backend_data)
 }
 
-/// Collect debug data from the linear scan backend.
-pub fn collect_linear_data(
-    ir: &LpirModule,
-    sig: &LpsModuleSig,
-    float_mode: FloatMode,
-    func_filter: Option<&str>,
-) -> Result<BackendDebugData> {
-    use lpvm_native::abi::ModuleAbi;
-    use lpvm_native::isa::rv32::debug::LineTable;
-    use lpvm_native::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
-    use lpvm_native::isa::rv32::emit::emit_function_bytes;
-
-    let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
-
-    let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
-        sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
-
-    let mut backend_data = BackendDebugData::new("rv32lp");
-
-    for func in &ir.functions {
-        if let Some(name) = func_filter {
-            if func.name != name {
-                continue;
-            }
-        }
-
-        let lpir_count = func.body.len();
-
-        let default_sig = lps_frontend::LpsFnSig {
-            name: func.name.clone(),
-            return_type: lps_frontend::LpsType::Void,
-            parameters: Vec::new(),
-        };
-        let fn_sig = sig_map
-            .get(func.name.as_str())
-            .copied()
-            .unwrap_or(&default_sig);
-
-        let emitted = emit_function_bytes(func, ir, &module_abi, fn_sig, float_mode, true, false)
-            .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
-
-        let disasm_count = emitted.code.len() / 4;
-
-        let table = LineTable::from_debug_lines(&emitted.debug_lines);
-        let disasm = disassemble_function(&emitted.code, &table, func, DisasmOptions::default());
-
-        let mut func_data = FunctionDebugData::new(func.name.clone());
-        func_data.lpir_count = lpir_count;
-        func_data.disasm_count = disasm_count;
-        func_data.disasm = disasm;
-        func_data.has_vinst = false;
-
-        backend_data.functions.push(func_data);
-    }
-
-    Ok(backend_data)
-}
-
 /// Collect debug data from Cranelift-based backends (rv32 and emu).
 pub fn collect_cranelift_data(
     ir: &LpirModule,

@@ -21,7 +21,7 @@ log = { workspace = true, default-features = false }
 
 [features]
 default = ["native-jit"]
-# RV32 native JIT shaders (`lpvm-native` `rt_jit`)
+# RV32 native JIT shaders (`lpvm-native-fa` `rt_jit`)
 native-jit = ["lp-server/native-jit"]
 # Cranelift JIT for shaders (comparison); prefer `--no-default-features --features cranelift` for a lean build
 cranelift = [

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use lpir::{FloatMode, validate_module};
 
 use super::args::Args;
-use super::collect::{collect_cranelift_data, collect_fa_data, collect_linear_data};
+use super::collect::{collect_cranelift_data, collect_fa_data};
 use super::display::{print_comparison_table, print_detailed_view, print_help_text};
 use super::types::{BackendTarget, DebugReport};
 
@@ -34,7 +34,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     // Parse targets
     let targets = args.targets();
     if targets.is_empty() {
-        anyhow::bail!("no valid targets specified. Use: rv32, rv32fa, rv32lp, emu");
+        anyhow::bail!("no valid targets specified. Use: rv32, rv32fa, emu");
     }
 
     // Get section filter
@@ -48,7 +48,6 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     for target in &targets {
         let backend_data = match target {
             BackendTarget::Rv32fa => collect_fa_data(&ir, &sig, float_mode, func_filter)?,
-            BackendTarget::Rv32lp => collect_linear_data(&ir, &sig, float_mode, func_filter)?,
             BackendTarget::Rv32 => {
                 collect_cranelift_data(&ir, &sig, float_mode, func_filter, false)?
             }

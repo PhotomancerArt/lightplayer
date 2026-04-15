@@ -98,18 +98,12 @@ runtime.
 | `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
-## Native RV32 backends (`lpvm-native` and `lpvm-native-fa`)
+## Native RV32 backend (`lpvm-native-fa`)
 
-There are **two** optional crates that lower LPIR to custom RV32 machine code
-outside Cranelift. Both stay in the workspace until the new path is complete.
-
-| Crate             | Role |
-|-------------------|------|
-| **`lpvm-native`** | Legacy linear-scan regalloc, ELF-style emission, `rt_jit` / `rt_emu`. Kept for CLI `shader-rv32` / filetests until full consolidation. Not used on-device. |
-| **`lpvm-native-fa`** | Fastalloc / straight-line PInst pipeline. Used by **`native-jit`** on `fw-esp32`/`fw-emu`, **`shader-rv32fa`**, and `shader-rv32 --pipeline fast`. |
-
-`lpvm-native-fa` is now the default on-device backend (`native-jit`).
-`lpvm-native` remains for legacy CLI usage and filetests until full consolidation.
+**`lpvm-native-fa`** lowers LPIR to custom RV32 machine code outside Cranelift
+(fastalloc / straight-line PInst pipeline, `rt_jit` / `rt_emu`). It is used by
+**`native-jit`** on `fw-esp32`/`fw-emu`, **`shader-rv32`** (annotated asm and
+`--pipeline fast`), **`shader-rv32fa`**, and the **`rv32fa.q32`** filetest target.
 
 ## Validation Commands
 

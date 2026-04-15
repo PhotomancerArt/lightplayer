@@ -1,7 +1,6 @@
 //! LPIR → custom RISC-V backend (`lpvm-native-fa`): fastalloc / straight-line PInst path.
 //!
-//! This crate is split from `lpvm-native` so the linear-scan emitter and fastalloc pipeline
-//! can evolve independently. Core lowering, fastalloc, and ELF emission remain `no_std` + alloc.
+//! Core lowering, fastalloc, and ELF emission are `no_std` + alloc.
 //!
 //! Enable feature **`emu`** for host-side linking with builtins and emulation via
 //! `lp-riscv-emu` (requires `std`).

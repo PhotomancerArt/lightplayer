@@ -12,7 +12,7 @@ pub struct Args {
     /// Path to GLSL source
     pub input: PathBuf,
 
-    /// Comma-separated list of targets (rv32fa, rv32lp, rv32, emu)
+    /// Comma-separated list of targets (rv32fa, rv32, emu)
     #[arg(short, long, default_value = "rv32fa")]
     pub target: String,
 
@@ -44,7 +44,7 @@ pub struct Args {
 impl Args {
     /// Parse the targets string into a list of BackendTarget.
     ///
-    /// Supports comma-separated targets like "rv32,rv32fa,rv32lp"
+    /// Supports comma-separated targets like "rv32,rv32fa"
     pub fn targets(&self) -> Vec<BackendTarget> {
         self.target
             .split(',')

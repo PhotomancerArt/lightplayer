@@ -191,7 +191,6 @@ cargo test -p lpvm-native-fa --test filetests
 
 ## See Also
 
-- [`lpvm-native`](../lpvm-native/) - Legacy linear-scan backend (kept for filetests)
 - [`lpvm-cranelift`](../lpvm-cranelift/) - Cranelift-based backend (reference implementation)
 - [`lpir`](../lpir/) - LightPlayer intermediate representation
 - [Performance Reports](../../docs/design/native/perf-report/)

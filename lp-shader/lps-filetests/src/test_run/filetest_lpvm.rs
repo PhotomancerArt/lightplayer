@@ -6,7 +6,6 @@ use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
-use lpvm_native::{NativeCompileOptions, NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 use lpvm_native_fa::{
     NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
     NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule,
@@ -24,8 +23,6 @@ pub enum CompiledShader {
     Jit(CraneliftModule),
     /// Linked RV32 + shared arena via Cranelift (`rv32.q32`).
     Emu(EmuModule),
-    /// Linked RV32 + shared arena via native backend (`rv32lp.q32`).
-    Native(NativeEmuModule),
     /// Linked RV32 + shared arena via fastalloc native backend (`rv32fa.q32`).
     NativeFa(FaEmuModule),
     /// wasmtime module (`wasm.q32`).
@@ -38,8 +35,6 @@ pub enum FiletestInstance {
     Jit(CraneliftInstance),
     /// RV32 emulator instance with guest VMContext (Cranelift path).
     Emu(EmuInstance),
-    /// RV32 emulator instance with guest VMContext (native path).
-    Native(NativeEmuInstance),
     /// RV32 emulator instance with guest VMContext (fastalloc native path).
     NativeFa(FaEmuInstance),
     /// wasmtime-linked shader instance.
@@ -51,7 +46,6 @@ impl CompiledShader {
         match self {
             Self::Jit(m) => m.signatures(),
             Self::Emu(m) => m.signatures(),
-            Self::Native(m) => m.signatures(),
             Self::NativeFa(m) => m.signatures(),
             Self::Wasm(m) => m.signatures(),
         }
@@ -64,9 +58,6 @@ impl CompiledShader {
             }
             Self::Emu(m) => {
                 FiletestInstance::Emu(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
-            }
-            Self::Native(m) => {
-                FiletestInstance::Native(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
             Self::NativeFa(m) => {
                 FiletestInstance::NativeFa(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
@@ -83,7 +74,6 @@ impl FiletestInstance {
         match self {
             Self::Jit(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Emu(i) => i.call(name, args).map_err(|e| e.to_string()),
-            Self::Native(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call(name, args).map_err(|e| e.to_string()),
         }
@@ -93,7 +83,6 @@ impl FiletestInstance {
         match self {
             Self::Jit(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Emu(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
-            Self::Native(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
         }
@@ -103,7 +92,6 @@ impl FiletestInstance {
         match self {
             Self::Jit(_) => None,
             Self::Emu(i) => i.debug_state(),
-            Self::Native(i) => i.debug_state(),
             Self::NativeFa(i) => i.debug_state(),
             Self::Wasm(_) => None,
         }
@@ -113,7 +101,6 @@ impl FiletestInstance {
         match self {
             Self::Jit(i) => i.last_guest_instruction_count(),
             Self::Emu(i) => i.last_guest_instruction_count(),
-            Self::Native(i) => i.last_guest_instruction_count(),
             Self::NativeFa(i) => i.last_guest_instruction_count(),
             Self::Wasm(i) => i.last_guest_instruction_count(),
         }
@@ -150,17 +137,6 @@ impl CompiledShader {
                 let engine = EmuEngine::new(opts);
                 Ok(Self::Emu(engine.compile(&ir, &meta)?))
             }
-            Backend::Rv32lp => {
-                let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
-                let native_opts = NativeCompileOptions {
-                    float_mode: fm,
-                    emu_trace_instructions: opts.emu_trace_instructions,
-                    alloc_trace,
-                    ..Default::default()
-                };
-                let engine = NativeEmuEngine::new(native_opts);
-                Ok(Self::Native(engine.compile(&ir, &meta)?))
-            }
             Backend::Rv32fa => {
                 let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
                 let native_opts = FaCompileOptions {
@@ -192,7 +168,6 @@ impl CompiledShader {
         match self {
             Self::Jit(_) => None,
             Self::Emu(m) => m.debug_info(),
-            Self::Native(m) => m.debug_info(),
             Self::NativeFa(m) => m.debug_info(),
             Self::Wasm(_) => None,
         }
@@ -201,7 +176,6 @@ impl CompiledShader {
     pub(crate) fn lpir_module(&self) -> Option<&LpirModule> {
         match self {
             Self::Emu(m) => m.lpir_module(),
-            Self::Native(m) => m.lpir_module(),
             Self::NativeFa(m) => m.lpir_module(),
             Self::Jit(_) | Self::Wasm(_) => None,
         }

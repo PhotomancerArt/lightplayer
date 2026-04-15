@@ -1998,7 +1998,7 @@ mod format_summary_tests {
         c.passed = 3;
         let mut per_target: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
         per_target.insert("rv32.q32".to_string(), a);
-        per_target.insert("rv32lp.q32".to_string(), b);
+        per_target.insert("rv32fa.q32".to_string(), b);
         per_target.insert("wasm.q32".to_string(), c);
         let cf: BTreeMap<String, usize> = BTreeMap::new();
         let table = format_target_table(&per_target, &cf);

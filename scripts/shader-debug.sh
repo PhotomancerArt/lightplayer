@@ -41,7 +41,7 @@ USAGE:
 OPTIONS:
     -h, --help          Show this help message
     -t, --target        Comma-separated list of backend targets
-                        (rv32fa, rv32lp, rv32, emu) [default: rv32fa]
+                        (rv32fa, rv32, emu) [default: rv32fa]
     --fn <NAME>         Show only specific function (default: all functions)
     --float-mode <MODE> Floating point mode (q32, f32) [default: q32]
     --lpir              Show LPIR section
@@ -55,9 +55,6 @@ EXAMPLES:
 
     # Compare multiple backends with comparison table
     shader-debug.sh -t rv32,rv32fa file.glsl
-
-    # Show debug output for rv32lp backend
-    shader-debug.sh -t rv32lp file.glsl
 
     # Show only specific function
     shader-debug.sh file.glsl --fn myFunction

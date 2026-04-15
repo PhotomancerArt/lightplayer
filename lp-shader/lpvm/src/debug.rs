@@ -3,7 +3,7 @@
 //! Provides structured debug output for compiled shader modules.
 //! Each backend populates sections appropriate to its capabilities:
 //! - rv32fa: interleaved, disasm, vinst, liveness, region
-//! - rv32/rv32lp: disasm only
+//! - rv32/rv32fa: disasm only
 //! - jit/wasm: (not available)
 
 use alloc::collections::BTreeMap;
