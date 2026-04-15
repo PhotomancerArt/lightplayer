@@ -530,6 +530,19 @@ fn process_generic(
                     },
                 );
             }
+            // dst may also have a spill slot (assigned by a later eviction in
+            // the backward walk). Store the register to that slot so reloads
+            // find the correct value — same logic as process_generic's
+            // def_spill_stores, but for the coalesced Mov32 path.
+            if let Some(slot) = spill.has_slot(*dst) {
+                edits.push((
+                    EditPoint::After(inst_idx_u16),
+                    Edit::Move {
+                        from: Alloc::Reg(preg),
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+            }
         } else {
             // Dst is spilled or dead: use normal allocation path for src
             allocs[use_idx] = alloc_use(*src, inst_idx, inst_idx_u16, pool, spill, edits, trace);
@@ -538,22 +551,41 @@ fn process_generic(
     }
 
     let mut operand_idx: usize = 0;
+    let mut def_spill_stores: Vec<(EditPoint, Edit)> = Vec::new();
 
     // Defs (backward: freed)
     inst.for_each_def(vreg_pool, |def_vreg| {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        let alloc = if let Some(preg) = pool.home(def_vreg) {
+        let preg_home = pool.home(def_vreg);
+        let slot = spill.has_slot(def_vreg);
+
+        let alloc = if let Some(preg) = preg_home {
             Alloc::Reg(preg)
-        } else if let Some(slot) = spill.has_slot(def_vreg) {
+        } else if let Some(slot) = slot {
             Alloc::Stack(slot)
         } else {
             Alloc::None
         };
 
         allocs[alloc_idx] = alloc;
-        if let Some(preg) = pool.home(def_vreg) {
+
+        // When a def writes to a register but the vreg also has a spill
+        // slot (assigned by a later eviction in the backward walk), store
+        // the register value to the slot so that any reload-from-slot
+        // (clobber restore, eviction reload, etc.) finds the correct data.
+        if let (Some(preg), Some(slot)) = (preg_home, slot) {
+            def_spill_stores.push((
+                EditPoint::After(inst_idx_u16),
+                Edit::Move {
+                    from: Alloc::Reg(preg),
+                    to: Alloc::Stack(slot),
+                },
+            ));
+        }
+
+        if let Some(preg) = preg_home {
             pool.free(preg);
         }
     });
@@ -579,6 +611,12 @@ fn process_generic(
         };
         allocs[alloc_idx] = alloc;
     });
+
+    // Pushed after uses so that after global reverse, def stores come
+    // before any After(reload) from handle_eviction — ensuring the slot
+    // is written before it can be overwritten by an eviction reload to
+    // the same physical register.
+    edits.extend(def_spill_stores);
 }
 
 /// Allocate a use operand: reload from spill or allocate fresh, evicting if needed.
@@ -756,6 +794,15 @@ fn process_call(
                     to: Alloc::Reg(pool_reg),
                 },
             ));
+            if let Some(slot) = spill.has_slot(ret_vreg) {
+                after_ret_moves.push((
+                    EditPoint::After(inst_idx_u16),
+                    Edit::Move {
+                        from: Alloc::Reg(pool_reg),
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+            }
             TracePush::push(
                 trace,
                 TraceEntry {

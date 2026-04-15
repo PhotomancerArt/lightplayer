@@ -1,0 +1,52 @@
+[31m✗[0m [33m 7/11[0m [2marray/phase/2-bounds-checking.glsl[0m [31m(4 unexpected)[0m [94m(942 inst)[0m
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-exp-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/11[0m [2mbuiltins/edge-nan-inf-propagation.glsl[0m [33m(compile-fail)[0m [31m(11 unexpected)[0m
+[31m✗[0m [33m 5/ 9[0m [2mbuiltins/edge-precision.glsl[0m [31m(4 unexpected)[0m [94m(20 inst)[0m
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-trig-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/17[0m [2mbuiltins/matrix-compmult.glsl[0m [33m(compile-fail)[0m [31m(17 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mcontrol/ternary/types.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-out-not-read.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mdebug/palette-rainbow.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mdebug/rainbow-noctrl.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [33m 6/ 7[0m [2mdebug/rainbow.glsl[0m [31m(1 unexpected)[0m [94m(23,153 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mfunction/param-in.glsl[0m [31m(1 unexpected)[0m [94m(293 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mfunction/param-inout.glsl[0m [31m(1 unexpected)[0m [94m(323 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mfunction/param-many.glsl[0m [31m(1 unexpected)[0m [94m(863 inst)[0m
+[31m✗[0m [33m 8/10[0m [2mfunction/param-mixed.glsl[0m [31m(2 unexpected)[0m [94m(1,168 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_hsv2rgb.glsl[0m [31m(2 unexpected)[0m [94m(1,049 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mlpfx/lp_hue2rgb.glsl[0m [31m(1 unexpected)[0m [94m(895 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_rgb2hsv.glsl[0m [31m(1 unexpected)[0m [94m(1,992 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(151 inst)[0m
+[31m✗[0m [33m 2/ 8[0m [2mmatrix/mat2/incdec-matrix-column.glsl[0m [31m(6 unexpected)[0m [94m(268 inst)[0m
+[31m✗[0m [33m 1/16[0m [2mmatrix/mat2/incdec-matrix-element.glsl[0m [31m(15 unexpected)[0m [94m(100 inst)[0m
+[31m✗[0m [33m 1/12[0m [2mmatrix/mat3/incdec-matrix-column.glsl[0m [31m(11 unexpected)[0m [94m(349 inst)[0m
+[31m✗[0m [31m 0/ 7[0m [2mmatrix/mat3/incdec-matrix-element.glsl[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mmatrix/mat4/incdec-matrix-column.glsl[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mmatrix/mat4/incdec-matrix-element.glsl[0m [31m(5 unexpected)[0m
+[31m✗[0m [33m14/20[0m [2moperators/incdec-component.glsl[0m [31m(6 unexpected)[0m [94m(494 inst)[0m
+[31m✗[0m [33m 3/26[0m [2moperators/incdec-matrix-column.glsl[0m [31m(23 unexpected)[0m [94m(617 inst)[0m
+[31m✗[0m [33m 1/28[0m [2moperators/incdec-matrix-element.glsl[0m [31m(27 unexpected)[0m [94m(100 inst)[0m
+[31m✗[0m [33m16/24[0m [2moperators/incdec-vector.glsl[0m [31m(8 unexpected)[0m [94m(488 inst)[0m
+[31m✗[0m [31m 0/ 1[0m [2moperators/predec-component.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [33m 4/ 8[0m [2mscalar/bool/to-float.glsl[0m [31m(4 unexpected)[0m [94m(28 inst)[0m
+[31m✗[0m [33m 4/ 7[0m [2mscalar/float/from-bool.glsl[0m [31m(3 unexpected)[0m [94m(28 inst)[0m
+[31m✗[0m [31m 0/ 7[0m [2mstruct/define-simple.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mstruct/define-vector.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec2/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mvec/bvec2/index-variable-bounds.glsl[0m [31m(10 unexpected)[0m
+[31m✗[0m [33m 9/11[0m [2mvec/bvec2/index-variable-valid.glsl[0m [31m(2 unexpected)[0m [94m(202 inst)[0m
+[31m✗[0m [33m 3/ 7[0m [2mvec/bvec2/to-float.glsl[0m [31m(4 unexpected)[0m [94m(38 inst)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec3/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec4/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec2/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec2/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec3/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec3/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec4/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec4/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec2/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec2/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec3/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec3/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec4/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec4/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(142 inst)[0m

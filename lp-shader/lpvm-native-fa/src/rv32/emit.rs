@@ -441,9 +441,16 @@ impl<'a> EmitContext<'a> {
         let p_false = self.use_vreg(output, inst_idx, 3, Self::TEMP1, src_op)? as u32;
         let p_cond = self.use_vreg(output, inst_idx, 1, Self::TEMP2, src_op)? as u32;
 
+        // Negate boolean condition (0/1) into a full bitmask (0x0/0xFFFFFFFF).
+        // Without this, `and` with 1 zeroes all but the LSB, making select
+        // always return the false value for Q32 (and most multi-bit) operands.
+        self.push_u32(
+            encode_sub(Self::TEMP2 as u32, 0, p_cond),
+            src_op,
+        );
         self.push_u32(encode_sub(Self::TEMP0 as u32, p_true, p_false), src_op);
         self.push_u32(
-            encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, p_cond),
+            encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, Self::TEMP2 as u32),
             src_op,
         );
 
