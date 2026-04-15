@@ -28,7 +28,6 @@ float test_call_order_left_to_right() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_call_order_left_to_right() ~= 6.0

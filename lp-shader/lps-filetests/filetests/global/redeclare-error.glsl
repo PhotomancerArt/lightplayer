@@ -24,10 +24,7 @@ float test_redeclare_error_valid() {
     return valid_global + different_global;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_valid() ~= 142.0
 
 int test_redeclare_error_different() {
@@ -35,10 +32,7 @@ int test_redeclare_error_different() {
     return valid_int + different_int;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_different() == 323
 
 vec2 test_redeclare_error_vecs() {
@@ -46,10 +40,7 @@ vec2 test_redeclare_error_vecs() {
     return valid_vec2 + different_vec2;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_vecs() ~= vec2(6.0, 8.0)
 
 float test_redeclare_error_scoping() {
@@ -58,10 +49,7 @@ float test_redeclare_error_scoping() {
     return valid_global;  // Returns 99.0, not 42.0
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_scoping() ~= 99.0
 
 float test_redeclare_error_global_unchanged() {
@@ -70,8 +58,5 @@ float test_redeclare_error_global_unchanged() {
     return valid_global;  // Should still be 42.0
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_global_unchanged() ~= 42.0

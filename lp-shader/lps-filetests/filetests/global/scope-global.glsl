@@ -29,10 +29,7 @@ float test_scope_global_visibility() {
     return global_counter + global_position.x + global_position.y;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_visibility() ~= 27.0
 
 bool test_scope_global_persistence() {
@@ -57,10 +54,7 @@ bool test_scope_global_persistence() {
     return first_check && !second_check;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_persistence() == true
 
 mat3 test_scope_global_matrix() {
@@ -78,10 +72,7 @@ mat3 test_scope_global_matrix() {
     return get_matrix();
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_matrix() ~= mat3(6.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 6.0)
 
 int test_scope_global_array() {
@@ -100,10 +91,7 @@ int test_scope_global_array() {
     return sum_array();
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_array() == 60
 
 float test_scope_global_nested_functions() {
@@ -122,10 +110,7 @@ float test_scope_global_nested_functions() {
     return global_counter;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_nested_functions() ~= 11.0
 
 vec2 test_scope_global_multiple_functions() {
@@ -150,10 +135,7 @@ vec2 test_scope_global_multiple_functions() {
     return get_position();
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_multiple_functions() ~= vec2(8.0, 10.0)
 
 float test_scope_global_state_machine() {
@@ -179,8 +161,5 @@ float test_scope_global_state_machine() {
     return get_value();
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_global_state_machine() ~= 7.0

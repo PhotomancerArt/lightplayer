@@ -18,10 +18,6 @@ float test_edge_uninitialized_read_float() {
     return uninit_float + 1.0;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_float() ~= 1.0
 
 int test_edge_uninitialized_read_int() {
@@ -29,10 +25,6 @@ int test_edge_uninitialized_read_int() {
     return uninit_int + 10;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_int() == 10
 
 uint test_edge_uninitialized_read_uint() {
@@ -40,10 +32,6 @@ uint test_edge_uninitialized_read_uint() {
     return int(uninit_uint + 5u);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_uint() == 5
 
 bool test_edge_uninitialized_read_bool() {
@@ -51,10 +39,6 @@ bool test_edge_uninitialized_read_bool() {
     return uninit_bool || true;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_bool() == true
 
 vec2 test_edge_uninitialized_read_vec2() {
@@ -62,10 +46,6 @@ vec2 test_edge_uninitialized_read_vec2() {
     return uninit_vec2 + vec2(1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_edge_uninitialized_read_vec3() {
@@ -73,10 +53,6 @@ vec3 test_edge_uninitialized_read_vec3() {
     return uninit_vec3 + vec3(1.0, 1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_vec3() ~= vec3(1.0, 1.0, 1.0)
 
 vec4 test_edge_uninitialized_read_vec4() {
@@ -84,10 +60,6 @@ vec4 test_edge_uninitialized_read_vec4() {
     return uninit_vec4 + vec4(1.0, 1.0, 1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_vec4() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 mat2 test_edge_uninitialized_read_mat2() {
@@ -95,10 +67,6 @@ mat2 test_edge_uninitialized_read_mat2() {
     return uninit_mat2 + mat2(1.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_read_mat2() ~= mat2(1.0, 1.0, 1.0, 1.0)
 
 void test_edge_uninitialized_assign_then_read() {
@@ -113,10 +81,6 @@ void test_edge_uninitialized_assign_then_read() {
     uninit_mat2 = mat2(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_assign_then_read() == 0.0
 
 float test_edge_uninitialized_after_assign() {
@@ -125,8 +89,4 @@ float test_edge_uninitialized_after_assign() {
     return uninit_float + float(uninit_int);
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_uninitialized_after_assign() ~= 165.0

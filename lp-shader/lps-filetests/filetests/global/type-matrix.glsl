@@ -14,7 +14,6 @@ mat2 test_type_matrix_mat2() {
     return global_mat2;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -28,7 +27,6 @@ mat3 test_type_matrix_mat3() {
     return global_mat3;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -43,7 +41,6 @@ mat4 test_type_matrix_mat4() {
     return global_mat4;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -55,7 +52,6 @@ mat2 test_type_matrix_identity() {
     return global_mat2;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -67,7 +63,6 @@ mat3 test_type_matrix_identity_3() {
     return global_mat3;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -79,7 +74,6 @@ mat4 test_type_matrix_identity_4() {
     return global_mat4;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -92,7 +86,6 @@ mat2 test_type_matrix_operations() {
     return global_mat2;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -107,7 +100,6 @@ mat3 test_type_matrix_multiplication() {
     return global_mat3 * other;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -120,7 +112,6 @@ vec2 test_type_matrix_vector_multiply() {
     return global_mat2 * v;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -133,7 +124,6 @@ vec3 test_type_matrix_vector_multiply_3() {
     return global_mat3 * v;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -146,7 +136,6 @@ vec4 test_type_matrix_vector_multiply_4() {
     return global_mat4 * v;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

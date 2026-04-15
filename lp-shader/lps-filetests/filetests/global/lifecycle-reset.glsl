@@ -14,12 +14,10 @@ float test_reset_counter() {
 }
 
 // Both calls should return 1.0 — counter resets to 0.0 before each call.
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
 // run: test_reset_counter() ~= 1.0
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -34,12 +32,10 @@ float test_reset_initialized() {
 }
 
 // Should always read the initialized value (5.0), not the mutated one.
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
 // run: test_reset_initialized() ~= 5.0
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

@@ -17,10 +17,6 @@ float test_cross_function_helper_mutates() {
 }
 
 // Helper sets shared_state to 1.0 + 10.0 = 11.0
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_cross_function_helper_mutates() ~= 11.0
 
 void helper_set(float val) {
@@ -36,10 +32,6 @@ float test_cross_function_set_get() {
     return helper_get();
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_cross_function_set_get() ~= 42.0
 
 float accumulator = 0.0;
@@ -55,8 +47,4 @@ float test_cross_function_accumulate() {
     return accumulator;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_cross_function_accumulate() ~= 6.0

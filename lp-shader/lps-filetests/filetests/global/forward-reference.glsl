@@ -12,7 +12,6 @@ float test_forward_reference_use_before_declare() {
     return global_after_function + 10.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -26,7 +25,6 @@ float test_forward_reference_after_declare() {
     return global_after_function * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -41,7 +39,6 @@ vec2 test_forward_reference_vec() {
     return global_vec_after + vec2(1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -52,7 +49,6 @@ mat3 test_forward_reference_mat() {
     return global_mat_after * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -71,7 +67,6 @@ float test_forward_reference_complex() {
     return scalar_result + vec_result.x + vec_result.y + mat_result[0][0];
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

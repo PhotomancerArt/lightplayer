@@ -17,12 +17,10 @@ float test_multi_type_mutate_and_read() {
 }
 
 // Both calls should return 1.0 + 10.0 + 2.0 + 3.0 = 16.0
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
 // run: test_multi_type_mutate_and_read() ~= 16.0
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

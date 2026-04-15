@@ -22,10 +22,7 @@ float test_edge_empty_declaration_normal() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_empty_declaration_normal() ~= 168.0
 
 float test_edge_empty_declaration_modify() {
@@ -37,10 +34,7 @@ float test_edge_empty_declaration_modify() {
     return normal_float + float(normal_int) + normal_vec2.x + normal_vec2.y;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_empty_declaration_modify() ~= 298.0
 
 void test_edge_empty_declaration_unused() {
@@ -50,10 +44,7 @@ void test_edge_empty_declaration_unused() {
     temp = temp + normal_float;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_empty_declaration_unused() == 0.0
 
 float test_edge_empty_declaration_scope() {
@@ -67,8 +58,5 @@ float test_edge_empty_declaration_scope() {
     return normal_float;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_edge_empty_declaration_scope() ~= 100.0

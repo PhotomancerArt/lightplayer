@@ -33,7 +33,6 @@ float test_type_struct_simple() {
     return global_simple_struct.x + float(global_simple_struct.y);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -48,7 +47,6 @@ vec2 test_type_struct_vector() {
     return global_vector_struct.position;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -59,7 +57,6 @@ vec3 test_type_struct_vector_color() {
     return global_vector_struct.color;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -70,7 +67,6 @@ bool test_type_struct_vector_active() {
     return global_vector_struct.active;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -89,7 +85,6 @@ float test_type_struct_nested() {
            global_nested_struct.vector.position.x;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -100,7 +95,6 @@ vec3 test_type_struct_nested_color() {
     return global_nested_struct.vector.color * global_nested_struct.scale;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -111,7 +105,6 @@ int test_type_struct_nested_y() {
     return global_nested_struct.simple.y * 2;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -128,7 +121,6 @@ float test_type_struct_operations() {
     return global_simple_struct.x + float(global_simple_struct.y);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -145,7 +137,6 @@ vec2 test_type_struct_vector_operations() {
     return global_vector_struct.position + global_vector_struct.color.xy;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

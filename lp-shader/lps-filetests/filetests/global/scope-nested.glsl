@@ -24,10 +24,7 @@ float test_scope_nested_access() {
     return global_counter;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_access() ~= 6.0
 
 vec2 test_scope_nested_vector() {
@@ -45,10 +42,7 @@ vec2 test_scope_nested_vector() {
     return global_position;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_nested_bool() {
@@ -66,10 +60,7 @@ bool test_scope_nested_bool() {
     return global_flag;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_bool() == true
 
 int test_scope_nested_depth() {
@@ -94,10 +85,7 @@ int test_scope_nested_depth() {
     return global_depth;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_depth() == 0
 
 float test_scope_nested_mixed() {
@@ -118,10 +106,7 @@ float test_scope_nested_mixed() {
     return global_counter + local_var;  // Uses outer local
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_mixed() ~= 65.0
 
 vec2 test_scope_nested_functions() {
@@ -147,10 +132,7 @@ vec2 test_scope_nested_functions() {
     return global_position;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_functions() ~= vec2(4.0, 4.0)
 
 float test_scope_nested_complex() {
@@ -175,8 +157,5 @@ float test_scope_nested_complex() {
     return global_counter;
 }
 
-// @unimplemented(jit.q32)
-// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // run: test_scope_nested_complex() ~= 5.0
