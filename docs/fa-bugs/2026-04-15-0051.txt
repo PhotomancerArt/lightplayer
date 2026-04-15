@@ -4,10 +4,6 @@
 [31m✗[0m [31m 0/10[0m [2mbuiltins/edge-trig-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
 [31m✗[0m [31m 0/17[0m [2mbuiltins/matrix-compmult.glsl[0m [33m(compile-fail)[0m [31m(17 unexpected)[0m
 [31m✗[0m [31m 0/12[0m [2mcontrol/ternary/types.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
-[31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-mat3-failure.glsl[0m [31m(1 unexpected)[0m
-[31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-mat3-regression.glsl[0m [31m(1 unexpected)[0m
-[31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-mat4-failure.glsl[0m [31m(1 unexpected)[0m
-[31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-mat4-regression.glsl[0m [31m(1 unexpected)[0m
 [31m✗[0m [31m 0/ 1[0m [2mdebug/fa3-out-not-read.glsl[0m [31m(1 unexpected)[0m
 [31m✗[0m [31m 0/ 1[0m [2mdebug/palette-rainbow.glsl[0m [31m(1 unexpected)[0m
 [31m✗[0m [31m 0/ 1[0m [2mdebug/rainbow-noctrl.glsl[0m [31m(1 unexpected)[0m

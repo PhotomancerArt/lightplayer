@@ -6,7 +6,7 @@ void set_components(out ivec3 result) {
     result.z = 3;
 }
 
-float test_edge_out_modify_components() {
+int test_edge_out_modify_components() {
     // Can modify individual components without reading whole vector
     ivec3 v;
     set_components(v);

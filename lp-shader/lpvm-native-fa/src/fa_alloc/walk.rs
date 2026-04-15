@@ -753,9 +753,17 @@ fn process_call(
     let rets = rets_slice.vregs(vreg_pool);
 
     // Collect edits in forward order; we'll push in reverse for the backward walk.
+    // All edits go into local vectors — nothing is pushed to the global `edits`
+    // until the end, so we have full control over forward-order sequencing.
     let mut before_arg_moves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut after_ret_moves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut after_restores: Vec<(EditPoint, Edit)> = Vec::new();
+
+    // Track pool registers that receive ret_move targets.  After(call)
+    // eviction restores must NOT target these, or they overwrite the return
+    // value (regalloc2 avoids this by removing clobbers from available_pregs
+    // before operand allocation; we filter at restore-emit time).
+    let mut ret_move_pool_regs: Vec<PReg> = Vec::new();
 
     // ── Step 1: Defs (return values) ──
     let mut operand_idx: usize = 0;
@@ -764,9 +772,6 @@ fn process_call(
         operand_idx += 1;
 
         if callee_uses_sret || i >= gpr::RET_REGS.len() {
-            // Sret call: all rets come from the sret buffer (emitter loads them).
-            // Non-sret: extra rets beyond register return slots.
-            // In both cases process generically — no RET_REG constraint.
             let alloc = if let Some(preg) = pool.home(ret_vreg) {
                 Alloc::Reg(preg)
             } else if let Some(slot) = spill.has_slot(ret_vreg) {
@@ -786,7 +791,7 @@ fn process_call(
         allocs[alloc_idx] = Alloc::Reg(target);
 
         if let Some(pool_reg) = pool.home(ret_vreg) {
-            // Vreg lives later in pool_reg: move ret_reg → pool_reg after call
+            ret_move_pool_regs.push(pool_reg);
             after_ret_moves.push((
                 EditPoint::After(inst_idx_u16),
                 Edit::Move {
@@ -814,7 +819,6 @@ fn process_call(
             );
             pool.free(pool_reg);
         } else if let Some(slot) = spill.has_slot(ret_vreg) {
-            // Vreg is spilled: move ret_reg → stack after call
             after_ret_moves.push((
                 EditPoint::After(inst_idx_u16),
                 Edit::Move {
@@ -832,13 +836,9 @@ fn process_call(
                 },
             );
         }
-        // else: dead def, no move needed
     }
 
-    // (Step 2 — relocate a-reg precolors — removed: params are no longer
-    // pre-seeded into a-regs, so there is nothing to relocate.)
-
-    // ── Step 3: Evict-then-reload for caller-saved pool t-regs ──
+    // ── Step 2: Evict-then-reload for caller-saved pool t-regs ──
     // regalloc2-style: evict clobbered-reg occupants from the pool and remove
     // the registers from the LRU so they can't be reused during arg allocation
     // (matches regalloc2's remove_clobbers_from_available_pregs). Emit only
@@ -854,8 +854,6 @@ fn process_call(
     let mut clobbered_pregs: Vec<PReg> = Vec::new();
     for (preg, vreg) in &clobbered {
         let slot = spill.get_or_assign(*vreg);
-        // Evict vreg AND remove register from LRU — prevents step 4
-        // from allocating args into a register that has an After(reload).
         pool.evict(*preg);
         clobbered_pregs.push(*preg);
         after_restores.push((
@@ -876,28 +874,139 @@ fn process_call(
         );
     }
 
-    // ── Step 4: Uses (arguments) ──
-    // Evictions during arg allocation: (preg, spill_slot).
-    // The evicted vreg's value is already in its spill slot from its def, so no
-    // save is needed. But we must restore the value after the call so that
-    // forward-time instructions see the correct register contents.
+    // ── Step 3: Uses (arguments) ──
+    //
+    // Two-phase allocation (regalloc2-style):
+    //   Phase A — ensure every arg vreg has a pool register.  Track
+    //             register-pass arg targets but do NOT emit Before moves yet.
+    //   Phase B — generate Before(call) moves using each vreg's FINAL
+    //             pool/spill location, which reflects all evictions from
+    //             phase A (including evictions caused by stack-pass arg
+    //             allocation).
+    //
+    // All eviction restores go into `after_restores` (not the global `edits`
+    // vector) so they can be filtered against ret_move_pool_regs and
+    // sequenced correctly relative to ret_moves.
+
     let arg_base = if callee_uses_sret { 1 } else { 0 };
-    let mut arg_evictions: Vec<(PReg, u8)> = Vec::new();
+
+    // (vreg, target_arg_reg) for register-pass args — Before moves deferred.
+    let mut reg_pass_args: Vec<(VReg, PReg)> = Vec::new();
+
+    // ── Phase A: allocate every arg vreg into the pool ──
     for (i, &arg_vreg) in args.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
         operand_idx += 1;
 
-        if arg_base + i >= gpr::ARG_REGS.len() {
-            // Stack-passed arg: process as normal use (emitter handles)
-            let alloc = alloc_use(arg_vreg, inst_idx, inst_idx_u16, pool, spill, edits, trace);
-            allocs[alloc_idx] = alloc;
-            continue;
+        let is_reg_pass = arg_base + i < gpr::ARG_REGS.len();
+        if is_reg_pass {
+            let target = gpr::ARG_REGS[arg_base + i];
+            reg_pass_args.push((arg_vreg, target));
+            allocs[alloc_idx] = Alloc::Reg(target);
         }
-
-        let target = gpr::ARG_REGS[arg_base + i];
 
         if let Some(pool_reg) = pool.home(arg_vreg) {
             pool.touch(pool_reg);
+            if !is_reg_pass {
+                allocs[alloc_idx] = Alloc::Reg(pool_reg);
+            }
+        } else if let Some(slot) = spill.has_slot(arg_vreg) {
+            let (new_preg, evicted) = pool.alloc(arg_vreg);
+            if let Some(ev) = evicted {
+                let ev_slot = spill.get_or_assign(ev);
+                if !ret_move_pool_regs.contains(&new_preg) {
+                    after_restores.push((
+                        EditPoint::After(inst_idx_u16),
+                        Edit::Move {
+                            from: Alloc::Stack(ev_slot),
+                            to: Alloc::Reg(new_preg),
+                        },
+                    ));
+                }
+                TracePush::push(
+                    trace,
+                    TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("evict"),
+                        decision: alloc::format!("x{} -> slot{} (v{})", new_preg, ev_slot, ev.0),
+                        register_state: String::new(),
+                    },
+                );
+            }
+            before_arg_moves.push((
+                EditPoint::Before(inst_idx_u16),
+                Edit::Move {
+                    from: Alloc::Stack(slot),
+                    to: Alloc::Reg(new_preg),
+                },
+            ));
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("reload"),
+                    decision: alloc::format!("slot{} -> x{} (v{})", slot, new_preg, arg_vreg.0),
+                    register_state: String::new(),
+                },
+            );
+            if !is_reg_pass {
+                allocs[alloc_idx] = Alloc::Reg(new_preg);
+            }
+        } else {
+            let (new_preg, evicted) = pool.alloc(arg_vreg);
+            if let Some(ev) = evicted {
+                let ev_slot = spill.get_or_assign(ev);
+                if !ret_move_pool_regs.contains(&new_preg) {
+                    after_restores.push((
+                        EditPoint::After(inst_idx_u16),
+                        Edit::Move {
+                            from: Alloc::Stack(ev_slot),
+                            to: Alloc::Reg(new_preg),
+                        },
+                    ));
+                }
+                TracePush::push(
+                    trace,
+                    TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("evict"),
+                        decision: alloc::format!("x{} -> slot{} (v{})", new_preg, ev_slot, ev.0),
+                        register_state: String::new(),
+                    },
+                );
+            }
+            if !is_reg_pass {
+                allocs[alloc_idx] = Alloc::Reg(new_preg);
+            }
+        }
+
+        TracePush::push(
+            trace,
+            TraceEntry {
+                vinst_idx: inst_idx,
+                vinst_mnemonic: String::from("call_arg"),
+                decision: if is_reg_pass {
+                    alloc::format!(
+                        "v{}: pool -> x{} (deferred)",
+                        arg_vreg.0,
+                        gpr::ARG_REGS[arg_base + i]
+                    )
+                } else {
+                    alloc::format!(
+                        "v{}: x{} (stack-pass)",
+                        arg_vreg.0,
+                        pool.home(arg_vreg).unwrap_or(0)
+                    )
+                },
+                register_state: String::new(),
+            },
+        );
+    }
+
+    // ── Phase B: emit Before(call) moves for register-pass args ──
+    // The pool now reflects the final allocation state after all evictions.
+    for &(arg_vreg, target) in &reg_pass_args {
+        if let Some(pool_reg) = pool.home(arg_vreg) {
             if pool_reg != target {
                 before_arg_moves.push((
                     EditPoint::Before(inst_idx_u16),
@@ -911,7 +1020,7 @@ fn process_call(
                 trace,
                 TraceEntry {
                     vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("call_arg"),
+                    vinst_mnemonic: String::from("call_arg_move"),
                     decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, pool_reg, target),
                     register_state: String::new(),
                 },
@@ -928,73 +1037,25 @@ fn process_call(
                 trace,
                 TraceEntry {
                     vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("call_arg"),
+                    vinst_mnemonic: String::from("call_arg_move"),
                     decision: alloc::format!("v{}: slot{} -> x{}", arg_vreg.0, slot, target),
                     register_state: String::new(),
                 },
             );
-        } else {
-            // Not yet allocated — allocate to a pool reg for the backward walk
-            let (new_preg, evicted) = pool.alloc(arg_vreg);
-            if let Some(ev) = evicted {
-                let slot = spill.get_or_assign(ev);
-                arg_evictions.push((new_preg, slot));
-                TracePush::push(
-                    trace,
-                    TraceEntry {
-                        vinst_idx: inst_idx,
-                        vinst_mnemonic: String::from("evict"),
-                        decision: alloc::format!("x{} -> slot{} (v{})", new_preg, slot, ev.0),
-                        register_state: String::new(),
-                    },
-                );
-            }
-            if new_preg != target {
-                before_arg_moves.push((
-                    EditPoint::Before(inst_idx_u16),
-                    Edit::Move {
-                        from: Alloc::Reg(new_preg),
-                        to: Alloc::Reg(target),
-                    },
-                ));
-            }
-            TracePush::push(
-                trace,
-                TraceEntry {
-                    vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("call_arg"),
-                    decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, new_preg, target),
-                    register_state: String::new(),
-                },
-            );
         }
-
-        allocs[alloc_idx] = Alloc::Reg(target);
     }
 
     // Restore clobbered registers to the LRU now that arg allocation is done.
     pool.restore_evicted(&clobbered_pregs);
 
-    // Fix up evictions during arg processing. For callee-saved registers that
-    // were evicted during arg allocation, emit an explicit restore. The register
-    // retains the arg value after the call, so we need to reload the original.
-    //
-    // Caller-saved registers are already handled by Step 3 evict-then-reload.
-    for &(preg, slot) in &arg_evictions {
-        if !gpr::is_caller_saved_pool(preg) {
-            after_restores.push((
-                EditPoint::After(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Stack(slot),
-                    to: Alloc::Reg(preg),
-                },
-            ));
-        }
-    }
-
     // Push edits in reverse-forward order (global reverse will restore forward order).
-    // Desired forward: Before(arg_moves), After(ret_moves, restores)
+    // Desired forward: Before(arg_moves), After(ret_moves), After(restores)
     // Push order:      After(restores), After(ret_moves), Before(arg_moves)
+    //
+    // ret_moves come before restores in forward order so that the return value
+    // lands in its pool register before any eviction restores run.  Eviction
+    // restores that target a ret_move pool register are already filtered out
+    // above, but sequencing ret_moves first is an extra safety net.
     for e in after_restores.into_iter().rev() {
         edits.push(e);
     }

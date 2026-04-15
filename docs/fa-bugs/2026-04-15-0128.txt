@@ -1,0 +1,12 @@
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-exp-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/11[0m [2mbuiltins/edge-nan-inf-propagation.glsl[0m [33m(compile-fail)[0m [31m(11 unexpected)[0m
+[31m✗[0m [33m 5/ 9[0m [2mbuiltins/edge-precision.glsl[0m [31m(4 unexpected)[0m [94m(20 inst)[0m
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-trig-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/17[0m [2mbuiltins/matrix-compmult.glsl[0m [33m(compile-fail)[0m [31m(17 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mcontrol/ternary/types.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mstruct/define-simple.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mstruct/define-vector.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec2/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mvec/bvec2/index-variable-bounds.glsl[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec3/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec4/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
