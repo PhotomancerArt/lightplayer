@@ -21,16 +21,15 @@ func @test(v1: i32) -> i32 {
 ;     v2:i32 = iconst.i32 42
 ;         ; move: a1 -> t5
 ;         i2 = IConst32 42
-;         ; write: i2 -> t4
+;         ; write: i2 -> slot0
 ;
 ;     v3:i32 = call @filetest::f(v1)
-;         ; move: t4 -> slot0
 ;         ; move: t5 -> a0
 ;         ; read: i1 <- a0
 ;         i3 = Call f (i1)
 ;         ; write: i3 -> a0
 ;         ; trace: call_ret: x10 -> x30 (v3)
-;         ; trace: clobber_save: x29 -> slot0 (v2)
+;         ; trace: clobber_evict: v2 evicted from x29 -> slot0
 ;         ; trace: call_arg: v1: x30 -> x10
 ;         ; move: a0 -> t5
 ;         ; move: slot0 -> t4

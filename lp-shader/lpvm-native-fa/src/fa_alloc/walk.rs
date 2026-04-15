@@ -456,6 +456,19 @@ fn process_generic(
                         },
                     );
                 }
+                // If src was evicted by a call clobber and has a spill slot,
+                // the After(reload) expects the value in the slot. Since we're
+                // coalescing src back into a register, emit a store-after-def
+                // so the slot gets the value too.
+                if let Some(slot) = spill.has_slot(*src) {
+                    edits.push((
+                        EditPoint::After(inst_idx_u16),
+                        Edit::Move {
+                            from: Alloc::Reg(preg),
+                            to: Alloc::Stack(slot),
+                        },
+                    ));
+                }
                 allocs[use_idx] = Alloc::Reg(preg);
                 TracePush::push(
                     trace,
@@ -652,7 +665,6 @@ fn process_call(
     let rets = rets_slice.vregs(vreg_pool);
 
     // Collect edits in forward order; we'll push in reverse for the backward walk.
-    let mut before_saves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut before_arg_moves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut after_ret_moves: Vec<(EditPoint, Edit)> = Vec::new();
     let mut after_restores: Vec<(EditPoint, Edit)> = Vec::new();
@@ -729,38 +741,42 @@ fn process_call(
     // (Step 2 — relocate a-reg precolors — removed: params are no longer
     // pre-seeded into a-regs, so there is nothing to relocate.)
 
-    // ── Step 3: Clobber save/restore for caller-saved pool t-regs ──
-    for &preg in gpr::CALLER_SAVED_POOL {
-        if let Some(vreg) = pool
-            .iter_occupied()
-            .find(|&(p, _)| p == preg)
-            .map(|(_, v)| v)
-        {
-            let slot = spill.get_or_assign(vreg);
-            before_saves.push((
-                EditPoint::Before(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Reg(preg),
-                    to: Alloc::Stack(slot),
-                },
-            ));
-            after_restores.push((
-                EditPoint::After(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Stack(slot),
-                    to: Alloc::Reg(preg),
-                },
-            ));
-            TracePush::push(
-                trace,
-                TraceEntry {
-                    vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("clobber_save"),
-                    decision: alloc::format!("x{} -> slot{} (v{})", preg, slot, vreg.0),
-                    register_state: String::new(),
-                },
-            );
-        }
+    // ── Step 3: Evict-then-reload for caller-saved pool t-regs ──
+    // regalloc2-style: evict clobbered-reg occupants from the pool and remove
+    // the registers from the LRU so they can't be reused during arg allocation
+    // (matches regalloc2's remove_clobbers_from_available_pregs). Emit only
+    // post-call reloads, no pre-call saves.
+    let clobbered: Vec<(PReg, VReg)> = gpr::CALLER_SAVED_POOL
+        .iter()
+        .filter_map(|&preg| {
+            pool.iter_occupied()
+                .find(|&(p, _)| p == preg)
+                .map(|(_, v)| (preg, v))
+        })
+        .collect();
+    let mut clobbered_pregs: Vec<PReg> = Vec::new();
+    for (preg, vreg) in &clobbered {
+        let slot = spill.get_or_assign(*vreg);
+        // Evict vreg AND remove register from LRU — prevents step 4
+        // from allocating args into a register that has an After(reload).
+        pool.evict(*preg);
+        clobbered_pregs.push(*preg);
+        after_restores.push((
+            EditPoint::After(inst_idx_u16),
+            Edit::Move {
+                from: Alloc::Stack(slot),
+                to: Alloc::Reg(*preg),
+            },
+        ));
+        TracePush::push(
+            trace,
+            TraceEntry {
+                vinst_idx: inst_idx,
+                vinst_mnemonic: String::from("clobber_evict"),
+                decision: alloc::format!("v{} evicted from x{} -> slot{}", vreg.0, preg, slot),
+                register_state: String::new(),
+            },
+        );
     }
 
     // ── Step 4: Uses (arguments) ──
@@ -859,24 +875,16 @@ fn process_call(
         allocs[alloc_idx] = Alloc::Reg(target);
     }
 
-    // Fix up evictions during arg processing. The evicted vreg's value is
-    // already in its spill slot (from the def), so no save is needed.  But
-    // after the call the register must be restored to its pre-eviction value so
-    // that forward-time instructions see the correct contents.
+    // Restore clobbered registers to the LRU now that arg allocation is done.
+    pool.restore_evicted(&clobbered_pregs);
+
+    // Fix up evictions during arg processing. For callee-saved registers that
+    // were evicted during arg allocation, emit an explicit restore. The register
+    // retains the arg value after the call, so we need to reload the original.
     //
-    // For caller-saved regs: a clobber save/restore pair already exists.
-    //   - Remove the SAVE (it would overwrite the slot with the wrong value).
-    //   - Keep the RESTORE (it reloads the correct value from the spill slot).
-    //
-    // For callee-saved regs: no clobber pair exists, but the call doesn't
-    //   clobber the register either — the register retains the NEW arg value
-    //   after the call. We must add an explicit RESTORE.
+    // Caller-saved registers are already handled by Step 3 evict-then-reload.
     for &(preg, slot) in &arg_evictions {
-        if gpr::is_caller_saved_pool(preg) {
-            before_saves.retain(
-                |(_, e)| !matches!(e, Edit::Move { from: Alloc::Reg(r), .. } if *r == preg),
-            );
-        } else {
+        if !gpr::is_caller_saved_pool(preg) {
             after_restores.push((
                 EditPoint::After(inst_idx_u16),
                 Edit::Move {
@@ -888,8 +896,8 @@ fn process_call(
     }
 
     // Push edits in reverse-forward order (global reverse will restore forward order).
-    // Desired forward: Before(saves, arg_moves), After(ret_moves, restores)
-    // Push order:      After(restores), After(ret_moves), Before(arg_moves), Before(saves)
+    // Desired forward: Before(arg_moves), After(ret_moves, restores)
+    // Push order:      After(restores), After(ret_moves), Before(arg_moves)
     for e in after_restores.into_iter().rev() {
         edits.push(e);
     }
@@ -897,9 +905,6 @@ fn process_call(
         edits.push(e);
     }
     for e in before_arg_moves.into_iter().rev() {
-        edits.push(e);
-    }
-    for e in before_saves.into_iter().rev() {
         edits.push(e);
     }
 }

@@ -17,22 +17,21 @@ func @test(v1: i32, v2: i32) -> i32 {
 ;     ; arg v1: a1
 ;     ; arg v2: a2
 ;     ; ret: a0
-;     ; entry_move: x11 -> x29
+;     ; entry_spill: x11 -> slot0
 ;     ; entry_move: x12 -> x30
 ;
 ;     v3:i32 = call @filetest::f(v1, v2)
-;         ; move: a1 -> t4
+;         ; move: a1 -> slot0
 ;         ; move: a2 -> t5
-;         ; move: t4 -> slot0
-;         ; move: t4 -> a0
+;         ; move: slot0 -> a0
 ;         ; move: t5 -> a1
 ;         ; read: i1 <- a0
 ;         ; read: i2 <- a1
 ;         i3 = Call f (i1, i2)
 ;         ; write: i3 -> a0
 ;         ; trace: call_ret: x10 -> x30 (v3)
-;         ; trace: clobber_save: x29 -> slot0 (v1)
-;         ; trace: call_arg: v1: x29 -> x10
+;         ; trace: clobber_evict: v1 evicted from x29 -> slot0
+;         ; trace: call_arg: v1: slot0 -> x10
 ;         ; trace: call_arg: v2: x30 -> x11
 ;         ; move: a0 -> t5
 ;         ; move: slot0 -> t4

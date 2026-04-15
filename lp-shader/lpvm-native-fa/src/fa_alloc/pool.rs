@@ -84,6 +84,27 @@ impl RegPool {
         }
     }
 
+    /// Evict a vreg from a PReg and remove the register from the LRU
+    /// entirely so it cannot be allocated until restored. Used for call
+    /// clobber handling (regalloc2-style): the clobbered register must
+    /// not be reused for arg allocation within the same instruction.
+    pub fn evict(&mut self, preg: PReg) {
+        self.preg_vreg[preg as usize] = None;
+        if let Some(pos) = self.lru.iter().position(|&p| p == preg) {
+            self.lru.remove(pos);
+        }
+    }
+
+    /// Restore previously evicted registers to the front of the LRU,
+    /// making them available for allocation again.
+    pub fn restore_evicted(&mut self, pregs: &[PReg]) {
+        for &preg in pregs.iter().rev() {
+            if !self.lru.contains(&preg) {
+                self.lru.insert(0, preg);
+            }
+        }
+    }
+
     /// Mark PReg as most recently used.
     pub fn touch(&mut self, preg: PReg) {
         if let Some(pos) = self.lru.iter().position(|&p| p == preg) {

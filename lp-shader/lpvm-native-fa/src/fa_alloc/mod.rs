@@ -436,37 +436,22 @@ mod tests {
 
     #[test]
     fn snapshot_simple_iconst_ret() {
-        expect_alloc(
-            "i0 = IConst32 10\nRet i0",
-            "i0 = IConst32 10
-; write: i0 -> t4
-; ---------------------------
-; read: i0 <- t4
-Ret i0
-; trace: alloc: v0 -> t29",
-        );
+        #[cfg(feature = "debug")]
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\n; read: i0 <- t4\nRet i0\n; trace: alloc: v0 -> t29";
+        #[cfg(not(feature = "debug"))]
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\n; read: i0 <- t4\nRet i0";
+        expect_alloc("i0 = IConst32 10\nRet i0", expected);
     }
 
     #[test]
     fn snapshot_binary_add() {
+        #[cfg(feature = "debug")]
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add32 i0, i1\n; write: i2 -> t4\n; trace: alloc: v0 -> t29\n; trace: alloc: v1 -> t30\n; ---------------------------\n; read: i2 <- t4\nRet i2\n; trace: alloc: v2 -> t29";
+        #[cfg(not(feature = "debug"))]
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add32 i0, i1\n; write: i2 -> t4\n; ---------------------------\n; read: i2 <- t4\nRet i2";
         expect_alloc(
             "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2",
-            "i0 = IConst32 10
-; write: i0 -> t4
-; ---------------------------
-i1 = IConst32 20
-; write: i1 -> t5
-; ---------------------------
-; read: i0 <- t4
-; read: i1 <- t5
-i2 = Add32 i0, i1
-; write: i2 -> t4
-; trace: alloc: v0 -> t29
-; trace: alloc: v1 -> t30
-; ---------------------------
-; read: i2 <- t4
-Ret i2
-; trace: alloc: v2 -> t29",
+            expected,
         );
     }
 }
