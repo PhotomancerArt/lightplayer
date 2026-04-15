@@ -1,5 +1,6 @@
 [package]
 name = "lps-q32"
+description = "Q16.16 fixed-point arithmetic for the LightPlayer shader stack"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

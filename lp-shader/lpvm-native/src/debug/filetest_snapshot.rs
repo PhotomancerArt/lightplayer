@@ -5,9 +5,9 @@ use alloc::string::{String, ToString};
 use lpir::{IrFunction, LpirModule};
 
 use crate::abi::FuncAbi;
-#[cfg(feature = "debug")]
-use crate::alloc::render::render_interleaved;
 use crate::lower::LoweredFunction;
+#[cfg(feature = "debug")]
+use crate::regalloc::render::render_interleaved;
 use crate::vinst::{VInst, VReg};
 
 /// Build comment-prefixed snapshot lines for allocator filetests.
@@ -16,7 +16,7 @@ pub fn build_allocator_snapshot_lines(
     func: &IrFunction,
     vinsts: &[VInst],
     vreg_pool: &[VReg],
-    output: &crate::alloc::AllocOutput,
+    output: &crate::regalloc::AllocOutput,
     func_abi: &FuncAbi,
     lowered: &LoweredFunction,
     filetest_separator: &str,

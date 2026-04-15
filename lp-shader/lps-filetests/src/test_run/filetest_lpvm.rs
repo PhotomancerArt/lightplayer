@@ -23,7 +23,7 @@ pub enum CompiledShader {
     Jit(CraneliftModule),
     /// Linked RV32 + shared arena via Cranelift (`rv32c.q32`).
     Emu(EmuModule),
-    /// Linked RV32 + shared arena via fastalloc native backend (`rv32n.q32`).
+    /// Linked RV32 + shared arena via `lpvm-native` (`rv32n.q32`).
     NativeFa(FaEmuModule),
     /// wasmtime module (`wasm.q32`).
     Wasm(WasmLpvmModule),
@@ -35,7 +35,7 @@ pub enum FiletestInstance {
     Jit(CraneliftInstance),
     /// RV32 emulator instance with guest VMContext (Cranelift path).
     Emu(EmuInstance),
-    /// RV32 emulator instance with guest VMContext (fastalloc native path).
+    /// RV32 emulator instance with guest VMContext (`lpvm-native` path).
     NativeFa(FaEmuInstance),
     /// wasmtime-linked shader instance.
     Wasm(WasmLpvmInstance),

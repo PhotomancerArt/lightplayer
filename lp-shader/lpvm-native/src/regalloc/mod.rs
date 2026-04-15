@@ -1,4 +1,4 @@
-//! Register allocation for fastalloc.
+//! Register allocation for the native RV32 backend.
 //!
 //! This module provides a straight-line register allocator using backward walk
 //! with edit-list emission (regalloc2-style approach adapted for LPIR).
@@ -158,10 +158,10 @@ pub enum AllocError {
 #[macro_export]
 macro_rules! emit_err {
     () => {
-        $crate::alloc::AllocError::Internal(file!(), line!(), None)
+        $crate::regalloc::AllocError::Internal(file!(), line!(), None)
     };
     ($($arg:tt)*) => {
-        $crate::alloc::AllocError::Internal(
+        $crate::regalloc::AllocError::Internal(
             file!(),
             line!(),
             Some(alloc::format!($($arg)*))
@@ -235,7 +235,7 @@ fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
 
 /// Allocate registers for a lowered function (full region tree).
 pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
-    use crate::alloc::pool::RegPool;
+    use crate::regalloc::pool::RegPool;
     use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 
     log::debug!(
@@ -403,8 +403,8 @@ mod tests {
     // Snapshot test helpers for allocator
     fn expect_alloc(input: &str, expected: &str) {
         use crate::debug::vinst;
-        use crate::alloc::render::render_alloc_output;
-        use crate::alloc::walk::walk_linear;
+        use crate::regalloc::render::render_alloc_output;
+        use crate::regalloc::walk::walk_linear;
         use crate::rv32::abi;
         use lps_shared::{LpsFnSig, LpsType};
 

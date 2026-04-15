@@ -63,7 +63,7 @@ cargo test -p lpvm-wasm
 
 ## Architecture
 
-- **`emit/`**: LPIR → WASM emission (copied/adapted from `lps-wasm`)
+- **`emit/`**: LPIR → WASM emission (copied/adapted from earlier `lps-wasm` layout; crate is `lpvm-wasm`)
 - **`runtime/`**: wasmtime trait implementations (requires `runtime` feature)
 - **`compile.rs`**: Main entry point for emission with metadata validation
 

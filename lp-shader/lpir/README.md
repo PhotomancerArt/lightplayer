@@ -1,33 +1,34 @@
 # lpir
 
 **LightPlayer Intermediate Representation** — a flat, scalarized IR with structured control flow,
-designed so the compiler speaks its own language instead of Cranelift's.
+designed so the compiler speaks its own language instead of any specific backend's.
 
 Full specification: [`docs/lpir/`](../../docs/lpir/) (overview, types, ops, control flow, calls,
 imports, text format, GLSL mapping, future).
 
 ## Why another IR?
 
-LightPlayer compiles GLSL to native RISC-V on an ESP32 microcontroller at runtime. The codegen
-backend is Cranelift. That creates a coupling risk: if the compiler's internal representation *is*
-Cranelift IR, every part of the stack — frontend lowering, builtins, vector decomposition, tests —
-depends on Cranelift's types and calling conventions. Cranelift changes break everything. Testing
-the compiler means running Cranelift.
+LightPlayer compiles GLSL to native RISC-V on an ESP32 microcontroller at runtime. If the
+compiler's internal representation *is* a backend IR, every part of the stack — frontend lowering,
+builtins, vector decomposition, tests — depends on that backend's types and calling conventions.
+Backend changes break everything. Testing the compiler means running the backend.
 
 LPIR is an **anti-corruption layer** (sometimes called a *Ports and Adapters* or *Hexagonal
 Architecture* boundary). It lets the compiler core — parsing, type checking, scalarization, builtin
-decomposition — be written entirely in LightPlayer's own terms. Cranelift only appears in one
-place: `lpvm-cranelift`, the backend adapter. The same IR feeds WASM emission (`lps-wasm`), an
-in-process interpreter (`lpir::interp`), and any future backend.
+decomposition — be written entirely in LightPlayer's own terms. Backends only appear behind
+adapter crates: `lpvm-native` (custom RV32 codegen), `lpvm-cranelift` (Cranelift codegen), and
+`lpvm-wasm` (WebAssembly emission). The same IR also feeds an in-process interpreter
+(`lpir::interp`) and any future backend.
 
 Concretely, this gives us:
 
-- **Decoupled testing.** The interpreter runs any LPIR program without Cranelift. Filetests can
-  verify scalarization, control flow, builtins, and GLSL semantics using the interpreter alone.
-- **Multiple backends from one lowering.** `lps-frontend` lowers GLSL once; three consumers
-  (Cranelift / WASM / interpreter) share the result.
-- **Stable compiler internals.** Cranelift version bumps, ABI changes, or ISA feature flags stay
-  behind the `lpvm-cranelift` boundary and do not ripple into the frontend or tests.
+- **Decoupled testing.** The interpreter runs any LPIR program without any codegen backend.
+  Filetests can verify scalarization, control flow, builtins, and GLSL semantics using the
+  interpreter alone.
+- **Multiple backends from one lowering.** `lps-frontend` lowers GLSL once; four consumers
+  (native / Cranelift / WASM / interpreter) share the result.
+- **Stable compiler internals.** Backend version bumps, ABI changes, or ISA feature flags stay
+  behind their adapter boundary and do not ripple into the frontend or tests.
 
 ## What LPIR looks like
 
@@ -96,8 +97,8 @@ func @example(v0:f32) -> f32 {
 |-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Flat / ANF**              | Every intermediate is a named VReg — no expression trees. Eliminates the scratch-local aliasing bugs that plagued the old single-pass WASM emitter. |
 | **Scalarized (v1)**         | Vectors decompose to scalar VRegs during lowering. Keeps backend complexity low; SIMD extensions are a future direction.                            |
-| **Non-SSA**                 | VRegs can be reassigned. Lowering stays simple; backends that want SSA (Cranelift) rebuild it themselves.                                           |
-| **Structured control flow** | `if`/`loop`/`switch`/`break`/`continue` — mirrors GLSL and maps directly to WASM. Cranelift lowers structured CF to its own CFG trivially.          |
+| **Non-SSA**                 | VRegs can be reassigned. Lowering stays simple; backends that want SSA rebuild it themselves.                                                       |
+| **Structured control flow** | `if`/`loop`/`switch`/`break`/`continue` — mirrors GLSL and maps directly to WASM. Other backends lower structured CF to their own CFG trivially.   |
 | **Float-mode-agnostic**     | `fadd` means "GLSL float add". Whether that becomes IEEE `f32` or Q16.16 fixed-point is a backend decision, not an IR property.                     |
 | **Open import modules**     | `@std.math::fsin`, `@lp.q32::…`, `@lpfx::…` — adding builtins never changes the opcode set.                                                         |
 
@@ -109,9 +110,10 @@ GLSL source
   ▼
 lps-frontend  (Naga glsl-in → IrModule)
   │
-  ├──► lpir::interp       (in-process interpreter, testing)
-  ├──► lpvm-cranelift      (Cranelift → RISC-V / host JIT)
-  └──► lps-wasm        (wasm-encoder → .wasm)
+  ├──► lpvm-native       (custom RV32 codegen — default on-device JIT)
+  ├──► lpvm-cranelift     (Cranelift → RISC-V / host JIT)
+  ├──► lpvm-wasm          (wasm-encoder → .wasm)
+  └──► lpir::interp       (in-process interpreter, testing)
 ```
 
 Lowering is **mode-unaware** (no f32-vs-Q32 in the IR). Backends are **mode-aware** and apply the
@@ -134,7 +136,7 @@ src/
   tests/           roundtrip, interpreter, validation tests
 ```
 
-`#![no_std]` + alloc. No Cranelift dependency. No GLSL parser dependency.
+`#![no_std]` + alloc. No backend dependency. No GLSL parser dependency.
 
 ## Documentation
 

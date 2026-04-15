@@ -4,7 +4,7 @@
 //! They verify the output is *self-consistent*, independent of register choice.
 
 use crate::abi::FuncAbi;
-use crate::alloc::{Alloc, AllocOutput};
+use crate::regalloc::{Alloc, AllocOutput};
 use crate::rv32::gpr;
 use crate::vinst::{VInst, VReg};
 use alloc::vec::Vec;
@@ -53,7 +53,7 @@ fn verify_every_use_allocated(vinsts: &[VInst], vreg_pool: &[VReg], output: &All
 /// appear in the same register in the alloc table because the edits will sequence them.
 /// We only flag it when there are no edits to explain the sharing.
 fn verify_no_double_reg_assignment(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
-    use crate::alloc::EditPoint;
+    use crate::regalloc::EditPoint;
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;

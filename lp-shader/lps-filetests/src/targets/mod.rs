@@ -11,7 +11,7 @@ pub enum Backend {
     Jit,
     /// LPIR → RV32 via Cranelift + linked builtins + emulator.
     Rv32,
-    /// LPIR → RV32 via fastalloc native backend + linked builtins + emulator.
+    /// LPIR → RV32 via `lpvm-native` + linked builtins + emulator.
     Rv32fa,
     /// WebAssembly via wasmtime.
     Wasm,

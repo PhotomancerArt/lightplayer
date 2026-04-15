@@ -1,6 +1,6 @@
 //! Smoke test for the native RV32 backend (`rv32n.q32`, `lpvm-native`).
 //!
-//! This test verifies that the fastalloc native emulation backend can compile
+//! This test verifies that the native emulation backend can compile
 //! and execute simple LPIR modules end-to-end.
 //!
 //! Note: The native backend currently does not support imports (builtin functions).
@@ -67,7 +67,7 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
 
 /// Smoke test: compile and execute a simple iadd function via native backend.
 #[test]
-fn rv32fa_native_emulator_compiles_and_runs_iadd() {
+fn rv32n_native_emulator_compiles_and_runs_iadd() {
     let (ir, sig) = build_iadd_module();
 
     let opts = NativeCompileOptions {
@@ -98,7 +98,7 @@ fn rv32fa_native_emulator_compiles_and_runs_iadd() {
 
 /// Smoke test: compile and execute via Q32 flat call interface.
 #[test]
-fn rv32fa_native_emulator_call_q32_flat() {
+fn rv32n_native_emulator_call_q32_flat() {
     let (ir, sig) = build_iadd_module();
 
     let opts = NativeCompileOptions {

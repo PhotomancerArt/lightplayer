@@ -1,6 +1,6 @@
 # lps-filetests
 
-Cranelift-style filetest infrastructure for validating GLSL compilation and execution.
+Filetest infrastructure for validating GLSL compilation and execution across all backends.
 
 **Location:** `lp-shader/lps-filetests/` (this is the canonical test suite)
 
@@ -119,14 +119,14 @@ runs **jit**, **wasm**, and **rv32c** via `just test-filetests`.
 1. **Discovery** — `.glsl` files under `filetests/` (app and `walkdir` harness).
 2. **Parsing** — directives and `// run:` lines (`src/filetest.rs`, `src/parse/`).
 3. **Bootstrap** — generated `main()` calling each expression under test.
-4. **Compilation** — GLSL → LPIR → backend (`lps-exec`, `lpvm-cranelift`, wasm path, etc.).
-5. **Execution** — **jit** (in-process), **wasm** (interpreter), or **rv32c** (emulator + linked
-   builtins), depending on target.
+4. **Compilation** — GLSL → LPIR → backend (`lpvm-native`, `lpvm-cranelift`, `lpvm-wasm`, etc.).
+5. **Execution** — **jit** (in-process), **wasm** (wasmtime), **rv32n** / **rv32c** (emulator +
+   linked builtins), depending on target.
 6. **Comparison** — expected vs actual; BLESS can rewrite expectations.
 
-### Comparison with Cranelift
+### Comparison with Cranelift filetests
 
-- Similar discovery, parsing, execution, and BLESS-style updates (`CRANELIFT_TEST_BLESS=1`).
+- Similar discovery, parsing, execution, and BLESS-style updates.
 - Differences: GLSL instead of CLIF, `~=` for floats, comment-based directives.
 
 ## Baseline: mark current failures `@unimplemented`

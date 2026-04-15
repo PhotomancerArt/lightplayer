@@ -1,5 +1,6 @@
 [package]
 name = "lps-builtin-ids"
+description = "Auto-generated builtin function IDs for lps-builtins"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

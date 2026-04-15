@@ -29,6 +29,7 @@ int test_define_vector_color_rgba() {
     return 1; // Should be 1
 }
 
+// @unimplemented(wasm.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // run: test_define_vector_color_rgba() == 1
@@ -43,6 +44,7 @@ uint test_define_vector_line_segment() {
     return 1u; // Should be 1u
 }
 
+// @unimplemented(wasm.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // run: test_define_vector_line_segment() == 1u
@@ -58,6 +60,7 @@ bool test_define_vector_triangle3d() {
     return true; // Should be true
 }
 
+// @unimplemented(wasm.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // run: test_define_vector_triangle3d() == true

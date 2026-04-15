@@ -1,7 +1,7 @@
 # LightPlayer
 
-LightPlayer is a tool for controlling visual effects on 32-bit RISC-V microcontrollers
-(such as esp32c6) and various linux and desktop platforms.
+LightPlayer is a work-in-progress application for controlling visual effects on the esp32c6
+microcontroller and various other embedded and linux systems.
 
 GLSL shaders are used to define the visual effects, which are just-in-time (JIT) compiled to native
 RISC-V code on the target device.
@@ -100,14 +100,14 @@ Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
 
 - **`lps-frontend`** GLSL → LPIR (via naga)
 - **`lpir`** LightPlayer IR definitions
-- **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (on-device JIT path)
+- **`lpvm-native`** LPIR → custom RV32 machine code (default on-device JIT)
+- **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (reference backend)
+- **`lpvm-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
 - **`lps-q32`** Fixed-point Q16.16 types: `Q32` scalar, `Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`,
   component-wise math helpers, constant encoding for compiler
 - **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
 - **`lps-diagnostics`** Error codes, spans, `GlslError`
 - **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
-- **`lps-exec`** `GlslExecutable` trait and filetest backend glue
-- **`lps-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
 - **`lps-builtin-ids`** Generated enum of builtin function IDs
 - **`lps-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
   lygia-inspired library of native glsl functions

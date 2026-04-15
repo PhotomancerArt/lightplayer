@@ -1,5 +1,6 @@
 [package]
 name = "lpvm-native"
+description = "LPIR to RV32 native code generation with pool-based register allocation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

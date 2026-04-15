@@ -8,9 +8,8 @@ then executed directly from RAM. This is analogous to MicroPython or Espruino,
 but for GLSL and LED control.
 
 The reference target is **ESP32-C6** (`riscv32imac-unknown-none-elf`), a
-bare-metal `no_std` RISC-V microcontroller. The Cranelift compiler backend runs
-**on the microcontroller itself** — not on a host, not as a cross-compilation
-step.
+bare-metal `no_std` RISC-V microcontroller. The compiler backend runs **on the
+microcontroller itself** — not on a host, not as a cross-compilation step.
 
 ## The Non-Negotiable Rule
 
@@ -29,8 +28,8 @@ If you are about to:
 
 ## How to Handle `no_std` Issues
 
-When a dependency in the GLSL → LPIR → Cranelift → machine code path does not
-support `no_std`:
+When a dependency in the GLSL → LPIR → machine code path does not support
+`no_std`:
 
 1. **Fix the dependency.** Fork it, patch it, or contribute upstream.
 2. **Patch it in `Cargo.toml`.** Use `[patch.crates-io]` with a `no_std` fork.
@@ -44,7 +43,7 @@ and the correct solution was always to fix the dependency.
 
 If the firmware binary exceeds available flash:
 
-1. Disable `cranelift-optimizer` and `cranelift-verifier` features (already gated)
+1. Disable optional compiler features (e.g. `cranelift-optimizer`, `cranelift-verifier`)
 2. Use LTO (`lto = true` in release profile)
 3. Use `opt-level = "z"` (size optimization)
 4. Strip debug info
@@ -74,8 +73,10 @@ lps-frontend (no_std + alloc) ── parses GLSL via naga
         ▼
 LPIR (LightPlayer IR)
         │
-        ▼
-lpvm-cranelift (no_std + alloc) ── Cranelift codegen → RISC-V machine code
+        ├─► lpvm-native (no_std + alloc) ── custom RV32 codegen → machine code
+        │         (default on-device JIT path)
+        │
+        └─► lpvm-cranelift (no_std + alloc) ── Cranelift → RISC-V machine code
         │
         ▼
 JIT buffer in RAM ── direct function call
@@ -92,6 +93,7 @@ runtime.
 | Crate            | Role                                   | `no_std`         |
 |------------------|----------------------------------------|------------------|
 | `lps-frontend`   | GLSL → LPIR (via naga)                 | yes              |
+| `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lp-server`      | Project management, client connections | yes              |
@@ -101,9 +103,9 @@ runtime.
 ## Native RV32 backend (`lpvm-native`)
 
 **`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
-(fastalloc / straight-line PInst pipeline, `rt_jit` / `rt_emu`). It is used by
-**`native-jit`** on `fw-esp32`/`fw-emu`, **`shader-rv32`** (annotated asm and
-`--pipeline fast`), **`shader-rv32fa`**, and the **`rv32fa.q32`** filetest target.
+(pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
+on-device codegen path and is exercised by **`native-jit`** on `fw-esp32`/`fw-emu`
+and the **`rv32n.q32`** filetest target.
 
 ## Validation Commands
 

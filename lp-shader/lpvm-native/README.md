@@ -4,7 +4,7 @@ A lightweight LPIR-to-RISC-V backend for LightPlayer, designed for embedded JIT 
 
 ## Overview
 
-`lpvm-native` (FastAlloc) compiles LightPlayer IR (LPIR) directly to RISC-V machine code without the heavy infrastructure of traditional compiler backends. It achieves **performance parity with Cranelift** while using significantly less memory and producing smaller binaries.
+`lpvm-native` compiles LightPlayer IR (LPIR) directly to RISC-V machine code without the heavy infrastructure of traditional compiler backends. It achieves **performance parity with Cranelift** while using significantly less memory and producing smaller binaries.
 
 ## Motivation
 
@@ -25,7 +25,7 @@ Comparing `lpvm-native` against the Cranelift/wasmtime backend on ESP32-C6 @ 40M
 | **Runtime FPS**  | ~29-30 FPS           | ~29 FPS             | **Performance parity** |
 | **Peak Memory**  | ~136 KB              | ~213 KB             | **36% less RAM**       |
 
-The FastAlloc backend achieves **identical runtime performance** to Cranelift while maintaining significant advantages in binary size, compile time, and memory usage.
+The native backend achieves **identical runtime performance** to Cranelift while maintaining significant advantages in binary size, compile time, and memory usage.
 
 ## Design
 
@@ -44,23 +44,23 @@ LPIR (LightPlayer IR)
     │
     ▼
 ┌─────────────────┐
-│  FastAlloc      │  VReg → PReg allocation
-│  (fa_alloc/)    │  Pool-based allocator with backward walk
+│  Register alloc │  VReg → PReg allocation
+│  (regalloc/)    │  Pool-based allocator with backward walk
 └─────────────────┘
     │
     ▼
 ┌─────────────────┐
-│  Emission       │  VInst + Alloc → PInst → bytes
-│  (rv32c/emit.rs) │  Direct machine code emission
+│  Emission       │  VInst + allocation edits → machine code
+│  (rv32/emit.rs) │  Direct machine code emission
 └─────────────────┘
     │
     ▼
 RISC-V machine code
 ```
 
-### FastAlloc Register Allocator
+### Register Allocator
 
-The core innovation is a lightweight register allocator optimized for straight-line code regions:
+The allocator is optimized for straight-line code regions:
 
 **Key Techniques (inspired by regalloc2):**
 
@@ -71,8 +71,8 @@ The core innovation is a lightweight register allocator optimized for straight-l
 
 **Benefits over traditional allocators:**
 
-| Technique           | FastAlloc               | Traditional (Cranelift) |
-| ------------------- | ----------------------- | ----------------------- |
+| Technique           | lpvm-native (`regalloc`) | Traditional (Cranelift) |
+| ------------------- | ------------------------ | ----------------------- |
 | Interference graph  | None (ITree eliminated) | Built and colored       |
 | Spill slots         | Reused via pool         | Greedy eviction         |
 | Compile-time memory | O(vregs) for pool       | O(vregs²) for graph     |
@@ -91,8 +91,8 @@ The intermediate representation between LPIR and machine code:
 
 | Module                         | Purpose                                  |
 | ------------------------------ | ---------------------------------------- |
-| [`fa_alloc/`](src/alloc/)   | FastAlloc register allocator             |
-| [`rv32c/`](src/rv32c/)           | RISC-V instruction encoding and emission |
+| [`regalloc/`](src/regalloc/)   | Register allocator                       |
+| [`rv32/`](src/rv32/)           | RISC-V instruction encoding and emission |
 | [`abi/`](src/abi/)             | Calling convention and frame layout      |
 | [`lower.rs`](src/lower.rs)     | LPIR → VInst lowering                    |
 | [`emit.rs`](src/emit.rs)       | Emission orchestration                   |
@@ -170,8 +170,11 @@ cargo check -p fw-esp32 \
 # Host tests with emulation
 cargo test -p fw-tests --test scene_render_emu
 
-# Allocator filetests
-cargo test -p lpvm-native --test filetests
+# Unit tests (allocator + helpers)
+cargo test -p lpvm-native --features emu
+
+# GLSL filetests (includes `rv32n.q32` target); see `lps-filetests` README
+cargo test -p lps-filetests --test filetests
 ```
 
 ## Design Trade-offs

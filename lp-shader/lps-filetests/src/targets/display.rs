@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_target_name_rv32fa_q32() {
+    fn test_target_name_rv32n_q32() {
         let target = &ALL_TARGETS[3];
         assert_eq!(target.name(), "rv32n.q32");
     }
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_target_filters_rv32fa_shorthand() {
+    fn test_parse_target_filters_rv32n_shorthand() {
         let v = parse_target_filters("rv32n").expect("parse");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].name(), "rv32n.q32");

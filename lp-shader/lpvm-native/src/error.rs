@@ -50,8 +50,8 @@ pub enum NativeError {
     /// JIT relocation or symbol resolution failure (RISC-V firmware path).
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
-    /// Fastalloc (backward-walk register allocation) failed.
-    FastAlloc(crate::alloc::AllocError),
+    /// Backward-walk register allocation failed.
+    RegAlloc(crate::regalloc::AllocError),
     /// Internal error (e.g., during restructuring).
     Internal(String),
 }
@@ -82,7 +82,7 @@ impl fmt::Display for NativeError {
             NativeError::BranchOffsetOutOfRange => {
                 write!(f, "branch/jal target out of RV32 immediate range")
             }
-            NativeError::FastAlloc(e) => write!(f, "fastalloc: {e}"),
+            NativeError::RegAlloc(e) => write!(f, "regalloc: {e}"),
             NativeError::Internal(s) => write!(f, "internal: {s}"),
             NativeError::MissingSretSlot => {
                 write!(
@@ -110,6 +110,7 @@ impl core::error::Error for NativeError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             NativeError::Lower(e) => Some(e),
+            NativeError::RegAlloc(e) => Some(e),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => Some(e),
             #[cfg(any(feature = "emu", target_arch = "riscv32"))]

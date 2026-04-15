@@ -1,4 +1,4 @@
-//! Compilation orchestration: LPIR → VInst → PInst → bytes.
+//! Compilation orchestration: LPIR → VInst → machine code.
 
 use alloc::string::String;
 use alloc::vec::Vec;

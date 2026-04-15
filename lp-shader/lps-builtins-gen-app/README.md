@@ -1,7 +1,7 @@
 # lps-builtins-gen-app
 
 Scans **`lps-builtins`** (`src/builtins/glsl/`, `lpir/`, `lpfx/`) and emits the glue every
-other crate expects: **`BuiltinId`**, Cranelift ABI glue, WASM import metadata, and `mod.rs`
+other crate expects: **`BuiltinId`**, backend ABI glue, WASM import metadata, and `mod.rs`
 stubs so the compiler and tests stay in sync.
 
 ## Generated outputs
@@ -10,11 +10,11 @@ stubs so the compiler and tests stay in sync.
 |--------------------------------------------------|------------------------------------------------------------------|
 | `lps-builtin-ids/src/glsl_builtin_mapping.rs`    | GLSL / LPIR / LPFX name → `BuiltinId` (WASM Q32 overloads, etc.) |
 | `lps-builtin-ids/src/lib.rs`                     | `BuiltinId` enum and helpers                                     |
-| `lpvm-cranelift/src/generated_builtin_abi.rs`    | Cranelift lowering: symbol names and signatures                  |
+| `lpvm-cranelift/src/generated_builtin_abi.rs`    | Cranelift backend: symbol names and signatures                   |
 | `lps-builtins-emu-app/src/builtin_refs.rs`       | Force-link all builtins for RV32 emu                             |
 | `lps-builtins/src/builtins/glsl/mod.rs`          | `mod` list for GLSL builtins                                     |
 | `lps-builtins/src/builtins/lpir/mod.rs`          | `mod` list for LPIR builtins                                     |
-| `lps-wasm/src/emit/builtin_wasm_import_types.rs` | WASM import typing for Q32 builtins                              |
+| `lpvm-wasm/src/emit/builtin_wasm_import_types.rs` | WASM import typing for Q32 builtins                              |
 
 Headers in generated files state that they are auto-generated and how to regenerate.
 

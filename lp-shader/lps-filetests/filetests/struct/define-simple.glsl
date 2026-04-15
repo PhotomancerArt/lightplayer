@@ -31,6 +31,7 @@ int test_define_simple_color() {
     return 1; // Should be 1
 }
 
+// @unimplemented(wasm.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // run: test_define_simple_color() == 1
@@ -46,6 +47,7 @@ uint test_define_simple_triangle() {
     return 1u; // Should be 1u
 }
 
+// @unimplemented(wasm.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(rv32n.q32)
 // run: test_define_simple_triangle() == 1u

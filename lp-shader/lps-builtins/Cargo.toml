@@ -1,5 +1,6 @@
 [package]
 name = "lps-builtins"
+description = "Built-in function implementations for the LightPlayer shader runtime"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "lps-frontend"
+description = "GLSL to LPIR frontend via naga"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

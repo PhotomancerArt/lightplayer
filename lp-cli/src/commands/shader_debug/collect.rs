@@ -6,7 +6,7 @@ use lps_frontend::LpsModuleSig;
 
 use super::types::{BackendDebugData, FunctionDebugData};
 
-/// Collect debug data from the fastalloc backend.
+/// Collect debug data from the native (`lpvm-native`) backend.
 pub fn collect_fa_data(
     ir: &LpirModule,
     sig: &LpsModuleSig,
@@ -14,9 +14,9 @@ pub fn collect_fa_data(
     func_filter: Option<&str>,
 ) -> Result<BackendDebugData> {
     use lpvm_native::abi::ModuleAbi;
-    use lpvm_native::alloc::allocate;
-    use lpvm_native::alloc::render::render_interleaved;
     use lpvm_native::lower_ops;
+    use lpvm_native::regalloc::allocate;
+    use lpvm_native::regalloc::render::render_interleaved;
     use lpvm_native::rv32::abi::func_abi_rv32;
     use lpvm_native::rv32::emit::emit_function;
 
@@ -54,7 +54,7 @@ pub fn collect_fa_data(
         let slots = func.total_param_slots() as usize;
         let func_abi = func_abi_rv32(fn_sig, slots);
         let alloc_result =
-            allocate(&lowered, &func_abi).map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
+            allocate(&lowered, &func_abi).map_err(|e| anyhow::anyhow!("regalloc: {e}"))?;
 
         // Generate interleaved output
         let interleaved = render_interleaved(
@@ -170,9 +170,7 @@ pub fn collect_cranelift_data(
                     if *sym_addr > addr && *sym_addr < end_addr && sym_name != &func.name {
                         // Only use this symbol if it's from the user code section
                         // and not an internal Cranelift label
-                        if *sym_addr >= elf_info.user_code_start
-                            && !sym_name.starts_with(".L")
-                        {
+                        if *sym_addr >= elf_info.user_code_start && !sym_name.starts_with(".L") {
                             end_addr = *sym_addr;
                         }
                     }

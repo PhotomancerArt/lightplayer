@@ -1,5 +1,6 @@
 [package]
 name = "lpfx-impl-macro"
+description = "Proc-macro for lpfx effect implementations"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

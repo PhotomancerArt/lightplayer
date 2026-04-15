@@ -15,7 +15,6 @@ float test_edge_array_size_match() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_match() ~= 6.0
 
 /*
@@ -48,7 +47,6 @@ float test_edge_array_size_explicit() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_explicit() ~= 20.0
 
 /*
@@ -93,7 +91,6 @@ float test_edge_array_size_vector() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_vector() ~= 10.0
 
 float sum2(float[2] arr) {
@@ -112,7 +109,6 @@ float test_edge_array_size_different_types() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_different_types() ~= 13.0
 
 bool all_true(bool[3] arr) {
@@ -126,7 +122,6 @@ bool test_edge_array_size_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_bool() == true
 
 float average(const float[5] arr) {
@@ -140,7 +135,6 @@ float test_edge_array_size_const() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_const() ~= 30.0
 
 /*
@@ -172,5 +166,4 @@ float test_edge_array_size_multidimensional() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(wasm.q32)
 // run: test_edge_array_size_multidimensional() ~= 21.0

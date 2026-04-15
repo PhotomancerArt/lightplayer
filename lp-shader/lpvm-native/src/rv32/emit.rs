@@ -1,12 +1,10 @@
 //! Forward emitter: VInst + AllocOutput → machine code bytes.
-//!
-//! Ported from lpvm-native/src/isa/rv32c/emit.rs, adapted for FA crate VInst types.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::abi::FrameLayout;
-use crate::alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
+use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::rv32::encode::*;
 use crate::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
 use crate::vinst::{IcmpCond, LabelId, ModuleSymbols, VInst, VReg};

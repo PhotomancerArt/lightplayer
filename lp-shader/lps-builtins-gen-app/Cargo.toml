@@ -1,5 +1,6 @@
 [package]
 name = "lps-builtins-gen-app"
+description = "Code generator for lps-builtins and lps-builtin-ids"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

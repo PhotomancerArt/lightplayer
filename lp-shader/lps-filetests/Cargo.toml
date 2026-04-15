@@ -1,5 +1,6 @@
 [package]
 name = "lps-filetests"
+description = "GLSL filetest infrastructure for the LightPlayer shader compiler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

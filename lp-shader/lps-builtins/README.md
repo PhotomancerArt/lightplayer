@@ -1,8 +1,8 @@
 # lps-builtins
 
 Low-level builtin library for **LightPlayer JIT shaders**: fixed-point and float math, memory
-helpers, and host hooks. Symbols are exported as `#[no_mangle] pub extern "C"` so
-`lpvm-cranelift` can link them into generated RISC-V code (and the RISC-V / WASM test harnesses
+helpers, and host hooks. Symbols are exported as `#[no_mangle] pub extern "C"` so the native and
+Cranelift backends can link them into generated RISC-V code (and the RISC-V / WASM test harnesses
 can resolve the same names).
 
 ## Layout
@@ -17,7 +17,7 @@ can resolve the same names).
 
 ## Wiring into the compiler
 
-Builtin **IDs** and Cranelift **ABI tables** are not edited by hand. Run
+Builtin **IDs** and **ABI tables** are not edited by hand. Run
 **`lps-builtins-gen-app`** (or `scripts/build-builtins.sh`), which scans `src/builtins/` and
 writes:
 
@@ -25,7 +25,7 @@ writes:
 - `lpvm-cranelift/src/generated_builtin_abi.rs`
 - `lps-builtins-emu-app` / `lps-builtins-wasm` `builtin_refs.rs`
 - `lps-builtins/src/builtins/glsl/mod.rs` and `lpir/mod.rs` (module lists)
-- `lps-wasm/src/emit/builtin_wasm_import_types.rs`
+- `lpvm-wasm/src/emit/builtin_wasm_import_types.rs`
 
 ## Adding a builtin
 

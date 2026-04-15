@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::abi::{FrameLayout, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::alloc::{AllocOutput, AllocResult, allocate};
+use crate::regalloc::{AllocOutput, AllocResult, allocate};
 use crate::rv32::emit::emit_function;
 use crate::vinst::VInst;
 
@@ -25,7 +25,7 @@ pub struct EmittedCode {
 /// Emit a LoweredFunction to machine code.
 ///
 /// This function orchestrates the allocation and emission pipeline:
-/// 1. Allocate registers (VInst → AllocOutput) via fa_alloc
+/// 1. Allocate registers (VInst → AllocOutput) via [`crate::regalloc`]
 /// 2. Emit VInst + AllocOutput → bytes via rv32::emit
 ///
 /// # Arguments
@@ -51,7 +51,7 @@ pub fn emit_lowered_ex(
         "[native-fa] emit_lowered_ex: starting allocation for {} vinsts",
         lowered.vinsts.len()
     );
-    let alloc_result = allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
+    let alloc_result = allocate(lowered, func_abi).map_err(NativeError::RegAlloc)?;
     log::debug!(
         "[native-fa] emit_lowered_ex: allocation complete, {} spill slots",
         alloc_result.spill_slots
@@ -92,7 +92,7 @@ pub fn emit_lowered_with_alloc(
         &lowered.symbols,
         func_abi.is_sret(),
     )
-    .map_err(NativeError::FastAlloc)?;
+    .map_err(NativeError::RegAlloc)?;
 
     // Build EmittedCode with allocation output for debug rendering
     Ok(EmittedCode {

@@ -9,7 +9,7 @@ and matrix types (`Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`), helper function
 encode/decode utilities.
 
 **Normative Q32 semantics** are defined in `[docs/design/q32.md](../../docs/design/q32.md)` — all
-implementations (this crate, JIT builtins, Cranelift emitter, WASM emitter, LPIR interpreter)
+implementations (this crate, JIT builtins, native/Cranelift emitters, WASM emitter, LPIR interpreter)
 must conform.
 
 ## Overview
@@ -123,7 +123,7 @@ The crate provides **two different** float→Q32 paths with different semantics 
 
 | Function | Returns | Use Case | Rounding | Out-of-range | Typical Caller |
 |----------|---------|----------|----------|--------------|----------------|
-| `q32_encode(f32)` → `i32` | **Raw `i32` bits** | Compiler constant emission | `libm::round` (nearest) | **Saturate** to max/min | `lpvm-cranelift` generating `iconst.i32` |
+| `q32_encode(f32)` → `i32` | **Raw `i32` bits** | Compiler constant emission | `libm::round` (nearest) | **Saturate** to max/min | Backend generating `iconst.i32` |
 | `Q32::from_f32_wrapping(f32)` → `Q32` | **Typed `Q32` value** | Runtime conversion | Truncate toward zero | **Wrap** (Rust `as` semantics) | Builtins, engine mapping, tests |
 
 **Why two paths?**
@@ -175,7 +175,8 @@ Tests cover:
 | `lps-q32`        | **This crate**: reference types and helpers (no `#[no_mangle]`)                                         |
 | `lps-builtins`   | `extern "C"` builtins with `#[no_mangle]` for JIT linking (`__lp_lpir_fmul_q32`, `__lps_sin_q32`, etc.) |
 | `lps-shared`     | `Q32ShaderValue` marshalling, `CallError`, `GlslReturn` for runtime shader I/O                          |
-| `lpvm-cranelift` | Uses `lps-q32` for constant encoding and `Q32Options` for codegen mode selection                        |
+| `lpvm-native`    | Uses `lps-q32` for constant encoding during native codegen                                              |
+| `lpvm-cranelift` | Uses `lps-q32` for constant encoding and `Q32Options` for Cranelift codegen                             |
 | `lp-engine`      | Uses `lps_q32::types::q32::{Q32, ToQ32}` for fixture pixel mapping                                      |
 
 

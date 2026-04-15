@@ -6,8 +6,8 @@ use alloc::string::String;
 use lpir::{IrFunction, LpirModule};
 
 use crate::abi::FuncAbi;
-use crate::alloc::AllocOutput;
 use crate::lower::LoweredFunction;
+use crate::regalloc::AllocOutput;
 use crate::vinst::ModuleSymbols;
 
 /// Build `FunctionDebugInfo` section map: interleaved LPIR/VInst/alloc, disasm, VInst listing.
@@ -24,7 +24,7 @@ pub fn build_debug_sections(
     {
         let mut sections = BTreeMap::new();
 
-        let interleaved = crate::alloc::render::render_interleaved(
+        let interleaved = crate::regalloc::render::render_interleaved(
             func,
             ir,
             &lowered.vinsts,

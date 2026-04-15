@@ -18,7 +18,7 @@ use super::builtins::BuiltinTable;
 /// Emit and link a full module for JIT execution.
 ///
 /// This is the main entry point for JIT compilation:
-/// 1. Compile all functions (LPIR → VInst → PInst → bytes)
+/// 1. Compile all functions (LPIR → VInst → machine code)
 /// 2. Link with builtins (resolve relocations)
 /// 3. Produce executable JitBuffer
 ///
