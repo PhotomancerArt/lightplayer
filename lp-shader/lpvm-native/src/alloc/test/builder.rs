@@ -19,10 +19,10 @@
 
 use crate::abi::FuncAbi;
 use crate::debug::vinst;
-use crate::fa_alloc::AllocOutput;
-use crate::fa_alloc::pool::RegPool;
-use crate::fa_alloc::render::render_alloc_output;
-use crate::fa_alloc::walk::walk_linear_with_pool;
+use crate::alloc::AllocOutput;
+use crate::alloc::pool::RegPool;
+use crate::alloc::render::render_alloc_output;
+use crate::alloc::walk::walk_linear_with_pool;
 use crate::rv32::abi;
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::string::{String, ToString};
@@ -123,7 +123,7 @@ impl AllocTestBuilder {
         let output = walk_linear_with_pool(&vinsts, &vreg_pool, &func_abi, pool)
             .unwrap_or_else(|e| panic!("Allocation failed: {:?}", e));
 
-        crate::fa_alloc::verify::verify_alloc(&vinsts, &vreg_pool, &output, &func_abi);
+        crate::alloc::verify::verify_alloc(&vinsts, &vreg_pool, &output, &func_abi);
 
         let rendered = render_alloc_output(&vinsts, &vreg_pool, &output, Some(&symbols));
 

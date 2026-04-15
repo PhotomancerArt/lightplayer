@@ -4,10 +4,10 @@
 //! freeing registers for defs, and recording spill/reload edits.
 
 use crate::abi::FuncAbi;
-use crate::fa_alloc::pool::RegPool;
-use crate::fa_alloc::spill::SpillAlloc;
-use crate::fa_alloc::trace::TraceEntry;
-use crate::fa_alloc::{
+use crate::alloc::pool::RegPool;
+use crate::alloc::spill::SpillAlloc;
+use crate::alloc::trace::TraceEntry;
+use crate::alloc::{
     Alloc, AllocError, AllocOutput, Edit, EditPoint, TracePush, TraceSink, trace_sink_new,
 };
 use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
@@ -168,7 +168,7 @@ impl<'a> WalkState<'a> {
                     // back-edge Br is a no-op; without pre-assignment the
                     // updated value would never reach the spill slot and the
                     // next iteration's header reload would read stale data.
-                    let body_live = crate::fa_alloc::liveness::analyze_liveness(
+                    let body_live = crate::alloc::liveness::analyze_liveness(
                         self.tree,
                         *body,
                         self.vinsts,
@@ -177,13 +177,13 @@ impl<'a> WalkState<'a> {
                     // Only values *defined* inside the loop need spill-at-boundary / loop_carried
                     // treatment. Parameters (and other loop-invariant inputs) are live into the body
                     // but must not get a spill slot here — reload-before-first-use would read garbage.
-                    let defs_in_loop = crate::fa_alloc::liveness::defs_in_region(
+                    let defs_in_loop = crate::alloc::liveness::defs_in_region(
                         self.tree,
                         *body,
                         self.vinsts,
                         self.vreg_pool,
                     )
-                    .union(&crate::fa_alloc::liveness::defs_in_region(
+                    .union(&crate::alloc::liveness::defs_in_region(
                         self.tree,
                         *header,
                         self.vinsts,

@@ -14,8 +14,8 @@ pub fn collect_fa_data(
     func_filter: Option<&str>,
 ) -> Result<BackendDebugData> {
     use lpvm_native::abi::ModuleAbi;
-    use lpvm_native::fa_alloc::allocate;
-    use lpvm_native::fa_alloc::render::render_interleaved;
+    use lpvm_native::alloc::allocate;
+    use lpvm_native::alloc::render::render_interleaved;
     use lpvm_native::lower_ops;
     use lpvm_native::rv32::abi::func_abi_rv32;
     use lpvm_native::rv32::emit::emit_function;

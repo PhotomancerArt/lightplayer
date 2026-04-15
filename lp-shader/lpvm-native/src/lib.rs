@@ -20,7 +20,7 @@ pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
-pub mod fa_alloc;
+pub mod alloc;
 pub mod link;
 pub mod lower;
 pub mod native_options;

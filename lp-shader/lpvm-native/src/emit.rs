@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::abi::{FrameLayout, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::fa_alloc::{AllocOutput, AllocResult, allocate};
+use crate::alloc::{AllocOutput, AllocResult, allocate};
 use crate::rv32::emit::emit_function;
 use crate::vinst::VInst;
 

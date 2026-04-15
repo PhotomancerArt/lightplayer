@@ -91,7 +91,7 @@ The intermediate representation between LPIR and machine code:
 
 | Module                         | Purpose                                  |
 | ------------------------------ | ---------------------------------------- |
-| [`fa_alloc/`](src/fa_alloc/)   | FastAlloc register allocator             |
+| [`fa_alloc/`](src/alloc/)   | FastAlloc register allocator             |
 | [`rv32c/`](src/rv32c/)           | RISC-V instruction encoding and emission |
 | [`abi/`](src/abi/)             | Calling convention and frame layout      |
 | [`lower.rs`](src/lower.rs)     | LPIR → VInst lowering                    |

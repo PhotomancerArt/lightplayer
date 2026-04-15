@@ -158,10 +158,10 @@ pub enum AllocError {
 #[macro_export]
 macro_rules! emit_err {
     () => {
-        $crate::fa_alloc::AllocError::Internal(file!(), line!(), None)
+        $crate::alloc::AllocError::Internal(file!(), line!(), None)
     };
     ($($arg:tt)*) => {
-        $crate::fa_alloc::AllocError::Internal(
+        $crate::alloc::AllocError::Internal(
             file!(),
             line!(),
             Some(alloc::format!($($arg)*))
@@ -235,7 +235,7 @@ fn used_callee_saved_from_output(output: &AllocOutput) -> crate::abi::PregSet {
 
 /// Allocate registers for a lowered function (full region tree).
 pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocResult, AllocError> {
-    use crate::fa_alloc::pool::RegPool;
+    use crate::alloc::pool::RegPool;
     use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 
     log::debug!(
@@ -403,8 +403,8 @@ mod tests {
     // Snapshot test helpers for allocator
     fn expect_alloc(input: &str, expected: &str) {
         use crate::debug::vinst;
-        use crate::fa_alloc::render::render_alloc_output;
-        use crate::fa_alloc::walk::walk_linear;
+        use crate::alloc::render::render_alloc_output;
+        use crate::alloc::walk::walk_linear;
         use crate::rv32::abi;
         use lps_shared::{LpsFnSig, LpsType};
 

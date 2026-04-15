@@ -7,11 +7,11 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-pub use crate::fa_alloc::trace::TraceEntry;
+pub use crate::alloc::trace::TraceEntry;
 
-/// Trace sink: real [`crate::fa_alloc::trace::AllocTrace`] when `debug` is enabled, ZST otherwise.
+/// Trace sink: real [`crate::alloc::trace::AllocTrace`] when `debug` is enabled, ZST otherwise.
 #[cfg(feature = "debug")]
-pub type TraceSink = crate::fa_alloc::trace::AllocTrace;
+pub type TraceSink = crate::alloc::trace::AllocTrace;
 
 /// Trace sink: ZST when `debug` is disabled (no storage, no allocations).
 #[cfg(not(feature = "debug"))]
@@ -38,7 +38,7 @@ impl TracePush for TraceSink {
 pub fn trace_sink_new() -> TraceSink {
     #[cfg(feature = "debug")]
     {
-        crate::fa_alloc::trace::AllocTrace::new()
+        crate::alloc::trace::AllocTrace::new()
     }
     #[cfg(not(feature = "debug"))]
     {
@@ -53,7 +53,7 @@ fn is_entry_trace_mnemonic(m: &str) -> bool {
 
 /// Non-entry trace rows grouped by VInst index (forward order).
 pub fn trace_by_vinst_or_empty(
-    output: &crate::fa_alloc::AllocOutput,
+    output: &crate::alloc::AllocOutput,
 ) -> BTreeMap<usize, Vec<&TraceEntry>> {
     #[cfg(feature = "debug")]
     {
@@ -80,7 +80,7 @@ pub fn trace_by_vinst_or_empty(
 pub fn append_entry_trace_metadata_lines(
     lines: &mut Vec<String>,
     ind_lp: &str,
-    output: &crate::fa_alloc::AllocOutput,
+    output: &crate::alloc::AllocOutput,
 ) {
     #[cfg(feature = "debug")]
     {

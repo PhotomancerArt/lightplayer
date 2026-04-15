@@ -6,7 +6,7 @@ use lpir::{IrFunction, LpirModule};
 
 use crate::abi::FuncAbi;
 #[cfg(feature = "debug")]
-use crate::fa_alloc::render::render_interleaved;
+use crate::alloc::render::render_interleaved;
 use crate::lower::LoweredFunction;
 use crate::vinst::{VInst, VReg};
 
@@ -16,7 +16,7 @@ pub fn build_allocator_snapshot_lines(
     func: &IrFunction,
     vinsts: &[VInst],
     vreg_pool: &[VReg],
-    output: &crate::fa_alloc::AllocOutput,
+    output: &crate::alloc::AllocOutput,
     func_abi: &FuncAbi,
     lowered: &LoweredFunction,
     filetest_separator: &str,

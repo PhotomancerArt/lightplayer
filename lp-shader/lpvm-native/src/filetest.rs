@@ -4,8 +4,8 @@
 //! (`tests/filetests.rs`) handles filesystem discovery and BLESS updates.
 
 use crate::debug::filetest_snapshot::build_allocator_snapshot_lines;
-use crate::fa_alloc::pool::RegPool;
-use crate::fa_alloc::verify::verify_alloc;
+use crate::alloc::pool::RegPool;
+use crate::alloc::verify::verify_alloc;
 use crate::lower::lower_ops;
 use crate::region::Region;
 use crate::rv32::abi;
@@ -249,7 +249,7 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
         total_param_slots,
     );
 
-    use crate::fa_alloc::walk::walk_linear_with_pool;
+    use crate::alloc::walk::walk_linear_with_pool;
 
     let pool = if let Some(n) = test.pool_size {
         RegPool::with_capacity(n)

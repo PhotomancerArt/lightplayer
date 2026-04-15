@@ -2,8 +2,8 @@
 
 use crate::abi::FuncAbi;
 use crate::abi::classify::{ArgLoc, ReturnMethod};
-use crate::fa_alloc::trace::TraceEntry;
-use crate::fa_alloc::{
+use crate::alloc::trace::TraceEntry;
+use crate::alloc::{
     Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
 use crate::rv32::gpr::reg_name;
@@ -725,7 +725,7 @@ mod tests {
     use super::*;
     use crate::abi::FuncAbi;
     use crate::debug::vinst;
-    use crate::fa_alloc::walk;
+    use crate::alloc::walk;
     use crate::rv32::abi;
     use lps_shared::{LpsFnSig, LpsType};
 

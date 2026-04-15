@@ -51,7 +51,7 @@ pub enum NativeError {
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
     /// Fastalloc (backward-walk register allocation) failed.
-    FastAlloc(crate::fa_alloc::AllocError),
+    FastAlloc(crate::alloc::AllocError),
     /// Internal error (e.g., during restructuring).
     Internal(String),
 }

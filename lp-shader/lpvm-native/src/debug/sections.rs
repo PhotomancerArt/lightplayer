@@ -6,7 +6,7 @@ use alloc::string::String;
 use lpir::{IrFunction, LpirModule};
 
 use crate::abi::FuncAbi;
-use crate::fa_alloc::AllocOutput;
+use crate::alloc::AllocOutput;
 use crate::lower::LoweredFunction;
 use crate::vinst::ModuleSymbols;
 
@@ -24,7 +24,7 @@ pub fn build_debug_sections(
     {
         let mut sections = BTreeMap::new();
 
-        let interleaved = crate::fa_alloc::render::render_interleaved(
+        let interleaved = crate::alloc::render::render_interleaved(
             func,
             ir,
             &lowered.vinsts,
