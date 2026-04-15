@@ -18,6 +18,7 @@ float test_pow_negative_base() {
 // @unimplemented(wasm.q32)
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_pow_negative_base() ~= 0.0
 
@@ -28,6 +29,7 @@ float test_pow_zero_negative_exponent() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
@@ -38,6 +40,7 @@ float test_pow_zero_zero() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_pow_zero_zero() ~= 0.0
 
@@ -48,6 +51,7 @@ float test_log_zero() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_log_zero() ~= 0.0
 
@@ -58,6 +62,7 @@ float test_log_negative() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_log_negative() ~= 0.0
 
@@ -68,6 +73,7 @@ float test_log2_zero() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_log2_zero() ~= 0.0
 
@@ -78,6 +84,7 @@ float test_log2_negative() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_log2_negative() ~= 0.0
 
@@ -88,6 +95,7 @@ float test_sqrt_negative() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_sqrt_negative() ~= 0.0
 
@@ -98,6 +106,7 @@ float test_inversesqrt_zero() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_inversesqrt_zero() ~= 0.0
 
@@ -108,6 +117,7 @@ float test_inversesqrt_negative() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_inversesqrt_negative() ~= 0.0
 

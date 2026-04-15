@@ -71,7 +71,13 @@ pub fn allocate_from_tree(
     pool: RegPool,
 ) -> Result<AllocOutput, AllocError> {
     let (inst_alloc_offsets, total_operands) = build_operand_layout(vinsts, vreg_pool);
-    let max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize + 32;
+    let mut max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize;
+    for inst in vinsts {
+        inst.for_each_vreg_touching(vreg_pool, |v| {
+            max_vreg_idx = max_vreg_idx.max(v.0 as usize);
+        });
+    }
+    let max_vreg_idx = max_vreg_idx + 32;
     let mut state = WalkState {
         vinsts,
         vreg_pool,
