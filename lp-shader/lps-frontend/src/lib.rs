@@ -289,6 +289,205 @@ float test_main() {
             self.math.call(module_name, func_name, args)
         }
     }
+
+    // ========================
+    // Globals & Uniforms Tests
+    // ========================
+
+    #[test]
+    fn lower_global_read_emits_load_from_vmctx() {
+        // Global variable (private address space) - simple read
+        let src = "float my_global; float test() { return my_global; }";
+        let naga = compile(src).unwrap();
+        let (ir, sig) = super::lower(&naga).expect("lower");
+
+        // Verify globals_type is set
+        assert!(sig.globals_type.is_some(), "globals_type should be set");
+        assert!(sig.uniforms_type.is_none(), "uniforms_type should be None");
+
+        // Verify the test function contains Load ops with VMCTX base
+        let test_func = ir
+            .functions
+            .iter()
+            .find(|f| f.name == "test")
+            .expect("test function");
+        let has_load_from_vmctx = test_func.body.iter().any(|op| {
+            matches!(
+                op,
+                lpir::LpirOp::Load {
+                    base: lpir::VReg(0),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_load_from_vmctx,
+            "test function should contain Load from VMCTX"
+        );
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_global_with_vec3_emits_multiple_loads() {
+        // Global vec3 should emit 3 Load ops
+        let src = "vec3 my_vec; vec3 test() { return my_vec; }";
+        let naga = compile(src).unwrap();
+        let (ir, sig) = super::lower(&naga).expect("lower");
+
+        // Verify globals_type is set and contains a Vec3
+        assert!(sig.globals_type.is_some(), "globals_type should be set");
+        if let Some(LpsType::Struct { members, .. }) = &sig.globals_type {
+            assert_eq!(members.len(), 1);
+            assert_eq!(members[0].ty, LpsType::Vec3);
+        } else {
+            panic!("globals_type should be a Struct");
+        }
+
+        // Verify the test function contains multiple Load ops
+        let test_func = ir
+            .functions
+            .iter()
+            .find(|f| f.name == "test")
+            .expect("test function");
+        let load_count = test_func
+            .body
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op,
+                    lpir::LpirOp::Load {
+                        base: lpir::VReg(0),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(load_count, 3, "vec3 read should emit 3 Load ops from VMCTX");
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_global_with_initializer_synthesizes_shader_init() {
+        let src = "float my_global = 42.0; float test() { return my_global; }";
+        let naga = compile(src).unwrap();
+        let (ir, sig) = super::lower(&naga).expect("lower");
+
+        // Verify globals_type is set
+        assert!(sig.globals_type.is_some(), "globals_type should be set");
+
+        // Verify __shader_init function exists
+        let init_func = ir.functions.iter().find(|f| f.name == "__shader_init");
+        assert!(
+            init_func.is_some(),
+            "__shader_init function should be synthesized"
+        );
+
+        // Verify __shader_init contains Store ops
+        let init_func = init_func.unwrap();
+        let has_store_to_vmctx = init_func.body.iter().any(|op| {
+            matches!(
+                op,
+                lpir::LpirOp::Store {
+                    base: lpir::VReg(0),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_store_to_vmctx,
+            "__shader_init should contain Store to VMCTX"
+        );
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_global_write_emits_store_to_vmctx() {
+        let src = "float my_global; void test() { my_global = 3.14; }";
+        let naga = compile(src).unwrap();
+        let (ir, _sig) = super::lower(&naga).expect("lower");
+
+        // Verify the test function contains Store ops with VMCTX base
+        let test_func = ir
+            .functions
+            .iter()
+            .find(|f| f.name == "test")
+            .expect("test function");
+        let has_store_to_vmctx = test_func.body.iter().any(|op| {
+            matches!(
+                op,
+                lpir::LpirOp::Store {
+                    base: lpir::VReg(0),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_store_to_vmctx,
+            "test function should contain Store to VMCTX"
+        );
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_global_vec3_write_emits_multiple_stores() {
+        let src = "vec3 my_vec; void test() { my_vec = vec3(1.0, 2.0, 3.0); }";
+        let naga = compile(src).unwrap();
+        let (ir, _sig) = super::lower(&naga).expect("lower");
+
+        // Verify the test function contains 3 Store ops (one per component)
+        let test_func = ir
+            .functions
+            .iter()
+            .find(|f| f.name == "test")
+            .expect("test function");
+        let store_count = test_func
+            .body
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op,
+                    lpir::LpirOp::Store {
+                        base: lpir::VReg(0),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(
+            store_count, 3,
+            "vec3 write should emit 3 Store ops to VMCTX"
+        );
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn lower_multiple_globals_sets_correct_metadata() {
+        let src = "float g1; int g2; float test() { return g1 + float(g2); }";
+        let naga = compile(src).unwrap();
+        let (ir, sig) = super::lower(&naga).expect("lower");
+
+        // Verify globals_type has 2 members
+        assert!(sig.globals_type.is_some(), "globals_type should be set");
+        if let Some(LpsType::Struct { members, .. }) = &sig.globals_type {
+            assert_eq!(members.len(), 2);
+            assert_eq!(members[0].ty, LpsType::Float);
+            assert_eq!(members[1].ty, LpsType::Int);
+        } else {
+            panic!("globals_type should be a Struct");
+        }
+
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    // NOTE: Uniform block support is limited because Naga represents uniform blocks as structs,
+    // which require additional type mapping work. The infrastructure for uniforms is in place
+    // (uniforms_type field in LpsModuleSig), but struct-to-struct type conversion is a TODO.
+    // See the spec for M1 - uniform blocks can be added as follow-up work.
 }
 
 pub use lpir::FloatMode;

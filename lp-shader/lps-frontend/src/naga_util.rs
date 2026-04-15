@@ -181,6 +181,13 @@ pub(crate) fn expr_type_inner(
             base: func.local_variables[*lv].ty,
             space: naga::AddressSpace::Function,
         }),
+        Expression::GlobalVariable(gv) => {
+            let gv_data = &module.global_variables[*gv];
+            Ok(TypeInner::Pointer {
+                base: gv_data.ty,
+                space: gv_data.space,
+            })
+        }
         Expression::ArrayLength(_) => Ok(TypeInner::Scalar(Scalar {
             kind: ScalarKind::Uint,
             width: 4,
@@ -556,6 +563,10 @@ pub(crate) fn expr_scalar_kind(
         Expression::LocalVariable(lv) => {
             let lv_ty = func.local_variables[*lv].ty;
             type_handle_scalar_kind(module, lv_ty)
+        }
+        Expression::GlobalVariable(gv) => {
+            let gv_ty = module.global_variables[*gv].ty;
+            type_handle_scalar_kind(module, gv_ty)
         }
         Expression::Load { pointer } => match &func.expressions[*pointer] {
             Expression::LocalVariable(lv) => {

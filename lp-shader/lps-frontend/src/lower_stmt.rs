@@ -381,6 +381,41 @@ fn lower_statement(ctx: &mut LowerCtx<'_>, stmt: &Statement) -> Result<(), Lower
                 }
                 Ok(())
             }
+            Expression::GlobalVariable(gv_handle) => {
+                // Store to a global variable.
+                let info = ctx.global_map.get(gv_handle).cloned().ok_or_else(|| {
+                    LowerError::Internal(format!(
+                        "GlobalVariable {:?} not found in global_map",
+                        gv_handle
+                    ))
+                })?;
+
+                if info.is_uniform {
+                    return Err(LowerError::UnsupportedStatement(String::from(
+                        "cannot write to uniform variable",
+                    )));
+                }
+
+                let srcs = ctx.ensure_expr_vec(*value)?;
+                if srcs.len() != info.component_count as usize {
+                    return Err(LowerError::UnsupportedStatement(format!(
+                        "Store to global: {} vs {} components",
+                        srcs.len(),
+                        info.component_count
+                    )));
+                }
+
+                // Store each component to the VMContext buffer
+                for (i, src) in srcs.iter().enumerate() {
+                    let offset = info.byte_offset + (i as u32 * 4);
+                    ctx.fb.push(LpirOp::Store {
+                        base: VMCTX_VREG,
+                        offset,
+                        value: *src,
+                    });
+                }
+                Ok(())
+            }
             _ => Err(LowerError::UnsupportedStatement(String::from(
                 "store to non-local pointer",
             ))),

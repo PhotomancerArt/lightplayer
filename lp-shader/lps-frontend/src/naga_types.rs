@@ -110,7 +110,10 @@ fn function_info(
     })
 }
 
-fn naga_type_inner_to_glsl(module: &Module, inner: &TypeInner) -> Result<LpsType, CompileError> {
+pub(crate) fn naga_type_inner_to_glsl(
+    module: &Module,
+    inner: &TypeInner,
+) -> Result<LpsType, CompileError> {
     match *inner {
         TypeInner::Pointer { base, .. } => {
             naga_type_inner_to_glsl(module, &module.types[base].inner)

@@ -8,7 +8,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FunctionBuilder, IrType, LpirModule, LpirOp, SlotId, VReg};
 use naga::{
-    AddressSpace, Expression, Function, Handle, LocalVariable, Module, Statement, Type, TypeInner,
+    AddressSpace, Expression, Function, GlobalVariable, Handle, LocalVariable, Module, Statement,
+    Type, TypeInner,
 };
 use smallvec::SmallVec;
 
@@ -19,6 +20,22 @@ pub(crate) use crate::naga_util::{
     func_return_ir_types, naga_scalar_to_ir_type, naga_type_to_ir_types, naga_type_width,
     vector_size_usize,
 };
+
+/// Information about a global variable (uniform or private global) for lowering.
+#[derive(Clone, Debug)]
+pub(crate) struct GlobalVarInfo {
+    /// Byte offset from the start of the VMContext buffer (including header).
+    pub byte_offset: u32,
+    /// The LpsType of this global variable.
+    pub ty: lps_shared::LpsType,
+    /// Number of scalar components (for scalarization).
+    pub component_count: u32,
+    /// Whether this is a uniform (read-only) variable.
+    pub is_uniform: bool,
+}
+
+/// Map from Naga GlobalVariable handle to its lowering info.
+pub(crate) type GlobalVarMap = BTreeMap<Handle<GlobalVariable>, GlobalVarInfo>;
 
 pub(crate) type VRegVec = SmallVec<[VReg; 4]>;
 
@@ -66,6 +83,8 @@ pub(crate) struct LowerCtx<'a> {
     pub import_map: BTreeMap<String, CalleeRef>,
     pub lpfx_map: BTreeMap<Handle<Function>, CalleeRef>,
     pub return_types: Vec<IrType>,
+    /// Map from Naga GlobalVariable handle to (vmctx_byte_offset, component_count, is_uniform).
+    pub(crate) global_map: GlobalVarMap,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -76,6 +95,7 @@ impl<'a> LowerCtx<'a> {
         func_map: &BTreeMap<Handle<Function>, CalleeRef>,
         import_map: &BTreeMap<String, CalleeRef>,
         lpfx_map: &BTreeMap<Handle<Function>, CalleeRef>,
+        global_map: GlobalVarMap,
     ) -> Result<Self, LowerError> {
         let return_types = func_return_ir_types(module, func)?;
         let mut fb = FunctionBuilder::new(name, &return_types);
@@ -199,6 +219,7 @@ impl<'a> LowerCtx<'a> {
             import_map: import_map.clone(),
             lpfx_map: lpfx_map.clone(),
             return_types,
+            global_map,
         };
 
         for (lv_handle, var) in func.local_variables.iter() {

@@ -30,6 +30,12 @@ pub enum ParamQualifier {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LpsModuleSig {
     pub functions: Vec<LpsFnSig>,
+    /// Struct type describing the uniforms region layout (std430).
+    /// Members correspond to `uniform` declarations. `None` if no uniforms.
+    pub uniforms_type: Option<LpsType>,
+    /// Struct type describing the globals region layout (std430).
+    /// Members correspond to private global declarations. `None` if no globals.
+    pub globals_type: Option<LpsType>,
 }
 
 #[cfg(test)]
@@ -58,6 +64,8 @@ mod tests {
                 ],
                 return_type: LpsType::Float,
             }],
+            uniforms_type: None,
+            globals_type: None,
         };
         assert_eq!(m.functions[0].name, "add");
         assert_eq!(m.functions[0].parameters.len(), 2);

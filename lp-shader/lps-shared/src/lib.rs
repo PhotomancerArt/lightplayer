@@ -18,7 +18,7 @@ mod sig;
 mod types;
 pub mod value_path;
 
-pub use layout::{array_stride, round_up, type_alignment, type_size};
+pub use layout::{VMCTX_HEADER_SIZE, array_stride, round_up, type_alignment, type_size};
 pub use lps_value_f32::LpsValueF32;
 pub use lps_value_q32::{
     LpsValueQ32, LpsValueQ32Error, lps_value_f32_to_q32, q32_to_lps_value_f32,

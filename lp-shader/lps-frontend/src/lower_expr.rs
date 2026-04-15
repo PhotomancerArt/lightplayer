@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpir::{IrType, LpirOp, VReg};
+use lpir::{IrType, LpirOp, VMCTX_VREG, VReg};
 use naga::{
     ArraySize, BinaryOperator, Expression, Handle, Literal, RelationalFunction, ScalarKind,
     TypeInner,
@@ -104,6 +104,53 @@ fn lower_expr_vec_uncached(
                         dst,
                         base: addr,
                         offset: (j * 4) as u32,
+                    });
+                    vregs.push(dst);
+                }
+                Ok(vregs)
+            }
+            Expression::GlobalVariable(gv_handle) => {
+                // Load from a global variable (uniform or private global).
+                let Some(info) = ctx.global_map.get(gv_handle) else {
+                    return Err(LowerError::Internal(format!(
+                        "GlobalVariable {:?} not found in global_map",
+                        gv_handle
+                    )));
+                };
+
+                // Determine IR types for this global's components
+                let ir_ty = match info.ty {
+                    lps_shared::LpsType::Float => IrType::F32,
+                    lps_shared::LpsType::Int => IrType::I32,
+                    lps_shared::LpsType::UInt => IrType::I32,
+                    lps_shared::LpsType::Bool => IrType::I32,
+                    lps_shared::LpsType::Vec2
+                    | lps_shared::LpsType::Vec3
+                    | lps_shared::LpsType::Vec4 => IrType::F32,
+                    lps_shared::LpsType::IVec2
+                    | lps_shared::LpsType::IVec3
+                    | lps_shared::LpsType::IVec4 => IrType::I32,
+                    lps_shared::LpsType::UVec2
+                    | lps_shared::LpsType::UVec3
+                    | lps_shared::LpsType::UVec4 => IrType::I32,
+                    lps_shared::LpsType::BVec2
+                    | lps_shared::LpsType::BVec3
+                    | lps_shared::LpsType::BVec4 => IrType::I32,
+                    lps_shared::LpsType::Mat2
+                    | lps_shared::LpsType::Mat3
+                    | lps_shared::LpsType::Mat4 => IrType::F32,
+                    _ => IrType::F32,
+                };
+
+                // Emit Load ops for each component from VMContext
+                let mut vregs = VRegVec::new();
+                for i in 0..info.component_count {
+                    let dst = ctx.fb.alloc_vreg(ir_ty);
+                    let offset = info.byte_offset + (i * 4);
+                    ctx.fb.push(LpirOp::Load {
+                        dst,
+                        base: VMCTX_VREG,
+                        offset,
                     });
                     vregs.push(dst);
                 }
@@ -471,6 +518,28 @@ fn lower_expr_vec_uncached(
         Expression::LocalVariable(_) => Err(LowerError::UnsupportedExpression(String::from(
             "LocalVariable must be used through Load",
         ))),
+        Expression::GlobalVariable(gv_handle) => {
+            // A bare GlobalVariable expression (used as a pointer, e.g. for Store).
+            // Return the info needed to access it later.
+            // This should only be reached when the global is used as a pointer (not loaded).
+            let Some(info) = ctx.global_map.get(&gv_handle) else {
+                return Err(LowerError::Internal(format!(
+                    "GlobalVariable {:?} not found in global_map",
+                    gv_handle
+                )));
+            };
+            if info.component_count == 1 {
+                // Scalar: return the offset as a "virtual vreg" that the Store handler will recognize
+                // We encode this as a special pattern - the Store handler will check for this.
+                Err(LowerError::UnsupportedExpression(String::from(
+                    "GlobalVariable bare expression not fully implemented - use Load/GlobalVariable pattern",
+                )))
+            } else {
+                Err(LowerError::UnsupportedExpression(String::from(
+                    "GlobalVariable bare expression for multi-component types not implemented",
+                )))
+            }
+        }
         _ => Err(LowerError::UnsupportedExpression(format!(
             "{:?}",
             ctx.func.expressions[expr]

@@ -255,4 +255,11 @@ foundation it needs.
 
 ## Notes
 
-(Populated during iteration.)
+- Layout computation and `LpvmDataQ32` already exist — no new layout code needed.
+- Use `LpsType::Struct` for both `uniforms_type` and `globals_type` on
+  `LpsModuleSig` — reuses all existing layout/path infrastructure.
+- `__shader_init` (not `__lp_` prefix, which is for compiler builtins).
+- Filetest directory restructure: `global/`, `uniform/`, `global-future/`.
+- M3 (filetest review) is done by orchestrating agent, not Kimi sub-agent.
+- Execution approach: Opus orchestrates, Kimi sub-agents implement milestones.
+  Stop for human review when creative input is needed.

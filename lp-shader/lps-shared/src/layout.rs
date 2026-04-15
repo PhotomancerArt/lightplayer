@@ -4,6 +4,10 @@
 
 use crate::{LayoutRules, LpsType, StructMember};
 
+/// Size of the VMContext header in bytes (16 bytes on 32-bit targets).
+/// This is the offset where uniforms start in the VMContext buffer.
+pub const VMCTX_HEADER_SIZE: usize = 16;
+
 /// Round `size` up to a multiple of `alignment` (must be > 0).
 pub fn round_up(size: usize, alignment: usize) -> usize {
     debug_assert!(alignment > 0);
