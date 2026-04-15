@@ -4,14 +4,12 @@
 //! freeing registers for defs, and recording spill/reload edits.
 
 use crate::abi::FuncAbi;
-#[cfg(not(feature = "debug"))]
-use crate::fa_alloc::TracePush;
 use crate::fa_alloc::pool::RegPool;
 use crate::fa_alloc::spill::SpillAlloc;
-#[cfg(feature = "debug")]
-use crate::fa_alloc::trace::AllocTrace;
 use crate::fa_alloc::trace::TraceEntry;
-use crate::fa_alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint, TraceSink};
+use crate::fa_alloc::{
+    Alloc, AllocError, AllocOutput, Edit, EditPoint, TracePush, TraceSink, trace_sink_new,
+};
 use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::regset::RegSet;
 use crate::rv32::gpr::{self, PReg};
@@ -84,10 +82,7 @@ pub fn allocate_from_tree(
         spill: SpillAlloc::new(max_vreg_idx + 16),
         allocs: vec![Alloc::None; total_operands],
         edits: Vec::new(),
-        #[cfg(feature = "debug")]
-        trace: AllocTrace::new(),
-        #[cfg(not(feature = "debug"))]
-        trace: (),
+        trace: trace_sink_new(),
         loop_carried: RegSet::new(),
     };
     state.walk_region(root)?;
@@ -104,7 +99,7 @@ struct WalkState<'a> {
     spill: SpillAlloc,
     allocs: Vec<Alloc>,
     edits: Vec<(EditPoint, Edit)>,
-    trace: crate::fa_alloc::TraceSink,
+    trace: TraceSink,
     /// VRegs that are loop-carried: defs to registers get a store-after-def
     /// edit so the spill slot always has the latest value at sub-boundaries.
     loop_carried: RegSet,
@@ -285,12 +280,15 @@ impl<'a> WalkState<'a> {
                         to: Alloc::Reg(final_preg),
                     },
                 ));
-                self.trace.push(TraceEntry {
-                    vinst_idx: 0,
-                    vinst_mnemonic: String::from("entry_move"),
-                    decision: alloc::format!("x{} -> x{}", abi_reg, final_preg),
-                    register_state: String::new(),
-                });
+                TracePush::push(
+                    &mut self.trace,
+                    TraceEntry {
+                        vinst_idx: 0,
+                        vinst_mnemonic: String::from("entry_move"),
+                        decision: alloc::format!("x{} -> x{}", abi_reg, final_preg),
+                        register_state: String::new(),
+                    },
+                );
             } else if let Some(slot) = self.spill.has_slot(vreg) {
                 entry_edits.push((
                     EditPoint::Before(0),
@@ -299,12 +297,15 @@ impl<'a> WalkState<'a> {
                         to: Alloc::Stack(slot),
                     },
                 ));
-                self.trace.push(TraceEntry {
-                    vinst_idx: 0,
-                    vinst_mnemonic: String::from("entry_spill"),
-                    decision: alloc::format!("x{} -> slot{}", abi_reg, slot),
-                    register_state: String::new(),
-                });
+                TracePush::push(
+                    &mut self.trace,
+                    TraceEntry {
+                        vinst_idx: 0,
+                        vinst_mnemonic: String::from("entry_spill"),
+                        decision: alloc::format!("x{} -> slot{}", abi_reg, slot),
+                        register_state: String::new(),
+                    },
+                );
             }
         }
 
@@ -319,12 +320,15 @@ impl<'a> WalkState<'a> {
                             to: Alloc::Reg(final_preg),
                         },
                     ));
-                    self.trace.push(TraceEntry {
-                        vinst_idx: 0,
-                        vinst_mnemonic: String::from("entry_load_stack_arg"),
-                        decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
-                        register_state: String::new(),
-                    });
+                    TracePush::push(
+                        &mut self.trace,
+                        TraceEntry {
+                            vinst_idx: 0,
+                            vinst_mnemonic: String::from("entry_load_stack_arg"),
+                            decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
+                            register_state: String::new(),
+                        },
+                    );
                 } else if let Some(slot) = self.spill.has_slot(vreg) {
                     entry_edits.push((
                         EditPoint::Before(0),
@@ -333,32 +337,27 @@ impl<'a> WalkState<'a> {
                             to: Alloc::Stack(slot),
                         },
                     ));
-                    self.trace.push(TraceEntry {
-                        vinst_idx: 0,
-                        vinst_mnemonic: String::from("entry_load_stack_arg"),
-                        decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
-                        register_state: String::new(),
-                    });
+                    TracePush::push(
+                        &mut self.trace,
+                        TraceEntry {
+                            vinst_idx: 0,
+                            vinst_mnemonic: String::from("entry_load_stack_arg"),
+                            decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
+                            register_state: String::new(),
+                        },
+                    );
                 }
             }
         }
 
         entry_edits.extend(self.edits);
-        #[cfg(feature = "debug")]
-        return Ok(AllocOutput {
+        Ok(AllocOutput {
             allocs: self.allocs,
             inst_alloc_offsets: self.inst_alloc_offsets,
             edits: entry_edits,
             num_spill_slots: self.spill.total_slots(),
             trace: self.trace,
-        });
-        #[cfg(not(feature = "debug"))]
-        return Ok(AllocOutput {
-            allocs: self.allocs,
-            inst_alloc_offsets: self.inst_alloc_offsets,
-            edits: entry_edits,
-            num_spill_slots: self.spill.total_slots(),
-        });
+        })
     }
 }
 
@@ -442,20 +441,31 @@ fn process_generic(
                             to: Alloc::Reg(preg),
                         },
                     ));
-                    trace.push(TraceEntry {
-                        vinst_idx: inst_idx,
-                        vinst_mnemonic: String::from("coalesce_evict"),
-                        decision: alloc::format!("slot{} -> t{} (v{})", slot, preg, evicted_vreg.0),
-                        register_state: String::new(),
-                    });
+                    TracePush::push(
+                        trace,
+                        TraceEntry {
+                            vinst_idx: inst_idx,
+                            vinst_mnemonic: String::from("coalesce_evict"),
+                            decision: alloc::format!(
+                                "slot{} -> t{} (v{})",
+                                slot,
+                                preg,
+                                evicted_vreg.0
+                            ),
+                            register_state: String::new(),
+                        },
+                    );
                 }
                 allocs[use_idx] = Alloc::Reg(preg);
-                trace.push(TraceEntry {
-                    vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("coalesce"),
-                    decision: alloc::format!("v{} -> t{} (shared)", src.0, preg),
-                    register_state: String::new(),
-                });
+                TracePush::push(
+                    trace,
+                    TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("coalesce"),
+                        decision: alloc::format!("v{} -> t{} (shared)", src.0, preg),
+                        register_state: String::new(),
+                    },
+                );
             }
         } else {
             // Dst is spilled or dead: use normal allocation path for src
@@ -530,12 +540,15 @@ fn alloc_use(
                 to: Alloc::Reg(new_preg),
             },
         ));
-        trace.push(TraceEntry {
-            vinst_idx: inst_idx,
-            vinst_mnemonic: String::from("reload"),
-            decision: alloc::format!("slot{} -> t{}", slot, new_preg),
-            register_state: String::new(),
-        });
+        TracePush::push(
+            trace,
+            TraceEntry {
+                vinst_idx: inst_idx,
+                vinst_mnemonic: String::from("reload"),
+                decision: alloc::format!("slot{} -> t{}", slot, new_preg),
+                register_state: String::new(),
+            },
+        );
         handle_eviction(
             evicted,
             new_preg,
@@ -557,12 +570,15 @@ fn alloc_use(
             edits,
             trace,
         );
-        trace.push(TraceEntry {
-            vinst_idx: inst_idx,
-            vinst_mnemonic: String::from("alloc"),
-            decision: alloc::format!("v{} -> t{}", use_vreg.0, new_preg),
-            register_state: String::new(),
-        });
+        TracePush::push(
+            trace,
+            TraceEntry {
+                vinst_idx: inst_idx,
+                vinst_mnemonic: String::from("alloc"),
+                decision: alloc::format!("v{} -> t{}", use_vreg.0, new_preg),
+                register_state: String::new(),
+            },
+        );
         Alloc::Reg(new_preg)
     }
 }
@@ -589,12 +605,15 @@ fn handle_eviction(
                 to: Alloc::Reg(preg),
             },
         ));
-        trace.push(TraceEntry {
-            vinst_idx: inst_idx,
-            vinst_mnemonic: String::from("evict"),
-            decision: alloc::format!("slot{} -> t{}", slot, preg),
-            register_state: String::new(),
-        });
+        TracePush::push(
+            trace,
+            TraceEntry {
+                vinst_idx: inst_idx,
+                vinst_mnemonic: String::from("evict"),
+                decision: alloc::format!("slot{} -> t{}", slot, preg),
+                register_state: String::new(),
+            },
+        );
     }
 }
 
@@ -675,12 +694,15 @@ fn process_call(
                     to: Alloc::Reg(pool_reg),
                 },
             ));
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("call_ret"),
-                decision: alloc::format!("x{} -> x{} (v{})", target, pool_reg, ret_vreg.0),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_ret"),
+                    decision: alloc::format!("x{} -> x{} (v{})", target, pool_reg, ret_vreg.0),
+                    register_state: String::new(),
+                },
+            );
             pool.free(pool_reg);
         } else if let Some(slot) = spill.has_slot(ret_vreg) {
             // Vreg is spilled: move ret_reg → stack after call
@@ -691,12 +713,15 @@ fn process_call(
                     to: Alloc::Stack(slot),
                 },
             ));
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("call_ret"),
-                decision: alloc::format!("x{} -> slot{} (v{})", target, slot, ret_vreg.0),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_ret"),
+                    decision: alloc::format!("x{} -> slot{} (v{})", target, slot, ret_vreg.0),
+                    register_state: String::new(),
+                },
+            );
         }
         // else: dead def, no move needed
     }
@@ -726,12 +751,15 @@ fn process_call(
                     to: Alloc::Reg(preg),
                 },
             ));
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("clobber_save"),
-                decision: alloc::format!("x{} -> slot{} (v{})", preg, slot, vreg.0),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("clobber_save"),
+                    decision: alloc::format!("x{} -> slot{} (v{})", preg, slot, vreg.0),
+                    register_state: String::new(),
+                },
+            );
         }
     }
 
@@ -766,12 +794,15 @@ fn process_call(
                     },
                 ));
             }
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("call_arg"),
-                decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, pool_reg, target),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_arg"),
+                    decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, pool_reg, target),
+                    register_state: String::new(),
+                },
+            );
         } else if let Some(slot) = spill.has_slot(arg_vreg) {
             before_arg_moves.push((
                 EditPoint::Before(inst_idx_u16),
@@ -780,24 +811,30 @@ fn process_call(
                     to: Alloc::Reg(target),
                 },
             ));
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("call_arg"),
-                decision: alloc::format!("v{}: slot{} -> x{}", arg_vreg.0, slot, target),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_arg"),
+                    decision: alloc::format!("v{}: slot{} -> x{}", arg_vreg.0, slot, target),
+                    register_state: String::new(),
+                },
+            );
         } else {
             // Not yet allocated — allocate to a pool reg for the backward walk
             let (new_preg, evicted) = pool.alloc(arg_vreg);
             if let Some(ev) = evicted {
                 let slot = spill.get_or_assign(ev);
                 arg_evictions.push((new_preg, slot));
-                trace.push(TraceEntry {
-                    vinst_idx: inst_idx,
-                    vinst_mnemonic: String::from("evict"),
-                    decision: alloc::format!("x{} -> slot{} (v{})", new_preg, slot, ev.0),
-                    register_state: String::new(),
-                });
+                TracePush::push(
+                    trace,
+                    TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("evict"),
+                        decision: alloc::format!("x{} -> slot{} (v{})", new_preg, slot, ev.0),
+                        register_state: String::new(),
+                    },
+                );
             }
             if new_preg != target {
                 before_arg_moves.push((
@@ -808,12 +845,15 @@ fn process_call(
                     },
                 ));
             }
-            trace.push(TraceEntry {
-                vinst_idx: inst_idx,
-                vinst_mnemonic: String::from("call_arg"),
-                decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, new_preg, target),
-                register_state: String::new(),
-            });
+            TracePush::push(
+                trace,
+                TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_arg"),
+                    decision: alloc::format!("v{}: x{} -> x{}", arg_vreg.0, new_preg, target),
+                    register_state: String::new(),
+                },
+            );
         }
 
         allocs[alloc_idx] = Alloc::Reg(target);

@@ -3,7 +3,9 @@
 use crate::abi::FuncAbi;
 use crate::abi::classify::{ArgLoc, ReturnMethod};
 use crate::fa_alloc::trace::TraceEntry;
-use crate::fa_alloc::{Alloc, AllocOutput, Edit, EditPoint};
+use crate::fa_alloc::{
+    Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
+};
 use crate::rv32::gpr::reg_name;
 use crate::vinst::{ModuleSymbols, VInst, VReg};
 use alloc::format;
@@ -15,29 +17,6 @@ use lpir::{IrFunction, LpirModule, LpirOp, print_module};
 const IND_LP: &str = "    ";
 /// Indentation for VInst lines, read, and write annotations.
 const IND_VI: &str = "        ";
-
-#[cfg(feature = "debug")]
-fn is_entry_trace_mnemonic(m: &str) -> bool {
-    m == "entry" || m == "entry_move" || m == "entry_spill"
-}
-
-/// Non-entry trace rows grouped by VInst index, in forward program / operand order.
-#[cfg(feature = "debug")]
-fn build_trace_by_vinst(
-    trace: &crate::fa_alloc::trace::AllocTrace,
-) -> alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> {
-    let mut map: alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> =
-        alloc::collections::BTreeMap::new();
-    for entry in trace.entries.iter().rev() {
-        if !is_entry_trace_mnemonic(&entry.vinst_mnemonic) {
-            map.entry(entry.vinst_idx).or_default().push(entry);
-        }
-    }
-    for v in map.values_mut() {
-        v.reverse();
-    }
-    map
-}
 
 /// First line of [`print_module`] for a copy of `func` with empty body (header only).
 fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &FuncAbi) -> String {
@@ -162,11 +141,7 @@ pub fn render_interleaved(
 
     let mut rendered_vinsts = alloc::collections::BTreeSet::new();
 
-    #[cfg(feature = "debug")]
-    let trace_by_vinst = build_trace_by_vinst(&output.trace);
-    #[cfg(not(feature = "debug"))]
-    let trace_by_vinst: alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> =
-        alloc::collections::BTreeMap::new();
+    let trace_by_vinst = trace_by_vinst_or_empty(output);
 
     lines.push(format_func_header_line(func, module, func_abi));
     push_alloc_metadata_lines(&mut lines, func, output, func_abi);
@@ -333,11 +308,7 @@ pub fn render_alloc_output(
 ) -> String {
     let mut lines = Vec::new();
 
-    #[cfg(feature = "debug")]
-    let trace_by_vinst = build_trace_by_vinst(&output.trace);
-    #[cfg(not(feature = "debug"))]
-    let trace_by_vinst: alloc::collections::BTreeMap<usize, Vec<&TraceEntry>> =
-        alloc::collections::BTreeMap::new();
+    let trace_by_vinst = trace_by_vinst_or_empty(output);
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let inst_idx_u16 = inst_idx as u16;
@@ -622,15 +593,7 @@ fn push_alloc_metadata_lines(
         "{IND_LP}; ret: {}",
         format_return_method(func_abi.return_method())
     ));
-    #[cfg(feature = "debug")]
-    for entry in &output.trace.entries {
-        if is_entry_trace_mnemonic(&entry.vinst_mnemonic) {
-            lines.push(format!(
-                "{IND_LP}; {}: {}",
-                entry.vinst_mnemonic, entry.decision
-            ));
-        }
-    }
+    append_entry_trace_metadata_lines(lines, IND_LP, output);
 }
 
 #[cfg(test)]

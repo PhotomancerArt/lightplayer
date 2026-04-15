@@ -221,9 +221,18 @@ pub fn collect_cranelift_data(
         let (disasm, disasm_count) = match addr {
             Some(addr) => {
                 let mut end_addr = elf_info.code.len() as u32;
+                // Only consider symbols from the user object file (not builtins)
+                // when determining function end address.
+                // Also skip Cranelift internal jump labels (starting with ".L")
                 for (sym_name, sym_addr) in &elf_info.symbol_map {
                     if *sym_addr > addr && *sym_addr < end_addr && sym_name != &func.name {
-                        end_addr = *sym_addr;
+                        // Only use this symbol if it's from the user code section
+                        // and not an internal Cranelift label
+                        if *sym_addr >= elf_info.user_code_start
+                            && !sym_name.starts_with(".L")
+                        {
+                            end_addr = *sym_addr;
+                        }
                     }
                 }
 

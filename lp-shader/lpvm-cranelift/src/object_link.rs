@@ -32,6 +32,9 @@ pub fn link_object_with_builtins(object_elf: &[u8]) -> Result<ElfLoadInfo, Compi
         )))
     })?;
 
+    // Record where user code will start (end of builtins code)
+    load_info.user_code_start = load_info.code.len() as u32;
+
     lp_riscv_elf::load_object_file(
         object_elf,
         &mut load_info.code,

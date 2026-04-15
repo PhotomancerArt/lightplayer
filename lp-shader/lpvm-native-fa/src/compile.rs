@@ -1,6 +1,5 @@
 //! Compilation orchestration: LPIR → VInst → PInst → bytes.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -112,58 +111,15 @@ pub fn compile_function(
         let relocs = emitted.relocs;
         let debug_lines = emitted.debug_lines;
 
-        // Build structured debug info (gated by 'debug' feature)
-        #[cfg(feature = "debug")]
-        let sections = {
-            let mut sections = BTreeMap::new();
-
-            // Interleaved LPIR + VInst + allocations
-            let interleaved = crate::fa_alloc::render::render_interleaved(
-                func,
-                ir,
-                &lowered.vinsts,
-                &lowered.vreg_pool,
-                &emitted.alloc_output,
-                &func_abi,
-                &lowered.symbols,
-            );
-            sections.insert("interleaved".into(), interleaved);
-
-            // Disasm section with hex
-            let mut disasm = String::new();
-            let mut off = 0usize;
-            while off + 4 <= code.len() {
-                let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
-                disasm.push_str(&format!(
-                    "{:04x}\t{:08x}\t{}\n",
-                    off,
-                    w,
-                    lp_riscv_inst::format_instruction(w)
-                ));
-                off += 4;
-            }
-            sections.insert("disasm".into(), disasm);
-
-            // Optional: VInst listing
-            let mut vinst_text = String::new();
-            for inst in &lowered.vinsts {
-                vinst_text.push_str(&format!(
-                    "{} {}\n",
-                    inst.mnemonic(),
-                    inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
-                ));
-            }
-            sections.insert("vinst".into(), vinst_text);
-
-            sections
-        };
-
-        #[cfg(not(feature = "debug"))]
-        let sections = {
-            // Both lowered and emitted.alloc_output are dropped here at end of scope
-            // This reduces peak memory during multi-function compilation
-            BTreeMap::new()
-        };
+        let sections = crate::debug::sections::build_debug_sections(
+            func,
+            ir,
+            &lowered,
+            &code,
+            &emitted.alloc_output,
+            &func_abi,
+            &lowered.symbols,
+        );
 
         (code, relocs, debug_lines, sections)
     };

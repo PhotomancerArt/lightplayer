@@ -7,33 +7,12 @@ use crate::abi::FuncAbi;
 use crate::lower::LoweredFunction;
 use alloc::vec::Vec;
 
-/// Trace sink type: AllocTrace when debug feature is enabled, dummy ZST otherwise.
-#[cfg(feature = "debug")]
-pub type TraceSink = crate::fa_alloc::trace::AllocTrace;
+pub mod debug_facade;
 
-/// Trace sink type: dummy ZST when debug feature is disabled.
-#[cfg(not(feature = "debug"))]
-pub type TraceSink = ();
-
-/// Trait to provide a unified `push` interface for TraceSink.
-/// For AllocTrace, it records the entry. For the dummy ZST, it's a no-op.
-pub trait TracePush {
-    fn push(&mut self, _entry: crate::fa_alloc::trace::TraceEntry);
-}
-
-#[cfg(feature = "debug")]
-impl TracePush for TraceSink {
-    fn push(&mut self, entry: crate::fa_alloc::trace::TraceEntry) {
-        self.entries.push(entry);
-    }
-}
-
-#[cfg(not(feature = "debug"))]
-impl TracePush for TraceSink {
-    fn push(&mut self, _entry: crate::fa_alloc::trace::TraceEntry) {
-        // No-op in non-debug builds
-    }
-}
+pub use debug_facade::{
+    TraceEntry, TracePush, TraceSink, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
+    trace_sink_new,
+};
 
 pub mod liveness;
 pub mod pool;
@@ -150,9 +129,8 @@ pub struct AllocOutput {
     /// Number of spill slots needed.
     pub num_spill_slots: u32,
 
-    /// Debug trace of allocator decisions (only available with debug feature).
-    #[cfg(feature = "debug")]
-    pub trace: crate::fa_alloc::trace::AllocTrace,
+    /// Debug trace of allocator decisions (empty / ZST when `debug` feature is off).
+    pub trace: TraceSink,
 }
 
 impl AllocOutput {
