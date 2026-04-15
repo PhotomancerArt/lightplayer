@@ -138,12 +138,18 @@ impl<'a> WalkState<'a> {
             } => {
                 if *else_body != REGION_ID_NONE {
                     self.walk_region(*else_body)?;
-                    if let Some(anchor) = region_first_vinst(self.tree, *then_body) {
+                    // Anchor at else_body's own start (the jump target), not
+                    // then_body's. Placing these reloads inside the else path
+                    // prevents them from executing in the fallthrough path.
+                    if let Some(anchor) = region_first_vinst(self.tree, *else_body) {
                         self.boundary_reload_before(anchor);
                     }
                 }
                 self.walk_region(*then_body)?;
-                if let Some(anchor) = region_first_vinst(self.tree, *head) {
+                // Anchor at then_body's own start (the fallthrough), not
+                // head's. Placing reloads inside the fallthrough path prevents
+                // them from clobbering the BrIf condition register.
+                if let Some(anchor) = region_first_vinst(self.tree, *then_body) {
                     self.boundary_reload_before(anchor);
                 }
                 self.walk_region(*head)?;
