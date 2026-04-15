@@ -526,9 +526,9 @@ fn process_generic(
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut TraceSink,
 ) {
-    // Special case: Mov32 is a copy. Coalesce src and dst to the same register
+    // Special case: Mov is a copy. Coalesce src and dst to the same register
     // to eliminate the move at emission time (emitter skips addi rd, rs, 0 when rd==rs).
-    if let VInst::Mov32 { dst, src, .. } = inst {
+    if let VInst::Mov { dst, src, .. } = inst {
         let def_idx = offset;
         let use_idx = offset + 1;
 
@@ -606,7 +606,7 @@ fn process_generic(
             // dst may also have a spill slot (assigned by a later eviction in
             // the backward walk). Store the register to that slot so reloads
             // find the correct value — same logic as process_generic's
-            // def_spill_stores, but for the coalesced Mov32 path.
+            // def_spill_stores, but for the coalesced Mov path.
             if let Some(slot) = spill.has_slot(*dst) {
                 edits.push((
                     EditPoint::After(inst_idx_u16),
@@ -1209,7 +1209,7 @@ mod tests {
 
     #[test]
     fn walk_binary_add() {
-        let input = "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2";
+        let input = "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add i0, i1\nRet i2";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
         let output = walk_linear(&vinsts, &pool, &make_abi()).unwrap();
 
@@ -1226,8 +1226,8 @@ mod tests {
     /// i0 = IConst32 1   ; v0
     /// i1 = IConst32 2   ; v1
     /// i2 = IConst32 3   ; v2
-    /// i3 = Add32 i0, i1 ; v3 = v0+v1  (evicts v2)
-    /// i4 = Add32 i3, i2 ; v4 = v3+v2  (v2 must reload from spill)
+    /// i3 = Add i0, i1 ; v3 = v0+v1  (evicts v2)
+    /// i4 = Add i3, i2 ; v4 = v3+v2  (v2 must reload from spill)
     /// Ret i4
     /// ```
     ///
@@ -1241,8 +1241,8 @@ mod tests {
             i0 = IConst32 1\n\
             i1 = IConst32 2\n\
             i2 = IConst32 3\n\
-            i3 = Add32 i0, i1\n\
-            i4 = Add32 i3, i2\n\
+            i3 = Add i0, i1\n\
+            i4 = Add i3, i2\n\
             Ret i4";
         let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
         let output =

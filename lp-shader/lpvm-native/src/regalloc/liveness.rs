@@ -196,7 +196,7 @@ pub fn format_liveness(liveness: &Liveness) -> String {
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{SRC_OP_NONE, VInst, VReg};
+    use crate::vinst::{AluOp, SRC_OP_NONE, VInst, VReg};
 
     #[test]
     fn liveness_simple_linear() {
@@ -211,7 +211,8 @@ mod tests {
                 val: 2,
                 src_op: SRC_OP_NONE,
             },
-            VInst::Add32 {
+            VInst::AluRRR {
+                op: AluOp::Add,
                 dst: VReg(2),
                 src1: VReg(0),
                 src2: VReg(1),
@@ -224,7 +225,7 @@ mod tests {
         tree.root = root;
 
         let liveness = analyze_liveness(&tree, root, &vinsts, &[]);
-        // v0, v1 are defined then used in Add32; no external uses
+        // v0, v1 are defined then used in AluRRR/Add; no external uses
         // After backward walk: defs kill before uses add, so live_in empty
         assert!(liveness.live_in.is_empty());
     }
@@ -232,7 +233,8 @@ mod tests {
     #[test]
     fn liveness_external_use() {
         // v0 is used but never defined in this region
-        let vinsts = vec![VInst::Add32 {
+        let vinsts = vec![VInst::AluRRR {
+            op: AluOp::Add,
             dst: VReg(1),
             src1: VReg(0),
             src2: VReg(0),
@@ -300,7 +302,7 @@ mod tests {
                 val: 1,
                 src_op: SRC_OP_NONE,
             },
-            VInst::Neg32 {
+            VInst::Neg {
                 dst: VReg(1),
                 src: VReg(0),
                 src_op: SRC_OP_NONE,
@@ -315,7 +317,7 @@ mod tests {
 
         let liveness = analyze_liveness(&tree, root, &vinsts, &[]);
         // r1 live_in = {} (IConst32 defines v0, no uses)
-        // r2 live_in = {v0} (Neg32 uses v0)
+        // r2 live_in = {v0} (Neg uses v0)
         // Combined = {} ∪ {v0} = {v0}
         assert!(liveness.live_in.contains(VReg(0)));
     }

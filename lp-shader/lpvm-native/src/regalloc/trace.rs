@@ -70,7 +70,7 @@ mod tests {
 
         trace.push(TraceEntry {
             vinst_idx: 0,
-            vinst_mnemonic: String::from("Add32"),
+            vinst_mnemonic: String::from("Add"),
             decision: String::from("alloc v2"),
             register_state: String::from("v2→a0"),
         });
@@ -103,14 +103,14 @@ mod tests {
         let mut trace = AllocTrace::new();
         trace.push(TraceEntry {
             vinst_idx: 0,
-            vinst_mnemonic: String::from("Add32"),
+            vinst_mnemonic: String::from("Add"),
             decision: String::from("alloc"),
             register_state: String::from("v2→a0"),
         });
 
         let output = trace.format();
         assert!(output.contains("=== AllocTrace ==="));
-        assert!(output.contains("Add32"));
+        assert!(output.contains("Add"));
         assert!(output.contains("alloc"));
     }
 }

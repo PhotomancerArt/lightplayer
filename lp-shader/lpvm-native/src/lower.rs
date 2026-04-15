@@ -15,7 +15,7 @@ use crate::error::LowerError;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
 use crate::rv32::abi::SRET_SCALAR_THRESHOLD;
 use crate::vinst::{
-    IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice, pack_src_op,
+    AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice, pack_src_op,
 };
 
 #[inline]
@@ -71,165 +71,170 @@ pub fn lower_lpir_op(
 ) -> Result<VInst, LowerError> {
     let po = pack_src_op(src_op);
     match op {
-        LpirOp::Iadd { dst, lhs, rhs } => Ok(VInst::Add32 {
+        LpirOp::Iadd { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Add,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Isub { dst, lhs, rhs } => Ok(VInst::Sub32 {
+        LpirOp::Isub { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Sub,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Imul { dst, lhs, rhs } => Ok(VInst::Mul32 {
+        LpirOp::Imul { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Mul,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IdivS { dst, lhs, rhs } => Ok(VInst::DivS32 {
+        LpirOp::IdivS { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::DivS,
             dst: fa_vreg(*dst),
-            lhs: fa_vreg(*lhs),
-            rhs: fa_vreg(*rhs),
+            src1: fa_vreg(*lhs),
+            src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IdivU { dst, lhs, rhs } => Ok(VInst::DivU32 {
+        LpirOp::IdivU { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::DivU,
             dst: fa_vreg(*dst),
-            lhs: fa_vreg(*lhs),
-            rhs: fa_vreg(*rhs),
+            src1: fa_vreg(*lhs),
+            src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IremS { dst, lhs, rhs } => Ok(VInst::RemS32 {
+        LpirOp::IremS { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::RemS,
             dst: fa_vreg(*dst),
-            lhs: fa_vreg(*lhs),
-            rhs: fa_vreg(*rhs),
+            src1: fa_vreg(*lhs),
+            src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IremU { dst, lhs, rhs } => Ok(VInst::RemU32 {
+        LpirOp::IremU { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::RemU,
             dst: fa_vreg(*dst),
-            lhs: fa_vreg(*lhs),
-            rhs: fa_vreg(*rhs),
+            src1: fa_vreg(*lhs),
+            src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ineg { dst, src } => Ok(VInst::Neg32 {
+        LpirOp::Ineg { dst, src } => Ok(VInst::Neg {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             src_op: po,
         }),
-        LpirOp::Ieq { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::Ieq { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::Eq,
             src_op: po,
         }),
-        LpirOp::Ine { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::Ine { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::Ne,
             src_op: po,
         }),
-        LpirOp::IltS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IltS { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LtS,
             src_op: po,
         }),
-        LpirOp::IleS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IleS { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LeS,
             src_op: po,
         }),
-        LpirOp::IgtS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgtS { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::GtS,
             src_op: po,
         }),
-        LpirOp::IgeS { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgeS { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::GeS,
             src_op: po,
         }),
-        LpirOp::IltU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IltU { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LtU,
             src_op: po,
         }),
-        LpirOp::IleU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IleU { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LeU,
             src_op: po,
         }),
-        LpirOp::IgtU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgtU { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::GtU,
             src_op: po,
         }),
-        LpirOp::IgeU { dst, lhs, rhs } => Ok(VInst::Icmp32 {
+        LpirOp::IgeU { dst, lhs, rhs } => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::GeU,
             src_op: po,
         }),
-        LpirOp::IeqImm { dst, src, imm } => Ok(VInst::IeqImm32 {
+        LpirOp::IeqImm { dst, src, imm } => Ok(VInst::IcmpImm {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             imm: *imm,
+            cond: IcmpCond::Eq,
             src_op: po,
         }),
-        LpirOp::Iand { dst, lhs, rhs } => Ok(VInst::And32 {
+        LpirOp::Iand { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::And,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ior { dst, lhs, rhs } => Ok(VInst::Or32 {
+        LpirOp::Ior { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Or,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ixor { dst, lhs, rhs } => Ok(VInst::Xor32 {
+        LpirOp::Ixor { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Xor,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ibnot { dst, src } => Ok(VInst::Bnot32 {
+        LpirOp::Ibnot { dst, src } => Ok(VInst::Bnot {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             src_op: po,
         }),
-        LpirOp::Ishl { dst, lhs, rhs } => Ok(VInst::Shl32 {
+        LpirOp::Ishl { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Sll,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IshrS { dst, lhs, rhs } => Ok(VInst::ShrS32 {
+        LpirOp::IshrS { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::SraS,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IshrU { dst, lhs, rhs } => Ok(VInst::ShrU32 {
+        LpirOp::IshrU { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::SrlU,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
@@ -240,14 +245,14 @@ pub fn lower_lpir_op(
             cond,
             if_true,
             if_false,
-        } => Ok(VInst::Select32 {
+        } => Ok(VInst::Select {
             dst: fa_vreg(*dst),
             cond: fa_vreg(*cond),
             if_true: fa_vreg(*if_true),
             if_false: fa_vreg(*if_false),
             src_op: po,
         }),
-        LpirOp::Copy { dst, src } => Ok(VInst::Mov32 {
+        LpirOp::Copy { dst, src } => Ok(VInst::Mov {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             src_op: po,
@@ -352,7 +357,7 @@ pub fn lower_lpir_op(
             &[*dst],
             src_op,
         ),
-        LpirOp::Fneg { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Neg32 {
+        LpirOp::Fneg { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Neg {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             src_op: po,
@@ -374,42 +379,42 @@ pub fn lower_lpir_op(
             src_op,
         ),
 
-        LpirOp::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Feq { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::Eq,
             src_op: po,
         }),
-        LpirOp::Fne { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fne { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::Ne,
             src_op: po,
         }),
-        LpirOp::Flt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Flt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LtS,
             src_op: po,
         }),
-        LpirOp::Fle { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fle { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::LeS,
             src_op: po,
         }),
-        LpirOp::Fgt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fgt { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
             cond: IcmpCond::GtS,
             src_op: po,
         }),
-        LpirOp::Fge { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp32 {
+        LpirOp::Fge { dst, lhs, rhs } if float_mode == FloatMode::Q32 => Ok(VInst::Icmp {
             dst: fa_vreg(*dst),
             lhs: fa_vreg(*lhs),
             rhs: fa_vreg(*rhs),
@@ -507,7 +512,7 @@ pub fn lower_lpir_op(
             &[*dst],
             src_op,
         ),
-        LpirOp::FfromI32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov32 {
+        LpirOp::FfromI32Bits { dst, src } if float_mode == FloatMode::Q32 => Ok(VInst::Mov {
             dst: fa_vreg(*dst),
             src: fa_vreg(*src),
             src_op: po,
@@ -1255,7 +1260,7 @@ mod tests {
         let got = call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
-            VInst::Add32 {
+            VInst::AluRRR { op: AluOp::Add,
                 dst: FaVReg(2),
                 src1: FaVReg(0),
                 src2: FaVReg(1),
@@ -1392,7 +1397,7 @@ mod tests {
         let (ir, abi) = empty_ir_abi();
         assert!(matches!(
             call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
-            VInst::Neg32 {
+            VInst::Neg {
                 dst: FaVReg(1),
                 src: FaVReg(0),
                 src_op,
@@ -1521,7 +1526,7 @@ mod tests {
         let (ir, abi) = empty_ir_abi();
         assert!(matches!(
             call_lower_op(&op, FloatMode::Q32, Some(2), &f, &ir, &abi).expect("ok"),
-            VInst::Mov32 {
+            VInst::Mov {
                 dst: FaVReg(1),
                 src: FaVReg(0),
                 src_op,
@@ -1626,7 +1631,7 @@ mod tests {
         let got = call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
-            VInst::Neg32 {
+            VInst::Neg {
                 dst: FaVReg(1),
                 src: FaVReg(0),
                 src_op,
@@ -1645,10 +1650,11 @@ mod tests {
         let (ir, abi) = empty_ir_abi();
         assert!(matches!(
             call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
-            VInst::IeqImm32 {
+            VInst::IcmpImm {
                 dst: FaVReg(1),
                 src: FaVReg(0),
                 imm: 0,
+                cond: IcmpCond::Eq,
                 src_op,
             } if unpack_src_op(src_op) == Some(0)
         ));
@@ -1665,7 +1671,7 @@ mod tests {
         let (ir, abi) = empty_ir_abi();
         assert!(matches!(
             call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
-            VInst::And32 {
+            VInst::AluRRR { op: AluOp::And,
                 dst: FaVReg(2),
                 src1: FaVReg(0),
                 src2: FaVReg(1),
@@ -1684,7 +1690,7 @@ mod tests {
         let (ir, abi) = empty_ir_abi();
         assert!(matches!(
             call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok"),
-            VInst::Bnot32 {
+            VInst::Bnot {
                 dst: FaVReg(1),
                 src: FaVReg(0),
                 src_op,
@@ -1704,10 +1710,11 @@ mod tests {
         let got = call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert!(matches!(
             got,
-            VInst::DivS32 {
+            VInst::AluRRR {
+                op: AluOp::DivS,
                 dst: FaVReg(2),
-                lhs: FaVReg(0),
-                rhs: FaVReg(1),
+                src1: FaVReg(0),
+                src2: FaVReg(1),
                 src_op,
             } if unpack_src_op(src_op) == Some(0)
         ));
@@ -1723,8 +1730,8 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         match call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
-            VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::Eq),
-            other => panic!("expected Icmp32, got {other:?}"),
+            VInst::Icmp { cond, .. } => assert_eq!(cond, IcmpCond::Eq),
+            other => panic!("expected Icmp, got {other:?}"),
         }
     }
 
@@ -1738,8 +1745,8 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         match call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
-            VInst::Icmp32 { cond, .. } => assert_eq!(cond, IcmpCond::LtU),
-            other => panic!("expected Icmp32, got {other:?}"),
+            VInst::Icmp { cond, .. } => assert_eq!(cond, IcmpCond::LtU),
+            other => panic!("expected Icmp, got {other:?}"),
         }
     }
 
@@ -1754,7 +1761,7 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         match call_lower_op(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok") {
-            VInst::Select32 {
+            VInst::Select {
                 dst,
                 cond,
                 if_true,
@@ -1767,7 +1774,7 @@ mod tests {
                 assert_eq!(if_false, FaVReg(2));
                 assert_eq!(unpack_src_op(src_op), Some(0));
             }
-            other => panic!("expected Select32, got {other:?}"),
+            other => panic!("expected Select, got {other:?}"),
         }
     }
 
@@ -1803,14 +1810,14 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         match call_lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok") {
-            VInst::Icmp32 {
+            VInst::Icmp {
                 cond,
                 dst: FaVReg(2),
                 lhs: FaVReg(0),
                 rhs: FaVReg(1),
                 ..
             } => assert_eq!(cond, want),
-            other => panic!("expected Icmp32, got {other:?}"),
+            other => panic!("expected Icmp, got {other:?}"),
         }
     }
 

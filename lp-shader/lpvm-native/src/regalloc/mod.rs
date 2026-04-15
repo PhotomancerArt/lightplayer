@@ -296,7 +296,7 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
 mod tests {
     use super::*;
     use crate::region::{Region, RegionTree};
-    use crate::vinst::{ModuleSymbols, SRC_OP_NONE, VInst, VReg};
+    use crate::vinst::{AluOp, ModuleSymbols, SRC_OP_NONE, VInst, VReg};
     use alloc::string::String;
     use alloc::vec::Vec;
 
@@ -312,7 +312,8 @@ mod tests {
                 val: 2,
                 src_op: SRC_OP_NONE,
             },
-            VInst::Add32 {
+            VInst::AluRRR {
+                op: AluOp::Add,
                 dst: VReg(2),
                 src1: VReg(0),
                 src2: VReg(1),
@@ -446,11 +447,11 @@ mod tests {
     #[test]
     fn snapshot_binary_add() {
         #[cfg(feature = "debug")]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add32 i0, i1\n; write: i2 -> t4\n; trace: alloc: v0 -> t29\n; trace: alloc: v1 -> t30\n; ---------------------------\n; read: i2 <- t4\nRet i2\n; trace: alloc: v2 -> t29";
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add i0, i1\n; write: i2 -> t4\n; trace: alloc: v0 -> t29\n; trace: alloc: v1 -> t30\n; ---------------------------\n; read: i2 <- t4\nRet i2\n; trace: alloc: v2 -> t29";
         #[cfg(not(feature = "debug"))]
-        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add32 i0, i1\n; write: i2 -> t4\n; ---------------------------\n; read: i2 <- t4\nRet i2";
+        let expected = "i0 = IConst32 10\n; write: i0 -> t4\n; ---------------------------\ni1 = IConst32 20\n; write: i1 -> t5\n; ---------------------------\n; read: i0 <- t4\n; read: i1 <- t5\ni2 = Add i0, i1\n; write: i2 -> t4\n; ---------------------------\n; read: i2 <- t4\nRet i2";
         expect_alloc(
-            "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add32 i0, i1\nRet i2",
+            "i0 = IConst32 10\ni1 = IConst32 20\ni2 = Add i0, i1\nRet i2",
             expected,
         );
     }

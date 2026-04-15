@@ -396,70 +396,19 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
         VInst::IConst32 { dst, val, .. } => {
             format!("i{} = IConst32 {}", dst.0, val)
         }
-        VInst::Add32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Add32 i{}, i{}", dst.0, src1.0, src2.0)
+        VInst::AluRRR { op, dst, src1, src2, .. } => {
+            format!("i{} = {} i{}, i{}", dst.0, op.mnemonic(), src1.0, src2.0)
         }
-        VInst::Sub32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Sub32 i{}, i{}", dst.0, src1.0, src2.0)
+        VInst::AluRRI { op, dst, src, imm, .. } => {
+            format!("i{} = {} i{}, {}", dst.0, op.mnemonic(), src.0, imm)
         }
-        VInst::Mul32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Mul32 i{}, i{}", dst.0, src1.0, src2.0)
+        VInst::Neg { dst, src, .. } => {
+            format!("i{} = Neg i{}", dst.0, src.0)
         }
-        VInst::Neg32 { dst, src, .. } => {
-            format!("i{} = Neg32 i{}", dst.0, src.0)
+        VInst::Bnot { dst, src, .. } => {
+            format!("i{} = Bnot i{}", dst.0, src.0)
         }
-        VInst::And32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = And32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::Or32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Or32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::Xor32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Xor32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::Bnot32 { dst, src, .. } => {
-            format!("i{} = Bnot32 i{}", dst.0, src.0)
-        }
-        VInst::Shl32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = Shl32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::ShrS32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = ShrS32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::ShrU32 {
-            dst, src1, src2, ..
-        } => {
-            format!("i{} = ShrU32 i{}, i{}", dst.0, src1.0, src2.0)
-        }
-        VInst::DivS32 { dst, lhs, rhs, .. } => {
-            format!("i{} = DivS32 i{}, i{}", dst.0, lhs.0, rhs.0)
-        }
-        VInst::DivU32 { dst, lhs, rhs, .. } => {
-            format!("i{} = DivU32 i{}, i{}", dst.0, lhs.0, rhs.0)
-        }
-        VInst::RemS32 { dst, lhs, rhs, .. } => {
-            format!("i{} = RemS32 i{}, i{}", dst.0, lhs.0, rhs.0)
-        }
-        VInst::RemU32 { dst, lhs, rhs, .. } => {
-            format!("i{} = RemU32 i{}, i{}", dst.0, lhs.0, rhs.0)
-        }
-        VInst::Icmp32 {
+        VInst::Icmp {
             dst,
             lhs,
             rhs,
@@ -467,17 +416,23 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             ..
         } => {
             format!(
-                "i{} = Icmp32 i{}, {} i{}",
+                "i{} = Icmp i{}, {} i{}",
                 dst.0,
                 lhs.0,
                 icmp_cond_str(*cond),
                 rhs.0
             )
         }
-        VInst::IeqImm32 { dst, src, imm, .. } => {
-            format!("i{} = IeqImm32 i{}, {}", dst.0, src.0, imm)
+        VInst::IcmpImm { dst, src, imm, cond, .. } => {
+            format!(
+                "i{} = IcmpImm {}, i{}, {}",
+                dst.0,
+                icmp_cond_str(*cond),
+                src.0,
+                imm
+            )
         }
-        VInst::Select32 {
+        VInst::Select {
             dst,
             cond,
             if_true,
@@ -485,12 +440,12 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             ..
         } => {
             format!(
-                "i{} = Select32 i{}, i{}, i{}",
+                "i{} = Select i{}, i{}, i{}",
                 dst.0, cond.0, if_true.0, if_false.0
             )
         }
-        VInst::Mov32 { dst, src, .. } => {
-            format!("i{} = Mov32 i{}", dst.0, src.0)
+        VInst::Mov { dst, src, .. } => {
+            format!("i{} = Mov i{}", dst.0, src.0)
         }
         VInst::Load32 {
             dst, base, offset, ..

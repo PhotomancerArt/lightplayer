@@ -7,7 +7,7 @@ use crate::abi::FrameLayout;
 use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::rv32::encode::*;
 use crate::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
-use crate::vinst::{IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
+use crate::vinst::{AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
 
 /// Callee sret buffer pointer (saved from incoming a0).
 const S1_REG: PReg = 9;
@@ -467,27 +467,52 @@ impl<'a> EmitContext<'a> {
     ) -> Result<(), AllocError> {
         let src_op = vinst.src_op();
         match vinst {
-            VInst::Add32 { .. } => {
+            VInst::AluRRR { op, .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());
                 }
                 let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
                 let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
                 let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_add(rd, rs1, rs2), src_op);
+                let encoded = match op {
+                    AluOp::Add => encode_add(rd, rs1, rs2),
+                    AluOp::Sub => encode_sub(rd, rs1, rs2),
+                    AluOp::Mul => encode_mul(rd, rs1, rs2),
+                    AluOp::And => encode_and(rd, rs1, rs2),
+                    AluOp::Or => encode_or(rd, rs1, rs2),
+                    AluOp::Xor => encode_xor(rd, rs1, rs2),
+                    AluOp::Sll => encode_sll(rd, rs1, rs2),
+                    AluOp::SrlU => encode_srl(rd, rs1, rs2),
+                    AluOp::SraS => encode_sra(rd, rs1, rs2),
+                    AluOp::DivS => encode_div(rd, rs1, rs2),
+                    AluOp::DivU => encode_divu(rd, rs1, rs2),
+                    AluOp::RemS => encode_rem(rd, rs1, rs2),
+                    AluOp::RemU => encode_remu(rd, rs1, rs2),
+                };
+                self.push_u32(encoded, src_op);
                 self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
             }
-            VInst::Sub32 { .. } => {
+            VInst::AluRRI { op, imm, .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());
                 }
                 let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
                 let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_sub(rd, rs1, rs2), src_op);
+                let encoded = match op {
+                    AluImmOp::Addi => encode_addi(rd, rs1, *imm),
+                    AluImmOp::Andi => encode_andi(rd, rs1, *imm),
+                    AluImmOp::Ori => encode_ori(rd, rs1, *imm),
+                    AluImmOp::Xori => encode_xori(rd, rs1, *imm),
+                    AluImmOp::Slli => encode_slli(rd, rs1, *imm as u32),
+                    AluImmOp::SrliU => encode_srli(rd, rs1, *imm as u32),
+                    AluImmOp::SraiS => encode_srai(rd, rs1, *imm as u32),
+                    AluImmOp::Slti => encode_slti(rd, rs1, *imm),
+                    AluImmOp::SltiU => encode_sltiu(rd, rs1, *imm),
+                };
+                self.push_u32(encoded, src_op);
                 self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
             }
-            VInst::Neg32 { .. } => {
+            VInst::Neg { .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());
                 }
@@ -496,47 +521,7 @@ impl<'a> EmitContext<'a> {
                 self.push_u32(encode_sub(rd, 0, rs), src_op);
                 self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
             }
-            VInst::Mul32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_mul(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::And32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_and(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::Or32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_or(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::Xor32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_xor(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::Bnot32 { .. } => {
+            VInst::Bnot { .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());
                 }
@@ -545,83 +530,15 @@ impl<'a> EmitContext<'a> {
                 self.push_u32(encode_xori(rd, rs, -1), src_op);
                 self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
             }
-            VInst::Shl32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_sll(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::ShrS32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_sra(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::ShrU32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_srl(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::DivS32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_div(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::DivU32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_divu(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::RemS32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_rem(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::RemU32 { .. } => {
-                if Self::is_dead_def(output, inst_idx, 0) {
-                    return Ok(());
-                }
-                let rs1 = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rs2 = self.use_vreg(output, inst_idx, 2, Self::TEMP1, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                self.push_u32(encode_remu(rd, rs1, rs2), src_op);
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
-            }
-            VInst::Icmp32 { cond, .. } => {
+            VInst::Icmp { cond, .. } => {
                 self.emit_icmp(output, inst_idx, *cond, src_op)?;
             }
-            VInst::IeqImm32 { imm, .. } => {
+            VInst::IcmpImm { imm, cond: _, .. } => {
+                // For now, only Eq is supported via emit_ieq_imm
+                // TODO: extend emit_ieq_imm to handle other conds
                 self.emit_ieq_imm(output, inst_idx, *imm, src_op)?;
             }
-            VInst::Select32 { .. } => {
+            VInst::Select { .. } => {
                 self.emit_select32(output, inst_idx, src_op)?;
             }
             VInst::Br { target, .. } => {
@@ -671,7 +588,7 @@ impl<'a> EmitContext<'a> {
                     });
                 }
             }
-            VInst::Mov32 { .. } => {
+            VInst::Mov { .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
                     return Ok(());
                 }

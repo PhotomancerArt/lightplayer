@@ -1,7 +1,8 @@
 //! Virtual instructions: post-lowering, pre-regalloc.
 //!
-//! Compact layout: [`VReg`] is `u16`; [`VInst::Call`] / [`VInst::Ret`] use [`VRegSlice`] into
-//! [`crate::lower::LoweredFunction::vreg_pool`]; callee is [`SymbolId`] into [`ModuleSymbols`].
+//! VInsts model RISC-V instruction formats (R-type, I-type, etc.) rather than
+//! LPIR semantics. This keeps the operand shapes aligned with the target ISA and
+//! makes immediate folding, native floats, and inline Q32 natural extensions.
 
 use alloc::format;
 use alloc::string::String;
@@ -95,6 +96,132 @@ pub const fn unpack_src_op(src_op: u16) -> Option<u32> {
 /// Label id for branch targets.
 pub type LabelId = u32;
 
+// ─── ALU opcode enums ────────────────────────────────────────────────────────
+
+/// R-type ALU operations (register-register: `rd = rs1 OP rs2`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AluOp {
+    Add,
+    Sub,
+    Mul,
+    And,
+    Or,
+    Xor,
+    Sll,
+    SrlU,
+    SraS,
+    DivS,
+    DivU,
+    RemS,
+    RemU,
+}
+
+impl AluOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            AluOp::Add => "Add",
+            AluOp::Sub => "Sub",
+            AluOp::Mul => "Mul",
+            AluOp::And => "And",
+            AluOp::Or => "Or",
+            AluOp::Xor => "Xor",
+            AluOp::Sll => "Sll",
+            AluOp::SrlU => "SrlU",
+            AluOp::SraS => "SraS",
+            AluOp::DivS => "DivS",
+            AluOp::DivU => "DivU",
+            AluOp::RemS => "RemS",
+            AluOp::RemU => "RemU",
+        }
+    }
+
+    pub fn symbol(self) -> &'static str {
+        match self {
+            AluOp::Add => "+",
+            AluOp::Sub => "-",
+            AluOp::Mul => "*",
+            AluOp::And => "&",
+            AluOp::Or => "|",
+            AluOp::Xor => "^",
+            AluOp::Sll => "<<",
+            AluOp::SrlU => ">>u",
+            AluOp::SraS => ">>",
+            AluOp::DivS => "/",
+            AluOp::DivU => "/u",
+            AluOp::RemS => "%",
+            AluOp::RemU => "%u",
+        }
+    }
+
+    pub fn from_mnemonic(s: &str) -> Option<Self> {
+        match s {
+            "Add" => Some(AluOp::Add),
+            "Sub" => Some(AluOp::Sub),
+            "Mul" => Some(AluOp::Mul),
+            "And" => Some(AluOp::And),
+            "Or" => Some(AluOp::Or),
+            "Xor" => Some(AluOp::Xor),
+            "Sll" => Some(AluOp::Sll),
+            "SrlU" => Some(AluOp::SrlU),
+            "SraS" => Some(AluOp::SraS),
+            "DivS" => Some(AluOp::DivS),
+            "DivU" => Some(AluOp::DivU),
+            "RemS" => Some(AluOp::RemS),
+            "RemU" => Some(AluOp::RemU),
+            _ => None,
+        }
+    }
+}
+
+/// I-type ALU operations (register-immediate: `rd = rs1 OP imm12`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AluImmOp {
+    Addi,
+    Andi,
+    Ori,
+    Xori,
+    Slli,
+    SrliU,
+    SraiS,
+    Slti,
+    SltiU,
+}
+
+impl AluImmOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            AluImmOp::Addi => "Addi",
+            AluImmOp::Andi => "Andi",
+            AluImmOp::Ori => "Ori",
+            AluImmOp::Xori => "Xori",
+            AluImmOp::Slli => "Slli",
+            AluImmOp::SrliU => "SrliU",
+            AluImmOp::SraiS => "SraiS",
+            AluImmOp::Slti => "Slti",
+            AluImmOp::SltiU => "SltiU",
+        }
+    }
+
+    pub fn from_mnemonic(s: &str) -> Option<Self> {
+        match s {
+            "Addi" => Some(AluImmOp::Addi),
+            "Andi" => Some(AluImmOp::Andi),
+            "Ori" => Some(AluImmOp::Ori),
+            "Xori" => Some(AluImmOp::Xori),
+            "Slli" => Some(AluImmOp::Slli),
+            "SrliU" => Some(AluImmOp::SrliU),
+            "SraiS" => Some(AluImmOp::SraiS),
+            "Slti" => Some(AluImmOp::Slti),
+            "SltiU" => Some(AluImmOp::SltiU),
+            _ => None,
+        }
+    }
+}
+
+// ─── Comparison condition ────────────────────────────────────────────────────
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IcmpCond {
     Eq,
@@ -124,6 +251,8 @@ fn icmp_cond_op(cond: IcmpCond) -> &'static str {
     }
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 fn vregs_csv_pool(pool: &[VReg], slice: VRegSlice) -> String {
     slice
         .vregs(pool)
@@ -133,159 +262,114 @@ fn vregs_csv_pool(pool: &[VReg], slice: VRegSlice) -> String {
         .join(", ")
 }
 
+// ─── VInst ───────────────────────────────────────────────────────────────────
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VInst {
-    Add32 {
+    /// R-type: `dst = src1 OP src2` (add, sub, mul, and, or, xor, shifts, div, rem).
+    AluRRR {
+        op: AluOp,
         dst: VReg,
         src1: VReg,
         src2: VReg,
         src_op: u16,
     },
-    Sub32 {
+    /// I-type: `dst = src OP imm12` (addi, andi, ori, xori, slli, srli, srai, slti, sltiu).
+    AluRRI {
+        op: AluImmOp,
         dst: VReg,
-        src1: VReg,
-        src2: VReg,
+        src: VReg,
+        imm: i32,
         src_op: u16,
     },
-    Neg32 {
+    /// Unary negate: `dst = -src` (pseudo for `sub rd, x0, rs`).
+    Neg {
         dst: VReg,
         src: VReg,
         src_op: u16,
     },
-    Mul32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    And32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    Or32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    Xor32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    Bnot32 {
+    /// Bitwise NOT: `dst = ~src` (pseudo for `xori rd, rs, -1`).
+    Bnot {
         dst: VReg,
         src: VReg,
         src_op: u16,
     },
-    Shl32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    ShrS32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    ShrU32 {
-        dst: VReg,
-        src1: VReg,
-        src2: VReg,
-        src_op: u16,
-    },
-    DivS32 {
-        dst: VReg,
-        lhs: VReg,
-        rhs: VReg,
-        src_op: u16,
-    },
-    DivU32 {
-        dst: VReg,
-        lhs: VReg,
-        rhs: VReg,
-        src_op: u16,
-    },
-    RemS32 {
-        dst: VReg,
-        lhs: VReg,
-        rhs: VReg,
-        src_op: u16,
-    },
-    RemU32 {
-        dst: VReg,
-        lhs: VReg,
-        rhs: VReg,
-        src_op: u16,
-    },
-    Icmp32 {
+    /// Integer comparison (pseudo — multi-instruction expansion in emitter).
+    Icmp {
         dst: VReg,
         lhs: VReg,
         rhs: VReg,
         cond: IcmpCond,
         src_op: u16,
     },
-    IeqImm32 {
+    /// Integer comparison with immediate (pseudo).
+    IcmpImm {
         dst: VReg,
         src: VReg,
         imm: i32,
+        cond: IcmpCond,
         src_op: u16,
     },
-    Select32 {
+    /// Select: `dst = cond ? if_true : if_false`.
+    Select {
         dst: VReg,
         cond: VReg,
         if_true: VReg,
         if_false: VReg,
         src_op: u16,
     },
+    /// Unconditional branch.
     Br {
         target: LabelId,
         src_op: u16,
     },
+    /// Conditional branch.
     BrIf {
         cond: VReg,
         target: LabelId,
         invert: bool,
         src_op: u16,
     },
-    Mov32 {
+    /// Register copy (kept separate for copy-coalescing in regalloc).
+    Mov {
         dst: VReg,
         src: VReg,
         src_op: u16,
     },
+    /// Word load: `dst = [base + offset]`.
     Load32 {
         dst: VReg,
         base: VReg,
         offset: i32,
         src_op: u16,
     },
+    /// Word store: `[base + offset] = src`.
     Store32 {
         src: VReg,
         base: VReg,
         offset: i32,
         src_op: u16,
     },
+    /// Compute address of LPIR stack slot.
     SlotAddr {
         dst: VReg,
         slot: u32,
         src_op: u16,
     },
+    /// Word-aligned memcpy.
     MemcpyWords {
         dst_base: VReg,
         src_base: VReg,
         size: u32,
         src_op: u16,
     },
+    /// 32-bit integer constant load.
     IConst32 {
         dst: VReg,
         val: i32,
         src_op: u16,
     },
+    /// Function call.
     Call {
         target: SymbolId,
         args: VRegSlice,
@@ -293,10 +377,12 @@ pub enum VInst {
         callee_uses_sret: bool,
         src_op: u16,
     },
+    /// Return from function.
     Ret {
         vals: VRegSlice,
         src_op: u16,
     },
+    /// Label definition (branch target).
     Label(LabelId, u16),
 }
 
@@ -304,27 +390,16 @@ impl VInst {
     /// Index of the originating LPIR op in [`lpir::IrFunction::body`], when tracked.
     pub fn src_op(&self) -> Option<u32> {
         let raw = match self {
-            VInst::Add32 { src_op, .. }
-            | VInst::Sub32 { src_op, .. }
-            | VInst::Neg32 { src_op, .. }
-            | VInst::Mul32 { src_op, .. }
-            | VInst::And32 { src_op, .. }
-            | VInst::Or32 { src_op, .. }
-            | VInst::Xor32 { src_op, .. }
-            | VInst::Bnot32 { src_op, .. }
-            | VInst::Shl32 { src_op, .. }
-            | VInst::ShrS32 { src_op, .. }
-            | VInst::ShrU32 { src_op, .. }
-            | VInst::DivS32 { src_op, .. }
-            | VInst::DivU32 { src_op, .. }
-            | VInst::RemS32 { src_op, .. }
-            | VInst::RemU32 { src_op, .. }
-            | VInst::Icmp32 { src_op, .. }
-            | VInst::IeqImm32 { src_op, .. }
-            | VInst::Select32 { src_op, .. }
+            VInst::AluRRR { src_op, .. }
+            | VInst::AluRRI { src_op, .. }
+            | VInst::Neg { src_op, .. }
+            | VInst::Bnot { src_op, .. }
+            | VInst::Icmp { src_op, .. }
+            | VInst::IcmpImm { src_op, .. }
+            | VInst::Select { src_op, .. }
             | VInst::Br { src_op, .. }
             | VInst::BrIf { src_op, .. }
-            | VInst::Mov32 { src_op, .. }
+            | VInst::Mov { src_op, .. }
             | VInst::Load32 { src_op, .. }
             | VInst::Store32 { src_op, .. }
             | VInst::SlotAddr { src_op, .. }
@@ -339,25 +414,14 @@ impl VInst {
 
     pub fn for_each_def<F: FnMut(VReg)>(&self, pool: &[VReg], mut f: F) {
         match self {
-            VInst::Add32 { dst, .. }
-            | VInst::Sub32 { dst, .. }
-            | VInst::Neg32 { dst, .. }
-            | VInst::Mul32 { dst, .. }
-            | VInst::And32 { dst, .. }
-            | VInst::Or32 { dst, .. }
-            | VInst::Xor32 { dst, .. }
-            | VInst::Bnot32 { dst, .. }
-            | VInst::Shl32 { dst, .. }
-            | VInst::ShrS32 { dst, .. }
-            | VInst::ShrU32 { dst, .. }
-            | VInst::DivS32 { dst, .. }
-            | VInst::DivU32 { dst, .. }
-            | VInst::RemS32 { dst, .. }
-            | VInst::RemU32 { dst, .. }
-            | VInst::Icmp32 { dst, .. }
-            | VInst::IeqImm32 { dst, .. }
-            | VInst::Select32 { dst, .. }
-            | VInst::Mov32 { dst, .. }
+            VInst::AluRRR { dst, .. }
+            | VInst::AluRRI { dst, .. }
+            | VInst::Neg { dst, .. }
+            | VInst::Bnot { dst, .. }
+            | VInst::Icmp { dst, .. }
+            | VInst::IcmpImm { dst, .. }
+            | VInst::Select { dst, .. }
+            | VInst::Mov { dst, .. }
             | VInst::Load32 { dst, .. }
             | VInst::SlotAddr { dst, .. }
             | VInst::IConst32 { dst, .. } => f(*dst),
@@ -383,44 +447,16 @@ impl VInst {
 
     pub fn for_each_use<F: FnMut(VReg)>(&self, pool: &[VReg], mut f: F) {
         match self {
-            VInst::Add32 { src1, src2, .. }
-            | VInst::Sub32 { src1, src2, .. }
-            | VInst::Mul32 { src1, src2, .. }
-            | VInst::And32 { src1, src2, .. }
-            | VInst::Or32 { src1, src2, .. }
-            | VInst::Xor32 { src1, src2, .. }
-            | VInst::Shl32 { src1, src2, .. }
-            | VInst::ShrS32 { src1, src2, .. }
-            | VInst::ShrU32 { src1, src2, .. }
-            | VInst::DivS32 {
-                lhs: src1,
-                rhs: src2,
-                ..
-            }
-            | VInst::DivU32 {
-                lhs: src1,
-                rhs: src2,
-                ..
-            }
-            | VInst::RemS32 {
-                lhs: src1,
-                rhs: src2,
-                ..
-            }
-            | VInst::RemU32 {
-                lhs: src1,
-                rhs: src2,
-                ..
-            }
-            | VInst::Icmp32 {
-                lhs: src1,
-                rhs: src2,
-                ..
-            } => {
+            VInst::AluRRR { src1, src2, .. } => {
                 f(*src1);
                 f(*src2);
             }
-            VInst::Select32 {
+            VInst::AluRRI { src, .. } => f(*src),
+            VInst::Icmp { lhs, rhs, .. } => {
+                f(*lhs);
+                f(*rhs);
+            }
+            VInst::Select {
                 cond,
                 if_true,
                 if_false,
@@ -430,10 +466,10 @@ impl VInst {
                 f(*if_true);
                 f(*if_false);
             }
-            VInst::Neg32 { src, .. } | VInst::Bnot32 { src, .. } | VInst::IeqImm32 { src, .. } => {
-                f(*src);
-            }
-            VInst::Mov32 { src, .. } => f(*src),
+            VInst::Neg { src, .. }
+            | VInst::Bnot { src, .. }
+            | VInst::IcmpImm { src, .. } => f(*src),
+            VInst::Mov { src, .. } => f(*src),
             VInst::Load32 { base, .. } => f(*base),
             VInst::Store32 { src, base, .. } => {
                 f(*src);
@@ -467,27 +503,16 @@ impl VInst {
 
     pub fn mnemonic(&self) -> &'static str {
         match self {
-            VInst::Add32 { .. } => "Add32",
-            VInst::Sub32 { .. } => "Sub32",
-            VInst::Neg32 { .. } => "Neg32",
-            VInst::Mul32 { .. } => "Mul32",
-            VInst::And32 { .. } => "And32",
-            VInst::Or32 { .. } => "Or32",
-            VInst::Xor32 { .. } => "Xor32",
-            VInst::Bnot32 { .. } => "Bnot32",
-            VInst::Shl32 { .. } => "Shl32",
-            VInst::ShrS32 { .. } => "ShrS32",
-            VInst::ShrU32 { .. } => "ShrU32",
-            VInst::DivS32 { .. } => "DivS32",
-            VInst::DivU32 { .. } => "DivU32",
-            VInst::RemS32 { .. } => "RemS32",
-            VInst::RemU32 { .. } => "RemU32",
-            VInst::Icmp32 { .. } => "Icmp32",
-            VInst::IeqImm32 { .. } => "IeqImm32",
-            VInst::Select32 { .. } => "Select32",
+            VInst::AluRRR { op, .. } => op.mnemonic(),
+            VInst::AluRRI { op, .. } => op.mnemonic(),
+            VInst::Neg { .. } => "Neg",
+            VInst::Bnot { .. } => "Bnot",
+            VInst::Icmp { .. } => "Icmp",
+            VInst::IcmpImm { .. } => "IcmpImm",
+            VInst::Select { .. } => "Select",
             VInst::Br { .. } => "Br",
             VInst::BrIf { .. } => "BrIf",
-            VInst::Mov32 { .. } => "Mov32",
+            VInst::Mov { .. } => "Mov",
             VInst::Load32 { .. } => "Load32",
             VInst::Store32 { .. } => "Store32",
             VInst::SlotAddr { .. } => "SlotAddr",
@@ -501,58 +526,39 @@ impl VInst {
 
     pub fn format_alloc_trace_detail(&self, pool: &[VReg], symbols: &ModuleSymbols) -> String {
         match self {
-            VInst::Add32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} + v{}", dst.0, src1.0, src2.0),
-            VInst::Sub32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} - v{}", dst.0, src1.0, src2.0),
-            VInst::Neg32 { dst, src, .. } => format!("v{} = -v{}", dst.0, src.0),
-            VInst::Mul32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} * v{}", dst.0, src1.0, src2.0),
-            VInst::And32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} & v{}", dst.0, src1.0, src2.0),
-            VInst::Or32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} | v{}", dst.0, src1.0, src2.0),
-            VInst::Xor32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} ^ v{}", dst.0, src1.0, src2.0),
-            VInst::Bnot32 { dst, src, .. } => format!("v{} = ~v{}", dst.0, src.0),
-            VInst::Shl32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} << v{}", dst.0, src1.0, src2.0),
-            VInst::ShrS32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} >> v{}", dst.0, src1.0, src2.0),
-            VInst::ShrU32 {
-                dst, src1, src2, ..
-            } => format!("v{} = v{} >>u v{}", dst.0, src1.0, src2.0),
-            VInst::DivS32 { dst, lhs, rhs, .. } => {
-                format!("v{} = v{} / v{}", dst.0, lhs.0, rhs.0)
-            }
-            VInst::DivU32 { dst, lhs, rhs, .. } => {
-                format!("v{} = v{} /u v{}", dst.0, lhs.0, rhs.0)
-            }
-            VInst::RemS32 { dst, lhs, rhs, .. } => {
-                format!("v{} = v{} % v{}", dst.0, lhs.0, rhs.0)
-            }
-            VInst::RemU32 { dst, lhs, rhs, .. } => {
-                format!("v{} = v{} %u v{}", dst.0, lhs.0, rhs.0)
-            }
-            VInst::Icmp32 {
+            VInst::AluRRR {
+                op,
+                dst,
+                src1,
+                src2,
+                ..
+            } => format!("v{} = v{} {} v{}", dst.0, src1.0, op.symbol(), src2.0),
+            VInst::AluRRI {
+                op, dst, src, imm, ..
+            } => format!("v{} = v{} {} {}", dst.0, src.0, op.mnemonic(), imm),
+            VInst::Neg { dst, src, .. } => format!("v{} = -v{}", dst.0, src.0),
+            VInst::Bnot { dst, src, .. } => format!("v{} = ~v{}", dst.0, src.0),
+            VInst::Icmp {
                 dst,
                 lhs,
                 rhs,
                 cond,
                 ..
             } => format!("v{} = v{} {} v{}", dst.0, lhs.0, icmp_cond_op(*cond), rhs.0),
-            VInst::IeqImm32 { dst, src, imm, .. } => {
-                format!("v{} = (v{} == {})", dst.0, src.0, imm)
-            }
-            VInst::Select32 {
+            VInst::IcmpImm {
+                dst,
+                src,
+                imm,
+                cond,
+                ..
+            } => format!(
+                "v{} = (v{} {} {})",
+                dst.0,
+                src.0,
+                icmp_cond_op(*cond),
+                imm
+            ),
+            VInst::Select {
                 dst,
                 cond,
                 if_true,
@@ -575,7 +581,7 @@ impl VInst {
                     format!("v{}, {}", cond.0, target)
                 }
             }
-            VInst::Mov32 { dst, src, .. } => format!("v{} = v{}", dst.0, src.0),
+            VInst::Mov { dst, src, .. } => format!("v{} = v{}", dst.0, src.0),
             VInst::Load32 {
                 dst, base, offset, ..
             } => format!("v{} = [v{}{:+}]", dst.0, base.0, offset),

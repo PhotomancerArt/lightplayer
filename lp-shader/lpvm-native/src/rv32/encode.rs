@@ -161,6 +161,12 @@ pub fn encode_sltu(rd: u32, rs1: u32, rs2: u32) -> u32 {
     encode_r_type(OP_OP, rd, F3_SLTU, rs1, rs2, F7_ADD)
 }
 
+/// slti rd, rs1, imm (signed less-than immediate)
+#[inline]
+pub fn encode_slti(rd: u32, rs1: u32, imm: i32) -> u32 {
+    encode_i_type(OP_OP_IMM, rd, F3_SLT, rs1, imm)
+}
+
 /// sltiu rd, rs1, imm
 #[inline]
 pub fn encode_sltiu(rd: u32, rs1: u32, imm: i32) -> u32 {
@@ -173,10 +179,41 @@ pub fn encode_xori(rd: u32, rs1: u32, imm: i32) -> u32 {
     encode_i_type(OP_OP_IMM, rd, F3_XOR_DIV, rs1, imm)
 }
 
+/// ori rd, rs1, imm
+#[inline]
+pub fn encode_ori(rd: u32, rs1: u32, imm: i32) -> u32 {
+    encode_i_type(OP_OP_IMM, rd, F3_OR_REM, rs1, imm)
+}
+
+/// andi rd, rs1, imm
+#[inline]
+pub fn encode_andi(rd: u32, rs1: u32, imm: i32) -> u32 {
+    encode_i_type(OP_OP_IMM, rd, F3_AND_REMU, rs1, imm)
+}
+
 /// addi rd, rs1, imm
 #[inline]
 pub fn encode_addi(rd: u32, rs1: u32, imm: i32) -> u32 {
     encode_i_type(OP_OP_IMM, rd, F3_ADD, rs1, imm)
+}
+
+/// slli rd, rs1, shamt (shift left logical immediate, shamt in 0..31)
+#[inline]
+pub fn encode_slli(rd: u32, rs1: u32, shamt: u32) -> u32 {
+    encode_i_type(OP_OP_IMM, rd, F3_SLL, rs1, (shamt & 0x1f) as i32)
+}
+
+/// srli rd, rs1, shamt (shift right logical immediate, shamt in 0..31)
+#[inline]
+pub fn encode_srli(rd: u32, rs1: u32, shamt: u32) -> u32 {
+    encode_i_type(OP_OP_IMM, rd, F3_SRL_DIVU, rs1, (shamt & 0x1f) as i32)
+}
+
+/// srai rd, rs1, shamt (shift right arithmetic immediate, shamt in 0..31)
+#[inline]
+pub fn encode_srai(rd: u32, rs1: u32, shamt: u32) -> u32 {
+    let imm = (0b0100000 << 5) | (shamt & 0x1f);
+    encode_i_type(OP_OP_IMM, rd, F3_SRL_DIVU, rs1, imm as i32)
 }
 
 /// lui rd, imm — `imm` is the high 20 bits (will be placed in imm[31:12]).

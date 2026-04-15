@@ -239,14 +239,14 @@ mod tests {
     // (verify_alloc) are checked automatically by run_vinst; these tests
     // add spill-count bounds that must hold at every pool size.
 
-    /// Binary add: 2 live values at the Add32.
+    /// Binary add: 2 live values at the Add.
     /// pool >= 2 → no spill. pool == 1 → must spill.
     #[rstest]
     fn binary_add(#[values(1, 2, 3, 4, 8, 16)] pool: usize) {
         let r = alloc_test().pool_size(pool).run_vinst(
             "i0 = IConst32 10
                  i1 = IConst32 20
-                 i2 = Add32 i0, i1
+                 i2 = Add i0, i1
                  Ret i2",
         );
         if pool >= 2 {
@@ -265,9 +265,9 @@ mod tests {
                  i1 = IConst32 2
                  i2 = IConst32 3
                  i3 = IConst32 4
-                 i4 = Add32 i0, i1
-                 i5 = Add32 i2, i3
-                 i6 = Add32 i4, i5
+                 i4 = Add i0, i1
+                 i5 = Add i2, i3
+                 i6 = Add i4, i5
                  Ret i6",
         );
         if pool >= 4 {
@@ -284,8 +284,8 @@ mod tests {
         let r = alloc_test().pool_size(pool).run_vinst(
             "i0 = IConst32 10
                  i1 = IConst32 20
-                 i2 = Add32 i0, i1
-                 i3 = Sub32 i0, i2
+                 i2 = Add i0, i1
+                 i3 = Sub i0, i2
                  Ret i3",
         );
         if pool >= 2 {
@@ -306,11 +306,11 @@ mod tests {
                  i3 = IConst32 4
                  i4 = IConst32 5
                  i5 = IConst32 6
-                 i6 = Add32 i0, i1
-                 i7 = Add32 i2, i3
-                 i8 = Add32 i4, i5
-                 i9 = Add32 i6, i7
-                 i10 = Add32 i8, i9
+                 i6 = Add i0, i1
+                 i7 = Add i2, i3
+                 i8 = Add i4, i5
+                 i9 = Add i6, i7
+                 i10 = Add i8, i9
                  Ret i10",
         );
         // Tree reduces in pairs, so max live is 6 at the start
@@ -360,7 +360,7 @@ mod tests {
         let r = alloc_test().pool_size(pool).run_vinst(
             "i0 = IConst32 42
              i1 = Call callee (i0)
-             i2 = Add32 i0, i1
+             i2 = Add i0, i1
              Ret i2",
         );
         if pool <= 6 {

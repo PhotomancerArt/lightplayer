@@ -1,10 +1,12 @@
 //! VInst text format and parser.
 //!
 //! Format:
-//!   i2 = Add32 i0, i1          // binary op
+//!   i2 = Add i0, i1            // binary ALU op (AluRRR)
+//!   i2 = Addi i0, 42           // immediate ALU op (AluRRI)
 //!   i0 = IConst32 42           // immediate
-//!   i3 = Icmp32 Eq, i0, i1     // comparison (cond first)
-//!   i3 = Select32 i0, i1, i2   // cond, if_true, if_false
+//!   i3 = Icmp Eq, i0, i1      // comparison (cond first)
+//!   i3 = IcmpImm Eq, i0, 42   // immediate comparison
+//!   i3 = Select i0, i1, i2    // cond, if_true, if_false
 //!   i1 = Load32 i0, 4          // base, offset (optional)
 //!   Store32 i1, i0, 4          // src, base, offset
 //!   (i2, i3) = Call mod (i0, i1)  // multi-ret and args
@@ -13,7 +15,7 @@
 //!   BrIf i0, @1                // branch if i0 != 0
 //!   @0:                        // label definition
 
-use crate::vinst::{IcmpCond, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice};
+use crate::vinst::{AluImmOp, AluOp, IcmpCond, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -75,7 +77,7 @@ fn parse_line(
         return Ok(VInst::Label(id, SRC_OP_NONE));
     }
 
-    // Assignment: i2 = Add32 i0, i1
+    // Assignment: i2 = Add i0, i1
     if let Some((lhs, rhs)) = line.split_once(" = ") {
         let dsts = parse_rets(lhs.trim())?;
         return parse_def_instruction(dsts, rhs.trim(), line_num, symbols, pool);
@@ -191,8 +193,8 @@ fn parse_def_instruction(
             })
         }
 
-        "Add32" | "Sub32" | "Mul32" | "And32" | "Or32" | "Xor32" | "Shl32" | "ShrS32"
-        | "ShrU32" => {
+        _ if AluOp::from_mnemonic(op).is_some() => {
+            let alu_op = AluOp::from_mnemonic(op).unwrap();
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
@@ -207,110 +209,45 @@ fn parse_def_instruction(
                 });
             }
             let (src1, src2) = (args[0], args[1]);
-            match op {
-                "Add32" => Ok(VInst::Add32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "Sub32" => Ok(VInst::Sub32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "Mul32" => Ok(VInst::Mul32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "And32" => Ok(VInst::And32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "Or32" => Ok(VInst::Or32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "Xor32" => Ok(VInst::Xor32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "Shl32" => Ok(VInst::Shl32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "ShrS32" => Ok(VInst::ShrS32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                "ShrU32" => Ok(VInst::ShrU32 {
-                    dst: dsts[0],
-                    src1,
-                    src2,
-                    src_op: SRC_OP_NONE,
-                }),
-                _ => unreachable!(),
-            }
+            Ok(VInst::AluRRR {
+                op: alu_op,
+                dst: dsts[0],
+                src1,
+                src2,
+                src_op: SRC_OP_NONE,
+            })
         }
 
-        "DivS32" | "DivU32" | "RemS32" | "RemU32" => {
+        _ if AluImmOp::from_mnemonic(op).is_some() => {
+            let alu_imm_op = AluImmOp::from_mnemonic(op).unwrap();
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
                     message: format!("{op} needs 1 dst"),
                 });
             }
-            let args = parse_args(&args_str)?;
-            if args.len() != 2 {
+            let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
+            if parts.len() != 2 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{op} needs 2 args"),
+                    message: format!("{op} needs 'ireg, imm'"),
                 });
             }
-            let (lhs, rhs) = (args[0], args[1]);
-            match op {
-                "DivS32" => Ok(VInst::DivS32 {
-                    dst: dsts[0],
-                    lhs,
-                    rhs,
-                    src_op: SRC_OP_NONE,
-                }),
-                "DivU32" => Ok(VInst::DivU32 {
-                    dst: dsts[0],
-                    lhs,
-                    rhs,
-                    src_op: SRC_OP_NONE,
-                }),
-                "RemS32" => Ok(VInst::RemS32 {
-                    dst: dsts[0],
-                    lhs,
-                    rhs,
-                    src_op: SRC_OP_NONE,
-                }),
-                "RemU32" => Ok(VInst::RemU32 {
-                    dst: dsts[0],
-                    lhs,
-                    rhs,
-                    src_op: SRC_OP_NONE,
-                }),
-                _ => unreachable!(),
-            }
+            let src = parse_ireg(parts[0])?;
+            let imm: i32 = parts[1].parse().map_err(|_| ParseError {
+                line: line_num,
+                message: format!("Invalid imm: {}", parts[1]),
+            })?;
+            Ok(VInst::AluRRI {
+                op: alu_imm_op,
+                dst: dsts[0],
+                src,
+                imm,
+                src_op: SRC_OP_NONE,
+            })
         }
 
-        "Neg32" | "Bnot32" | "Mov32" => {
+        "Neg" | "Bnot" | "Mov" => {
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
@@ -319,17 +256,17 @@ fn parse_def_instruction(
             }
             let src = parse_ireg(args_str.trim())?;
             match op {
-                "Neg32" => Ok(VInst::Neg32 {
+                "Neg" => Ok(VInst::Neg {
                     dst: dsts[0],
                     src,
                     src_op: SRC_OP_NONE,
                 }),
-                "Bnot32" => Ok(VInst::Bnot32 {
+                "Bnot" => Ok(VInst::Bnot {
                     dst: dsts[0],
                     src,
                     src_op: SRC_OP_NONE,
                 }),
-                "Mov32" => Ok(VInst::Mov32 {
+                "Mov" => Ok(VInst::Mov {
                     dst: dsts[0],
                     src,
                     src_op: SRC_OP_NONE,
@@ -338,11 +275,11 @@ fn parse_def_instruction(
             }
         }
 
-        "Icmp32" => {
+        "Icmp" => {
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "Icmp32 needs 1 dst".into(),
+                    message: "Icmp needs 1 dst".into(),
                 });
             }
             // Format: Eq, i0, i1
@@ -350,13 +287,13 @@ fn parse_def_instruction(
             if parts.len() != 3 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "Icmp32 needs 'Eq, i0, i1'".into(),
+                    message: "Icmp needs 'Eq, i0, i1'".into(),
                 });
             }
             let cond = parse_icmp_cond(parts[0])?;
             let lhs = parse_ireg(parts[1])?;
             let rhs = parse_ireg(parts[2])?;
-            Ok(VInst::Icmp32 {
+            Ok(VInst::Icmp {
                 dst: dsts[0],
                 lhs,
                 rhs,
@@ -365,48 +302,51 @@ fn parse_def_instruction(
             })
         }
 
-        "IeqImm32" => {
+        "IcmpImm" => {
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "IeqImm32 needs 1 dst".into(),
+                    message: "IcmpImm needs 1 dst".into(),
                 });
             }
+            // Format: Eq, i0, 42
             let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
-            if parts.len() != 2 {
+            if parts.len() != 3 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "IeqImm32 needs 'i0, 42'".into(),
+                    message: "IcmpImm needs 'Eq, i0, 42'".into(),
                 });
             }
-            let src = parse_ireg(parts[0])?;
-            let imm: i32 = parts[1].parse().map_err(|_| ParseError {
+            let cond = parse_icmp_cond(parts[0])?;
+            let src = parse_ireg(parts[1])?;
+            let imm: i32 = parts[2].parse().map_err(|_| ParseError {
                 line: line_num,
-                message: format!("Invalid imm: {}", parts[1]),
+                message: format!("Invalid imm: {}", parts[2]),
             })?;
-            Ok(VInst::IeqImm32 {
+            Ok(VInst::IcmpImm {
                 dst: dsts[0],
                 src,
                 imm,
+                cond,
                 src_op: SRC_OP_NONE,
             })
         }
 
-        "Select32" => {
+        "Select" => {
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "Select32 needs 1 dst".into(),
+                    message: "Select needs 1 dst".into(),
                 });
             }
             let args = parse_args(&args_str)?;
             if args.len() != 3 {
                 return Err(ParseError {
                     line: line_num,
-                    message: "Select32 needs 3 args".into(),
+                    message: "Select needs 3 args".into(),
                 });
             }
-            Ok(VInst::Select32 {
+            Ok(VInst::Select {
                 dst: dsts[0],
                 cond: args[0],
                 if_true: args[1],
@@ -653,76 +593,24 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
             format!("{} = IConst32 {}", ireg(dst), val)
         }
 
-        VInst::Add32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Add32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
+        VInst::AluRRR { op, dst, src1, src2, .. } => {
+            format!("{} = {} {}, {}", ireg(dst), op.mnemonic(), ireg(src1), ireg(src2))
         }
-        VInst::Sub32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Sub32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::Mul32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Mul32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::And32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = And32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::Or32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Or32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::Xor32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Xor32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::Shl32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = Shl32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::ShrS32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = ShrS32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
-        }
-        VInst::ShrU32 {
-            dst, src1, src2, ..
-        } => {
-            format!("{} = ShrU32 {}, {}", ireg(dst), ireg(src1), ireg(src2))
+        VInst::AluRRI { op, dst, src, imm, .. } => {
+            format!("{} = {} {}, {}", ireg(dst), op.mnemonic(), ireg(src), imm)
         }
 
-        VInst::DivS32 { dst, lhs, rhs, .. } => {
-            format!("{} = DivS32 {}, {}", ireg(dst), ireg(lhs), ireg(rhs))
+        VInst::Neg { dst, src, .. } => {
+            format!("{} = Neg {}", ireg(dst), ireg(src))
         }
-        VInst::DivU32 { dst, lhs, rhs, .. } => {
-            format!("{} = DivU32 {}, {}", ireg(dst), ireg(lhs), ireg(rhs))
+        VInst::Bnot { dst, src, .. } => {
+            format!("{} = Bnot {}", ireg(dst), ireg(src))
         }
-        VInst::RemS32 { dst, lhs, rhs, .. } => {
-            format!("{} = RemS32 {}, {}", ireg(dst), ireg(lhs), ireg(rhs))
-        }
-        VInst::RemU32 { dst, lhs, rhs, .. } => {
-            format!("{} = RemU32 {}, {}", ireg(dst), ireg(lhs), ireg(rhs))
+        VInst::Mov { dst, src, .. } => {
+            format!("{} = Mov {}", ireg(dst), ireg(src))
         }
 
-        VInst::Neg32 { dst, src, .. } => {
-            format!("{} = Neg32 {}", ireg(dst), ireg(src))
-        }
-        VInst::Bnot32 { dst, src, .. } => {
-            format!("{} = Bnot32 {}", ireg(dst), ireg(src))
-        }
-        VInst::Mov32 { dst, src, .. } => {
-            format!("{} = Mov32 {}", ireg(dst), ireg(src))
-        }
-
-        VInst::Icmp32 {
+        VInst::Icmp {
             dst,
             lhs,
             rhs,
@@ -730,17 +618,17 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
             ..
         } => {
             format!(
-                "{} = Icmp32 {}, {}, {}",
+                "{} = Icmp {}, {}, {}",
                 ireg(dst),
                 icmp_cond(cond),
                 ireg(lhs),
                 ireg(rhs)
             )
         }
-        VInst::IeqImm32 { dst, src, imm, .. } => {
-            format!("{} = IeqImm32 {}, {}", ireg(dst), ireg(src), imm)
+        VInst::IcmpImm { dst, src, imm, cond, .. } => {
+            format!("{} = IcmpImm {}, {}, {}", ireg(dst), icmp_cond(cond), ireg(src), imm)
         }
-        VInst::Select32 {
+        VInst::Select {
             dst,
             cond,
             if_true,
@@ -748,7 +636,7 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
             ..
         } => {
             format!(
-                "{} = Select32 {}, {}, {}",
+                "{} = Select {}, {}, {}",
                 ireg(dst),
                 ireg(cond),
                 ireg(if_true),
@@ -870,21 +758,21 @@ mod tests {
 
     #[test]
     fn test_parse_add() {
-        let input = "i2 = Add32 i0, i1";
+        let input = "i2 = Add i0, i1";
         let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(
-            matches!(&vinsts[0], VInst::Add32 { dst, src1, src2, .. } if dst.0 == 2 && src1.0 == 0 && src2.0 == 1)
+            matches!(&vinsts[0], VInst::AluRRR { op: AluOp::Add, dst, src1, src2, .. } if dst.0 == 2 && src1.0 == 0 && src2.0 == 1)
         );
     }
 
     #[test]
     fn test_parse_icmp() {
-        let input = "i3 = Icmp32 Eq, i0, i1";
+        let input = "i3 = Icmp Eq, i0, i1";
         let (vinsts, _, _) = parse(input).unwrap();
         assert_eq!(vinsts.len(), 1);
         assert!(
-            matches!(&vinsts[0], VInst::Icmp32 { dst, cond, .. } if dst.0 == 3 && *cond == IcmpCond::Eq)
+            matches!(&vinsts[0], VInst::Icmp { dst, cond, .. } if dst.0 == 3 && *cond == IcmpCond::Eq)
         );
     }
 
@@ -954,19 +842,20 @@ mod tests {
 
     #[test]
     fn test_format_add() {
-        let inst = VInst::Add32 {
+        let inst = VInst::AluRRR {
+            op: AluOp::Add,
             dst: VReg(2),
             src1: VReg(0),
             src2: VReg(1),
             src_op: SRC_OP_NONE,
         };
         let s = format_vinst(&inst, &[], &ModuleSymbols::default());
-        assert_eq!(s, "i2 = Add32 i0, i1");
+        assert_eq!(s, "i2 = Add i0, i1");
     }
 
     #[test]
     fn test_format_icmp() {
-        let inst = VInst::Icmp32 {
+        let inst = VInst::Icmp {
             dst: VReg(3),
             lhs: VReg(0),
             rhs: VReg(1),
@@ -974,7 +863,7 @@ mod tests {
             src_op: SRC_OP_NONE,
         };
         let s = format_vinst(&inst, &[], &ModuleSymbols::default());
-        assert_eq!(s, "i3 = Icmp32 Eq, i0, i1");
+        assert_eq!(s, "i3 = Icmp Eq, i0, i1");
     }
 
     #[test]
@@ -982,7 +871,7 @@ mod tests {
         let input = r#"
 i0 = IConst32 1
 i1 = IConst32 2
-i2 = Add32 i0, i1
+i2 = Add i0, i1
 Ret i2
 "#;
         let (vinsts, syms, pool) = parse(input).unwrap();
