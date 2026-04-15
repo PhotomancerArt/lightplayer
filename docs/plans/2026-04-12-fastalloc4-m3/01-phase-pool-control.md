@@ -199,7 +199,7 @@ fn pool_size_full_default_no_spill() {
 ## Validation
 
 ```bash
-cargo test -p lpvm-native-fa fa_alloc::test::builder::
+cargo test -p lpvm-native fa_alloc::test::builder::
 ```
 
 ## Notes

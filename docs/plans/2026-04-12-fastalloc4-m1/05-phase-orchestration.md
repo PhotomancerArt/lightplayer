@@ -150,14 +150,14 @@ After the deletions and additions, fix any remaining compilation errors:
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1
+cargo check -p lpvm-native 2>&1
 ```
 
 Expected: Clean check, no errors. Warnings about dead code (the stub
 allocator) are acceptable.
 
 ```bash
-cargo check -p lpvm-native-fa --lib 2>&1 | grep -E "(error|warning)" | head -20
+cargo check -p lpvm-native --lib 2>&1 | grep -E "(error|warning)" | head -20
 ```
 
 Should show no errors. Any warnings should be reviewed.

@@ -1,10 +1,10 @@
-# lpvm-native-fa
+# lpvm-native
 
 A lightweight LPIR-to-RISC-V backend for LightPlayer, designed for embedded JIT compilation on resource-constrained targets like the ESP32-C6.
 
 ## Overview
 
-`lpvm-native-fa` (FastAlloc) compiles LightPlayer IR (LPIR) directly to RISC-V machine code without the heavy infrastructure of traditional compiler backends. It achieves **performance parity with Cranelift** while using significantly less memory and producing smaller binaries.
+`lpvm-native` (FastAlloc) compiles LightPlayer IR (LPIR) directly to RISC-V machine code without the heavy infrastructure of traditional compiler backends. It achieves **performance parity with Cranelift** while using significantly less memory and producing smaller binaries.
 
 ## Motivation
 
@@ -16,9 +16,9 @@ The original LightPlayer implementation used Cranelift for code generation. Whil
 
 ## Performance Results
 
-Comparing `lpvm-native-fa` against the Cranelift/wasmtime backend on ESP32-C6 @ 40MHz:
+Comparing `lpvm-native` against the Cranelift/wasmtime backend on ESP32-C6 @ 40MHz:
 
-| Metric           | lpvm-native-fa       | Cranelift/wasmtime  | Advantage              |
+| Metric           | lpvm-native       | Cranelift/wasmtime  | Advantage              |
 | ---------------- | -------------------- | ------------------- | ---------------------- |
 | **Binary Size**  | ~1.64 MB (52% flash) | 2.38 MB (76% flash) | **31% smaller**        |
 | **Compile Time** | ~565ms               | 1000ms              | **43% faster**         |
@@ -105,7 +105,7 @@ The intermediate representation between LPIR and machine code:
 ### Compiling a Module
 
 ```rust
-use lpvm_native_fa::{compile_module, NativeCompileOptions};
+use lpvm_native::{compile_module, NativeCompileOptions};
 use lpir::{LpirModule, FloatMode};
 use lps_shared::LpsModuleSig;
 
@@ -126,7 +126,7 @@ for func in &compiled.functions {
 ### JIT Execution (on RISC-V target)
 
 ```rust
-use lpvm_native_fa::{link_jit, NativeJitEngine, NativeJitModule};
+use lpvm_native::{link_jit, NativeJitEngine, NativeJitModule};
 
 // Link compiled code into executable memory
 let linked = link_jit(compiled_module, &builtins)?;
@@ -145,7 +145,7 @@ instance.call_direct(&call_handle, &args, &mut ret_buf)?;
 Enable the `emu` feature for host-side testing with the RISC-V emulator:
 
 ```bash
-cargo test -p lpvm-native-fa --features emu
+cargo test -p lpvm-native --features emu
 ```
 
 ## Features
@@ -171,7 +171,7 @@ cargo check -p fw-esp32 \
 cargo test -p fw-tests --test scene_render_emu
 
 # Allocator filetests
-cargo test -p lpvm-native-fa --test filetests
+cargo test -p lpvm-native --test filetests
 ```
 
 ## Design Trade-offs

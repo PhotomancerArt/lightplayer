@@ -9,7 +9,7 @@ All existing filetests pass under `rv32fa`.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── region.rs                  # UPDATE: add label fields to IfThenElse/Loop
 ├── lower.rs                   # UPDATE: store labels in regions, body regions = pure computation
 ├── fa_alloc/

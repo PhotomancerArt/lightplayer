@@ -4,7 +4,7 @@
 
 This is a refactoring milestone focused on reducing memory pressure before building the M4 allocator infrastructure. The goal is to shrink the VInst enum from ~88 bytes to ~20 bytes per instruction, eliminate heap allocations in Call/Ret, and build a memory-efficient region tree during lowering.
 
-**DECISION:** Work is happening in `lpvm-native-fa` crate — a clean fork of `lpvm-native`. The old allocators and types remain untouched in the original crate. This eliminates the need to maintain backward compatibility with legacy code.
+**DECISION:** Work is happening in `lpvm-native` crate — a clean fork of `lpvm-native`. The old allocators and types remain untouched in the original crate. This eliminates the need to maintain backward compatibility with legacy code.
 
 ## Current State
 
@@ -36,7 +36,7 @@ Both methods currently return `impl Iterator` backed by a freshly allocated `Vec
 
 **Decision:** u16 (65,536) is safe. Even 10K vregs would be ~40KB just for type metadata. In practice shaders use dozens to low hundreds of vregs.
 
-**STATUS:** ✅ Confirmed. `VReg(pub u16)` for lpvm-native-fa.
+**STATUS:** ✅ Confirmed. `VReg(pub u16)` for lpvm-native.
 
 ### Q2: Should we intern symbol names per-function or module-level?
 
@@ -90,7 +90,7 @@ Both methods currently return `impl Iterator` backed by a freshly allocated `Vec
 
 ## Notes
 
-- Work is in `lp-shader/lpvm-native-fa/` — clean fork, no legacy compatibility needed
+- Work is in `lp-shader/lpvm-native/` — clean fork, no legacy compatibility needed
 - The old `lpvm-native` crate remains untouched with working greedy/linear allocators
 - This refactoring blocks M4 (allocator shell). M4 should assume the new types exist.
 - The region tree in M4 will use `RegionId(u16)` into `Vec<Region>` arena.
@@ -106,4 +106,4 @@ Both methods currently return `impl Iterator` backed by a freshly allocated `Vec
 6. `defs()`/`uses()` replaced with `for_each_def()`/`for_each_use()` (no allocation)
 7. `LoweredFunction` and `LoweredModule` carry vreg_pool and module_symbols
 8. Region tree arena structure defined (actual building happens in M4)
-9. All code in `lpvm-native-fa` compiles and tests pass
+9. All code in `lpvm-native` compiles and tests pass

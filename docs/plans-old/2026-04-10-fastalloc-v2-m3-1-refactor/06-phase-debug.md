@@ -210,7 +210,7 @@ This file formats physical instructions (PInst). The changes are minimal since P
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- debug::vinst
+cargo test -p lpvm-native --lib -- debug::vinst
 ```
 
 Tests should pass.

@@ -2,7 +2,7 @@
 
 ## Scope of Work
 
-Restructure `lpvm-native-fa` into a clean Cranelift-inspired architecture:
+Restructure `lpvm-native` into a clean Cranelift-inspired architecture:
 
 1. **Flatten `isa/rv32/`** — one ISA, hierarchy adds nothing
 2. **Add `compile.rs`** — module-level orchestrator, `CompileSession`, per-function compile
@@ -17,7 +17,7 @@ Restructure `lpvm-native-fa` into a clean Cranelift-inspired architecture:
 
 ### Crate structure (47 files)
 ```
-lpvm-native-fa/src/
+lpvm-native/src/
 ├── abi/                    # ABI types (classify, frame, func_abi, regset)
 ├── config.rs               # Constants (MAX_VREGS)
 ├── debug/                  # VInst debug formatters
@@ -124,7 +124,7 @@ pub fn compile_function(
 ### Q1: Should the old allocators (greedy, linear_scan) survive the restructure?
 
 **Answer:** No. Already deleted. The old allocators live in `lpvm-native`.
-This crate (`lpvm-native-fa`) is a clean slate — only the fastalloc in
+This crate (`lpvm-native`) is a clean slate — only the fastalloc in
 `isa/rv32/alloc.rs` remains. `regalloc/` directory is gone.
 
 ### Q2: Should we merge `abi/` directory and `isa/rv32/abi.rs`?

@@ -19,10 +19,10 @@ Remove dead stub code, fix warnings, ensure formatting is clean.
 
 ```bash
 # All fa_alloc tests pass
-cargo test -p lpvm-native-fa --lib -- fa_alloc
+cargo test -p lpvm-native --lib -- fa_alloc
 
 # No warnings
-cargo check -p lpvm-native-fa 2>&1 | grep warning
+cargo check -p lpvm-native 2>&1 | grep warning
 
 # Format
 cargo +nightly fmt -- --check

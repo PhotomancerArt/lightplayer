@@ -153,8 +153,8 @@ produce correct output. Check against existing filetests.
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 # Run GLSL filetests with if-else
 cargo test -p lps-filetests -- rv32fa --nocapture 2>&1 | head -50
 ```

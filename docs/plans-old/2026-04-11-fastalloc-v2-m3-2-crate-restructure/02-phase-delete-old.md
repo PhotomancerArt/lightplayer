@@ -88,7 +88,7 @@ pipeline used (verify first — likely none are exclusive).
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
+cargo check -p lpvm-native
 ```
 
 Should compile with stubs. All surviving code is clean, no dead references.

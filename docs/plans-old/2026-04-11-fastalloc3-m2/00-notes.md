@@ -23,7 +23,7 @@ Remaining code from pre-M1 era:
 4. Update CLI pipeline to use `fa_alloc`
 5. Add `Backend::Rv32fa` to `lps-filetests` target system
 6. Wire `rv32fa` through `CompiledShader`, `FiletestInstance`, and `compile_glsl`
-7. Add `lpvm-native-fa` dependency to `lps-filetests/Cargo.toml`
+7. Add `lpvm-native` dependency to `lps-filetests/Cargo.toml`
 8. Validate straight-line filetests pass under `rv32fa`
 9. Annotate control-flow/call filetests as `unimplemented: rv32fa.q32`
 
@@ -35,17 +35,17 @@ Remaining code from pre-M1 era:
 
 ### Q1: Should `rv32fa` reuse `NativeEmuEngine/Module/Instance` or get its own?
 
-The `rt_emu` module in `lpvm-native-fa` already has `NativeEmuEngine`, etc.,
+The `rt_emu` module in `lpvm-native` already has `NativeEmuEngine`, etc.,
 which internally calls `compile_module` → `compile_function` → `rv32::alloc`.
 After we replace `rv32::alloc` with `fa_alloc` in `compile_function`, the
 existing `NativeEmuEngine` automatically uses the new allocator. So **rv32fa
 uses the same `NativeEmuEngine` types**—they just now call `fa_alloc` internally.
 
-This means `rv32lp` (from `lpvm-native`) and `rv32fa` (from `lpvm-native-fa`)
+This means `rv32lp` (from `lpvm-native`) and `rv32fa` (from `lpvm-native`)
 are distinct backends using distinct crates, but the same type-level pattern.
 
 **Answer**: `rv32fa` adds a parallel `CompiledShader::NativeFa` / `FiletestInstance::NativeFa`
-variant, importing from `lpvm_native_fa`. This mirrors how `rv32lp` uses `lpvm_native`.
+variant, importing from `lpvm_native`. This mirrors how `rv32lp` uses `lpvm_native`.
 
 ### Q2: Should `rv32fa` be in `DEFAULT_TARGETS`?
 

@@ -98,9 +98,9 @@ runtime.
 | `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
-## Native RV32 backend (`lpvm-native-fa`)
+## Native RV32 backend (`lpvm-native`)
 
-**`lpvm-native-fa`** lowers LPIR to custom RV32 machine code outside Cranelift
+**`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
 (fastalloc / straight-line PInst pipeline, `rt_jit` / `rt_emu`). It is used by
 **`native-jit`** on `fw-esp32`/`fw-emu`, **`shader-rv32`** (annotated asm and
 `--pipeline fast`), **`shader-rv32fa`**, and the **`rv32fa.q32`** filetest target.

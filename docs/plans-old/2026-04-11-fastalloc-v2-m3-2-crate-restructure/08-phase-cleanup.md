@@ -18,7 +18,7 @@ pass, ensure no dead code remains. Commit.
 ### 1. Grep for TODOs
 
 ```bash
-rg 'TODO' lp-shader/lpvm-native-fa/src/ --type rust
+rg 'TODO' lp-shader/lpvm-native/src/ --type rust
 ```
 
 Resolve each TODO:
@@ -29,7 +29,7 @@ Resolve each TODO:
 ### 2. Grep for dead code
 
 ```bash
-rg 'allow\(dead_code\)' lp-shader/lpvm-native-fa/src/ --type rust
+rg 'allow\(dead_code\)' lp-shader/lpvm-native/src/ --type rust
 ```
 
 Remove any dead code or `#[allow(dead_code)]` that was added during the
@@ -38,8 +38,8 @@ restructure.
 ### 3. Check for stale `isa` references
 
 ```bash
-rg 'crate::isa' lp-shader/lpvm-native-fa/src/ --type rust
-rg 'isa::rv32' lp-shader/lpvm-native-fa/src/ --type rust
+rg 'crate::isa' lp-shader/lpvm-native/src/ --type rust
+rg 'isa::rv32' lp-shader/lpvm-native/src/ --type rust
 ```
 
 Should return zero results.
@@ -47,8 +47,8 @@ Should return zero results.
 ### 4. Check for stale `regalloc` references
 
 ```bash
-rg 'regalloc' lp-shader/lpvm-native-fa/src/ --type rust
-rg 'GreedyAlloc\|LinearScan\|RegAlloc\b' lp-shader/lpvm-native-fa/src/ --type rust
+rg 'regalloc' lp-shader/lpvm-native/src/ --type rust
+rg 'GreedyAlloc\|LinearScan\|RegAlloc\b' lp-shader/lpvm-native/src/ --type rust
 ```
 
 Should return zero results.
@@ -56,8 +56,8 @@ Should return zero results.
 ### 5. Fix all warnings
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | grep warning
-cargo check -p lpvm-native-fa --features emu 2>&1 | grep warning
+cargo check -p lpvm-native 2>&1 | grep warning
+cargo check -p lpvm-native --features emu 2>&1 | grep warning
 ```
 
 Fix unused imports, dead code warnings, etc.
@@ -65,14 +65,14 @@ Fix unused imports, dead code warnings, etc.
 ### 6. Format
 
 ```bash
-cargo +nightly fmt -p lpvm-native-fa
+cargo +nightly fmt -p lpvm-native
 ```
 
 ### 7. Run all tests
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo test -p lpvm-native-fa --features emu
+cargo test -p lpvm-native
+cargo test -p lpvm-native --features emu
 ```
 
 ### 8. Check downstream
@@ -104,7 +104,7 @@ mv docs/plans/2026-04-11-fastalloc-v2-m3-2-crate-restructure \
 ## Commit
 
 ```
-refactor(lpvm-native-fa): restructure crate into compile/emit/link pipeline
+refactor(lpvm-native): restructure crate into compile/emit/link pipeline
 
 - Flatten isa/rv32/ to rv32/ (one ISA, no trait indirection)
 - Add compile.rs: CompileSession, compile_function, compile_module

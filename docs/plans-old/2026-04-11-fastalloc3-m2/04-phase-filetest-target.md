@@ -9,7 +9,7 @@ allocator and compare results with cranelift.
 
 ### `lps-filetests/Cargo.toml`
 ```toml
-lpvm-native-fa = { path = "../lpvm-native-fa", features = ["emu"] }
+lpvm-native = { path = "../lpvm-native", features = ["emu"] }
 ```
 
 ### `lps-filetests/src/targets/mod.rs`
@@ -53,7 +53,7 @@ Update error string in `parse_target_filters` to mention `rv32fa`.
 
 Add imports:
 ```rust
-use lpvm_native_fa::{
+use lpvm_native::{
     NativeCompileOptions as FaCompileOptions,
     NativeEmuEngine as FaEmuEngine,
     NativeEmuInstance as FaEmuInstance,

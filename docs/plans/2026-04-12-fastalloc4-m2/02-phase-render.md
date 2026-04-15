@@ -104,6 +104,6 @@ Location format:
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa fa_alloc::render::tests
+cargo check -p lpvm-native
+cargo test -p lpvm-native fa_alloc::render::tests
 ```

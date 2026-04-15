@@ -2,11 +2,11 @@
 
 ## Scope
 
-Refactor `lpvm-native-fa` to populate `ModuleDebugInfo` instead of the raw `debug_asm: BTreeMap<String, String>`. Use the interleaved format as the primary output.
+Refactor `lpvm-native` to populate `ModuleDebugInfo` instead of the raw `debug_asm: BTreeMap<String, String>`. Use the interleaved format as the primary output.
 
 ## Implementation Details
 
-### 1. Update `lpvm-native-fa/src/rt_emu/module.rs`
+### 1. Update `lpvm-native/src/rt_emu/module.rs`
 
 Change the field type:
 ```rust
@@ -30,7 +30,7 @@ impl LpvmModule for NativeEmuModule {
 }
 ```
 
-### 2. Update `lpvm-native-fa/src/rt_emu/engine.rs`
+### 2. Update `lpvm-native/src/rt_emu/engine.rs`
 
 In the compile method, populate `ModuleDebugInfo`:
 ```rust
@@ -79,7 +79,7 @@ for func in &ir.functions {
 }
 ```
 
-### 3. Update `lpvm-native-fa/src/compile.rs`
+### 3. Update `lpvm-native/src/compile.rs`
 
 The `CompiledFunction` struct should also carry `FunctionDebugInfo`:
 ```rust
@@ -131,7 +131,7 @@ pub fn render_to_sections(
 
 ### 5. Handle rt_jit module
 
-Update `lpvm-native-fa/src/rt_jit/module.rs` similarly:
+Update `lpvm-native/src/rt_jit/module.rs` similarly:
 ```rust
 pub struct NativeJitModule {
     pub inner: Arc<NativeJitModuleInner>,
@@ -156,7 +156,7 @@ impl LpvmModule for NativeJitModule {
 
 Run existing FA tests to ensure debug info is still populated:
 ```bash
-cargo test -p lpvm-native-fa --lib
+cargo test -p lpvm-native --lib
 ```
 
 Verify the `debug_info` method returns valid data:
@@ -177,6 +177,6 @@ fn fa_module_has_debug_info() {
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 ```

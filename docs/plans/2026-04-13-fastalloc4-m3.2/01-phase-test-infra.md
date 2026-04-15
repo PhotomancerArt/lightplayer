@@ -78,10 +78,10 @@ return method (needed later for callee-side sret testing).
 
 ```bash
 # Existing tests still pass
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 
 # Builder can construct a call (add a smoke test)
-cargo test -p lpvm-native-fa builder::call
+cargo test -p lpvm-native builder::call
 ```
 
 ## Success Criteria

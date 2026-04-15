@@ -10,7 +10,7 @@ Update `shader_rv32fa/pipeline.rs` to use `fa_alloc` instead of `rv32::alloc`.
 
 Before:
 ```rust
-use lpvm_native_fa::rv32::alloc;
+use lpvm_native::rv32::alloc;
 // ...
 let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
     .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;
@@ -18,7 +18,7 @@ let phys = alloc::allocate(&lowered.vinsts, &func_abi, func, &lowered.vreg_pool)
 
 After:
 ```rust
-use lpvm_native_fa::fa_alloc;
+use lpvm_native::fa_alloc;
 // ...
 let alloc_result = fa_alloc::allocate(&lowered, &func_abi)
     .map_err(|e| anyhow::anyhow!("fastalloc: {e}"))?;

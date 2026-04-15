@@ -239,6 +239,6 @@ spill-at-boundary, over-approximation is safe (just more spills).
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 ```

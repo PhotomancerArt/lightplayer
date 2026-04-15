@@ -12,7 +12,7 @@ Unify debug output across the compiler to use a single, consistent format based 
 
 ## Current State
 
-### FA Backend (`lpvm-native-fa`)
+### FA Backend (`lpvm-native`)
 
 **Two different debug output formats:**
 

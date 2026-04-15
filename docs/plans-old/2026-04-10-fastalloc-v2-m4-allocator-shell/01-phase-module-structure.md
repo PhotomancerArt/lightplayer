@@ -11,7 +11,7 @@ Two tasks combined since they're tightly coupled:
 ### 1. Create `src/alloc/` module structure
 
 ```bash
-mkdir -p lp-shader/lpvm-native-fa/src/alloc
+mkdir -p lp-shader/lpvm-native/src/alloc
 ```
 
 #### `alloc/mod.rs`
@@ -198,8 +198,8 @@ with `ctx.region_tree.root` set to the root region id.
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa --lib
-cargo test -p lpvm-native-fa --lib
+cargo check -p lpvm-native --lib
+cargo test -p lpvm-native --lib
 ```
 
 Should compile and all existing tests pass. Region tree is now populated for all lowered functions.

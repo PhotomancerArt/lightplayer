@@ -11,14 +11,14 @@ Final cleanup, summary, and commit.
 - [ ] Grep for `unimplemented!()`, `panic!`, `todo!` - ensure they're appropriate
 - [ ] Check for dead code warnings
 - [ ] Run `cargo +nightly fmt --all`
-- [ ] Run `cargo clippy -p lpvm-native-fa` (if available)
+- [ ] Run `cargo clippy -p lpvm-native` (if available)
 
 ## Validation
 
 ```bash
 # Final validation
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 cargo test -p lps-filetests -- --ignored 2>&1 | grep -E "(passed|failed)"
 
 # ESP32 check

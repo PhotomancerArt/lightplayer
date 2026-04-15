@@ -109,13 +109,13 @@ In `fa_alloc/test/builder.rs`:
 
 ```bash
 # Allocator unit tests
-cargo test -p lpvm-native-fa fa_alloc
+cargo test -p lpvm-native fa_alloc
 
 # LPIR filetests
-cargo test -p lpvm-native-fa --test filetests
+cargo test -p lpvm-native --test filetests
 
 # Verify all existing tests still pass
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 ```
 
 ## Success Criteria

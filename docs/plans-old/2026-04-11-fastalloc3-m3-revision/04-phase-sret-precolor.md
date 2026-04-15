@@ -138,6 +138,6 @@ This is computed during ABI construction and used to reserve frame space.
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 ```

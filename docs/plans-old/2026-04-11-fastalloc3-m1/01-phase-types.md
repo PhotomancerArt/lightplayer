@@ -198,7 +198,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- fa_alloc
+cargo test -p lpvm-native --lib -- fa_alloc
 ```
 
 Should compile and pass new tests. Existing stub tests may need `#[allow]` or

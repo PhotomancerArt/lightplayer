@@ -20,7 +20,7 @@ cargo test -p lps-filetests -- rv32fa
 
 Or specifically:
 ```bash
-cargo test -p lps-filetests -- test_file_lpvm_native_fa
+cargo test -p lps-filetests -- test_file_lpvm_native
 ```
 
 ### 2. Fix Failures
@@ -48,8 +48,8 @@ Search for and remove/finalize:
 ### 4. Final Validation
 
 ```bash
-# All lpvm-native-fa tests pass
-cargo test -p lpvm-native-fa
+# All lpvm-native tests pass
+cargo test -p lpvm-native
 
 # Filetests pass
 cargo test -p lps-filetests
@@ -58,10 +58,10 @@ cargo test -p lps-filetests
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 
 # Format
-cargo +nightly fmt -p lpvm-native-fa
+cargo +nightly fmt -p lpvm-native
 
 # No warnings
-cargo check -p lpvm-native-fa 2>&1 | grep -i warning || true
+cargo check -p lpvm-native 2>&1 | grep -i warning || true
 ```
 
 ## Deliverables

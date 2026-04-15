@@ -6,13 +6,13 @@ Visual regression tests for the fastalloc register allocator.
 
 ```bash
 # Run all allocator filetests
-cargo test -p lpvm-native-fa --test filetests
+cargo test -p lpvm-native --test filetests
 
 # List discovered tests
-cargo test -p lpvm-native-fa --test filetests list_filetests -- --nocapture
+cargo test -p lpvm-native --test filetests list_filetests -- --nocapture
 
 # Update expected output (BLESS mode)
-BLESS=1 cargo test -p lpvm-native-fa --test filetests
+BLESS=1 cargo test -p lpvm-native --test filetests
 ```
 
 ## File Format
@@ -66,7 +66,7 @@ Ret i2
 2. Write LPIR input and header directives
 3. Run in BLESS mode to generate expected output:
    ```bash
-   BLESS=1 cargo test -p lpvm-native-fa --test filetests
+   BLESS=1 cargo test -p lpvm-native --test filetests
    ```
 4. Review the generated output in the file
 5. Commit the new test

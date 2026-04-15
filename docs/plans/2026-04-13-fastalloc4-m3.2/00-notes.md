@@ -100,7 +100,7 @@ S-regs in pool survive calls (callee-saved), no action needed.
 
 ### Q7/Q8: Test coverage ✓
 
-**LPIR filetests** (allocator-level, `lpvm-native-fa/filetests/call/`):
+**LPIR filetests** (allocator-level, `lpvm-native/filetests/call/`):
 
 | File | Edge case | Validates |
 |------|-----------|-----------|

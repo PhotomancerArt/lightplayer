@@ -9,7 +9,7 @@ Final cleanup: fix warnings, verify all tests pass, document remaining TODOs.
 ### 1. Fix warnings
 
 ```bash
-cargo clippy -p lpvm-native-fa --lib -- -W clippy::all
+cargo clippy -p lpvm-native --lib -- -W clippy::all
 ```
 
 Fix any new unused imports, dead code, redundant casts.
@@ -17,13 +17,13 @@ Fix any new unused imports, dead code, redundant casts.
 ### 2. Verify all tests pass
 
 ```bash
-cargo test -p lpvm-native-fa --lib
+cargo test -p lpvm-native --lib
 ```
 
 ### 3. Verify existing filetests still pass
 
 ```bash
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 ```
 
 ### 4. Verify CLI works
@@ -41,7 +41,7 @@ cargo build -p lp-cli
 ### 5. Check TODOs
 
 ```bash
-grep -r "TODO" lp-shader/lpvm-native-fa/src/alloc/
+grep -r "TODO" lp-shader/lpvm-native/src/alloc/
 ```
 
 Only acceptable TODOs are ones marking where M5 work begins (IfThenElse/Loop liveness, real allocation decisions).
@@ -52,7 +52,7 @@ The 4 warnings in `link.rs` (unused fields on `ElfBuilder`/`ElfSection`, redunda
 
 ## Success Criteria
 
-1. No new compiler warnings in `lpvm-native-fa`
+1. No new compiler warnings in `lpvm-native`
 2. All existing tests still pass
 3. New `alloc/` module tests pass
 4. CLI `--show-region` and `--show-liveness` produce output
@@ -62,6 +62,6 @@ The 4 warnings in `link.rs` (unused fields on `ElfBuilder`/`ElfSection`, redunda
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 cargo build -p lp-cli
 ```

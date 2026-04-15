@@ -141,7 +141,7 @@ fn build_two_int_params_abi() -> FuncAbi { /* two i32 params, i32 return */ }
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- fa_alloc
+cargo test -p lpvm-native --lib -- fa_alloc
 ```
 
 All new tests pass. No existing tests broken (update stub tests if signatures

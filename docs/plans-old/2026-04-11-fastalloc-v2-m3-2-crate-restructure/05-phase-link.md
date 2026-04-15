@@ -221,6 +221,6 @@ pub use link::link_elf;
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo check -p lpvm-native-fa --features emu
+cargo check -p lpvm-native
+cargo check -p lpvm-native --features emu
 ```

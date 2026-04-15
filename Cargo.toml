@@ -23,7 +23,7 @@ members = [
     "lp-shader/lpvm-wasm",
     "lp-shader/lps-frontend",
     "lp-shader/lpvm-cranelift",
-    "lp-shader/lpvm-native-fa",
+    "lp-shader/lpvm-native",
     "lp-shader/lpvm-emu",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",

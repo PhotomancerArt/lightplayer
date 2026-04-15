@@ -221,7 +221,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         #[cfg(feature = "cranelift")]
         log::info!("[fw-esp32] Shader backend: Cranelift (LPIR → lpvm-cranelift)");
         #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
-        log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native-fa rt_jit)");
+        log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
 
         #[cfg(feature = "test_oom")]
         {

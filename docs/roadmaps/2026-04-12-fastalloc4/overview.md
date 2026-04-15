@@ -154,7 +154,7 @@ and emitter need replacement.
 | M2  | Straight-line   | Backward walk for Linear, per-operand allocs, unit tests |
 | M3  | Calls + Sret    | Call clobbers, arg/ret ABI, sret, stack-passed args      |
 | M4  | Control Flow    | IfThenElse, Loop, spill-at-boundary edits                |
-| M5  | Cleanup         | Remove lpvm-native, rename lpvm-native-fa                |
+| M5  | Cleanup         | Remove lpvm-native, rename lpvm-native                |
 
 ## Success Criteria
 

@@ -11,18 +11,18 @@ an error.
 
 ### Files to delete
 
-- `lp-shader/lpvm-native-fa/src/fa_alloc/walk.rs` (1633 lines)
+- `lp-shader/lpvm-native/src/fa_alloc/walk.rs` (1633 lines)
   - Contains broken backward walk with direct PInst emission
   - Has `RegPool` utility that we'll extract first
   - Has `emit_vinst` VInst→PInst mapping that we won't need (going direct to bytes)
 
-- `lp-shader/lpvm-native-fa/src/rv32/inst.rs` (240 lines)
+- `lp-shader/lpvm-native/src/rv32/inst.rs` (240 lines)
   - PInst enum definition
 
-- `lp-shader/lpvm-native-fa/src/rv32/rv32_emit.rs`
+- `lp-shader/lpvm-native/src/rv32/rv32_emit.rs`
   - PInst → bytes encoder
 
-- `lp-shader/lpvm-native-fa/src/rv32/debug/pinst.rs`
+- `lp-shader/lpvm-native/src/rv32/debug/pinst.rs`
   - PInst debug formatting
 
 ### Files to keep (reference for porting)
@@ -35,14 +35,14 @@ an error.
 
 ### Files to modify
 
-- `lp-shader/lpvm-native-fa/src/fa_alloc/mod.rs`
+- `lp-shader/lpvm-native/src/fa_alloc/mod.rs`
   - Replace `run_shell()` and `allocate()` with stub that returns `Err`
   - Define `AllocOutput`, `Alloc`, `Edit`, `EditPoint` types
 
-- `lp-shader/lpvm-native-fa/src/emit.rs`
+- `lp-shader/lpvm-native/src/emit.rs`
   - Call new allocator (stub) and new emitter
 
-- `lp-shader/lpvm-native-fa/src/rv32/mod.rs`
+- `lp-shader/lpvm-native/src/rv32/mod.rs`
   - Remove PInst re-exports
 
 ### Types to define
@@ -133,4 +133,4 @@ produces the correct VInst types. It will be used in M2 for snapshot tests.
 - Keep the `rv32/encode.rs` encoders unchanged.
 - The `emit.rs` orchestration file (the one that calls the allocator) is thin
   and just needs to call the new types.
-- Goal for M1: `cargo check -p lpvm-native-fa` passes. Tests may fail (expected).
+- Goal for M1: `cargo check -p lpvm-native` passes. Tests may fail (expected).

@@ -10,7 +10,7 @@ integration, validation, and cleanup.
 
 ## Current State
 
-### What exists in `lpvm-native-fa`
+### What exists in `lpvm-native`
 
 **Working compile pipeline (straight-line only):**
 - `lower.rs` → LPIR to VInst + RegionTree
@@ -103,7 +103,7 @@ handles straight-line, so validation is limited to that subset. For control flow
 we need new filetests or rely on the emulator tests.
 
 **Answer:** Validate against cranelift pipeline (`lpvm-native`) and filetests.
-Nothing in `lpvm-native-fa` is load-bearing — `rv32::alloc` doesn't need to be
+Nothing in `lpvm-native` is load-bearing — `rv32::alloc` doesn't need to be
 preserved as a reference. The cranelift crate + filetests are ground truth.
 
 ### Q5: What's the milestone granularity?
@@ -122,12 +122,12 @@ handling, integration, validation, cleanup.
 - M1: Allocator core (straight-line, unit tests)
 - M2: Integration (wire to compile, rv32fa filetest target, validate straight-line)
 - M3: Control flow + calls (full functionality)
-- M4: Cleanup (remove lpvm-native entirely, rename lpvm-native-fa to lpvm-native)
+- M4: Cleanup (remove lpvm-native entirely, rename lpvm-native to lpvm-native)
 
 ## Notes
 
 - No rv32fa filetest target exists yet. Current targets: rv32 (cranelift), rv32lp
   (linear scan), wasm, jit.
-- lpvm-native-fa has CLI support (`shader-rv32fa`) but no filetest integration.
-- Nothing in lpvm-native-fa is load-bearing — cranelift pipeline is the reference.
+- lpvm-native has CLI support (`shader-rv32fa`) but no filetest integration.
+- Nothing in lpvm-native is load-bearing — cranelift pipeline is the reference.
 - Future work (not in this roadmap): pluggable emitter for direct bytecode generation.

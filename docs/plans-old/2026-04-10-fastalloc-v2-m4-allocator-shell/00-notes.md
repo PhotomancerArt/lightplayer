@@ -8,7 +8,7 @@ Build the allocator structure: **populate the RegionTree** built during lowering
 
 The crate was restructured in M3.2. Key changes relevant to M4:
 
-- **Crate is `lpvm-native-fa`**, not `lpvm-native`. Module paths are `crate::rv32::` not `crate::isa::rv32fa::`.
+- **Crate is `lpvm-native`**, not `lpvm-native`. Module paths are `crate::rv32::` not `crate::isa::rv32fa::`.
 - **`src/region.rs` exists** with arena-based `RegionTree`, `Region` enum (`Linear`, `IfThenElse`, `Loop`, `Seq`), `RegionId = u16`.
 - **`src/regset.rs` exists** with `RegSet` (fixed-size `[u64; 4]` bitset over VRegs, no heap).
 - **`LoweredFunction.region_tree` exists** but is currently `RegionTree::default()` (not populated).

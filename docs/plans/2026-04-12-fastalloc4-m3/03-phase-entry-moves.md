@@ -69,7 +69,7 @@ Per-instruction trace (`; trace: alloc: vN -> tM`) shows fresh allocations durin
 
 ### 3. Filetest location
 
-Param filetests live in `lp-shader/lpvm-native-fa/filetests/param/`:
+Param filetests live in `lp-shader/lpvm-native/filetests/param/`:
 - `stays_in_reg.lpir` — single param stays in ABI reg
 - `evicted_to_reg.lpir` — two params with limited pool
 - `spilled_at_entry.lpir` — same setup (true spills need call clobbers)
@@ -77,7 +77,7 @@ Param filetests live in `lp-shader/lpvm-native-fa/filetests/param/`:
 
 ### 4. Filetest coverage
 
-Filetests in `lp-shader/lpvm-native-fa/filetests/param/` cover param scenarios:
+Filetests in `lp-shader/lpvm-native/filetests/param/` cover param scenarios:
 
 - `stays_in_reg.lpir` — param stays in ABI reg (a1), no entry move
 - `evicted_to_reg.lpir` — params stay in ABI regs (limited pool but no eviction pressure on ABI regs)
@@ -90,10 +90,10 @@ Filetests in `lp-shader/lpvm-native-fa/filetests/param/` cover param scenarios:
 
 ```bash
 # Filetests
-cargo test -p lpvm-native-fa --test filetests
+cargo test -p lpvm-native --test filetests
 
 # All param tests
-cargo test -p lpvm-native-fa param
+cargo test -p lpvm-native param
 ```
 
 ## Success Criteria

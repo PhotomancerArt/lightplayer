@@ -128,7 +128,7 @@ float test_sret_stack_args() {
 
 ```bash
 # All allocator tests
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 
 # All GLSL native filetests
 TARGET=rv32fa.q32 cargo test -p lps-filetests -- --ignored native

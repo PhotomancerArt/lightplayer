@@ -10,7 +10,7 @@ code with TODO comments, add phase summary.
 ### 1. Fix Warnings
 
 ```bash
-cargo check -p lpvm-native-fa --lib 2>&1 | grep -E "^warning:" | head -30
+cargo check -p lpvm-native --lib 2>&1 | grep -E "^warning:" | head -30
 ```
 
 For each warning:
@@ -57,15 +57,15 @@ Ensure public types have doc comments:
 Search for remnants of deleted code:
 
 ```bash
-grep -r "PInst" lp-shader/lpvm-native-fa/src/ 2>/dev/null || echo "None found - good"
-grep -r "rv32_emit" lp-shader/lpvm-native-fa/src/ 2>/dev/null || echo "None found - good"
-grep -r "walk_region" lp-shader/lpvm-native-fa/src/ 2>/dev/null || echo "None found - good"
+grep -r "PInst" lp-shader/lpvm-native/src/ 2>/dev/null || echo "None found - good"
+grep -r "rv32_emit" lp-shader/lpvm-native/src/ 2>/dev/null || echo "None found - good"
+grep -r "walk_region" lp-shader/lpvm-native/src/ 2>/dev/null || echo "None found - good"
 ```
 
 ### 5. Check Tests Compile
 
 ```bash
-cargo test -p lpvm-native-fa --no-run 2>&1 | tail -10
+cargo test -p lpvm-native --no-run 2>&1 | tail -10
 ```
 
 Expected: Tests compile (though they may not all pass yet).
@@ -76,16 +76,16 @@ Final validation:
 
 ```bash
 # Clean check
-cargo check -p lpvm-native-fa
+cargo check -p lpvm-native
 
 # Check with all features
-cargo check -p lpvm-native-fa --all-features
+cargo check -p lpvm-native --all-features
 
 # Check tests compile
-cargo test -p lpvm-native-fa --no-run
+cargo test -p lpvm-native --no-run
 
 # Check no_std build (for firmware)
-cargo check -p lpvm-native-fa --target riscv32imac-unknown-none-elf 2>&1 | head -20
+cargo check -p lpvm-native --target riscv32imac-unknown-none-elf 2>&1 | head -20
 ```
 
 ## Summary

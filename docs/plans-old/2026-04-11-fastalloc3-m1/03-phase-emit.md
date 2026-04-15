@@ -179,5 +179,5 @@ fn emit_mov_elided_when_same_reg() {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- fa_alloc
+cargo test -p lpvm-native --lib -- fa_alloc
 ```

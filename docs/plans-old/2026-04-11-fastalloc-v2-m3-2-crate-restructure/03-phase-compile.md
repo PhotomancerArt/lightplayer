@@ -251,7 +251,7 @@ This requires the file is named `rv32_emit.rs` in the `rv32/` directory (it is).
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
+cargo check -p lpvm-native
 ```
 
 The new `compile_function` and `compile_module` should compile. The
@@ -261,7 +261,7 @@ The new `compile_function` and `compile_module` should compile. The
 ### Test
 
 ```bash
-cargo test -p lpvm-native-fa -- rv32::alloc::tests
+cargo test -p lpvm-native -- rv32::alloc::tests
 ```
 
 The fastalloc unit tests should still pass (they don't depend on the old

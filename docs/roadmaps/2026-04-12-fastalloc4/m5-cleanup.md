@@ -3,7 +3,7 @@
 ## Goal
 
 Remove the `lpvm-native` (cranelift-based) crate entirely. Rename
-`lpvm-native-fa` to `lpvm-native`. Clean up all references. Final validation.
+`lpvm-native` to `lpvm-native`. Clean up all references. Final validation.
 
 ## Suggested Plan Name
 
@@ -15,7 +15,7 @@ Remove the `lpvm-native` (cranelift-based) crate entirely. Rename
 
 - **Delete `lpvm-native` crate**: remove `lp-shader/lpvm-native/` and its
   `Cargo.toml` entry
-- **Rename `lpvm-native-fa` to `lpvm-native`**: update directory, package
+- **Rename `lpvm-native` to `lpvm-native`**: update directory, package
   name, all `Cargo.toml` dependency references across workspace
 - **Remove `rv32::alloc`** if any remnants exist
 - **Remove `shader-rv32` CLI command**: migrate useful flags to `shader-rv32fa`
@@ -41,7 +41,7 @@ Remove the `lpvm-native` (cranelift-based) crate entirely. Rename
 ## Deliverables
 
 - `lpvm-native` directory deleted
-- `lpvm-native-fa` renamed to `lpvm-native`
+- `lpvm-native` renamed to `lpvm-native`
 - All workspace references updated
 - CLI commands cleaned up
 - All tests passing

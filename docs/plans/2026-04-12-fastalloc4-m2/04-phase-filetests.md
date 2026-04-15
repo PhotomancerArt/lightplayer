@@ -13,7 +13,7 @@ The filetest runner likely needs updates to work with the new allocator:
 
 1. **Check pipeline configuration**: `lp-shader/lps-filetests/src/test_run/filetest_lpvm.rs`
    - Ensure `rv32fa` target is wired up
-   - May need to use `lpvm_native_fa::compile_function` instead of old path
+   - May need to use `lpvm_native::compile_function` instead of old path
 
 2. **Update CLI**: `lp-cli/src/commands/shader_rv32fa/pipeline.rs`
    - Ensure it calls the new allocator path
@@ -52,11 +52,11 @@ When a test fails:
 
 ```bash
 # Build check
-cargo check -p lpvm-native-fa
+cargo check -p lpvm-native
 cargo check -p lps-filetests
 
 # Unit tests
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 
 # Filetests
 cargo test -p lps-filetests -- --test-threads=1 spill_simple

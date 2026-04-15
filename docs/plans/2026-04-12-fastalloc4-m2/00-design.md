@@ -9,7 +9,7 @@ snapshot tests. Filetests pass for straight-line functions.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── fa_alloc/
 │   ├── mod.rs          # UPDATE: wire up walk, snapshot tests
 │   ├── walk.rs         # NEW: backward walk for Linear regions

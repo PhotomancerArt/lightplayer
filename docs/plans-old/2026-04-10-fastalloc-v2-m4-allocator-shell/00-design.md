@@ -12,12 +12,12 @@ The crate restructure (M3.2) already delivered:
 - `src/regset.rs` — fixed-size `RegSet` bitset over VRegs (no heap)
 - `LoweredFunction.region_tree` field (currently `RegionTree::default()`, not populated)
 - `compile.rs` / `emit.rs` / `link.rs` — clean compilation pipeline
-- Crate is `lpvm-native-fa`, ISA code is at `src/rv32/` (no `isa/` wrapper)
+- Crate is `lpvm-native`, ISA code is at `src/rv32/` (no `isa/` wrapper)
 
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── region.rs           # EXISTING: extend with helper methods
 ├── regset.rs           # EXISTING: used by liveness
 ├── rv32/
@@ -168,7 +168,7 @@ pub show_liveness: bool,
 
 ## Success Criteria
 
-1. `cargo test -p lpvm-native-fa --lib` passes
+1. `cargo test -p lpvm-native --lib` passes
 2. `--show-region` displays region tree
 3. `--show-liveness` displays liveness
 4. Trace shows stubbed decisions for each VInst

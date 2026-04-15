@@ -11,7 +11,7 @@ Add the compile-time constant for maximum virtual registers and implement the fi
 Add the constant that controls RegSet size:
 
 ```rust
-//! Compile-time configuration for lpvm-native-fa.
+//! Compile-time configuration for lpvm-native.
 
 /// When `true`, use linear-scan register allocation.
 pub const USE_LINEAR_SCAN_REGALLOC: bool = true;
@@ -224,7 +224,7 @@ pub use regset::RegSet;
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- regset
+cargo test -p lpvm-native --lib -- regset
 ```
 
 Tests should verify:

@@ -213,8 +213,8 @@ Simpler approach: pass `&ModuleSymbols` alongside `vinsts` in the walk functions
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 # Test with CLI:
 cargo run -p lp-cli -- shader-rv32fa lp-shader/lps-filetests/filetests/lpvm/native/native-call-control-flow.glsl 2>&1
 # Should get past "calls not supported" for native_branch_helper (straight-line + call)

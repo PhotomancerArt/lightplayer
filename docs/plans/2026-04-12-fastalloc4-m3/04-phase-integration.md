@@ -10,7 +10,7 @@ Ensure all existing tests pass, plus new advanced tests. Clean up and validate.
 
 ```bash
 # All unit tests
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 
 # All filetests (including new ones)
 TEST_FILE=spill_simple cargo test -p lps-filetests -- --ignored
@@ -44,7 +44,7 @@ When `alloc: true`, render and print `AllocOutput`.
 
 ```bash
 cargo +nightly fmt --all
-cargo fix --lib -p lpvm-native-fa
+cargo fix --lib -p lpvm-native
 ```
 
 Fix any warnings introduced.
@@ -57,14 +57,14 @@ Update `docs/plans/2026-04-12-fastalloc4-m3/summary.md` with completed work.
 
 ```bash
 # Build checks
-cargo check -p lpvm-native-fa
+cargo check -p lpvm-native
 cargo check -p lps-filetests
 
 # ESP32 firmware (must still compile)
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
 
 # Unit tests
-cargo test -p lpvm-native-fa fa_alloc::
+cargo test -p lpvm-native fa_alloc::
 
 # Filetests (all must pass)
 TEST_FILE=spill_simple cargo test -p lps-filetests -- --ignored

@@ -142,5 +142,5 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- alloc::liveness
+cargo test -p lpvm-native --lib -- alloc::liveness
 ```

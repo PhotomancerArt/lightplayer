@@ -10,7 +10,7 @@ errors.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── fa_alloc/
 │   ├── mod.rs              # UPDATE: allocate() entry → AllocResult
 │   ├── walk.rs             # UPDATE: real backward walk with PInst output

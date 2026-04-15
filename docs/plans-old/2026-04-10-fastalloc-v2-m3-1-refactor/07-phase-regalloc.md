@@ -73,13 +73,13 @@ fn process_instruction(inst: &VInst, pool: &[VReg], state: &mut AllocState)
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa --lib
+cargo check -p lpvm-native --lib
 ```
 
 Check for compile errors. Fix any issues with missing pool parameters or type mismatches.
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- regalloc
+cargo test -p lpvm-native --lib -- regalloc
 ```
 
 Tests should pass with the updated allocators.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-Rewrite the `fa_alloc` register allocator in `lpvm-native-fa` to use an
+Rewrite the `fa_alloc` register allocator in `lpvm-native` to use an
 **edit-list** architecture instead of direct PInst emission. The previous
 approach (fastalloc3) attempted direct backward-walk PInst emission, which
 proved fundamentally flawed: later backward walk decisions (evictions) can
@@ -14,7 +14,7 @@ instruction emission.
 
 ### What works
 
-The `lpvm-native-fa` crate has a complete pipeline *around* the allocator:
+The `lpvm-native` crate has a complete pipeline *around* the allocator:
 
 - **Lowering** (`lower.rs`): LPIR → VInst + RegionTree. ~1780 lines, solid.
 - **VInst IR** (`vinst.rs`): compact post-lowering IR. Clean.
@@ -122,7 +122,7 @@ Proven code. Adapt for FA crate's VInst types (VReg u16, VRegSlice, SymbolId).
    for Linear regions, validate with unit tests and spill_simple filetest)
 3. M3: Calls + sret (call clobbers, arg/ret ABI, sret, stack-passed args)
 4. M4: Control flow (IfThenElse, Loop, spill-at-boundary edits)
-5. M5: Cleanup (remove lpvm-native, rename lpvm-native-fa)
+5. M5: Cleanup (remove lpvm-native, rename lpvm-native)
 
 ### Q6: Testing strategy?
 

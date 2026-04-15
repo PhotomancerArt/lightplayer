@@ -15,7 +15,7 @@ lp-shader/lpvm/src/
 ├── debug.rs                          # NEW: ModuleDebugInfo, FunctionDebugInfo types
 └── module.rs                         # UPDATE: Add debug_info() trait method
 
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── rt_emu/module.rs                  # UPDATE: Change debug_asm field to ModuleDebugInfo
 ├── rt_emu/engine.rs                  # UPDATE: Populate ModuleDebugInfo during compile
 ├── compile.rs                        # UPDATE: Return FunctionDebugInfo per function
@@ -139,7 +139,7 @@ pub trait LpvmModule {
 }
 ```
 
-### 3. FA Backend Population (`lpvm-native-fa`)
+### 3. FA Backend Population (`lpvm-native`)
 
 The existing `compile_function` already produces debug info. Refactor to:
 

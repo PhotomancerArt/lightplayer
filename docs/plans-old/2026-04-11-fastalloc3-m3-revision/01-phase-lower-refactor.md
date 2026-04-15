@@ -102,7 +102,7 @@ regions (still used for top-level code and nested Seq regions).
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa -- lower
+cargo test -p lpvm-native -- lower
 ```
 
 The refactoring should not break existing straight-line tests since those

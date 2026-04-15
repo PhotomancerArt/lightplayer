@@ -369,7 +369,7 @@ pub mod emit;
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | head -50
+cargo check -p lpvm-native 2>&1 | head -50
 ```
 
 Expected: The emitter skeleton should compile. Errors about `emit_vinst` not

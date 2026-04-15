@@ -84,8 +84,8 @@ Verify: `a0` holds sret ptr, vmctx→`a1`, user arg→`a2`.
 ## Validation
 
 ```bash
-cargo test -p lpvm-native-fa --test filetests
-cargo test -p lpvm-native-fa fa_alloc
+cargo test -p lpvm-native --test filetests
+cargo test -p lpvm-native fa_alloc
 
 # GLSL sret tests
 TEST_FILE=native-call-vec4-return TARGET=rv32fa.q32 cargo test -p lps-filetests -- --ignored

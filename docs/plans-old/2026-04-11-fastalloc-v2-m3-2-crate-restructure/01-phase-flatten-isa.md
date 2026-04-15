@@ -105,7 +105,7 @@ the `allocate_for_emit` function body and mark with TODO.
 ```bash
 # May not fully compile yet due to dead references in old emit.rs
 # Goal: all non-emit.rs modules compile with new paths
-cargo check -p lpvm-native-fa 2>&1 | head -60
+cargo check -p lpvm-native 2>&1 | head -60
 ```
 
 Fix all import path errors. The old `rv32/emit.rs` may have broken references

@@ -247,7 +247,7 @@ Op::Return { vals } => {
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa --lib
+cargo check -p lpvm-native --lib
 ```
 
 Check for compile errors. Full test pass comes after updating defs/uses.

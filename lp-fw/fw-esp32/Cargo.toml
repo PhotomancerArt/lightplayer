@@ -21,7 +21,7 @@ server = [
     "lp-shared",
     "ser-write-json",
 ]  # Enable server dependencies (lp-server, lp-shared, lp-model)
-# RV32 native JIT shaders (`lpvm-native-fa` `rt_jit`); default for on-device testing
+# RV32 native JIT shaders (`lpvm-native` `rt_jit`); default for on-device testing
 native-jit = ["lp-server/native-jit"]
 # Cranelift JIT for shaders (comparison); use `--no-default-features --features esp32c6,server,cranelift`
 cranelift = [

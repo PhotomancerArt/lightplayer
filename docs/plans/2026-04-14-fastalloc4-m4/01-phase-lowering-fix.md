@@ -86,8 +86,8 @@ test in `lower.rs` that lowers a loop with a continuing block and asserts the
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 ```
 
 Existing tests must still pass. The `UnsupportedControlFlow` error will still

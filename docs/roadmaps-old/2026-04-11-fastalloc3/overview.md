@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The FastAlloc v2 roadmap (M0-M4) built the foundation: the `lpvm-native-fa`
+The FastAlloc v2 roadmap (M0-M4) built the foundation: the `lpvm-native`
 crate with VInst IR, LPIR lowering, region tree construction, peephole
 optimizer, PInst model, RV32 emitter, debug/trace infrastructure, CLI tooling
 (`shader-rv32fa`), and a backward-walk shell over structured control flow. A
@@ -77,13 +77,13 @@ phi insertion/resolution and maps naturally to GLSL's structured control flow.
 | M1  | Allocator Core    | Real backward-walk allocation with PInst output, unit tests          |
 | M2  | Integration       | Wire fa_alloc into compile, rv32fa filetest target, validate simple  |
 | M3  | Control Flow      | IfThenElse, Loop liveness, call clobbers — full functionality        |
-| M4  | Cleanup           | Remove lpvm-native crate, rename lpvm-native-fa to lpvm-native      |
+| M4  | Cleanup           | Remove lpvm-native crate, rename lpvm-native to lpvm-native      |
 
 ## Success Criteria
 
 1. All cranelift filetests pass under the `rv32fa` target
 2. `rv32fa` target produces correct results for control flow and calls
 3. The `lpvm-native` (cranelift) crate is fully removed
-4. `lpvm-native-fa` is renamed to `lpvm-native` and is the sole native backend
+4. `lpvm-native` is renamed to `lpvm-native` and is the sole native backend
 5. Trace output is useful for debugging allocation decisions
 6. No regressions in firmware build (`fw-esp32`, `fw-emu`)

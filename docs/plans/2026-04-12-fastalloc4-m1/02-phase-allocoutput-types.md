@@ -163,7 +163,7 @@ Remove `run_shell()` entirely — it was a debugging helper for the old broken w
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | head -30
+cargo check -p lpvm-native 2>&1 | head -30
 ```
 
 Expected: Fewer errors than Phase 1. The AllocOutput types should compile. Other

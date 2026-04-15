@@ -45,7 +45,7 @@ Expected areas of bugs:
 ### 3. Clean up warnings
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | grep warning
+cargo check -p lpvm-native 2>&1 | grep warning
 cargo check -p lp-cli 2>&1 | grep warning
 ```
 
@@ -74,8 +74,8 @@ Only `AllocError::TooManyArgs` should remain (if kept).
 ### 6. Final validation
 
 ```bash
-# All lpvm-native-fa tests pass
-cargo test -p lpvm-native-fa
+# All lpvm-native tests pass
+cargo test -p lpvm-native
 
 # Filetest target tests pass
 cargo test -p lps-filetests

@@ -2,7 +2,7 @@
 
 ## Scope of Work
 
-Restructure `lpvm-native-fa` from the forked `lpvm-native` layout into a clean,
+Restructure `lpvm-native` from the forked `lpvm-native` layout into a clean,
 Cranelift-inspired architecture with:
 
 - Central `compile.rs` orchestrator with `CompileSession` (module-level shared state)
@@ -15,7 +15,7 @@ Cranelift-inspired architecture with:
 ## File Structure
 
 ```
-lpvm-native-fa/src/
+lpvm-native/src/
 ├── lib.rs                      # UPDATE: new module declarations + re-exports
 ├── compile.rs                  # NEW: CompileSession, compile_function, compile_module
 ├── link.rs                     # NEW: link_jit(), link_elf() — relocation + ELF gen

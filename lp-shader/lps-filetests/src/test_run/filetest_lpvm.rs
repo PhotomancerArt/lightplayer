@@ -6,7 +6,7 @@ use lps_shared::{LpsFnSig, LpsModuleSig};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule, ModuleDebugInfo};
 use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
-use lpvm_native_fa::{
+use lpvm_native::{
     NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
     NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule,
 };

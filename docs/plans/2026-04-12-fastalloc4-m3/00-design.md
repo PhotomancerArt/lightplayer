@@ -17,7 +17,7 @@ Extend the allocator to robustly handle advanced straight-line scenarios:
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── fa_alloc/
 │   ├── mod.rs              # allocate(), AllocResult, AllocTestBuilder
 │   ├── walk.rs             # walk_linear() - backward walk allocator

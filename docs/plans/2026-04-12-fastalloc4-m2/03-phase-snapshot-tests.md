@@ -178,7 +178,7 @@ The `fn_` prefix in expected output serves as a section marker for multi-functio
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa fa_alloc::tests
+cargo test -p lpvm-native fa_alloc::tests
 ```
 
 All tests should pass with correct expected output.

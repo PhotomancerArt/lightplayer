@@ -120,5 +120,5 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- alloc::trace
+cargo test -p lpvm-native --lib -- alloc::trace
 ```

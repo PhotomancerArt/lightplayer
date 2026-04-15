@@ -157,5 +157,5 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- alloc::walk
+cargo test -p lpvm-native --lib -- alloc::walk
 ```

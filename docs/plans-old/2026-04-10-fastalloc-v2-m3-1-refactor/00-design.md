@@ -2,12 +2,12 @@
 
 ## Scope of Work
 
-Shrink VInst from ~88 bytes to ~20 bytes per instruction, eliminate heap allocations in Call/Ret, define memory-efficient region tree and RegSet types. Work happens in `lpvm-native-fa` crate — clean fork with no legacy compatibility burden.
+Shrink VInst from ~88 bytes to ~20 bytes per instruction, eliminate heap allocations in Call/Ret, define memory-efficient region tree and RegSet types. Work happens in `lpvm-native` crate — clean fork with no legacy compatibility burden.
 
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── config.rs                    # UPDATE: Add MAX_VREGS constant
 ├── types.rs                     # EXISTING
 ├── vinst.rs                     # MAJOR UPDATE: u16 VReg, VRegSlice, SymbolId
@@ -196,8 +196,8 @@ Update `debug/vinst.rs` and `isa/rv32/debug/pinst.rs` to:
 
 ## Success Criteria
 
-1. `cargo check -p lpvm-native-fa` passes with no errors
-2. `cargo test -p lpvm-native-fa` passes
+1. `cargo check -p lpvm-native` passes with no errors
+2. `cargo test -p lpvm-native` passes
 3. `VInst` enum size ≤ 24 bytes (verified with `std::mem::size_of` test)
 4. `RegSet` size = 32 bytes (4 × u64)
 5. No heap allocations during `for_each_def()` / `for_each_use()` calls

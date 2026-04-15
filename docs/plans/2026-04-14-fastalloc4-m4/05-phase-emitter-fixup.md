@@ -88,8 +88,8 @@ Mostly verification and targeted fixes. Likely changes:
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 # Full filetest suite
 cargo test -p lps-filetests -- rv32fa
 ```

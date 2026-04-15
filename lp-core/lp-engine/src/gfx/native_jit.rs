@@ -1,4 +1,4 @@
-//! RV32 native JIT backend for [`super::LpGraphics`] (`lpvm-native-fa` `rt_jit`).
+//! RV32 native JIT backend for [`super::LpGraphics`] (`lpvm-native` `rt_jit`).
 //!
 //! Only built for `riscv32` when feature `native-jit` is enabled (e.g. `fw-emu`).
 
@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 
 use lp_shared::Texture;
 use lpvm::{LpvmEngine, LpvmModule};
-use lpvm_native_fa::{
+use lpvm_native::{
     BuiltinTable, NativeCompileOptions, NativeJitDirectCall, NativeJitEngine, NativeJitInstance,
 };
 

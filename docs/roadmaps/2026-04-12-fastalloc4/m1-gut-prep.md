@@ -40,7 +40,7 @@ the actual allocator. The crate compiles but allocation returns an error.
   - `emit.rs` calls new allocator + new emitter
   - `compile.rs` unchanged (calls `emit.rs`)
 
-- **Compile check:** `cargo check -p lpvm-native-fa` passes. Tests may fail.
+- **Compile check:** `cargo check -p lpvm-native` passes. Tests may fail.
 
 ### Out of scope
 
@@ -67,7 +67,7 @@ the actual allocator. The crate compiles but allocation returns an error.
 - New `fa_alloc/mod.rs` with AllocOutput types and stub allocator
 - New `rv32/emit.rs` ported from `lpvm-native`
 - Updated `emit.rs` orchestration
-- `cargo check -p lpvm-native-fa` passes
+- `cargo check -p lpvm-native` passes
 
 ## Dependencies
 

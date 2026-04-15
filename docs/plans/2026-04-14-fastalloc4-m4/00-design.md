@@ -9,7 +9,7 @@ any region tree produced by lowering. All filetests pass under `rv32fa.q32`.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── fa_alloc/
 │   ├── mod.rs              # UPDATE: allocate() dispatches walk_region
 │   ├── walk.rs             # UPDATE: walk_region, walk_ite, walk_loop, walk_seq, boundary_spill

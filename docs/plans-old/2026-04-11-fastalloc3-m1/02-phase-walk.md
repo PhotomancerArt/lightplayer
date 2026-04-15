@@ -240,5 +240,5 @@ fn walk_rejects_control_flow() {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- fa_alloc
+cargo test -p lpvm-native --lib -- fa_alloc
 ```

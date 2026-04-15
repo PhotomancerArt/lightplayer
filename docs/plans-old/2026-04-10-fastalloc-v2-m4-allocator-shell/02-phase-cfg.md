@@ -113,5 +113,5 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- rv32::debug::region
+cargo test -p lpvm-native --lib -- rv32::debug::region
 ```

@@ -149,8 +149,8 @@ Unit tests using the builder:
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 ```
 
 All existing linear-only tests must still pass (the `walk_region → Linear`

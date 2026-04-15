@@ -78,7 +78,7 @@ Replace the inline emission logic in `compile_function` with a call to
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa -- rv32::alloc::tests
-cargo test -p lpvm-native-fa -- rv32::rv32_emit::tests
+cargo check -p lpvm-native
+cargo test -p lpvm-native -- rv32::alloc::tests
+cargo test -p lpvm-native -- rv32::rv32_emit::tests
 ```

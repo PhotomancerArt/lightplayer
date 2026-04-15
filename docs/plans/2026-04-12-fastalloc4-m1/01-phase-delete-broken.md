@@ -8,10 +8,10 @@ deletion — no replacements yet.
 ## Files to Delete
 
 ```bash
-rm lp-shader/lpvm-native-fa/src/fa_alloc/walk.rs      # 1633 lines
-rm lp-shader/lpvm-native-fa/src/rv32/inst.rs           # 240 lines
-rm lp-shader/lpvm-native-fa/src/rv32/rv32_emit.rs
-rm lp-shader/lpvm-native-fa/src/rv32/debug/pinst.rs
+rm lp-shader/lpvm-native/src/fa_alloc/walk.rs      # 1633 lines
+rm lp-shader/lpvm-native/src/rv32/inst.rs           # 240 lines
+rm lp-shader/lpvm-native/src/rv32/rv32_emit.rs
+rm lp-shader/lpvm-native/src/rv32/debug/pinst.rs
 ```
 
 ## Code Organization Reminders
@@ -29,7 +29,7 @@ rm lp-shader/lpvm-native-fa/src/rv32/debug/pinst.rs
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | head -50
+cargo check -p lpvm-native 2>&1 | head -50
 ```
 
 Expected: Many errors about missing modules, types, and functions. That's fine

@@ -43,11 +43,11 @@ Files changed:
 ### Phase 4: Add `rv32fa` filetest target
 
 Files changed:
-- `lps-filetests/Cargo.toml` — add `lpvm-native-fa = { path = "../lpvm-native-fa", features = ["emu"] }`
+- `lps-filetests/Cargo.toml` — add `lpvm-native = { path = "../lpvm-native", features = ["emu"] }`
 - `lps-filetests/src/targets/mod.rs` — add `Backend::Rv32fa`, add to `ALL_TARGETS`
 - `lps-filetests/src/targets/display.rs` — add `Display` arm, update error string
 - `lps-filetests/src/test_run/filetest_lpvm.rs`:
-  - Add `use lpvm_native_fa::{NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine, NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule};`
+  - Add `use lpvm_native::{NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine, NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule};`
   - Add `CompiledShader::NativeFa(FaEmuModule)` variant
   - Add `FiletestInstance::NativeFa(FaEmuInstance)` variant
   - Add match arms in `compile_glsl`, `instantiate`, `call`, `call_q32_flat`,
@@ -69,8 +69,8 @@ Files changed:
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 cargo check -p lps-filetests
 cargo test -p lps-filetests -- rv32fa
 # Run filetests with rv32fa target

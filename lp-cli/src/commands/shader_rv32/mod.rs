@@ -1,4 +1,4 @@
-//! GLSL → annotated RV32 assembly (`lpvm-native-fa`; linear path) or fastalloc dump (`--pipeline fast`).
+//! GLSL → annotated RV32 assembly (`lpvm-native`; linear path) or fastalloc dump (`--pipeline fast`).
 
 mod args;
 mod handler;

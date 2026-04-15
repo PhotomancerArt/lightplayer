@@ -165,7 +165,7 @@ With sret handling complete, remove this variant.
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 cargo check -p lp-cli
 ```

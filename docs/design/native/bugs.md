@@ -1,4 +1,4 @@
-# lpvm-native-fa: Known Bugs
+# lpvm-native: Known Bugs
 
 Status as of 2026-04-11. 19/27 filetests passing for `rv32fa.q32`.
 

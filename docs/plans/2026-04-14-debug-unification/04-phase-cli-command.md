@@ -96,7 +96,7 @@ fn compile_and_get_debug(
 
     match target {
         "rv32fa" | "rv32fa.q32" => {
-            use lpvm_native_fa::{NativeCompileOptions, NativeEmuEngine};
+            use lpvm_native::{NativeCompileOptions, NativeEmuEngine};
             let opts = NativeCompileOptions {
                 float_mode,
                 ..Default::default()

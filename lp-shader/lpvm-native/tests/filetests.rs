@@ -3,11 +3,11 @@
 //! Discovers `.lpir` files in `filetests/` recursively (e.g. `alloc/`, `param/`).
 //! Filesystem I/O stays here so the library stays `no_std`.
 //!
-//! Run: `cargo test -p lpvm-native-fa --test filetests`
+//! Run: `cargo test -p lpvm-native --test filetests`
 //!
-//! BLESS: `BLESS=1 cargo test -p lpvm-native-fa --test filetests`
+//! BLESS: `BLESS=1 cargo test -p lpvm-native --test filetests`
 
-use lpvm_native_fa::filetest::{
+use lpvm_native::filetest::{
     FILETEST_SEPARATOR, compute_filetest_snapshot, parse_filetest, run_filetest,
 };
 use std::env;

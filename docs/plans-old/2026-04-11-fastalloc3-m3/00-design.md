@@ -8,7 +8,7 @@ Region types. After this milestone, all existing filetests pass under `rv32fa`.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/src/
+lp-shader/lpvm-native/src/
 ├── fa_alloc/
 │   ├── mod.rs              # UPDATE: wire func_abi, sret buffer, param precoloring
 │   ├── walk.rs             # UPDATE: IfThenElse, Loop, Call, Select32, BrIf, Br, Label

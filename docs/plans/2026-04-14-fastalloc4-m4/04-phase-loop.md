@@ -145,8 +145,8 @@ filetest suite and compare pass/fail counts to baseline.
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa
+cargo check -p lpvm-native
+cargo test -p lpvm-native
 # Full filetest run
 cargo test -p lps-filetests -- rv32fa --nocapture 2>&1 | tail -5
 ```

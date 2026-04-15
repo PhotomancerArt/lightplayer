@@ -254,13 +254,13 @@ pub use pool::RegPool;
 ## Validation
 
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | head -30
+cargo check -p lpvm-native 2>&1 | head -30
 ```
 
 Expected: RegPool should compile. Other errors about missing modules remain.
 
 ```bash
-cargo test -p lpvm-native-fa pool::
+cargo test -p lpvm-native pool::
 ```
 
 Expected: RegPool unit tests pass.

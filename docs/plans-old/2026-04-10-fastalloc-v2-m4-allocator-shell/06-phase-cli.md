@@ -40,7 +40,7 @@ After lowering, display region tree and liveness when requested:
 let lowered = lower_ops(&func, &ir, &abi, float_mode)?;
 
 if verbosity.region {
-    let text = lpvm_native_fa::rv32::debug::region::format_region_tree(
+    let text = lpvm_native::rv32::debug::region::format_region_tree(
         &lowered.region_tree,
         lowered.region_tree.root,
         &lowered.vinsts,
@@ -52,13 +52,13 @@ if verbosity.region {
 }
 
 if verbosity.liveness {
-    let liveness = lpvm_native_fa::alloc::liveness::analyze_liveness(
+    let liveness = lpvm_native::alloc::liveness::analyze_liveness(
         &lowered.region_tree,
         lowered.region_tree.root,
         &lowered.vinsts,
         &lowered.vreg_pool,
     );
-    eprintln!("{}", lpvm_native_fa::alloc::liveness::format_liveness(&liveness));
+    eprintln!("{}", lpvm_native::alloc::liveness::format_liveness(&liveness));
 }
 ```
 

@@ -1,4 +1,4 @@
-//! Compile-time configuration for lpvm-native-fa. Change constants here and rebuild.
+//! Compile-time configuration for lpvm-native. Change constants here and rebuild.
 
 /// Maximum distinct virtual registers per function in the FA backend (`v0..v{N-1}`).
 pub const MAX_VREGS: usize = 256;

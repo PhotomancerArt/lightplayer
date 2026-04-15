@@ -166,13 +166,13 @@ fn spill_no_reload_for_dead_value() {
 
 ```bash
 # Unit tests
-cargo test -p lpvm-native-fa spill
+cargo test -p lpvm-native spill
 
 # Filetest
 TEST_FILE=spill_simple TARGET=rv32fa.q32 cargo test -p lps-filetests -- --ignored
 
 # All existing tests must still pass
-cargo test -p lpvm-native-fa fa_alloc::
+cargo test -p lpvm-native fa_alloc::
 ```
 
 ## Success Criteria

@@ -282,7 +282,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- vinst::tests
+cargo test -p lpvm-native --lib -- vinst::tests
 ```
 
 All tests should pass.

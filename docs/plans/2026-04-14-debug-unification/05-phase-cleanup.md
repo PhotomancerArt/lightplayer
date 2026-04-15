@@ -26,7 +26,7 @@ Check for and fix:
 ```bash
 cargo clippy -p lp-cli -- -D warnings
 cargo clippy -p lpvm -- -D warnings
-cargo clippy -p lpvm-native-fa -- -D warnings
+cargo clippy -p lpvm-native -- -D warnings
 cargo clippy -p lpvm-native -- -D warnings
 cargo clippy -p lpvm-emu -- -D warnings
 ```
@@ -34,7 +34,7 @@ cargo clippy -p lpvm-emu -- -D warnings
 ### 4. Run Format
 
 ```bash
-cargo +nightly fmt -p lp-cli -p lpvm -p lpvm-native-fa -p lpvm-native -p lpvm-emu
+cargo +nightly fmt -p lp-cli -p lpvm -p lpvm-native -p lpvm-native -p lpvm-emu
 ```
 
 ### 5. Full Test Suite
@@ -42,7 +42,7 @@ cargo +nightly fmt -p lp-cli -p lpvm -p lpvm-native-fa -p lpvm-native -p lpvm-em
 ```bash
 # Core library tests
 cargo test -p lpvm --lib
-cargo test -p lpvm-native-fa --lib
+cargo test -p lpvm-native --lib
 cargo test -p lpvm-native --lib
 cargo test -p lpvm-emu --lib
 
@@ -139,7 +139,7 @@ lp-cli shader-debug -t rv32fa lp-shader/lps-filetests/filetests/debug/rainbow-no
 lp-cli shader-debug -t rv32 lp-shader/lps-filetests/filetests/debug/rainbow-noctrl.glsl --fn paletteWarm 2>&1 | head -50
 
 # Run full test suite
-cargo test -p lpvm-native-fa --lib
+cargo test -p lpvm-native --lib
 cargo test -p lpvm-native --lib
 scripts/glsl-filetests.sh --target rv32fa.q32,rv32.q32 lpvm/native/perf/
 ```

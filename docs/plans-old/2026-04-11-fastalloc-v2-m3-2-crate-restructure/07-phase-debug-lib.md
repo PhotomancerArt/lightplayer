@@ -116,10 +116,10 @@ pub use rt_jit::{
 
 ### 3. Check downstream usage
 
-Grep for any crate that imports from `lpvm_native_fa::isa::` and update:
+Grep for any crate that imports from `lpvm_native::isa::` and update:
 
 ```bash
-rg 'lpvm_native_fa::isa' --type rust
+rg 'lpvm_native::isa' --type rust
 ```
 
 Key downstream crates to check:
@@ -132,9 +132,9 @@ Update any broken imports.
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo check -p lpvm-native-fa --features emu
-cargo test -p lpvm-native-fa -- debug_asm::tests
+cargo check -p lpvm-native
+cargo check -p lpvm-native --features emu
+cargo test -p lpvm-native -- debug_asm::tests
 ```
 
 If downstream crates are affected:

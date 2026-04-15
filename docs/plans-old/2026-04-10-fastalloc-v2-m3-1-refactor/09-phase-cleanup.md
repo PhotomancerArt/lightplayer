@@ -16,15 +16,15 @@ Search for and remove:
 
 ```bash
 # Search for common temporary markers
-grep -r "todo!" lp-shader/lpvm-native-fa/src/
-grep -r "unimplemented!" lp-shader/lpvm-native-fa/src/
-grep -r "println!" lp-shader/lpvm-native-fa/src/
+grep -r "todo!" lp-shader/lpvm-native/src/
+grep -r "unimplemented!" lp-shader/lpvm-native/src/
+grep -r "println!" lp-shader/lpvm-native/src/
 ```
 
 ### 2. Check for unused imports
 
 ```bash
-cargo clippy -p lpvm-native-fa --lib 2>&1 | grep "unused_imports"
+cargo clippy -p lpvm-native --lib 2>&1 | grep "unused_imports"
 ```
 
 ### 3. Verify no legacy type references
@@ -35,9 +35,9 @@ Ensure no references to old types:
 - `Option<u32>` for src_op should not appear in VInst variants
 
 ```bash
-grep -r "SymbolRef" lp-shader/lpvm-native-fa/src/vinst.rs
+grep -r "SymbolRef" lp-shader/lpvm-native/src/vinst.rs
 # Should only show in comments or legacy conversion code
-grep -r "Option<u32>" lp-shader/lpvm-native-fa/src/vinst.rs
+grep -r "Option<u32>" lp-shader/lpvm-native/src/vinst.rs
 # Should not appear in enum variants
 ```
 
@@ -46,7 +46,7 @@ grep -r "Option<u32>" lp-shader/lpvm-native-fa/src/vinst.rs
 Add and run size tests:
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- size
+cargo test -p lpvm-native --lib -- size
 ```
 
 Expected:
@@ -62,7 +62,7 @@ Expected:
 ### 1. Full test suite
 
 ```bash
-cargo test -p lpvm-native-fa --lib
+cargo test -p lpvm-native --lib
 ```
 
 All tests should pass.
@@ -70,7 +70,7 @@ All tests should pass.
 ### 2. Clippy warnings
 
 ```bash
-cargo clippy -p lpvm-native-fa --lib -- -D warnings
+cargo clippy -p lpvm-native --lib -- -D warnings
 ```
 
 No warnings allowed.
@@ -78,7 +78,7 @@ No warnings allowed.
 ### 3. Format check
 
 ```bash
-cargo fmt -p lpvm-native-fa -- --check
+cargo fmt -p lpvm-native -- --check
 ```
 
 All files properly formatted.
@@ -157,9 +157,9 @@ Create `summary.md`:
 
 ```bash
 # Full validation
-cargo test -p lpvm-native-fa --lib
-cargo clippy -p lpvm-native-fa --lib -- -D warnings
-cargo fmt -p lpvm-native-fa
+cargo test -p lpvm-native --lib
+cargo clippy -p lpvm-native --lib -- -D warnings
+cargo fmt -p lpvm-native
 
 # Verify original crate still works
 cargo test -p lpvm-native --lib

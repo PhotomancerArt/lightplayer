@@ -110,8 +110,8 @@ runtime modules.
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo check -p lpvm-native-fa --features emu
+cargo check -p lpvm-native
+cargo check -p lpvm-native --features emu
 # JIT check (riscv32 target):
-# cargo check -p lpvm-native-fa --target riscv32imac-unknown-none-elf
+# cargo check -p lpvm-native --target riscv32imac-unknown-none-elf
 ```

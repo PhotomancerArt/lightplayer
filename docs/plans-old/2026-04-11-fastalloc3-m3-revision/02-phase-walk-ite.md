@@ -417,6 +417,6 @@ Region::IfThenElse { head, then_body, else_body, .. } => {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 ```

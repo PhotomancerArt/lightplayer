@@ -102,8 +102,8 @@ mod tests {
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa
-cargo test -p lpvm-native-fa fa_alloc::walk::tests
+cargo check -p lpvm-native
+cargo test -p lpvm-native fa_alloc::walk::tests
 ```
 
 Should compile. Tests will fail (NotImplemented) until Phase 1 complete.

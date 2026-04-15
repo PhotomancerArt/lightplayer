@@ -2,7 +2,7 @@
 
 ## Scope
 
-Improve rv32fa (lpvm-native-fa) code quality toward parity with rv32
+Improve rv32fa (lpvm-native) code quality toward parity with rv32
 (lpvm-native / cranelift + regalloc2), focusing on call-heavy code (Q32 math).
 
 Current benchmark: `test_four_live_across_call` — 41 instructions (rv32fa) vs

@@ -15,20 +15,20 @@ Final cleanup, validation, and commit preparation.
 
 ### Formatting
 ```bash
-cargo +nightly fmt -p lpvm-native-fa
+cargo +nightly fmt -p lpvm-native
 cargo +nightly fmt -p lps-filetests
 ```
 
 ### Warnings
 ```bash
-cargo check -p lpvm-native-fa 2>&1 | grep -i warning
+cargo check -p lpvm-native 2>&1 | grep -i warning
 ```
 Fix all warnings or explicitly allow with justification.
 
 ### Tests
 ```bash
 # Unit tests
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 
 # Filetests
 cargo test -p lps-filetests -- --test-threads=1

@@ -129,5 +129,5 @@ fn shell_with_real_lowered_function() {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- alloc
+cargo test -p lpvm-native --lib -- alloc
 ```

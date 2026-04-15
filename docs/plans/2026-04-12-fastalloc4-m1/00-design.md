@@ -9,7 +9,7 @@ emitter as `rv32/emit.rs`. Leave stubs for the actual allocator.
 ## File Structure
 
 ```
-lp-shader/lpvm-native-fa/
+lp-shader/lpvm-native/
 └── src/
     ├── fa_alloc/
     │   ├── mod.rs              # UPDATE: AllocOutput types, stub allocator
@@ -137,7 +137,7 @@ Ported from `lpvm-native/src/isa/rv32/emit.rs`. Key patterns:
 
 ## Success Criteria
 
-- `cargo check -p lpvm-native-fa` passes
+- `cargo check -p lpvm-native` passes
 - All old broken code deleted
 - New types defined
 - Emitter ported and compiling

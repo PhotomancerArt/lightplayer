@@ -62,7 +62,7 @@ don't regress.
 # Full suite
 cargo test -p lps-filetests -- rv32fa
 # Also run the unit filetest suite
-cargo test -p lpvm-native-fa
+cargo test -p lpvm-native
 # Check firmware builds still work
 cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```

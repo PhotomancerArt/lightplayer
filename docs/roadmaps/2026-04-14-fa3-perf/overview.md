@@ -2,7 +2,7 @@
 
 ## Motivation / rationale
 
-The rv32fa backend (lpvm-native-fa) produces significantly more instructions
+The rv32fa backend (lpvm-native) produces significantly more instructions
 than rv32 (lpvm-native / cranelift + regalloc2) for the same LPIR input. On the
 `caller-save-pressure.glsl` benchmark suite: 140 instructions vs 85 (1.65x).
 Per-function ratios range from 1.58x (4 values live across a call) to 4.50x
@@ -32,11 +32,11 @@ This roadmap targets the regalloc and emit stages. Lowering improvements
 (constant folding, immediate fusion) are captured as later milestones.
 
 Key files:
-- `lp-shader/lpvm-native-fa/src/fa_alloc/pool.rs` — LRU register pool
-- `lp-shader/lpvm-native-fa/src/fa_alloc/walk.rs` — backward walk + call handling
-- `lp-shader/lpvm-native-fa/src/emit.rs` — prologue/epilogue + instruction emission
-- `lp-shader/lpvm-native-fa/src/rv32/emit.rs` — RV32 encoding + frame layout
-- `lp-shader/lpvm-native-fa/src/lower.rs` — LPIR → VInst lowering
+- `lp-shader/lpvm-native/src/fa_alloc/pool.rs` — LRU register pool
+- `lp-shader/lpvm-native/src/fa_alloc/walk.rs` — backward walk + call handling
+- `lp-shader/lpvm-native/src/emit.rs` — prologue/epilogue + instruction emission
+- `lp-shader/lpvm-native/src/rv32/emit.rs` — RV32 encoding + frame layout
+- `lp-shader/lpvm-native/src/lower.rs` — LPIR → VInst lowering
 
 ## Milestones
 

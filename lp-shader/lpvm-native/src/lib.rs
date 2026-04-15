@@ -1,4 +1,4 @@
-//! LPIR → custom RISC-V backend (`lpvm-native-fa`): fastalloc / straight-line PInst path.
+//! LPIR → custom RISC-V backend (`lpvm-native`): fastalloc / straight-line PInst path.
 //!
 //! Core lowering, fastalloc, and ELF emission are `no_std` + alloc.
 //!

@@ -129,6 +129,6 @@ In `fa_alloc/mod.rs`, ensure `emit_pinsts` (or `Rv32Emitter`) calls
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa
-cargo check -p lpvm-native-fa
+cargo test -p lpvm-native
+cargo check -p lpvm-native
 ```

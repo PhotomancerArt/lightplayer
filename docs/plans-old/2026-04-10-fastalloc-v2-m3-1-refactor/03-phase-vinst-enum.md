@@ -286,7 +286,7 @@ mod tests {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- vinst::tests::test_vinst_size
+cargo test -p lpvm-native --lib -- vinst::tests::test_vinst_size
 ```
 
 Should pass with VInst size ≤ 32 bytes (ideally ~20-24).

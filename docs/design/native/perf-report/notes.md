@@ -113,11 +113,11 @@ espflash monitor --chip esp32c6
 
 ---
 
-## 2026-04-14: lpvm-native-fa (FastAlloc) On-Device Success
+## 2026-04-14: lpvm-native (FastAlloc) On-Device Success
 
-**Status:** First successful on-device execution of the new `lpvm-native-fa` FastAlloc backend on ESP32-C6.
+**Status:** First successful on-device execution of the new `lpvm-native` FastAlloc backend on ESP32-C6.
 
-The FastAlloc backend (`lpvm-native-fa`) with the new register allocator successfully executed on ESP32-C6 hardware. This backend replaces the previous greedy allocator with a pool-based fast allocation system.
+The FastAlloc backend (`lpvm-native`) with the new register allocator successfully executed on ESP32-C6 hardware. This backend replaces the previous greedy allocator with a pool-based fast allocation system.
 
 ### Results
 
@@ -149,7 +149,7 @@ Target: riscv32imac-unknown-none-elf
 Chip: ESP32-C6 (revision v0.1)
 Clock: 40 MHz
 Features: esp32c6,server
-Backend: lpvm-native-fa rt_jit
+Backend: lpvm-native rt_jit
 Shader: rainbow.shader with 5 palette functions (paletteHeatmap, paletteRainbow, paletteFire, paletteCool, paletteWarm)
 LEDs: 241 (723 bytes output buffer)
 ```
@@ -176,9 +176,9 @@ From `2026-04-14-fa3.txt` heap trace:
 
 **Allocation Hotspots:**
 
-- `lpvm_native_fa::RawVecInner::finish_grow`: 416,960 bytes (vec growth during compilation)
-- `lpvm_native_fa::emit::emit_lowered_ex`: 11,594 bytes
-- `lpvm_native_fa::compile::compile_module`: 19,796 bytes
+- `lpvm_native::RawVecInner::finish_grow`: 416,960 bytes (vec growth during compilation)
+- `lpvm_native::emit::emit_lowered_ex`: 11,594 bytes
+- `lpvm_native::compile::compile_module`: 19,796 bytes
 
 ---
 
@@ -372,27 +372,27 @@ lpvm-native uses significantly less RAM during operation - only ~130KB at peak v
 
 ---
 
-## 2026-04-14: Final Comparison - lpvm-native-fa vs Cranelift/Wasmtime
+## 2026-04-14: Final Comparison - lpvm-native vs Cranelift/Wasmtime
 
-**Summary:** The `lpvm-native-fa` FastAlloc backend now matches cranelift's runtime performance while maintaining all previous advantages in binary size and compile time.
+**Summary:** The `lpvm-native` FastAlloc backend now matches cranelift's runtime performance while maintaining all previous advantages in binary size and compile time.
 
 ### Final Results Table
 
-| Metric           | lpvm-native-fa (FastAlloc) | lpvm-native (LinearScan) | cranelift/wasmtime |
+| Metric           | lpvm-native (FastAlloc) | lpvm-native (LinearScan) | cranelift/wasmtime |
 | ---------------- | -------------------------- | ------------------------ | ------------------ |
 | **Binary Size**  | **~1.64 MB (52%, 0.69x)**  | ~1.64 MB (52%, 0.69x)    | 2.38 MB (76%, 1x)  |
 | **Compile Time** | **~565ms (0.57x)**         | ~620ms (0.62x)           | 1000ms (1x)        |
 | **Runtime FPS**  | **~29-30 FPS (~1.0x)**     | ~25 FPS (0.86x)          | ~29 FPS (1x)       |
 | **Peak Memory**  | **~136 KB (0.64x)**        | ~130 KB (0.61x)          | ~213 KB (1x)       |
 
-### Key Improvements in lpvm-native-fa
+### Key Improvements in lpvm-native
 
 1. **Performance parity:** Now matches cranelift's ~29-30 FPS (was 25 FPS, -14% gap)
 2. **Faster compilation:** 565ms vs 620ms (-9% improvement over old backend)
 3. **Same binary size:** No code size regression with new allocator
 4. **Full function call support:** Handles complex shaders with multiple user-defined functions
 
-### Technical Changes in lpvm-native-fa
+### Technical Changes in lpvm-native
 
 **New FastAlloc Pipeline:**
 
@@ -425,7 +425,7 @@ espflash monitor --chip esp32c6
 
 ### Conclusion
 
-The `lpvm-native-fa` backend achieves **performance parity with cranelift** (~29-30 FPS) while maintaining significant advantages:
+The `lpvm-native` backend achieves **performance parity with cranelift** (~29-30 FPS) while maintaining significant advantages:
 
 - **31% smaller binary** (52% vs 76% of flash)
 - **43% faster compile time** (565ms vs 1000ms)

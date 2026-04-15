@@ -263,7 +263,7 @@ pub struct LoweredFunction {
 ## Validate
 
 ```bash
-cargo test -p lpvm-native-fa --lib -- region
+cargo test -p lpvm-native --lib -- region
 ```
 
 Tests should verify:

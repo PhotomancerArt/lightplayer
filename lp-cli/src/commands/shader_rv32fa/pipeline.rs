@@ -4,14 +4,14 @@ use std::io::Write;
 
 use anyhow::Result;
 use lpir::FloatMode;
-use lpvm_native_fa::abi::ModuleAbi;
-use lpvm_native_fa::emit::emit_lowered_with_alloc;
-use lpvm_native_fa::fa_alloc;
-use lpvm_native_fa::fa_alloc::liveness::{analyze_liveness, format_liveness};
-use lpvm_native_fa::fa_alloc::render::render_alloc_output;
-use lpvm_native_fa::lower_ops;
-use lpvm_native_fa::rv32::abi::func_abi_rv32;
-use lpvm_native_fa::rv32::debug::region::format_region_tree;
+use lpvm_native::abi::ModuleAbi;
+use lpvm_native::emit::emit_lowered_with_alloc;
+use lpvm_native::fa_alloc;
+use lpvm_native::fa_alloc::liveness::{analyze_liveness, format_liveness};
+use lpvm_native::fa_alloc::render::render_alloc_output;
+use lpvm_native::lower_ops;
+use lpvm_native::rv32::abi::func_abi_rv32;
+use lpvm_native::rv32::debug::region::format_region_tree;
 
 /// Which stderr debug sections to print.
 #[derive(Clone, Copy, Debug)]

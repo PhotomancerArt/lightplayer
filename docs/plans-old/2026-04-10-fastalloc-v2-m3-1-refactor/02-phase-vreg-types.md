@@ -112,7 +112,7 @@ pub use vinst::{VReg, VRegSlice, SymbolId, LabelId, SRC_OP_NONE, SYMBOL_ID_NONE}
 ## Validate
 
 ```bash
-cargo check -p lpvm-native-fa --lib
+cargo check -p lpvm-native --lib
 ```
 
 Should compile. The VInst enum still uses old types — that comes next phase.
