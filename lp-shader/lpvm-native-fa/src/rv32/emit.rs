@@ -671,11 +671,21 @@ impl<'a> EmitContext<'a> {
                     return Ok(());
                 }
                 let rs = self.use_vreg(output, inst_idx, 1, Self::TEMP0, src_op)? as u32;
-                let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
-                if rd != rs {
-                    self.push_u32(encode_addi(rd, rs, 0), src_op);
+                let def_alloc = Self::operand_alloc(output, inst_idx, 0);
+                if let Alloc::Stack(slot) = def_alloc {
+                    // Store source register directly to spill slot,
+                    // avoiding the addi-to-temp + sw roundtrip.
+                    let offset = self
+                        .frame
+                        .spill_offset_from_fp(slot as u32)
+                        .ok_or(crate::emit_err!())?;
+                    self.push_u32(encode_sw(rs, FP_REG as u32, offset), src_op);
+                } else {
+                    let rd = self.def_vreg(output, inst_idx, 0, Self::TEMP0)? as u32;
+                    if rd != rs {
+                        self.push_u32(encode_addi(rd, rs, 0), src_op);
+                    }
                 }
-                self.store_def_vreg(output, inst_idx, 0, Self::TEMP0, src_op)?;
             }
             VInst::Load32 { offset, .. } => {
                 if Self::is_dead_def(output, inst_idx, 0) {
