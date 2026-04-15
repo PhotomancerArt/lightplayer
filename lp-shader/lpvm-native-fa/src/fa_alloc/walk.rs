@@ -168,9 +168,32 @@ impl<'a> WalkState<'a> {
                         self.vinsts,
                         self.vreg_pool,
                     );
+                    // Only values *defined* inside the loop need spill-at-boundary / loop_carried
+                    // treatment. Parameters (and other loop-invariant inputs) are live into the body
+                    // but must not get a spill slot here — reload-before-first-use would read garbage.
+                    let defs_in_loop = crate::fa_alloc::liveness::defs_in_region(
+                        self.tree,
+                        *body,
+                        self.vinsts,
+                        self.vreg_pool,
+                    )
+                    .union(&crate::fa_alloc::liveness::defs_in_region(
+                        self.tree,
+                        *header,
+                        self.vinsts,
+                        self.vreg_pool,
+                    ));
                     for vreg in body_live.live_in.iter() {
-                        self.spill.get_or_assign(vreg);
-                        self.loop_carried.insert(vreg);
+                        // Parameters (and vmctx) appear as defs in lowered IR (`v = copy v`) inside the
+                        // loop body range, but they are not carried across iterations — skip them so we
+                        // do not assign spill slots that get reloaded before the entry move has stored.
+                        if self.func_abi.precolor_of(vreg.0 as u32).is_some() {
+                            continue;
+                        }
+                        if defs_in_loop.contains(vreg) {
+                            self.spill.get_or_assign(vreg);
+                            self.loop_carried.insert(vreg);
+                        }
                     }
 
                     self.walk_region(*body)?;
@@ -295,6 +318,27 @@ impl<'a> WalkState<'a> {
                         register_state: String::new(),
                     },
                 );
+                // Spill slots can be assigned during the backward walk (e.g. for a later call) before
+                // any instruction stores the live value. A `Before(0)` reload would otherwise read
+                // garbage; mirror the incoming register into the slot so early reloads match the ABI.
+                if let Some(slot) = self.spill.has_slot(vreg) {
+                    entry_edits.push((
+                        EditPoint::Before(0),
+                        Edit::Move {
+                            from: Alloc::Reg(final_preg),
+                            to: Alloc::Stack(slot),
+                        },
+                    ));
+                    TracePush::push(
+                        &mut self.trace,
+                        TraceEntry {
+                            vinst_idx: 0,
+                            vinst_mnemonic: String::from("entry_slot_init"),
+                            decision: alloc::format!("x{} -> slot{}", final_preg, slot),
+                            register_state: String::new(),
+                        },
+                    );
+                }
             } else if let Some(slot) = self.spill.has_slot(vreg) {
                 entry_edits.push((
                     EditPoint::Before(0),

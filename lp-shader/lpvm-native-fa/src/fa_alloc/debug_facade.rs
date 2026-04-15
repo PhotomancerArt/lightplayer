@@ -48,7 +48,7 @@ pub fn trace_sink_new() -> TraceSink {
 
 #[cfg(feature = "debug")]
 fn is_entry_trace_mnemonic(m: &str) -> bool {
-    m == "entry" || m == "entry_move" || m == "entry_spill"
+    m == "entry" || m == "entry_move" || m == "entry_spill" || m == "entry_slot_init"
 }
 
 /// Non-entry trace rows grouped by VInst index (forward order).

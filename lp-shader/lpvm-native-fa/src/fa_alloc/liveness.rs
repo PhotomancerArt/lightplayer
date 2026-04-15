@@ -118,6 +118,58 @@ pub fn analyze_liveness(
     }
 }
 
+/// Every [`VReg`] defined by some instruction inside `region_id` (including nested regions).
+///
+/// Used to distinguish **loop-carried** values (redefined each iteration and live across the
+/// back-edge) from **loop-invariant** inputs such as function parameters: the latter appear in
+/// `body.live_in` but must not get spill-slot preassignment, or the first reload reads
+/// uninitialized stack before any def has stored there.
+pub fn defs_in_region(
+    tree: &RegionTree,
+    region_id: RegionId,
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+) -> RegSet {
+    let mut out = RegSet::new();
+    if region_id == REGION_ID_NONE {
+        return out;
+    }
+    match &tree.nodes[region_id as usize] {
+        Region::Linear { start, end } => {
+            for i in *start..*end {
+                vinsts[i as usize].for_each_def(vreg_pool, |d| out.insert(d));
+            }
+        }
+        Region::Seq {
+            children_start,
+            child_count,
+        } => {
+            let s = *children_start as usize;
+            let e = s + *child_count as usize;
+            for &child in &tree.seq_children[s..e] {
+                out = out.union(&defs_in_region(tree, child, vinsts, vreg_pool));
+            }
+        }
+        Region::IfThenElse {
+            head,
+            then_body,
+            else_body,
+            ..
+        } => {
+            out = out.union(&defs_in_region(tree, *head, vinsts, vreg_pool));
+            out = out.union(&defs_in_region(tree, *then_body, vinsts, vreg_pool));
+            if *else_body != REGION_ID_NONE {
+                out = out.union(&defs_in_region(tree, *else_body, vinsts, vreg_pool));
+            }
+        }
+        Region::Loop { header, body, .. } => {
+            out = out.union(&defs_in_region(tree, *header, vinsts, vreg_pool));
+            out = out.union(&defs_in_region(tree, *body, vinsts, vreg_pool));
+        }
+    }
+    out
+}
+
 /// Format liveness for debug output.
 pub fn format_liveness(liveness: &Liveness) -> String {
     let mut lines: Vec<String> = Vec::new();
@@ -213,6 +265,29 @@ mod tests {
 
         assert!(output.contains("=== Liveness ==="));
         assert!(output.contains("live_in"));
+    }
+
+    #[test]
+    fn defs_in_linear_region() {
+        let vinsts = vec![
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 1,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::IConst32 {
+                dst: VReg(1),
+                val: 2,
+                src_op: SRC_OP_NONE,
+            },
+        ];
+        let mut tree = RegionTree::new();
+        let root = tree.push(Region::Linear { start: 0, end: 2 });
+        tree.root = root;
+        let d = defs_in_region(&tree, root, &vinsts, &[]);
+        assert!(d.contains(VReg(0)));
+        assert!(d.contains(VReg(1)));
+        assert!(!d.contains(VReg(2)));
     }
 
     #[test]
