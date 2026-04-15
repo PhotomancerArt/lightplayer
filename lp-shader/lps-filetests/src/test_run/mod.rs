@@ -6,7 +6,6 @@ pub mod filetest_lpvm;
 pub mod parse_assert;
 pub mod run;
 pub mod run_detail;
-pub mod wasm_link;
 
 // Re-exports
 pub use run::{PerTargetStats, run_test_file, run_test_file_with_line_filter};
