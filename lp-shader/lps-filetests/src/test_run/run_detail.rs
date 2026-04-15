@@ -26,6 +26,7 @@ pub fn run(
     line_filter: Option<usize>,
     output_mode: OutputMode,
     target: &Target,
+    suppress_rerun: bool,
 ) -> Result<(Result<()>, TestCaseStats, Vec<usize>, Vec<usize>, bool)> {
     // Compute relative path for rerun command
     let filetests_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
@@ -310,6 +311,7 @@ pub fn run(
                     output_mode,
                     Some(&directive.expression_str),
                     target,
+                    suppress_rerun,
                 );
                 let full_error = append_debug_state_if_requested(output_mode, &inst, formatted);
                 eprintln_if_detail(output_mode, &full_error);
@@ -348,6 +350,7 @@ pub fn run(
                         output_mode,
                         Some(&directive.expression_str),
                         target,
+                        suppress_rerun,
                     );
                     // Append debug section if available and in debug mode
                     let full_error = if let Some(debug) = debug_section {
@@ -381,6 +384,7 @@ pub fn run(
                         output_mode,
                         Some(&directive.expression_str),
                         target,
+                        suppress_rerun,
                     );
                     // Append debug section if available and in debug mode
                     let full_error = if let Some(debug) = debug_section {
@@ -424,6 +428,7 @@ pub fn run(
                             output_mode,
                             Some(&directive.expression_str),
                             target,
+                            suppress_rerun,
                         );
                         eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -453,6 +458,7 @@ pub fn run(
                             output_mode,
                             Some(&directive.expression_str),
                             target,
+                            suppress_rerun,
                         );
                         eprintln_if_detail(output_mode, &formatted_error);
                         errors.push(anyhow::anyhow!("{formatted_error}"));
@@ -608,6 +614,7 @@ pub fn run(
                                 directive.expression_str, op_str, directive.expected_str
                             )),
                             target,
+                            suppress_rerun,
                         );
                         let full_error =
                             append_debug_state_if_requested(output_mode, &inst, formatted_error);
@@ -657,6 +664,7 @@ enum ErrorType {
 }
 
 /// Format error with consistent section ordering (optional GLSL context, rerun hints).
+/// When `suppress_rerun` is true, the rerun commands are omitted (used in mark-unimplemented mode).
 fn format_error(
     _error_type: ErrorType,
     error_message: &str,
@@ -666,6 +674,7 @@ fn format_error(
     output_mode: OutputMode,
     _test_expression: Option<&str>,
     target: &Target,
+    suppress_rerun: bool,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -679,31 +688,33 @@ fn format_error(
     // Error details (just the error message, filename:line removed)
     parts.push(error_message.to_string());
 
-    // Rerun
-    let target_name = target.name();
-    let rerun_section = if output_mode.show_full_output() {
-        let rerun_title = if colors::should_color() {
-            format!("{}{}{}", colors::BOLD, "Rerun this test:", colors::RESET)
-        } else {
-            "Rerun this test:".to_string()
-        };
-        let debug_title = if colors::should_color() {
+    // Rerun (omitted in mark-unimplemented mode)
+    if !suppress_rerun {
+        let target_name = target.name();
+        let rerun_section = if output_mode.show_full_output() {
+            let rerun_title = if colors::should_color() {
+                format!("{}{}{}", colors::BOLD, "Rerun this test:", colors::RESET)
+            } else {
+                "Rerun this test:".to_string()
+            };
+            let debug_title = if colors::should_color() {
+                format!(
+                    "{}{}{}",
+                    colors::BOLD,
+                    "Rerun with debugging:",
+                    colors::RESET
+                )
+            } else {
+                "Rerun with debugging:".to_string()
+            };
             format!(
-                "{}{}{}",
-                colors::BOLD,
-                "Rerun with debugging:",
-                colors::RESET
+                "{rerun_title}\n  scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}"
             )
         } else {
-            "Rerun with debugging:".to_string()
+            format!("scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}")
         };
-        format!(
-            "{rerun_title}\n  scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}\n\n{debug_title}\n  DEBUG=1 scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}"
-        )
-    } else {
-        format!("scripts/glsl-filetests.sh --target {target_name} {filename}:{line_number}")
-    };
-    parts.push(rerun_section);
+        parts.push(rerun_section);
+    }
 
     parts.join("\n\n")
 }

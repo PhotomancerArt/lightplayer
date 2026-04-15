@@ -23,6 +23,9 @@ struct Request {
     line_filter: Option<usize>,
     output_mode: OutputMode,
     targets: Vec<&'static Target>,
+    /// When true, individual test failure messages omit rerun commands (used in
+    /// mark-unimplemented mode).
+    suppress_rerun: bool,
 }
 
 /// Reply from worker thread.
@@ -117,6 +120,7 @@ impl ConcurrentRunner {
         line_filter: Option<usize>,
         output_mode: OutputMode,
         targets: &[&'static Target],
+        suppress_rerun: bool,
     ) {
         self.request_tx
             .as_ref()
@@ -127,6 +131,7 @@ impl ConcurrentRunner {
                 line_filter,
                 output_mode,
                 targets: targets.to_vec(),
+                suppress_rerun,
             })
             .expect("all the worker threads are gone");
     }
@@ -167,6 +172,7 @@ fn worker_thread(
                     line_filter,
                     output_mode,
                     targets,
+                    suppress_rerun,
                 } = match requests.lock().unwrap().recv() {
                     Err(..) => break, // TX end shut down. exit thread.
                     Ok(req) => req,
@@ -188,6 +194,7 @@ fn worker_thread(
                         line_filter,
                         output_mode,
                         &targets,
+                        suppress_rerun,
                     )
                 })) {
                     Ok(Ok((r, pt, s, up, fl, cfmap, cf))) => (r, pt, s, up, fl, cfmap, cf, true),

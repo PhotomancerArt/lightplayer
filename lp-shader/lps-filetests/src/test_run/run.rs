@@ -22,6 +22,7 @@ pub fn run_test_file_with_line_filter(
     line_filter: Option<usize>,
     output_mode: OutputMode,
     targets: &[&Target],
+    suppress_rerun: bool,
 ) -> Result<(
     Result<()>,
     PerTargetStats,
@@ -65,7 +66,7 @@ pub fn run_test_file_with_line_filter(
 
     for target in targets {
         let (result, stats, unexpected_pass, failed_lines, compile_failed) =
-            run_detail::run(test_file, path, line_filter, output_mode, target)?;
+            run_detail::run(test_file, path, line_filter, output_mode, target, suppress_rerun)?;
 
         let target_name = target.name();
         compile_failed_by_target.insert(target_name.clone(), compile_failed);
@@ -110,6 +111,6 @@ pub fn run_test_file_with_line_filter(
 pub fn run_test_file(test_file: &TestFile, path: &Path) -> Result<()> {
     let targets: Vec<&Target> = crate::targets::DEFAULT_TARGETS.iter().collect();
     let (result, _, _, _, _, _, _) =
-        run_test_file_with_line_filter(test_file, path, None, OutputMode::Detail, &targets)?;
+        run_test_file_with_line_filter(test_file, path, None, OutputMode::Detail, &targets, false)?;
     result
 }

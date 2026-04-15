@@ -117,7 +117,7 @@ fn mark_unimplemented_expectations_for_file(
 pub fn run_filetest(path: &Path) -> Result<()> {
     let targets: Vec<&Target> = DEFAULT_TARGETS.iter().collect();
     let (result, _, _, _, _, _, _) =
-        run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets)?;
+        run_filetest_with_line_filter(path, None, OutputMode::Detail, &targets, false)?;
     result
 }
 
@@ -151,11 +151,14 @@ pub(crate) fn count_test_cases(path: &Path, line_filter: Option<usize>) -> test_
 /// Run a single filetest with optional line number filtering.
 /// Returns the result, per-target stats, combined stats, unexpected-pass lines, failed lines, and
 /// whether any target had a whole-file compile failure.
+/// When `suppress_rerun` is true, individual test failure messages omit rerun commands (used in
+/// mark-unimplemented mode).
 pub fn run_filetest_with_line_filter(
     path: &Path,
     line_filter: Option<usize>,
     output_mode: OutputMode,
     targets: &[&Target],
+    suppress_rerun: bool,
 ) -> Result<(
     Result<()>,
     test_run::PerTargetStats,
@@ -259,6 +262,7 @@ pub fn run_filetest_with_line_filter(
             line_filter,
             output_mode,
             targets,
+            suppress_rerun,
         )?;
         Ok((
             result,
@@ -492,6 +496,7 @@ pub fn run(
                 spec.line_number,
                 output_mode,
                 &active_targets,
+                mark_mode_active,
             )
         })) {
             Ok(Ok((r, pt, s, up, fl, cfm, cf))) => (r, pt, s, up, fl, cfm, cf, true),
@@ -930,6 +935,7 @@ pub fn run(
             tests[jobid].spec.line_number,
             output_mode,
             &active_targets,
+            mark_mode_active,
         );
         next_test += 1;
     }
@@ -1219,8 +1225,8 @@ pub fn run(
 
     let elapsed = start_time.elapsed();
 
-    // Print failed tests summary if there are failures
-    if !failed_tests.is_empty() && !output_mode.show_full_output() {
+    // Print failed tests summary if there are failures (skip in mark mode)
+    if !failed_tests.is_empty() && !output_mode.show_full_output() && !mark_mode_active {
         println!("\n{} Failed tests", failed_tests.len());
         println!("Run these commands to see test failure details\n");
         for failed_test in &failed_tests {
@@ -1255,6 +1261,74 @@ pub fn run(
         }
     }
 
+    if mark_mode_active && unexpected_pass_test_cases > 0 {
+        anyhow::bail!(
+            "cannot use --mark-unimplemented when there are unexpected passes; use --fix first"
+        );
+    }
+
+    if mark_mode_active {
+        let mut total_marks = 0usize;
+        let mut files_marked = std::collections::BTreeSet::new();
+        for test in &tests {
+            let mut file_had_mark = false;
+            for t in &active_targets {
+                let tn = t.name();
+                let failed_lines = test
+                    .failed_lines_by_target
+                    .get(&tn)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let compile_failed_t = *test.compile_failed_by_target.get(&tn).unwrap_or(&false);
+                if !compile_failed_t && failed_lines.is_empty() {
+                    continue;
+                }
+                let marks = mark_unimplemented_expectations_for_file(
+                    &test.spec.path,
+                    failed_lines,
+                    compile_failed_t,
+                    t,
+                    baseline_for_dup,
+                )?;
+                if marks > 0 {
+                    file_had_mark = true;
+                }
+                total_marks += marks;
+            }
+            if file_had_mark {
+                files_marked.insert(relative_path(&test.spec.path, &filetests_dir));
+            }
+        }
+        if total_marks > 0 {
+            println!(
+                "\n{}",
+                colors::colorize(
+                    &format!(
+                        "Applied {total_marks} @unimplemented marker(s) across {} file(s)",
+                        files_marked.len()
+                    ),
+                    colors::GREEN,
+                )
+            );
+            println!(
+                "{}",
+                colors::colorize("Re-run filetests to verify green.", colors::GREEN)
+            );
+            return Ok(());
+        }
+        if failed > 0 {
+            anyhow::bail!(
+                "--mark-unimplemented: failures found but no new markers were added (already annotated?)"
+            );
+        }
+        println!(
+            "\n{}",
+            colors::colorize("No failing tests needed marking.", colors::YELLOW)
+        );
+        return Ok(());
+    }
+
+    // Print results summary (skipped in mark mode above)
     println!(
         "\n{}",
         format_results_summary(
@@ -1271,59 +1345,6 @@ pub fn run(
             &per_target_compile_fail_files,
         )
     );
-
-    if mark_mode_active && unexpected_pass_test_cases > 0 {
-        anyhow::bail!(
-            "cannot use --mark-unimplemented when there are unexpected passes; use --fix first"
-        );
-    }
-
-    if mark_mode_active {
-        let mut total_marks = 0usize;
-        for test in &tests {
-            for t in &active_targets {
-                let tn = t.name();
-                let failed_lines = test
-                    .failed_lines_by_target
-                    .get(&tn)
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
-                let compile_failed_t = *test.compile_failed_by_target.get(&tn).unwrap_or(&false);
-                if !compile_failed_t && failed_lines.is_empty() {
-                    continue;
-                }
-                total_marks += mark_unimplemented_expectations_for_file(
-                    &test.spec.path,
-                    failed_lines,
-                    compile_failed_t,
-                    t,
-                    baseline_for_dup,
-                )?;
-            }
-        }
-        if total_marks > 0 {
-            println!(
-                "\n{}",
-                colors::colorize(
-                    &format!(
-                        "Applied {total_marks} baseline @unimplemented marker(s). Re-run filetests to verify green."
-                    ),
-                    colors::GREEN,
-                )
-            );
-            return Ok(());
-        }
-        if failed > 0 {
-            anyhow::bail!(
-                "--mark-unimplemented: failures found but no new markers were added (already annotated?)"
-            );
-        }
-        println!(
-            "\n{}",
-            colors::colorize("No failing tests needed marking.", colors::YELLOW)
-        );
-        return Ok(());
-    }
 
     // Exit with error if there are unexpected failures or unexpected passes
     if failed > 0 {
