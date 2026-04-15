@@ -61,6 +61,67 @@ fn region_first_vinst(tree: &RegionTree, id: RegionId) -> Option<u16> {
     }
 }
 
+/// Identify entry-parameter vregs that are exclusively used as call args at the
+/// same ABI position they arrive in. These can stay in their ABI register
+/// without ever entering the pool, eliminating entry_move + arg_move overhead.
+///
+/// Returns a map from vreg index → entry ABI register for eligible vregs.
+fn build_passthrough_set(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+    func_abi: &FuncAbi,
+) -> Vec<Option<PReg>> {
+    let max_vreg = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize;
+    let mut passthrough: Vec<Option<PReg>> = vec![None; max_vreg + 1];
+    let mut disqualified = vec![false; max_vreg + 1];
+
+    for &(vreg_idx, preg) in func_abi.precolors() {
+        let idx = vreg_idx as usize;
+        if idx < passthrough.len() {
+            passthrough[idx] = Some(preg.hw);
+        }
+    }
+
+    for inst in vinsts {
+        match inst {
+            VInst::Call {
+                args,
+                callee_uses_sret,
+                ..
+            } => {
+                let arg_base = if *callee_uses_sret { 1 } else { 0 };
+                let call_args = args.vregs(vreg_pool);
+                for (i, &arg_vreg) in call_args.iter().enumerate() {
+                    let idx = arg_vreg.0 as usize;
+                    if idx >= passthrough.len() || disqualified[idx] || passthrough[idx].is_none() {
+                        continue;
+                    }
+                    let entry_reg = passthrough[idx].unwrap();
+                    let is_reg_pass = arg_base + i < gpr::ARG_REGS.len();
+                    if !is_reg_pass || gpr::ARG_REGS[arg_base + i] != entry_reg {
+                        disqualified[idx] = true;
+                    }
+                }
+            }
+            other => {
+                other.for_each_use(vreg_pool, |use_vreg| {
+                    let idx = use_vreg.0 as usize;
+                    if idx < disqualified.len() {
+                        disqualified[idx] = true;
+                    }
+                });
+            }
+        }
+    }
+
+    for (idx, dq) in disqualified.iter().enumerate() {
+        if *dq && idx < passthrough.len() {
+            passthrough[idx] = None;
+        }
+    }
+    passthrough
+}
+
 /// Register allocation over the full `vinsts` slice using a region tree root.
 pub fn allocate_from_tree(
     vinsts: &[VInst],
@@ -78,6 +139,7 @@ pub fn allocate_from_tree(
         });
     }
     let max_vreg_idx = max_vreg_idx + 32;
+    let passthrough = build_passthrough_set(vinsts, vreg_pool, func_abi);
     let mut state = WalkState {
         vinsts,
         vreg_pool,
@@ -90,6 +152,7 @@ pub fn allocate_from_tree(
         edits: Vec::new(),
         trace: trace_sink_new(),
         loop_carried: RegSet::new(),
+        passthrough,
     };
     state.walk_region(root)?;
     state.finish()
@@ -109,6 +172,9 @@ struct WalkState<'a> {
     /// VRegs that are loop-carried: defs to registers get a store-after-def
     /// edit so the spill slot always has the latest value at sub-boundaries.
     loop_carried: RegSet,
+    /// Entry-parameter vregs that stay in their ABI register (never enter pool).
+    /// Indexed by vreg index; `Some(preg)` = passthrough to that ABI register.
+    passthrough: Vec<Option<PReg>>,
 }
 
 impl<'a> WalkState<'a> {
@@ -231,6 +297,7 @@ impl<'a> WalkState<'a> {
                     &mut self.allocs,
                     &mut self.edits,
                     &mut self.trace,
+                    &self.passthrough,
                 );
             } else {
                 process_generic(
@@ -744,6 +811,7 @@ fn process_call(
     allocs: &mut [Alloc],
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut TraceSink,
+    passthrough: &[Option<PReg>],
 ) {
     let (args_slice, rets_slice, callee_uses_sret) = match inst {
         VInst::Call {
@@ -907,6 +975,28 @@ fn process_call(
         let is_reg_pass = arg_base + i < gpr::ARG_REGS.len();
         if is_reg_pass {
             let target = gpr::ARG_REGS[arg_base + i];
+
+            // Pass-through shortcut: vreg stays in its ABI register, no pool needed.
+            let is_passthrough = passthrough
+                .get(arg_vreg.0 as usize)
+                .copied()
+                .flatten()
+                .is_some_and(|entry_reg| entry_reg == target);
+            if is_passthrough {
+                allocs[alloc_idx] = Alloc::Reg(target);
+                TracePush::push(
+                    trace,
+                    TraceEntry {
+                        vinst_idx: inst_idx,
+                        vinst_mnemonic: String::from("call_arg"),
+                        decision: alloc::format!("v{}: x{} (passthrough)", arg_vreg.0, target),
+                        register_state: String::new(),
+                    },
+                );
+                operand_idx += 0; // already incremented
+                continue;
+            }
+
             reg_pass_args.push((arg_vreg, target));
             allocs[alloc_idx] = Alloc::Reg(target);
         }
