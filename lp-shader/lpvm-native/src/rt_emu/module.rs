@@ -39,21 +39,38 @@ impl LpvmModule for NativeEmuModule {
         use lpvm::AllocError;
 
         let align = 16usize;
-        let size = GUEST_VMCTX_BYTES.max(align);
+        let total_size = self.meta.vmctx_buffer_size();
+        let size = total_size.max(align);
         let buf = self
             .arena
             .alloc(size, align)
             .map_err(|e: AllocError| NativeError::Alloc(alloc::format!("{e:?}")))?;
+
+        // Zero-initialize the entire buffer, then write the vmctx header
         unsafe {
-            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), GUEST_VMCTX_BYTES);
-            write_guest_vmctx_header(slot);
+            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), total_size);
+            slot.fill(0);
+            write_guest_vmctx_header(&mut slot[..GUEST_VMCTX_BYTES]);
         }
-        Ok(NativeEmuInstance {
+
+        let globals_offset = self.meta.globals_offset();
+        let snapshot_offset = self.meta.snapshot_offset();
+        let globals_size = self.meta.globals_size();
+
+        let mut instance = NativeEmuInstance {
             module: self.clone(),
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
-        })
+            globals_offset,
+            snapshot_offset,
+            globals_size,
+        };
+
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        let _ = instance.init_globals();
+
+        Ok(instance)
     }
 
     fn debug_info(&self) -> Option<&ModuleDebugInfo> {

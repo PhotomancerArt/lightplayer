@@ -13,7 +13,6 @@
 
 use alloc::boxed::Box;
 
-use crate::LpsValueF32;
 use lps_shared::LpsType;
 
 /// Default instruction fuel for new [`VmContext`] values (tests and host JIT calls).
@@ -73,20 +72,8 @@ impl VmContext {
         (self as *mut Self as *mut u8).wrapping_add(Self::HEADER_SIZE)
     }
 
-    /// Placeholder: read global by index.
-    pub fn get_global(&self, _index: usize) -> LpsValueF32 {
-        unimplemented!("globals access in Milestone 2")
-    }
-
-    /// Placeholder: write global by index.
-    pub fn set_global(&mut self, _index: usize, _value: LpsValueF32) {
-        unimplemented!("globals access in Milestone 2")
-    }
-
-    /// Placeholder: read uniform by index.
-    pub fn get_uniform(&self, _index: usize) -> LpsValueF32 {
-        unimplemented!("uniforms access in Milestone 2")
-    }
+    // Note: Globals and uniforms access uses byte offsets (from LpsModuleSig layout)
+    // rather than indexed accessors. Use LpvmDataQ32 with computed offsets for typed access.
 }
 
 /// Allocate a header-sized buffer initialized from [`VmContext::default`].

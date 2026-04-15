@@ -2,7 +2,7 @@
 
 use alloc::{string::String, vec::Vec};
 
-use crate::LpsType;
+use crate::{LayoutRules, LpsType, VMCTX_HEADER_SIZE};
 
 /// Signature for LightPlayer Shader functions
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +36,47 @@ pub struct LpsModuleSig {
     /// Struct type describing the globals region layout (std430).
     /// Members correspond to private global declarations. `None` if no globals.
     pub globals_type: Option<LpsType>,
+}
+
+impl LpsModuleSig {
+    /// Compute the size of the uniforms region in bytes (std430 layout).
+    pub fn uniforms_size(&self) -> usize {
+        self.uniforms_type
+            .as_ref()
+            .map(|t| crate::layout::type_size(t, LayoutRules::Std430))
+            .unwrap_or(0)
+    }
+
+    /// Compute the size of the globals region in bytes (std430 layout).
+    pub fn globals_size(&self) -> usize {
+        self.globals_type
+            .as_ref()
+            .map(|t| crate::layout::type_size(t, LayoutRules::Std430))
+            .unwrap_or(0)
+    }
+
+    /// Compute the total VMContext buffer size:
+    /// header + uniforms + globals + snapshot
+    pub fn vmctx_buffer_size(&self) -> usize {
+        let uniforms_size = self.uniforms_size();
+        let globals_size = self.globals_size();
+        VMCTX_HEADER_SIZE + uniforms_size + 2 * globals_size
+    }
+
+    /// Offset to the uniforms region (after header).
+    pub fn uniforms_offset(&self) -> usize {
+        VMCTX_HEADER_SIZE
+    }
+
+    /// Offset to the globals region (after header + uniforms).
+    pub fn globals_offset(&self) -> usize {
+        VMCTX_HEADER_SIZE + self.uniforms_size()
+    }
+
+    /// Offset to the globals snapshot region (after globals).
+    pub fn snapshot_offset(&self) -> usize {
+        VMCTX_HEADER_SIZE + self.uniforms_size() + self.globals_size()
+    }
 }
 
 #[cfg(test)]

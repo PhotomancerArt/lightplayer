@@ -21,9 +21,59 @@ use super::module::{NativeJitDirectCall, NativeJitModule};
 pub struct NativeJitInstance {
     pub(crate) module: NativeJitModule,
     pub(crate) vmctx_guest: u32,
+    /// Byte offset from vmctx base to globals region
+    pub(crate) globals_offset: u32,
+    /// Byte offset from vmctx base to snapshot region
+    pub(crate) snapshot_offset: u32,
+    /// Size of globals region in bytes
+    pub(crate) globals_size: u32,
 }
 
 impl NativeJitInstance {
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state.
+    pub fn init_globals(&mut self) -> Result<(), NativeError> {
+        // Call __shader_init if it exists (it may not be present if there are no globals with initializers)
+        if self.module.entry_offset("__shader_init").is_some() {
+            self.invoke_flat("__shader_init", &[])?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals();
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals.
+    /// This is a no-op if globals_size == 0.
+    pub fn reset_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let base = self.vmctx_guest as *mut u8;
+        let globals_ptr = unsafe { base.add(self.globals_offset as usize) };
+        let snapshot_ptr = unsafe { base.add(self.snapshot_offset as usize) };
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(snapshot_ptr, globals_ptr, self.globals_size as usize);
+        }
+    }
+
+    /// Copy globals region to snapshot region (for init).
+    fn snapshot_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let base = self.vmctx_guest as *mut u8;
+        let globals_ptr = unsafe { base.add(self.globals_offset as usize) };
+        let snapshot_ptr = unsafe { base.add(self.snapshot_offset as usize) };
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(globals_ptr, snapshot_ptr, self.globals_size as usize);
+        }
+    }
+
     /// Fast direct call using cached handle (zero lookups, zero allocations).
     ///
     /// Uses stack-allocated buffers for args and returns. Caller provides output buffer.
@@ -219,6 +269,8 @@ impl LpvmInstance for NativeJitInstance {
     type Error = NativeError;
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
         if self.module.inner.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeJitInstance::call requires FloatMode::Q32",
@@ -282,6 +334,9 @@ impl LpvmInstance for NativeJitInstance {
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         if self.module.inner.options.float_mode != FloatMode::Q32 {
             return Err(NativeError::Call(CallError::Unsupported(String::from(
                 "NativeJitInstance::call_q32 requires FloatMode::Q32",

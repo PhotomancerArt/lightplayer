@@ -10,8 +10,8 @@ use cranelift_codegen::ir::ArgumentPurpose;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{
-    CallError, LpsValueF32, LpvmInstance, LpvmModule, VMCTX_HEADER_SIZE, VmContext,
-    decode_q32_return, flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
+    CallError, LpsValueF32, LpvmInstance, LpvmModule, VmContext, decode_q32_return,
+    flat_q32_words_from_f32_args, glsl_component_count, q32_to_lps_value_f32,
 };
 
 use crate::lpvm_module::CraneliftModule;
@@ -42,24 +42,89 @@ impl From<CallError> for InstanceError {
 pub struct CraneliftInstance {
     module: Arc<CraneliftModule>,
     vmctx_buf: Vec<u8>,
+    /// Byte offset from vmctx base to globals region
+    globals_offset: usize,
+    /// Byte offset from vmctx base to snapshot region
+    snapshot_offset: usize,
+    /// Size of globals region in bytes
+    globals_size: usize,
 }
 
 impl CraneliftInstance {
     pub(crate) fn new(module: &CraneliftModule) -> Self {
+        let meta = module.metadata();
+        let total_size = meta.vmctx_buffer_size();
+        let globals_offset = meta.globals_offset();
+        let snapshot_offset = meta.snapshot_offset();
+        let globals_size = meta.globals_size();
+
         let mut vmctx_buf = Vec::new();
-        vmctx_buf.resize(VMCTX_HEADER_SIZE, 0);
+        vmctx_buf.resize(total_size, 0);
         let header = VmContext::default();
         unsafe {
             core::ptr::write(vmctx_buf.as_mut_ptr().cast(), header);
         }
-        Self {
+
+        let mut instance = Self {
             module: Arc::new(module.clone()),
             vmctx_buf,
-        }
+            globals_offset,
+            snapshot_offset,
+            globals_size,
+        };
+
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        let _ = instance.init_globals();
+
+        instance
     }
 
     fn vmctx_ptr(&self) -> *const u8 {
         self.vmctx_buf.as_ptr()
+    }
+
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state.
+    pub fn init_globals(&mut self) -> Result<(), InstanceError> {
+        // Call __shader_init if it exists
+        if self.module.has_function("__shader_init") {
+            self.call_q32("__shader_init", &[])?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals();
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals.
+    /// This is a no-op if globals_size == 0.
+    pub fn reset_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let base = self.vmctx_buf.as_mut_ptr();
+        let globals_ptr = unsafe { base.add(self.globals_offset) };
+        let snapshot_ptr = unsafe { base.add(self.snapshot_offset) };
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(snapshot_ptr, globals_ptr, self.globals_size);
+        }
+    }
+
+    /// Copy globals region to snapshot region (for init).
+    fn snapshot_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        let base = self.vmctx_buf.as_mut_ptr();
+        let globals_ptr = unsafe { base.add(self.globals_offset) };
+        let snapshot_ptr = unsafe { base.add(self.snapshot_offset) };
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(globals_ptr, snapshot_ptr, self.globals_size);
+        }
     }
 }
 
@@ -80,6 +145,9 @@ impl LpvmInstance for CraneliftInstance {
     type Error = InstanceError;
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         if self.module.float_mode() != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "CraneliftInstance::call requires FloatMode::Q32; use direct_call for F32 JIT",
@@ -141,6 +209,9 @@ impl LpvmInstance for CraneliftInstance {
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         if self.module.float_mode() != FloatMode::Q32 {
             return Err(InstanceError::Unsupported(
                 "CraneliftInstance::call_q32 requires FloatMode::Q32",

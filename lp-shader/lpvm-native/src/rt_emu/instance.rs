@@ -27,9 +27,73 @@ pub struct NativeEmuInstance {
     pub(crate) vmctx_guest: u32,
     pub(crate) last_debug: Option<String>,
     pub(crate) last_guest_instruction_count: Option<u64>,
+    /// Byte offset from vmctx base to globals region
+    pub(crate) globals_offset: usize,
+    /// Byte offset from vmctx base to snapshot region
+    pub(crate) snapshot_offset: usize,
+    /// Size of globals region in bytes
+    pub(crate) globals_size: usize,
 }
 
 impl NativeEmuInstance {
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state.
+    pub fn init_globals(&mut self) -> Result<(), NativeError> {
+        // Call __shader_init if it exists
+        if self.has_function("__shader_init") {
+            self.invoke_flat("__shader_init", &[])?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals();
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals.
+    /// This is a no-op if globals_size == 0.
+    pub fn reset_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        self.memcpy_guest(self.snapshot_offset, self.globals_offset, self.globals_size);
+    }
+
+    /// Copy globals region to snapshot region (for init).
+    fn snapshot_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        self.memcpy_guest(self.globals_offset, self.snapshot_offset, self.globals_size);
+    }
+
+    /// Check if a function exists in the module.
+    fn has_function(&self, name: &str) -> bool {
+        self.module.ir.functions.iter().any(|f| f.name == name)
+    }
+
+    /// Memcpy within the guest memory (via shared arena).
+    /// src_offset and dst_offset are relative to vmctx_guest base.
+    fn memcpy_guest(&self, src_offset: usize, dst_offset: usize, size: usize) {
+        let shared_start = self.module.arena.shared_start() as usize;
+        let vmctx_base = self.vmctx_guest as usize;
+
+        let src_addr = vmctx_base + src_offset - shared_start;
+        let dst_addr = vmctx_base + dst_offset - shared_start;
+
+        let mut storage = self.module.arena.lock_storage();
+        if src_addr + size <= storage.len() && dst_addr + size <= storage.len() {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    storage.as_ptr().add(src_addr),
+                    storage.as_mut_ptr().add(dst_addr),
+                    size,
+                );
+            }
+        }
+    }
+
     fn refresh_vmctx_header(&self) {
         let off =
             (u64::from(self.vmctx_guest) - u64::from(self.module.arena.shared_start())) as usize;
@@ -171,6 +235,9 @@ impl LpvmInstance for NativeEmuInstance {
     type Error = NativeError;
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
@@ -234,6 +301,9 @@ impl LpvmInstance for NativeEmuInstance {
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {

@@ -52,26 +52,107 @@ pub struct EmuInstance {
     vmctx_guest: u32,
     last_debug: Option<String>,
     last_guest_instruction_count: Option<u64>,
+    /// Byte offset from vmctx base to globals region
+    globals_offset: usize,
+    /// Byte offset from vmctx base to snapshot region
+    snapshot_offset: usize,
+    /// Size of globals region in bytes
+    globals_size: usize,
 }
 
 impl EmuInstance {
     pub(crate) fn new(module: EmuModule) -> Result<Self, InstanceError> {
         let align = 16usize;
-        let size = GUEST_VMCTX_BYTES.max(align);
+        let total_size = module.meta.vmctx_buffer_size();
+        let size = total_size.max(align);
         let buf = module
             .arena
             .alloc(size, align)
             .map_err(|e: AllocError| InstanceError::Alloc(e.to_string()))?;
+
+        // Zero-initialize the entire buffer, then write the vmctx header
         unsafe {
-            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), GUEST_VMCTX_BYTES);
-            emu_run::write_guest_vmctx_header(slot);
+            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), total_size);
+            slot.fill(0);
+            emu_run::write_guest_vmctx_header(&mut slot[..GUEST_VMCTX_BYTES]);
         }
-        Ok(Self {
+
+        let globals_offset = module.meta.globals_offset();
+        let snapshot_offset = module.meta.snapshot_offset();
+        let globals_size = module.meta.globals_size();
+
+        let mut instance = Self {
             module,
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
-        })
+            globals_offset,
+            snapshot_offset,
+            globals_size,
+        };
+
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        let _ = instance.init_globals();
+
+        Ok(instance)
+    }
+
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state.
+    pub fn init_globals(&mut self) -> Result<(), InstanceError> {
+        // Call __shader_init if it exists
+        if self.has_function("__shader_init") {
+            self.invoke_flat("__shader_init", &[])?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals();
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals.
+    /// This is a no-op if globals_size == 0.
+    pub fn reset_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        self.memcpy_guest(self.snapshot_offset, self.globals_offset, self.globals_size);
+    }
+
+    /// Copy globals region to snapshot region (for init).
+    fn snapshot_globals(&mut self) {
+        if self.globals_size == 0 {
+            return;
+        }
+
+        self.memcpy_guest(self.globals_offset, self.snapshot_offset, self.globals_size);
+    }
+
+    /// Check if a function exists in the module.
+    fn has_function(&self, name: &str) -> bool {
+        self.module.ir.functions.iter().any(|f| f.name == name)
+    }
+
+    /// Memcpy within the guest memory (via shared arena).
+    /// src_offset and dst_offset are relative to vmctx_guest base.
+    fn memcpy_guest(&self, src_offset: usize, dst_offset: usize, size: usize) {
+        let shared_start = self.module.arena.shared_start() as usize;
+        let vmctx_base = self.vmctx_guest as usize;
+
+        let src_addr = vmctx_base + src_offset - shared_start;
+        let dst_addr = vmctx_base + dst_offset - shared_start;
+
+        let mut storage = self.module.arena.lock_storage();
+        if src_addr + size <= storage.len() && dst_addr + size <= storage.len() {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    storage.as_ptr().add(src_addr),
+                    storage.as_mut_ptr().add(dst_addr),
+                    size,
+                );
+            }
+        }
     }
 
     fn refresh_vmctx_header(&self) {
@@ -88,6 +169,9 @@ impl LpvmInstance for EmuInstance {
     type Error = InstanceError;
 
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {
@@ -154,6 +238,9 @@ impl LpvmInstance for EmuInstance {
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
+        // Reset globals before each call to ensure fresh state
+        self.reset_globals();
+
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         if self.module.options.float_mode != FloatMode::Q32 {

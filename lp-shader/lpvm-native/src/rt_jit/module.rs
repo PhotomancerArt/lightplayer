@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{AllocError, LpvmMemory, LpvmModule, ModuleDebugInfo};
+use lpvm::{AllocError, LpvmMemory, LpvmModule};
 use lpvm::{DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE};
 
 use crate::error::NativeError;
@@ -38,8 +38,6 @@ pub struct NativeJitDirectCall {
 #[derive(Clone)]
 pub struct NativeJitModule {
     pub(crate) inner: Arc<NativeJitModuleInner>,
-    /// Debug info with sections per function.
-    pub(crate) debug_info: ModuleDebugInfo,
 }
 
 impl NativeJitModule {
@@ -90,23 +88,36 @@ impl LpvmModule for NativeJitModule {
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         let align = 16usize;
-        let size = VMCTX_HEADER_SIZE.max(align);
+        let total_size = self.inner.meta.vmctx_buffer_size();
+        let size = total_size.max(align);
         let memory = NativeHostMemory::new();
         let buf = memory
             .alloc(size, align)
             .map_err(|e: AllocError| NativeError::Alloc(alloc::format!("{e:?}")))?;
+
+        // Zero-initialize the entire buffer, then write the vmctx header
         unsafe {
-            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), VMCTX_HEADER_SIZE);
-            write_vmctx_header(slot);
+            let slot = core::slice::from_raw_parts_mut(buf.native_ptr(), total_size);
+            slot.fill(0);
+            write_vmctx_header(&mut slot[..VMCTX_HEADER_SIZE]);
         }
-        Ok(NativeJitInstance {
+
+        let globals_offset = self.inner.meta.globals_offset() as u32;
+        let snapshot_offset = self.inner.meta.snapshot_offset() as u32;
+        let globals_size = self.inner.meta.globals_size() as u32;
+
+        let mut instance = NativeJitInstance {
             module: self.clone(),
             vmctx_guest: buf.guest_base() as u32,
-        })
-    }
+            globals_offset,
+            snapshot_offset,
+            globals_size,
+        };
 
-    fn debug_info(&self) -> Option<&ModuleDebugInfo> {
-        Some(&self.debug_info)
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        instance.init_globals()?;
+
+        Ok(instance)
     }
 }
 

@@ -75,6 +75,11 @@ pub fn lower(naga_module: &NagaModule) -> Result<(LpirModule, LpsModuleSig), Low
     // Synthesize __shader_init function if there are globals with initializers.
     if !global_map.is_empty() {
         if let Some(init_func) = synthesize_shader_init(&naga_module.module, &global_map) {
+            glsl_meta.functions.push(LpsFnSig {
+                name: String::from("__shader_init"),
+                parameters: vec![],
+                return_type: LpsType::Void,
+            });
             mb.add_function(init_func);
         }
     }
