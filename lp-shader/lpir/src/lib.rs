@@ -7,6 +7,7 @@
 extern crate alloc;
 
 pub mod builder;
+pub mod const_fold;
 pub mod interp;
 pub mod lpir_module;
 pub mod lpir_op;

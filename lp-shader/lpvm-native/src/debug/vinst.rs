@@ -593,10 +593,24 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
             format!("{} = IConst32 {}", ireg(dst), val)
         }
 
-        VInst::AluRRR { op, dst, src1, src2, .. } => {
-            format!("{} = {} {}, {}", ireg(dst), op.mnemonic(), ireg(src1), ireg(src2))
+        VInst::AluRRR {
+            op,
+            dst,
+            src1,
+            src2,
+            ..
+        } => {
+            format!(
+                "{} = {} {}, {}",
+                ireg(dst),
+                op.mnemonic(),
+                ireg(src1),
+                ireg(src2)
+            )
         }
-        VInst::AluRRI { op, dst, src, imm, .. } => {
+        VInst::AluRRI {
+            op, dst, src, imm, ..
+        } => {
             format!("{} = {} {}, {}", ireg(dst), op.mnemonic(), ireg(src), imm)
         }
 
@@ -625,8 +639,20 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
                 ireg(rhs)
             )
         }
-        VInst::IcmpImm { dst, src, imm, cond, .. } => {
-            format!("{} = IcmpImm {}, {}, {}", ireg(dst), icmp_cond(cond), ireg(src), imm)
+        VInst::IcmpImm {
+            dst,
+            src,
+            imm,
+            cond,
+            ..
+        } => {
+            format!(
+                "{} = IcmpImm {}, {}, {}",
+                ireg(dst),
+                icmp_cond(cond),
+                ireg(src),
+                imm
+            )
         }
         VInst::Select {
             dst,

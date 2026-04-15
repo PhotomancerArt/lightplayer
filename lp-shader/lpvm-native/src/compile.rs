@@ -72,7 +72,7 @@ impl CompileSession {
     }
 }
 
-/// Compile one function: LPIR → VInst → (peephole) → AllocOutput → bytes.
+/// Compile one function: LPIR → (const fold) → VInst → (imm fold) → AllocOutput → bytes.
 pub fn compile_function(
     session: &mut CompileSession,
     func: &IrFunction,
@@ -88,17 +88,26 @@ pub fn compile_function(
     // Build function ABI (needed for both debug and non-debug paths)
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
 
-    // 1-3. Lower, allocate, emit - wrapped in scope to drop intermediates early
+    // 1-4. Const-fold, lower, optimize, allocate, emit
     let (code, relocs, debug_lines, sections) = {
-        // Lower LPIR → VInst
-        let lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
+        let mut func_opt = func.clone();
+        let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
+        if n_folded > 0 {
+            log::debug!(
+                "[native-fa] compile_function: folded {} LPIR constants",
+                n_folded
+            );
+        }
+
+        let mut lowered = crate::lower::lower_ops(&func_opt, ir, &session.abi, session.float_mode)
             .map_err(NativeError::Lower)?;
         log::debug!(
             "[native-fa] compile_function: lowered to {} vinsts",
             lowered.vinsts.len()
         );
 
-        // Allocate and emit
+        crate::opt::fold_immediates(&mut lowered);
+
         log::debug!("[native-fa] compile_function: emitting code...");
         let emitted =
             crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
@@ -112,7 +121,7 @@ pub fn compile_function(
         let debug_lines = emitted.debug_lines;
 
         let sections = crate::debug::sections::build_debug_sections(
-            func,
+            &func_opt,
             ir,
             &lowered,
             &code,

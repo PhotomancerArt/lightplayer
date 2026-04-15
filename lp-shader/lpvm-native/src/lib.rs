@@ -23,7 +23,7 @@ pub mod error;
 pub mod link;
 pub mod lower;
 pub mod native_options;
-pub mod peephole;
+pub mod opt;
 pub mod regalloc;
 pub mod region;
 pub mod regset;

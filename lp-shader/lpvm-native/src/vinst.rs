@@ -283,17 +283,9 @@ pub enum VInst {
         src_op: u16,
     },
     /// Unary negate: `dst = -src` (pseudo for `sub rd, x0, rs`).
-    Neg {
-        dst: VReg,
-        src: VReg,
-        src_op: u16,
-    },
+    Neg { dst: VReg, src: VReg, src_op: u16 },
     /// Bitwise NOT: `dst = ~src` (pseudo for `xori rd, rs, -1`).
-    Bnot {
-        dst: VReg,
-        src: VReg,
-        src_op: u16,
-    },
+    Bnot { dst: VReg, src: VReg, src_op: u16 },
     /// Integer comparison (pseudo — multi-instruction expansion in emitter).
     Icmp {
         dst: VReg,
@@ -319,10 +311,7 @@ pub enum VInst {
         src_op: u16,
     },
     /// Unconditional branch.
-    Br {
-        target: LabelId,
-        src_op: u16,
-    },
+    Br { target: LabelId, src_op: u16 },
     /// Conditional branch.
     BrIf {
         cond: VReg,
@@ -331,11 +320,7 @@ pub enum VInst {
         src_op: u16,
     },
     /// Register copy (kept separate for copy-coalescing in regalloc).
-    Mov {
-        dst: VReg,
-        src: VReg,
-        src_op: u16,
-    },
+    Mov { dst: VReg, src: VReg, src_op: u16 },
     /// Word load: `dst = [base + offset]`.
     Load32 {
         dst: VReg,
@@ -351,11 +336,7 @@ pub enum VInst {
         src_op: u16,
     },
     /// Compute address of LPIR stack slot.
-    SlotAddr {
-        dst: VReg,
-        slot: u32,
-        src_op: u16,
-    },
+    SlotAddr { dst: VReg, slot: u32, src_op: u16 },
     /// Word-aligned memcpy.
     MemcpyWords {
         dst_base: VReg,
@@ -364,11 +345,7 @@ pub enum VInst {
         src_op: u16,
     },
     /// 32-bit integer constant load.
-    IConst32 {
-        dst: VReg,
-        val: i32,
-        src_op: u16,
-    },
+    IConst32 { dst: VReg, val: i32, src_op: u16 },
     /// Function call.
     Call {
         target: SymbolId,
@@ -378,10 +355,7 @@ pub enum VInst {
         src_op: u16,
     },
     /// Return from function.
-    Ret {
-        vals: VRegSlice,
-        src_op: u16,
-    },
+    Ret { vals: VRegSlice, src_op: u16 },
     /// Label definition (branch target).
     Label(LabelId, u16),
 }
@@ -466,9 +440,9 @@ impl VInst {
                 f(*if_true);
                 f(*if_false);
             }
-            VInst::Neg { src, .. }
-            | VInst::Bnot { src, .. }
-            | VInst::IcmpImm { src, .. } => f(*src),
+            VInst::Neg { src, .. } | VInst::Bnot { src, .. } | VInst::IcmpImm { src, .. } => {
+                f(*src)
+            }
             VInst::Mov { src, .. } => f(*src),
             VInst::Load32 { base, .. } => f(*base),
             VInst::Store32 { src, base, .. } => {
@@ -551,13 +525,7 @@ impl VInst {
                 imm,
                 cond,
                 ..
-            } => format!(
-                "v{} = (v{} {} {})",
-                dst.0,
-                src.0,
-                icmp_cond_op(*cond),
-                imm
-            ),
+            } => format!("v{} = (v{} {} {})", dst.0, src.0, icmp_cond_op(*cond), imm),
             VInst::Select {
                 dst,
                 cond,

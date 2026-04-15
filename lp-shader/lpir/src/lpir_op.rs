@@ -378,3 +378,87 @@ pub enum LpirOp {
         values: VRegRange,
     },
 }
+
+impl LpirOp {
+    /// Returns the destination VReg defined by this operation, if any.
+    pub fn def_vreg(&self) -> Option<crate::VReg> {
+        match self {
+            LpirOp::Fadd { dst, .. }
+            | LpirOp::Fsub { dst, .. }
+            | LpirOp::Fmul { dst, .. }
+            | LpirOp::Fdiv { dst, .. }
+            | LpirOp::Fneg { dst, .. }
+            | LpirOp::Fabs { dst, .. }
+            | LpirOp::Fsqrt { dst, .. }
+            | LpirOp::Fmin { dst, .. }
+            | LpirOp::Fmax { dst, .. }
+            | LpirOp::Ffloor { dst, .. }
+            | LpirOp::Fceil { dst, .. }
+            | LpirOp::Ftrunc { dst, .. }
+            | LpirOp::Fnearest { dst, .. }
+            | LpirOp::Iadd { dst, .. }
+            | LpirOp::Isub { dst, .. }
+            | LpirOp::Imul { dst, .. }
+            | LpirOp::IdivS { dst, .. }
+            | LpirOp::IdivU { dst, .. }
+            | LpirOp::IremS { dst, .. }
+            | LpirOp::IremU { dst, .. }
+            | LpirOp::Ineg { dst, .. }
+            | LpirOp::Feq { dst, .. }
+            | LpirOp::Fne { dst, .. }
+            | LpirOp::Flt { dst, .. }
+            | LpirOp::Fle { dst, .. }
+            | LpirOp::Fgt { dst, .. }
+            | LpirOp::Fge { dst, .. }
+            | LpirOp::Ieq { dst, .. }
+            | LpirOp::Ine { dst, .. }
+            | LpirOp::IltS { dst, .. }
+            | LpirOp::IleS { dst, .. }
+            | LpirOp::IgtS { dst, .. }
+            | LpirOp::IgeS { dst, .. }
+            | LpirOp::IltU { dst, .. }
+            | LpirOp::IleU { dst, .. }
+            | LpirOp::IgtU { dst, .. }
+            | LpirOp::IgeU { dst, .. }
+            | LpirOp::Iand { dst, .. }
+            | LpirOp::Ior { dst, .. }
+            | LpirOp::Ixor { dst, .. }
+            | LpirOp::Ibnot { dst, .. }
+            | LpirOp::Ishl { dst, .. }
+            | LpirOp::IshrS { dst, .. }
+            | LpirOp::IshrU { dst, .. }
+            | LpirOp::IaddImm { dst, .. }
+            | LpirOp::IsubImm { dst, .. }
+            | LpirOp::ImulImm { dst, .. }
+            | LpirOp::IshlImm { dst, .. }
+            | LpirOp::IshrSImm { dst, .. }
+            | LpirOp::IshrUImm { dst, .. }
+            | LpirOp::IeqImm { dst, .. }
+            | LpirOp::FtoiSatS { dst, .. }
+            | LpirOp::FtoiSatU { dst, .. }
+            | LpirOp::ItofS { dst, .. }
+            | LpirOp::ItofU { dst, .. }
+            | LpirOp::FfromI32Bits { dst, .. }
+            | LpirOp::Select { dst, .. }
+            | LpirOp::Copy { dst, .. }
+            | LpirOp::SlotAddr { dst, .. }
+            | LpirOp::Load { dst, .. }
+            | LpirOp::FconstF32 { dst, .. }
+            | LpirOp::IconstI32 { dst, .. } => Some(*dst),
+            LpirOp::Store { .. }
+            | LpirOp::Memcpy { .. }
+            | LpirOp::Return { .. }
+            | LpirOp::Call { .. }
+            | LpirOp::IfStart { .. }
+            | LpirOp::Else
+            | LpirOp::End
+            | LpirOp::LoopStart { .. }
+            | LpirOp::Break
+            | LpirOp::Continue
+            | LpirOp::BrIfNot { .. }
+            | LpirOp::SwitchStart { .. }
+            | LpirOp::CaseStart { .. }
+            | LpirOp::DefaultStart { .. } => None,
+        }
+    }
+}

@@ -396,10 +396,18 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
         VInst::IConst32 { dst, val, .. } => {
             format!("i{} = IConst32 {}", dst.0, val)
         }
-        VInst::AluRRR { op, dst, src1, src2, .. } => {
+        VInst::AluRRR {
+            op,
+            dst,
+            src1,
+            src2,
+            ..
+        } => {
             format!("i{} = {} i{}, i{}", dst.0, op.mnemonic(), src1.0, src2.0)
         }
-        VInst::AluRRI { op, dst, src, imm, .. } => {
+        VInst::AluRRI {
+            op, dst, src, imm, ..
+        } => {
             format!("i{} = {} i{}, {}", dst.0, op.mnemonic(), src.0, imm)
         }
         VInst::Neg { dst, src, .. } => {
@@ -423,7 +431,13 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
                 rhs.0
             )
         }
-        VInst::IcmpImm { dst, src, imm, cond, .. } => {
+        VInst::IcmpImm {
+            dst,
+            src,
+            imm,
+            cond,
+            ..
+        } => {
             format!(
                 "i{} = IcmpImm {}, i{}, {}",
                 dst.0,

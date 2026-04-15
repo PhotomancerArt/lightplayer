@@ -15,7 +15,8 @@ use crate::error::LowerError;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
 use crate::rv32::abi::SRET_SCALAR_THRESHOLD;
 use crate::vinst::{
-    AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice, pack_src_op,
+    AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice,
+    pack_src_op,
 };
 
 #[inline]
@@ -71,19 +72,22 @@ pub fn lower_lpir_op(
 ) -> Result<VInst, LowerError> {
     let po = pack_src_op(src_op);
     match op {
-        LpirOp::Iadd { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Add,
+        LpirOp::Iadd { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Add,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Isub { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Sub,
+        LpirOp::Isub { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Sub,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Imul { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Mul,
+        LpirOp::Imul { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Mul,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
@@ -199,19 +203,57 @@ pub fn lower_lpir_op(
             cond: IcmpCond::Eq,
             src_op: po,
         }),
-        LpirOp::Iand { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::And,
+        LpirOp::IaddImm { dst, src, imm } => Ok(VInst::AluRRI {
+            op: AluImmOp::Addi,
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            imm: *imm,
+            src_op: po,
+        }),
+        LpirOp::IsubImm { dst, src, imm } => Ok(VInst::AluRRI {
+            op: AluImmOp::Addi,
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            imm: -(*imm),
+            src_op: po,
+        }),
+        LpirOp::IshlImm { dst, src, imm } => Ok(VInst::AluRRI {
+            op: AluImmOp::Slli,
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            imm: *imm,
+            src_op: po,
+        }),
+        LpirOp::IshrSImm { dst, src, imm } => Ok(VInst::AluRRI {
+            op: AluImmOp::SraiS,
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            imm: *imm,
+            src_op: po,
+        }),
+        LpirOp::IshrUImm { dst, src, imm } => Ok(VInst::AluRRI {
+            op: AluImmOp::SrliU,
+            dst: fa_vreg(*dst),
+            src: fa_vreg(*src),
+            imm: *imm,
+            src_op: po,
+        }),
+        LpirOp::Iand { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::And,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ior { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Or,
+        LpirOp::Ior { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Or,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::Ixor { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Xor,
+        LpirOp::Ixor { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Xor,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
@@ -222,19 +264,22 @@ pub fn lower_lpir_op(
             src: fa_vreg(*src),
             src_op: po,
         }),
-        LpirOp::Ishl { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::Sll,
+        LpirOp::Ishl { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::Sll,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IshrS { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::SraS,
+        LpirOp::IshrS { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::SraS,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
             src_op: po,
         }),
-        LpirOp::IshrU { dst, lhs, rhs } => Ok(VInst::AluRRR { op: AluOp::SrlU,
+        LpirOp::IshrU { dst, lhs, rhs } => Ok(VInst::AluRRR {
+            op: AluOp::SrlU,
             dst: fa_vreg(*dst),
             src1: fa_vreg(*lhs),
             src2: fa_vreg(*rhs),
