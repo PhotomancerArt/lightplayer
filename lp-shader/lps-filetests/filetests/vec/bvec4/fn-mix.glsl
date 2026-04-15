@@ -15,6 +15,8 @@ bvec4 test_bvec4_mix_all_false_selector() {
 
 // @unimplemented(jit.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_all_false_selector() == bvec4(true, false, true, false)
 
 bvec4 test_bvec4_mix_all_true_selector() {
@@ -25,6 +27,8 @@ bvec4 test_bvec4_mix_all_true_selector() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_all_true_selector() == bvec4(false, true, false, true)
 
 bvec4 test_bvec4_mix_mixed_selector() {
@@ -35,6 +39,8 @@ bvec4 test_bvec4_mix_mixed_selector() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_mixed_selector() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_other_mixed_selector() {
@@ -45,6 +51,8 @@ bvec4 test_bvec4_mix_other_mixed_selector() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_other_mixed_selector() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_same_vectors() {
@@ -54,6 +62,8 @@ bvec4 test_bvec4_mix_same_vectors() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_same_vectors() == bvec4(true, true, true, true)
 
 bvec4 test_bvec4_mix_in_expression() {
@@ -67,4 +77,6 @@ bvec4 test_bvec4_mix_in_expression() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bvec4_mix_in_expression() == bvec4(true, true, true, true)

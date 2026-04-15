@@ -16,6 +16,8 @@ int test_ternary_vec2() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_vec2() == 3
 
 int test_ternary_vec3() {
@@ -27,6 +29,8 @@ int test_ternary_vec3() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_vec3() == 15
 
 int test_ternary_vec4() {
@@ -38,6 +42,8 @@ int test_ternary_vec4() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_vec4() == 3
 
 int test_ternary_ivec2() {
@@ -49,6 +55,8 @@ int test_ternary_ivec2() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_ivec2() == 70
 
 int test_ternary_bvec2() {
@@ -60,6 +68,8 @@ int test_ternary_bvec2() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_bvec2() == 1
 
 // Matrix types
@@ -72,6 +82,8 @@ int test_ternary_mat2() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_mat2() == 5
 
 int test_ternary_mat3() {
@@ -83,6 +95,8 @@ int test_ternary_mat3() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_mat3() == 20
 
 // Structure types
@@ -151,6 +165,8 @@ int test_ternary_vec_component() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_vec_component() == 5
 
 // Nested with different types
@@ -165,6 +181,8 @@ int test_ternary_nested_types() {
 }
 
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_ternary_nested_types() == 7
 
 

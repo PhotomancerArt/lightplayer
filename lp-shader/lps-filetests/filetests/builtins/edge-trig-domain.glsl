@@ -18,6 +18,7 @@ float test_asin_domain_over() {
 // @unimplemented(wasm.q32)
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_asin_domain_over() ~= 0.0
 
@@ -28,6 +29,7 @@ float test_asin_domain_under() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_asin_domain_under() ~= 0.0
 
@@ -38,6 +40,7 @@ float test_acos_domain_over() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_acos_domain_over() ~= 0.0
 
@@ -48,6 +51,7 @@ float test_acos_domain_under() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_acos_domain_under() ~= 0.0
 
@@ -58,6 +62,7 @@ float test_atan2_zero_zero() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_atan2_zero_zero() ~= 0.0
 
@@ -68,6 +73,7 @@ float test_acosh_domain_under() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_acosh_domain_under() ~= 0.0
 
@@ -78,6 +84,7 @@ float test_atanh_domain_over() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_atanh_domain_over() ~= 0.0
 
@@ -88,6 +95,7 @@ float test_atanh_domain_under() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_atanh_domain_under() ~= 0.0
 
@@ -98,6 +106,7 @@ float test_atanh_domain_one() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_atanh_domain_one() ~= 0.0
 
@@ -108,6 +117,7 @@ float test_atanh_domain_neg_one() {
 
 // @unsupported(jit.q32)
 // @unsupported(rv32.q32)
+// @unsupported(rv32fa.q32)
 // @unsupported(wasm.q32)
 // run: test_atanh_domain_neg_one() ~= 0.0
 
