@@ -53,7 +53,10 @@ impl LpGraphics for NativeJitGraphics {
         let (ir, meta) = lps_frontend::lower(&naga).map_err(|e| crate::error::Error::Other {
             message: format!("{e}"),
         })?;
-        log::debug!("[native-jit] LPIR lowering complete: {} functions", ir.functions.len());
+        log::debug!(
+            "[native-jit] LPIR lowering complete: {} functions",
+            ir.functions.len()
+        );
         drop(naga);
 
         let engine = NativeJitEngine::new(

@@ -70,20 +70,16 @@ impl core::fmt::Display for PathError {
         match self {
             Self::Parse(e) => write!(f, "{e}"),
             Self::FieldNotFound { field, available } => {
-                write!(
-                    f,
-                    "field '{}' not found (available: {:?})",
-                    field, available
-                )
+                write!(f, "field '{field}' not found (available: {available:?})")
             }
             Self::IndexOutOfBounds { index, len } => {
-                write!(f, "index {} out of bounds (len {})", index, len)
+                write!(f, "index {index} out of bounds (len {len})")
             }
-            Self::NotIndexable { ty } => write!(f, "type `{}` is not indexable", ty),
-            Self::NotAField { ty } => write!(f, "type `{}` has no fields", ty),
-            Self::UnsupportedSwizzle(s) => write!(f, "unsupported swizzle `{}`", s),
+            Self::NotIndexable { ty } => write!(f, "type `{ty}` is not indexable"),
+            Self::NotAField { ty } => write!(f, "type `{ty}` has no fields"),
+            Self::UnsupportedSwizzle(s) => write!(f, "unsupported swizzle `{s}`"),
             Self::TrailingPath { remaining } => {
-                write!(f, "{} path segments remain after scalar", remaining)
+                write!(f, "{remaining} path segments remain after scalar")
             }
         }
     }
@@ -139,7 +135,7 @@ fn type_walk(ty: &LpsType, segs: &[LpsPathSeg]) -> Result<LpsType, PathError> {
             LpsPathSeg::Field(_name),
             scalar @ (LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool),
         ) => Err(PathError::NotAField {
-            ty: format!("{:?}", scalar),
+            ty: format!("{scalar:?}"),
         }),
         (LpsPathSeg::Field(name), _) => Err(PathError::FieldNotFound {
             field: name.clone(),
@@ -238,7 +234,7 @@ fn field_names(ty: &LpsType) -> Vec<String> {
 }
 
 fn type_name(ty: &LpsType) -> String {
-    format!("{:?}", ty)
+    format!("{ty:?}")
 }
 
 fn vector_scalar_type(ty: &LpsType, name: &str) -> Result<LpsType, PathError> {

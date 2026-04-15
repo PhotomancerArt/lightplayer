@@ -81,7 +81,10 @@ impl Mat2Q32 {
     }
 
     /// Matrix-matrix multiplication
-    #[allow(clippy::should_implement_trait)]
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Named `mul` for no_std Q32 matrices; not implementing std::ops::Mul"
+    )]
     #[inline(always)]
     pub fn mul(self, rhs: Self) -> Self {
         let a = self;

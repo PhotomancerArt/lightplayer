@@ -88,28 +88,28 @@ cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu
 
 ```bash
 # Run all filetest targets
-./scripts/glsl-filetests.sh --target rv32.q32
+./scripts/glsl-filetests.sh --target rv32.q32c
 ./scripts/glsl-filetests.sh --target wasm.q32
 
 # If scripts don't exist, run via cargo:
-cargo test -p lps-filetests -- --target rv32.q32
+cargo test -p lps-filetests -- --target rv32.q32c
 cargo test -p lps-filetests -- --target wasm.q32
 ```
 
 ## Expected Results
 
-| Test | Expected |
-|------|----------|
-| `cargo test -p lpvm-cranelift` | All pass |
-| `cargo test -p lpvm-emu` | All pass |
-| `cargo test -p lpvm-wasm` | All pass |
-| `cargo test -p lp-engine` | All pass |
-| `cargo test -p lp-server` | All pass |
-| `cargo test -p lps-filetests` | All pass |
-| `cargo test -p fw-tests` | All pass |
-| `fw-esp32 check` | Clean (no warnings) |
-| `fw-emu check` | Clean (no warnings) |
-| `cargo +nightly fmt --check` | Clean |
+| Test                           | Expected            |
+| ------------------------------ | ------------------- |
+| `cargo test -p lpvm-cranelift` | All pass            |
+| `cargo test -p lpvm-emu`       | All pass            |
+| `cargo test -p lpvm-wasm`      | All pass            |
+| `cargo test -p lp-engine`      | All pass            |
+| `cargo test -p lp-server`      | All pass            |
+| `cargo test -p lps-filetests`  | All pass            |
+| `cargo test -p fw-tests`       | All pass            |
+| `fw-esp32 check`               | Clean (no warnings) |
+| `fw-emu check`                 | Clean (no warnings) |
+| `cargo +nightly fmt --check`   | Clean               |
 
 ## Warnings to Fix
 

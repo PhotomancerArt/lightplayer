@@ -39,7 +39,7 @@ Zero unexpected failures on all targets. All deferred items annotated. Plan and 
 
 - `./scripts/glsl-filetests.sh` → exit 0 (jit.q32).
 - `./scripts/glsl-filetests.sh --target wasm.q32` → exit 0.
-- `./scripts/glsl-filetests.sh --target rv32.q32` → exit 0.
+- `./scripts/glsl-filetests.sh --target rv32.q32c` → exit 0.
 - `cargo test -p lps-frontend -p lpir -p lpvm-cranelift -p lps-filetests -p lps-wasm`.
 - `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server`.
 - `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`.

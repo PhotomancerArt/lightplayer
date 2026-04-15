@@ -562,7 +562,7 @@ impl VInst {
                 "v{} = v{} ? v{} : v{}",
                 dst.0, cond.0, if_true.0, if_false.0
             ),
-            VInst::Br { target, .. } => format!("Label({})", target),
+            VInst::Br { target, .. } => format!("Label({target})"),
             VInst::BrIf {
                 cond,
                 target,
@@ -606,13 +606,16 @@ impl VInst {
                 let args_s = vregs_csv_pool(pool, *args);
                 let rets_s = vregs_csv_pool(pool, *rets);
                 if rets.count == 0 {
-                    format!("{}({})", name, args_s)
+                    format!("{name}({args_s})")
                 } else {
-                    format!("{} = {}({})", rets_s, name, args_s)
+                    format!("{rets_s} = {name}({args_s})")
                 }
             }
-            VInst::Ret { vals, .. } => format!("({})", vregs_csv_pool(pool, *vals)),
-            VInst::Label(id, _) => format!("({})", id),
+            VInst::Ret { vals, .. } => {
+                let s = vregs_csv_pool(pool, *vals);
+                format!("({s})")
+            }
+            VInst::Label(id, _) => format!("({id})"),
         }
     }
 }

@@ -97,7 +97,7 @@ fn ratio_text(ratio: f64) -> String {
     if ratio <= 1.0005 {
         "1.00×".to_string()
     } else {
-        format!("{:.2}×", ratio)
+        format!("{ratio:.2}×")
     }
 }
 
@@ -117,7 +117,7 @@ fn format_count_with_ratio(
     } else {
         rt
     };
-    format!("{} ({})", count, ratio_part)
+    format!("{count} ({ratio_part})")
 }
 
 fn legend_line(use_color: bool) -> String {
@@ -242,7 +242,7 @@ mod tests {
         f1.disasm_count = 9;
         rv32n.functions.push(f1);
 
-        let mut r = DebugReport::new("x.glsl");
+        let mut r = DebugReport::new();
         r.backends.push(rv32c);
         r.backends.push(rv32n);
 

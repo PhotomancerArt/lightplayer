@@ -261,11 +261,8 @@ test: test-rust test-filetests
 test-rust:
     cargo test
 
-# Default script run is jit.q32; CI also exercises wasm.q32 and rv32.q32.
 test-filetests:
     scripts/glsl-filetests.sh
-    scripts/glsl-filetests.sh --target wasm.q32
-    scripts/glsl-filetests.sh --target rv32.q32
 
 # ============================================================================
 # Testing - lp-app only
@@ -284,7 +281,7 @@ test-glsl:
 test-glsl-filetests:
     scripts/glsl-filetests.sh
     scripts/glsl-filetests.sh --target wasm.q32
-    scripts/glsl-filetests.sh --target rv32.q32
+    scripts/glsl-filetests.sh --target rv32.q32c
 
 # ============================================================================
 # CI and validation

@@ -873,7 +873,10 @@ pub fn run(
         failed_lines_by_target: BTreeMap<String, Vec<usize>>,
         compile_failed_by_target: BTreeMap<String, bool>,
         /// Whether any target had whole-file compile failure (for tooling; not used for pass/fail).
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "Recorded for tooling; not used in pass/fail logic"
+        )]
         compile_failed: bool,
         /// False when the worker did not finish `run_filetest_with_line_filter` successfully.
         harness_completed: bool,
@@ -1744,7 +1747,7 @@ fn format_target_table(
         let fail_pad = format!("{:>col_fail$}", s.failed);
         let unimpl_pad = format!("{:>col_unimpl$}", s.unimplemented);
         let unsupported_pad = format!("{:>col_unsupported$}", s.unsupported);
-        let compile_fail_pad = format!("{:>col_compile_fail$}", cf);
+        let compile_fail_pad = format!("{cf:>col_compile_fail$}");
 
         let pass_cell = if with_color {
             format!("{}{pass_pad}{}", colors::GREEN, colors::RESET)
@@ -1785,9 +1788,9 @@ fn format_target_table(
             } else {
                 "—".to_string()
             };
-            let inst_padded = format!("{:>col_sigma_inst$}", inst_cell);
+            let inst_padded = format!("{inst_cell:>col_sigma_inst$}");
             let rel_cell = format_inst_vs_fastest(s.guest_instructions_total, fastest);
-            let rel_padded = format!("{:>col_vs_fast$}", rel_cell);
+            let rel_padded = format!("{rel_cell:>col_vs_fast$}");
 
             let color = perf_summary_color(s.guest_instructions_total, fastest);
             let inst_cell_out = if with_color {

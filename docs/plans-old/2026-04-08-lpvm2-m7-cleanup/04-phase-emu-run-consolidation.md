@@ -146,7 +146,7 @@ cargo check -p lpvm-emu --lib
 cargo test -p lpvm-emu --lib
 
 # Filetests using emu:
-cargo test -p lps-filetests -- --target rv32.q32
+cargo test -p lps-filetests -- --target rv32.q32c
 ```
 
 ## Phase Notes
@@ -154,4 +154,3 @@ cargo test -p lps-filetests -- --target rv32.q32
 - This is about reducing duplicate code paths, not just deletion
 - The `EmuInstance::call_q32` path is the canonical one going forward
 - Ensure VMContext/fuel handling is identical between old and new paths
-

@@ -70,7 +70,7 @@ fn parse_line(
         let id_str = &line[1..line.len() - 1];
         let id: u32 = id_str.parse().map_err(|_| ParseError {
             line: line_num,
-            message: format!("Invalid label id: {}", id_str),
+            message: format!("Invalid label id: {id_str}"),
         })?;
         return Ok(VInst::Label(id, SRC_OP_NONE));
     }
@@ -106,12 +106,12 @@ fn parse_ireg(s: &str) -> Result<VReg, ParseError> {
     if !s.starts_with("i") {
         return Err(ParseError {
             line: 0,
-            message: format!("Expected ireg like 'i0', got '{}'", s),
+            message: format!("Expected ireg like 'i0', got '{s}'"),
         });
     }
     let num: u32 = s[1..].parse().map_err(|_| ParseError {
         line: 0,
-        message: format!("Invalid ireg number in '{}'", s),
+        message: format!("Invalid ireg number in '{s}'"),
     })?;
     Ok(VReg(num as u16))
 }
@@ -126,7 +126,7 @@ fn parse_paren_args(s: &str) -> Result<Vec<VReg>, ParseError> {
     if !s.starts_with("(") || !s.ends_with(")") {
         return Err(ParseError {
             line: 0,
-            message: format!("Expected parens like '(i0, i1)', got '{}'", s),
+            message: format!("Expected parens like '(i0, i1)', got '{s}'"),
         });
     }
     let inner = &s[1..s.len() - 1];
@@ -141,12 +141,12 @@ fn parse_label(s: &str) -> Result<u32, ParseError> {
     if !s.starts_with("@") {
         return Err(ParseError {
             line: 0,
-            message: format!("Expected label like '@0', got '{}'", s),
+            message: format!("Expected label like '@0', got '{s}'"),
         });
     }
     s[1..].parse().map_err(|_| ParseError {
         line: 0,
-        message: format!("Invalid label id in '{}'", s),
+        message: format!("Invalid label id in '{s}'"),
     })
 }
 
@@ -182,7 +182,7 @@ fn parse_def_instruction(
             }
             let val: i32 = args_str.trim().parse().map_err(|_| ParseError {
                 line: line_num,
-                message: format!("Invalid i32: {}", args_str),
+                message: format!("Invalid i32: {args_str}"),
             })?;
             Ok(VInst::IConst32 {
                 dst: dsts[0],
@@ -196,14 +196,14 @@ fn parse_def_instruction(
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{} needs 1 dst", op),
+                    message: format!("{op} needs 1 dst"),
                 });
             }
             let args = parse_args(&args_str)?;
             if args.len() != 2 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{} needs 2 args", op),
+                    message: format!("{op} needs 2 args"),
                 });
             }
             let (src1, src2) = (args[0], args[1]);
@@ -270,14 +270,14 @@ fn parse_def_instruction(
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{} needs 1 dst", op),
+                    message: format!("{op} needs 1 dst"),
                 });
             }
             let args = parse_args(&args_str)?;
             if args.len() != 2 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{} needs 2 args", op),
+                    message: format!("{op} needs 2 args"),
                 });
             }
             let (lhs, rhs) = (args[0], args[1]);
@@ -314,7 +314,7 @@ fn parse_def_instruction(
             if dsts.len() != 1 {
                 return Err(ParseError {
                     line: line_num,
-                    message: format!("{} needs 1 dst", op),
+                    message: format!("{op} needs 1 dst"),
                 });
             }
             let src = parse_ireg(args_str.trim())?;
@@ -449,7 +449,7 @@ fn parse_def_instruction(
             }
             let slot: u32 = args_str.trim().parse().map_err(|_| ParseError {
                 line: line_num,
-                message: format!("Invalid slot: {}", args_str),
+                message: format!("Invalid slot: {args_str}"),
             })?;
             Ok(VInst::SlotAddr {
                 dst: dsts[0],
@@ -481,7 +481,7 @@ fn parse_def_instruction(
 
         _ => Err(ParseError {
             line: line_num,
-            message: format!("Unknown instruction: {}", op),
+            message: format!("Unknown instruction: {op}"),
         }),
     }
 }
@@ -493,12 +493,11 @@ fn parse_nodef_instruction(
     pool: &mut Vec<VReg>,
 ) -> Result<VInst, ParseError> {
     // Ret i0 or Ret (i0, i1) or Ret
-    if line.starts_with("Ret ") || line == "Ret" {
-        let rest = if line.starts_with("Ret ") {
-            &line[4..]
-        } else {
-            ""
-        };
+    if line == "Ret" || line.starts_with("Ret ") {
+        let rest = line
+            .strip_prefix("Ret ")
+            .or_else(|| line.strip_prefix("Ret"))
+            .unwrap_or("");
         let vals = if rest.trim().is_empty() {
             vec![]
         } else if rest.starts_with("(") && rest.ends_with(")") {
@@ -514,8 +513,7 @@ fn parse_nodef_instruction(
     }
 
     // Store32 i1, i0, 4
-    if line.starts_with("Store32 ") {
-        let rest = &line[8..];
+    if let Some(rest) = line.strip_prefix("Store32 ") {
         let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
         if parts.len() < 2 {
             return Err(ParseError {
@@ -542,8 +540,7 @@ fn parse_nodef_instruction(
     }
 
     // MemcpyWords i0, i1, 16
-    if line.starts_with("MemcpyWords ") {
-        let rest = &line[11..];
+    if let Some(rest) = line.strip_prefix("MemcpyWords ") {
         let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
         if parts.len() != 3 {
             return Err(ParseError {
@@ -566,8 +563,7 @@ fn parse_nodef_instruction(
     }
 
     // Br @0
-    if line.starts_with("Br ") {
-        let rest = &line[3..];
+    if let Some(rest) = line.strip_prefix("Br ") {
         let target = parse_label(rest.trim())?;
         return Ok(VInst::Br {
             target,
@@ -576,8 +572,7 @@ fn parse_nodef_instruction(
     }
 
     // BrIf i0, @1
-    if line.starts_with("BrIf ") {
-        let rest = &line[5..];
+    if let Some(rest) = line.strip_prefix("BrIf ") {
         let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
         if parts.len() != 2 {
             return Err(ParseError {
@@ -596,8 +591,7 @@ fn parse_nodef_instruction(
     }
 
     // Call mod (i0, i1) with no return
-    if line.starts_with("Call ") {
-        let rest = &line[5..];
+    if let Some(rest) = line.strip_prefix("Call ") {
         let open_paren = rest.find('(').unwrap_or(rest.len());
         let target_name = rest[..open_paren].trim();
         let args = if open_paren < rest.len() {
@@ -619,7 +613,7 @@ fn parse_nodef_instruction(
 
     Err(ParseError {
         line: line_num,
-        message: format!("Unknown instruction: {}", line),
+        message: format!("Unknown instruction: {line}"),
     })
 }
 
@@ -637,7 +631,7 @@ fn parse_icmp_cond(s: &str) -> Result<IcmpCond, ParseError> {
         "GeU" => Ok(IcmpCond::GeU),
         _ => Err(ParseError {
             line: 0,
-            message: format!("Unknown cond: {}", s),
+            message: format!("Unknown cond: {s}"),
         }),
     }
 }
@@ -653,7 +647,7 @@ pub fn format(vinsts: &[VInst], pool: &[VReg], symbols: &ModuleSymbols) -> Strin
 
 fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String {
     match inst {
-        VInst::Label(id, _) => format!("@{}:", id),
+        VInst::Label(id, _) => format!("@{id}:"),
 
         VInst::IConst32 { dst, val, .. } => {
             format!("{} = IConst32 {}", ireg(dst), val)
@@ -804,12 +798,12 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
             let args_str = format_args(args.vregs(pool));
             let rets_v = rets.vregs(pool);
             if rets_v.is_empty() {
-                format!("Call {} {}", target_str, args_str)
+                format!("Call {target_str} {args_str}")
             } else if rets_v.len() == 1 {
                 format!("{} = Call {} {}", ireg(&rets_v[0]), target_str, args_str)
             } else {
                 let rets_str = format_rets(rets_v);
-                format!("{} = Call {} {}", rets_str, target_str, args_str)
+                format!("{rets_str} = Call {target_str} {args_str}")
             }
         }
 
@@ -825,7 +819,7 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
         }
 
         VInst::Br { target, .. } => {
-            format!("Br @{}", target)
+            format!("Br @{target}")
         }
         VInst::BrIf { cond, target, .. } => {
             format!("BrIf {}, @{}", ireg(cond), target)

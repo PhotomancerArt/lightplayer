@@ -24,7 +24,7 @@ Final cleanup, comprehensive testing, documentation updates, and plan closure.
 
 ```bash
 # Run all GLSL filetests (both rv32 and wasm targets)
-./scripts/glsl-filetests.sh --target rv32.q32
+./scripts/glsl-filetests.sh --target rv32.q32c
 ./scripts/glsl-filetests.sh --target wasm.q32
 ```
 

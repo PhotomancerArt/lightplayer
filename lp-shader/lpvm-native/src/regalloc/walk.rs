@@ -320,7 +320,7 @@ impl<'a> WalkState<'a> {
                     TraceEntry {
                         vinst_idx: 0,
                         vinst_mnemonic: String::from("entry_move"),
-                        decision: alloc::format!("x{} -> x{}", abi_reg, final_preg),
+                        decision: alloc::format!("x{abi_reg} -> x{final_preg}"),
                         register_state: String::new(),
                     },
                 );
@@ -340,7 +340,7 @@ impl<'a> WalkState<'a> {
                         TraceEntry {
                             vinst_idx: 0,
                             vinst_mnemonic: String::from("entry_slot_init"),
-                            decision: alloc::format!("x{} -> slot{}", final_preg, slot),
+                            decision: alloc::format!("x{final_preg} -> slot{slot}"),
                             register_state: String::new(),
                         },
                     );
@@ -358,7 +358,7 @@ impl<'a> WalkState<'a> {
                     TraceEntry {
                         vinst_idx: 0,
                         vinst_mnemonic: String::from("entry_spill"),
-                        decision: alloc::format!("x{} -> slot{}", abi_reg, slot),
+                        decision: alloc::format!("x{abi_reg} -> slot{slot}"),
                         register_state: String::new(),
                     },
                 );
@@ -381,7 +381,7 @@ impl<'a> WalkState<'a> {
                         TraceEntry {
                             vinst_idx: 0,
                             vinst_mnemonic: String::from("entry_load_stack_arg"),
-                            decision: alloc::format!("[fp+{}] -> x{}", offset, final_preg),
+                            decision: alloc::format!("[fp+{offset}] -> x{final_preg}"),
                             register_state: String::new(),
                         },
                     );
@@ -398,7 +398,7 @@ impl<'a> WalkState<'a> {
                         TraceEntry {
                             vinst_idx: 0,
                             vinst_mnemonic: String::from("entry_load_stack_arg"),
-                            decision: alloc::format!("[fp+{}] -> slot{}", offset, slot),
+                            decision: alloc::format!("[fp+{offset}] -> slot{slot}"),
                             register_state: String::new(),
                         },
                     );
@@ -652,7 +652,7 @@ fn alloc_use(
             TraceEntry {
                 vinst_idx: inst_idx,
                 vinst_mnemonic: String::from("reload"),
-                decision: alloc::format!("slot{} -> t{}", slot, new_preg),
+                decision: alloc::format!("slot{slot} -> t{new_preg}"),
                 register_state: String::new(),
             },
         );
@@ -717,7 +717,7 @@ fn handle_eviction(
             TraceEntry {
                 vinst_idx: inst_idx,
                 vinst_mnemonic: String::from("evict"),
-                decision: alloc::format!("slot{} -> t{}", slot, preg),
+                decision: alloc::format!("slot{slot} -> t{preg}"),
                 register_state: String::new(),
             },
         );

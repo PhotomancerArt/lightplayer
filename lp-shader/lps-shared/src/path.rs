@@ -28,10 +28,10 @@ impl core::fmt::Display for PathParseError {
             Self::EmptyPath => write!(f, "path is empty"),
             Self::EmptyIdentifier => write!(f, "expected field name"),
             Self::EmptyIndex => write!(f, "expected array index"),
-            Self::InvalidIdentifierStart(c) => write!(f, "invalid start of identifier: '{}'", c),
-            Self::InvalidNumber(s) => write!(f, "invalid number: '{}'", s),
+            Self::InvalidIdentifierStart(c) => write!(f, "invalid start of identifier: '{c}'"),
+            Self::InvalidNumber(s) => write!(f, "invalid number: '{s}'"),
             Self::MissingBracket => write!(f, "missing closing ']'"),
-            Self::UnexpectedChar(c) => write!(f, "unexpected character: '{}'", c),
+            Self::UnexpectedChar(c) => write!(f, "unexpected character: '{c}'"),
         }
     }
 }

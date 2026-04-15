@@ -153,7 +153,7 @@ pub fn render_interleaved(
         }
 
         let lpir_line = format_lpir_op_line(func, module, i, op);
-        lines.push(format!("{IND_LP}{}", lpir_line));
+        lines.push(format!("{IND_LP}{lpir_line}"));
 
         if let Some(vinst_list) = vinsts_by_src_op.get(&(i as u32)) {
             for (vinst_idx, inst) in vinst_list.iter() {
@@ -530,7 +530,7 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             }
         }
         VInst::Br { target, .. } => {
-            format!("Br L{}", target)
+            format!("Br L{target}")
         }
         VInst::BrIf {
             cond,
@@ -545,7 +545,7 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             }
         }
         VInst::Label(id, _) => {
-            format!("Label L{}", id)
+            format!("Label L{id}")
         }
         VInst::Call {
             target,
@@ -643,7 +643,7 @@ fn format_alloc(alloc: Alloc) -> String {
                 _ => "??",
             })
         }
-        Alloc::Stack(slot) => format!("slot{}", slot),
+        Alloc::Stack(slot) => format!("slot{slot}"),
         Alloc::None => String::from("none"),
     }
 }

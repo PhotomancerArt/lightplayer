@@ -43,7 +43,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     let file_path_str = args.input.to_string_lossy().to_string();
 
     // Collect data from all targets
-    let mut report = DebugReport::new(&file_path_str);
+    let mut report = DebugReport::new();
 
     for target in &targets {
         let backend_data = match target {

@@ -77,16 +77,16 @@ lp-fw/fw-emu/src/main.rs   # Creates CraneliftGraphics, passes to LpServer::new(
 
 ## Phases
 
-| Phase | Description | Risk |
-|-------|-------------|------|
-| 1 | Define LpGraphics + LpShader traits | Low (additive) |
-| 2 | Implement CraneliftGraphics | Low (new code) |
-| 3 | Migrate ShaderRuntime to LpShader | **High** (changes rendering core) |
-| 4 | Wire graphics through ProjectRuntime | Medium (constructor changes) |
-| 5 | Wire graphics through LpServer | Medium (constructor changes) |
-| 6 | Update firmware crates | Medium (main.rs changes) |
-| 7 | Make lpvm-cranelift optional | Low (Cargo.toml only) |
-| 8 | Cleanup, validation, plan closure | Low |
+| Phase | Description                          | Risk                              |
+| ----- | ------------------------------------ | --------------------------------- |
+| 1     | Define LpGraphics + LpShader traits  | Low (additive)                    |
+| 2     | Implement CraneliftGraphics          | Low (new code)                    |
+| 3     | Migrate ShaderRuntime to LpShader    | **High** (changes rendering core) |
+| 4     | Wire graphics through ProjectRuntime | Medium (constructor changes)      |
+| 5     | Wire graphics through LpServer       | Medium (constructor changes)      |
+| 6     | Update firmware crates               | Medium (main.rs changes)          |
+| 7     | Make lpvm-cranelift optional         | Low (Cargo.toml only)             |
+| 8     | Cleanup, validation, plan closure    | Low                               |
 
 ## Key Trade-offs
 
@@ -106,7 +106,7 @@ After all phases:
 
 ```bash
 # File tests across all targets
-./scripts/glsl-filetests.sh --target rv32.q32
+./scripts/glsl-filetests.sh --target rv32.q32c
 ./scripts/glsl-filetests.sh --target wasm.q32
 
 # Firmware tests

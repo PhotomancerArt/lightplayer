@@ -102,12 +102,12 @@ impl ModuleDebugInfo {
                     } else if *section_name == "interleaved" {
                         // Count VInsts in content (lines containing " = ")
                         let vinst_count = content.lines().filter(|l| l.contains(" = ")).count();
-                        format!(" ({} VInsts)", vinst_count)
+                        format!(" ({vinst_count} VInsts)")
                     } else {
                         String::new()
                     };
 
-                    out.push_str(&format!("--- {}{} ---\n", section_name, count_line));
+                    out.push_str(&format!("--- {section_name}{count_line} ---\n"));
                     out.push_str(content);
                     if !content.ends_with('\n') {
                         out.push('\n');
@@ -115,7 +115,7 @@ impl ModuleDebugInfo {
                     out.push('\n');
                 } else if *section_name == "interleaved" && func.sections.contains_key("disasm") {
                     // Special message for missing interleaved when disasm is present
-                    out.push_str(&format!("--- {} ---\n", section_name));
+                    out.push_str(&format!("--- {section_name} ---\n"));
                     out.push_str(
                         "(not available for this backend - only disassembly available)\n\n",
                     );
@@ -135,8 +135,7 @@ impl ModuleDebugInfo {
 
         for func_name in self.function_names() {
             out.push_str(&format!(
-                "  lp-cli shader-debug -t {} {} --fn {}\n",
-                target, file_path, func_name
+                "  lp-cli shader-debug -t {target} {file_path} --fn {func_name}\n"
             ));
         }
 

@@ -26,7 +26,7 @@ pub fn format_region_tree(
 
     match region {
         Region::Linear { start, end } => {
-            lines.push(format!("{}Linear [{}..{})", prefix, start, end));
+            lines.push(format!("{prefix}Linear [{start}..{end})"));
             for i in *start..*end {
                 let v = &vinsts[i as usize];
                 lines.push(format!(
@@ -47,10 +47,9 @@ pub fn format_region_tree(
             merge_label,
         } => {
             lines.push(format!(
-                "{}IfThenElse (else={} merge={})",
-                prefix, else_label, merge_label
+                "{prefix}IfThenElse (else={else_label} merge={merge_label})"
             ));
-            lines.push(format!("{}  head:", prefix));
+            lines.push(format!("{prefix}  head:"));
             lines.push(format_region_tree(
                 tree,
                 *head,
@@ -59,7 +58,7 @@ pub fn format_region_tree(
                 symbols,
                 indent + 2,
             ));
-            lines.push(format!("{}  then:", prefix));
+            lines.push(format!("{prefix}  then:"));
             lines.push(format_region_tree(
                 tree,
                 *then_body,
@@ -68,7 +67,7 @@ pub fn format_region_tree(
                 symbols,
                 indent + 2,
             ));
-            lines.push(format!("{}  else:", prefix));
+            lines.push(format!("{prefix}  else:"));
             lines.push(format_region_tree(
                 tree,
                 *else_body,
@@ -86,10 +85,9 @@ pub fn format_region_tree(
             exit_label,
         } => {
             lines.push(format!(
-                "{}Loop (header={} exit={})",
-                prefix, header_label, exit_label
+                "{prefix}Loop (header={header_label} exit={exit_label})"
             ));
-            lines.push(format!("{}  header:", prefix));
+            lines.push(format!("{prefix}  header:"));
             lines.push(format_region_tree(
                 tree,
                 *header,
@@ -98,7 +96,7 @@ pub fn format_region_tree(
                 symbols,
                 indent + 2,
             ));
-            lines.push(format!("{}  body:", prefix));
+            lines.push(format!("{prefix}  body:"));
             lines.push(format_region_tree(
                 tree,
                 *body,
@@ -113,7 +111,7 @@ pub fn format_region_tree(
             children_start,
             child_count,
         } => {
-            lines.push(format!("{}Seq ({})", prefix, child_count));
+            lines.push(format!("{prefix}Seq ({child_count})"));
             let start = *children_start as usize;
             let end = start + *child_count as usize;
             for &child_id in &tree.seq_children[start..end] {

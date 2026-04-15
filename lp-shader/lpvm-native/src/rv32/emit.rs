@@ -48,7 +48,10 @@ pub struct EmitContext<'a> {
     frame: FrameLayout,
     symbols: &'a ModuleSymbols,
     /// Kept for API parity with [`emit_function`] (e.g. future pool-indexed lowering).
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "reserved for emit API parity with pool-indexed lowering"
+    )]
     vreg_pool: &'a [VReg],
     label_offsets: Vec<Option<usize>>,
     branch_fixups: Vec<BranchFixup>,

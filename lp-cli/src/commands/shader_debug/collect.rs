@@ -220,7 +220,7 @@ fn disassemble_raw(code: &[u8]) -> String {
             code[offset + 3],
         ]);
         let asm = lp_riscv_inst::format_instruction(word);
-        out.push_str(&format!("{:04x}\t{:08x}\t{}\n", offset, word, asm));
+        out.push_str(&format!("{offset:04x}\t{word:08x}\t{asm}\n"));
         offset += 4;
     }
 

@@ -12,4 +12,3 @@ mod types;
 
 pub use args::Args;
 pub use handler::handle_shader_debug;
-pub use types::{BackendDebugData, BackendTarget, DebugReport, FunctionDebugData, SectionFilter};

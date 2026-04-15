@@ -142,7 +142,7 @@ parallel execution of WASM/RV32 tests.
 scripts/glsl-filetests.sh 'array/*.glsl' --fix
 
 # RV32 only
-scripts/glsl-filetests.sh --target rv32.q32 'array/*.glsl' --fix
+scripts/glsl-filetests.sh --target rv32.q32c 'array/*.glsl' --fix
 
 # Both
 scripts/glsl-filetests.sh --target wasm.q32,rv32.q32 'array/*.glsl' --fix
@@ -168,14 +168,15 @@ done
 To pinpoint the crash location:
 
 1. **Run with lldb** to get backtrace:
+
    ```bash
    lldb -- scripts/glsl-filetests.sh 'array/*.glsl'
    # At lldb prompt: run, then after crash: bt
    ```
 
 2. **Add instrumentation** in `jit_module.rs`:
-    - Print in `JitModule` drop
-    - Print in `AllocJitMemoryProvider::free_memory()`
+   - Print in `JitModule` drop
+   - Print in `AllocJitMemoryProvider::free_memory()`
 
 3. **Test with process-per-file**:
    Modify runner to spawn a new process per test file instead of threads
@@ -189,10 +190,10 @@ To pinpoint the crash location:
 - **Severity**: Low (workarounds exist, JIT not primary target for bulk tests)
 - **Affected**: JIT backend with multiple files when using >1 thread
 - **Not Affected**:
-    - WASM/RV32 backends (primary for bulk testing)
-    - CI (uses WASM)
-    - Single-file JIT testing
-    - Embedded targets (no JIT)
+  - WASM/RV32 backends (primary for bulk testing)
+  - CI (uses WASM)
+  - Single-file JIT testing
+  - Embedded targets (no JIT)
 
 ## Notes
 
@@ -206,4 +207,4 @@ To pinpoint the crash location:
 - Cranelift JIT fork: `https://github.com/light-player/lp-cranelift` (branch: main, version 0.127.0)
 - Related comment in `lpvm-cranelift/src/process_sync.rs`:
   > "Concurrent `cranelift_jit` finalization and/or object emission has produced process crashes (
-  SIGSEGV)"
+  > SIGSEGV)"

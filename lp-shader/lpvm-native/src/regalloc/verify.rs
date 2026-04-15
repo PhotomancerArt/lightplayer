@@ -138,8 +138,7 @@ fn verify_allocs_within_pool(
                     || (is_call && !callee_uses_sret && def_idx < gpr::RET_REGS.len());
                 assert!(
                     allowed,
-                    "inst {}: def allocated to non-allocatable register x{}",
-                    inst_idx, preg
+                    "inst {inst_idx}: def allocated to non-allocatable register x{preg}"
                 );
             }
             op_idx += 1;
@@ -155,8 +154,7 @@ fn verify_allocs_within_pool(
                     || (is_call && arg_base + use_idx < gpr::ARG_REGS.len());
                 assert!(
                     allowed,
-                    "inst {}: use allocated to non-allocatable register x{}",
-                    inst_idx, preg
+                    "inst {inst_idx}: use allocated to non-allocatable register x{preg}"
                 );
             }
             op_idx += 1;
@@ -186,11 +184,7 @@ fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
                     let actual = output.allocs[offset + def_idx];
                     assert!(
                         actual == Alloc::Reg(expected),
-                        "inst {} (Call): ret[{}] should be x{}, got {:?}",
-                        inst_idx,
-                        def_idx,
-                        expected,
-                        actual
+                        "inst {inst_idx} (Call): ret[{def_idx}] should be x{expected}, got {actual:?}"
                     );
                 }
                 def_idx += 1;
@@ -208,11 +202,7 @@ fn verify_call_abi(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
                 let actual = output.allocs[offset + num_defs + use_idx];
                 assert!(
                     actual == Alloc::Reg(expected),
-                    "inst {} (Call): arg[{}] should be x{}, got {:?}",
-                    inst_idx,
-                    use_idx,
-                    expected,
-                    actual
+                    "inst {inst_idx} (Call): arg[{use_idx}] should be x{expected}, got {actual:?}"
                 );
             }
             use_idx += 1;

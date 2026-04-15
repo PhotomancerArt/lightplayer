@@ -116,21 +116,21 @@ AGENTS.md                     # UPDATE: architecture diagram and key crates tabl
 
 ### Legacy Crates (lp-shader/legacy/)
 
-| Crate | Reason for Deletion |
-|-------|---------------------|
-| `lps-exec` | `GlslExecutable` trait superseded by `LpvmEngine`/`LpvmModule`/`LpvmInstance` |
-| `lps-wasm` | Old WASM emitter superseded by `lpvm-wasm` |
-| `lps-builtins-wasm` | Old builtins WASM build, not used by new `lpvm-wasm` |
+| Crate               | Reason for Deletion                                                           |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `lps-exec`          | `GlslExecutable` trait superseded by `LpvmEngine`/`LpvmModule`/`LpvmInstance` |
+| `lps-wasm`          | Old WASM emitter superseded by `lpvm-wasm`                                    |
+| `lps-builtins-wasm` | Old builtins WASM build, not used by new `lpvm-wasm`                          |
 
 ### Code to Delete
 
-| File/Function | Replacement |
-|---------------|-------------|
-| `lpvm-cranelift::jit()` | `CraneliftEngine::compile()` |
-| `lpvm-cranelift::JitModule` | `CraneliftModule` |
-| `lpvm-emu::emu_run.rs` | `EmuInstance::call`/`call_q32` |
+| File/Function                 | Replacement                       |
+| ----------------------------- | --------------------------------- |
+| `lpvm-cranelift::jit()`       | `CraneliftEngine::compile()`      |
+| `lpvm-cranelift::JitModule`   | `CraneliftModule`                 |
+| `lpvm-emu::emu_run.rs`        | `EmuInstance::call`/`call_q32`    |
 | `lps-filetests::wasm_link.rs` | `lpvm-wasm` instantiate/link path |
-| `lps-exec::GlslExecutable` | `LpvmEngine` trait |
+| `lps-exec::GlslExecutable`    | `LpvmEngine` trait                |
 
 ## Main Interactions
 
@@ -142,9 +142,10 @@ AGENTS.md                     # UPDATE: architecture diagram and key crates tabl
 ## Verification
 
 After cleanup:
+
 - `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server` ✓
 - `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu` ✓
 - `cargo test -p fw-tests --test scene_render_emu --test alloc_trace_emu` ✓
-- `./scripts/glsl-filetests.sh --target rv32.q32 --target wasm.q32` ✓
+- `./scripts/glsl-filetests.sh --target rv32.q32c --target wasm.q32` ✓
 - `cargo +nightly fmt --check` ✓
 - No warnings in affected crates

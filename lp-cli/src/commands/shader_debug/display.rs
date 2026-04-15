@@ -10,7 +10,7 @@ fn should_color() -> bool {
 /// Print comparison table across all backends.
 pub fn print_comparison_table(report: &DebugReport) {
     if let Some(text) = comparison_table::render_summary_table(report, should_color()) {
-        print!("{}", text);
+        print!("{text}");
     }
 }
 
@@ -25,7 +25,7 @@ pub fn print_detailed_view(report: &DebugReport, sections: &SectionFilter) {
         }
         first_func = false;
 
-        println!("=== Function: {} ===", func_name);
+        println!("=== Function: {func_name} ===");
         println!();
 
         // Show each backend's output
@@ -38,7 +38,7 @@ pub fn print_detailed_view(report: &DebugReport, sections: &SectionFilter) {
 
                 // Show spill slots for FA
                 if let Some(slots) = func_data.spill_slots {
-                    println!("; spill_slots: {}", slots);
+                    println!("; spill_slots: {slots}");
                 }
 
                 // Interleaved section
@@ -46,15 +46,16 @@ pub fn print_detailed_view(report: &DebugReport, sections: &SectionFilter) {
                     if let Some(ref interleaved) = func_data.interleaved {
                         println!();
                         let vinst_count = interleaved.lines().filter(|l| l.contains(" = ")).count();
-                        println!("--- interleaved ({} VInsts) ---", vinst_count);
-                        println!("{}", interleaved);
+                        println!("--- interleaved ({vinst_count} VInsts) ---");
+                        println!("{interleaved}");
                     }
                 }
 
                 // LPIR section (raw LPIR ops)
                 if sections.lpir {
                     println!();
-                    println!("--- LPIR ({} ops) ---", func_data.lpir_count);
+                    let lpir = func_data.lpir_count;
+                    println!("--- LPIR ({lpir} ops) ---");
                     // Note: We don't store raw LPIR in the data structure currently
                     println!("; (LPIR source not stored in debug data)");
                 }
@@ -62,8 +63,10 @@ pub fn print_detailed_view(report: &DebugReport, sections: &SectionFilter) {
                 // Assembly section
                 if sections.asm {
                     println!();
-                    println!("--- disasm ({} instructions) ---", func_data.disasm_count);
-                    print!("{}", func_data.disasm);
+                    let dc = func_data.disasm_count;
+                    println!("--- disasm ({dc} instructions) ---");
+                    let disasm = &func_data.disasm;
+                    print!("{disasm}");
                 }
             }
         }
@@ -87,13 +90,11 @@ pub fn print_help_text(file_path: &str, report: &DebugReport) {
         .collect::<Vec<_>>()
         .join(",");
     for func_name in &func_names {
-        println!(
-            "  scripts/shader-debug.sh -t {} {} --fn {}",
-            targets, file_path, func_name
-        );
+        println!("  scripts/shader-debug.sh -t {targets} {file_path} --fn {func_name}");
     }
 
     println!();
     print!("Available functions: ");
-    println!("{}", func_names.join(", "));
+    let names = func_names.join(", ");
+    println!("{names}");
 }

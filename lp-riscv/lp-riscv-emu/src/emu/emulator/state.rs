@@ -282,25 +282,30 @@ impl Riscv32Emulator {
     /// Get elapsed milliseconds based on current time mode
     ///
     /// Returns 0 if start time not initialized (RealTime mode) or std feature disabled.
-    #[cfg(feature = "std")]
+    #[cfg_attr(
+        not(feature = "std"),
+        allow(
+            dead_code,
+            reason = "SYSCALL_TIME_MS returns 0 without std; still used by unit tests and std builds"
+        )
+    )]
     pub(super) fn elapsed_ms(&self) -> u32 {
         match self.time_mode {
+            TimeMode::Simulated(current) => current,
             TimeMode::RealTime => {
-                if let Some(start) = self.start_time {
-                    start.elapsed().as_millis() as u32
-                } else {
+                #[cfg(feature = "std")]
+                {
+                    if let Some(start) = self.start_time {
+                        start.elapsed().as_millis() as u32
+                    } else {
+                        0
+                    }
+                }
+                #[cfg(not(feature = "std"))]
+                {
                     0
                 }
             }
-            TimeMode::Simulated(current) => current,
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    pub(super) fn elapsed_ms(&self) -> u32 {
-        match self.time_mode {
-            TimeMode::RealTime => 0,
-            TimeMode::Simulated(current) => current,
         }
     }
 }

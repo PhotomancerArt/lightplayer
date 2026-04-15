@@ -1,5 +1,7 @@
 //! GLSL → LPIR → WASM in the browser; builtins come from this same module’s exports (`lpvm_init_exports`).
 
+#![cfg(target_arch = "wasm32")]
+
 use std::cell::RefCell;
 
 use js_sys::{Array, Function, Reflect};

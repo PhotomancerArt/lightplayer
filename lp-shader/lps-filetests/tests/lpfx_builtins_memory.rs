@@ -50,7 +50,7 @@ fn lpfx_saturate_vec3_q32_writes_shared_memory() {
 #[ignore = "WASM import ABI mismatch for vec3 LPFX (multi-return vs result-pointer). See docs/roadmaps/2026-03-25-lpir-features/"]
 fn shader_lpfx_saturate_vec3_writes_scratch_then_reads_it() {
     use lpir::FloatMode as IrFloatMode;
-    use lps_frontend::{FloatMode, compile, lower};
+    use lps_frontend::{compile, lower};
     use lpvm_wasm::{WasmOptions, compile_lpir};
 
     let src = r#"

@@ -39,7 +39,7 @@ pub fn build_allocator_snapshot_lines(
             if line.is_empty() {
                 actual_lines.push(";".to_string());
             } else {
-                actual_lines.push(alloc::format!("; {}", line));
+                actual_lines.push(alloc::format!("; {line}"));
             }
         }
         Ok(actual_lines.join("\n"))

@@ -36,7 +36,7 @@ Re-run **Tier B** paths (from [`summary.md`](./summary.md)) the same way.
 ```bash
 ./scripts/glsl-filetests.sh --summary
 ./scripts/glsl-filetests.sh --target wasm.q32 --summary
-./scripts/glsl-filetests.sh --target rv32.q32 --summary
+./scripts/glsl-filetests.sh --target rv32.q32c --summary
 ```
 
 Or use `just test-filetests` if your workflow runs the three-target sweep.

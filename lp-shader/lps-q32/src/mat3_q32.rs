@@ -20,7 +20,10 @@ impl Mat3Q32 {
     ///
     /// Parameters are in column-major order:
     /// m00, m10, m20, m01, m11, m21, m02, m12, m22
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "9 separate matrix elements match column-major GLSL layout"
+    )]
     #[inline(always)]
     pub const fn new(
         m00: Q32,
@@ -39,7 +42,10 @@ impl Mat3Q32 {
     }
 
     /// Create a matrix from 9 f32 values (column-major order)
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "9 separate matrix elements match column-major GLSL layout"
+    )]
     #[inline(always)]
     pub fn from_f32(
         m00: f32,
@@ -136,7 +142,10 @@ impl Mat3Q32 {
     }
 
     /// Matrix-matrix multiplication
-    #[allow(clippy::should_implement_trait)]
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "Named `mul` for no_std Q32 matrices; not implementing std::ops::Mul"
+    )]
     #[inline(always)]
     pub fn mul(self, rhs: Self) -> Self {
         let a = self;

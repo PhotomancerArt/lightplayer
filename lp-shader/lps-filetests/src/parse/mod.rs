@@ -122,7 +122,6 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
 #[cfg(test)]
 mod block_comment_directive_tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn run_inside_glsl_block_comment_is_ignored() {
@@ -146,7 +145,7 @@ float f() { return 1.0; }
 
     #[test]
     fn run_on_same_line_after_block_close_is_seen() {
-        let p = PathBuf::from(std::env::temp_dir()).join(format!(
+        let p = std::env::temp_dir().join(format!(
             "lps_ft_block_same_line_{}.glsl",
             std::process::id()
         ));
