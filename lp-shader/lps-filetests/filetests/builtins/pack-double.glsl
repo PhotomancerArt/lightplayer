@@ -13,6 +13,7 @@ uvec2 test_packdouble2x32_zeros() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_zeros() == uvec2(0u, 0u)
 
 uvec2 test_packdouble2x32_ones() {
@@ -23,6 +24,7 @@ uvec2 test_packdouble2x32_ones() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_ones() == uvec2(0u, 1072693248u)
 
 uvec2 test_packdouble2x32_half() {
@@ -33,6 +35,7 @@ uvec2 test_packdouble2x32_half() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_half() == uvec2(0u, 1071644672u)
 
 uvec2 test_packdouble2x32_neg_one() {
@@ -43,6 +46,7 @@ uvec2 test_packdouble2x32_neg_one() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_neg_one() == uvec2(0u, 1072693248u)
 
 uvec2 test_packdouble2x32_two() {
@@ -53,6 +57,7 @@ uvec2 test_packdouble2x32_two() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_two() == uvec2(0u, 1073741824u)
 
 uvec2 test_packdouble2x32_small() {
@@ -63,6 +68,7 @@ uvec2 test_packdouble2x32_small() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_packdouble2x32_small() == uvec2(0u, 1069128089u)
 
 

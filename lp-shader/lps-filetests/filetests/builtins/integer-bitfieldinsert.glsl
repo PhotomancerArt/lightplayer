@@ -15,6 +15,7 @@ int test_bitfieldinsert_int_simple() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_int_simple() == 175
 
 int test_bitfieldinsert_int_lsb() {
@@ -25,6 +26,7 @@ int test_bitfieldinsert_int_lsb() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_int_lsb() == 243
 
 int test_bitfieldinsert_int_msb() {
@@ -35,6 +37,7 @@ int test_bitfieldinsert_int_msb() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_int_msb() == 207
 
 uint test_bitfieldinsert_uint_simple() {
@@ -45,6 +48,7 @@ uint test_bitfieldinsert_uint_simple() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_uint_simple() == 175u
 
 uint test_bitfieldinsert_uint_single_bit() {
@@ -55,6 +59,7 @@ uint test_bitfieldinsert_uint_single_bit() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_uint_single_bit() == 4u
 
 ivec2 test_bitfieldinsert_ivec2() {
@@ -65,6 +70,7 @@ ivec2 test_bitfieldinsert_ivec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_bitfieldinsert_ivec2() == ivec2(175, 243)
 
 

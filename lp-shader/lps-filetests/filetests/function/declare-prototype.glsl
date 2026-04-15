@@ -40,6 +40,7 @@ vec4 test_declare_prototype_vector(vec4 a, vec4 b) {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_prototype_vector(vec4(1.0), vec4(2.0)) ~= vec4(3.0)
 
 float test_declare_prototype_multiple();

@@ -28,6 +28,7 @@ float test_access_from_function_read() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_read() ~= 72.0
 
 void test_access_from_function_write() {
@@ -51,6 +52,7 @@ void test_access_from_function_write() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_write() == 0.0
 
 float test_access_from_function_verify_write() {
@@ -62,6 +64,7 @@ float test_access_from_function_verify_write() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_verify_write() ~= 15.0
 
 bool test_access_from_function_flag() {
@@ -82,6 +85,7 @@ bool test_access_from_function_flag() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_flag() == false
 
 mat4 test_access_from_function_matrix() {
@@ -102,6 +106,7 @@ mat4 test_access_from_function_matrix() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_matrix() ~= mat4(6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 6.0)
 
 float test_access_from_function_nested() {
@@ -123,6 +128,7 @@ float test_access_from_function_nested() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_nested() ~= 20.0
 
 vec2 test_access_from_function_multiple() {
@@ -150,4 +156,5 @@ vec2 test_access_from_function_multiple() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_function_multiple() ~= vec2(8.0, 10.0)

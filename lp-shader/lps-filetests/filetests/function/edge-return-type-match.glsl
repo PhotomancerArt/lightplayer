@@ -16,6 +16,7 @@ float test_edge_return_type_match_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_match_float() ~= 3.14159
 
 int get_answer() {
@@ -30,6 +31,7 @@ int test_edge_return_type_match_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_match_int() == 42
 
 vec2 get_origin() {
@@ -44,6 +46,7 @@ vec2 test_edge_return_type_match_vector() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_match_vector() ~= vec2(0.0, 0.0)
 
 void do_nothing() {
@@ -58,6 +61,7 @@ void test_edge_return_type_match_void() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_match_void() == 0.0
 
 /*
@@ -85,6 +89,7 @@ float test_edge_return_type_convertible() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_convertible() ~= 42.0
 
 /*
@@ -112,6 +117,7 @@ float test_edge_return_type_array() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_array() ~= 6.0
 
 /*
@@ -143,6 +149,7 @@ Point test_edge_return_type_struct() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_struct() ~= Point(1.0, 2.0)
 
 mat2 get_identity() {
@@ -157,6 +164,7 @@ mat2 test_edge_return_type_matrix() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_matrix() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 bool is_even(int x) {
@@ -171,6 +179,7 @@ bool test_edge_return_type_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_bool() == true
 
 float absolute_value(float x) {
@@ -189,4 +198,5 @@ float test_edge_return_type_multiple_returns() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_return_type_multiple_returns() ~= 5.0

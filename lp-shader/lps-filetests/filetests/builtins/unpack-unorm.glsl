@@ -14,6 +14,7 @@ vec2 test_unpackunorm2x16_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm2x16_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_unpackunorm2x16_max() {
@@ -24,6 +25,7 @@ vec2 test_unpackunorm2x16_max() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm2x16_max() ~= vec2(1.0, 1.0)
 
 vec2 test_unpackunorm2x16_half() {
@@ -34,6 +36,7 @@ vec2 test_unpackunorm2x16_half() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm2x16_half() ~= vec2(0.5, 0.5)
 
 vec4 test_unpackunorm4x8_zero() {
@@ -44,6 +47,7 @@ vec4 test_unpackunorm4x8_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm4x8_zero() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 vec4 test_unpackunorm4x8_max() {
@@ -54,6 +58,7 @@ vec4 test_unpackunorm4x8_max() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm4x8_max() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 vec4 test_unpackunorm4x8_quarters() {
@@ -64,6 +69,7 @@ vec4 test_unpackunorm4x8_quarters() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackunorm4x8_quarters() ~= vec4(0.25, 0.25, 0.25, 0.25)
 
 

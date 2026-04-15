@@ -16,6 +16,7 @@ mat2 test_outerproduct_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2() ~= mat2(3.0, 4.0, 6.0, 8.0)
 
 mat3 test_outerproduct_vec3() {
@@ -28,6 +29,7 @@ mat3 test_outerproduct_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3() ~= mat3(2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 6.0, 6.0, 6.0)
 
 mat4 test_outerproduct_vec4() {
@@ -40,6 +42,7 @@ mat4 test_outerproduct_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4() ~= mat4(1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0)
 
 mat2x3 test_outerproduct_vec2_vec3() {
@@ -52,6 +55,7 @@ mat2x3 test_outerproduct_vec2_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_vec3() ~= mat2x3(2.0, 4.0, 6.0, 3.0, 6.0, 9.0)
 
 mat3x2 test_outerproduct_vec3_vec2() {
@@ -64,6 +68,7 @@ mat3x2 test_outerproduct_vec3_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_vec2() ~= mat3x2(2.0, 3.0, 4.0, 6.0, 6.0, 9.0)
 
 mat2 test_outerproduct_vec2_negative() {
@@ -75,6 +80,7 @@ mat2 test_outerproduct_vec2_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_negative() ~= mat2(-3.0, 4.0, 6.0, -8.0)
 
 mat3 test_outerproduct_vec3_negative() {
@@ -86,6 +92,7 @@ mat3 test_outerproduct_vec3_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_negative() ~= mat3(-2.0, 2.0, -3.0, 4.0, -4.0, 6.0, -6.0, 6.0, -9.0)
 
 mat4 test_outerproduct_vec4_negative() {
@@ -97,6 +104,7 @@ mat4 test_outerproduct_vec4_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4_negative() ~= mat4(-1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0)
 
 mat2 test_outerproduct_vec2_zero() {
@@ -108,6 +116,7 @@ mat2 test_outerproduct_vec2_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_zero() ~= mat2(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_outerproduct_vec3_zero() {
@@ -119,6 +128,7 @@ mat3 test_outerproduct_vec3_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_zero() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_outerproduct_vec4_zero() {
@@ -130,6 +140,7 @@ mat4 test_outerproduct_vec4_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4_zero() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat2 test_outerproduct_vec2_fractions() {
@@ -141,6 +152,7 @@ mat2 test_outerproduct_vec2_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_fractions() ~= mat2(1.0, 1.0, 3.0, 3.0)
 
 mat3 test_outerproduct_vec3_fractions() {
@@ -152,6 +164,7 @@ mat3 test_outerproduct_vec3_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_fractions() ~= mat3(1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 5.0, 5.0, 5.0)
 
 mat4 test_outerproduct_vec4_fractions() {
@@ -163,6 +176,7 @@ mat4 test_outerproduct_vec4_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4_fractions() ~= mat4(1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0, 5.0, 5.0, 5.0, 5.0, 7.0, 7.0, 7.0, 7.0)
 
 mat2 test_outerproduct_vec2_expressions() {
@@ -172,6 +186,7 @@ mat2 test_outerproduct_vec2_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_expressions() ~= mat2(6.0, 8.0, 9.0, 12.0)
 
 mat3 test_outerproduct_vec3_expressions() {
@@ -181,6 +196,7 @@ mat3 test_outerproduct_vec3_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_expressions() ~= mat3(2.0, 3.0, 4.0, 4.0, 6.0, 8.0, 6.0, 9.0, 12.0)
 
 mat4 test_outerproduct_vec4_expressions() {
@@ -190,6 +206,7 @@ mat4 test_outerproduct_vec4_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4_expressions() ~= mat4(1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0)
 
 mat2 test_outerproduct_vec2_variables() {
@@ -201,6 +218,7 @@ mat2 test_outerproduct_vec2_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec2_variables() ~= mat2(8.0, 10.0, 12.0, 15.0)
 
 mat3 test_outerproduct_vec3_variables() {
@@ -212,6 +230,7 @@ mat3 test_outerproduct_vec3_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec3_variables() ~= mat3(3.0, 2.0, 1.0, 6.0, 4.0, 2.0, 9.0, 6.0, 3.0)
 
 mat4 test_outerproduct_vec4_variables() {
@@ -223,4 +242,5 @@ mat4 test_outerproduct_vec4_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_outerproduct_vec4_variables() ~= mat4(2.0, 4.0, 6.0, 8.0, 2.0, 4.0, 6.0, 8.0, 2.0, 4.0, 6.0, 8.0, 2.0, 4.0, 6.0, 8.0)

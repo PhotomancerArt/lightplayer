@@ -26,6 +26,7 @@ float test_access_read_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_float() ~= 42.0
 
 int test_access_read_int() {
@@ -36,6 +37,7 @@ int test_access_read_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_int() == -123
 
 uint test_access_read_uint() {
@@ -46,6 +48,7 @@ uint test_access_read_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_uint() == 987
 
 bool test_access_read_bool() {
@@ -56,6 +59,7 @@ bool test_access_read_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_bool() == true
 
 vec2 test_access_read_vec2() {
@@ -66,6 +70,7 @@ vec2 test_access_read_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_access_read_vec3() {
@@ -76,6 +81,7 @@ vec3 test_access_read_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_access_read_vec4() {
@@ -86,6 +92,7 @@ vec4 test_access_read_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_access_read_mat2() {
@@ -96,6 +103,7 @@ mat2 test_access_read_mat2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_access_read_const() {
@@ -106,6 +114,7 @@ float test_access_read_const() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_const() ~= 6.28
 
 float test_access_read_uniform() {
@@ -116,6 +125,7 @@ float test_access_read_uniform() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_uniform() ~= 1.0
 
 vec3 test_access_read_in() {
@@ -126,6 +136,7 @@ vec3 test_access_read_in() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_in() ~= vec3(1.0, 1.0, 1.0)
 
 float test_access_read_buffer() {
@@ -138,4 +149,5 @@ float test_access_read_buffer() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_read_buffer() ~= 15.0

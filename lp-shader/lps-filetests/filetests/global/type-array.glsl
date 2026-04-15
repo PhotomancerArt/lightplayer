@@ -24,6 +24,7 @@ float test_type_array_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_float() ~= 15.0
 
 vec2 test_type_array_vec2() {
@@ -38,6 +39,7 @@ vec2 test_type_array_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_vec2() ~= vec2(9.0, 12.0)
 
 int test_type_array_int() {
@@ -53,6 +55,7 @@ int test_type_array_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_int() == 100
 
 bool test_type_array_bool() {
@@ -67,6 +70,7 @@ bool test_type_array_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_bool() == true
 
 float test_type_array_indexing() {
@@ -83,6 +87,7 @@ float test_type_array_indexing() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_indexing() ~= 350.0
 
 vec2 test_type_array_loop() {
@@ -100,6 +105,7 @@ vec2 test_type_array_loop() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_loop() ~= vec2(6.0, 12.0)
 
 int test_type_array_length() {
@@ -115,6 +121,7 @@ int test_type_array_length() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_length() == 4
 
 float test_type_array_multidimensional() {
@@ -134,4 +141,5 @@ float test_type_array_multidimensional() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_array_multidimensional() ~= 13.0

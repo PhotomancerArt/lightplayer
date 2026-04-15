@@ -64,6 +64,7 @@ mat4 test_mat4_add_assign_chained() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_mat4_add_assign_chained() ~= mat4(5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0, 27.0, 29.0, 31.0, 33.0, 35.0)
 
 mat4 test_mat4_add_assign_large_values() {

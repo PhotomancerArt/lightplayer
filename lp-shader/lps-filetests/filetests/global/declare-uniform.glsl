@@ -24,6 +24,7 @@ float test_declare_uniform_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_float() ~= 0.0
 
 int test_declare_uniform_int() {
@@ -34,6 +35,7 @@ int test_declare_uniform_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_int() == 1
 
 uint test_declare_uniform_uint() {
@@ -44,6 +46,7 @@ uint test_declare_uniform_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_uint() == 0
 
 bool test_declare_uniform_bool() {
@@ -54,6 +57,7 @@ bool test_declare_uniform_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_bool() == false
 
 vec2 test_declare_uniform_vec2() {
@@ -64,6 +68,7 @@ vec2 test_declare_uniform_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_declare_uniform_vec3() {
@@ -74,6 +79,7 @@ vec3 test_declare_uniform_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_vec3() ~= vec3(1.0, 0.0, 0.0)
 
 vec4 test_declare_uniform_vec4() {
@@ -84,6 +90,7 @@ vec4 test_declare_uniform_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat2 test_declare_uniform_mat2() {
@@ -94,6 +101,7 @@ mat2 test_declare_uniform_mat2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_mat2() ~= mat2(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_declare_uniform_mat3() {
@@ -105,6 +113,7 @@ mat3 test_declare_uniform_mat3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_mat3() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_declare_uniform_mat4() {
@@ -115,4 +124,5 @@ mat4 test_declare_uniform_mat4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_declare_uniform_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)

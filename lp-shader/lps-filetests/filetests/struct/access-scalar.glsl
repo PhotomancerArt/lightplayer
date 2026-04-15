@@ -17,6 +17,7 @@ float test_access_scalar_point_x() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_point_x() ~= 1.0
 
 float test_access_scalar_point_y() {
@@ -27,6 +28,7 @@ float test_access_scalar_point_y() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_point_y() ~= 4.0
 
 struct Color {
@@ -43,6 +45,7 @@ float test_access_scalar_color_r() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_color_r() ~= 0.1
 
 float test_access_scalar_color_g() {
@@ -53,6 +56,7 @@ float test_access_scalar_color_g() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_color_g() ~= 0.7
 
 float test_access_scalar_color_b() {
@@ -63,6 +67,7 @@ float test_access_scalar_color_b() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_color_b() ~= 0.0
 
 struct Triangle {
@@ -79,6 +84,7 @@ float test_access_scalar_triangle_a() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_triangle_a() ~= 3.0
 
 float test_access_scalar_triangle_sum() {
@@ -89,6 +95,7 @@ float test_access_scalar_triangle_sum() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_triangle_sum() ~= 6.0
 
 struct Person {
@@ -105,6 +112,7 @@ int test_access_scalar_person_age() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_person_age() == 25
 
 float test_access_scalar_person_height() {
@@ -115,6 +123,7 @@ float test_access_scalar_person_height() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_person_height() ~= 180.0
 
 bool test_access_scalar_person_is_student() {
@@ -125,6 +134,7 @@ bool test_access_scalar_person_is_student() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_person_is_student() == true
 
 struct Circle {
@@ -139,6 +149,7 @@ float test_access_scalar_circle_radius() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_circle_radius() ~= 10.0
 
 struct EmptyData {
@@ -153,4 +164,5 @@ int test_access_scalar_empty_data_id() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_scalar_empty_data_id() == 42

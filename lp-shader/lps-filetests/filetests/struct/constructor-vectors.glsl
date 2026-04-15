@@ -17,6 +17,7 @@ vec3 test_constructor_vectors_transform_position() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_transform_position() ~= vec3(1.0, 2.0, 3.0)
 
 vec3 test_constructor_vectors_transform_rotation() {
@@ -27,6 +28,7 @@ vec3 test_constructor_vectors_transform_rotation() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_transform_rotation() ~= vec3(0.1, 0.2, 0.3)
 
 struct ColorRGBA {
@@ -41,6 +43,7 @@ vec4 test_constructor_vectors_color_rgba() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_color_rgba() ~= vec4(0.1, 0.2, 0.3, 0.4)
 
 struct LineSegment {
@@ -56,6 +59,7 @@ vec2 test_constructor_vectors_line_segment() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_line_segment() ~= vec2(0.0, 0.0)
 
 vec2 test_constructor_vectors_line_segment_end() {
@@ -66,6 +70,7 @@ vec2 test_constructor_vectors_line_segment_end() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_line_segment_end() ~= vec2(15.0, 15.0)
 
 struct Triangle3D {
@@ -82,6 +87,7 @@ vec3 test_constructor_vectors_triangle3d() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_triangle3d() ~= vec3(1.0, 0.0, 0.0)
 
 struct MatrixTransform {
@@ -104,6 +110,7 @@ vec4 test_constructor_vectors_matrix_transform() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_matrix_transform() ~= vec4(0.0, 0.0, 1.0, 0.0)
 
 struct Particle {
@@ -121,6 +128,7 @@ vec3 test_constructor_vectors_particle_position() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_particle_position() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_constructor_vectors_particle_color() {
@@ -131,6 +139,7 @@ vec4 test_constructor_vectors_particle_color() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_particle_color() ~= vec4(0.5, 0.5, 0.5, 0.8)
 
 float test_constructor_vectors_particle_size() {
@@ -141,4 +150,5 @@ float test_constructor_vectors_particle_size() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_vectors_particle_size() ~= 15.5

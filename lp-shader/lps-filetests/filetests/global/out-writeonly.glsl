@@ -20,6 +20,7 @@ void test_out_writeonly_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_float() == 0.0
 
 void test_out_writeonly_int() {
@@ -30,6 +31,7 @@ void test_out_writeonly_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_int() == 0.0
 
 void test_out_writeonly_uint() {
@@ -40,6 +42,7 @@ void test_out_writeonly_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_uint() == 0.0
 
 void test_out_writeonly_bool() {
@@ -50,6 +53,7 @@ void test_out_writeonly_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_bool() == 0.0
 
 void test_out_writeonly_vec2() {
@@ -60,6 +64,7 @@ void test_out_writeonly_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_vec2() == 0.0
 
 void test_out_writeonly_vec3() {
@@ -70,6 +75,7 @@ void test_out_writeonly_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_vec3() == 0.0
 
 void test_out_writeonly_vec4() {
@@ -80,6 +86,7 @@ void test_out_writeonly_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_vec4() == 0.0
 
 void test_out_writeonly_calculations() {
@@ -95,6 +102,7 @@ void test_out_writeonly_calculations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_calculations() == 0.0
 
 void test_out_writeonly_fragment_output() {
@@ -110,4 +118,5 @@ void test_out_writeonly_fragment_output() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_out_writeonly_fragment_output() == 0.0

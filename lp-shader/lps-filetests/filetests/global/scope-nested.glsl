@@ -27,6 +27,7 @@ float test_scope_nested_access() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_access() ~= 6.0
 
 vec2 test_scope_nested_vector() {
@@ -47,6 +48,7 @@ vec2 test_scope_nested_vector() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_nested_bool() {
@@ -67,6 +69,7 @@ bool test_scope_nested_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_bool() == true
 
 int test_scope_nested_depth() {
@@ -94,6 +97,7 @@ int test_scope_nested_depth() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_depth() == 0
 
 float test_scope_nested_mixed() {
@@ -117,6 +121,7 @@ float test_scope_nested_mixed() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_mixed() ~= 65.0
 
 vec2 test_scope_nested_functions() {
@@ -145,6 +150,7 @@ vec2 test_scope_nested_functions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_functions() ~= vec2(4.0, 4.0)
 
 float test_scope_nested_complex() {
@@ -172,4 +178,5 @@ float test_scope_nested_complex() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_nested_complex() ~= 5.0

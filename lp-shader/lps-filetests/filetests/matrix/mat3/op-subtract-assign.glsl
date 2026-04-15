@@ -38,6 +38,7 @@ mat3 test_mat3_subtract_assign_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_mat3_subtract_assign_expressions() ~= mat3(4.0, 4.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 0.0)
 
 mat3 test_mat3_subtract_assign_zero() {
@@ -67,6 +68,7 @@ mat3 test_mat3_subtract_assign_chained() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_mat3_subtract_assign_chained() ~= mat3(-4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0, -4.0)
 
 mat3 test_mat3_subtract_assign_large_values() {

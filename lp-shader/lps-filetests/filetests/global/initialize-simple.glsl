@@ -21,6 +21,7 @@ float test_initialize_simple_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_float() ~= 84.0
 
 int test_initialize_simple_int() {
@@ -31,6 +32,7 @@ int test_initialize_simple_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_int() == -23
 
 uint test_initialize_simple_uint() {
@@ -41,6 +43,7 @@ uint test_initialize_simple_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_uint() == 329
 
 bool test_initialize_simple_bool() {
@@ -51,6 +54,7 @@ bool test_initialize_simple_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_bool() == true
 
 vec2 test_initialize_simple_vec2() {
@@ -61,6 +65,7 @@ vec2 test_initialize_simple_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_vec2() ~= vec2(2.0, 4.0)
 
 vec3 test_initialize_simple_vec3() {
@@ -71,6 +76,7 @@ vec3 test_initialize_simple_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_vec3() ~= vec3(2.0, 3.0, 4.0)
 
 vec4 test_initialize_simple_vec4() {
@@ -81,6 +87,7 @@ vec4 test_initialize_simple_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_initialize_simple_mat2() {
@@ -91,6 +98,7 @@ mat2 test_initialize_simple_mat2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_mat2() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 float test_initialize_simple_modify() {
@@ -103,4 +111,5 @@ float test_initialize_simple_modify() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_initialize_simple_modify() ~= 52.0

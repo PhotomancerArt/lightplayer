@@ -13,6 +13,7 @@ dvec2 test_unpackdouble2x32_zero() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_zero() ~= dvec2(0.0, 0.0)
 
 dvec2 test_unpackdouble2x32_ones() {
@@ -23,6 +24,7 @@ dvec2 test_unpackdouble2x32_ones() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_ones() ~= dvec2(1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_half() {
@@ -33,6 +35,7 @@ dvec2 test_unpackdouble2x32_half() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_half() ~= dvec2(0.5, 0.5)
 
 dvec2 test_unpackdouble2x32_neg_one() {
@@ -43,6 +46,7 @@ dvec2 test_unpackdouble2x32_neg_one() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_neg_one() ~= dvec2(-1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_two() {
@@ -53,6 +57,7 @@ dvec2 test_unpackdouble2x32_two() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_two() ~= dvec2(2.0, 2.0)
 
 dvec2 test_unpackdouble2x32_small() {
@@ -63,6 +68,7 @@ dvec2 test_unpackdouble2x32_small() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_unpackdouble2x32_small() ~= dvec2(0.1, 0.1)
 
 

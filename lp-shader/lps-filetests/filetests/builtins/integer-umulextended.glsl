@@ -16,6 +16,7 @@ uvec4 test_umulextended_uint_small() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_umulextended_uint_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_umulextended_uint_medium() {
@@ -28,6 +29,7 @@ uvec4 test_umulextended_uint_medium() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_umulextended_uint_medium() == uvec4(1410065408u, 2u, 0u, 0u)
 
 uvec4 test_umulextended_uint_large() {
@@ -40,6 +42,7 @@ uvec4 test_umulextended_uint_large() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_umulextended_uint_large() == uvec4(0u, 1u, 0u, 0u)
 
 uvec4 test_umulextended_uint_max() {
@@ -52,6 +55,7 @@ uvec4 test_umulextended_uint_max() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
 

@@ -14,6 +14,7 @@ mat2 test_transpose_mat2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2() ~= mat2(1.0, 3.0, 2.0, 4.0)
 
 mat3 test_transpose_mat3() {
@@ -25,6 +26,7 @@ mat3 test_transpose_mat3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3() ~= mat3(1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0)
 
 mat4 test_transpose_mat4() {
@@ -36,6 +38,7 @@ mat4 test_transpose_mat4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
 mat2x3 test_transpose_mat2x3() {
@@ -47,6 +50,7 @@ mat2x3 test_transpose_mat2x3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2x3() ~= mat3x2(1.0, 4.0, 2.0, 5.0, 3.0, 6.0)
 
 mat3x2 test_transpose_mat3x2() {
@@ -58,6 +62,7 @@ mat3x2 test_transpose_mat3x2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3x2() ~= mat2x3(1.0, 3.0, 5.0, 2.0, 4.0, 6.0)
 
 mat2 test_transpose_mat2_identity() {
@@ -68,6 +73,7 @@ mat2 test_transpose_mat2_identity() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2_identity() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 mat3 test_transpose_mat3_identity() {
@@ -78,6 +84,7 @@ mat3 test_transpose_mat3_identity() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3_identity() ~= mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 mat4 test_transpose_mat4_simple() {
@@ -88,6 +95,7 @@ mat4 test_transpose_mat4_simple() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4_simple() ~= mat4(1.0, 5.0, 9.0, 13.0, 2.0, 6.0, 10.0, 14.0, 3.0, 7.0, 11.0, 15.0, 4.0, 8.0, 12.0, 16.0)
 
 mat2 test_transpose_mat2_negative() {
@@ -98,6 +106,7 @@ mat2 test_transpose_mat2_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2_negative() ~= mat2(-1.0, -3.0, -2.0, -4.0)
 
 mat3 test_transpose_mat3_negative() {
@@ -108,6 +117,7 @@ mat3 test_transpose_mat3_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3_negative() ~= mat3(-1.0, -4.0, -7.0, -2.0, -5.0, -8.0, -3.0, -6.0, -9.0)
 
 mat4 test_transpose_mat4_negative() {
@@ -118,6 +128,7 @@ mat4 test_transpose_mat4_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4_negative() ~= mat4(-1.0, -5.0, -9.0, -13.0, -2.0, -6.0, -10.0, -14.0, -3.0, -7.0, -11.0, -15.0, -4.0, -8.0, -12.0, -16.0)
 
 mat2 test_transpose_mat2_fractions() {
@@ -128,6 +139,7 @@ mat2 test_transpose_mat2_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2_fractions() ~= mat2(0.5, 2.5, 1.5, 3.5)
 
 mat3 test_transpose_mat3_fractions() {
@@ -138,6 +150,7 @@ mat3 test_transpose_mat3_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3_fractions() ~= mat3(0.5, 3.5, 6.5, 1.5, 4.5, 7.5, 2.5, 5.5, 8.5)
 
 mat4 test_transpose_mat4_fractions() {
@@ -148,6 +161,7 @@ mat4 test_transpose_mat4_fractions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4_fractions() ~= mat4(0.5, 4.5, 8.5, 12.5, 1.5, 5.5, 9.5, 13.5, 2.5, 6.5, 10.5, 14.5, 3.5, 7.5, 11.5, 15.5)
 
 mat2 test_transpose_mat2_expressions() {
@@ -157,6 +171,7 @@ mat2 test_transpose_mat2_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2_expressions() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 mat3 test_transpose_mat3_expressions() {
@@ -166,6 +181,7 @@ mat3 test_transpose_mat3_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3_expressions() ~= mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
 
 mat4 test_transpose_mat4_expressions() {
@@ -175,6 +191,7 @@ mat4 test_transpose_mat4_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4_expressions() ~= mat4(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
 
 mat2 test_transpose_mat2_variables() {
@@ -185,6 +202,7 @@ mat2 test_transpose_mat2_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat2_variables() ~= mat2(1.0, 3.0, 2.0, 4.0)
 
 mat3 test_transpose_mat3_variables() {
@@ -195,6 +213,7 @@ mat3 test_transpose_mat3_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat3_variables() ~= mat3(1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0)
 
 mat4 test_transpose_mat4_variables() {
@@ -205,4 +224,5 @@ mat4 test_transpose_mat4_variables() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_transpose_mat4_variables() ~= mat4(1.0, 5.0, 9.0, 13.0, 2.0, 6.0, 10.0, 14.0, 3.0, 7.0, 11.0, 15.0, 4.0, 8.0, 12.0, 16.0)

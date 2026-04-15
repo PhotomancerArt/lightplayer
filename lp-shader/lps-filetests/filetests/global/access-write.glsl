@@ -25,6 +25,7 @@ void test_access_write_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_float() == 0.0
 
 void test_access_write_int() {
@@ -35,6 +36,7 @@ void test_access_write_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_int() == 0.0
 
 void test_access_write_uint() {
@@ -45,6 +47,7 @@ void test_access_write_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_uint() == 0.0
 
 void test_access_write_bool() {
@@ -55,6 +58,7 @@ void test_access_write_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_bool() == 0.0
 
 void test_access_write_vec2() {
@@ -65,6 +69,7 @@ void test_access_write_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_vec2() == 0.0
 
 void test_access_write_vec3() {
@@ -75,6 +80,7 @@ void test_access_write_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_vec3() == 0.0
 
 void test_access_write_vec4() {
@@ -85,6 +91,7 @@ void test_access_write_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_vec4() == 0.0
 
 void test_access_write_mat2() {
@@ -95,6 +102,7 @@ void test_access_write_mat2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_mat2() == 0.0
 
 void test_access_write_out() {
@@ -105,6 +113,7 @@ void test_access_write_out() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_out() == 0.0
 
 void test_access_write_buffer() {
@@ -118,6 +127,7 @@ void test_access_write_buffer() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_buffer() == 0.0
 
 void test_access_write_shared() {
@@ -128,6 +138,7 @@ void test_access_write_shared() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_shared() == 0.0
 
 float test_access_write_read() {
@@ -142,4 +153,5 @@ float test_access_write_read() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_write_read() ~= 157.0

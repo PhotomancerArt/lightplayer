@@ -26,6 +26,7 @@ float test_edge_in_write_error_read() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -36,6 +37,7 @@ int test_edge_in_write_error_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -46,6 +48,7 @@ vec2 test_edge_in_write_error_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -56,6 +59,7 @@ vec3 test_edge_in_write_error_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -66,6 +70,7 @@ vec4 test_edge_in_write_error_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -81,6 +86,7 @@ float test_edge_in_write_error_calculations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -99,4 +105,5 @@ vec4 test_edge_in_write_error_vertex_processing() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

@@ -26,6 +26,7 @@ vec2 test_type_vector_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_type_vector_vec3() {
@@ -37,6 +38,7 @@ vec3 test_type_vector_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_type_vector_vec4() {
@@ -48,6 +50,7 @@ vec4 test_type_vector_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 ivec2 test_type_vector_ivec2() {
@@ -59,6 +62,7 @@ ivec2 test_type_vector_ivec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_ivec2() ~= vec2(1.0, 2.0)
 
 ivec3 test_type_vector_ivec3() {
@@ -70,6 +74,7 @@ ivec3 test_type_vector_ivec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_ivec3() ~= vec3(1.0, 2.0, 3.0)
 
 ivec4 test_type_vector_ivec4() {
@@ -81,6 +86,7 @@ ivec4 test_type_vector_ivec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_ivec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 uvec2 test_type_vector_uvec2() {
@@ -92,6 +98,7 @@ uvec2 test_type_vector_uvec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_uvec2() ~= vec2(1.0, 2.0)
 
 uvec3 test_type_vector_uvec3() {
@@ -103,6 +110,7 @@ uvec3 test_type_vector_uvec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_uvec3() ~= vec3(1.0, 2.0, 3.0)
 
 uvec4 test_type_vector_uvec4() {
@@ -114,6 +122,7 @@ uvec4 test_type_vector_uvec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_uvec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 bvec2 test_type_vector_bvec2() {
@@ -125,6 +134,7 @@ bvec2 test_type_vector_bvec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_bvec2() ~= vec2(1.0, 0.0)
 
 bvec3 test_type_vector_bvec3() {
@@ -136,6 +146,7 @@ bvec3 test_type_vector_bvec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_bvec3() ~= vec3(1.0, 0.0, 1.0)
 
 bvec4 test_type_vector_bvec4() {
@@ -147,6 +158,7 @@ bvec4 test_type_vector_bvec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_bvec4() ~= vec4(1.0, 0.0, 1.0, 0.0)
 
 vec2 test_type_vector_operations() {
@@ -160,6 +172,7 @@ vec2 test_type_vector_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_operations() ~= vec2(3.0, 5.0)
 
 vec3 test_type_vector_swizzle() {
@@ -173,4 +186,5 @@ vec3 test_type_vector_swizzle() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_vector_swizzle() ~= vec3(1.0, 2.0, 3.0)

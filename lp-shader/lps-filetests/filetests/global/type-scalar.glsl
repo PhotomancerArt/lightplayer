@@ -18,6 +18,7 @@ float test_type_scalar_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_float() ~= 42.5
 
 int test_type_scalar_int() {
@@ -29,6 +30,7 @@ int test_type_scalar_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_int() == -123
 
 uint test_type_scalar_uint() {
@@ -40,6 +42,7 @@ uint test_type_scalar_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_uint() == 987
 
 bool test_type_scalar_bool() {
@@ -51,6 +54,7 @@ bool test_type_scalar_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_bool() == true
 
 float test_type_scalar_float_operations() {
@@ -64,6 +68,7 @@ float test_type_scalar_float_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_float_operations() ~= 25.0
 
 int test_type_scalar_int_operations() {
@@ -77,6 +82,7 @@ int test_type_scalar_int_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_int_operations() == 22
 
 uint test_type_scalar_uint_operations() {
@@ -90,6 +96,7 @@ uint test_type_scalar_uint_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_uint_operations() == 25
 
 bool test_type_scalar_bool_operations() {
@@ -103,6 +110,7 @@ bool test_type_scalar_bool_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_bool_operations() == true
 
 float test_type_scalar_mixed_operations() {
@@ -118,6 +126,7 @@ float test_type_scalar_mixed_operations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_mixed_operations() ~= 6.0
 
 bool test_type_scalar_comparison() {
@@ -136,4 +145,5 @@ bool test_type_scalar_comparison() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_type_scalar_comparison() == true

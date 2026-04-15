@@ -22,6 +22,7 @@ float test_uniform_readonly_float() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_float() ~= 1.0
 
 int test_uniform_readonly_int() {
@@ -32,6 +33,7 @@ int test_uniform_readonly_int() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_int() == 0
 
 uint test_uniform_readonly_uint() {
@@ -42,6 +44,7 @@ uint test_uniform_readonly_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_uint() == 1
 
 bool test_uniform_readonly_bool() {
@@ -52,6 +55,7 @@ bool test_uniform_readonly_bool() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_bool() == false
 
 vec2 test_uniform_readonly_vec2() {
@@ -62,6 +66,7 @@ vec2 test_uniform_readonly_vec2() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_uniform_readonly_vec3() {
@@ -72,6 +77,7 @@ vec3 test_uniform_readonly_vec3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_uniform_readonly_vec4() {
@@ -82,6 +88,7 @@ vec4 test_uniform_readonly_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_uniform_readonly_mat4() {
@@ -92,6 +99,7 @@ mat4 test_uniform_readonly_mat4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat3 test_uniform_readonly_mat3() {
@@ -102,6 +110,7 @@ mat3 test_uniform_readonly_mat3() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_mat3() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_calculations() {
@@ -116,6 +125,7 @@ float test_uniform_readonly_calculations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_calculations() ~= 10.0
 
 vec4 test_uniform_readonly_lighting() {
@@ -132,6 +142,7 @@ vec4 test_uniform_readonly_lighting() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_lighting() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_readonly_transform() {
@@ -145,4 +156,5 @@ float test_uniform_readonly_transform() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uniform_readonly_transform() ~= 0.0

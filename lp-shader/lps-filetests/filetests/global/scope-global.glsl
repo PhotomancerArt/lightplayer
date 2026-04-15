@@ -32,6 +32,7 @@ float test_scope_global_visibility() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_visibility() ~= 27.0
 
 bool test_scope_global_persistence() {
@@ -59,6 +60,7 @@ bool test_scope_global_persistence() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_persistence() == true
 
 mat3 test_scope_global_matrix() {
@@ -79,6 +81,7 @@ mat3 test_scope_global_matrix() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_matrix() ~= mat3(6.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 6.0)
 
 int test_scope_global_array() {
@@ -100,6 +103,7 @@ int test_scope_global_array() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_array() == 60
 
 float test_scope_global_nested_functions() {
@@ -121,6 +125,7 @@ float test_scope_global_nested_functions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_nested_functions() ~= 11.0
 
 vec2 test_scope_global_multiple_functions() {
@@ -148,6 +153,7 @@ vec2 test_scope_global_multiple_functions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_multiple_functions() ~= vec2(8.0, 10.0)
 
 float test_scope_global_state_machine() {
@@ -176,4 +182,5 @@ float test_scope_global_state_machine() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_scope_global_state_machine() ~= 7.0

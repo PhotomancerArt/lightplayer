@@ -25,6 +25,7 @@ float test_edge_empty_declaration_normal() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_empty_declaration_normal() ~= 168.0
 
 float test_edge_empty_declaration_modify() {
@@ -39,6 +40,7 @@ float test_edge_empty_declaration_modify() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_empty_declaration_modify() ~= 298.0
 
 void test_edge_empty_declaration_unused() {
@@ -51,6 +53,7 @@ void test_edge_empty_declaration_unused() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_empty_declaration_unused() == 0.0
 
 float test_edge_empty_declaration_scope() {
@@ -67,4 +70,5 @@ float test_edge_empty_declaration_scope() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_edge_empty_declaration_scope() ~= 100.0

@@ -102,6 +102,7 @@ uvec3 test_uvec3_from_uvec2_uint() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_uvec3_from_uvec3_from_uvec2_uint() == uvec3(5u, 3u, 7u)
 
 uvec3 test_uvec3_from_uint_uvec2() {

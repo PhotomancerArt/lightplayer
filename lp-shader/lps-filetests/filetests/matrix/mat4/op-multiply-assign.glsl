@@ -38,6 +38,7 @@ mat4 test_mat4_multiply_assign_matrix_expressions() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_mat4_multiply_assign_matrix_expressions() ~= mat4(2.0, 2.0, 2.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 mat4 test_mat4_multiply_assign_scalar() {

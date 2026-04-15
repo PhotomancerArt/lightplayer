@@ -70,6 +70,7 @@ vec4 test_roundeven_vec4() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_roundeven_vec4() ~= vec4(1.0, 3.0, -1.0, 4.0)
 
 

@@ -41,6 +41,7 @@ float test_multiple_declare_scalars() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_scalars() ~= 66.0
 
 vec2 test_multiple_declare_vectors() {
@@ -59,6 +60,7 @@ vec2 test_multiple_declare_vectors() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_vectors() ~= vec2(6.0, 6.0)
 
 mat2 test_multiple_declare_matrices() {
@@ -72,6 +74,7 @@ mat2 test_multiple_declare_matrices() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_matrices() ~= mat2(3.0, 2.0, 3.0, 6.0)
 
 vec4 test_multiple_declare_colors() {
@@ -86,6 +89,7 @@ vec4 test_multiple_declare_colors() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_colors() ~= vec4(1.0, 1.0, 1.0, 3.0)
 
 float test_multiple_declare_mixed() {
@@ -105,6 +109,7 @@ float test_multiple_declare_mixed() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_mixed() ~= 25.0
 
 int test_multiple_declare_bools() {
@@ -128,4 +133,5 @@ int test_multiple_declare_bools() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_multiple_declare_bools() == 602

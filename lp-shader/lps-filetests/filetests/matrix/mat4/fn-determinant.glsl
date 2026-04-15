@@ -63,6 +63,7 @@ float test_mat4_determinant_negative() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_mat4_determinant_negative() ~= -1.0
 
 float test_mat4_determinant_fractional() {

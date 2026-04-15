@@ -17,6 +17,7 @@ float test_constructor_simple_point() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_point() ~= 1.0
 
 int test_constructor_simple_point_y() {
@@ -27,6 +28,7 @@ int test_constructor_simple_point_y() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_point_y() == 4
 
 struct Color {
@@ -43,6 +45,7 @@ float test_constructor_simple_color() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_color() ~= 0.7
 
 struct Triangle {
@@ -59,6 +62,7 @@ float test_constructor_simple_triangle() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_triangle() ~= 12.0
 
 struct Person {
@@ -75,6 +79,7 @@ int test_constructor_simple_person() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_person() == 25
 
 float test_constructor_simple_person_height() {
@@ -85,6 +90,7 @@ float test_constructor_simple_person_height() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_person_height() ~= 180.0
 
 bool test_constructor_simple_person_student() {
@@ -95,6 +101,7 @@ bool test_constructor_simple_person_student() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_person_student() == true
 
 struct Circle {
@@ -109,6 +116,7 @@ float test_constructor_simple_circle() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_circle() ~= 10.0
 
 struct EmptyData {
@@ -123,4 +131,5 @@ int test_constructor_simple_empty_data() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_constructor_simple_empty_data() == 42

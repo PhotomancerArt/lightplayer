@@ -17,6 +17,7 @@ float test_access_from_main_read() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_read() ~= 0.0
 
 void test_access_from_main_write() {
@@ -30,6 +31,7 @@ void test_access_from_main_write() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_write() == 0.0
 
 float test_access_from_main_verify_write() {
@@ -41,6 +43,7 @@ float test_access_from_main_verify_write() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_verify_write() ~= 43.5
 
 bool test_access_from_main_flag() {
@@ -54,6 +57,7 @@ bool test_access_from_main_flag() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_flag() == false
 
 mat2 test_access_from_main_matrix() {
@@ -66,6 +70,7 @@ mat2 test_access_from_main_matrix() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 float test_access_from_main_calculations() {
@@ -86,6 +91,7 @@ float test_access_from_main_calculations() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_calculations() ~= 22.0
 
 vec3 test_access_from_main_vector_ops() {
@@ -100,6 +106,7 @@ vec3 test_access_from_main_vector_ops() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_vector_ops() ~= vec3(1.1, 1.2, 1.3)
 
 float test_access_from_main_mixed() {
@@ -120,4 +127,5 @@ float test_access_from_main_mixed() {
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
 // @unimplemented(wasm.q32)
+// @unimplemented(rv32fa.q32)
 // run: test_access_from_main_mixed() ~= 15.0
