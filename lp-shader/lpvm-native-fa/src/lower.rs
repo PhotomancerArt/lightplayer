@@ -1023,19 +1023,21 @@ pub fn lower_ops(
     abi: &ModuleAbi,
     float_mode: FloatMode,
 ) -> Result<LoweredFunction, LowerError> {
+    // Pre-size vectors to reduce allocation overhead during lowering.
+    // Estimate: ~2 vinsts per LPIR op, vreg pool from IR plus headroom for temps.
     let mut ctx = LowerCtx {
         func,
         ir,
         abi,
         float_mode,
         out: Vec::with_capacity(func.body.len().saturating_mul(2)),
-        vreg_pool: Vec::new(),
+        vreg_pool: Vec::with_capacity(func.vreg_pool.len().saturating_add(64)),
         symbols: ModuleSymbols::default(),
         next_label: 0,
         loop_stack: Vec::new(),
         epilogue_label: 0,
         loop_regions: Vec::new(),
-        region_tree: RegionTree::new(),
+        region_tree: RegionTree::with_capacity(func.body.len()),
     };
     ctx.epilogue_label = ctx.alloc_label();
     let root = ctx.lower_range(0, func.body.len())?;

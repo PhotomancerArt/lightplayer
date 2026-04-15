@@ -4,10 +4,14 @@
 //! freeing registers for defs, and recording spill/reload edits.
 
 use crate::abi::FuncAbi;
+#[cfg(not(feature = "debug"))]
+use crate::fa_alloc::TracePush;
 use crate::fa_alloc::pool::RegPool;
 use crate::fa_alloc::spill::SpillAlloc;
-use crate::fa_alloc::trace::{AllocTrace, TraceEntry};
-use crate::fa_alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
+#[cfg(feature = "debug")]
+use crate::fa_alloc::trace::AllocTrace;
+use crate::fa_alloc::trace::TraceEntry;
+use crate::fa_alloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint, TraceSink};
 use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 use crate::regset::RegSet;
 use crate::rv32::gpr::{self, PReg};
@@ -80,7 +84,10 @@ pub fn allocate_from_tree(
         spill: SpillAlloc::new(max_vreg_idx + 16),
         allocs: vec![Alloc::None; total_operands],
         edits: Vec::new(),
+        #[cfg(feature = "debug")]
         trace: AllocTrace::new(),
+        #[cfg(not(feature = "debug"))]
+        trace: (),
         loop_carried: RegSet::new(),
     };
     state.walk_region(root)?;
@@ -97,7 +104,7 @@ struct WalkState<'a> {
     spill: SpillAlloc,
     allocs: Vec<Alloc>,
     edits: Vec<(EditPoint, Edit)>,
-    trace: AllocTrace,
+    trace: crate::fa_alloc::TraceSink,
     /// VRegs that are loop-carried: defs to registers get a store-after-def
     /// edit so the spill slot always has the latest value at sub-boundaries.
     loop_carried: RegSet,
@@ -337,13 +344,21 @@ impl<'a> WalkState<'a> {
         }
 
         entry_edits.extend(self.edits);
-        Ok(AllocOutput {
+        #[cfg(feature = "debug")]
+        return Ok(AllocOutput {
             allocs: self.allocs,
             inst_alloc_offsets: self.inst_alloc_offsets,
             edits: entry_edits,
             num_spill_slots: self.spill.total_slots(),
             trace: self.trace,
-        })
+        });
+        #[cfg(not(feature = "debug"))]
+        return Ok(AllocOutput {
+            allocs: self.allocs,
+            inst_alloc_offsets: self.inst_alloc_offsets,
+            edits: entry_edits,
+            num_spill_slots: self.spill.total_slots(),
+        });
     }
 }
 
@@ -387,7 +402,7 @@ fn process_generic(
     spill: &mut SpillAlloc,
     allocs: &mut [Alloc],
     edits: &mut Vec<(EditPoint, Edit)>,
-    trace: &mut AllocTrace,
+    trace: &mut TraceSink,
 ) {
     // Special case: Mov32 is a copy. Coalesce src and dst to the same register
     // to eliminate the move at emission time (emitter skips addi rd, rs, 0 when rd==rs).
@@ -501,7 +516,7 @@ fn alloc_use(
     pool: &mut RegPool,
     spill: &mut SpillAlloc,
     edits: &mut Vec<(EditPoint, Edit)>,
-    trace: &mut AllocTrace,
+    trace: &mut TraceSink,
 ) -> Alloc {
     if let Some(preg) = pool.home(use_vreg) {
         pool.touch(preg);
@@ -559,7 +574,7 @@ fn handle_eviction(
     inst_idx_u16: u16,
     spill: &mut SpillAlloc,
     edits: &mut Vec<(EditPoint, Edit)>,
-    trace: &mut AllocTrace,
+    trace: &mut TraceSink,
 ) {
     if let Some(evicted_vreg) = evicted {
         let slot = spill.get_or_assign(evicted_vreg);
@@ -602,7 +617,7 @@ fn process_call(
     spill: &mut SpillAlloc,
     allocs: &mut [Alloc],
     edits: &mut Vec<(EditPoint, Edit)>,
-    trace: &mut AllocTrace,
+    trace: &mut TraceSink,
 ) {
     let (args_slice, rets_slice, callee_uses_sret) = match inst {
         VInst::Call {

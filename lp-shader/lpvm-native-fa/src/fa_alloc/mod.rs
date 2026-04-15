@@ -4,9 +4,36 @@
 //! with edit-list emission (regalloc2-style approach adapted for LPIR).
 
 use crate::abi::FuncAbi;
-use crate::fa_alloc::trace::AllocTrace;
 use crate::lower::LoweredFunction;
 use alloc::vec::Vec;
+
+/// Trace sink type: AllocTrace when debug feature is enabled, dummy ZST otherwise.
+#[cfg(feature = "debug")]
+pub type TraceSink = crate::fa_alloc::trace::AllocTrace;
+
+/// Trace sink type: dummy ZST when debug feature is disabled.
+#[cfg(not(feature = "debug"))]
+pub type TraceSink = ();
+
+/// Trait to provide a unified `push` interface for TraceSink.
+/// For AllocTrace, it records the entry. For the dummy ZST, it's a no-op.
+pub trait TracePush {
+    fn push(&mut self, _entry: crate::fa_alloc::trace::TraceEntry);
+}
+
+#[cfg(feature = "debug")]
+impl TracePush for TraceSink {
+    fn push(&mut self, entry: crate::fa_alloc::trace::TraceEntry) {
+        self.entries.push(entry);
+    }
+}
+
+#[cfg(not(feature = "debug"))]
+impl TracePush for TraceSink {
+    fn push(&mut self, _entry: crate::fa_alloc::trace::TraceEntry) {
+        // No-op in non-debug builds
+    }
+}
 
 pub mod liveness;
 pub mod pool;
@@ -123,8 +150,9 @@ pub struct AllocOutput {
     /// Number of spill slots needed.
     pub num_spill_slots: u32,
 
-    /// Debug trace of allocator decisions.
-    pub trace: AllocTrace,
+    /// Debug trace of allocator decisions (only available with debug feature).
+    #[cfg(feature = "debug")]
+    pub trace: crate::fa_alloc::trace::AllocTrace,
 }
 
 impl AllocOutput {
@@ -232,9 +260,19 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
     use crate::fa_alloc::pool::RegPool;
     use crate::region::{REGION_ID_NONE, Region, RegionId, RegionTree};
 
+    log::debug!(
+        "[native-fa] allocate: starting for {} vinsts, region_tree.root={}",
+        lowered.vinsts.len(),
+        lowered.region_tree.root
+    );
+
     let synthetic_root = lowered.region_tree.root == REGION_ID_NONE && !lowered.vinsts.is_empty();
     let owned_tree;
     let (tree, root): (&RegionTree, RegionId) = if synthetic_root {
+        log::debug!(
+            "[native-fa] allocate: creating synthetic linear region for {} vinsts",
+            lowered.vinsts.len()
+        );
         let mut t = RegionTree::new();
         let r = t.push(Region::Linear {
             start: 0,
@@ -244,9 +282,15 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
         owned_tree = t;
         (&owned_tree, r)
     } else {
+        log::debug!(
+            "[native-fa] allocate: using existing region tree with root={}, {} nodes",
+            lowered.region_tree.root,
+            lowered.region_tree.nodes.len()
+        );
         (&lowered.region_tree, lowered.region_tree.root)
     };
 
+    log::debug!("[native-fa] allocate: calling allocate_from_tree...");
     let output = walk::allocate_from_tree(
         &lowered.vinsts,
         &lowered.vreg_pool,
@@ -258,6 +302,11 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
     let spill_slots = output.num_spill_slots;
     let used_callee_saved = used_callee_saved_from_output(&output);
 
+    log::debug!(
+        "[native-fa] allocate: complete, {} spill slots, {} edits",
+        spill_slots,
+        output.edits.len()
+    );
     Ok(AllocResult {
         output,
         spill_slots,

@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmEngine, LpvmMemory, ModuleDebugInfo};
+use lpvm::{LpvmEngine, LpvmMemory};
 
 use crate::error::NativeError;
 use crate::native_options::NativeCompileOptions;

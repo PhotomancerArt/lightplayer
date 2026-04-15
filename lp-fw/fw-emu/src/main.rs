@@ -60,7 +60,7 @@ pub extern "C" fn _lp_main() -> ! {
     #[cfg(feature = "cranelift")]
     log::info!("[fw-emu] Shader backend: Cranelift (LPIR → lpvm-cranelift)");
     #[cfg(all(feature = "native-jit", not(feature = "cranelift")))]
-    log::info!("[fw-emu] Shader backend: native JIT (lpvm-native rt_jit)");
+    log::info!("[fw-emu] Shader backend: native JIT (lpvm-native-fa rt_jit)");
 
     // Create serial I/O first (needed for test_unwind check)
     let serial_io = SyscallSerialIo::new();

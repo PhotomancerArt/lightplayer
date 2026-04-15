@@ -105,12 +105,11 @@ outside Cranelift. Both stay in the workspace until the new path is complete.
 
 | Crate             | Role |
 |-------------------|------|
-| **`lpvm-native`** | Established backend: linear-scan regalloc, ELF-style emission, `rt_jit` / `rt_emu`. Used by **`native-jit`** on device, `shader-rv32` linear pipeline, and filetests for `rv32lp`. |
-| **`lpvm-native-fa`** | Fastalloc / straight-line PInst pipeline under active development. Used by **`shader-rv32fa`** and the `shader-rv32 --pipeline fast` path. |
+| **`lpvm-native`** | Legacy linear-scan regalloc, ELF-style emission, `rt_jit` / `rt_emu`. Kept for CLI `shader-rv32` / filetests until full consolidation. Not used on-device. |
+| **`lpvm-native-fa`** | Fastalloc / straight-line PInst pipeline. Used by **`native-jit`** on `fw-esp32`/`fw-emu`, **`shader-rv32fa`**, and `shader-rv32 --pipeline fast`. |
 
-Do **not** delete `lpvm-native` while `lpvm-native-fa` is still incomplete. When
-FA is fully functional and wired everywhere you care about, **then** remove the
-old crate and consolidate on `lpvm-native-fa`.
+`lpvm-native-fa` is now the default on-device backend (`native-jit`).
+`lpvm-native` remains for legacy CLI usage and filetests until full consolidation.
 
 ## Validation Commands
 

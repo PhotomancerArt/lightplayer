@@ -74,12 +74,20 @@ struct JalFixup {
 }
 
 impl<'a> EmitContext<'a> {
-    /// Create new emit context.
-    pub fn new(frame: FrameLayout, symbols: &'a ModuleSymbols, vreg_pool: &'a [VReg]) -> Self {
+    /// Create new emit context with pre-sized buffers.
+    /// `expected_insts` is a hint for code buffer sizing (typically vinsts.len()).
+    pub fn new(
+        frame: FrameLayout,
+        symbols: &'a ModuleSymbols,
+        vreg_pool: &'a [VReg],
+        expected_insts: usize,
+    ) -> Self {
+        // Estimate ~4 bytes per instruction + prologue/epilogue (~64 bytes)
+        let code_cap = expected_insts.saturating_mul(4).saturating_add(64);
         Self {
-            code: Vec::new(),
+            code: Vec::with_capacity(code_cap),
             relocs: Vec::new(),
-            debug_lines: Vec::new(),
+            debug_lines: Vec::with_capacity(expected_insts),
             frame,
             symbols,
             vreg_pool,
@@ -916,13 +924,23 @@ pub fn emit_function(
     symbols: &ModuleSymbols,
     is_sret: bool,
 ) -> Result<EmittedCode, AllocError> {
-    let mut ctx = EmitContext::new(frame, symbols, vreg_pool);
+    log::debug!(
+        "[native-fa] emit_function: starting with {} vinsts, {} edits",
+        vinsts.len(),
+        output.edits.len()
+    );
+    let mut ctx = EmitContext::new(frame, symbols, vreg_pool, vinsts.len());
 
+    log::debug!("[native-fa] emit_function: emitting prologue...");
     ctx.emit_prologue(is_sret)?;
 
     let mut edit_cursor = 0usize;
 
     if vinsts.is_empty() {
+        log::debug!(
+            "[native-fa] emit_function: empty vinsts, processing {} edits",
+            output.edits.len()
+        );
         while edit_cursor < output.edits.len() {
             let (point, edit) = &output.edits[edit_cursor];
             if *point != EditPoint::Before(0) {
@@ -932,7 +950,18 @@ pub fn emit_function(
             edit_cursor += 1;
         }
     } else {
+        log::debug!(
+            "[native-fa] emit_function: emitting {} vinsts...",
+            vinsts.len()
+        );
         for (inst_idx, vinst) in vinsts.iter().enumerate() {
+            if inst_idx % 100 == 0 {
+                log::debug!(
+                    "[native-fa] emit_function: vinst {}/{}",
+                    inst_idx,
+                    vinsts.len()
+                );
+            }
             let src_op = vinst.src_op();
             while edit_cursor < output.edits.len() {
                 let (point, edit) = &output.edits[edit_cursor];
@@ -958,9 +987,15 @@ pub fn emit_function(
         return Err(crate::emit_err!());
     }
 
+    log::debug!("[native-fa] emit_function: emitting epilogue and finish...");
     ctx.emit_epilogue();
 
-    ctx.finish()
+    let result = ctx.finish()?;
+    log::debug!(
+        "[native-fa] emit_function: complete, {} bytes emitted",
+        result.code.len()
+    );
+    Ok(result)
 }
 
 #[cfg(test)]

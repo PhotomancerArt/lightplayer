@@ -189,7 +189,10 @@ mod tests {
         // should omit frame pointer entirely to save 4 instructions.
         let frame = FrameLayout::compute(&abi, 0, PregSet::EMPTY, &[], true, 0, 0);
         assert!(!frame.save_ra);
-        assert!(!frame.save_fp, "leaf without spills/callee-saved should skip fp");
+        assert!(
+            !frame.save_fp,
+            "leaf without spills/callee-saved should skip fp"
+        );
         assert!(frame.ra_offset_from_sp.is_none());
         assert!(frame.fp_offset_from_sp.is_none());
     }

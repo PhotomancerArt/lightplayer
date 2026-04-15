@@ -4,6 +4,7 @@
 //! (`tests/filetests.rs`) handles filesystem discovery and BLESS updates.
 
 use crate::fa_alloc::pool::RegPool;
+#[cfg(feature = "debug")]
 use crate::fa_alloc::render::render_interleaved;
 use crate::fa_alloc::verify::verify_alloc;
 use crate::lower::lower_ops;
@@ -269,26 +270,39 @@ pub fn compute_filetest_snapshot(test: &FileTest) -> Result<String, String> {
 
     verify_alloc(vinsts, vreg_pool, &output, &func_abi);
 
-    let rendered = render_interleaved(
-        &func,
-        &module,
-        vinsts,
-        vreg_pool,
-        &output,
-        &func_abi,
-        &lowered.symbols,
-    );
+    #[cfg(feature = "debug")]
+    {
+        let rendered = render_interleaved(
+            &func,
+            &module,
+            vinsts,
+            vreg_pool,
+            &output,
+            &func_abi,
+            &lowered.symbols,
+        );
 
-    let mut actual_lines = vec![FILETEST_SEPARATOR.to_string()];
-    actual_lines.push(";".to_string());
-    for line in rendered.lines() {
-        if line.is_empty() {
-            actual_lines.push(";".to_string());
-        } else {
-            actual_lines.push(format!("; {}", line));
+        let mut actual_lines = vec![FILETEST_SEPARATOR.to_string()];
+        actual_lines.push(";".to_string());
+        for line in rendered.lines() {
+            if line.is_empty() {
+                actual_lines.push(";".to_string());
+            } else {
+                actual_lines.push(format!("; {}", line));
+            }
         }
+        Ok(actual_lines.join("\n"))
     }
-    Ok(actual_lines.join("\n"))
+    #[cfg(not(feature = "debug"))]
+    {
+        // In non-debug builds, return a placeholder indicating debug output is disabled
+        let mut actual_lines = vec![FILETEST_SEPARATOR.to_string()];
+        actual_lines.push(";".to_string());
+        actual_lines
+            .push("; Debug output disabled (build with --features debug to enable)".to_string());
+        actual_lines.push(";".to_string());
+        Ok(actual_lines.join("\n"))
+    }
 }
 
 #[cfg(test)]

@@ -11,6 +11,9 @@
 #[macro_use]
 extern crate alloc;
 
+// Re-export log crate for use within this crate
+pub use log;
+
 pub mod abi;
 pub mod compile;
 pub mod config;

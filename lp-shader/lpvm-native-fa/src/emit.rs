@@ -47,7 +47,15 @@ pub fn emit_lowered_ex(
     func_abi: &crate::abi::FuncAbi,
     caller_sret_bytes: u32,
 ) -> Result<EmittedCode, NativeError> {
+    log::debug!(
+        "[native-fa] emit_lowered_ex: starting allocation for {} vinsts",
+        lowered.vinsts.len()
+    );
     let alloc_result = allocate(lowered, func_abi).map_err(NativeError::FastAlloc)?;
+    log::debug!(
+        "[native-fa] emit_lowered_ex: allocation complete, {} spill slots",
+        alloc_result.spill_slots
+    );
     emit_lowered_with_alloc(lowered, func_abi, alloc_result, caller_sret_bytes)
 }
 

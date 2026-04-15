@@ -103,12 +103,19 @@ where
         let func_base = func_offsets[func_idx];
 
         for reloc in &func.relocs {
-            let target = resolve_symbol(&reloc.symbol).ok_or_else(|| {
-                NativeError::Internal(format!(
-                    "unresolved symbol `{}` for JIT relocation at offset {}",
-                    reloc.symbol, reloc.offset
-                ))
-            })?;
+            // First try the external resolver (for builtins)
+            let target = if let Some(addr) = resolve_symbol(&reloc.symbol) {
+                addr
+            } else {
+                // Fall back to intra-module function resolution
+                let target_offset = entries.get(&reloc.symbol).ok_or_else(|| {
+                    NativeError::Internal(format!(
+                        "unresolved symbol `{}` for JIT relocation at offset {}",
+                        reloc.symbol, reloc.offset
+                    ))
+                })?;
+                image_base.wrapping_add(*target_offset) as u32
+            };
 
             let absolute_offset = func_base + reloc.offset;
             patch_call_plt(&mut code, absolute_offset, image_base, target)?;

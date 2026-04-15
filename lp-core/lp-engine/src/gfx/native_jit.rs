@@ -1,4 +1,4 @@
-//! RV32 native JIT backend for [`super::LpGraphics`] (`lpvm-native` `rt_jit`).
+//! RV32 native JIT backend for [`super::LpGraphics`] (`lpvm-native-fa` `rt_jit`).
 //!
 //! Only built for `riscv32` when feature `native-jit` is enabled (e.g. `fw-emu`).
 
@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 
 use lp_shared::Texture;
 use lpvm::{LpvmEngine, LpvmModule};
-use lpvm_native::{
+use lpvm_native_fa::{
     BuiltinTable, NativeCompileOptions, NativeJitDirectCall, NativeJitEngine, NativeJitInstance,
 };
 
@@ -45,12 +45,15 @@ impl LpGraphics for NativeJitGraphics {
         source: &str,
         options: &ShaderCompileOptions,
     ) -> Result<Box<dyn LpShader>, crate::error::Error> {
+        log::debug!("[native-jit] Starting GLSL compilation");
         let naga = lps_frontend::compile(source).map_err(|e| crate::error::Error::Other {
             message: format!("{e}"),
         })?;
+        log::debug!("[native-jit] Naga parsing complete, lowering to LPIR...");
         let (ir, meta) = lps_frontend::lower(&naga).map_err(|e| crate::error::Error::Other {
             message: format!("{e}"),
         })?;
+        log::debug!("[native-jit] LPIR lowering complete: {} functions", ir.functions.len());
         drop(naga);
 
         let engine = NativeJitEngine::new(
@@ -63,11 +66,13 @@ impl LpGraphics for NativeJitGraphics {
             },
         );
 
+        log::debug!("[native-jit] Compiling LPIR to native code...");
         let module = engine
             .compile(&ir, &meta)
             .map_err(|e| crate::error::Error::Other {
                 message: format!("{e}"),
             })?;
+        log::debug!("[native-jit] Native compilation complete");
 
         let direct_call = module.direct_call("render");
 

@@ -46,7 +46,15 @@ pub fn compile_module_jit(
     };
 
     // 1. Compile module
+    log::debug!(
+        "[native-fa] compile_module_jit: starting compile_module with {} functions",
+        ir.functions.len()
+    );
     let compiled = compile_module(ir, sig, float_mode, options)?;
+    log::debug!(
+        "[native-fa] compile_module_jit: compile_module complete, {} functions compiled",
+        compiled.functions.len()
+    );
 
     // 2. Build ModuleDebugInfo from compiled functions
     let mut debug_info = ModuleDebugInfo::new();

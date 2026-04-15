@@ -36,7 +36,8 @@ rustc-demangle = "0.1"
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lpvm-native = { path = "../lp-shader/lpvm-native" }
-lpvm-native-fa = { path = "../lp-shader/lpvm-native-fa" }
+# `debug` enables interleaved alloc rendering for `shader-debug` and related tooling.
+lpvm-native-fa = { path = "../lp-shader/lpvm-native-fa", features = ["debug"] }
 lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-object"] }
 unicode-width = "0.2"
 

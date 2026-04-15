@@ -1,7 +1,6 @@
 //! Compilation orchestration: LPIR → VInst → PInst → bytes.
 
 use alloc::collections::BTreeMap;
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -81,60 +80,93 @@ pub fn compile_function(
     ir: &LpirModule,
     fn_sig: &LpsFnSig,
 ) -> Result<CompiledFunction, NativeError> {
-    // 1. Lower LPIR → VInst
-    let lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
-        .map_err(NativeError::Lower)?;
+    log::debug!(
+        "[native-fa] compile_function: lowering {} ({} ops)",
+        func.name,
+        func.body.len()
+    );
 
-    // 2. Build function ABI
+    // Build function ABI (needed for both debug and non-debug paths)
     let func_abi = crate::rv32::abi::func_abi_rv32(fn_sig, func.total_param_slots() as usize);
 
-    // 3. Allocate and emit
-    let emitted =
-        crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
+    // 1-3. Lower, allocate, emit - wrapped in scope to drop intermediates early
+    let (code, relocs, debug_lines, sections) = {
+        // Lower LPIR → VInst
+        let lowered = crate::lower::lower_ops(func, ir, &session.abi, session.float_mode)
+            .map_err(NativeError::Lower)?;
+        log::debug!(
+            "[native-fa] compile_function: lowered to {} vinsts",
+            lowered.vinsts.len()
+        );
 
-    let code = emitted.code;
-    let relocs = emitted.relocs;
+        // Allocate and emit
+        log::debug!("[native-fa] compile_function: emitting code...");
+        let emitted =
+            crate::emit::emit_lowered_ex(&lowered, &func_abi, session.abi.max_callee_sret_bytes())?;
+        log::debug!(
+            "[native-fa] compile_function: emitted {} bytes",
+            emitted.code.len()
+        );
 
-    // 4. Build structured debug info
-    let mut sections = BTreeMap::new();
+        let code = emitted.code;
+        let relocs = emitted.relocs;
+        let debug_lines = emitted.debug_lines;
 
-    // Interleaved LPIR + VInst + allocations
-    let interleaved = crate::fa_alloc::render::render_interleaved(
-        func,
-        ir,
-        &lowered.vinsts,
-        &lowered.vreg_pool,
-        &emitted.alloc_output,
-        &func_abi,
-        &lowered.symbols,
-    );
-    sections.insert("interleaved".into(), interleaved);
+        // Build structured debug info (gated by 'debug' feature)
+        #[cfg(feature = "debug")]
+        let sections = {
+            let mut sections = BTreeMap::new();
 
-    // Disasm section with hex
-    let mut disasm = String::new();
-    let mut off = 0usize;
-    while off + 4 <= code.len() {
-        let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
-        disasm.push_str(&format!(
-            "{:04x}\t{:08x}\t{}\n",
-            off,
-            w,
-            lp_riscv_inst::format_instruction(w)
-        ));
-        off += 4;
-    }
-    sections.insert("disasm".into(), disasm);
+            // Interleaved LPIR + VInst + allocations
+            let interleaved = crate::fa_alloc::render::render_interleaved(
+                func,
+                ir,
+                &lowered.vinsts,
+                &lowered.vreg_pool,
+                &emitted.alloc_output,
+                &func_abi,
+                &lowered.symbols,
+            );
+            sections.insert("interleaved".into(), interleaved);
 
-    // Optional: VInst listing
-    let mut vinst_text = String::new();
-    for inst in &lowered.vinsts {
-        vinst_text.push_str(&format!(
-            "{} {}\n",
-            inst.mnemonic(),
-            inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
-        ));
-    }
-    sections.insert("vinst".into(), vinst_text);
+            // Disasm section with hex
+            let mut disasm = String::new();
+            let mut off = 0usize;
+            while off + 4 <= code.len() {
+                let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
+                disasm.push_str(&format!(
+                    "{:04x}\t{:08x}\t{}\n",
+                    off,
+                    w,
+                    lp_riscv_inst::format_instruction(w)
+                ));
+                off += 4;
+            }
+            sections.insert("disasm".into(), disasm);
+
+            // Optional: VInst listing
+            let mut vinst_text = String::new();
+            for inst in &lowered.vinsts {
+                vinst_text.push_str(&format!(
+                    "{} {}\n",
+                    inst.mnemonic(),
+                    inst.format_alloc_trace_detail(&lowered.vreg_pool, &lowered.symbols)
+                ));
+            }
+            sections.insert("vinst".into(), vinst_text);
+
+            sections
+        };
+
+        #[cfg(not(feature = "debug"))]
+        let sections = {
+            // Both lowered and emitted.alloc_output are dropped here at end of scope
+            // This reduces peak memory during multi-function compilation
+            BTreeMap::new()
+        };
+
+        (code, relocs, debug_lines, sections)
+    };
 
     let debug_info = FunctionDebugInfo::new(&func.name)
         .with_inst_count(code.len() / 4)
@@ -144,7 +176,7 @@ pub fn compile_function(
         name: func.name.clone(),
         code,
         relocs,
-        debug_lines: emitted.debug_lines,
+        debug_lines,
         debug_info,
     })
 }
@@ -156,6 +188,10 @@ pub fn compile_module(
     float_mode: FloatMode,
     options: crate::native_options::NativeCompileOptions,
 ) -> Result<CompiledModule, NativeError> {
+    log::debug!(
+        "[native-fa] compile_module: building ABI for {} functions",
+        ir.functions.len()
+    );
     let module_abi = ModuleAbi::from_ir_and_sig(ir, sig);
     let mut session = CompileSession::new(module_abi, float_mode, options);
 
@@ -163,7 +199,13 @@ pub fn compile_module(
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut functions = Vec::with_capacity(ir.functions.len());
-    for func in &ir.functions {
+    for (idx, func) in ir.functions.iter().enumerate() {
+        log::debug!(
+            "[native-fa] compile_module: compiling function {}/{}: {}",
+            idx + 1,
+            ir.functions.len(),
+            func.name
+        );
         let default_sig = LpsFnSig {
             name: func.name.clone(),
             return_type: lps_shared::LpsType::Void,
@@ -175,8 +217,16 @@ pub fn compile_module(
             .unwrap_or(&default_sig);
         let compiled = compile_function(&mut session, func, ir, fn_sig)?;
         functions.push(compiled);
+        log::debug!(
+            "[native-fa] compile_module: function {} complete",
+            func.name
+        );
     }
 
+    log::debug!(
+        "[native-fa] compile_module: all {} functions compiled",
+        functions.len()
+    );
     Ok(CompiledModule {
         functions,
         symbols: session.symbols,

@@ -49,8 +49,14 @@ impl Default for RegionTree {
 impl RegionTree {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    /// Create with pre-allocated capacity for nodes.
+    #[must_use]
+    pub fn with_capacity(node_capacity: usize) -> Self {
         Self {
-            nodes: Vec::new(),
+            nodes: Vec::with_capacity(node_capacity.saturating_add(4)),
             seq_children: Vec::new(),
             root: REGION_ID_NONE,
         }
