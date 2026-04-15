@@ -101,6 +101,7 @@ int test_ternary_struct() {
 
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // @unimplemented(wasm.q32)
 // run: test_ternary_struct() == 3
 
@@ -120,6 +121,7 @@ int test_ternary_struct_complex() {
 
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // @unimplemented(wasm.q32)
 // run: test_ternary_struct_complex() == 15
 
@@ -135,6 +137,7 @@ int test_ternary_array_element() {
 
 // @unimplemented(jit.q32)
 // @unimplemented(rv32.q32)
+// @unimplemented(rv32fa.q32)
 // @unimplemented(wasm.q32)
 // run: test_ternary_array_element() == 1
 

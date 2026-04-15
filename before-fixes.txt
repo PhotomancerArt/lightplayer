@@ -1,0 +1,187 @@
+[31m✗[0m [31m 0/ 1[0m [2mconst/array-size/struct-field.glsl[0m [33m(compile-fail)[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mcontrol/while/continue_nested.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mcontrol/while/edge_cases.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mcontrol/while/nested_if.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mdebug/palette-rainbow.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mdebug/rainbow-noctrl.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mfunction/param-unnamed/int.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2mfunction/return-exact-match.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 1[0m [2moperators/predec-component.glsl[0m [31m(1 unexpected)[0m
+[31m✗[0m [31m 0/ 3[0m [2mcontrol/do_while/nested_if.glsl[0m [31m(3 unexpected)[0m
+[31m✗[0m [31m 0/ 3[0m [2mcontrol/for/nested_if.glsl[0m [31m(3 unexpected)[0m
+[31m✗[0m [31m 0/ 3[0m [2mcontrol/while/continue.glsl[0m [31m(3 unexpected)[0m
+[31m✗[0m [31m 0/ 4[0m [2mbuiltins/integer-imulextended.glsl[0m [33m(compile-fail)[0m [31m(4 unexpected)[0m
+[31m✗[0m [31m 0/ 4[0m [2mbuiltins/integer-uaddcarry.glsl[0m [33m(compile-fail)[0m [31m(4 unexpected)[0m
+[31m✗[0m [31m 0/ 4[0m [2mbuiltins/integer-umulextended.glsl[0m [33m(compile-fail)[0m [31m(4 unexpected)[0m
+[31m✗[0m [31m 0/ 4[0m [2mglobal/edge-empty-declaration.glsl[0m [33m(compile-fail)[0m [31m(4 unexpected)[0m
+[31m✗[0m [31m 0/ 4[0m [2mglobal/edge-out-read-error.glsl[0m [33m(compile-fail)[0m [31m(4 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mbuiltins/integer-usubborrow.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mfunction/edge-const-out-error.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mglobal/declare-buffer.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mglobal/forward-reference.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mglobal/redeclare-error.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mglobal/shared-array-size.glsl[0m [33m(compile-fail)[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 5[0m [2mmatrix/mat4/incdec-matrix-element.glsl[0m [31m(5 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/common-frexp.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/integer-bitfieldextract.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/integer-bitfieldinsert.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/pack-double.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/pack-half.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/pack-unorm.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/unpack-double.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/unpack-half.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mbuiltins/unpack-unorm.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mfunction/call-order.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/edge-multiple-qualifiers-error.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/edge-uniform-write-error.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/initialize-uniform.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/multiple-declare.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/shared-globals.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mglobal/shared-struct-match.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mmatrix/mat4/incdec-matrix-column.glsl[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec2/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec3/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 6[0m [2mvec/bvec4/fn-mix.glsl[0m [33m(compile-fail)[0m [31m(6 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mbuiltins/common-modf.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mfunction/edge-lvalue-out.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mglobal/access-from-function.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mglobal/edge-in-write-error.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mglobal/scope-global.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mglobal/scope-nested.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mmatrix/mat3/incdec-matrix-element.glsl[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 7[0m [2mstruct/define-simple.glsl[0m [33m(compile-fail)[0m [31m(7 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mbuiltins/common-floatbitstoint.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mfunction/param-struct.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mfunction/return-struct.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mglobal/access-from-main.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mglobal/declare-in.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mglobal/declare-out.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mglobal/edge-no-storage-qualifier.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mglobal/type-array.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mstruct/define-nested.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 8[0m [2mstruct/define-vector.glsl[0m [33m(compile-fail)[0m [31m(8 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mfunction/scope-global.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/declare-shared.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/declare-simple.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/initialize-simple.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/out-writeonly.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/type-struct.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mglobal/uniform-no-init-error.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/ 9[0m [2mstruct/constructor-simple.glsl[0m [33m(compile-fail)[0m [31m(9 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-exp-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mbuiltins/edge-trig-domain.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mfunction/edge-return-type-match.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mfunction/param-default-in.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mfunction/scope-local.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/declare-uniform.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/edge-uninitialized-read.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/in-readonly.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/initialize-undefined.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/scope-shadowing.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mglobal/type-scalar.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mstruct/constructor-vectors.glsl[0m [33m(compile-fail)[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/10[0m [2mvec/bvec2/index-variable-bounds.glsl[0m [31m(10 unexpected)[0m
+[31m✗[0m [31m 0/11[0m [2mbuiltins/edge-nan-inf-propagation.glsl[0m [33m(compile-fail)[0m [31m(11 unexpected)[0m
+[31m✗[0m [31m 0/11[0m [2mglobal/type-matrix.glsl[0m [33m(compile-fail)[0m [31m(11 unexpected)[0m
+[31m✗[0m [31m 0/11[0m [2mstruct/assign-simple.glsl[0m [33m(compile-fail)[0m [31m(11 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mcontrol/ternary/types.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mglobal/access-read.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mglobal/access-write.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mglobal/uniform-readonly.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mstruct/access-scalar.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mstruct/access-vector.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/12[0m [2mstruct/constructor-nested.glsl[0m [33m(compile-fail)[0m [31m(12 unexpected)[0m
+[31m✗[0m [31m 0/14[0m [2mglobal/type-vector.glsl[0m [33m(compile-fail)[0m [31m(14 unexpected)[0m
+[31m✗[0m [31m 0/17[0m [2mbuiltins/matrix-compmult.glsl[0m [33m(compile-fail)[0m [31m(17 unexpected)[0m
+[31m✗[0m [31m 0/20[0m [2mbuiltins/matrix-outerproduct.glsl[0m [33m(compile-fail)[0m [31m(20 unexpected)[0m
+[31m✗[0m [31m 0/20[0m [2mbuiltins/matrix-transpose.glsl[0m [33m(compile-fail)[0m [31m(20 unexpected)[0m
+[31m✗[0m [33m 1/ 2[0m [2mcontrol/do_while/edge_cases.glsl[0m [31m(1 unexpected)[0m [94m(122 inst)[0m
+[31m✗[0m [33m 1/ 2[0m [2mcontrol/do_while/nested_while.glsl[0m [31m(1 unexpected)[0m [94m(268 inst)[0m
+[31m✗[0m [33m 1/ 2[0m [2mcontrol/while/nested_do_while.glsl[0m [31m(1 unexpected)[0m [94m(246 inst)[0m
+[31m✗[0m [33m 1/ 2[0m [2mfunction/recursive-static-error.glsl[0m [31m(1 unexpected)[0m [94m(136 inst)[0m
+[31m✗[0m [33m 1/ 2[0m [2mfunction/return-while-loop.glsl[0m [31m(1 unexpected)[0m [94m(417 inst)[0m
+[31m✗[0m [33m 1/ 3[0m [2mcontrol/do_while/continue.glsl[0m [31m(2 unexpected)[0m [94m(170 inst)[0m
+[31m✗[0m [33m 1/ 8[0m [2mbuiltins/common-intbitstofloat.glsl[0m [31m(7 unexpected)[0m [94m(22 inst)[0m
+[31m✗[0m [33m 1/16[0m [2mmatrix/mat2/incdec-matrix-element.glsl[0m [31m(15 unexpected)[0m [94m(99 inst)[0m
+[31m✗[0m [33m 1/28[0m [2moperators/incdec-matrix-element.glsl[0m [31m(27 unexpected)[0m [94m(99 inst)[0m
+[31m✗[0m [33m 2/ 3[0m [2mcontrol/for/continue_nested.glsl[0m [31m(1 unexpected)[0m [94m(1,609 inst)[0m
+[31m✗[0m [33m 2/ 4[0m [2mmatrix/mat4/op-incdec.glsl[0m [31m(2 unexpected)[0m [94m(1,090 inst)[0m
+[31m✗[0m [33m 2/ 8[0m [2mmatrix/mat2/incdec-matrix-column.glsl[0m [31m(6 unexpected)[0m [94m(270 inst)[0m
+[31m✗[0m [33m 2/11[0m [2mcontrol/ternary/nested.glsl[0m [31m(9 unexpected)[0m [94m(66 inst)[0m
+[31m✗[0m [33m 3/ 4[0m [2mfunction/declare-prototype.glsl[0m [31m(1 unexpected)[0m [94m(114 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_hsv2rgb.glsl[0m [31m(2 unexpected)[0m [94m(1,057 inst)[0m
+[31m✗[0m [33m 3/ 5[0m [2mlpfx/lp_saturate.glsl[0m [31m(2 unexpected)[0m [94m(154 inst)[0m
+[31m✗[0m [33m 3/ 7[0m [2mfunction/param-inout.glsl[0m [31m(4 unexpected)[0m [94m(96 inst)[0m
+[31m✗[0m [33m 3/ 7[0m [2mvec/bvec2/to-float.glsl[0m [31m(4 unexpected)[0m [94m(38 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec2/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec2/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec3/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec3/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec4/fn-max.gen.glsl[0m [31m(5 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 8[0m [2mvec/uvec4/fn-min.gen.glsl[0m [31m(5 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec2/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec2/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(56 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec3/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec3/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(112 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec4/fn-max.gen.glsl[0m [31m(6 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/ 9[0m [2mvec/ivec4/fn-min.gen.glsl[0m [31m(6 unexpected)[0m [94m(142 inst)[0m
+[31m✗[0m [33m 3/10[0m [2mfunction/param-mixed.glsl[0m [31m(7 unexpected)[0m [94m(220 inst)[0m
+[31m✗[0m [33m 3/12[0m [2mmatrix/mat3/incdec-matrix-column.glsl[0m [31m(9 unexpected)[0m [94m(1,097 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mcontrol/return/conditional.glsl[0m [31m(1 unexpected)[0m [94m(60 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mcontrol/return/early.glsl[0m [31m(1 unexpected)[0m [94m(60 inst)[0m
+[31m✗[0m [33m 4/ 5[0m [2mlpfx/lp_hue2rgb.glsl[0m [31m(1 unexpected)[0m [94m(903 inst)[0m
+[31m✗[0m [33m 4/ 7[0m [2mscalar/float/from-bool.glsl[0m [31m(3 unexpected)[0m [94m(28 inst)[0m
+[31m✗[0m [33m 4/ 8[0m [2mcontrol/ternary/short_circuit.glsl[0m [31m(4 unexpected)[0m [94m(72 inst)[0m
+[31m✗[0m [33m 4/ 8[0m [2mmatrix/mat2/op-multiply.glsl[0m [31m(4 unexpected)[0m [94m(934 inst)[0m
+[31m✗[0m [33m 4/ 8[0m [2mmatrix/mat3/op-multiply.glsl[0m [31m(4 unexpected)[0m [94m(2,936 inst)[0m
+[31m✗[0m [33m 4/ 8[0m [2mscalar/bool/to-float.glsl[0m [31m(4 unexpected)[0m [94m(28 inst)[0m
+[31m✗[0m [33m 4/ 9[0m [2mfunction/edge-inout-both.glsl[0m [31m(5 unexpected)[0m [94m(99 inst)[0m
+[31m✗[0m [33m 5/ 6[0m [2mlpfx/lp_rgb2hsv.glsl[0m [31m(1 unexpected)[0m [94m(2,007 inst)[0m
+[31m✗[0m [33m 5/ 7[0m [2mfunction/call-multiple.glsl[0m [31m(2 unexpected)[0m [94m(893 inst)[0m
+[31m✗[0m [33m 5/ 7[0m [2mfunction/overload-same-name.glsl[0m [31m(2 unexpected)[0m [94m(1,503 inst)[0m
+[31m✗[0m [33m 5/ 9[0m [2mbuiltins/edge-precision.glsl[0m [31m(4 unexpected)[0m [94m(20 inst)[0m
+[31m✗[0m [33m 5/ 9[0m [2mbuiltins/integer-bitcount.glsl[0m [31m(4 unexpected)[0m [94m(22 inst)[0m
+[31m✗[0m [33m 5/26[0m [2moperators/incdec-matrix-column.glsl[0m [31m(21 unexpected)[0m [94m(1,367 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mdebug/rainbow.glsl[0m [31m(1 unexpected)[0m [94m(21,176 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mvec/bvec2/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(31 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mvec/bvec3/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(116 inst)[0m
+[31m✗[0m [33m 6/ 7[0m [2mvec/bvec4/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(133 inst)[0m
+[31m✗[0m [33m 6/ 8[0m [2mcontrol/return/edge-cases.glsl[0m [31m(2 unexpected)[0m [94m(322 inst)[0m
+[31m✗[0m [33m 6/ 8[0m [2mmatrix/mat3/op-subtract-assign.glsl[0m [31m(2 unexpected)[0m [94m(1,294 inst)[0m
+[31m✗[0m [33m 6/ 8[0m [2mmatrix/mat4/op-multiply.glsl[0m [31m(2 unexpected)[0m [94m(11,458 inst)[0m
+[31m✗[0m [33m 6/ 8[0m [2mmatrix/mat4/op-subtract-assign.glsl[0m [31m(2 unexpected)[0m [94m(3,033 inst)[0m
+[31m✗[0m [33m 6/ 9[0m [2mfunction/return-early.glsl[0m [31m(3 unexpected)[0m [94m(456 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mfunction/param-in.glsl[0m [31m(1 unexpected)[0m [94m(295 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mmatrix/mat2/op-add-assign.glsl[0m [31m(1 unexpected)[0m [94m(698 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mmatrix/mat3/op-add-assign.glsl[0m [31m(1 unexpected)[0m [94m(1,498 inst)[0m
+[31m✗[0m [33m 7/ 8[0m [2mmatrix/mat4/op-add-assign.glsl[0m [31m(1 unexpected)[0m [94m(3,525 inst)[0m
+[31m✗[0m [33m 7/ 9[0m [2mfunction/edge-out-not-read.glsl[0m [31m(2 unexpected)[0m [94m(296 inst)[0m
+[31m✗[0m [33m 7/ 9[0m [2mfunction/param-array.glsl[0m [31m(2 unexpected)[0m [94m(1,082 inst)[0m
+[31m✗[0m [33m 7/ 9[0m [2mfunction/return-multiple.glsl[0m [31m(2 unexpected)[0m [94m(810 inst)[0m
+[31m✗[0m [33m 7/11[0m [2marray/phase/2-bounds-checking.glsl[0m [31m(4 unexpected)[0m [94m(942 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mbuiltins/common-roundeven.glsl[0m [31m(1 unexpected)[0m [94m(66 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mfunction/param-many.glsl[0m [31m(1 unexpected)[0m [94m(868 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mfunction/return-array.glsl[0m [31m(1 unexpected)[0m [94m(607 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mmatrix/mat2/op-assign.glsl[0m [31m(1 unexpected)[0m [94m(256 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mmatrix/mat3/op-assign.glsl[0m [31m(1 unexpected)[0m [94m(536 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mmatrix/mat4/from-matrix.glsl[0m [31m(1 unexpected)[0m [94m(783 inst)[0m
+[31m✗[0m [33m 8/ 9[0m [2mmatrix/mat4/op-assign.glsl[0m [31m(1 unexpected)[0m [94m(1,462 inst)[0m
+[31m✗[0m [33m 8/10[0m [2mbuiltins/integer-findmsb.glsl[0m [31m(2 unexpected)[0m [94m(34 inst)[0m
+[31m✗[0m [33m 8/11[0m [2mcontrol/ternary/precedence.glsl[0m [31m(3 unexpected)[0m [94m(169 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mfunction/call-return-value.glsl[0m [31m(1 unexpected)[0m [94m(760 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mmatrix/mat2/op-multiply-assign.glsl[0m [31m(1 unexpected)[0m [94m(1,591 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mmatrix/mat3/op-multiply-assign.glsl[0m [31m(1 unexpected)[0m [94m(3,974 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mmatrix/mat4/fn-determinant.glsl[0m [31m(1 unexpected)[0m [94m(9,286 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mmatrix/mat4/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(491 inst)[0m
+[31m✗[0m [33m 9/10[0m [2mmatrix/mat4/op-multiply-assign.glsl[0m [31m(1 unexpected)[0m [94m(9,140 inst)[0m
+[31m✗[0m [33m 9/11[0m [2mvec/bvec2/index-variable-valid.glsl[0m [31m(2 unexpected)[0m [94m(202 inst)[0m
+[31m✗[0m [33m10/11[0m [2mcontrol/ternary/type_conversions.glsl[0m [31m(1 unexpected)[0m [94m(263 inst)[0m
+[31m✗[0m [33m10/11[0m [2mvec/vec3/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(189 inst)[0m
+[31m✗[0m [33m10/11[0m [2mvec/vec4/from-scalar.glsl[0m [31m(1 unexpected)[0m [94m(214 inst)[0m
+[31m✗[0m [33m10/12[0m [2moperators/incdec-matrix.glsl[0m [31m(2 unexpected)[0m [94m(2,584 inst)[0m
+[31m✗[0m [33m13/16[0m [2mbuiltins/matrix-inverse.glsl[0m [31m(3 unexpected)[0m [94m(21,266 inst)[0m
+[31m✗[0m [33m14/20[0m [2moperators/incdec-component.glsl[0m [31m(6 unexpected)[0m [94m(512 inst)[0m
+[31m✗[0m [33m16/24[0m [2moperators/incdec-vector.glsl[0m [31m(8 unexpected)[0m [94m(494 inst)[0m
+[31m✗[0m [33m17/18[0m [2mvec/uvec3/from-uvec.glsl[0m [31m(1 unexpected)[0m [94m(435 inst)[0m
+[31m✗[0m [33m20/21[0m [2mbuiltins/matrix-determinant.glsl[0m [31m(1 unexpected)[0m [94m(7,521 inst)[0m
+[31m✗[0m [33m20/21[0m [2mcontrol/ternary/edge_cases.glsl[0m [31m(1 unexpected)[0m [94m(426 inst)[0m

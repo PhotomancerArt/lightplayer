@@ -53,6 +53,9 @@ struct TestOptions {
     /// Add @unimplemented(backend=…) to failing tests (baseline for milestone work); requires a single --target
     #[arg(long)]
     mark_unimplemented: bool,
+    /// Like --mark-unimplemented, but only before `// run:` lines that already have `@unimplemented(<TARGET>)` for this baseline (e.g. rv32.q32 when duplicating onto rv32fa). Requires exactly one `--target`.
+    #[arg(long, value_name = "TARGET")]
+    mark_unimplemented_if_baseline: Option<String>,
     /// With --mark-unimplemented, skip typing `yes` (non-interactive)
     #[arg(long)]
     assume_yes: bool,
@@ -83,6 +86,7 @@ fn main() -> anyhow::Result<()> {
                 t.fix,
                 t.mark_unimplemented,
                 t.assume_yes,
+                t.mark_unimplemented_if_baseline,
                 target_spec,
                 output_override,
             )?;

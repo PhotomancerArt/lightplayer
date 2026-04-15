@@ -119,8 +119,8 @@ impl FileUpdate {
         Ok(())
     }
 
-    /// `true` if the line immediately before this `// run:` already has `@unimplemented` for
-    /// `target` (uses `line_diff` like [`add_annotation`]).
+    /// `true` if any consecutive `// @` line immediately above this `// run:` has
+    /// `@unimplemented(<target>)` (uses `line_diff` like [`add_annotation`]).
     pub fn per_directive_unimplemented_present(
         &self,
         run_line_1based: usize,
@@ -133,11 +133,19 @@ impl FileUpdate {
         if run_line_idx == 0 {
             return Ok(false);
         }
-        let prev = all_lines[run_line_idx - 1];
-        if let Ok(Some(ann)) =
-            parse_annotation::parse_annotation_line(prev, run_line_1based.saturating_sub(1))
-        {
-            return Ok(ann.kind == AnnotationKind::Unimplemented && ann.applies_to(target));
+        let mut j = run_line_idx;
+        while j > 0 {
+            j -= 1;
+            let line = all_lines[j];
+            let prev = line.trim();
+            if !prev.starts_with("// @") {
+                break;
+            }
+            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
+                if ann.kind == AnnotationKind::Unimplemented && ann.applies_to(target) {
+                    return Ok(true);
+                }
+            }
         }
         Ok(false)
     }
@@ -519,6 +527,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir.join("sample.glsl")
+    }
+
+    #[test]
+    fn per_directive_unimplemented_present_scans_stacked_annotations() {
+        let path = temp_glsl("stacked_ann");
+        let content = r"// test run
+
+float one() { return 1.0; }
+// @unimplemented(rv32.q32)
+// @unimplemented(wasm.q32)
+// run: one() ~= 1.0
+";
+        fs::write(&path, content).expect("write");
+        let u = FileUpdate::new(&path);
+        let wasm = Target::from_name("wasm.q32").expect("wasm");
+        let rv32 = Target::from_name("rv32.q32").expect("rv32");
+        assert!(
+            u.per_directive_unimplemented_present(6, wasm)
+                .expect("wasm")
+        );
+        assert!(
+            u.per_directive_unimplemented_present(6, rv32)
+                .expect("rv32")
+        );
+        let jit = Target::from_name("jit.q32").expect("jit");
+        assert!(!u.per_directive_unimplemented_present(6, jit).expect("jit"));
     }
 
     #[test]

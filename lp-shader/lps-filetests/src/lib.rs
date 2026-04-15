@@ -25,18 +25,32 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
+use crate::parse::RunDirective;
 use crate::targets::{
-    DEFAULT_TARGETS, Disposition, Target, directive_disposition, parse_target_filters,
+    AnnotationKind, DEFAULT_TARGETS, Disposition, Target, directive_disposition,
+    parse_target_filters,
 };
+
+fn directive_has_unimplemented_for(directive: &RunDirective, for_target: &Target) -> bool {
+    directive
+        .annotations
+        .iter()
+        .any(|a| a.kind == AnnotationKind::Unimplemented && a.applies_to(for_target))
+}
 
 /// Adds `// @unimplemented(target)` before each failing `// run:` (or before each expect-success
 /// run when the whole file failed to compile).
+///
+/// When `only_if_unimplemented_for` is `Some(baseline)`, only directives that already carry
+/// `@unimplemented(<baseline>)` are considered (used to duplicate baseline markers onto a new
+/// backend without touching unrelated failures).
 /// Returns how many marker operations were applied (0 if already annotated).
 fn mark_unimplemented_expectations_for_file(
     path: &Path,
     failed_lines: &[usize],
     compile_failed: bool,
     target: &Target,
+    only_if_unimplemented_for: Option<&Target>,
 ) -> anyhow::Result<usize> {
     let ann = format!("// @unimplemented({})", target.name());
     let mut n = 0;
@@ -48,10 +62,14 @@ fn mark_unimplemented_expectations_for_file(
             .run_directives
             .iter()
             .filter(|d| {
-                matches!(
-                    directive_disposition(&d.annotations, target),
-                    Disposition::ExpectSuccess
-                )
+                let baseline_ok = only_if_unimplemented_for
+                    .map(|b| directive_has_unimplemented_for(d, b))
+                    .unwrap_or(true);
+                baseline_ok
+                    && matches!(
+                        directive_disposition(&d.annotations, target),
+                        Disposition::ExpectSuccess
+                    )
             })
             .map(|d| d.line_number)
             .collect();
@@ -67,11 +85,25 @@ fn mark_unimplemented_expectations_for_file(
         return Ok(n);
     }
 
+    let tf = if only_if_unimplemented_for.is_some() {
+        Some(crate::parse::parse_test_file(path)?)
+    } else {
+        None
+    };
+
     let u = util::file_update::FileUpdate::new(path);
     let mut sorted: Vec<usize> = failed_lines.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
     for line in sorted {
+        if let (Some(tf), Some(baseline)) = (&tf, only_if_unimplemented_for) {
+            let Some(d) = tf.run_directives.iter().find(|d| d.line_number == line) else {
+                continue;
+            };
+            if !directive_has_unimplemented_for(d, baseline) {
+                continue;
+            }
+        }
         if u.per_directive_unimplemented_present(line, target)? {
             continue;
         }
@@ -276,11 +308,17 @@ struct FileSpec {
 /// `mark_unimplemented` adds `// @unimplemented(target)` before failing `// run:` lines (mirrors `--fix` for the
 /// opposite workflow). Use `LP_MARK_UNIMPLEMENTED=1` or `--mark-unimplemented`. Applies per active
 /// target when multiple are selected. With `--yes`, skips the interactive confirmation.
+///
+/// `mark_unimplemented_if_baseline` (or `LP_MARK_UNIMPLEMENTED_IF_BASELINE=<target>`) restricts
+/// marking to directives that already have `@unimplemented(<baseline>)`, so you can copy baseline
+/// markers onto another backend (e.g. `rv32.q32` → `rv32fa.q32`) without touching unrelated failures.
+/// Requires exactly one `--target`.
 pub fn run(
     files: &[String],
     fix_xfail: bool,
     mark_unimplemented: bool,
     mark_unimplemented_yes: bool,
+    mark_unimplemented_if_baseline: Option<String>,
     target_spec: Option<&str>,
     output_override: Option<OutputMode>,
 ) -> anyhow::Result<()> {
@@ -290,19 +328,38 @@ pub fn run(
             .map(|v| v == "1")
             .unwrap_or(false);
 
-    let mark_unimplemented = mark_unimplemented
+    let mark_unimplemented_plain = mark_unimplemented
         || std::env::var("LP_MARK_UNIMPLEMENTED")
             .map(|v| v == "1")
             .unwrap_or(false);
 
-    if mark_unimplemented && !mark_unimplemented_yes {
-        println!(
-            "\n{}",
-            colors::colorize(
-                "WARNING: This will add // @unimplemented(<target>) before failing // run: lines.",
-                colors::RED
+    let mark_if_baseline_spec = mark_unimplemented_if_baseline
+        .or_else(|| std::env::var("LP_MARK_UNIMPLEMENTED_IF_BASELINE").ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let baseline_for_dup: Option<&'static Target> = match mark_if_baseline_spec.as_deref() {
+        Some(spec) => Some(Target::from_name(spec).map_err(|e| {
+            anyhow::anyhow!(
+                "invalid baseline target '{spec}' for --mark-unimplemented-if-baseline / LP_MARK_UNIMPLEMENTED_IF_BASELINE: {e}"
             )
-        );
+        })?),
+        None => None,
+    };
+
+    let mark_mode_active = mark_unimplemented_plain || baseline_for_dup.is_some();
+
+    if mark_mode_active && !mark_unimplemented_yes {
+        let warn = if baseline_for_dup.is_some() {
+            format!(
+                "WARNING: This will add // @unimplemented(<active-target>) only before failing // run: lines that already carry // @unimplemented({}).",
+                baseline_for_dup.expect("baseline").name()
+            )
+        } else {
+            "WARNING: This will add // @unimplemented(<target>) before failing // run: lines."
+                .to_string()
+        };
+        println!("\n{}", colors::colorize(&warn, colors::RED));
         println!(
             "{}",
             colors::colorize(
@@ -327,6 +384,18 @@ pub fn run(
     } else {
         DEFAULT_TARGETS.iter().collect()
     };
+
+    if baseline_for_dup.is_some() && active_targets.len() != 1 {
+        anyhow::bail!(
+            "--mark-unimplemented-if-baseline requires exactly one `--target` (got {})",
+            active_targets
+                .iter()
+                .map(|t| t.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     let target_name_width = active_targets
         .iter()
         .map(|t| t.name().len())
@@ -736,7 +805,7 @@ pub fn run(
                     );
                 }
             }
-            if mark_unimplemented {
+            if mark_mode_active {
                 let mut total_marks = 0usize;
                 let mut any_needs_mark = false;
                 for t in &active_targets {
@@ -753,6 +822,7 @@ pub fn run(
                             failed_lines,
                             compile_failed_t,
                             t,
+                            baseline_for_dup,
                         )?;
                     }
                 }
@@ -1191,13 +1261,13 @@ pub fn run(
         )
     );
 
-    if mark_unimplemented && unexpected_pass_test_cases > 0 {
+    if mark_mode_active && unexpected_pass_test_cases > 0 {
         anyhow::bail!(
             "cannot use --mark-unimplemented when there are unexpected passes; use --fix first"
         );
     }
 
-    if mark_unimplemented {
+    if mark_mode_active {
         let mut total_marks = 0usize;
         for test in &tests {
             for t in &active_targets {
@@ -1216,6 +1286,7 @@ pub fn run(
                     failed_lines,
                     compile_failed_t,
                     t,
+                    baseline_for_dup,
                 )?;
             }
         }
