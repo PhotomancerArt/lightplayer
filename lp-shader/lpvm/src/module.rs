@@ -1,5 +1,6 @@
 //! `LpvmModule` trait - compiled artifact with metadata.
 
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
 use crate::debug::ModuleDebugInfo;
@@ -29,6 +30,11 @@ pub trait LpvmModule {
 
     /// Compilation debug info. Returns None if not available for this backend.
     fn debug_info(&self) -> Option<&ModuleDebugInfo> {
+        None
+    }
+
+    /// LPIR this module was compiled from, when the backend retains it (RV32 emu paths).
+    fn lpir_module(&self) -> Option<&LpirModule> {
         None
     }
 }

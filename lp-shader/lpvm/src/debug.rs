@@ -116,7 +116,9 @@ impl ModuleDebugInfo {
                 } else if *section_name == "interleaved" && func.sections.contains_key("disasm") {
                     // Special message for missing interleaved when disasm is present
                     out.push_str(&format!("--- {} ---\n", section_name));
-                    out.push_str("(not available for this backend - only disassembly available)\n\n");
+                    out.push_str(
+                        "(not available for this backend - only disassembly available)\n\n",
+                    );
                 }
             }
         }

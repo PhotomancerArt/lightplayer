@@ -27,8 +27,6 @@ pub struct NativeEmuInstance {
     pub(crate) vmctx_guest: u32,
     pub(crate) last_debug: Option<String>,
     pub(crate) last_guest_instruction_count: Option<u64>,
-    /// Name of the last called function (for looking up debug info).
-    pub(crate) last_called_func: Option<String>,
 }
 
 impl NativeEmuInstance {
@@ -50,7 +48,6 @@ impl NativeEmuInstance {
 
     fn invoke_flat(&mut self, name: &str, flat: &[i32]) -> Result<Vec<i32>, NativeError> {
         self.last_guest_instruction_count = None;
-        self.last_called_func = Some(name.to_string());
         self.refresh_vmctx_header();
 
         let idx = self
@@ -299,32 +296,9 @@ impl LpvmInstance for NativeEmuInstance {
     }
 
     fn debug_state(&self) -> Option<String> {
-        let mut result = String::new();
-
-        // Include compilation debug info for the last called function
-        if let Some(ref func_name) = self.last_called_func {
-            if let Some(func_info) = self.module.debug_info.functions.get(func_name) {
-                // Get the interleaved section if available, otherwise disasm
-                if let Some(content) = func_info.sections.get("interleaved") {
-                    result.push_str(content);
-                } else if let Some(content) = func_info.sections.get("disasm") {
-                    result.push_str("--- disasm ---\n");
-                    result.push_str(content);
-                }
-                result.push_str("\n\n");
-            }
-        }
-
-        // Include emulator state
-        if let Some(ref debug) = self.last_debug {
-            result.push_str(debug);
-        }
-
-        if result.is_empty() {
-            None
-        } else {
-            Some(result)
-        }
+        // Compile-time interleaved/disasm lives on [`NativeEmuModule::debug_info`]; filetests and
+        // tooling print that once after compile. Here we only surface per-run emulator output.
+        self.last_debug.clone()
     }
 
     fn last_guest_instruction_count(&self) -> Option<u64> {

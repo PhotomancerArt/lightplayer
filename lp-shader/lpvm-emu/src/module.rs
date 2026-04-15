@@ -38,4 +38,8 @@ impl LpvmModule for EmuModule {
     fn debug_info(&self) -> Option<&ModuleDebugInfo> {
         Some(&self.debug_info)
     }
+
+    fn lpir_module(&self) -> Option<&LpirModule> {
+        Some(&self.ir)
+    }
 }

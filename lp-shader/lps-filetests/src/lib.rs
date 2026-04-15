@@ -788,8 +788,16 @@ pub fn run(
                 )
             );
 
+            // `run_detail` already printed the full message via `eprintln_if_detail` when
+            // `show_full_output` is on; printing `e` again here duplicates GLSL / rerun / debug.
             if let Err(e) = &_result {
-                eprintln!("\n{e}");
+                let detail_already_printed = harness_completed
+                    && output_mode.show_full_output()
+                    && stats.unexpected_pass == 0
+                    && stats.failed > 0;
+                if !detail_already_printed {
+                    eprintln!("\n{e}");
+                }
             }
             if stats.unexpected_pass > 0 {
                 if fix_xfail {

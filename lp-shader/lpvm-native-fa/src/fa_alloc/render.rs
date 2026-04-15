@@ -7,7 +7,7 @@ use crate::fa_alloc::{
     Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
 use crate::rv32::gpr::reg_name;
-use crate::vinst::{ModuleSymbols, VInst, VReg};
+use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -411,6 +411,113 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
         } => {
             format!("i{} = Mul32 i{}, i{}", dst.0, src1.0, src2.0)
         }
+        VInst::Neg32 { dst, src, .. } => {
+            format!("i{} = Neg32 i{}", dst.0, src.0)
+        }
+        VInst::And32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = And32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::Or32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = Or32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::Xor32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = Xor32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::Bnot32 { dst, src, .. } => {
+            format!("i{} = Bnot32 i{}", dst.0, src.0)
+        }
+        VInst::Shl32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = Shl32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::ShrS32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = ShrS32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::ShrU32 {
+            dst, src1, src2, ..
+        } => {
+            format!("i{} = ShrU32 i{}, i{}", dst.0, src1.0, src2.0)
+        }
+        VInst::DivS32 { dst, lhs, rhs, .. } => {
+            format!("i{} = DivS32 i{}, i{}", dst.0, lhs.0, rhs.0)
+        }
+        VInst::DivU32 { dst, lhs, rhs, .. } => {
+            format!("i{} = DivU32 i{}, i{}", dst.0, lhs.0, rhs.0)
+        }
+        VInst::RemS32 { dst, lhs, rhs, .. } => {
+            format!("i{} = RemS32 i{}, i{}", dst.0, lhs.0, rhs.0)
+        }
+        VInst::RemU32 { dst, lhs, rhs, .. } => {
+            format!("i{} = RemU32 i{}, i{}", dst.0, lhs.0, rhs.0)
+        }
+        VInst::Icmp32 {
+            dst,
+            lhs,
+            rhs,
+            cond,
+            ..
+        } => {
+            format!(
+                "i{} = Icmp32 i{}, {} i{}",
+                dst.0,
+                lhs.0,
+                icmp_cond_str(*cond),
+                rhs.0
+            )
+        }
+        VInst::IeqImm32 { dst, src, imm, .. } => {
+            format!("i{} = IeqImm32 i{}, {}", dst.0, src.0, imm)
+        }
+        VInst::Select32 {
+            dst,
+            cond,
+            if_true,
+            if_false,
+            ..
+        } => {
+            format!(
+                "i{} = Select32 i{}, i{}, i{}",
+                dst.0, cond.0, if_true.0, if_false.0
+            )
+        }
+        VInst::Mov32 { dst, src, .. } => {
+            format!("i{} = Mov32 i{}", dst.0, src.0)
+        }
+        VInst::Load32 {
+            dst, base, offset, ..
+        } => {
+            format!("i{} = Load32 i{}{:+}", dst.0, base.0, offset)
+        }
+        VInst::Store32 {
+            src, base, offset, ..
+        } => {
+            format!("Store32 i{}, i{}{:+}", src.0, base.0, offset)
+        }
+        VInst::SlotAddr { dst, slot, .. } => {
+            format!("i{} = SlotAddr {}", dst.0, slot)
+        }
+        VInst::MemcpyWords {
+            dst_base,
+            src_base,
+            size,
+            ..
+        } => {
+            format!(
+                "MemcpyWords i{}, i{}, {} words",
+                dst_base.0,
+                src_base.0,
+                size / 4
+            )
+        }
         VInst::Ret { vals, .. } => {
             let vals = vals.vregs(vreg_pool);
             if vals.is_empty() {
@@ -425,11 +532,16 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
         VInst::Br { target, .. } => {
             format!("Br L{}", target)
         }
-        VInst::BrIf { target, invert, .. } => {
+        VInst::BrIf {
+            cond,
+            target,
+            invert,
+            ..
+        } => {
             if *invert {
-                format!("BrIf L{} invert", target)
+                format!("BrIf !i{}, L{}", cond.0, target)
             } else {
-                format!("BrIf L{}", target)
+                format!("BrIf i{}, L{}", cond.0, target)
             }
         }
         VInst::Label(id, _) => {
@@ -477,9 +589,21 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             s.push(')');
             s
         }
-        _ => {
-            format!("{} (unformatted)", inst.mnemonic())
-        }
+    }
+}
+
+fn icmp_cond_str(cond: IcmpCond) -> &'static str {
+    match cond {
+        IcmpCond::Eq => "==",
+        IcmpCond::Ne => "!=",
+        IcmpCond::LtS => "<",
+        IcmpCond::LeS => "<=",
+        IcmpCond::GtS => ">",
+        IcmpCond::GeS => ">=",
+        IcmpCond::LtU => "<u",
+        IcmpCond::LeU => "<=u",
+        IcmpCond::GtU => ">u",
+        IcmpCond::GeU => ">=u",
     }
 }
 

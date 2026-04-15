@@ -96,12 +96,20 @@ pub fn run(
         log_level,
     ) {
         Ok(c) => {
-            // Print debug info sections when in Debug mode
+            // Print compile-time debug (same building blocks as `shader-debug.sh`: LPIR,
+            // interleaved allocator trace, VInst listing, full disasm) plus runtime sections later.
             if output_mode.show_debug_sections() {
+                if let Some(ir) = c.lpir_module() {
+                    let lpir_text = lpir::print_module(ir);
+                    if !lpir_text.trim().is_empty() {
+                        eprintln!("=== LPIR ===\n{lpir_text}");
+                        eprintln!("────────────────────────────────────────");
+                    }
+                }
                 if let Some(debug_info) = c.debug_info() {
                     let output = debug_info.render(None);
                     if !output.is_empty() {
-                        eprintln!("{}", output);
+                        eprintln!("=== Compile-time debug (allocator / disasm) ===\n{output}");
                         eprintln!("────────────────────────────────────────");
                     }
                 }
@@ -261,7 +269,9 @@ pub fn run(
                     &mut unexpected_pass_lines,
                     directive.line_number,
                 );
-                errors.push(e);
+                let msg = format!("instantiate failed: {e:#}");
+                eprintln_if_detail(output_mode, &msg);
+                errors.push(e.context(msg));
                 continue;
             }
         };

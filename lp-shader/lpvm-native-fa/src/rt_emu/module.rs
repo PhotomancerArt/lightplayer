@@ -53,11 +53,14 @@ impl LpvmModule for NativeEmuModule {
             vmctx_guest: buf.guest_base() as u32,
             last_debug: None,
             last_guest_instruction_count: None,
-            last_called_func: None,
         })
     }
 
     fn debug_info(&self) -> Option<&ModuleDebugInfo> {
         Some(&self.debug_info)
+    }
+
+    fn lpir_module(&self) -> Option<&LpirModule> {
+        Some(&self.ir)
     }
 }
