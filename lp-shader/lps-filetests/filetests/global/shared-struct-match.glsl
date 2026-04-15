@@ -37,9 +37,9 @@ vec3 test_shared_struct_match_light() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_light() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_shared_struct_match_material() {
@@ -52,9 +52,9 @@ vec4 test_shared_struct_match_material() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_shared_struct_match_camera_view() {
@@ -63,9 +63,9 @@ mat4 test_shared_struct_match_camera_view() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_camera_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_shared_struct_match_camera_projection() {
@@ -74,9 +74,9 @@ mat4 test_shared_struct_match_camera_projection() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_camera_projection() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_shared_struct_match_camera_planes() {
@@ -85,9 +85,9 @@ float test_shared_struct_match_camera_planes() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_camera_planes() ~= 0.0
 
 vec4 test_shared_struct_match_combined() {
@@ -106,7 +106,7 @@ vec4 test_shared_struct_match_combined() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)

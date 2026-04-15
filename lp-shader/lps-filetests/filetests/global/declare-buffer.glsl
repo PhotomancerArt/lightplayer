@@ -29,9 +29,9 @@ float test_declare_buffer_array() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_buffer_array() ~= 66.0
 
 vec4 test_declare_buffer_structured() {
@@ -45,9 +45,9 @@ vec4 test_declare_buffer_structured() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_buffer_structured() ~= vec4(2.0, 2.0, 2.0, 4.0)
 
 mat4 test_declare_buffer_matrix() {
@@ -59,9 +59,9 @@ mat4 test_declare_buffer_matrix() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_buffer_matrix() ~= mat4(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
 
 int test_declare_buffer_int_array() {
@@ -74,9 +74,9 @@ int test_declare_buffer_int_array() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_buffer_int_array() == 60
 
 float test_declare_buffer_single() {
@@ -89,7 +89,7 @@ float test_declare_buffer_single() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_buffer_single() ~= 5.14

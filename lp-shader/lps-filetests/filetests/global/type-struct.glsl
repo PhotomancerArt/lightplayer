@@ -34,9 +34,9 @@ float test_type_struct_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_simple() ~= 165.0
 
 vec2 test_type_struct_vector() {
@@ -49,9 +49,9 @@ vec2 test_type_struct_vector() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_vector() ~= vec2(10.0, 20.0)
 
 vec3 test_type_struct_vector_color() {
@@ -60,9 +60,9 @@ vec3 test_type_struct_vector_color() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_vector_color() ~= vec3(1.0, 0.5, 0.0)
 
 bool test_type_struct_vector_active() {
@@ -71,9 +71,9 @@ bool test_type_struct_vector_active() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_vector_active() == true
 
 float test_type_struct_nested() {
@@ -90,9 +90,9 @@ float test_type_struct_nested() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_nested() ~= 12.0
 
 vec3 test_type_struct_nested_color() {
@@ -101,9 +101,9 @@ vec3 test_type_struct_nested_color() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_nested_color() ~= vec3(1.6, 1.2, 0.8)
 
 int test_type_struct_nested_y() {
@@ -112,9 +112,9 @@ int test_type_struct_nested_y() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_nested_y() == 6
 
 float test_type_struct_operations() {
@@ -129,9 +129,9 @@ float test_type_struct_operations() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_operations() ~= 28.0
 
 vec2 test_type_struct_vector_operations() {
@@ -146,7 +146,7 @@ vec2 test_type_struct_vector_operations() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_type_struct_vector_operations() ~= vec2(3.7, 3.7)

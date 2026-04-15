@@ -1,4 +1,4 @@
-//! `shader-rv32fa` — fastalloc RV32FA debug compiler CLI.
+//! `shader-rv32n` — fastalloc RV32FA debug compiler CLI.
 
 mod args;
 mod handler;

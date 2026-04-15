@@ -1,4 +1,4 @@
-//! Handler for `shader-rv32`.
+//! Handler for `shader-rv32c`.
 
 use std::io::Write;
 

@@ -1,6 +1,6 @@
 //! Forward emitter: VInst + AllocOutput → machine code bytes.
 //!
-//! Ported from lpvm-native/src/isa/rv32/emit.rs, adapted for FA crate VInst types.
+//! Ported from lpvm-native/src/isa/rv32c/emit.rs, adapted for FA crate VInst types.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -444,10 +444,7 @@ impl<'a> EmitContext<'a> {
         // Negate boolean condition (0/1) into a full bitmask (0x0/0xFFFFFFFF).
         // Without this, `and` with 1 zeroes all but the LSB, making select
         // always return the false value for Q32 (and most multi-bit) operands.
-        self.push_u32(
-            encode_sub(Self::TEMP2 as u32, 0, p_cond),
-            src_op,
-        );
+        self.push_u32(encode_sub(Self::TEMP2 as u32, 0, p_cond), src_op);
         self.push_u32(encode_sub(Self::TEMP0 as u32, p_true, p_false), src_op);
         self.push_u32(
             encode_and(Self::TEMP0 as u32, Self::TEMP0 as u32, Self::TEMP2 as u32),

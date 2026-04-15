@@ -535,21 +535,21 @@ mod tests {
         let content = r"// test run
 
 float one() { return 1.0; }
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: one() ~= 1.0
 ";
         fs::write(&path, content).expect("write");
         let u = FileUpdate::new(&path);
         let wasm = Target::from_name("wasm.q32").expect("wasm");
-        let rv32 = Target::from_name("rv32.q32").expect("rv32");
+        let rv32c = Target::from_name("rv32c.q32").expect("rv32c");
         assert!(
             u.per_directive_unimplemented_present(6, wasm)
                 .expect("wasm")
         );
         assert!(
-            u.per_directive_unimplemented_present(6, rv32)
-                .expect("rv32")
+            u.per_directive_unimplemented_present(6, rv32c)
+                .expect("rv32c")
         );
         let jit = Target::from_name("jit.q32").expect("jit");
         assert!(!u.per_directive_unimplemented_present(6, jit).expect("jit"));
@@ -562,7 +562,7 @@ float one() { return 1.0; }
 
 float one() { return 1.0; }
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // run: one() ~= 1.0
 ";
         fs::write(&path, content).expect("write");
@@ -572,6 +572,6 @@ float one() { return 1.0; }
             .expect("strip wasm");
         let out = fs::read_to_string(&path).expect("read");
         assert!(!out.contains("wasm.q32"), "wasm ann removed: {out}");
-        assert!(out.contains("rv32.q32"), "rv32 kept: {out}");
+        assert!(out.contains("rv32c.q32"), "rv32c kept: {out}");
     }
 }

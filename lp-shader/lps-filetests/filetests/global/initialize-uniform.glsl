@@ -23,9 +23,9 @@ float test_initialize_uniform_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_float() ~= 1.0
 
 int test_initialize_uniform_int() {
@@ -34,9 +34,9 @@ int test_initialize_uniform_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_int() == 5
 
 vec2 test_initialize_uniform_vec2() {
@@ -45,9 +45,9 @@ vec2 test_initialize_uniform_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_initialize_uniform_vec3() {
@@ -56,9 +56,9 @@ vec3 test_initialize_uniform_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_initialize_uniform_mat4() {
@@ -67,9 +67,9 @@ mat4 test_initialize_uniform_mat4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_initialize_uniform_usage() {
@@ -82,7 +82,7 @@ float test_initialize_uniform_usage() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_uniform_usage() ~= 2.0

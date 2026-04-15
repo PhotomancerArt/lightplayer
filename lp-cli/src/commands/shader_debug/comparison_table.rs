@@ -230,21 +230,21 @@ mod tests {
 
     #[test]
     fn summary_contains_counts_and_ratios_no_color() {
-        let mut rv32 = BackendDebugData::new("rv32");
+        let mut rv32c = BackendDebugData::new("rv32c");
         let mut f0 = FunctionDebugData::new("callee_identity".to_string());
         f0.lpir_count = 3;
         f0.disasm_count = 2;
-        rv32.functions.push(f0);
+        rv32c.functions.push(f0);
 
-        let mut rv32fa = BackendDebugData::new("rv32fa");
+        let mut rv32n = BackendDebugData::new("rv32n");
         let mut f1 = FunctionDebugData::new("callee_identity".to_string());
         f1.lpir_count = 3;
         f1.disasm_count = 9;
-        rv32fa.functions.push(f1);
+        rv32n.functions.push(f1);
 
         let mut r = DebugReport::new("x.glsl");
-        r.backends.push(rv32);
-        r.backends.push(rv32fa);
+        r.backends.push(rv32c);
+        r.backends.push(rv32n);
 
         let s = render_summary_table(&r, false).expect("table");
         assert!(!s.contains('\x1b'), "no ansi when use_color=false:\n{s}");

@@ -30,9 +30,9 @@ mat4 test_mat4_multiply_scale() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat4_multiply_scale() ~= mat4(2.0, 4.0, 6.0, 8.0, 15.0, 18.0, 21.0, 24.0, 36.0, 40.0, 44.0, 48.0, 65.0, 70.0, 75.0, 80.0)
 
 mat4 test_mat4_multiply_zero() {
@@ -56,9 +56,9 @@ mat4 test_mat4_multiply_expressions() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat4_multiply_expressions() ~= mat4(1.0, 1.0, 1.0, 2.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 mat4 test_mat4_multiply_in_assignment() {

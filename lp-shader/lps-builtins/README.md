@@ -43,7 +43,7 @@ writes:
    scripts/build-builtins.sh
    ```
 
-3. Rebuild RV32 emu app / WASM builtins if you need those artifacts (`just build-rv32-builtins`,
+3. Rebuild RV32 emu app / WASM builtins if you need those artifacts (`just build-rv32c-builtins`,
    `scripts/build-builtins.sh`, etc.).
 
 ## Dependency

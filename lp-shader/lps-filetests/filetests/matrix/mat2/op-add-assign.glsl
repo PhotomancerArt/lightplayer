@@ -62,9 +62,9 @@ mat2 test_mat2_add_assign_chained() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat2_add_assign_chained() ~= mat2(5.0, 7.0, 9.0, 11.0)
 
 mat2 test_mat2_add_assign_large_values() {

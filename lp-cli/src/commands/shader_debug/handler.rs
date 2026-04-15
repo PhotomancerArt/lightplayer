@@ -34,7 +34,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     // Parse targets
     let targets = args.targets();
     if targets.is_empty() {
-        anyhow::bail!("no valid targets specified. Use: rv32, rv32fa, emu");
+        anyhow::bail!("no valid targets specified. Use: rv32c, rv32n, emu");
     }
 
     // Get section filter

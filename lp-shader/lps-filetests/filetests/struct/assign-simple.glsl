@@ -17,9 +17,9 @@ float test_assign_simple_point() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_point() ~= 3.0
 
 float test_assign_simple_point_y() {
@@ -30,9 +30,9 @@ float test_assign_simple_point_y() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_point_y() ~= 8.0
 
 struct Color {
@@ -49,9 +49,9 @@ float test_assign_simple_color() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_color() ~= 0.5
 
 struct Transform {
@@ -67,9 +67,9 @@ vec3 test_assign_simple_transform_position() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_transform_position() ~= vec3(7.0, 8.0, 9.0)
 
 vec3 test_assign_simple_transform_rotation() {
@@ -80,9 +80,9 @@ vec3 test_assign_simple_transform_rotation() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_transform_rotation() ~= vec3(0.1, 0.2, 0.3)
 
 struct Person {
@@ -99,9 +99,9 @@ int test_assign_simple_person_age() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_person_age() == 30
 
 float test_assign_simple_person_height() {
@@ -112,9 +112,9 @@ float test_assign_simple_person_height() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_person_height() ~= 190.0
 
 bool test_assign_simple_person_student() {
@@ -125,9 +125,9 @@ bool test_assign_simple_person_student() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_person_student() == false
 
 struct Line {
@@ -143,9 +143,9 @@ float test_assign_simple_line_nested() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_line_nested() ~= 5.0
 
 float test_assign_simple_line_nested_end_y() {
@@ -156,9 +156,9 @@ float test_assign_simple_line_nested_end_y() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_line_nested_end_y() ~= 40.0
 
 struct EmptyData {
@@ -173,7 +173,7 @@ int test_assign_simple_empty_data() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_assign_simple_empty_data() == 99

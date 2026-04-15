@@ -51,7 +51,7 @@ LPIR (LightPlayer IR)
     ▼
 ┌─────────────────┐
 │  Emission       │  VInst + Alloc → PInst → bytes
-│  (rv32/emit.rs) │  Direct machine code emission
+│  (rv32c/emit.rs) │  Direct machine code emission
 └─────────────────┘
     │
     ▼
@@ -92,7 +92,7 @@ The intermediate representation between LPIR and machine code:
 | Module                         | Purpose                                  |
 | ------------------------------ | ---------------------------------------- |
 | [`fa_alloc/`](src/fa_alloc/)   | FastAlloc register allocator             |
-| [`rv32/`](src/rv32/)           | RISC-V instruction encoding and emission |
+| [`rv32c/`](src/rv32c/)           | RISC-V instruction encoding and emission |
 | [`abi/`](src/abi/)             | Calling convention and frame layout      |
 | [`lower.rs`](src/lower.rs)     | LPIR → VInst lowering                    |
 | [`emit.rs`](src/emit.rs)       | Emission orchestration                   |

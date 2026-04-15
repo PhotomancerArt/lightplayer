@@ -25,9 +25,9 @@ float test_redeclare_error_valid() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_valid() ~= 142.0
 
 int test_redeclare_error_different() {
@@ -36,9 +36,9 @@ int test_redeclare_error_different() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_different() == 323
 
 vec2 test_redeclare_error_vecs() {
@@ -47,9 +47,9 @@ vec2 test_redeclare_error_vecs() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_vecs() ~= vec2(6.0, 8.0)
 
 float test_redeclare_error_scoping() {
@@ -59,9 +59,9 @@ float test_redeclare_error_scoping() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_scoping() ~= 99.0
 
 float test_redeclare_error_global_unchanged() {
@@ -71,7 +71,7 @@ float test_redeclare_error_global_unchanged() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_redeclare_error_global_unchanged() ~= 42.0

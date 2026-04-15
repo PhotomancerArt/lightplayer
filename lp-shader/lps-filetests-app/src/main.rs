@@ -53,14 +53,14 @@ struct TestOptions {
     /// Add @unimplemented(backend=…) to failing tests (baseline for milestone work); requires a single --target
     #[arg(long)]
     mark_unimplemented: bool,
-    /// Like --mark-unimplemented, but only before `// run:` lines that already have `@unimplemented(<TARGET>)` for this baseline (e.g. rv32.q32 when duplicating onto rv32fa). Requires exactly one `--target`.
+    /// Like --mark-unimplemented, but only before `// run:` lines that already have `@unimplemented(<TARGET>)` for this baseline (e.g. rv32c.q32 when duplicating onto rv32n). Requires exactly one `--target`.
     #[arg(long, value_name = "TARGET")]
     mark_unimplemented_if_baseline: Option<String>,
     /// With --mark-unimplemented, skip typing `yes` (non-interactive)
     #[arg(long)]
     assume_yes: bool,
-    /// Run only the specified target(s): comma-separated and/or backend shorthand (jit, wasm, rv32)
-    /// or full names (jit.q32). Example: `-t wasm,jit` or `--target rv32`.
+    /// Run only the specified target(s): comma-separated and/or backend shorthand (jit, wasm, rv32c)
+    /// or full names (jit.q32). Example: `-t wasm,jit` or `--target rv32c`.
     #[arg(short, long)]
     target: Option<String>,
     #[command(flatten)]

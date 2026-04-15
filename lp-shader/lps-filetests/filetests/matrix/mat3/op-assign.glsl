@@ -78,9 +78,9 @@ mat3 test_mat3_assign_after_operations() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat3_assign_after_operations() ~= mat3(2.0, 3.0, 4.0, 10.0, 11.0, 12.0, 8.0, 9.0, 10.0)
 
 

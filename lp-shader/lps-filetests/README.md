@@ -16,14 +16,14 @@ scripts/glsl-filetests.sh
 
 # One backend
 scripts/glsl-filetests.sh --target wasm.q32
-scripts/glsl-filetests.sh --target rv32.q32
+scripts/glsl-filetests.sh --target rv32c.q32
 
 # Full matrix (same as `just test-filetests` / `just test`)
 just test-filetests
 ```
 
 `just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script
-three times: default (`rv32.q32` + `wasm.q32`), then `jit.q32`. Ensure `just build-ci` (or a full
+three times: default (`rv32c.q32` + `wasm.q32`), then `jit.q32`. Ensure `just build-ci` (or a full
 build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
 
 **Parallelism:** filetests default to **num_cpus** workers. WASM and RV32 backends are fully
@@ -35,7 +35,7 @@ JIT specifically (see `docs/bugs/2026-03-30-jit-filetest-segfault.md`).
 `cargo test` does **not** run the corpus by default. The integration test in `tests/filetests.rs` is
 marked `#[ignore]` so it stays out of the normal Rust test suite.
 
-To run it explicitly (uses `DEFAULT_TARGETS` = `rv32.q32` + `wasm.q32`, same as the script with no
+To run it explicitly (uses `DEFAULT_TARGETS` = `rv32c.q32` + `wasm.q32`, same as the script with no
 `--target`):
 
 ```bash
@@ -46,7 +46,7 @@ cargo test -p lps-filetests --test filetests -- --ignored --nocapture
 TEST_FILE=scalar/float/op-add.glsl cargo test -p lps-filetests --test filetests -- --ignored --nocapture
 ```
 
-For wasm/rv32 via the harness you would need separate tooling; prefer
+For wasm/rv32c via the harness you would need separate tooling; prefer
 `scripts/glsl-filetests.sh --target …` for those.
 
 ### From the crate directory
@@ -69,7 +69,7 @@ Q32, or a path we do not intend to implement there). This is not an assertion fa
 - **`@unsupported(...)`** — permanent “not on this target” (skip; does not count as pass or fail).
 
 Failures are reported with expected vs actual values. Use
-`scripts/glsl-filetests.sh --target wasm.q32` (or `jit.q32` / `rv32.q32`) to focus one backend.
+`scripts/glsl-filetests.sh --target wasm.q32` (or `jit.q32` / `rv32c.q32`) to focus one backend.
 
 ## Test file format
 
@@ -98,11 +98,11 @@ int add_int(int a, int b) {
 
 - `// test run` — marks an execution test file (required for run tests).
 - `// target <backend>.<format>` — file-level default target (e.g. `jit.q32`, `wasm.q32`,
-  `rv32.q32`).
-- Per-directive filters: `// @jit`, `// @wasm`, `// @rv32` (see parser / plan docs).
+  `rv32c.q32`).
+- Per-directive filters: `// @jit`, `// @wasm`, `// @rv32c` (see parser / plan docs).
 
-**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32.q32` + `wasm.q32`**. CI
-runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
+**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32c.q32` + `wasm.q32`**. CI
+runs **jit**, **wasm**, and **rv32c** via `just test-filetests`.
 
 ### Run directives
 
@@ -120,7 +120,7 @@ runs **jit**, **wasm**, and **rv32** via `just test-filetests`.
 2. **Parsing** — directives and `// run:` lines (`src/filetest.rs`, `src/parse/`).
 3. **Bootstrap** — generated `main()` calling each expression under test.
 4. **Compilation** — GLSL → LPIR → backend (`lps-exec`, `lpvm-cranelift`, wasm path, etc.).
-5. **Execution** — **jit** (in-process), **wasm** (interpreter), or **rv32** (emulator + linked
+5. **Execution** — **jit** (in-process), **wasm** (interpreter), or **rv32c** (emulator + linked
    builtins), depending on target.
 6. **Comparison** — expected vs actual; BLESS can rewrite expectations.
 

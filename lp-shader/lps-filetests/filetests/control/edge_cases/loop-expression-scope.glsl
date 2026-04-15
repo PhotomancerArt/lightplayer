@@ -25,9 +25,9 @@ int test_for_loop_expression_modified_in_body() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_for_loop_expression_modified_in_body() == 5
 

@@ -1,4 +1,4 @@
-//! Arguments for `shader-rv32fa`.
+//! Arguments for `shader-rv32n`.
 
 use std::path::PathBuf;
 

@@ -167,7 +167,7 @@ mod tests {
     use lps_shared::{LpsFnSig, LpsModuleSig, LpsType};
 
     use crate::abi::classify::entry_param_scalar_count;
-    use crate::rv32::abi as rv32;
+    use crate::rv32::abi as rv32c;
 
     #[test]
     fn direct_allocatable_includes_s1() {

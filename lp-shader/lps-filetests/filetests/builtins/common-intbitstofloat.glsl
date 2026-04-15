@@ -18,9 +18,9 @@ float test_intbitstofloat_one() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_one() ~= 1.0
 
 float test_intbitstofloat_neg_one() {
@@ -29,9 +29,9 @@ float test_intbitstofloat_neg_one() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_neg_one() ~= -1.0
 
 float test_intbitstofloat_inf() {
@@ -40,9 +40,9 @@ float test_intbitstofloat_inf() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_inf() ~= 1.0 / 0.0
 
 float test_intbitstofloat_neg_inf() {
@@ -51,9 +51,9 @@ float test_intbitstofloat_neg_inf() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_neg_inf() ~= -1.0 / 0.0
 
 vec2 test_intbitstofloat_vec2() {
@@ -62,9 +62,9 @@ vec2 test_intbitstofloat_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_vec2() ~= vec2(1.0, -1.0)
 
 vec3 test_intbitstofloat_vec3() {
@@ -73,9 +73,9 @@ vec3 test_intbitstofloat_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_vec3() ~= vec3(0.0, 1.0, 2.0)
 
 vec4 test_intbitstofloat_vec4() {
@@ -84,9 +84,9 @@ vec4 test_intbitstofloat_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_intbitstofloat_vec4() ~= vec4(1.0, 0.0, -1.0, 1.0 / 0.0)
 
 

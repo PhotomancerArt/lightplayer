@@ -60,7 +60,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32, rv32fa — used for error messages and CLI.
+/// Order: wasm, jit, rv32c, rv32n — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         backend: Backend::Wasm,
@@ -88,7 +88,7 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: rv32fa, rv32 (Cranelift), wasm (Q32).
+/// Default targets for local `cargo test` / app runs: rv32n, rv32c (Cranelift), wasm (Q32).
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
 pub const DEFAULT_TARGETS: &[Target] = &[ALL_TARGETS[3], ALL_TARGETS[2], ALL_TARGETS[0]];
 
@@ -183,21 +183,21 @@ mod tests {
     #[test]
     fn test_disposition_non_matching_target() {
         let wasm = Target::from_name("wasm.q32").expect("wasm");
-        let rv32 = Target::from_name("rv32.q32").expect("rv32");
+        let rv32c = Target::from_name("rv32c.q32").expect("rv32c");
         let ann = Annotation {
             kind: AnnotationKind::Unsupported,
             target: wasm.name(),
             line_number: 1,
         };
-        let d = directive_disposition(&[ann], rv32);
+        let d = directive_disposition(&[ann], rv32c);
         assert_eq!(d, Disposition::ExpectSuccess);
     }
 
     #[test]
     fn test_default_targets_order_matches_const() {
         assert_eq!(DEFAULT_TARGETS.len(), 3);
-        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32fa.q32");
-        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32.q32");
+        assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
+        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32c.q32");
         assert_eq!(DEFAULT_TARGETS[2].name(), "wasm.q32");
     }
 }

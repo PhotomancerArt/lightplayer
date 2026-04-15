@@ -23,7 +23,7 @@ scripts/build-builtins.sh
 or (codegen optional if sources unchanged):
 
 ```bash
-just build-rv32-builtins
+just build-rv32c-builtins
 ```
 
 Typical artifact:

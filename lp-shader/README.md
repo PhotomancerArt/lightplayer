@@ -92,7 +92,7 @@ In-browser GLSL → WASM demo (workspace root `lp-app/web-demo/`): `just web-dem
 
 # Specific backend
 ./scripts/glsl-filetests.sh --target wasm.q32
-./scripts/glsl-filetests.sh --target rv32.q32
+./scripts/glsl-filetests.sh --target rv32c.q32
 
 # Full matrix (same as CI)
 just test-filetests

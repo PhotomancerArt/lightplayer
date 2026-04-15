@@ -28,7 +28,7 @@ float test_edge_array_size_mismatch() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_mismatch() ~= 0.0
 */
@@ -61,7 +61,7 @@ float test_edge_array_size_too_small() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_too_small() ~= 0.0
 */
@@ -76,7 +76,7 @@ float test_edge_array_size_too_large() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_too_large() ~= 0.0
 */
@@ -152,7 +152,7 @@ float test_edge_array_size_implicit() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_implicit() ~= 0.0
 */

@@ -311,7 +311,7 @@ struct FileSpec {
 ///
 /// `mark_unimplemented_if_baseline` (or `LP_MARK_UNIMPLEMENTED_IF_BASELINE=<target>`) restricts
 /// marking to directives that already have `@unimplemented(<baseline>)`, so you can copy baseline
-/// markers onto another backend (e.g. `rv32.q32` → `rv32fa.q32`) without touching unrelated failures.
+/// markers onto another backend (e.g. `rv32c.q32` → `rv32n.q32`) without touching unrelated failures.
 /// Requires exactly one `--target`.
 pub fn run(
     files: &[String],
@@ -1997,8 +1997,8 @@ mod format_summary_tests {
         let mut c = test_run::TestCaseStats::default();
         c.passed = 3;
         let mut per_target: BTreeMap<String, test_run::TestCaseStats> = BTreeMap::new();
-        per_target.insert("rv32.q32".to_string(), a);
-        per_target.insert("rv32fa.q32".to_string(), b);
+        per_target.insert("rv32c.q32".to_string(), a);
+        per_target.insert("rv32n.q32".to_string(), b);
         per_target.insert("wasm.q32".to_string(), c);
         let cf: BTreeMap<String, usize> = BTreeMap::new();
         let table = format_target_table(&per_target, &cf);

@@ -14,9 +14,9 @@ uvec2 test_uaddcarry_uint_no_carry() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_uaddcarry_uint_no_carry() == uvec2(3u, 0u)
 
 uvec2 test_uaddcarry_uint_with_carry() {
@@ -27,9 +27,9 @@ uvec2 test_uaddcarry_uint_with_carry() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_uaddcarry_uint_with_carry() == uvec2(0u, 1u)
 
 uvec2 test_uaddcarry_uint_large_no_carry() {
@@ -40,9 +40,9 @@ uvec2 test_uaddcarry_uint_large_no_carry() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_uaddcarry_uint_large_no_carry() == uvec2(4000000000u, 0u)
 
 uvec4 test_uaddcarry_uvec2() {
@@ -53,9 +53,9 @@ uvec4 test_uaddcarry_uvec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u)
 
 

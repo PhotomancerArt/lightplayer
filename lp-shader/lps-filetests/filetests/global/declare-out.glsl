@@ -19,9 +19,9 @@ void test_declare_out_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_float() == 0.0
 
 void test_declare_out_int() {
@@ -30,9 +30,9 @@ void test_declare_out_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_int() == 0.0
 
 void test_declare_out_uint() {
@@ -41,9 +41,9 @@ void test_declare_out_uint() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_uint() == 0.0
 
 void test_declare_out_bool() {
@@ -52,9 +52,9 @@ void test_declare_out_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_bool() == 0.0
 
 void test_declare_out_vec2() {
@@ -63,9 +63,9 @@ void test_declare_out_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_vec2() == 0.0
 
 void test_declare_out_vec3() {
@@ -74,9 +74,9 @@ void test_declare_out_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_vec3() == 0.0
 
 void test_declare_out_vec4() {
@@ -85,9 +85,9 @@ void test_declare_out_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_vec4() == 0.0
 
 void test_declare_out_calculate() {
@@ -99,7 +99,7 @@ void test_declare_out_calculate() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_out_calculate() == 0.0

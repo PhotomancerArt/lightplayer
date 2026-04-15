@@ -21,9 +21,9 @@ float test_shared_globals_time() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_time() ~= 1.0
 
 vec3 test_shared_globals_light() {
@@ -32,9 +32,9 @@ vec3 test_shared_globals_light() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_light() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_shared_globals_view() {
@@ -43,9 +43,9 @@ mat4 test_shared_globals_view() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 vec4 test_shared_globals_material() {
@@ -54,9 +54,9 @@ vec4 test_shared_globals_material() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 int test_shared_globals_mode() {
@@ -65,9 +65,9 @@ int test_shared_globals_mode() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_mode() == 1
 
 float test_shared_globals_combined() {
@@ -79,7 +79,7 @@ float test_shared_globals_combined() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_shared_globals_combined() ~= 1.0

@@ -16,9 +16,9 @@ float test_scope_shadowing_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_simple() ~= 50.0
 
 float test_scope_shadowing_verify_global() {
@@ -28,9 +28,9 @@ float test_scope_shadowing_verify_global() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_verify_global() ~= 100.0
 
 vec2 test_scope_shadowing_vector() {
@@ -40,9 +40,9 @@ vec2 test_scope_shadowing_vector() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_vector() ~= vec2(1.0, 2.0)
 
 vec2 test_scope_shadowing_verify_global_vector() {
@@ -52,9 +52,9 @@ vec2 test_scope_shadowing_verify_global_vector() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_verify_global_vector() ~= vec2(10.0, 20.0)
 
 bool test_scope_shadowing_bool() {
@@ -64,9 +64,9 @@ bool test_scope_shadowing_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_bool() == false
 
 bool test_scope_shadowing_verify_global_bool() {
@@ -76,9 +76,9 @@ bool test_scope_shadowing_verify_global_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_verify_global_bool() == true
 
 int test_scope_shadowing_int() {
@@ -88,9 +88,9 @@ int test_scope_shadowing_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_int() == 99
 
 int test_scope_shadowing_verify_global_int() {
@@ -100,9 +100,9 @@ int test_scope_shadowing_verify_global_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_verify_global_int() == 42
 
 float test_scope_shadowing_in_function() {
@@ -117,9 +117,9 @@ float test_scope_shadowing_in_function() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_in_function() ~= 100.0
 
 float test_scope_shadowing_nested() {
@@ -137,7 +137,7 @@ float test_scope_shadowing_nested() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_scope_shadowing_nested() ~= 100.0

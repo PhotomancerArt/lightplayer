@@ -17,8 +17,8 @@ float test_scope_local_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_simple() ~= 42.0
 
@@ -33,8 +33,8 @@ float test_scope_local_shadow_global() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_shadow_global() ~= 200.0
 
@@ -51,8 +51,8 @@ float test_scope_local_multiple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_multiple() ~= 3.0
 
@@ -71,8 +71,8 @@ float test_scope_local_in_loop() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_in_loop() ~= 10.0
 
@@ -92,8 +92,8 @@ float test_scope_local_nested() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_nested() ~= 30.0
 
@@ -108,8 +108,8 @@ float test_scope_local_parameters() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_parameters() ~= 13.0
 
@@ -128,8 +128,8 @@ float test_scope_local_types() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_types() ~= 12.14
 
@@ -144,8 +144,8 @@ float test_scope_local_arrays() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_arrays() ~= 6.0
 
@@ -164,8 +164,8 @@ LocalStruct test_scope_local_struct() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_struct() ~= LocalStruct(5.0, 10.0)
 
@@ -182,7 +182,7 @@ float test_scope_local_modification() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32c.q32)
+// @unimplemented(rv32n.q32)
 // @unimplemented(wasm.q32)
 // run: test_scope_local_modification() ~= 13.0

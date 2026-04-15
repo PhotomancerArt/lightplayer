@@ -18,9 +18,9 @@ float test_edge_no_storage_qualifier_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_float() ~= 42.0
 
 int test_edge_no_storage_qualifier_int() {
@@ -30,9 +30,9 @@ int test_edge_no_storage_qualifier_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_int() == -123
 
 vec2 test_edge_no_storage_qualifier_vec2() {
@@ -42,9 +42,9 @@ vec2 test_edge_no_storage_qualifier_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_edge_no_storage_qualifier_vec3() {
@@ -54,9 +54,9 @@ vec3 test_edge_no_storage_qualifier_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 mat4 test_edge_no_storage_qualifier_mat4() {
@@ -66,9 +66,9 @@ mat4 test_edge_no_storage_qualifier_mat4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_mat4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
 float test_edge_no_storage_qualifier_modify() {
@@ -81,9 +81,9 @@ float test_edge_no_storage_qualifier_modify() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_modify() ~= 25.0
 
 vec3 test_edge_no_storage_qualifier_vector_math() {
@@ -96,9 +96,9 @@ vec3 test_edge_no_storage_qualifier_vector_math() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_vector_math() ~= vec3(2.5, 2.5, 2.5)
 
 float test_edge_no_storage_qualifier_combined() {
@@ -111,7 +111,7 @@ float test_edge_no_storage_qualifier_combined() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_no_storage_qualifier_combined() ~= 14.0

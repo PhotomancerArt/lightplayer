@@ -16,9 +16,9 @@ float test_declare_simple_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_float() ~= 42.0
 
 int test_declare_simple_int() {
@@ -28,9 +28,9 @@ int test_declare_simple_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_int() == -123
 
 uint test_declare_simple_uint() {
@@ -40,9 +40,9 @@ uint test_declare_simple_uint() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_uint() == 987
 
 bool test_declare_simple_bool() {
@@ -52,9 +52,9 @@ bool test_declare_simple_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_bool() == true
 
 vec2 test_declare_simple_vec2() {
@@ -65,9 +65,9 @@ vec2 test_declare_simple_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_declare_simple_vec3() {
@@ -78,9 +78,9 @@ vec3 test_declare_simple_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_declare_simple_vec4() {
@@ -91,9 +91,9 @@ vec4 test_declare_simple_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_declare_simple_mat2() {
@@ -104,9 +104,9 @@ mat2 test_declare_simple_mat2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_declare_simple_multiple() {
@@ -121,7 +121,7 @@ float test_declare_simple_multiple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_declare_simple_multiple() ~= 60.0

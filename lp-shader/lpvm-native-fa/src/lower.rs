@@ -538,7 +538,7 @@ pub fn lower_lpir_op(
         | LpirOp::FtoiSatS { .. }
         | LpirOp::FtoiSatU { .. }
         | LpirOp::FfromI32Bits { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from("float op requires Q32 mode (F32 not supported on rv32)"),
+            description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
         }),
 
         LpirOp::IfStart { .. } | LpirOp::Else | LpirOp::End | LpirOp::LoopStart { .. } => {

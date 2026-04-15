@@ -1,4 +1,4 @@
-//! Fastalloc RV32FA pipeline shared by `shader-rv32 --pipeline fast` and `shader-rv32fa`.
+//! Fastalloc RV32FA pipeline shared by `shader-rv32c --pipeline fast` and `shader-rv32n`.
 
 use std::io::Write;
 
@@ -24,7 +24,7 @@ pub struct Verbosity {
 }
 
 impl Verbosity {
-    /// Match legacy `shader-rv32 --pipeline fast` opt-in flags.
+    /// Match legacy `shader-rv32c --pipeline fast` opt-in flags.
     pub fn fast_cli(show_vinst: bool, show_pinst: bool, disassemble: bool) -> Self {
         Self {
             vinst: show_vinst,

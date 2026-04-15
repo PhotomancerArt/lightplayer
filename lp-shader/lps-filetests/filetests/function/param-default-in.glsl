@@ -14,9 +14,9 @@ float test_param_default_explicit_in() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_explicit_in() ~= 5.0
 
 float add_implicit(float a, float b) {
@@ -29,9 +29,9 @@ float test_param_default_implicit_in() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_implicit_in() ~= 5.0
 
 float process(in float a, float b, in float c) {
@@ -44,9 +44,9 @@ float test_param_default_mixed() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_mixed() ~= 6.0
 
 vec2 combine_vectors(vec2 a, vec2 b) {
@@ -59,9 +59,9 @@ float test_param_default_vector() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_vector() ~= 10.0
 
 int multiply(int x, int y) {
@@ -74,9 +74,9 @@ int test_param_default_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_int() == 42
 
 bool logical_and(bool a, bool b) {
@@ -89,9 +89,9 @@ bool test_param_default_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_bool() == true
 
 float modify_local(float x) {
@@ -107,9 +107,9 @@ float test_param_default_modification() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_modification() ~= 15.0
 
 mat2 multiply_matrices(mat2 a, mat2 b) {
@@ -125,9 +125,9 @@ mat2 test_param_default_matrix() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_matrix() ~= mat2(2.0, 4.0, 6.0, 8.0)
 
 float sum_elements(float[3] arr) {
@@ -141,9 +141,9 @@ float test_param_default_array() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_array() ~= 6.0
 
 struct Point {
@@ -161,7 +161,7 @@ Point test_param_default_struct() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_param_default_struct() ~= Point(4.0, 6.0)

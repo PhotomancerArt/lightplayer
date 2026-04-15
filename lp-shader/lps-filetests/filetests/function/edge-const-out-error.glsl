@@ -21,9 +21,9 @@ float test_edge_const_out_error() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_const_out_error() ~= 1.0
 
 /*
@@ -37,7 +37,7 @@ float test_edge_const_inout_error() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_const_inout_error() ~= 0.0
 */
@@ -54,9 +54,9 @@ float test_edge_const_only_with_in() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_const_only_with_in() ~= 2.0
 
 void explicit_const_in(const in float x) {
@@ -70,9 +70,9 @@ float test_edge_const_in_explicit() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_const_in_explicit() ~= 3.0
 
 /*
@@ -87,7 +87,7 @@ float test_edge_const_multiple_qualifiers() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_const_multiple_qualifiers() ~= 0.0
 */
@@ -105,9 +105,9 @@ float test_edge_const_array() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_const_array() ~= 4.0
 
 struct Point {
@@ -127,7 +127,7 @@ float test_edge_const_struct() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_edge_const_struct() ~= 5.0

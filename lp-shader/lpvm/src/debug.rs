@@ -2,8 +2,8 @@
 //!
 //! Provides structured debug output for compiled shader modules.
 //! Each backend populates sections appropriate to its capabilities:
-//! - rv32fa: interleaved, disasm, vinst, liveness, region
-//! - rv32/rv32fa: disasm only
+//! - rv32n: interleaved, disasm, vinst, liveness, region
+//! - rv32c/rv32n: disasm only
 //! - jit/wasm: (not available)
 
 use alloc::collections::BTreeMap;
@@ -214,9 +214,9 @@ mod tests {
         module.add_function(FunctionDebugInfo::new("foo"));
         module.add_function(FunctionDebugInfo::new("bar"));
 
-        let help = module.help_text("test.glsl", "rv32fa");
-        assert!(help.contains("lp-cli shader-debug -t rv32fa test.glsl --fn foo"));
-        assert!(help.contains("lp-cli shader-debug -t rv32fa test.glsl --fn bar"));
+        let help = module.help_text("test.glsl", "rv32n");
+        assert!(help.contains("lp-cli shader-debug -t rv32n test.glsl --fn foo"));
+        assert!(help.contains("lp-cli shader-debug -t rv32n test.glsl --fn bar"));
         // BTreeMap iterates in sorted order, so "bar" comes before "foo"
         assert!(help.contains("Available functions: bar, foo"));
     }

@@ -29,7 +29,7 @@ impl FunctionDebugData {
 
 /// Debug data for all functions from a single backend.
 pub struct BackendDebugData {
-    pub backend: String, // "rv32", "rv32fa", "emu"
+    pub backend: String, // "rv32c", "rv32n", "emu"
     pub functions: Vec<FunctionDebugData>,
 }
 
@@ -137,8 +137,8 @@ pub enum BackendTarget {
 impl BackendTarget {
     pub fn as_str(&self) -> &'static str {
         match self {
-            BackendTarget::Rv32fa => "rv32fa",
-            BackendTarget::Rv32 => "rv32",
+            BackendTarget::Rv32fa => "rv32n",
+            BackendTarget::Rv32 => "rv32c",
             BackendTarget::Emu => "emu",
         }
     }
@@ -149,8 +149,8 @@ impl std::str::FromStr for BackendTarget {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "rv32fa" => Ok(BackendTarget::Rv32fa),
-            "rv32" => Ok(BackendTarget::Rv32),
+            "rv32n" => Ok(BackendTarget::Rv32fa),
+            "rv32c" => Ok(BackendTarget::Rv32),
             "emu" => Ok(BackendTarget::Emu),
             _ => Err(format!("unknown target: {}", s)),
         }

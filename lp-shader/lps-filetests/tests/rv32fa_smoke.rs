@@ -1,4 +1,4 @@
-//! Smoke test for the native RV32 backend (`rv32fa.q32`, `lpvm-native-fa`).
+//! Smoke test for the native RV32 backend (`rv32n.q32`, `lpvm-native-fa`).
 //!
 //! This test verifies that the fastalloc native emulation backend can compile
 //! and execute simple LPIR modules end-to-end.

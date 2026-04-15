@@ -22,9 +22,9 @@ mat2 test_inverse_mat2_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_inverse_mat2_simple() ~= mat2(-2.0, 1.0, -1.5, 0.5)
 
 mat3 test_inverse_mat3_identity() {
@@ -57,9 +57,9 @@ mat3 test_inverse_mat3_scaling() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_inverse_mat3_scaling() ~= mat3(0.5, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.25)
 
 mat4 test_inverse_mat4_scaling() {
@@ -68,9 +68,9 @@ mat4 test_inverse_mat4_scaling() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_inverse_mat4_scaling() ~= mat4(0.5, 0.0, 0.0, 0.0, 0.0, 0.3333333333333333, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.2)
 
 mat2 test_inverse_mat2_rotation() {

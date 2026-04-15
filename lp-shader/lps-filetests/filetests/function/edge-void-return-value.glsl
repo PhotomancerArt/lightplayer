@@ -44,7 +44,7 @@ void test_edge_void_return_value_error() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_void_return_value_error() == 0.0
 */
@@ -91,7 +91,7 @@ void test_edge_void_in_expression() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_void_in_expression() == 0.0
 */
@@ -162,7 +162,7 @@ void test_edge_void_wrong_return_type() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_void_wrong_return_type() == 0.0
 */

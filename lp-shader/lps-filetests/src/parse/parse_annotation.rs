@@ -62,11 +62,11 @@ mod tests {
 
     #[test]
     fn test_parse_unsupported_target() {
-        let ann = parse_annotation_line("// @unsupported(rv32.q32)", 2)
+        let ann = parse_annotation_line("// @unsupported(rv32c.q32)", 2)
             .unwrap()
             .unwrap();
         assert!(matches!(ann.kind, AnnotationKind::Unsupported));
-        assert_eq!(ann.target, "rv32.q32");
+        assert_eq!(ann.target, "rv32c.q32");
     }
 
     #[test]

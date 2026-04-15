@@ -8,8 +8,8 @@ impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Backend::Jit => write!(f, "jit"),
-            Backend::Rv32 => write!(f, "rv32"),
-            Backend::Rv32fa => write!(f, "rv32fa"),
+            Backend::Rv32 => write!(f, "rv32c"),
+            Backend::Rv32fa => write!(f, "rv32n"),
             Backend::Wasm => write!(f, "wasm"),
         }
     }
@@ -55,7 +55,7 @@ fn target_matches_spec_token(token: &str, t: &Target) -> bool {
 /// Parse comma-separated target specs into concrete targets from [`ALL_TARGETS`], in list order.
 ///
 /// Each token is trimmed. Empty tokens are ignored. A token matches either a full canonical name
-/// or a backend shorthand when it contains no `.` (e.g. `rv32` → `rv32.q32`, `rv32.f32`).
+/// or a backend shorthand when it contains no `.` (e.g. `rv32c` → `rv32c.q32`, `rv32c.f32`).
 pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> {
     let mut chosen: BTreeSet<String> = BTreeSet::new();
     let mut out: Vec<&'static Target> = Vec::new();
@@ -77,7 +77,7 @@ pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> 
         }
         if !any {
             let valid: Vec<String> = ALL_TARGETS.iter().map(|t| t.name()).collect();
-            let backends = "jit, wasm, rv32, rv32fa (shorthand) or full names like jit.q32";
+            let backends = "jit, wasm, rv32c, rv32n (shorthand) or full names like jit.q32";
             return Err(format!(
                 "unknown target '{token}'. Try {backends}. Known targets: {}",
                 valid.join(", ")
@@ -111,13 +111,13 @@ mod tests {
     #[test]
     fn test_target_name_rv32_q32() {
         let target = &ALL_TARGETS[2];
-        assert_eq!(target.name(), "rv32.q32");
+        assert_eq!(target.name(), "rv32c.q32");
     }
 
     #[test]
     fn test_target_name_rv32fa_q32() {
         let target = &ALL_TARGETS[3];
-        assert_eq!(target.name(), "rv32fa.q32");
+        assert_eq!(target.name(), "rv32n.q32");
     }
 
     #[test]
@@ -126,10 +126,10 @@ mod tests {
         assert_eq!(t.name(), "jit.q32");
         let t = Target::from_name("wasm.q32").unwrap();
         assert_eq!(t.name(), "wasm.q32");
-        let t = Target::from_name("rv32.q32").unwrap();
-        assert_eq!(t.name(), "rv32.q32");
-        let t = Target::from_name("rv32fa.q32").unwrap();
-        assert_eq!(t.name(), "rv32fa.q32");
+        let t = Target::from_name("rv32c.q32").unwrap();
+        assert_eq!(t.name(), "rv32c.q32");
+        let t = Target::from_name("rv32n.q32").unwrap();
+        assert_eq!(t.name(), "rv32n.q32");
     }
 
     #[test]
@@ -138,8 +138,8 @@ mod tests {
         assert!(err.contains("unknown target"));
         assert!(err.contains("jit.q32"));
         assert!(err.contains("wasm.q32"));
-        assert!(err.contains("rv32.q32"));
-        assert!(err.contains("rv32fa.q32"));
+        assert!(err.contains("rv32c.q32"));
+        assert!(err.contains("rv32n.q32"));
     }
 
     #[test]
@@ -152,16 +152,16 @@ mod tests {
 
     #[test]
     fn test_parse_target_filters_backend_single() {
-        let v = parse_target_filters("rv32").expect("parse");
+        let v = parse_target_filters("rv32c").expect("parse");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32.q32");
+        assert_eq!(v[0].name(), "rv32c.q32");
     }
 
     #[test]
     fn test_parse_target_filters_rv32fa_shorthand() {
-        let v = parse_target_filters("rv32fa").expect("parse");
+        let v = parse_target_filters("rv32n").expect("parse");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32fa.q32");
+        assert_eq!(v[0].name(), "rv32n.q32");
     }
 
     #[test]

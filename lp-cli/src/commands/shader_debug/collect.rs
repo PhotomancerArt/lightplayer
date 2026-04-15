@@ -25,7 +25,7 @@ pub fn collect_fa_data(
     let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
-    let mut backend_data = BackendDebugData::new("rv32fa");
+    let mut backend_data = BackendDebugData::new("rv32n");
 
     for func in &ir.functions {
         // Filter if specified
@@ -126,7 +126,7 @@ pub fn collect_fa_data(
     Ok(backend_data)
 }
 
-/// Collect debug data from Cranelift-based backends (rv32 and emu).
+/// Collect debug data from Cranelift-based backends (rv32c and emu).
 pub fn collect_cranelift_data(
     ir: &LpirModule,
     _sig: &LpsModuleSig,
@@ -147,7 +147,7 @@ pub fn collect_cranelift_data(
     let elf_info = link_object_with_builtins(&object_bytes)
         .map_err(|e| anyhow::anyhow!("cranelift link: {e}"))?;
 
-    let backend_name = if is_emu { "emu" } else { "rv32" };
+    let backend_name = if is_emu { "emu" } else { "rv32c" };
     let mut backend_data = BackendDebugData::new(backend_name);
 
     for func in &ir.functions {

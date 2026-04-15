@@ -11,9 +11,9 @@ vec2 test_unpackhalf2x16_zero() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_unpackhalf2x16_ones() {
@@ -22,9 +22,9 @@ vec2 test_unpackhalf2x16_ones() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_ones() ~= vec2(1.0, 1.0)
 
 vec2 test_unpackhalf2x16_half() {
@@ -33,9 +33,9 @@ vec2 test_unpackhalf2x16_half() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_half() ~= vec2(0.5, 0.5)
 
 vec2 test_unpackhalf2x16_neg_one() {
@@ -44,9 +44,9 @@ vec2 test_unpackhalf2x16_neg_one() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_neg_one() ~= vec2(-1.0, 1.0)
 
 vec2 test_unpackhalf2x16_two() {
@@ -55,9 +55,9 @@ vec2 test_unpackhalf2x16_two() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_two() ~= vec2(2.0, 2.0)
 
 vec2 test_unpackhalf2x16_small() {
@@ -66,9 +66,9 @@ vec2 test_unpackhalf2x16_small() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_unpackhalf2x16_small() ~= vec2(0.1, 0.1)
 
 

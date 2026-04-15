@@ -13,9 +13,9 @@ float test_forward_reference_use_before_declare() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_forward_reference_use_before_declare() ~= 10.0
 
 // Global declaration comes after function definition
@@ -27,9 +27,9 @@ float test_forward_reference_after_declare() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_forward_reference_after_declare() ~= 84.0
 
 // Multiple globals with forward references
@@ -42,9 +42,9 @@ vec2 test_forward_reference_vec() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_forward_reference_vec() ~= vec2(1.0, 1.0)
 
 mat3 test_forward_reference_mat() {
@@ -53,9 +53,9 @@ mat3 test_forward_reference_mat() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_forward_reference_mat() ~= mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
 
 // Declarations after function definitions
@@ -72,7 +72,7 @@ float test_forward_reference_complex() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_forward_reference_complex() ~= 58.0

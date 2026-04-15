@@ -87,7 +87,7 @@ enum Cli {
         #[arg(long)]
         skip_validate: bool,
     },
-    /// Unified debug output for shader compilation (replaces shader-rv32, shader-rv32fa).
+    /// Unified debug output for shader compilation (replaces shader-rv32c, shader-rv32n).
     ShaderDebug {
         #[command(flatten)]
         args: shader_debug::Args,

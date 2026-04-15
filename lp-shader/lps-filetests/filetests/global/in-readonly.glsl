@@ -18,9 +18,9 @@ float test_in_readonly_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_float() ~= 1.0
 
 int test_in_readonly_int() {
@@ -29,9 +29,9 @@ int test_in_readonly_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_int() == 100
 
 uint test_in_readonly_uint() {
@@ -40,9 +40,9 @@ uint test_in_readonly_uint() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_uint() == 50
 
 bool test_in_readonly_bool() {
@@ -51,9 +51,9 @@ bool test_in_readonly_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_bool() == false
 
 vec2 test_in_readonly_vec2() {
@@ -62,9 +62,9 @@ vec2 test_in_readonly_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_in_readonly_vec3() {
@@ -73,9 +73,9 @@ vec3 test_in_readonly_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_in_readonly_vec4() {
@@ -84,9 +84,9 @@ vec4 test_in_readonly_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_calculations() {
@@ -100,9 +100,9 @@ float test_in_readonly_calculations() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_calculations() ~= 0.3
 
 vec4 test_in_readonly_vertex_processing() {
@@ -119,9 +119,9 @@ vec4 test_in_readonly_vertex_processing() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_texture_mapping() {
@@ -138,7 +138,7 @@ float test_in_readonly_texture_mapping() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_in_readonly_texture_mapping() ~= -2.0

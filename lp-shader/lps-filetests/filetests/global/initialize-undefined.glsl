@@ -20,9 +20,9 @@ float test_initialize_undefined_float() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_float() ~= 1.0
 
 int test_initialize_undefined_int() {
@@ -31,9 +31,9 @@ int test_initialize_undefined_int() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_int() == 10
 
 uint test_initialize_undefined_uint() {
@@ -42,9 +42,9 @@ uint test_initialize_undefined_uint() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_uint() == 1
 
 bool test_initialize_undefined_bool() {
@@ -53,9 +53,9 @@ bool test_initialize_undefined_bool() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_bool() == true
 
 vec2 test_initialize_undefined_vec2() {
@@ -64,9 +64,9 @@ vec2 test_initialize_undefined_vec2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_initialize_undefined_vec3() {
@@ -75,9 +75,9 @@ vec3 test_initialize_undefined_vec3() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_vec3() ~= vec3(1.0, 1.0, 1.0)
 
 vec4 test_initialize_undefined_vec4() {
@@ -86,9 +86,9 @@ vec4 test_initialize_undefined_vec4() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_vec4() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 mat2 test_initialize_undefined_mat2() {
@@ -97,9 +97,9 @@ mat2 test_initialize_undefined_mat2() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_mat2() ~= mat2(1.0, 1.0, 1.0, 1.0)
 
 void test_initialize_undefined_assign() {
@@ -115,9 +115,9 @@ void test_initialize_undefined_assign() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_assign() == 0.0
 
 float test_initialize_undefined_after_assign() {
@@ -127,7 +127,7 @@ float test_initialize_undefined_after_assign() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_initialize_undefined_after_assign() ~= 165.0

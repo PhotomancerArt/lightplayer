@@ -22,9 +22,9 @@ mat2 test_mat2_multiply_simple() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat2_multiply_simple() ~= mat2(19.0, 22.0, 43.0, 50.0)
 
 mat2 test_mat2_multiply_scale() {
@@ -35,9 +35,9 @@ mat2 test_mat2_multiply_scale() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat2_multiply_scale() ~= mat2(2.0, 4.0, 9.0, 12.0)
 
 mat2 test_mat2_multiply_zero() {
@@ -61,9 +61,9 @@ mat2 test_mat2_multiply_expressions() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat2_multiply_expressions() ~= mat2(2.0, 1.0, 1.0, 1.0)
 
 mat2 test_mat2_multiply_in_assignment() {
@@ -83,7 +83,7 @@ mat2 test_mat2_multiply_associative() {
 }
 
 // @unimplemented(jit.q32)
-// @unimplemented(rv32.q32)
+// @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
-// @unimplemented(rv32fa.q32)
+// @unimplemented(rv32n.q32)
 // run: test_mat2_multiply_associative() ~= mat2(6.0, 6.0, 14.0, 14.0)

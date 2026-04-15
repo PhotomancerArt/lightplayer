@@ -21,9 +21,9 @@ use crate::targets::{Backend, FloatMode as TargetFloatMode, Target};
 pub enum CompiledShader {
     /// Host Cranelift JIT (`jit.q32`).
     Jit(CraneliftModule),
-    /// Linked RV32 + shared arena via Cranelift (`rv32.q32`).
+    /// Linked RV32 + shared arena via Cranelift (`rv32c.q32`).
     Emu(EmuModule),
-    /// Linked RV32 + shared arena via fastalloc native backend (`rv32fa.q32`).
+    /// Linked RV32 + shared arena via fastalloc native backend (`rv32n.q32`).
     NativeFa(FaEmuModule),
     /// wasmtime module (`wasm.q32`).
     Wasm(WasmLpvmModule),
